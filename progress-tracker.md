@@ -7,7 +7,7 @@
 - Date: 2026-08-08
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation plus Organization + Digital Twin vertical slice.
-- Current active work: Guided Onboarding + AI Readiness Score implementation plan is ready; application implementation is paused pending explicit approval.
+- Current active work: Guided Onboarding + AI Readiness Score implementation is complete pending live Supabase verification.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
 - Implementation plan: `docs/superpowers/plans/2026-08-08-guided-onboarding-implementation.md`.
@@ -31,6 +31,8 @@
 - The focused panel uses directional slide transitions, dynamic height, animated connectors, shadcn controls, and reduced-motion support.
 - Save is allowed for incomplete sections. Unknown and needs-attention are explicit states.
 - AI extraction is suggestion-only until operator confirmation.
+- Implementation uses TanStack Query v5 for the onboarding client snapshot/mutations and TanStack Form v1 for section editors; server reads remain RSC-owned.
+- The onboarding control plane is recorded in `adrs/0009-guided-onboarding-control-plane.md` and migration `supabase/migrations/20260807193344_guided_onboarding.sql`.
 
 ## Canonical documents
 
@@ -53,21 +55,21 @@
 
 ## Blockers and risks
 
-- Supabase CLI is not installed in the environment, so migrations have not been reset against a local instance.
-- Playwright Chromium was unavailable during prior verification; browser E2E remains pending.
-- The current onboarding route only creates the organization across three steps; the ten-section workflow needs new persistence, upload/extraction contracts, readiness scoring, and UI composition.
-- `framer-motion` is not yet installed; add it only during implementation after the approved design plan.
+- Supabase CLI can be invoked through `pnpm dlx`, but the local Postgres container is unavailable (`127.0.0.1:54322 ECONNREFUSED`), so migrations have not been reset/linted against a live local instance.
+- Next 16.0.0 reports an inherited security warning during dependency installation; upgrading it is intentionally deferred from this scoped implementation.
 
 ## Next implementation sequence
 
-1. Obtain explicit approval for `docs/superpowers/plans/2026-08-08-guided-onboarding-implementation.md`.
-2. Execute the approved plan using its test-first task sequence.
-3. Install/enable local Supabase CLI and Playwright Chromium before attempting final database and E2E completion.
+1. Run local Supabase migration/RLS verification when Docker/Postgres is available.
+2. Add authenticated two-tenant database and browser fixtures when the local Supabase test environment is available.
 
 ## Verification record
 
 - Previous foundation checks passed: `pnpm install --frozen-lockfile`, `pnpm format:check`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`.
-- Guided Onboarding implementation checks are not yet run because implementation has not started.
+- Passing focused checks: onboarding domain, service, route, rail/workspace, section editor, extraction, and candidate-review tests; `pnpm typecheck`; `pnpm lint`.
+- Passing full checks: `pnpm test` (38 tests), `pnpm format:check`, `pnpm build`, and guided onboarding E2E (2 protected/reduced-motion tests).
+- Chrome DevTools MCP verification completed against the running Next.js app: auth redirect/login rendering and the fixture-backed onboarding workspace screenshot were inspected; all ten rail sections and six phases rendered with shadcn controls.
+- Live Supabase migration lint/RLS verification remains blocked by Docker/Postgres only.
 
 ## Notes for future agents
 

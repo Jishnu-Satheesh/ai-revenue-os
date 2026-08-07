@@ -45,6 +45,8 @@ Revenue is a visible outcome, but the optimization target should normally be **i
 - Supabase Postgres, Auth, Storage, Row Level Security, and optional pgvector
 - Trigger.dev for durable background and agent workflow execution
 - Vercel AI SDK with model-provider abstraction
+- TanStack Query v5 for interactive client-owned server state
+- TanStack Form v1 for complex and multi-step forms
 - Zod for schemas and tool validation
 - Sentry + OpenTelemetry for observability
 - n8n only for connectors where it materially reduces integration time
@@ -57,21 +59,31 @@ Build production-quality **vertical slices**, not broad but incomplete modules. 
 
 This repository now contains the initial Next.js control-plane foundation and Supabase tenancy schema. The first production vertical slice is Organization + Digital Twin onboarding.
 
+## Organization + Digital Twin slice
+
+The onboarding flow is available at `/organizations/new` after authentication. It creates the organization, owner membership, default access/spend policies, an initial business profile, and an optional first branch in one database transaction. The Digital Twin workspace at `/organizations/:organizationId/digital-twin` records profile context, branches, source-aware facts, goals, constraints, policies, readiness, and audit history.
+
+Draft organizations are soft-archived through the lifecycle control rather than hard-deleted. Restaurant organizations require an active physical branch and an access policy before activation. Verified facts cannot be downgraded by later inferred or imported writes.
+
+All project commands use **pnpm**. The committed `pnpm-lock.yaml` is the dependency source of truth.
+
+All user-facing controls and surface primitives must use shadcn/ui components or compositions of them. This is a critical design-system and accessibility rule; add missing primitives with the pnpm shadcn CLI rather than introducing bare HTML controls.
+
 ## Local setup
 
-1. Install Node.js 22+ and npm (or pnpm), then copy `.env.example` to `.env.local`.
+1. Install Node.js 22+ and pnpm, then copy `.env.example` to `.env.local`.
 2. Fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
-3. Install dependencies with `npm install`.
-4. Apply migrations with `npm run supabase:start` and `npm run supabase:reset` for a local Supabase instance.
-5. Run `npm run dev` and open `http://localhost:3000`.
+3. Install dependencies with `pnpm install`.
+4. Apply migrations with `pnpm supabase:start` and `pnpm supabase:reset` for a local Supabase instance.
+5. Run `pnpm dev` and open `http://localhost:3000`.
 
 Quality checks:
 
 ```bash
-npm run typecheck
-npm run lint
-npm run test
-npm run build
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
 ```
 
 ## Foundation boundaries
@@ -83,4 +95,4 @@ npm run build
 - `src/lib/supabase` contains browser/server session clients; service-role access is not used by browser code.
 - `supabase/migrations` contains the tenant root, memberships, and RLS policies.
 
-The shell intentionally contains no fake analytics. The next task is to implement Organization Creation + Digital Twin Onboarding from `specs/001-organization-digital-twin.md`.
+The shell intentionally contains no fake analytics. The next task is Guided Onboarding and the AI Readiness Score from `specs/002-guided-onboarding.md` and `specs/008-ai-readiness-score.md`.

@@ -2,6 +2,12 @@
 
 import { FormEvent, useState } from "react";
 import { ArrowRight, ShieldCheck } from "lucide-react";
+
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/browser";
 
 export default function LoginPage() {
@@ -24,5 +30,68 @@ export default function LoginPage() {
     else setMessage("Check your inbox for a secure sign-in link.");
   }
 
-  return <main className="flex min-h-screen items-center justify-center bg-background px-6 py-12"><div className="w-full max-w-md"><div className="mb-10"><div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-foreground text-background"><ArrowRight size={22} /></div><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Revenue Intelligence</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Sign in to AI Revenue OS</h1><p className="mt-3 text-muted-foreground">Use your workspace email. We’ll send a passwordless sign-in link.</p></div><form onSubmit={submit} className="rounded-xl border border-border bg-surface p-6"><label htmlFor="email" className="text-sm font-medium">Work email</label><input id="email" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none ring-accent focus:ring-2" placeholder="you@company.com" /><button disabled={isSubmitting} className="mt-4 w-full rounded-lg bg-foreground px-4 py-2.5 text-sm font-semibold text-background disabled:opacity-50" type="submit">{isSubmitting ? "Sending…" : "Send sign-in link"}</button>{message && <p className="mt-4 text-sm text-success">{message}</p>}{error && <p className="mt-4 text-sm text-danger">{error}</p>}</form><p className="mt-6 flex items-center justify-center gap-2 text-xs text-muted-foreground"><ShieldCheck size={14} />Authentication is handled by Supabase Auth.</p></div></main>;
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background px-6 py-12">
+      <div className="w-full max-w-md">
+        <div className="mb-10">
+          <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-foreground text-background">
+            <ArrowRight />
+          </div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Revenue Intelligence
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Sign in to AI Revenue OS</h1>
+          <p className="mt-3 text-muted-foreground">
+            Use your workspace email. We’ll send a passwordless sign-in link.
+          </p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Welcome back</CardTitle>
+            <CardDescription>Sign in securely with a one-time link.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={submit}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="email">Work email</FieldLabel>
+                  <Input
+                    id="email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@company.com"
+                  />
+                  <FieldDescription>We never share your workspace email.</FieldDescription>
+                </Field>
+                <Button disabled={isSubmitting} type="submit" className="w-full">
+                  {isSubmitting ? "Sending…" : "Send sign-in link"}
+                  <ArrowRight data-icon="inline-end" />
+                </Button>
+              </FieldGroup>
+            </form>
+            {message && (
+              <Alert className="mt-4 border-success/30 bg-success/5">
+                <ShieldCheck />
+                <AlertTitle>Link sent</AlertTitle>
+                <AlertDescription>{message}</AlertDescription>
+              </Alert>
+            )}
+            {error && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertTitle>Sign-in unavailable</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+        {/* <p className="mt-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+          <ShieldCheck />
+          Authentication is handled by Supabase Auth.
+        </p> */}
+      </div>
+    </main>
+  );
 }

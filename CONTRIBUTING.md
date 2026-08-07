@@ -1,5 +1,9 @@
 # Contributing
 
+## Tooling
+
+This project uses **pnpm**. Use `pnpm install` and `pnpm <script>`; do not commit a second package-manager lockfile.
+
 ## Branching and pull requests
 
 - Use short-lived branches.

@@ -46,6 +46,10 @@ Never merge AI-generated code without:
 - Prefer explicit interfaces and examples over broad natural-language directions.
 - Update specs when implementation reveals a missing decision.
 
+## Critical UI regression rule
+
+Before changing UI, inspect `src/components/ui` and compose the installed shadcn/ui primitives. Bare interactive markup in feature components is a regression: use shadcn/ui `Button`, `Input`, `Select`, `Textarea`, `Checkbox`, `Badge`, `Card`, `Alert`, `Empty`, `Sidebar`, `DropdownMenu`, `Field`, and related primitives instead. If a primitive is missing, add it with pnpm and keep the generated component source in the repository.
+
 ## AI-specific anti-regression tests
 
 For model-backed features, maintain fixtures for:

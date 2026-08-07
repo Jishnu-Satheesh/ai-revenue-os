@@ -10,6 +10,8 @@ Authentication, memberships, roles, permissions, session security, and tenant co
 
 Organization creation, branch setup, business profile, facts, goals, constraints, policies, and readiness.
 
+Guided onboarding is the organization-scoped control plane for resumable ten-section intake, missing-data requests, private uploads, bounded extraction candidates, and versioned AI-readiness assessments. It lives under `src/modules/onboarding`, `src/components/onboarding`, and `src/app/api/organizations/[organizationId]/onboarding`; confirmed values remain canonical in the Organization/Digital Twin module.
+
 ### Integration Hub
 
 Connection catalog, OAuth or credential handoff, webhook registration, file imports, provider health, and branch mappings.

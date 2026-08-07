@@ -8,7 +8,8 @@ export function createAiProviderRegistry(providers: AiProvider[]) {
   return {
     get(provider: AiProvider["provider"]): AiProvider {
       const selected = registry.get(provider);
-      if (!selected) throw new DomainError("INTEGRATION_ERROR", `AI provider ${provider} is not configured.`);
+      if (!selected)
+        throw new DomainError("INTEGRATION_ERROR", `AI provider ${provider} is not configured.`);
       return selected;
     },
   };

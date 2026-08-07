@@ -1,22 +1,44 @@
 import { z } from "zod";
 
+function emptyToUndefined(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+const optionalNonEmptyString = z.preprocess(emptyToUndefined, z.string().min(1).optional());
+const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
+
 const serverEnvSchema = z.object({
   APP_ENV: z.enum(["development", "test", "preview", "production"]).default("development"),
-  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
-  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
-  AI_DEFAULT_MODEL: z.string().min(1).optional(),
-  TRIGGER_SECRET_KEY: z.string().min(1).optional(),
-  TRIGGER_PROJECT_REF: z.string().min(1).optional(),
-  SENTRY_DSN: z.string().url().optional(),
-  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  NEXT_PUBLIC_APP_URL: z.preprocess(
+    emptyToUndefined,
+    z.string().url().default("http://localhost:3000"),
+  ),
+  NEXT_PUBLIC_SUPABASE_URL: z.preprocess(emptyToUndefined, z.string().url()),
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.preprocess(emptyToUndefined, z.string().min(1)),
+  SUPABASE_SERVICE_ROLE_KEY: optionalNonEmptyString,
+  OPENAI_API_KEY: optionalNonEmptyString,
+  ANTHROPIC_API_KEY: optionalNonEmptyString,
+  GOOGLE_GENERATIVE_AI_API_KEY: optionalNonEmptyString,
+  AI_DEFAULT_MODEL: optionalNonEmptyString,
+  TRIGGER_SECRET_KEY: optionalNonEmptyString,
+  TRIGGER_PROJECT_REF: optionalNonEmptyString,
+  SENTRY_DSN: optionalUrl,
+  OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
 });
 
-export const env = serverEnvSchema.parse({
+function formatEnvValidationError(error: z.ZodError): string {
+  const details = error.issues
+    .map((issue) => `${issue.path.join(".") || "env"}: ${issue.message}`)
+    .join("; ");
+  return `Invalid environment configuration: ${details}`;
+}
+
+const parsedEnv = serverEnvSchema.safeParse({
   APP_ENV: process.env.APP_ENV,
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -31,5 +53,11 @@ export const env = serverEnvSchema.parse({
   SENTRY_DSN: process.env.SENTRY_DSN,
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
 });
+
+if (!parsedEnv.success) {
+  throw new Error(formatEnvValidationError(parsedEnv.error));
+}
+
+export const env = parsedEnv.data;
 
 export type AppEnv = z.infer<typeof serverEnvSchema>;
