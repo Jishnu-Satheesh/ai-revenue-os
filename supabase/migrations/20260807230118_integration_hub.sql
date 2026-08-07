@@ -57,7 +57,8 @@ create table public.integration_capability_grants (
   updated_at timestamptz not null default now(),
   unique (organization_id, id),
   unique (organization_id, connection_id, capability_key),
-  foreign key (organization_id, connection_id) references public.integration_connections(organization_id, id) on delete cascade
+  foreign key (organization_id, connection_id) references public.integration_connections(organization_id, id) on delete cascade,
+  check (availability <> 'available' or maturity in ('manual', 'imported', 'read-only'))
 );
 
 create table public.integration_account_mappings (
@@ -108,6 +109,17 @@ create table public.integration_data_sources (
   check (
     source_type = 'csv_import'
     or (storage_path is null and original_filename is null and media_type is null and size_bytes is null)
+  ),
+  check (
+    storage_path is null
+    or (
+      source_type = 'csv_import'
+      and cardinality(string_to_array(storage_path, '/')) = 4
+      and (string_to_array(storage_path, '/'))[1] = organization_id::text
+      and (string_to_array(storage_path, '/'))[2] = id::text
+      and (string_to_array(storage_path, '/'))[3] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      and (string_to_array(storage_path, '/'))[4] <> ''
+    )
   )
 );
 
@@ -229,6 +241,131 @@ create trigger integration_ingestion_runs_set_updated_at
 before update on public.integration_ingestion_runs
 for each row execute function public.set_updated_at();
 
+create or replace function private.prevent_integration_identity_change()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  old_row jsonb := pg_catalog.to_jsonb(old);
+  new_row jsonb := pg_catalog.to_jsonb(new);
+  immutable_keys text[];
+  immutable_key text;
+begin
+  immutable_keys := case TG_TABLE_NAME
+    when 'integration_connections' then array[
+      'id', 'organization_id', 'provider_key', 'external_account_id', 'created_by', 'created_at'
+    ]
+    when 'integration_capability_grants' then array[
+      'id', 'organization_id', 'connection_id', 'capability_key', 'created_at'
+    ]
+    when 'integration_account_mappings' then array[
+      'id', 'organization_id', 'connection_id', 'external_resource_id', 'created_by', 'created_at'
+    ]
+    when 'integration_data_sources' then array[
+      'id', 'organization_id', 'source_type', 'created_by', 'created_at'
+    ]
+    when 'integration_ingestion_runs' then array[
+      'id', 'organization_id', 'connection_id', 'data_source_id', 'idempotency_key',
+      'correlation_id', 'created_at'
+    ]
+    else array[]::text[]
+  end;
+
+  foreach immutable_key in array immutable_keys loop
+    if new_row -> immutable_key is distinct from old_row -> immutable_key then
+      raise exception 'integration_identity_is_immutable' using errcode = '23514';
+    end if;
+  end loop;
+
+  return new;
+end;
+$$;
+
+revoke all on function private.prevent_integration_identity_change() from public;
+
+create trigger integration_connections_prevent_identity_change
+before update on public.integration_connections
+for each row execute function private.prevent_integration_identity_change();
+create trigger integration_capability_grants_prevent_identity_change
+before update on public.integration_capability_grants
+for each row execute function private.prevent_integration_identity_change();
+create trigger integration_account_mappings_prevent_identity_change
+before update on public.integration_account_mappings
+for each row execute function private.prevent_integration_identity_change();
+create trigger integration_data_sources_prevent_identity_change
+before update on public.integration_data_sources
+for each row execute function private.prevent_integration_identity_change();
+create trigger integration_ingestion_runs_prevent_identity_change
+before update on public.integration_ingestion_runs
+for each row execute function private.prevent_integration_identity_change();
+
+create or replace function private.validate_integration_capability_grant()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  connection_status text;
+begin
+  if new.availability <> 'available' then
+    return new;
+  end if;
+
+  select connection.status
+  into connection_status
+  from public.integration_connections connection
+  where connection.organization_id = new.organization_id
+    and connection.id = new.connection_id
+  for key share;
+
+  if connection_status in ('disconnected', 'revoked') then
+    raise exception 'inactive_connection_cannot_have_available_grants' using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function private.validate_integration_capability_grant() from public;
+
+create trigger integration_capability_grants_validate
+before insert or update on public.integration_capability_grants
+for each row execute function private.validate_integration_capability_grant();
+
+create or replace function private.disable_integration_grants_for_inactive_connection()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.status in ('disconnected', 'revoked')
+    and new.status is distinct from old.status then
+    update public.integration_capability_grants
+    set
+      availability = 'disabled',
+      reason_codes = case
+        when 'connection_inactive' = any(reason_codes) then reason_codes
+        else pg_catalog.array_append(reason_codes, 'connection_inactive')
+      end
+    where organization_id = new.organization_id
+      and connection_id = new.id
+      and availability <> 'disabled';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function private.disable_integration_grants_for_inactive_connection() from public;
+
+create trigger integration_connections_disable_inactive_grants
+after update of status on public.integration_connections
+for each row execute function private.disable_integration_grants_for_inactive_connection();
+
 alter table public.integration_connections enable row level security;
 alter table public.integration_connections force row level security;
 alter table public.integration_capability_grants enable row level security;
@@ -252,6 +389,7 @@ with check (
     organization_id,
     array['owner', 'admin', 'operator']::public.organization_role[]
   )
+  and created_by = (select auth.uid())
 );
 create policy "operators can update integration connections"
 on public.integration_connections for update to authenticated
@@ -271,28 +409,6 @@ with check (
 create policy "members can read integration capability grants"
 on public.integration_capability_grants for select to authenticated
 using (private.is_organization_member(organization_id));
-create policy "operators can create integration capability grants"
-on public.integration_capability_grants for insert to authenticated
-with check (
-  private.has_organization_role(
-    organization_id,
-    array['owner', 'admin', 'operator']::public.organization_role[]
-  )
-);
-create policy "operators can update integration capability grants"
-on public.integration_capability_grants for update to authenticated
-using (
-  private.has_organization_role(
-    organization_id,
-    array['owner', 'admin', 'operator']::public.organization_role[]
-  )
-)
-with check (
-  private.has_organization_role(
-    organization_id,
-    array['owner', 'admin', 'operator']::public.organization_role[]
-  )
-);
 
 create policy "members can read integration account mappings"
 on public.integration_account_mappings for select to authenticated
@@ -304,6 +420,7 @@ with check (
     organization_id,
     array['owner', 'admin', 'operator']::public.organization_role[]
   )
+  and created_by = (select auth.uid())
 );
 create policy "operators can update integration account mappings"
 on public.integration_account_mappings for update to authenticated
@@ -330,6 +447,7 @@ with check (
     organization_id,
     array['owner', 'admin', 'operator']::public.organization_role[]
   )
+  and created_by = (select auth.uid())
 );
 create policy "operators can update integration data sources"
 on public.integration_data_sources for update to authenticated
@@ -410,7 +528,6 @@ grant select (
   updated_at
 ) on table public.integration_connections to authenticated;
 grant insert (
-  id,
   organization_id,
   provider_key,
   adapter_version,
@@ -423,9 +540,7 @@ grant insert (
   last_tested_at,
   last_successful_sync_at,
   next_scheduled_sync_at,
-  created_by,
-  created_at,
-  updated_at
+  created_by
 ) on table public.integration_connections to authenticated;
 grant update (
   adapter_version,
@@ -438,11 +553,90 @@ grant update (
   last_successful_sync_at,
   next_scheduled_sync_at
 ) on table public.integration_connections to authenticated;
-grant select, insert, update on table public.integration_capability_grants to authenticated;
-grant select, insert, update on table public.integration_account_mappings to authenticated;
-grant select, insert, update on table public.integration_data_sources to authenticated;
-grant select, insert, update on table public.integration_ingestion_runs to authenticated;
-grant select, insert on table public.integration_health_checks to authenticated;
+grant select on table public.integration_capability_grants to authenticated;
+grant select on table public.integration_account_mappings to authenticated;
+grant insert (
+  organization_id,
+  connection_id,
+  external_resource_id,
+  external_resource_label,
+  branch_id,
+  status,
+  created_by
+) on table public.integration_account_mappings to authenticated;
+grant update (
+  external_resource_label,
+  branch_id,
+  status
+) on table public.integration_account_mappings to authenticated;
+grant select on table public.integration_data_sources to authenticated;
+grant insert (
+  organization_id,
+  source_type,
+  name,
+  branch_id,
+  status,
+  storage_path,
+  original_filename,
+  media_type,
+  size_bytes,
+  schema_version,
+  column_mapping,
+  last_successful_import_at,
+  created_by
+) on table public.integration_data_sources to authenticated;
+grant update (
+  name,
+  branch_id,
+  status,
+  storage_path,
+  original_filename,
+  media_type,
+  size_bytes,
+  schema_version,
+  column_mapping,
+  last_successful_import_at
+) on table public.integration_data_sources to authenticated;
+grant select on table public.integration_ingestion_runs to authenticated;
+grant insert (
+  organization_id,
+  connection_id,
+  data_source_id,
+  trigger_run_id,
+  idempotency_key,
+  status,
+  started_at,
+  completed_at,
+  records_received,
+  records_accepted,
+  records_rejected,
+  normalized_error_code,
+  safe_error_summary,
+  correlation_id
+) on table public.integration_ingestion_runs to authenticated;
+grant update (
+  trigger_run_id,
+  status,
+  started_at,
+  completed_at,
+  records_received,
+  records_accepted,
+  records_rejected,
+  normalized_error_code,
+  safe_error_summary
+) on table public.integration_ingestion_runs to authenticated;
+grant select on table public.integration_health_checks to authenticated;
+grant insert (
+  organization_id,
+  connection_id,
+  ingestion_run_id,
+  check_type,
+  outcome,
+  latency_ms,
+  normalized_error_code,
+  safe_detail,
+  correlation_id
+) on table public.integration_health_checks to authenticated;
 
 create trigger integration_connections_audit after insert or update on public.integration_connections
 for each row execute function private.audit_organization_change();
@@ -479,6 +673,7 @@ create policy "members can read integration imports"
 on storage.objects for select to authenticated
 using (
   bucket_id = 'integration-imports'
+  and cardinality(storage.foldername(name)) = 3
   and (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[3] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -495,6 +690,7 @@ create policy "operators can upload integration imports"
 on storage.objects for insert to authenticated
 with check (
   bucket_id = 'integration-imports'
+  and cardinality(storage.foldername(name)) = 3
   and (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[3] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -514,6 +710,7 @@ create policy "operators can update integration imports"
 on storage.objects for update to authenticated
 using (
   bucket_id = 'integration-imports'
+  and cardinality(storage.foldername(name)) = 3
   and (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[3] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -531,6 +728,7 @@ using (
 )
 with check (
   bucket_id = 'integration-imports'
+  and cardinality(storage.foldername(name)) = 3
   and (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[3] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -550,6 +748,7 @@ create policy "operators can delete integration imports"
 on storage.objects for delete to authenticated
 using (
   bucket_id = 'integration-imports'
+  and cardinality(storage.foldername(name)) = 3
   and (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and (storage.foldername(name))[3] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
