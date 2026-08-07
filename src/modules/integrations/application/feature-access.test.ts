@@ -37,7 +37,9 @@ describe("Integration Hub rollout access", () => {
   });
 
   it("allows uppercase organization IDs when the rollout set is enabled", () => {
-    expect(() => assertIntegrationHubEnabled(organizationA.toUpperCase(), new Set([organizationA]))).not.toThrow();
+    expect(() =>
+      assertIntegrationHubEnabled(organizationA.toUpperCase(), new Set([organizationA])),
+    ).not.toThrow();
   });
 
   it("blocks organizations outside the enabled rollout", () => {
