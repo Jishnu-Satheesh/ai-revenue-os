@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(80);
+select extensions.plan(81);
 
 select extensions.has_table('public', 'integration_connections', 'integration connections exist');
 select extensions.has_table('public', 'integration_capability_grants', 'integration grants exist');
@@ -322,10 +322,10 @@ select extensions.throws_ok(
   null,
   'viewer cannot create connections'
 );
-update public.integration_capability_grants set availability = 'disabled';
-select extensions.is(
-  (select availability from public.integration_capability_grants),
-  'available',
+select extensions.throws_ok(
+  $$ update public.integration_capability_grants set availability = 'disabled' $$,
+  '42501',
+  null,
   'viewer cannot update grants'
 );
 update public.integration_account_mappings set status = 'ignored';
@@ -683,9 +683,16 @@ select extensions.throws_ok(
 update public.integration_connections
 set status = 'revoked'
 where organization_id = '23000000-0000-4000-8000-000000000002';
-update public.integration_capability_grants
-set availability = 'disabled'
-where organization_id = '23000000-0000-4000-8000-000000000002';
+select extensions.throws_ok(
+  $$
+    update public.integration_capability_grants
+    set availability = 'disabled'
+    where organization_id = '23000000-0000-4000-8000-000000000002'
+  $$,
+  '42501',
+  null,
+  'operator cannot update another tenant server-managed grants'
+);
 update public.integration_account_mappings
 set status = 'ignored'
 where organization_id = '23000000-0000-4000-8000-000000000002';
@@ -843,6 +850,24 @@ select extensions.throws_ok(
   null,
   'disconnected connections cannot receive available grants'
 );
+select extensions.throws_ok(
+  $$
+    insert into public.integration_capability_grants (
+      organization_id, connection_id, capability_key, maturity, availability,
+      derived_from_adapter_version
+    ) values (
+      '23000000-0000-4000-8000-000000000001',
+      '43000000-0000-4000-8000-000000000001',
+      'read_reviews',
+      'read-only',
+      'available',
+      '1.0.0'
+    )
+  $$,
+  '23505',
+  null,
+  'capability grants are unique by tenant connection and capability'
+);
 update public.integration_connections
 set status = 'revoked'
 where id = '43000000-0000-4000-8000-000000000001';
@@ -980,24 +1005,6 @@ select extensions.throws_ok(
   '23503',
   null,
   'mapping branch must belong to the same tenant'
-);
-select extensions.throws_ok(
-  $$
-    insert into public.integration_capability_grants (
-      organization_id, connection_id, capability_key, maturity, availability,
-      derived_from_adapter_version
-    ) values (
-      '23000000-0000-4000-8000-000000000001',
-      '43000000-0000-4000-8000-000000000001',
-      'read_reviews',
-      'read-only',
-      'available',
-      '1.0.0'
-    )
-  $$,
-  '23505',
-  null,
-  'capability grants are unique by tenant connection and capability'
 );
 select extensions.throws_ok(
   $$

@@ -319,7 +319,7 @@ begin
   from public.integration_connections connection
   where connection.organization_id = new.organization_id
     and connection.id = new.connection_id
-  for key share;
+  for update;
 
   if connection_status in ('disconnected', 'revoked') then
     raise exception 'inactive_connection_cannot_have_available_grants' using errcode = '23514';

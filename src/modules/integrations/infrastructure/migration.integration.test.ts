@@ -4,6 +4,10 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const migrationsDirectory = resolve(process.cwd(), "supabase/migrations");
+const integrationPgTapPath = resolve(
+  process.cwd(),
+  "supabase/tests/database/integration_hub_rls_test.sql",
+);
 const integrationMigrationNames = readdirSync(migrationsDirectory)
   .filter((name) => /^\d{14}_integration_hub\.sql$/.test(name))
   .sort();
@@ -15,6 +19,18 @@ function readIntegrationMigration() {
   ).toEqual(["20260807230118_integration_hub.sql"]);
 
   return readFileSync(resolve(migrationsDirectory, integrationMigrationNames[0]!), "utf8");
+}
+
+function readIntegrationPgTap() {
+  return readFileSync(integrationPgTapPath, "utf8");
+}
+
+function functionDefinition(sql: string, qualifiedName: string) {
+  const start = sql.indexOf(`create or replace function ${qualifiedName}`);
+  expect(start, `${qualifiedName} function exists`).toBeGreaterThanOrEqual(0);
+  const end = sql.indexOf("\n$$;", start);
+  expect(end, `${qualifiedName} function body terminates`).toBeGreaterThan(start);
+  return sql.slice(start, end + 4);
 }
 
 function statements(sql: string) {
@@ -118,6 +134,34 @@ describe("Integration Hub migration contract", () => {
     expect(statementContaining(sql, "integration_connections_disable_inactive_grants")).toContain(
       "private.disable_integration_grants_for_inactive_connection()",
     );
+  });
+
+  it("serializes available-grant validation with connection status transitions", () => {
+    const validator = functionDefinition(
+      readIntegrationMigration(),
+      "private.validate_integration_capability_grant()",
+    );
+
+    expect(validator).toContain("for update");
+    expect(validator).not.toContain("for key share");
+  });
+
+  it("keeps capability denial probes wrapped and checks uniqueness before revocation", () => {
+    const sql = readIntegrationPgTap();
+    const topLevelCapabilityUpdates = sql.match(
+      /^update public\.integration_capability_grants\b/gm,
+    );
+    const duplicateProbe = sql.indexOf(
+      "'capability grants are unique by tenant connection and capability'",
+    );
+    const tenantOneRevocation = sql.indexOf(
+      "update public.integration_connections\nset status = 'revoked'\nwhere id = '43000000-0000-4000-8000-000000000001'",
+    );
+
+    expect(sql).toContain("select extensions.plan(81)");
+    expect(topLevelCapabilityUpdates).toBeNull();
+    expect(duplicateProbe).toBeGreaterThanOrEqual(0);
+    expect(tenantOneRevocation).toBeGreaterThan(duplicateProbe);
   });
 
   it("binds stored CSV paths to immutable source identity", () => {
