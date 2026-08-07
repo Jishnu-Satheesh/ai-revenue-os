@@ -1,0 +1,58 @@
+ai-revenue-os-foundation/
+├── adrs
+│   ├── 0001-use-postgres-and-supabase.md
+│   ├── 0002-separate-control-and-execution-planes.md
+│   ├── 0003-use-triggerdev-for-durable-execution.md
+│   ├── 0004-delay-langgraph-adoption.md
+│   ├── 0005-use-event-driven-architecture.md
+│   ├── 0006-use-industry-packs.md
+│   └── 0007-risk-based-human-approvals.md
+├── context
+│   ├── 00-vision.md
+│   ├── 01-project-overview.md
+│   ├── 02-product-principles.md
+│   ├── 03-architecture.md
+│   ├── 04-domain-model.md
+│   ├── 05-module-map.md
+│   ├── 06-multi-tenancy-and-security.md
+│   ├── 07-ai-system-design.md
+│   ├── 08-decision-engine.md
+│   ├── 09-business-memory.md
+│   ├── 10-events-and-workflows.md
+│   ├── 11-playbooks-and-experiments.md
+│   ├── 12-integrations.md
+│   ├── 13-ui-ux-context.md
+│   ├── 14-coding-standards.md
+│   ├── 15-ai-coding-standards.md
+│   ├── 16-testing-evaluation.md
+│   ├── 17-observability-cost-governance.md
+│   ├── 18-anti-patterns.md
+│   ├── 19-glossary.md
+│   └── 20-roadmap.md
+├── industry-packs
+│   └── restaurant
+│       ├── domain-model.md
+│       ├── dubai-pilot.md
+│       ├── playbooks.md
+│       └── README.md
+├── review
+│   ├── foundation-review.md
+│   ├── generated-pack-qa.md
+│   └── implementation-readiness-checklist.md
+├── specs
+│   ├── 000-spec-template.md
+│   ├── 001-organization-digital-twin.md
+│   ├── 002-guided-onboarding.md
+│   ├── 003-integration-hub.md
+│   ├── 004-business-memory.md
+│   ├── 005-decision-engine-v1.md
+│   ├── 006-triggerdev-worker-runtime.md
+│   ├── 007-revenue-opportunity-feed.md
+│   ├── 008-ai-readiness-score.md
+│   ├── 009-restaurant-menu-intelligence.md
+│   └── 010-human-approval-governance.md
+├── AGENTS.md
+├── CONTRIBUTING.md
+├── MANIFEST.md
+├── README.md
+└── TREE.txt
