@@ -7,7 +7,7 @@
 - Date: 2026-08-08
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation plus Organization + Digital Twin vertical slice.
-- Current active work: Guided Onboarding + AI Readiness Score implementation is complete pending live Supabase verification.
+- Current active work: Guided Onboarding + AI Readiness Score implementation and live staging Supabase verification are complete.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
 - Implementation plan: `docs/superpowers/plans/2026-08-08-guided-onboarding-implementation.md`.
@@ -33,6 +33,9 @@
 - AI extraction is suggestion-only until operator confirmation.
 - Implementation uses TanStack Query v5 for the onboarding client snapshot/mutations and TanStack Form v1 for section editors; server reads remain RSC-owned.
 - The onboarding control plane is recorded in `adrs/0009-guided-onboarding-control-plane.md` and migration `supabase/migrations/20260807193344_guided_onboarding.sql`.
+- Staging Supabase now has all seven repository migrations through `20260808011000_fix_audit_trigger_coalesce.sql`; local and remote migration histories are aligned.
+- Database hardening explicitly removes anonymous table privileges, keeps authenticated table grants scoped, hardens tenant-changing `UPDATE` policies, fixes trigger search paths, and covers all foreign keys with indexes.
+- The shared Digital Twin audit trigger now normalizes polymorphic trigger rows through JSON before reading table-specific fields. A pgTAP regression test covers organization and business-profile writes plus their audit events.
 
 ## Canonical documents
 
@@ -55,21 +58,30 @@
 
 ## Blockers and risks
 
-- Supabase CLI can be invoked through `pnpm dlx`, but the local Postgres container is unavailable (`127.0.0.1:54322 ECONNREFUSED`), so migrations have not been reset/linted against a live local instance.
+- Rotate the staging database password and update `.env.local`: the credential was exposed to a local process listing during connection diagnostics. No credential value is recorded in this tracker.
+- Supabase Auth leaked-password protection is disabled in the staging project and should be enabled in the dashboard before production use.
+- The direct Supabase database hostname is IPv6-only and this development environment has no IPv6 route. CLI database work uses the staging region's session pooler with TLS; the pooler URL is derived at runtime and is not committed.
+- Local Supabase reset and pgTAP execution still require Docker/Postgres. Remote migration lint and transaction-safe behavior checks pass, but the CLI's type generator also requires a container even when given the pooler URL; the Supabase project API successfully generated and confirmed the live schema shape.
 - Next 16.0.0 reports an inherited security warning during dependency installation; upgrading it is intentionally deferred from this scoped implementation.
 
 ## Next implementation sequence
 
-1. Run local Supabase migration/RLS verification when Docker/Postgres is available.
-2. Add authenticated two-tenant database and browser fixtures when the local Supabase test environment is available.
+1. Rotate the staging database password and enable leaked-password protection in Supabase Auth.
+2. Run the committed pgTAP database test locally when Docker/Postgres is available and add it to CI.
+3. Add authenticated browser fixtures for the staged onboarding workflow.
 
 ## Verification record
 
 - Previous foundation checks passed: `pnpm install --frozen-lockfile`, `pnpm format:check`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`.
 - Passing focused checks: onboarding domain, service, route, rail/workspace, section editor, extraction, and candidate-review tests; `pnpm typecheck`; `pnpm lint`.
-- Passing full checks: `pnpm test` (38 tests), `pnpm format:check`, `pnpm build`, and guided onboarding E2E (2 protected/reduced-motion tests).
+- Passing full checks: `pnpm test` (42 tests), `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm build`, and guided onboarding E2E (2 protected/reduced-motion tests).
 - Chrome DevTools MCP verification completed against the running Next.js app: auth redirect/login rendering and the fixture-backed onboarding workspace screenshot were inspected; all ten rail sections and six phases rendered with shadcn controls.
-- Live Supabase migration lint/RLS verification remains blocked by Docker/Postgres only.
+- Staging migration dry-run reports up to date; all seven local migration versions match remote history.
+- Remote Supabase database lint passed for `public` and `private` with no schema errors.
+- Remote schema verification passed: 18/18 expected tables exist, 18/18 have RLS, 13/13 tenant-changing update policies have privileged `WITH CHECK` rules, authenticated clients have the required table grants, anonymous table grants are zero, and the onboarding storage bucket is private.
+- Remote transaction-safe two-tenant verification passed and cleaned up its fixtures: tenant A could not see or update tenant B; an owner in tenant A who was only a viewer in tenant B could not reassign a tenant-owned branch (`SQLSTATE 42501`).
+- Supabase security advisor is clear for database schema issues. The only remaining warning is the project-level leaked-password-protection setting. Performance advisor reports only expected unused-index notices on the empty staging schema; all missing-FK-index notices are resolved.
+- Audit-trigger pgTAP regression verification passed after first reproducing the prior failure: organization and business-profile writes both succeed and emit the expected audit events.
 
 ## Notes for future agents
 
