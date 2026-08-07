@@ -116,3 +116,16 @@ Supabase Postgres is the system of record. It provides relational integrity, JSO
 - Execution runs never infer tenant scope from user-controlled text.
 - Service-role database access is limited to server and worker code with explicit organization filters.
 - Provider webhooks are verified, normalized, deduplicated, and stored before downstream processing.
+
+## Frontend data and state policy
+
+Follow ADR 0008's selective TanStack policy:
+
+- React Server Components and Next.js data APIs own server-rendered reads by default.
+- TanStack Query v5 is the standard for server state used by interactive Client Components, including polling, background refresh, retry, and reversible optimistic mutations.
+- TanStack Form v1 is the standard for complex and multi-step forms; Zod and domain services remain the authoritative validation boundaries, and shadcn/ui remains the rendered component layer.
+- TanStack Table v8 is approved for advanced data grids. TanStack Virtual is added only after measured scale requires it.
+- TanStack DB, Store, AI, Charts, Hotkeys, Pacer, and Table v9 are not default dependencies.
+- Vercel AI SDK remains the model/agent SDK behind the provider abstraction; Trigger.dev remains the durable workflow runtime.
+
+Do not duplicate server state in a global client store or add a TanStack package only for ecosystem consistency.

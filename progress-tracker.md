@@ -7,9 +7,10 @@
 - Date: 2026-08-08
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation plus Organization + Digital Twin vertical slice.
-- Current active work: Guided Onboarding + AI Readiness Score design approved; implementation not started.
+- Current active work: Guided Onboarding + AI Readiness Score implementation plan is ready; application implementation is paused pending explicit approval.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
+- Implementation plan: `docs/superpowers/plans/2026-08-08-guided-onboarding-implementation.md`.
 
 ## Completed
 
@@ -40,6 +41,9 @@
 
 ## Architectural decisions and notes
 
+- ADR 0008 adopts TanStack selectively: Query v5 for interactive Client Component server state, Form v1 for complex forms, Table v8 for advanced grids, and Virtual only after measured need.
+- React Server Components remain the default for server-owned reads. TanStack is not an application-wide stack.
+- Vercel AI SDK and Trigger.dev remain the V1 AI/orchestration choices; TanStack AI, DB, Store, Charts, Hotkeys, Pacer, and Table v9 are deferred.
 - Core platform remains industry-neutral; restaurant menu behavior belongs to the Restaurant Industry Pack.
 - No model may directly execute destructive or money-moving actions.
 - Every AI output requires schema validation, provenance, review hooks, and explicit verification for trusted facts.
@@ -56,14 +60,9 @@
 
 ## Next implementation sequence
 
-1. Review and approve the written onboarding design spec.
-2. Create the implementation plan and any required ADR/schema migration decisions.
-3. Add domain schemas and tests for session, section state, requests, uploads, extraction candidates, and readiness.
-4. Add tenant-scoped persistence/API contracts and event emission.
-5. Build the animated shadcn stepper and section rail with save/resume/error states.
-6. Implement sections incrementally, starting with identity/operations and then all remaining sections.
-7. Add upload/extraction review and client request assignment.
-8. Add readiness score/review and end-to-end coverage.
+1. Obtain explicit approval for `docs/superpowers/plans/2026-08-08-guided-onboarding-implementation.md`.
+2. Execute the approved plan using its test-first task sequence.
+3. Install/enable local Supabase CLI and Playwright Chromium before attempting final database and E2E completion.
 
 ## Verification record
 
@@ -73,5 +72,5 @@
 ## Notes for future agents
 
 - Read `AGENTS.md`, this tracker, the relevant spec, and the approved design before editing.
-- Do not begin implementation until the user has reviewed the written design and an implementation plan exists.
+- Do not begin implementation until the user explicitly approves the written implementation plan.
 - Preserve the approved hybrid layout and operator-first ownership unless the user explicitly changes the decision.

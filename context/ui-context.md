@@ -1048,7 +1048,7 @@ Use the current shadcn/ui component implementation with **Radix UI primitives** 
 | `Command` / `CommandDialog` | Global search, quick navigation, organization switcher, command palette | Long forms or complex configuration |
 | `Breadcrumb` | Nested resource path | Replacing sidebar navigation |
 | `Card` | Bounded summary, opportunity, exception, compact metric group | Every section or every table row |
-| `Table` + TanStack Table | Audit records, sortable/filterable lists, bulk operations | Small two-item summaries |
+| `Table` + TanStack Table v8 | Audit records, sortable/filterable lists, bulk operations | Small two-item summaries; do not adopt v9 while beta |
 | `Tabs` | Stable peer views within the same resource | Sequential onboarding steps |
 | `Sheet` | Contextual detail, quick edit, evidence panel, logs | Destructive confirmation or long multi-step setup |
 | `Drawer` | Mobile contextual detail or mobile filters | Desktop primary pattern when a sheet is appropriate |
@@ -1061,7 +1061,7 @@ Use the current shadcn/ui component implementation with **Radix UI primitives** 
 | `Tooltip` | Icon labels and brief clarification | Long instructions, errors, or required evidence |
 | `Collapsible` | Optional advanced details, logs, assumptions | Hiding required approval information |
 | `Accordion` | FAQ-like or grouped configuration sections | Peer navigation better served by tabs |
-| `Form` + React Hook Form + Zod | Validated forms and onboarding | Local search/filter controls that do not require form submission |
+| `Form` + TanStack Form v1 + Zod | Complex validated forms and onboarding | Small forms or local search/filter controls that do not need library state |
 | `Input` | Short text and numeric values | Long-form content |
 | `Textarea` | Rejection reason, notes, prompt/template copy | Structured multi-value data |
 | `Select` | Small fixed option sets | Large searchable lists; use Combobox |
@@ -1307,7 +1307,7 @@ Do not silently populate high-impact fields.
 
 ## 20. Tables
 
-Use TanStack Table with shadcn `Table` primitives.
+Use TanStack Table v8 with shadcn `Table` primitives. Do not adopt Table v9 while it remains beta.
 
 ### 20.1 Required table capabilities where applicable
 

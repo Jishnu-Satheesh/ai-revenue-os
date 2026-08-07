@@ -67,6 +67,8 @@ Every worker defines:
 
 Use the Vercel AI SDK or an internal interface so workers depend on capabilities rather than a specific provider. Model selection may vary by task, cost, latency, privacy, and quality.
 
+Vercel AI SDK is the approved V1 implementation behind this boundary, with Trigger.dev providing durable orchestration. TanStack AI is deferred while beta and must not be introduced without a later documented decision based on a proven need such as AG-UI interoperability or materially better provider portability.
+
 ## Structured outputs
 
 All consequential model outputs must be parsed into Zod-validated schemas. Invalid output is retried with bounded repair attempts or sent to review. Free-form text never becomes an executable plan.
