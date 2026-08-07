@@ -62,10 +62,7 @@ export function deriveConnectionHealth(input: ConnectionHealthInput): Connection
       ...shared,
     };
   }
-  if (
-    input.status === "degraded" &&
-    (input.latestOutcome === "warning" || input.latestOutcome === "failed")
-  ) {
+  if (input.latestOutcome === "warning" || input.latestOutcome === "failed") {
     return {
       state: "degraded",
       reasonCode: "latest_check_degraded",

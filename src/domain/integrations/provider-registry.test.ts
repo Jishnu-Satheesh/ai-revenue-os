@@ -44,6 +44,12 @@ describe("createProviderRegistry", () => {
     ).toThrow("does not match");
   });
 
+  it("rejects duplicate provider adapter registrations", () => {
+    expect(() => createProviderRegistry([definition], [adapter, adapter])).toThrow(
+      "Duplicate provider adapter",
+    );
+  });
+
   it("rejects webhook and write provider definitions in V1", () => {
     expect(() =>
       createProviderRegistry([{ ...definition, supportsWebhooks: true }], [adapter]),
@@ -57,5 +63,19 @@ describe("createProviderRegistry", () => {
     const registry = createProviderRegistry([definition], [adapter]);
 
     expect(() => registry.getAdapter("not_registered", "v1")).toThrow("not registered");
+  });
+
+  it("snapshots provider definitions before exposing them", () => {
+    const mutableDefinition = { ...definition, displayName: "Original name" };
+    const registry = createProviderRegistry([mutableDefinition], [adapter]);
+    mutableDefinition.displayName = "Mutated name";
+    mutableDefinition.supportedCapabilities.push("unexpected_capability");
+
+    const [registeredDefinition] = registry.listDefinitions();
+    expect(registeredDefinition).toMatchObject({
+      displayName: "Original name",
+      supportedCapabilities: ["read_google_business_profile"],
+    });
+    expect(Object.isFrozen(registeredDefinition)).toBe(true);
   });
 });

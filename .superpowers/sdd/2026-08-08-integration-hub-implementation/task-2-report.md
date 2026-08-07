@@ -46,3 +46,18 @@ Completed and committed as `feat(integrations): define domain contracts and heal
 
 - The Task 2 contracts deliberately do not implement fixture adapters, credential storage, provider calls, ingestion persistence, workers, or API/UI routes; those remain for later tasks.
 - The existing Vite CJS deprecation notice appears during Vitest execution, but it is unrelated to this change and does not affect the passing suite.
+
+## Review remediation
+
+- Normalized provider errors now map every provider error code to fixed safe operator copy. Raw provider messages are retained only in the non-serializing `internalCause`; hostile message coverage confirms they cannot enter public JSON.
+- Active connections with a latest warning or failed result now derive `degraded` after stale evaluation.
+- The registry rejects duplicate provider/adapter-version registrations and snapshots/freeze provider definitions and their capability/scope arrays before exposing them.
+- Secret-bearing credential port types moved from the client-importable types module into `credential-store.server.ts`, which is explicitly marked `server-only`. A client-condition import test verifies the marker.
+- Added revoked-grant and full connection-status vocabulary coverage.
+
+### Remediation verification
+
+- RED: 26 focused tests produced seven failures that directly covered the reported unsafe copy, active degraded health, registry duplicate/mutation, and missing server-only boundary behaviors.
+- GREEN: `pnpm vitest run src/domain/integrations` — 5 files, 26 tests passed.
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed.

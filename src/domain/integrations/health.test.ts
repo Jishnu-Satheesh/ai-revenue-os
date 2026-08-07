@@ -42,6 +42,32 @@ describe("deriveConnectionHealth", () => {
     expect(health).toMatchObject({ state: "stale", reasonCode: "sync_stale" });
   });
 
+  it("derives degraded health from an active connection's latest warning", () => {
+    const health = deriveConnectionHealth({
+      status: "active",
+      staleAfterMinutes: 65,
+      lastTestedAt: "2026-08-08T11:30:00.000Z",
+      lastSuccessfulSyncAt: "2026-08-08T11:30:00.000Z",
+      latestOutcome: "warning",
+      now,
+    });
+
+    expect(health).toMatchObject({ state: "degraded", reasonCode: "latest_check_degraded" });
+  });
+
+  it("derives degraded health from an active connection's latest failed check", () => {
+    const health = deriveConnectionHealth({
+      status: "active",
+      staleAfterMinutes: 65,
+      lastTestedAt: "2026-08-08T11:30:00.000Z",
+      lastSuccessfulSyncAt: "2026-08-08T11:30:00.000Z",
+      latestOutcome: "failed",
+      now,
+    });
+
+    expect(health).toMatchObject({ state: "degraded", reasonCode: "latest_check_degraded" });
+  });
+
   it("prioritizes revocation over every other health signal", () => {
     const health = deriveConnectionHealth({
       status: "revoked",

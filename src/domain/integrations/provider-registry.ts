@@ -25,7 +25,14 @@ export function createProviderRegistry(
     if (definition.supportsWrites) {
       throw new DomainError("FEATURE_NOT_AVAILABLE", "Provider writes are not supported in V1.");
     }
-    definitionsByKey.set(definition.key, definition);
+    definitionsByKey.set(
+      definition.key,
+      Object.freeze({
+        ...definition,
+        supportedCapabilities: Object.freeze([...definition.supportedCapabilities]),
+        requiredScopes: Object.freeze([...definition.requiredScopes]),
+      }),
+    );
   }
 
   for (const adapter of adapters) {
@@ -42,7 +49,11 @@ export function createProviderRegistry(
         "Provider adapter version does not match its definition.",
       );
     }
-    adaptersByProviderAndVersion.set(`${adapter.providerKey}:${adapter.adapterVersion}`, adapter);
+    const adapterKey = `${adapter.providerKey}:${adapter.adapterVersion}`;
+    if (adaptersByProviderAndVersion.has(adapterKey)) {
+      throw new DomainError("VALIDATION_ERROR", `Duplicate provider adapter: ${adapterKey}`);
+    }
+    adaptersByProviderAndVersion.set(adapterKey, adapter);
   }
 
   return {

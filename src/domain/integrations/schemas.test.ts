@@ -5,6 +5,7 @@ import { vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
+  connectionStatusSchema,
   connectionMaturitySchema,
   ingestionRunSourceSchema,
   integrationRecordEnvelopeSchema,
@@ -27,6 +28,16 @@ describe("integration schemas", () => {
   it("limits V1 availability to manual, imported, and read-only maturities", () => {
     expect(v1AvailableMaturitySchema.safeParse("read-only").success).toBe(true);
     expect(v1AvailableMaturitySchema.safeParse("governed-write").success).toBe(false);
+  });
+
+  it("parses every approved connection status", () => {
+    expect(connectionStatusSchema.options).toEqual([
+      "pending",
+      "active",
+      "degraded",
+      "disconnected",
+      "revoked",
+    ]);
   });
 
   it("rejects malformed integration record envelopes", () => {
@@ -62,12 +73,29 @@ describe("integration schemas", () => {
       cause: internalCause,
     });
 
-    expect(error.internalCause).toBe(internalCause);
+    expect(error.internalCause).toEqual({
+      providerMessage: "Retry later.",
+      cause: internalCause,
+    });
     expect(error.toJSON()).toEqual({
       code: "RATE_LIMITED",
-      message: "Retry later.",
+      message: "The provider rate limit was reached. Retry later.",
       retryable: true,
       metadata: { retryAfterSeconds: 60 },
     });
+  });
+
+  it("uses fixed safe copy instead of hostile provider error text", () => {
+    const hostileMessage = "token=private-value authorization=https://provider.example/private";
+    const error = normalizeProviderError({
+      code: "AUTHENTICATION_FAILED",
+      message: hostileMessage,
+    });
+
+    expect(error.toJSON().message).toBe(
+      "Authentication with the provider failed. Reconnect to continue.",
+    );
+    expect(JSON.stringify(error)).not.toContain(hostileMessage);
+    expect(error.internalCause).toEqual({ providerMessage: hostileMessage, cause: undefined });
   });
 });

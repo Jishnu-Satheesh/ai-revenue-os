@@ -49,6 +49,17 @@ export class IntegrationError extends Error {
 
 const credentialShapedKey = /(token|secret|authorization|credential)/i;
 
+const safeOperatorCopy: Record<(typeof providerErrorCodes)[number], string> = {
+  AUTHENTICATION_FAILED: "Authentication with the provider failed. Reconnect to continue.",
+  AUTHORIZATION_SCOPE_MISSING:
+    "The provider connection is missing required access. Update permissions and retry.",
+  RATE_LIMITED: "The provider rate limit was reached. Retry later.",
+  PROVIDER_UNAVAILABLE: "The provider is temporarily unavailable. Retry later.",
+  INVALID_PROVIDER_RESPONSE: "The provider returned an invalid response. Try again later.",
+  RESOURCE_NOT_FOUND: "The requested provider resource was not found.",
+  UNKNOWN_PROVIDER_ERROR: "The provider request failed. Try again later.",
+};
+
 export function normalizeProviderError(input: {
   code?: string;
   message?: string;
@@ -63,7 +74,7 @@ export function normalizeProviderError(input: {
     Object.entries(input.metadata ?? {}).filter(([key]) => !credentialShapedKey.test(key)),
   );
   const retryable = input.retryable ?? (code === "RATE_LIMITED" || code === "PROVIDER_UNAVAILABLE");
-  const message = input.message?.trim() || "The provider could not complete this request.";
+  const internalCause = { providerMessage: input.message, cause: input.cause };
 
-  return new IntegrationError(code, message, retryable, metadata, input.cause);
+  return new IntegrationError(code, safeOperatorCopy[code], retryable, metadata, internalCause);
 }

@@ -89,4 +89,16 @@ describe("deriveCapabilityGrants", () => {
       }),
     ]);
   });
+
+  it("disables every grant for a revoked connection", () => {
+    const grants = deriveCapabilityGrants({
+      ...baseInput,
+      connection: { status: "revoked", grantedScopes: ["business.manage"] },
+    });
+
+    expect(grants).toEqual([
+      expect.objectContaining({ availability: "disabled", reasonCodes: ["connection_revoked"] }),
+      expect.objectContaining({ availability: "disabled", reasonCodes: ["connection_revoked"] }),
+    ]);
+  });
 });
