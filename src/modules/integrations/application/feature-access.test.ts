@@ -5,6 +5,8 @@ vi.hoisted(() => {
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
 });
 
+vi.mock("server-only", () => ({}));
+
 import {
   assertIntegrationHubEnabled,
   parseIntegrationOrganizationIds,
@@ -26,6 +28,16 @@ describe("Integration Hub rollout access", () => {
 
   it("rejects duplicate organization IDs", () => {
     expect(() => parseIntegrationOrganizationIds(`${organizationA},${organizationA}`)).toThrow();
+  });
+
+  it("rejects duplicate organization IDs regardless of UUID case", () => {
+    expect(() =>
+      parseIntegrationOrganizationIds(`${organizationA},${organizationA.toUpperCase()}`),
+    ).toThrow();
+  });
+
+  it("allows uppercase organization IDs when the rollout set is enabled", () => {
+    expect(() => assertIntegrationHubEnabled(organizationA.toUpperCase(), new Set([organizationA]))).not.toThrow();
   });
 
   it("blocks organizations outside the enabled rollout", () => {

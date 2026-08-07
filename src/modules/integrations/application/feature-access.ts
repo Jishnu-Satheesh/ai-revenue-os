@@ -19,7 +19,7 @@ export function parseIntegrationOrganizationIds(value: string | undefined): Set<
   const enabledOrganizationIds = new Set<string>();
 
   for (const organizationId of organizationIds) {
-    enabledOrganizationIds.add(organizationIdSchema.parse(organizationId));
+    enabledOrganizationIds.add(organizationIdSchema.parse(organizationId).toLowerCase());
   }
 
   if (enabledOrganizationIds.size !== organizationIds.length) {
@@ -35,7 +35,7 @@ export function assertIntegrationHubEnabled(
     env.INTEGRATION_HUB_V1_ORGANIZATION_IDS,
   ),
 ): void {
-  if (!enabledOrganizationIds.has(organizationId)) {
+  if (!enabledOrganizationIds.has(organizationId.toLowerCase())) {
     throw new DomainError(
       "FEATURE_NOT_AVAILABLE",
       "Integration Hub is not available for this organization.",
