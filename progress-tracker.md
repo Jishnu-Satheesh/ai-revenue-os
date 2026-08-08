@@ -6,8 +6,8 @@
 
 - Date: 2026-08-08
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
-- Product stage: foundation plus Organization + Digital Twin vertical slice.
-- Current active work: Integration Hub product, architecture, security, testing, and health-first UX design are approved; the implementation plan is prepared and awaits explicit execution approval. Runtime implementation has not started.
+- Product stage: foundation, Organization + Digital Twin vertical slice, and the Integration Hub V1 runtime.
+- Current active work: all fourteen Integration Hub plan tasks are implemented and committed. Remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
 - Current implementation plan: `docs/superpowers/plans/2026-08-08-integration-hub-implementation.md`.
@@ -15,6 +15,11 @@
 
 ## Completed
 
+- Integration Hub V1 runtime: rollout gate, domain contracts and health policy, six-table tenant
+  schema with forced RLS and a private import bucket, scoped repositories and the health-first read
+  model, governed application flows, the deterministic Google Business Profile fixture with
+  credential/ingestion boundaries, five leased Trigger.dev workers, all ten APIs, the four-tab
+  operator workspace, and the Playwright suite.
 - Next.js App Router + TypeScript foundation.
 - Supabase tenancy schema, auth boundary, RLS patterns, and organization context.
 - Organization creation and Digital Twin editor.
@@ -73,6 +78,17 @@
 
 ## Blockers and risks
 
+- The Integration Hub migrations are committed but **not applied to staging**. Until they are, the
+  Hub's authenticated reads fail closed and the feature cannot be enabled for any organization.
+- pgTAP, `supabase db lint --local`, `supabase:reset`, and `pnpm db:types` have never run for the
+  Integration Hub schema: this workspace has neither Docker/Podman nor the Supabase CLI. The row
+  types in `src/modules/integrations/application/ports.ts` are therefore still hand-written stand-ins
+  for the generated `Database` type.
+- Fourteen of twenty Integration Hub E2E scenarios skip because no seeded tenant exists. Authorization,
+  worker state, CSV import, disconnect, and responsive behaviour are covered by unit and component
+  tests but have no browser evidence yet.
+- Chrome DevTools verification of the Hub itself is incomplete: the signed-in account in this
+  workspace belongs to zero organizations, so only the route chrome and error boundary were inspected.
 - Rotate the staging database password and update `.env.local`: the credential was exposed to a local process listing during connection diagnostics. No credential value is recorded in this tracker.
 - Supabase Auth leaked-password protection is disabled in the staging project and should be enabled in the dashboard before production use.
 - The direct Supabase database hostname is IPv6-only and this development environment has no IPv6 route. CLI database work uses the staging region's session pooler with TLS; the pooler URL is derived at runtime and is not committed.
@@ -83,13 +99,53 @@
 
 ## Next implementation sequence
 
+Integration Hub code is complete. Everything below is a release gate that needs credentials or a
+database runtime, not further implementation.
+
 1. Rotate the staging database password and enable leaked-password protection in Supabase Auth.
-2. Run the committed pgTAP database test locally when Docker/Postgres is available and add it to CI.
-3. Execute `docs/superpowers/plans/2026-08-08-integration-hub-implementation.md` task-by-task, beginning with the rollout gate and worker tooling.
-4. Preserve focused tests and commits at every task boundary; do not apply the Integration Hub staging migration until its local/static security checks pass.
-5. Complete authenticated browser fixtures and Chrome DevTools desktop/narrow verification before signing off the Integration Hub.
+   Both need dashboard authority no agent in this workspace has.
+2. Apply `20260807230118_integration_hub.sql`, `20260808012410_integration_worker_run_transitions.sql`,
+   `20260808025602_integration_authenticated_operations.sql`, and
+   `20260808033746_integration_data_source_operations.sql` to staging: compare histories, dry-run,
+   apply, then run database lint and the security/performance advisors.
+3. Run the committed pgTAP test (`supabase test db supabase/tests/database/integration_hub_rls_test.sql`)
+   once Docker/Postgres is available, and add it to CI.
+4. Regenerate `src/lib/supabase/database.types.ts` and remove the provisional row types in
+   `src/modules/integrations/application/ports.ts` that stand in for the generated schema.
+5. Seed operator and viewer accounts plus an allowlisted organization, set
+   `INTEGRATION_HUB_V1_ORGANIZATION_IDS` and the `E2E_*` variables, then run
+   `pnpm test:e2e -- e2e/integration-hub.spec.ts` at desktop and narrow viewports.
+6. Repeat Chrome DevTools verification against an authenticated allowlisted organization: all four
+   tabs, fixture connect, mapping validation, queued/running/error states, CSV validation and
+   import, disconnect, keyboard/focus, 200% zoom, reduced motion, and background refetch.
 
 ## Verification record
+
+### Integration Hub V1 (2026-08-08)
+
+- Full gate passed: `pnpm install --frozen-lockfile`, `pnpm format:check`, `pnpm typecheck`,
+  `pnpm lint`, `pnpm test` (**249 tests in 41 files**), and `pnpm build` (compiled successfully,
+  8/8 static pages).
+- `pnpm test:e2e`: **6 passed, 14 skipped**. The skips are the authenticated Integration Hub
+  scenarios; they report their missing environment rather than passing vacuously.
+- Integration regression suites pass: repository integration, connection routes, data-source routes,
+  and workers -- 42 tests.
+- Service-role isolation verified by search: `SUPABASE_SERVICE_ROLE_KEY` appears only in
+  `src/lib/env.ts` and `src/lib/supabase/service.ts`, and `src/lib/supabase/service` is imported
+  only by `src/trigger/integrations.ts`.
+- Chrome DevTools (partial, see blockers): route-aware breadcrumb and the organization sidebar group
+  render from the pathname; an inaccessible organization renders the shadcn error boundary with a
+  retry control and no leak of the underlying reason; no horizontal overflow at 390px, at a 640px
+  CSS viewport (the 200%-zoom equivalent), or at desktop width; the served HTML and all 37 client
+  scripts contain none of `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, `service_role`,
+  `credential_reference`, `internalCause`, `TRIGGER_SECRET_KEY`, or `DB_PASSWORD`. The only console
+  error is React's development-mode log of the handled boundary error.
+- No provider write or webhook code exists in the runtime: the registry rejects any definition with
+  `supportsWebhooks` or `supportsWrites`, and no webhook route is registered.
+- Migrations added for the Hub: `20260807230118_integration_hub.sql`,
+  `20260808012410_integration_worker_run_transitions.sql`,
+  `20260808025602_integration_authenticated_operations.sql`, and
+  `20260808033746_integration_data_source_operations.sql`.
 
 - Previous foundation checks passed: `pnpm install --frozen-lockfile`, `pnpm format:check`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`.
 - Passing focused checks: onboarding domain, service, route, rail/workspace, section editor, extraction, and candidate-review tests; `pnpm typecheck`; `pnpm lint`.
@@ -108,6 +164,13 @@
 ## Notes for future agents
 
 - Read `AGENTS.md`, this tracker, the relevant spec, and the approved design before editing.
-- Do not begin Integration Hub runtime implementation until the user explicitly approves the written plan and execution mode; then record task checkboxes/evidence as work lands.
+- Integration Hub runtime implementation is complete and committed. Do not re-open it as new work; the remaining items in the next-sequence list are environment gates, not code.
 - Preserve the approved hybrid layout and operator-first ownership unless the user explicitly changes the decision.
 - For Integration Hub work, preserve the approved health-first layout, fixture-first Google provider, no-webhook/no-write V1 boundary, and server-only credential interface.
+- Never report a connection as healthy, a sync or import as succeeded, a capability as available, or
+  a disconnect as complete from an accepted request alone. Only refetched persisted worker state may
+  say so; the UI shows queued or running until then.
+- The client may read the role-to-permission mapping from `src/domain/integrations/permissions.ts`,
+  but enforcement lives only in the service, the routes, and RLS. Do not import
+  `src/domain/integrations/errors.ts` from a Client Component: it is server-only and will break the
+  build.

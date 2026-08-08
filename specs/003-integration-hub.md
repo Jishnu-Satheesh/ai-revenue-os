@@ -478,6 +478,14 @@ All inputs and responses have colocated Zod schemas and typed public errors.
 
 Mutation requests include `idempotencyKey`. Accepted background work returns `202` with a run identifier and status; it never returns a false success result.
 
+The snapshot endpoint is the single authenticated read behind the whole workspace. Its payload is
+`summary`, `connections`, `dataSources`, `branches`, `recentActivity`, and `serverTime`. Each
+connection carries its derived `health`, its latest health check, its `capabilities` (capability
+grants), and its `mappings` (account mappings), so the selected-connection detail in section 16.1
+renders without a per-connection endpoint outside this surface. `branches` carries branch identity
+only — `id`, `organization_id`, and `name` — for the mapping and data-source forms.
+`credential_reference` is never selected and never returned.
+
 ## 15. Events and audit
 
 Use the repository event envelope with organization, actor, correlation, causation, schema version, and typed payload.

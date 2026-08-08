@@ -722,11 +722,15 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 
   Rotate the previously exposed database password, update `.env.local` without printing it, and enable Supabase Auth leaked-password protection. Stop if either action lacks user authority or dashboard access; record it as an explicit release blocker.
 
+  **Release blocker (not done).** Both actions need Supabase dashboard authority that is not available here, and neither may be performed without the user. Recorded in `progress-tracker.md`.
+
 - [ ] **Step 2: Apply and verify the migration safely.**
 
   Compare local/remote migration history, dry-run first, apply the CLI-generated migration, regenerate live types, run database lint/security/performance advisors, verify six tables and private bucket, verify forced RLS/explicit grants/zero anon privileges/FK indexes, and execute a transaction-safe two-tenant smoke test with cleanup.
 
-- [ ] **Step 3: Run the full project gate.**
+  **Release blocker (not done).** This depends on Step 1 and on tooling this workspace lacks: no Supabase CLI, no Docker/Podman, and the password rotation gate is still open. Applying schema to the user's staging project is also not an action to take unattended. Static migration contract tests cover the SQL (17 assertions in `migration.integration.test.ts`), but no live schema, advisor, or two-tenant evidence exists for the Integration Hub tables.
+
+- [x] **Step 3: Run the full project gate.**
 
   ```bash
   pnpm install --frozen-lockfile
@@ -740,17 +744,27 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 
   Record counts and failures honestly. Do not sign off with any known critical/high security, tenancy, integrity, or accessibility defect.
 
+  Result: install up to date; `format:check` clean; `typecheck` clean; `lint` clean; `pnpm test` **249 passed in 41 files**; `pnpm build` compiled successfully with 8/8 static pages; `pnpm test:e2e` **6 passed, 14 skipped** (the skips are the authenticated Integration Hub scenarios, which report their missing seeded environment).
+
 - [ ] **Step 4: Verify the frontend with Chrome DevTools before sign-off.**
 
   Start the app with the staged/fixture-safe configuration. Inspect desktop and narrow viewports for all four tabs; fixture connect; mapping validation; queued/running/success and error states; CSV validation/import; disconnect; keyboard/focus; 200% zoom; reduced motion; and background refetch. Inspect Console and Network for critical errors, secret/credential leakage, wrong-tenant requests, false success, layout overflow, and accessibility issues.
 
-- [ ] **Step 5: Update documentation and tracker with evidence.**
+  **Partially done; remains a release gate.** Verified against the running dev server: the breadcrumb and the organization sidebar group derive from the pathname rather than a hardcoded Overview; an inaccessible organization renders the shadcn error boundary with a retry control and does not repeat the underlying reason; no horizontal overflow at 390px, at a 640px CSS viewport (the 200%-zoom equivalent), or at desktop width; the served HTML and all 37 client scripts contain none of `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, `service_role`, `credential_reference`, `internalCause`, `TRIGGER_SECRET_KEY`, or `DB_PASSWORD`; the only console error is React's development-mode log of the handled boundary error.
+
+  Not verified, because the signed-in account in this workspace belongs to zero organizations and the Integration Hub schema is not applied to staging: the four tabs, fixture connect, mapping validation, queued/running/success states, CSV validation and import, disconnect, and background refetch in a real tenant.
+
+- [x] **Step 5: Update documentation and tracker with evidence.**
 
   Mark the active plan, completed tasks, migration version, test counts, staging verification, Chrome DevTools findings, risks, blockers, and genuine remaining work. Preserve the Google/Vault external gates and state clearly that real OAuth/writes/webhooks remain absent.
 
-- [ ] **Step 6: Run `git diff --check` and scan changed files for unfinished markers, stub handlers, raw feature controls, secrets, and provider-write/webhook code.**
+  Updated `progress-tracker.md` (state, completed work, blockers, next sequence, verification record, agent notes), `README.md` (Integration Hub section with the rollout variable and E2E environment), `.env.example` (`INTEGRATION_HUB_V1_ORGANIZATION_IDS` and the `E2E_*` variables), and `specs/003-integration-hub.md` section 14 (the snapshot payload now documents `branches` and the per-connection `capabilities`/`mappings` the detail pane reads). ADR 0010 needed no change: the fixture-first, server-only credential boundary is unchanged.
 
-- [ ] **Step 7: Commit with `git commit -m "docs(integrations): record implementation verification"`.**
+- [x] **Step 6: Run `git diff --check` and scan changed files for unfinished markers, stub handlers, raw feature controls, secrets, and provider-write/webhook code.**
+
+  `git diff --check` is clean. No `TODO`, `FIXME`, `@ts-ignore`, `@ts-expect-error`, or stub marker appears in the changed source. No raw `button`, `input`, `select`, `textarea`, or `dialog` element exists in Integration Hub, layout, or route feature code. The only webhook references are the registry's refusal and operator copy stating that writes and webhooks do not exist.
+
+- [x] **Step 7: Commit with `git commit -m "docs(integrations): record implementation verification"`.**
 
 ## Spec Coverage Map
 
@@ -779,11 +793,22 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 
 ## Plan Completion Review
 
-- [ ] Every runtime file named in the file map is either created or consciously removed from this plan with the spec updated.
-- [ ] Every external boundary has a Zod schema and at least one rejection test.
-- [ ] Every repository and worker operation scopes both organization and entity IDs.
-- [ ] Every mutation has permission, idempotency, audit/event, safe-error, and observability coverage.
-- [ ] Every shadcn component uses its full composition API; no feature code contains raw buttons, selects, dialogs, cards, menus, or sidebars.
-- [ ] Google remains fixture-only/read-only and the exact pending-access copy is present.
-- [ ] No plan item or implementation contains unresolved work markers, false success, or silent failure.
+- [x] Every runtime file named in the file map is either created or consciously removed from this plan with the spec updated.
+- [x] Every external boundary has a Zod schema and at least one rejection test.
+- [x] Every repository and worker operation scopes both organization and entity IDs.
+- [x] Every mutation has permission, idempotency, audit/event, safe-error, and observability coverage.
+- [x] Every shadcn component uses its full composition API; no feature code contains raw buttons, selects, dialogs, cards, menus, or sidebars.
+- [x] Google remains fixture-only/read-only and the exact pending-access copy is present.
+- [x] No plan item or implementation contains unresolved work markers, false success, or silent failure.
 - [ ] Chrome DevTools verification and the complete pnpm/Supabase command evidence are recorded before completion is claimed.
+
+  The pnpm evidence is complete and recorded. The Supabase evidence is not: `supabase:reset`,
+  `supabase db lint`, `supabase test db`, and `pnpm db:types` have never run against the Integration
+  Hub schema because this workspace has no Docker/Podman and no Supabase CLI, and the staging apply
+  is still gated on the password rotation. Chrome DevTools verification covered the route chrome,
+  error boundary, responsive overflow, and client-bundle secret scan, but not an authenticated
+  tenant. This item stays open deliberately rather than being claimed.
+
+  The three runtime additions beyond the original file map are `src/components/integrations/health-status.tsx`
+  (shared health presentation), `src/components/integrations/csv-mapping-form.tsx` (named in Task 12),
+  and `src/domain/integrations/permissions.ts` (the client-safe half of the permission mapping).

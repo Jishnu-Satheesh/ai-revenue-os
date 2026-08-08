@@ -86,6 +86,25 @@ pnpm test
 pnpm build
 ```
 
+## Integration Hub
+
+The Integration Hub lives at `/organizations/:organizationId/integrations` and covers connection
+health, the provider catalog, manual/CSV data sources, and activity.
+
+V1 is deliberately narrow: Google Business Profile runs from a deterministic fixture, no provider
+credential is stored, and there are no provider writes or webhooks. Real OAuth stays disabled until
+Google approves API access and the credential security review in `specs/003-integration-hub.md`
+passes.
+
+Access is gated by `INTEGRATION_HUB_V1_ORGANIZATION_IDS`, a server-only comma-separated list of
+organization UUIDs enforced in the page loader, every API route, and every worker. Navigation
+visibility is not authorization: an organization outside the list is refused everywhere.
+
+The authenticated end-to-end suite (`e2e/integration-hub.spec.ts`) needs a seeded Supabase project.
+Set `E2E_INTEGRATION_ORGANIZATION_ID`, `E2E_OTHER_ORGANIZATION_ID`, and the `E2E_OPERATOR_*` and
+`E2E_VIEWER_*` credentials from `.env.example`; without them those scenarios skip and only the
+unauthenticated boundary scenarios run.
+
 ## Foundation boundaries
 
 - `src/app` is the presentation layer and route composition.
