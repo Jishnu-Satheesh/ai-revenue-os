@@ -135,6 +135,130 @@ describe("validated integration ingestion sink", () => {
     expect(handoff.ingest).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects same-key reuse when only the payload changes", async () => {
+    const handoff = createHandoff();
+    const sink = createValidatedIngestionSink({
+      handoff,
+      sourceResolver: { resolve: async () => source },
+    });
+    const input = {
+      organizationId,
+      ingestionRunId: "run-a",
+      idempotencyKey: "sync-payload-a",
+      records: [baseRecord],
+    };
+
+    await sink.accept(input);
+
+    await expect(
+      sink.accept({
+        ...input,
+        records: [{ ...baseRecord, payload: { locationName: "Changed fixture location" } }],
+      }),
+    ).resolves.toEqual({
+      accepted: 0,
+      rejected: 1,
+      rejectionReasons: ["IDEMPOTENCY_KEY_REUSED"],
+    });
+    expect(handoff.ingest).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one in-flight handoff between identical concurrent calls", async () => {
+    let releaseHandoff: (() => void) | undefined;
+    const handoff: DataIngestionPort = {
+      ingest: vi.fn(
+        () =>
+          new Promise<{ accepted: number; rejected: number; rejectionReasons: string[] }>(
+            (resolve) => {
+              releaseHandoff = () => resolve({ accepted: 1, rejected: 0, rejectionReasons: [] });
+            },
+          ),
+      ),
+    };
+    const sink = createValidatedIngestionSink({
+      handoff,
+      sourceResolver: { resolve: async () => source },
+    });
+    const input = {
+      organizationId,
+      ingestionRunId: "run-a",
+      idempotencyKey: "sync-concurrent-a",
+      records: [baseRecord],
+    };
+
+    const first = sink.accept(input);
+    await vi.waitFor(() => expect(handoff.ingest).toHaveBeenCalledTimes(1));
+    const second = sink.accept(input);
+    await vi.waitFor(() => expect(handoff.ingest).toHaveBeenCalledTimes(1));
+    await expect(
+      sink.accept({
+        ...input,
+        records: [{ ...baseRecord, payload: { locationName: "Conflicting in-flight payload" } }],
+      }),
+    ).resolves.toEqual({
+      accepted: 0,
+      rejected: 1,
+      rejectionReasons: ["IDEMPOTENCY_KEY_REUSED"],
+    });
+    releaseHandoff?.();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { accepted: 1, rejected: 0, rejectionReasons: [] },
+      { accepted: 1, rejected: 0, rejectionReasons: [] },
+    ]);
+  });
+
+  it("rejects oversized and deeply nested payloads before they reach Data Ingestion", async () => {
+    const handoff = createHandoff();
+    const sink = createValidatedIngestionSink({
+      handoff,
+      sourceResolver: { resolve: async () => source },
+    });
+    let deepPayload: unknown = "leaf";
+    for (let depth = 0; depth < 13; depth += 1) {
+      deepPayload = { child: deepPayload };
+    }
+
+    await expect(
+      sink.accept({
+        organizationId,
+        ingestionRunId: "run-a",
+        idempotencyKey: "sync-bounded-a",
+        records: [
+          { ...baseRecord, externalRecordId: "oversized", payload: "x".repeat(16_385) },
+          { ...baseRecord, externalRecordId: "deep", payload: deepPayload },
+        ],
+      }),
+    ).resolves.toEqual({
+      accepted: 0,
+      rejected: 2,
+      rejectionReasons: ["INVALID_PAYLOAD", "INVALID_PAYLOAD"],
+    });
+    expect(handoff.ingest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { accepted: 0, rejected: 0, label: "under-counts" },
+    { accepted: 2, rejected: 0, label: "over-counts" },
+  ])("fails closed when the downstream handoff $label records", async ({ accepted, rejected }) => {
+    const handoff: DataIngestionPort = {
+      ingest: vi.fn(async () => ({ accepted, rejected, rejectionReasons: [] })),
+    };
+    const sink = createValidatedIngestionSink({
+      handoff,
+      sourceResolver: { resolve: async () => source },
+    });
+
+    await expect(
+      sink.accept({
+        organizationId,
+        ingestionRunId: "run-a",
+        idempotencyKey: "sync-undercount-a",
+        records: [baseRecord],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
   it("accounts for downstream partial ingestion without retaining records", async () => {
     const handoff: DataIngestionPort = {
       ingest: vi.fn(async () => ({

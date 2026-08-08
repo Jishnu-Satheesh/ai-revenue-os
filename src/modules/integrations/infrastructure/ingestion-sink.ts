@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import { IntegrationError } from "@/domain/integrations/errors";
@@ -33,6 +35,14 @@ const handoffResultSchema = z.object({
   rejected: z.number().int().nonnegative(),
   rejectionReasons: z.array(z.string()).max(50),
 });
+
+const MAX_RECORD_SERIALIZED_BYTES = 64 * 1024;
+const MAX_PAYLOAD_SERIALIZED_BYTES = 48 * 1024;
+const MAX_PAYLOAD_STRING_BYTES = 16 * 1024;
+const MAX_PAYLOAD_NESTING = 12;
+const MAX_PAYLOAD_ARRAY_ITEMS = 500;
+const MAX_PAYLOAD_OBJECT_PROPERTIES = 100;
+const MAX_ENVELOPE_TEXT_BYTES = 4 * 1024;
 
 export type DataIngestionPort = {
   ingest(input: {
@@ -81,21 +91,29 @@ type CachedResult = {
   result: { accepted: number; rejected: number; rejectionReasons: readonly string[] };
 };
 
-function fingerprintRecords(records: readonly IntegrationRecordEnvelope[]): string {
-  return records
-    .map((record) =>
-      [
-        record.schemaVersion,
-        record.organizationId,
-        record.source.kind,
-        record.source.id,
-        record.externalRecordId,
-        record.recordType,
-        record.observedAt ?? "",
-        record.fetchedAt,
-      ].join("|"),
-    )
-    .join("\n");
+type InFlightResult = {
+  fingerprint: string;
+  promise: Promise<{ accepted: number; rejected: number; rejectionReasons: readonly string[] }>;
+};
+
+function fingerprintRecords(
+  records: readonly IntegrationRecordEnvelope[],
+  payloadDigests: readonly string[],
+  rejectionReasons: readonly string[],
+): string {
+  return JSON.stringify({
+    records: records.map((record, index) => ({
+      schemaVersion: record.schemaVersion,
+      organizationId: record.organizationId,
+      source: record.source,
+      externalRecordId: record.externalRecordId,
+      recordType: record.recordType,
+      observedAt: record.observedAt,
+      fetchedAt: record.fetchedAt,
+      payloadDigest: payloadDigests[index],
+    })),
+    rejectionReasons,
+  });
 }
 
 function idempotencyCacheKey(input: {
@@ -103,7 +121,7 @@ function idempotencyCacheKey(input: {
   ingestionRunId: string;
   idempotencyKey: string;
 }): string {
-  return `${input.organizationId}:${input.ingestionRunId}:${input.idempotencyKey}`;
+  return JSON.stringify([input.organizationId, input.ingestionRunId, input.idempotencyKey]);
 }
 
 function cacheResult(
@@ -126,6 +144,117 @@ function safeDownstreamReasons(reasons: readonly string[]): string[] {
   );
 }
 
+class PayloadLimitError extends Error {}
+
+function isPlainObject(value: object): value is Record<string, unknown> {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function canonicalPayloadDigest(payload: unknown): { digest: string; serializedBytes: number } {
+  const chunks: string[] = [];
+  let bytes = 0;
+  const write = (value: string): void => {
+    bytes += Buffer.byteLength(value, "utf8");
+    if (bytes > MAX_PAYLOAD_SERIALIZED_BYTES) throw new PayloadLimitError();
+    chunks.push(value);
+  };
+  const serialize = (value: unknown, depth: number): void => {
+    if (depth > MAX_PAYLOAD_NESTING) throw new PayloadLimitError();
+    if (value === null) {
+      write("null");
+      return;
+    }
+    if (typeof value === "string") {
+      if (Buffer.byteLength(value, "utf8") > MAX_PAYLOAD_STRING_BYTES)
+        throw new PayloadLimitError();
+      write(JSON.stringify(value));
+      return;
+    }
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) throw new PayloadLimitError();
+      write(JSON.stringify(value));
+      return;
+    }
+    if (typeof value === "boolean") {
+      write(value ? "true" : "false");
+      return;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > MAX_PAYLOAD_ARRAY_ITEMS) throw new PayloadLimitError();
+      write("[");
+      value.forEach((item, index) => {
+        if (index > 0) write(",");
+        serialize(item, depth + 1);
+      });
+      write("]");
+      return;
+    }
+    if (typeof value !== "object" || !isPlainObject(value)) throw new PayloadLimitError();
+    const descriptors = Object.entries(Object.getOwnPropertyDescriptors(value));
+    if (descriptors.some(([, descriptor]) => !("value" in descriptor)))
+      throw new PayloadLimitError();
+    const entries = descriptors
+      .map(([key, descriptor]) => [key, descriptor.value] as const)
+      .sort(([left], [right]) => left.localeCompare(right));
+    if (entries.length > MAX_PAYLOAD_OBJECT_PROPERTIES) throw new PayloadLimitError();
+    write("{");
+    entries.forEach(([key, item], index) => {
+      if (index > 0) write(",");
+      write(JSON.stringify(key));
+      write(":");
+      serialize(item, depth + 1);
+    });
+    write("}");
+  };
+
+  serialize(payload, 0);
+  return {
+    digest: createHash("sha256").update(chunks.join(""), "utf8").digest("base64url"),
+    serializedBytes: bytes,
+  };
+}
+
+function hasBoundedPayload(record: IntegrationRecordEnvelope): string | null {
+  try {
+    const textFields = [
+      record.organizationId,
+      record.source.id,
+      record.externalRecordId,
+      record.recordType,
+      record.observedAt,
+      record.fetchedAt,
+    ];
+    if (
+      textFields.some(
+        (value) =>
+          value !== undefined && Buffer.byteLength(value, "utf8") > MAX_ENVELOPE_TEXT_BYTES,
+      )
+    ) {
+      return null;
+    }
+    const payload = canonicalPayloadDigest(record.payload);
+    const withNullPayload = JSON.stringify({
+      schemaVersion: record.schemaVersion,
+      organizationId: record.organizationId,
+      source: record.source,
+      externalRecordId: record.externalRecordId,
+      recordType: record.recordType,
+      ...(record.observedAt ? { observedAt: record.observedAt } : {}),
+      fetchedAt: record.fetchedAt,
+      payload: null,
+    });
+    const serializedBytes =
+      Buffer.byteLength(withNullPayload, "utf8") -
+      Buffer.byteLength("null", "utf8") +
+      payload.serializedBytes;
+    if (serializedBytes > MAX_RECORD_SERIALIZED_BYTES) return null;
+    return payload.digest;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Validates and forwards a bounded batch. It caches only a small idempotency
  * result fingerprint; provider records and payloads are never persisted here.
@@ -138,6 +267,7 @@ export function createValidatedIngestionSink(
     throw new IntegrationError("VALIDATION_ERROR", "Idempotency cache size is invalid.", false);
   }
   const cache = new Map<string, CachedResult>();
+  const inFlight = new Map<string, InFlightResult>();
 
   return {
     async accept(input) {
@@ -147,6 +277,7 @@ export function createValidatedIngestionSink(
       }
       const parsed = parsedInput.data;
       const validRecords: IntegrationRecordEnvelope[] = [];
+      const payloadDigests: string[] = [];
       const rejectionReasons: string[] = [];
       const seenExternalRecords = new Set<string>();
 
@@ -180,6 +311,11 @@ export function createValidatedIngestionSink(
           rejectionReasons.push("SOURCE_MISMATCH");
           continue;
         }
+        const payloadDigest = hasBoundedPayload(candidate.data);
+        if (!payloadDigest) {
+          rejectionReasons.push("INVALID_PAYLOAD");
+          continue;
+        }
         const externalRecordKey = `${candidate.data.source.kind}:${candidate.data.source.id}:${candidate.data.externalRecordId}`;
         if (seenExternalRecords.has(externalRecordKey)) {
           rejectionReasons.push("DUPLICATE_EXTERNAL_RECORD");
@@ -187,9 +323,10 @@ export function createValidatedIngestionSink(
         }
         seenExternalRecords.add(externalRecordKey);
         validRecords.push(candidate.data);
+        payloadDigests.push(payloadDigest);
       }
 
-      const fingerprint = fingerprintRecords(validRecords);
+      const fingerprint = fingerprintRecords(validRecords, payloadDigests, rejectionReasons);
       const cacheKey = idempotencyCacheKey(parsed);
       const cached = cache.get(cacheKey);
       if (cached) {
@@ -200,41 +337,79 @@ export function createValidatedIngestionSink(
           rejectionReasons: ["IDEMPOTENCY_KEY_REUSED"],
         };
       }
-
-      let handoffResult = { accepted: 0, rejected: 0, rejectionReasons: [] as string[] };
-      if (validRecords.length > 0) {
-        const handoff = handoffResultSchema.safeParse(
-          await dependencies.handoff.ingest({
-            organizationId: parsed.organizationId,
-            ingestionRunId: parsed.ingestionRunId,
-            idempotencyKey: parsed.idempotencyKey,
-            records: validRecords,
-          }),
-        );
-        if (
-          !handoff.success ||
-          handoff.data.accepted + handoff.data.rejected > validRecords.length
-        ) {
-          throw new IntegrationError(
-            "VALIDATION_ERROR",
-            "Data Ingestion returned an invalid handoff result.",
-            false,
-          );
-        }
-        handoffResult = {
-          accepted: handoff.data.accepted,
-          rejected: handoff.data.rejected,
-          rejectionReasons: safeDownstreamReasons(handoff.data.rejectionReasons),
+      const pending = inFlight.get(cacheKey);
+      if (pending) {
+        if (pending.fingerprint === fingerprint) return pending.promise;
+        return {
+          accepted: 0,
+          rejected: validRecords.length + rejectionReasons.length,
+          rejectionReasons: ["IDEMPOTENCY_KEY_REUSED"],
         };
       }
 
-      const result = {
-        accepted: handoffResult.accepted,
-        rejected: rejectionReasons.length + handoffResult.rejected,
-        rejectionReasons: [...rejectionReasons, ...handoffResult.rejectionReasons],
-      };
-      cacheResult(cache, cacheKey, { fingerprint, result }, maxEntries);
-      return result;
+      let resolveResult!: (value: {
+        accepted: number;
+        rejected: number;
+        rejectionReasons: readonly string[];
+      }) => void;
+      let rejectResult!: (reason?: unknown) => void;
+      const resultPromise = new Promise<{
+        accepted: number;
+        rejected: number;
+        rejectionReasons: readonly string[];
+      }>((resolve, reject) => {
+        resolveResult = resolve;
+        rejectResult = reject;
+      });
+      inFlight.set(cacheKey, { fingerprint, promise: resultPromise });
+
+      void Promise.resolve()
+        .then(async () => {
+          let handoffResult = { accepted: 0, rejected: 0, rejectionReasons: [] as string[] };
+          if (validRecords.length > 0) {
+            const handoff = handoffResultSchema.safeParse(
+              await dependencies.handoff.ingest({
+                organizationId: parsed.organizationId,
+                ingestionRunId: parsed.ingestionRunId,
+                idempotencyKey: parsed.idempotencyKey,
+                records: validRecords,
+              }),
+            );
+            if (
+              !handoff.success ||
+              handoff.data.accepted + handoff.data.rejected !== validRecords.length
+            ) {
+              throw new IntegrationError(
+                "VALIDATION_ERROR",
+                "Data Ingestion returned an invalid handoff result.",
+                false,
+              );
+            }
+            handoffResult = {
+              accepted: handoff.data.accepted,
+              rejected: handoff.data.rejected,
+              rejectionReasons: safeDownstreamReasons(handoff.data.rejectionReasons),
+            };
+          }
+
+          return {
+            accepted: handoffResult.accepted,
+            rejected: rejectionReasons.length + handoffResult.rejected,
+            rejectionReasons: [...rejectionReasons, ...handoffResult.rejectionReasons],
+          };
+        })
+        .then(
+          (result) => {
+            cacheResult(cache, cacheKey, { fingerprint, result }, maxEntries);
+            resolveResult(result);
+          },
+          (error: unknown) => rejectResult(error),
+        )
+        .finally(() => {
+          if (inFlight.get(cacheKey)?.promise === resultPromise) inFlight.delete(cacheKey);
+        });
+
+      return resultPromise;
     },
   };
 }
