@@ -6,6 +6,7 @@ type LogContext = {
   opportunityId?: string;
   runId?: string;
   workerId?: string;
+  durationMs?: number;
 };
 
 function write(level: "info" | "warn" | "error", message: string, context: LogContext = {}) {
