@@ -437,6 +437,9 @@ describe("Integration repositories", () => {
         current = { ...current, status: "running", started_at: input.startedAt };
         return { outcome: "transitioned", run: current };
       },
+      async resumeRun() {
+        return { outcome: "conflict" };
+      },
       async completeRun(input) {
         if (current.status === "running") {
           current = {
@@ -505,6 +508,9 @@ describe("Integration repositories", () => {
     const { port } = createMemoryPort({ runs: [completed] });
     const transitions: IntegrationRunTransitionPort = {
       async markRunRunning() {
+        return { outcome: "conflict" };
+      },
+      async resumeRun() {
         return { outcome: "conflict" };
       },
       async completeRun(input) {

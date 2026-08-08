@@ -100,6 +100,7 @@ function workerRepository(): IntegrationWorkerRepository & {
     health,
     completions,
     markRunRunning: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
+    resumeRun: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
     completeRun: vi.fn(async (input) => {
       completions.push(input);
       return runRow({
@@ -257,6 +258,9 @@ describe("Integration Hub workers", () => {
     vi.mocked(worker.markRunRunning)
       .mockResolvedValueOnce(runRow({ status: "running", started_at: timestamp }))
       .mockRejectedValueOnce(new IntegrationError("CONFLICT", "terminal", false));
+    vi.mocked(worker.resumeRun).mockRejectedValueOnce(
+      new IntegrationError("CONFLICT", "terminal", false),
+    );
     const deps = dependencies({ worker });
     const payload = { ...connectionPayload, taskName: "integration.sync-connection" as const };
     await runSyncConnection(payload, deps);

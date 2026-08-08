@@ -199,6 +199,16 @@ export function createIntegrationWorkerRepository(
       }
       return result.run;
     },
+    async resumeRun(input) {
+      const result = await requiredRunTransitions(dependencies.transitions).resumeRun({
+        ...input,
+        expectedStatus: "running",
+      });
+      if (result.outcome === "conflict") {
+        throw new IntegrationError("CONFLICT", "The ingestion run cannot be resumed.", false);
+      }
+      return result.run;
+    },
 
     async completeRun(input) {
       const result = await requiredRunTransitions(dependencies.transitions).completeRun({
@@ -348,6 +358,17 @@ export function createSupabaseIntegrationRunTransitionPort(
         recordsAccepted: 0,
         recordsRejected: 0,
         startedAt: input.startedAt,
+      });
+    },
+    resumeRun(input) {
+      return transition({
+        organizationId: input.organizationId,
+        ingestionRunId: input.ingestionRunId,
+        expectedStatuses: [input.expectedStatus],
+        status: "running",
+        recordsReceived: 0,
+        recordsAccepted: 0,
+        recordsRejected: 0,
       });
     },
     completeRun(input) {

@@ -182,11 +182,20 @@ export async function beginOrCancel(
   dependencies: IntegrationWorkerDependencies,
 ): Promise<boolean> {
   try {
-    await dependencies.worker.markRunRunning({
-      organizationId: payload.organizationId,
-      ingestionRunId: payload.ingestionRunId,
-      startedAt: nowIso(dependencies),
-    });
+    try {
+      await dependencies.worker.markRunRunning({
+        organizationId: payload.organizationId,
+        ingestionRunId: payload.ingestionRunId,
+        startedAt: nowIso(dependencies),
+      });
+    } catch (error) {
+      const normalized = normalizedError(error);
+      if (normalized.code !== "CONFLICT") throw normalized;
+      await dependencies.worker.resumeRun({
+        organizationId: payload.organizationId,
+        ingestionRunId: payload.ingestionRunId,
+      });
+    }
     const cancelled = await dependencies.isCancelled?.({
       organizationId: payload.organizationId,
       ingestionRunId: payload.ingestionRunId,

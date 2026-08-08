@@ -64,7 +64,7 @@ export async function runSyncConnection(
     });
   } catch (error) {
     const normalized = normalizedError(error);
-    if (normalized.metadata.staleLease) return;
+    if (normalized.metadata.staleLease || normalized.metadata.handoffInProgress) return;
     await appendConnectionHealth(payload, dependencies, {
       checkType: "sync",
       outcome: "failed",

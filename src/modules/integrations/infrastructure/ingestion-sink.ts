@@ -126,6 +126,7 @@ export function createDurableIngestionSink(input: {
           "CONFLICT",
           "The ingestion handoff is already in progress.",
           true,
+          { handoffInProgress: true },
         );
       }
       const result = await input.sink.accept(request);

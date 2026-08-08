@@ -317,6 +317,13 @@ export type IntegrationRunTransitionPort = {
   }): Promise<
     { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
   >;
+  resumeRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    expectedStatus: "running";
+  }): Promise<
+    { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
+  >;
   completeRun(input: {
     organizationId: string;
     ingestionRunId: string;
@@ -358,6 +365,10 @@ export type IntegrationWorkerRepository = {
     organizationId: string;
     ingestionRunId: string;
     startedAt: string;
+  }): Promise<IntegrationIngestionRunRow>;
+  resumeRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
   }): Promise<IntegrationIngestionRunRow>;
   completeRun(input: {
     organizationId: string;
