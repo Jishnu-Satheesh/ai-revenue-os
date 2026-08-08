@@ -66,6 +66,8 @@ function snapshot(): IntegrationHubSnapshot {
         created_by: "user-1",
         created_at: "2026-08-01T09:00:00.000Z",
         updated_at: "2026-08-08T09:00:00.000Z",
+        capabilities: [],
+        mappings: [],
         latestHealth: null,
         health: {
           state: "healthy",
@@ -78,6 +80,7 @@ function snapshot(): IntegrationHubSnapshot {
       },
     ],
     dataSources: [],
+    branches: [],
     recentActivity: [],
     serverTime: "2026-08-08T09:05:00.000Z",
   };
@@ -178,7 +181,7 @@ describe("IntegrationHubClient", () => {
       renderClient({ fetchNeverResolves: true });
 
       expect(await screen.findByRole("status", { name: /refreshing/i })).toBeInTheDocument();
-      expect(screen.getByText("Fixture Bakery — Central")).toBeInTheDocument();
+      expect(screen.getAllByText("Fixture Bakery — Central").length).toBeGreaterThan(0);
       expect(screen.queryByTestId("integration-hub-skeleton")).not.toBeInTheDocument();
       await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
       expect(fetchSpy.mock.calls[0]?.[0]).toBe(`/api/organizations/${organizationId}/integrations`);

@@ -584,35 +584,37 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Consumes: snapshot/catalog/query mutations and TanStack Form
 - Produces: desktop list/detail and narrow Sheet UI for health, actions, capabilities, mappings, sync/test, and governed disconnect
 
-- [ ] **Step 1: Write failing UI-state tests.**
+- [x] **Step 1: Write failing UI-state tests.**
 
   Cover empty, pending, healthy, degraded, stale, revoked, queued/running, partial, recoverable failure, action-required summary, freshness/next sync, fixture copy, viewer-hidden actions, focus movement, disconnect cleanup warning, and status text/icons independent of color.
 
-- [ ] **Step 2: Run the component test and confirm missing UI.**
+- [x] **Step 2: Run the component test and confirm missing UI.**
 
   Run: `pnpm vitest run src/components/integrations/connections-tab.test.tsx`
 
-- [ ] **Step 3: Build the health summary and responsive master/detail layout.**
+- [x] **Step 3: Build the health summary and responsive master/detail layout.**
 
   Compose full shadcn Card, Alert, Badge/StatusBadge, Tabs, Button/Spinner, Empty, Skeleton, Separator, Sheet, and Tooltip APIs. Connections lead with operational health/action required, not provider promotion. On narrow screens the selected detail opens in a Sheet.
 
-- [ ] **Step 4: Build test/sync mutations without false optimism.**
+- [x] **Step 4: Build test/sync mutations without false optimism.**
 
   Buttons show pending locally; responses show queued/running; only refetched worker state may show success. Use Sonner for mutation acknowledgement/failure and targeted invalidation for connection, summary, and activity.
 
-- [ ] **Step 5: Build the TanStack mapping form.**
+- [x] **Step 5: Build the TanStack mapping form.**
 
   Use `FieldGroup`, `Field`, `Select`, `SelectGroup`, and Zod. Render unmapped/mapped/ignored resources, branch choices from the same organization, per-field errors, keyboard submission, and focus to the error summary after failure.
 
-- [ ] **Step 6: Build governed disconnect.**
+- [x] **Step 6: Build governed disconnect.**
 
   Use shadcn AlertDialog naming provider/account, affected grants, retained history, and required phrase. After acceptance show capabilities disabled immediately and cleanup queued; failure remains a warning with retry/escalation.
 
-- [ ] **Step 7: Run UI tests, typecheck, and lint; reserve the required 200%-zoom browser check for Task 14.**
+- [x] **Step 7: Run UI tests, typecheck, and lint; reserve the required 200%-zoom browser check for Task 14.**
 
   Run: `pnpm vitest run src/components/integrations/connections-tab.test.tsx && pnpm typecheck && pnpm lint`
 
-- [ ] **Step 8: Commit with `git commit -m "feat(integrations): build health-first connections UI"`.**
+- [x] **Step 8: Commit with `git commit -m "feat(integrations): build health-first connections UI"`.**
+
+  The snapshot read model now carries capability grants, account mappings, and branch options so the detail pane renders from one authenticated server read instead of an endpoint outside spec section 14. Sonner's `Toaster` was missing from the root layout and is now mounted there.
 
 ### Task 12: Build Catalog, Data sources, and Activity experiences
 

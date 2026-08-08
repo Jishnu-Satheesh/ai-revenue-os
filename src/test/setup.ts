@@ -3,6 +3,21 @@ import "@testing-library/jest-dom/vitest";
 if (typeof window !== "undefined") {
   window.scrollTo = () => undefined;
 
+  // jsdom has no media query engine. Components read the viewport through
+  // matchMedia, so the default answer is the desktop-first "no match".
+  if (typeof window.matchMedia === "undefined") {
+    window.matchMedia = ((query: string) => ({
+      media: query,
+      matches: false,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+
   // jsdom implements neither observer, and Radix primitives (Switch, Select,
   // Popover) measure their triggers on mount through both.
   if (typeof window.ResizeObserver === "undefined") {

@@ -159,8 +159,18 @@ export type FixtureConnectionUpsertInput = {
   correlationId: string;
 };
 
+/** Minimal branch identity the mapping form needs; no operational detail. */
+export type IntegrationBranchOption = {
+  id: string;
+  organization_id: string;
+  name: string;
+};
+
 export type IntegrationPersistencePort = {
   listConnections(input: { organizationId: string }): Promise<IntegrationConnectionRow[]>;
+  listCapabilityGrants(input: { organizationId: string }): Promise<IntegrationCapabilityGrantRow[]>;
+  listAccountMappings(input: { organizationId: string }): Promise<IntegrationAccountMappingRow[]>;
+  listBranches(input: { organizationId: string }): Promise<IntegrationBranchOption[]>;
   listDataSources(input: { organizationId: string }): Promise<IntegrationDataSourceRow[]>;
   listHealthChecks(input: { organizationId: string }): Promise<IntegrationHealthCheckRow[]>;
   listRuns(input: { organizationId: string }): Promise<IntegrationIngestionRunRow[]>;

@@ -15,6 +15,11 @@ export type ProviderDefinition = {
   staleAfterMinutes: number;
   supportsWebhooks: boolean;
   supportsWrites: boolean;
+  /**
+   * Exact operator-facing sentence for a provider whose access is not general,
+   * owned by the definition so the UI never invents its own wording.
+   */
+  operatorCopy?: string;
 };
 
 export type CredentialHandle = {

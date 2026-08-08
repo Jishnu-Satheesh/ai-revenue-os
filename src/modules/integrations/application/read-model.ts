@@ -1,6 +1,9 @@
 import { deriveConnectionHealth } from "@/domain/integrations/health";
 import type {
+  IntegrationAccountMappingRow,
   IntegrationAuditEvent,
+  IntegrationBranchOption,
+  IntegrationCapabilityGrantRow,
   IntegrationConnectionRow,
   IntegrationDataSourceRow,
   IntegrationHealthCheckRow,
@@ -10,6 +13,8 @@ import type {
 type SafeConnection = Omit<IntegrationConnectionRow, "credential_reference"> & {
   latestHealth: IntegrationHealthCheckRow | null;
   health: ReturnType<typeof deriveConnectionHealth>;
+  capabilities: IntegrationCapabilityGrantRow[];
+  mappings: IntegrationAccountMappingRow[];
 };
 
 export type IntegrationActivity =
@@ -47,6 +52,7 @@ export type IntegrationHubSnapshot = {
   };
   connections: SafeConnection[];
   dataSources: IntegrationDataSourceRow[];
+  branches: IntegrationBranchOption[];
   recentActivity: IntegrationActivity[];
   serverTime: string;
 };
@@ -55,6 +61,9 @@ export function buildIntegrationHubSnapshot(input: {
   organizationId: string;
   now: Date;
   connections: readonly IntegrationConnectionRow[];
+  capabilityGrants?: readonly IntegrationCapabilityGrantRow[];
+  accountMappings?: readonly IntegrationAccountMappingRow[];
+  branches?: readonly IntegrationBranchOption[];
   dataSources: readonly IntegrationDataSourceRow[];
   healthChecks: readonly IntegrationHealthCheckRow[];
   runs: readonly IntegrationIngestionRunRow[];
@@ -70,6 +79,8 @@ export function buildIntegrationHubSnapshot(input: {
     if (!latestHealthByConnection.has(check.connection_id))
       latestHealthByConnection.set(check.connection_id, check);
   }
+  const capabilityGrants = sameOrganization(input.capabilityGrants ?? []);
+  const accountMappings = sameOrganization(input.accountMappings ?? []);
   const connections = sameOrganization(input.connections)
     .map((connectionRow) => {
       const safeConnection = { ...connectionRow };
@@ -78,6 +89,14 @@ export function buildIntegrationHubSnapshot(input: {
       const latestHealth = latestHealthByConnection.get(connection.id) ?? null;
       return {
         ...connection,
+        capabilities: capabilityGrants
+          .filter((grant) => grant.connection_id === connection.id)
+          .sort((left, right) => left.capability_key.localeCompare(right.capability_key)),
+        mappings: accountMappings
+          .filter((mapping) => mapping.connection_id === connection.id)
+          .sort((left, right) =>
+            left.external_resource_label.localeCompare(right.external_resource_label),
+          ),
         latestHealth,
         health: deriveConnectionHealth({
           status: connection.status,
@@ -137,6 +156,9 @@ export function buildIntegrationHubSnapshot(input: {
     connections,
     dataSources: sameOrganization(input.dataSources).sort((left, right) =>
       right.updated_at.localeCompare(left.updated_at),
+    ),
+    branches: sameOrganization(input.branches ?? []).sort((left, right) =>
+      left.name.localeCompare(right.name),
     ),
     recentActivity,
     serverTime: input.now.toISOString(),

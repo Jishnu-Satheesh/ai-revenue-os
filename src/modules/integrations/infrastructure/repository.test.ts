@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import type {
+  IntegrationAccountMappingRow,
   IntegrationAuditEvent,
+  IntegrationBranchOption,
+  IntegrationCapabilityGrantRow,
   IntegrationConnectionRow,
   IntegrationDataSourceRow,
   IntegrationHealthCheckRow,
@@ -128,6 +131,9 @@ function audit(overrides: Partial<IntegrationAuditEvent> = {}): IntegrationAudit
 function createMemoryPort(
   seed: {
     connections?: IntegrationConnectionRow[];
+    grants?: IntegrationCapabilityGrantRow[];
+    mappings?: IntegrationAccountMappingRow[];
+    branches?: IntegrationBranchOption[];
     sources?: IntegrationDataSourceRow[];
     healthChecks?: IntegrationHealthCheckRow[];
     runs?: IntegrationIngestionRunRow[];
@@ -136,6 +142,9 @@ function createMemoryPort(
 ) {
   const calls: Array<{ method: string; organizationId: string }> = [];
   const connections = seed.connections ?? [connection()];
+  const grants = seed.grants ?? [];
+  const mappings = seed.mappings ?? [];
+  const branches = seed.branches ?? [];
   const sources = seed.sources ?? [source()];
   const healthChecks = seed.healthChecks ?? [health()];
   const runs = seed.runs ?? [run()];
@@ -144,6 +153,18 @@ function createMemoryPort(
     async listConnections(input) {
       calls.push({ method: "listConnections", ...input });
       return connections.filter((row) => row.organization_id === input.organizationId);
+    },
+    async listCapabilityGrants(input) {
+      calls.push({ method: "listCapabilityGrants", ...input });
+      return grants.filter((row) => row.organization_id === input.organizationId);
+    },
+    async listAccountMappings(input) {
+      calls.push({ method: "listAccountMappings", ...input });
+      return mappings.filter((row) => row.organization_id === input.organizationId);
+    },
+    async listBranches(input) {
+      calls.push({ method: "listBranches", ...input });
+      return branches.filter((row) => row.organization_id === input.organizationId);
     },
     async listDataSources(input) {
       calls.push({ method: "listDataSources", ...input });

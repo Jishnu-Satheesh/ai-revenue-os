@@ -3,13 +3,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Activity, BookOpen, Database, Eye, Plug } from "lucide-react";
 
+import { ConnectionsTab } from "@/components/integrations/connections-tab";
 import {
   integrationCatalogQueryOptions,
   integrationSnapshotQueryOptions,
 } from "@/components/integrations/query-options";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Empty,
   EmptyDescription,
@@ -111,29 +110,12 @@ export function IntegrationHubClient({
         </TabsList>
 
         <TabsContent value="connections" className="min-h-0">
-          {snapshot.connections.length === 0 ? (
-            <PlaceholderTab
-              icon={Plug}
-              title="No connections yet"
-              description={`${organizationName} has no provider connections. Open the Catalog to add one.`}
-            />
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {snapshot.connections.map((connection) => (
-                <li key={connection.id}>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>{connection.external_account_label}</CardTitle>
-                      <CardDescription>{connection.health.explanation}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <Badge variant="outline">{connection.health.state}</Badge>
-                    </CardContent>
-                  </Card>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ConnectionsTab
+            organizationId={organizationId}
+            snapshot={snapshot}
+            catalog={catalog}
+            role={role}
+          />
         </TabsContent>
         <TabsContent value="catalog" className="min-h-0">
           <PlaceholderTab
@@ -146,7 +128,7 @@ export function IntegrationHubClient({
           <PlaceholderTab
             icon={Database}
             title="Data sources"
-            description={`${snapshot.summary.dataSources} manual or imported source(s).`}
+            description={`${organizationName} has ${snapshot.summary.dataSources} manual or imported source(s).`}
           />
         </TabsContent>
         <TabsContent value="activity" className="min-h-0">

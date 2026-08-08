@@ -7,6 +7,7 @@ import { buildIntegrationHubSnapshot } from "@/modules/integrations/application/
 import type {
   IntegrationAuditEvent,
   IntegrationAccountMappingRow,
+  IntegrationBranchOption,
   IntegrationCapabilityGrantRow,
   IntegrationConnectionRow,
   IntegrationDataSourceRow,
@@ -62,8 +63,20 @@ export function createIntegrationRepository(
   const now = dependencies.now ?? (() => new Date());
   return {
     async getSnapshot({ organizationId }) {
-      const [connections, dataSources, healthChecks, runs, auditEvents] = await Promise.all([
+      const [
+        connections,
+        capabilityGrants,
+        accountMappings,
+        branches,
+        dataSources,
+        healthChecks,
+        runs,
+        auditEvents,
+      ] = await Promise.all([
         dependencies.persistence.listConnections({ organizationId }),
+        dependencies.persistence.listCapabilityGrants({ organizationId }),
+        dependencies.persistence.listAccountMappings({ organizationId }),
+        dependencies.persistence.listBranches({ organizationId }),
         dependencies.persistence.listDataSources({ organizationId }),
         dependencies.persistence.listHealthChecks({ organizationId }),
         dependencies.persistence.listRuns({ organizationId }),
@@ -73,6 +86,9 @@ export function createIntegrationRepository(
         organizationId,
         now: now(),
         connections,
+        capabilityGrants,
+        accountMappings,
+        branches,
         dataSources,
         healthChecks,
         runs,
@@ -549,6 +565,12 @@ const runColumns =
   "id,organization_id,connection_id,data_source_id,trigger_run_id,idempotency_key,status,started_at,completed_at,records_received,records_accepted,records_rejected,normalized_error_code,safe_error_summary,correlation_id,created_at,updated_at";
 const healthColumns =
   "id,organization_id,connection_id,ingestion_run_id,check_type,outcome,latency_ms,normalized_error_code,safe_detail,checked_at,correlation_id";
+const capabilityGrantColumns =
+  "id,organization_id,connection_id,capability_key,maturity,availability,reason_codes,derived_from_adapter_version,created_at,updated_at";
+const accountMappingColumns =
+  "id,organization_id,connection_id,external_resource_id,external_resource_label,branch_id,status,created_by,created_at,updated_at";
+/** The mapping form only needs branch identity, never operational branch data. */
+const branchOptionColumns = "id,organization_id,name";
 const auditColumns =
   "id,organization_id,event_name,actor_type,actor_id,entity_type,entity_id,correlation_id,payload,occurred_at";
 
@@ -599,9 +621,12 @@ export function createSupabaseIntegrationPersistencePort(
     from(
       table:
         | "integration_connections"
+        | "integration_capability_grants"
+        | "integration_account_mappings"
         | "integration_data_sources"
         | "integration_ingestion_runs"
         | "integration_health_checks"
+        | "branches"
         | "audit_events",
     ): {
       select(columns: string): ReturnType<SupabaseClient["from"]>;
@@ -614,9 +639,12 @@ export function createSupabaseIntegrationPersistencePort(
   const scoped = (
     table:
       | "integration_connections"
+      | "integration_capability_grants"
+      | "integration_account_mappings"
       | "integration_data_sources"
       | "integration_ingestion_runs"
       | "integration_health_checks"
+      | "branches"
       | "audit_events",
     columns: string,
     organizationId: string,
@@ -661,6 +689,37 @@ export function createSupabaseIntegrationPersistencePort(
           { ascending: false },
         ) as unknown as PromiseLike<{ data: IntegrationConnectionRow[] | null; error: unknown }>,
         "Integration connections could not be loaded.",
+      );
+    },
+    async listCapabilityGrants({ organizationId }) {
+      return rows<IntegrationCapabilityGrantRow>(
+        fluent(
+          scoped("integration_capability_grants", capabilityGrantColumns, organizationId),
+        ).order("capability_key", { ascending: true }) as unknown as PromiseLike<{
+          data: IntegrationCapabilityGrantRow[] | null;
+          error: unknown;
+        }>,
+        "Integration capabilities could not be loaded.",
+      );
+    },
+    async listAccountMappings({ organizationId }) {
+      return rows<IntegrationAccountMappingRow>(
+        fluent(scoped("integration_account_mappings", accountMappingColumns, organizationId)).order(
+          "external_resource_label",
+          { ascending: true },
+        ) as unknown as PromiseLike<{
+          data: IntegrationAccountMappingRow[] | null;
+          error: unknown;
+        }>,
+        "Integration mappings could not be loaded.",
+      );
+    },
+    async listBranches({ organizationId }) {
+      return rows<IntegrationBranchOption>(
+        fluent(scoped("branches", branchOptionColumns, organizationId)).order("name", {
+          ascending: true,
+        }) as unknown as PromiseLike<{ data: IntegrationBranchOption[] | null; error: unknown }>,
+        "Organization branches could not be loaded.",
       );
     },
     async listDataSources({ organizationId }) {
