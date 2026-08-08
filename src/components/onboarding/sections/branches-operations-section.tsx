@@ -6,39 +6,50 @@ export function BranchesOperationsSection({
   defaultValues = {},
   onSave,
 }: {
-  defaultValues?: Record<string, string>;
-  onSave: (payload: Record<string, string>, status: SectionSaveStatus) => Promise<void>;
+  defaultValues?: Record<string, unknown>;
+  onSave: (payload: Record<string, unknown>, status: SectionSaveStatus) => Promise<void>;
 }) {
   return (
     <SectionForm
+      sectionKey="branches_operations"
       title="Branches and operations"
       description="Capture where work happens and record branchless operations explicitly."
       defaultValues={defaultValues}
       onSave={onSave}
       fields={[
         {
+          name: "branchlessConfirmed",
+          label: "Branchless operation",
+          control: "switch",
+          switchLabel: "This business operates without physical branches",
+        },
+        {
           name: "branches",
           label: "Branches",
-          placeholder: "Jumeirah; Downtown",
+          control: "tags",
+          placeholder: "Jumeirah",
           required: true,
-          description: "Separate branches with semicolons.",
+          description: "Add one branch at a time. Leave empty only if the business is branchless.",
         },
         {
           name: "operatingHours",
           label: "Operating hours",
-          placeholder: "Mon–Sun, 10:00–23:00",
+          control: "weeklyHours",
           required: true,
+          description: "The recurring weekly pattern customers can rely on.",
         },
         {
           name: "serviceArea",
-          label: "Service area",
-          placeholder: "Dubai Marina and nearby areas",
+          label: "Service areas",
+          control: "tags",
+          placeholder: "Dubai Marina",
+          description: "Delivery zones, districts, or regions covered.",
         },
         {
           name: "capacity",
           label: "Capacity and constraints",
-          placeholder: "Seats, order capacity, staffing limits",
-          multiline: true,
+          control: "textarea",
+          placeholder: "Seats, order throughput, staffing limits",
         },
       ]}
     />

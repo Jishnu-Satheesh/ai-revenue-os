@@ -16,6 +16,8 @@ Guided onboarding is the organization-scoped control plane for resumable ten-sec
 
 Connection catalog, OAuth or credential handoff, webhook registration, file imports, provider health, and branch mappings.
 
+The approved V1 is a health-first organization workspace with a provider-agnostic adapter registry, a fixture-backed read-only Google Business Profile provider, manual/CSV data sources, capability grants, account mappings, ingestion-run metadata, and health checks. Webhooks and provider writes are deferred. Credentials sit behind a server-only `CredentialStore`; Trigger.dev executes durable work while Postgres remains authoritative. See `specs/003-integration-hub.md` and ADR 0010.
+
 ### Data Ingestion and Normalization
 
 Schemas, validation, deduplication, source quality, reconciliation, and normalized metrics.

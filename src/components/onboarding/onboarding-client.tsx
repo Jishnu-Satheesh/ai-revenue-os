@@ -20,6 +20,7 @@ import type { RailSection } from "@/components/onboarding/onboarding-section-rai
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { onboardingSectionRegistry } from "@/domain/onboarding/section-registry";
+import { normalizeIndustry } from "@/domain/organizations/industries";
 import type { ReadinessResult } from "@/domain/onboarding/readiness";
 import type { OnboardingSectionKey } from "@/domain/onboarding/types";
 import type {
@@ -41,50 +42,13 @@ type Props = {
 const queryKey = (organizationId: string) =>
   ["organizations", organizationId, "onboarding"] as const;
 
-function sectionPayload(state: OnboardingSectionStateRecord | undefined) {
-  if (!state) return {};
-  return Object.fromEntries(
-    Object.entries(state.payload).map(([key, value]) => [
-      key,
-      Array.isArray(value)
-        ? value.join("; ")
-        : typeof value === "boolean"
-          ? String(value)
-          : String(value ?? ""),
-    ]),
-  );
-}
-
-function splitList(value: string) {
-  return value
-    .split(/[;\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function isTrue(value: string) {
-  return ["true", "yes", "y", "confirmed", "connected", "available"].includes(
-    value.trim().toLowerCase(),
-  );
-}
-
-function normalizeSectionPayload(sectionKey: OnboardingSectionKey, values: Record<string, string>) {
-  const payload: Record<string, unknown> = { ...values };
-  if (sectionKey === "branches_operations") payload.branches = splitList(values.branches ?? "");
-  if (sectionKey === "products_services") payload.items = splitList(values.items ?? "");
-  if (sectionKey === "channels_presence") {
-    payload.channels = splitList(values.channels ?? "");
-    payload.conversionTracking = isTrue(values.conversionTracking ?? "");
-  }
-  if (sectionKey === "historical_performance") payload.metrics = splitList(values.metrics ?? "");
-  if (sectionKey === "customers_consent") {
-    payload.consentConfirmed = isTrue(values.consentConfirmed ?? "");
-    if (!payload.consentConfirmed && values.consentConfirmed?.trim().toLowerCase() === "unknown")
-      payload.unknown = true;
-  }
-  if (sectionKey === "governance") payload.goals = splitList(values.goals ?? "");
-  if (sectionKey === "integrations_uploads") payload.sources = splitList(values.sources ?? "");
-  return payload;
+/**
+ * Section editors read and write the stored payload directly. Each control
+ * owns its own shape, so nothing is flattened to a string on the way in or
+ * parsed back out of one on the way through.
+ */
+function sectionPayload(state: OnboardingSectionStateRecord | undefined): Record<string, unknown> {
+  return state?.payload ?? {};
 }
 
 function mapReadiness(snapshot: OnboardingSnapshot): ReadinessResult | null {
@@ -148,7 +112,7 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
     mutationFn: async (input: {
       sectionKey: OnboardingSectionKey;
       status: "in_progress" | "complete";
-      values: Record<string, string>;
+      payload: Record<string, unknown>;
     }) => {
       if (!snapshot.session) throw new Error("Onboarding session is not available.");
       const response = await fetch(
@@ -159,7 +123,7 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
           body: JSON.stringify({
             sessionId: snapshot.session.id,
             status: input.status,
-            payload: normalizeSectionPayload(input.sectionKey, input.values),
+            payload: input.payload,
             idempotencyKey: crypto.randomUUID(),
           }),
         },
@@ -252,8 +216,8 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
   const readiness = mapReadiness(snapshot);
 
   function save(sectionKey: OnboardingSectionKey) {
-    return (values: Record<string, string>, status: "in_progress" | "complete") =>
-      saveSection.mutateAsync({ sectionKey, status, values }).then(() => undefined);
+    return (payload: Record<string, unknown>, status: "in_progress" | "complete") =>
+      saveSection.mutateAsync({ sectionKey, status, payload }).then(() => undefined);
   }
 
   async function confirmReview() {
@@ -263,7 +227,7 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
     await saveSection.mutateAsync({
       sectionKey: "review_readiness",
       status: "complete",
-      values: { operatorConfirmed: "true" },
+      payload: { operatorConfirmed: true },
     });
     return true;
   }
@@ -273,7 +237,7 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
       <BusinessIdentitySection
         defaultValues={{
           name: organization.name,
-          industry: organization.industry,
+          industry: normalizeIndustry(organization.industry) ?? "",
           ...sectionPayload(sectionStates.get("business_identity")),
         }}
         onSave={save("business_identity")}
@@ -322,12 +286,11 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
       />
     ),
     integrations_uploads: (
-      <div className="flex flex-col gap-6">
-        <IntegrationsUploadsSection
-          defaultValues={sectionPayload(sectionStates.get("integrations_uploads"))}
-          onSave={save("integrations_uploads")}
-          onUpload={(file) => uploadSource.mutateAsync(file).then(() => undefined)}
-        />
+      <IntegrationsUploadsSection
+        defaultValues={sectionPayload(sectionStates.get("integrations_uploads"))}
+        onSave={save("integrations_uploads")}
+        onUpload={(file) => uploadSource.mutateAsync(file).then(() => undefined)}
+      >
         <UploadStatusList uploads={snapshot.uploads} />
         <CandidateReview
           candidates={snapshot.candidates.filter((candidate) => candidate.status === "pending")}
@@ -335,7 +298,7 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
             reviewCandidate.mutateAsync({ candidateId, ...input }).then(() => undefined)
           }
         />
-      </div>
+      </IntegrationsUploadsSection>
     ),
     review_readiness: (
       <ReviewReadinessSection readiness={readiness} onConfirm={() => confirmReview()} />
@@ -354,9 +317,9 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="relative flex min-h-0 w-full flex-1 flex-col">
       {onboardingQuery.isFetching ? (
-        <Spinner className="self-end" aria-label="Refreshing onboarding" />
+        <Spinner className="absolute -top-7 right-0 z-10" aria-label="Refreshing onboarding" />
       ) : null}
       <OnboardingWorkspace
         sections={sections}

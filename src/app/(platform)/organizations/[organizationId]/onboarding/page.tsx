@@ -1,10 +1,10 @@
-import { ArrowLeft, Compass, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Compass, BadgeInfo } from "lucide-react";
 import Link from "next/link";
 
 import { OnboardingClient } from "@/components/onboarding/onboarding-client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { industryLabels, normalizeIndustry } from "@/domain/organizations/industries";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { createEventPublisher } from "@/domain/events/publisher";
@@ -25,10 +25,14 @@ export default async function OnboardingPage({ params }: PageProps) {
     userId: context.user.id,
   });
   const snapshot = await service.getSnapshot(context.organizationId);
+  const industrySlug = normalizeIndustry(organization.industry);
+  const industryLabel = industrySlug ? industryLabels[industrySlug] : organization.industry;
 
   return (
-    <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-8">
-      <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+    // The page fills the shell's remaining height: the heading block is pinned
+    // and the workspace below it owns all vertical scrolling.
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-6">
+      <div className="flex shrink-0 flex-col justify-between gap-5 lg:flex-row lg:items-end">
         <div>
           <Button asChild variant="link" className="h-auto p-0 text-muted-foreground">
             <Link href={`/organizations/${context.organizationId}/digital-twin`}>
@@ -36,39 +40,27 @@ export default async function OnboardingPage({ params }: PageProps) {
               Digital Twin overview
             </Link>
           </Button>
-          <div className="mt-5 flex items-start gap-3">
+          <div className="mt-4 flex items-start gap-3">
             <span className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
               <Compass />
             </span>
             <div>
               <h2 className="text-3xl font-semibold tracking-tight">Guided onboarding</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {organization.name} · {organization.industry} · organization-scoped workspace
+                {organization.name} · {industryLabel} · organization-scoped workspace
               </p>
             </div>
           </div>
         </div>
-        <Card className="max-w-md border-accent/20 bg-accent/5">
-          <CardHeader className="flex-row items-start gap-3 space-y-0 pb-3">
-            <ShieldCheck className="mt-0.5 text-accent" />
-            <div>
-              <CardTitle className="text-base">Trust before automation</CardTitle>
-              <CardDescription className="mt-1">
-                Unknowns stay visible, evidence remains attached, and sensitive actions stay
-                approval-gated.
-              </CardDescription>
-            </div>
-          </CardHeader>
-        </Card>
+        <Alert className="max-w-sm bg-primary/5">
+          <BadgeInfo className="text-accent" />
+          <AlertTitle>Complete what is known, request what is missing</AlertTitle>
+          <AlertDescription>
+            Save a draft at any point.
+          </AlertDescription>
+        </Alert>
       </div>
-      <Alert>
-        <Compass />
-        <AlertTitle>Complete what is known, request what is missing</AlertTitle>
-        <AlertDescription>
-          Save a draft at any point. A section becomes complete only when its deterministic
-          requirements are met.
-        </AlertDescription>
-      </Alert>
+
       <OnboardingClient
         organizationId={context.organizationId}
         organization={{ name: organization.name, industry: organization.industry }}

@@ -1,29 +1,22 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { AnimatedPhaseStepper } from "@/components/onboarding/animated-phase-stepper";
 import {
   OnboardingSectionRail,
   type RailSection,
 } from "@/components/onboarding/onboarding-section-rail";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { OnboardingSectionKey } from "@/domain/onboarding/types";
 
 const emptyContents: Partial<Record<OnboardingSectionKey, React.ReactNode>> = {};
 
 type OnboardingWorkspaceControls = {
-  completeCurrentSection: () => void;
+  goToNextSection: () => void;
 };
 
 const OnboardingWorkspaceContext = createContext<OnboardingWorkspaceControls | null>(null);
@@ -47,76 +40,56 @@ export function OnboardingWorkspace({
   const [currentSectionKey, setCurrentSectionKey] = useState<OnboardingSectionKey>(
     initialSectionKey ?? firstSection,
   );
-  const [visitedSectionKeys, setVisitedSectionKeys] = useState<OnboardingSectionKey[]>(() => {
-    const persisted = sections
-      .filter((section) => section.status !== "not_started")
-      .map((section) => section.key);
-    return persisted.includes(initialSectionKey ?? firstSection)
-      ? persisted
-      : [initialSectionKey ?? firstSection, ...persisted];
-  });
-  const [contentHeight, setContentHeight] = useState<number | "auto">("auto");
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
   const reduceMotion = useReducedMotion();
   const activeSection = useMemo(
     () => sections.find((section) => section.key === currentSectionKey) ?? sections[0],
     [currentSectionKey, sections],
   );
 
-  useLayoutEffect(() => {
-    if (!contentRef.current || reduceMotion) {
-      setContentHeight("auto");
-      return;
-    }
-    setContentHeight(contentRef.current.offsetHeight);
-  }, [currentSectionKey, reduceMotion]);
-
   useEffect(() => {
     headingRef.current?.focus();
   }, [currentSectionKey]);
 
   function selectSection(sectionKey: OnboardingSectionKey) {
-    if (!visitedSectionKeys.includes(sectionKey)) return;
     setCurrentSectionKey(sectionKey);
     onSectionChange?.(sectionKey);
   }
 
-  function completeCurrentSection() {
+  function goToNextSection() {
     const currentIndex = sections.findIndex((section) => section.key === currentSectionKey);
     const nextSection = sections[currentIndex + 1];
     if (!nextSection) return;
-    setVisitedSectionKeys((current) =>
-      current.includes(nextSection.key) ? current : [...current, nextSection.key],
-    );
-    setCurrentSectionKey(nextSection.key);
-    onSectionChange?.(nextSection.key);
+    selectSection(nextSection.key);
   }
 
   if (!activeSection) return null;
 
   return (
-    <OnboardingWorkspaceContext.Provider value={{ completeCurrentSection }}>
-      <div className="grid gap-6 lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]">
-        <Card className="h-fit lg:sticky lg:top-6">
-          <CardHeader>
+    <OnboardingWorkspaceContext.Provider value={{ goToNextSection }}>
+      {/* Both panes are height-bounded by the grid row, so each one scrolls its
+          own body while its header, and the editor's actions, stay in place. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-6 lg:grid lg:grid-cols-[minmax(17rem,23rem)_minmax(0,1fr)]">
+        <Card className="flex max-h-80 flex-col gap-0 py-0 lg:max-h-none lg:min-h-0">
+          <CardHeader className="shrink-0 border-b py-4">
             <CardTitle>Onboarding map</CardTitle>
             <CardDescription>
               Complete the trusted context needed for safe revenue work.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <OnboardingSectionRail
-              sections={sections}
-              currentSectionKey={currentSectionKey}
-              visitedSectionKeys={visitedSectionKeys}
-              onSelect={selectSection}
-            />
-          </CardContent>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="px-2 py-3">
+              <OnboardingSectionRail
+                sections={sections}
+                currentSectionKey={currentSectionKey}
+                onSelect={selectSection}
+              />
+            </div>
+          </ScrollArea>
         </Card>
 
-        <Card className="min-w-0 overflow-hidden">
-          <CardHeader className="gap-5">
+        <Card className="flex min-h-0 min-w-0 flex-col gap-0 py-0 max-lg:min-h-[36rem]">
+          <CardHeader className="shrink-0 gap-4 border-b py-4">
             <AnimatedPhaseStepper sections={sections} currentSectionKey={currentSectionKey} />
             <Separator />
             <div className="flex flex-col gap-1">
@@ -133,40 +106,29 @@ export function OnboardingWorkspace({
               <p className="text-sm text-muted-foreground">{activeSection.description}</p>
             </div>
           </CardHeader>
-          <motion.div
-            animate={{ height: reduceMotion ? "auto" : contentHeight }}
-            transition={
-              reduceMotion ? { duration: 0 } : { type: "spring", damping: 25, stiffness: 200 }
-            }
-            className="overflow-hidden"
-          >
-            <AnimatePresence initial={false} mode="wait" custom={1}>
-              <motion.div
-                key={currentSectionKey}
-                ref={contentRef}
-                custom={1}
-                initial={{ x: reduceMotion ? 0 : 20, opacity: reduceMotion ? 1 : 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: reduceMotion ? 0 : -20, opacity: reduceMotion ? 1 : 0 }}
-                transition={
-                  reduceMotion
-                    ? { duration: 0 }
-                    : {
-                        x: { type: "spring", stiffness: 300, damping: 30 },
-                        opacity: { duration: 0.2 },
-                      }
-                }
-              >
-                <CardContent>
-                  {contents[currentSectionKey] ?? (
-                    <p className="text-sm text-muted-foreground">
-                      This section is ready for input.
-                    </p>
-                  )}
-                </CardContent>
-              </motion.div>
-            </AnimatePresence>
-          </motion.div>
+          <AnimatePresence initial={false} mode="wait">
+            <motion.div
+              key={currentSectionKey}
+              className="flex min-h-0 flex-1 flex-col"
+              initial={{ x: reduceMotion ? 0 : 20, opacity: reduceMotion ? 1 : 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: reduceMotion ? 0 : -20, opacity: reduceMotion ? 1 : 0 }}
+              transition={
+                reduceMotion
+                  ? { duration: 0 }
+                  : {
+                      x: { type: "spring", stiffness: 300, damping: 30 },
+                      opacity: { duration: 0.2 },
+                    }
+              }
+            >
+              {contents[currentSectionKey] ?? (
+                <p className="px-(--card-spacing) py-5 text-sm text-muted-foreground">
+                  This section is ready for input.
+                </p>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </Card>
       </div>
     </OnboardingWorkspaceContext.Provider>

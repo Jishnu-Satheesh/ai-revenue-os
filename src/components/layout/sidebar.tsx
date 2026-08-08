@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Activity,
   BarChart3,
@@ -7,6 +10,7 @@ import {
   LayoutDashboard,
   Settings2,
   Sparkles,
+  Waypoints,
 } from "lucide-react";
 
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
@@ -21,11 +25,13 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
+  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 
 const navigation = [
-  { label: "Overview", href: "/overview", icon: LayoutDashboard, active: true },
+  { label: "Overview", href: "/overview", icon: LayoutDashboard },
   { label: "Opportunities", href: "/opportunities", icon: Sparkles },
   { label: "Agents", href: "/agents", icon: Bot, upcoming: true },
   { label: "Campaigns", href: "/campaigns", icon: BarChart3, upcoming: true },
@@ -34,15 +40,28 @@ const navigation = [
 ];
 
 export function Sidebar() {
+  const pathname = usePathname();
+
   return (
-    <SidebarPrimitive collapsible="none" className="hidden border-r md:flex">
-      <SidebarHeader className="gap-4 p-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Revenue Intelligence
-          </p>
-          <h1 className="mt-1 text-lg font-semibold tracking-tight">AI Revenue OS</h1>
-        </div>
+    <SidebarPrimitive variant="floating" collapsible="icon">
+      <SidebarHeader className="gap-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" asChild tooltip="AI Revenue OS">
+              <Link href="/overview">
+                <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
+                  <Waypoints />
+                </span>
+                <span className="grid min-w-0 flex-1 text-left leading-tight">
+                  <span className="truncate text-[10px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+                    Revenue Intelligence
+                  </span>
+                  <span className="truncate text-sm font-semibold">AI Revenue OS</span>
+                </span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <OrganizationSwitcher />
       </SidebarHeader>
       <SidebarContent>
@@ -50,14 +69,21 @@ export function Sidebar() {
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigation.map(({ label, href, icon: Icon, active, upcoming }) => (
+              {navigation.map(({ label, href, icon: Icon, upcoming }) => (
                 <SidebarMenuItem key={label}>
-                  <SidebarMenuButton asChild isActive={active} tooltip={label}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname === href || pathname.startsWith(`${href}/`)}
+                    tooltip={label}
+                  >
                     <Link href={href}>
                       <Icon />
                       <span>{label}</span>
                       {upcoming && (
-                        <Badge variant="secondary" className="ml-auto text-[10px] uppercase">
+                        <Badge
+                          variant="secondary"
+                          className="ml-auto text-[10px] uppercase group-data-[collapsible=icon]:hidden"
+                        >
                           Soon
                         </Badge>
                       )}
@@ -70,26 +96,34 @@ export function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
+        <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Settings">
+            <SidebarMenuButton
+              asChild
+              isActive={pathname.startsWith("/settings")}
+              tooltip="Settings"
+            >
               <Link href="/settings">
                 <Settings2 />
                 <span>Settings</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" tooltip="Agency operator" className="cursor-default">
+              <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
+                AR
+              </span>
+              <span className="grid min-w-0 flex-1 text-left leading-tight">
+                <span className="truncate text-sm font-medium">Agency operator</span>
+                <span className="truncate text-xs text-muted-foreground">Workspace admin</span>
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
-        <div className="flex items-center gap-3 px-2 py-2">
-          <span className="flex size-8 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
-            AR
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">Agency operator</p>
-            <p className="truncate text-xs text-muted-foreground">Workspace admin</p>
-          </div>
-        </div>
       </SidebarFooter>
+      <SidebarRail />
     </SidebarPrimitive>
   );
 }

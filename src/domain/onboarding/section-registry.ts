@@ -1,4 +1,15 @@
+import {
+  approvalModeSchema,
+  baselineStatusSchema,
+  consentStatusSchema,
+  conversionTrackingSchema,
+  hasEntries,
+  hasMeasurementPeriod,
+  hasOpeningHours,
+} from "@/domain/onboarding/vocabularies";
 import type { OnboardingPhase, OnboardingSectionKey } from "@/domain/onboarding/types";
+import { industrySchema } from "@/domain/organizations/industries";
+import { findCurrency } from "@/domain/reference/currencies";
 
 export type OnboardingSectionDefinition = {
   key: OnboardingSectionKey;
@@ -74,41 +85,176 @@ export function getOnboardingSectionDefinition(key: OnboardingSectionKey) {
   return onboardingSectionRegistry.find((section) => section.key === key);
 }
 
-function hasCollection(payload: Record<string, unknown>, key: string) {
+/**
+ * A single deterministic condition a section must meet before it can be marked
+ * complete. `field` points at the control that satisfies it so the editor can
+ * tell the operator exactly what is still missing instead of failing the save.
+ */
+export type SectionRequirement = {
+  field: string;
+  label: string;
+  satisfied: boolean;
+};
+
+function text(payload: Record<string, unknown>, key: string, minimum = 1) {
   const value = payload[key];
-  return Array.isArray(value) && value.length > 0;
+  return typeof value === "string" && value.trim().length >= minimum;
+}
+
+function list(payload: Record<string, unknown>, key: string) {
+  return hasEntries(payload, key);
+}
+
+function member(
+  payload: Record<string, unknown>,
+  key: string,
+  schema: { safeParse: (value: unknown) => { success: boolean } },
+) {
+  return schema.safeParse(payload[key]).success;
+}
+
+function wholeNumber(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function currency(payload: Record<string, unknown>, key: string) {
+  return findCurrency(typeof payload[key] === "string" ? (payload[key] as string) : null) !== null;
+}
+
+function requirementsFor(
+  key: OnboardingSectionKey,
+  payload: Record<string, unknown>,
+): SectionRequirement[] {
+  switch (key) {
+    case "business_identity":
+      return [
+        { field: "name", label: "Organization name", satisfied: text(payload, "name", 2) },
+        {
+          field: "industry",
+          label: "Industry",
+          satisfied: member(payload, "industry", industrySchema),
+        },
+      ];
+    case "branches_operations":
+      return [
+        {
+          field: "branches",
+          label: "Branches, or a branchless confirmation",
+          satisfied: payload.branchlessConfirmed === true || list(payload, "branches"),
+        },
+        {
+          field: "operatingHours",
+          label: "Operating hours for at least one day",
+          satisfied: hasOpeningHours(payload.operatingHours),
+        },
+      ];
+    case "products_services":
+      return [
+        {
+          field: "items",
+          label: "Products or services",
+          satisfied: list(payload, "items") || list(payload, "services"),
+        },
+      ];
+    case "channels_presence":
+      return [
+        {
+          field: "channels",
+          label: "Owned and marketplace channels",
+          satisfied: list(payload, "channels"),
+        },
+        {
+          field: "conversionTrackingStatus",
+          label: "Conversion tracking status",
+          satisfied: member(payload, "conversionTrackingStatus", conversionTrackingSchema),
+        },
+      ];
+    case "historical_performance":
+      return [
+        { field: "metrics", label: "Historical metrics", satisfied: list(payload, "metrics") },
+        {
+          field: "period",
+          label: "Measurement period",
+          satisfied: hasMeasurementPeriod(payload.period),
+        },
+        { field: "currency", label: "Currency", satisfied: currency(payload, "currency") },
+      ];
+    case "customers_consent":
+      return [
+        { field: "segments", label: "Customer segments", satisfied: list(payload, "segments") },
+        {
+          field: "consentStatus",
+          label: "Consent confirmation source",
+          satisfied: member(payload, "consentStatus", consentStatusSchema),
+        },
+      ];
+    case "brand_assets":
+      return [
+        { field: "brandVoice", label: "Brand voice", satisfied: list(payload, "brandVoice") },
+        { field: "languages", label: "Languages", satisfied: list(payload, "languages") },
+      ];
+    case "governance":
+      return [
+        { field: "goals", label: "Measurable goals", satisfied: list(payload, "goals") },
+        {
+          field: "baseline",
+          label: "Baseline status",
+          satisfied: member(payload, "baseline", baselineStatusSchema),
+        },
+        {
+          field: "budgetMinor",
+          label: "Monthly budget",
+          satisfied: wholeNumber(payload, "budgetMinor"),
+        },
+        {
+          field: "budgetCurrency",
+          label: "Budget currency",
+          satisfied: currency(payload, "budgetCurrency"),
+        },
+        {
+          field: "approvalMode",
+          label: "Approval mode",
+          satisfied: member(payload, "approvalMode", approvalModeSchema),
+        },
+      ];
+    case "integrations_uploads":
+      return [
+        {
+          field: "sources",
+          label: "Available integrations and files",
+          satisfied: list(payload, "sources"),
+        },
+      ];
+    case "review_readiness":
+      return [
+        {
+          field: "operatorConfirmed",
+          label: "Operator confirmation",
+          satisfied: payload.operatorConfirmed === true,
+        },
+      ];
+  }
+}
+
+/**
+ * Reports every completion condition for a section and whether the payload
+ * currently satisfies it. The editor uses the unsatisfied entries to explain a
+ * draft save; the service uses `canCompleteSection` to enforce the same rule.
+ */
+export function evaluateSectionCompletion(
+  key: OnboardingSectionKey,
+  payload: Record<string, unknown>,
+): SectionRequirement[] {
+  if (payload.unknown === true && key !== "business_identity" && key !== "review_readiness") {
+    return requirementsFor(key, payload).map((requirement) => ({
+      ...requirement,
+      satisfied: true,
+    }));
+  }
+  return requirementsFor(key, payload);
 }
 
 export function canCompleteSection(key: OnboardingSectionKey, payload: Record<string, unknown>) {
-  if (payload.unknown === true && key !== "business_identity" && key !== "review_readiness") {
-    return true;
-  }
-
-  switch (key) {
-    case "business_identity":
-      return (
-        typeof payload.name === "string" &&
-        payload.name.trim().length >= 2 &&
-        typeof payload.industry === "string" &&
-        payload.industry.trim().length >= 2
-      );
-    case "branches_operations":
-      return payload.branchlessConfirmed === true || hasCollection(payload, "branches");
-    case "products_services":
-      return hasCollection(payload, "items") || hasCollection(payload, "services");
-    case "channels_presence":
-      return hasCollection(payload, "channels");
-    case "historical_performance":
-      return hasCollection(payload, "metrics");
-    case "customers_consent":
-      return payload.consentConfirmed === true || payload.unknown === true;
-    case "brand_assets":
-      return typeof payload.brandVoice === "string" && payload.brandVoice.trim().length > 0;
-    case "governance":
-      return hasCollection(payload, "goals") && typeof payload.approvalMode === "string";
-    case "integrations_uploads":
-      return hasCollection(payload, "sources");
-    case "review_readiness":
-      return payload.operatorConfirmed === true;
-  }
+  return evaluateSectionCompletion(key, payload).every((requirement) => requirement.satisfied);
 }

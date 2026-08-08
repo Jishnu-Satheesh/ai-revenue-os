@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   createIntegrationService: vi.fn(),
   service: {
     createDataSource: vi.fn(),
+    createDataSourceWithIdempotency: vi.fn(),
     updateDataSource: vi.fn(),
     finalizeDataSourceUpload: vi.fn(),
     requestImport: vi.fn(),
@@ -63,6 +64,16 @@ beforeEach(() => {
     source_type: "manual",
     status: "ready",
   });
+  mocks.service.createDataSourceWithIdempotency.mockResolvedValue({
+    source: {
+      id: dataSourceId,
+      organization_id: organizationId,
+      source_type: "manual",
+      status: "ready",
+    },
+    created: true,
+    deduplicated: false,
+  });
   mocks.service.updateDataSource.mockResolvedValue({ id: dataSourceId, status: "archived" });
   mocks.service.finalizeDataSourceUpload.mockResolvedValue({
     id: dataSourceId,
@@ -79,13 +90,17 @@ describe("data-source routes", () => {
       new Request("http://localhost", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceType: "manual", name: "Daily revenue" }),
+        body: JSON.stringify({
+          sourceType: "manual",
+          name: "Daily revenue",
+          idempotencyKey: "manual-source-key-1",
+        }),
       }),
       params(),
     );
     expect(response.status).toBe(201);
-    expect(mocks.service.createDataSource).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceType: "manual" }),
+    expect(mocks.service.createDataSourceWithIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceType: "manual", idempotencyKey: "manual-source-key-1" }),
     );
   });
 
@@ -93,6 +108,7 @@ describe("data-source routes", () => {
     const form = new FormData();
     form.set("sourceType", "csv_import");
     form.set("name", "August CSV");
+    form.set("idempotencyKey", "csv-source-key-0001");
     form.set("columnMapping", JSON.stringify({ revenue: "revenue" }));
     form.set("file", new File(["date,revenue\n2026-08-01,42"], "august.csv", { type: "text/csv" }));
     const upload = vi.fn().mockResolvedValue({ data: { path: "ok" }, error: null });
@@ -103,10 +119,10 @@ describe("data-source routes", () => {
       membership: { role: "operator" },
       supabase: { from: vi.fn(), storage: { from: vi.fn(() => ({ upload, remove })) } },
     });
-    mocks.service.createDataSource.mockResolvedValueOnce({
-      id: dataSourceId,
-      source_type: "csv_import",
-      status: "pending",
+    mocks.service.createDataSourceWithIdempotency.mockResolvedValueOnce({
+      source: { id: dataSourceId, source_type: "csv_import", status: "pending" },
+      created: true,
+      deduplicated: false,
     });
     mocks.service.updateDataSource.mockResolvedValueOnce({
       id: dataSourceId,
@@ -147,7 +163,7 @@ describe("data-source routes", () => {
       new Request("http://localhost", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ status: "archived" }),
+        body: JSON.stringify({ status: "archived", idempotencyKey: "archive-source-key-1" }),
       }),
       sourceParams(),
     );

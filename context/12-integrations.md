@@ -4,6 +4,8 @@
 
 Integrations are capabilities with varying levels of access. The platform must work with API connections, provider exports, spreadsheets, email reports, and structured manual entry.
 
+The approved V1 vertical slice is fixture-first and health-first. Google Business Profile is the reference read-only provider, backed by a deterministic fixture until API approval. Manual and CSV sources are modeled as data sources rather than provider connections. Provider writes and webhooks are not part of V1.
+
 ## Connection maturity levels
 
 1. **Manual** - user enters or uploads data.
@@ -43,6 +45,10 @@ Each adapter defines:
 - Read/write risk classification.
 - Provider-specific error normalization.
 - Health-check behavior.
+
+Provider definitions and adapters are versioned in TypeScript. Connection state, derived capability grants, account mappings, data sources, ingestion runs, and health checks are tenant-scoped in Postgres. Provider payloads cross Zod validation before the Data Ingestion handoff.
+
+Credentials are accessed only through a server-only `CredentialStore`. The target implementation is Supabase Vault, while application tables contain only opaque credential references and safe metadata. Real OAuth remains disabled until provider approval and a credential security review pass. See ADR 0010 and `specs/003-integration-hub.md`.
 
 ## Delivery marketplaces
 

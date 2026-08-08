@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 
 import type {
   EventPublisher,
@@ -120,6 +121,9 @@ const createDataSourceSchema = z
       });
     }
   });
+const dataSourceIdempotencySchema = z.object({
+  idempotencyKey: idempotencyKeySchema.optional(),
+});
 const updateDataSourceSchema = z.object({
   name: z.string().trim().min(2).max(160).optional(),
   branchId: idSchema.nullable().optional(),
@@ -155,6 +159,14 @@ function dispatchIdempotencyKey(
   runId: string,
 ): string {
   return `${operation}:${organizationId}:${sourceId}:${runId}`;
+}
+
+function fingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}
+
+function failureStateKey(idempotencyKey: string, suffix: string): string {
+  return `${idempotencyKey.slice(0, 160)}:${createHash("sha256").update(suffix).digest("hex").slice(0, 16)}`;
 }
 
 function capabilityRows(input: {
@@ -367,8 +379,9 @@ export function createIntegrationService({
     return committed.mappings;
   }
 
-  async function createDataSource(
-    input: AuthenticatedIntegrationContext & z.input<typeof createDataSourceSchema>,
+  async function createDataSourceWithIdempotency(
+    input: AuthenticatedIntegrationContext &
+      z.input<typeof createDataSourceSchema> & { operationFingerprint?: string },
   ) {
     authorize(input, "integration.import");
     const parsed = createDataSourceSchema.parse(input);
@@ -388,14 +401,44 @@ export function createIntegrationService({
       last_successful_import_at: null,
       created_by: input.actorId,
     };
-    const source = await repository.createDataSource(record);
+    const operation = dataSourceIdempotencySchema.parse(input);
+    if (!operation.idempotencyKey || !repository.createDataSourceWithIdempotency) {
+      throw new IntegrationError(
+        "CONFLICT",
+        "Data source mutations require an idempotency-capable database operation.",
+        false,
+      );
+    }
+    const committed = await repository.createDataSourceWithIdempotency({
+      source: record,
+      dataSourceId: crypto.randomUUID(),
+      idempotencyKey: operation.idempotencyKey,
+      requestFingerprint: fingerprint(
+        input.operationFingerprint ?? {
+          operation: "data_source.create",
+          sourceType: record.source_type,
+          name: record.name,
+          branchId: record.branch_id,
+          columnMapping: record.column_mapping,
+        },
+      ),
+      correlationId: input.correlationId,
+    });
+    const source = committed.source;
+    if (committed.deduplicated) return committed;
     await publish(input, "data_source.created", {
       dataSourceId: source.id,
       sourceType: source.source_type,
       status: source.status,
       ...(source.branch_id ? { branchId: source.branch_id } : {}),
     });
-    return source;
+    return committed;
+  }
+
+  async function createDataSource(
+    input: AuthenticatedIntegrationContext & z.input<typeof createDataSourceSchema>,
+  ) {
+    return (await createDataSourceWithIdempotency(input)).source;
   }
 
   async function updateDataSource(
@@ -407,16 +450,32 @@ export function createIntegrationService({
     const source = await requireDataSource(input, input.dataSourceId);
     const parsed = updateDataSourceSchema.parse(input);
     await ensureBranchScope(input.organizationId, parsed.branchId);
-    return repository.updateDataSource({
+    const operation = dataSourceIdempotencySchema.parse(input);
+    if (!operation.idempotencyKey || !repository.updateDataSourceWithIdempotency) {
+      throw new IntegrationError(
+        "CONFLICT",
+        "Data source mutations require an idempotency-capable database operation.",
+        false,
+      );
+    }
+    const committed = await repository.updateDataSourceWithIdempotency({
       organizationId: input.organizationId,
       dataSourceId: source.id,
+      actorId: input.actorId,
+      idempotencyKey: operation.idempotencyKey,
+      requestFingerprint: fingerprint({
+        operation: "data_source.update",
+        dataSourceId: source.id,
+        ...(parsed.name !== undefined ? { name: parsed.name } : {}),
+        ...(parsed.status !== undefined ? { status: parsed.status } : {}),
+      }),
       patch: {
         ...(parsed.name !== undefined ? { name: parsed.name } : {}),
-        ...(parsed.branchId !== undefined ? { branch_id: parsed.branchId } : {}),
         ...(parsed.status !== undefined ? { status: parsed.status } : {}),
-        ...(parsed.columnMapping !== undefined ? { column_mapping: parsed.columnMapping } : {}),
       },
+      correlationId: input.correlationId,
     });
+    return committed.source;
   }
 
   async function finalizeDataSourceUpload(
@@ -658,6 +717,7 @@ export function createIntegrationService({
     requestSync,
     replaceMappings,
     createDataSource,
+    createDataSourceWithIdempotency,
     updateDataSource,
     finalizeDataSourceUpload,
     requestImport,

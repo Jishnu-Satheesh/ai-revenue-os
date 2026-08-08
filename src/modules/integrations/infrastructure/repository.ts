@@ -167,6 +167,16 @@ export function createIntegrationRepository(
     async disconnect(input) {
       return requiredTransaction(dependencies.transactions).disconnectConnection(input);
     },
+    async createDataSourceWithIdempotency(input) {
+      const transaction = requiredTransaction(dependencies.transactions);
+      if (!transaction.createDataSourceWithIdempotency) return unavailableTransaction();
+      return transaction.createDataSourceWithIdempotency(input);
+    },
+    async updateDataSourceWithIdempotency(input) {
+      const transaction = requiredTransaction(dependencies.transactions);
+      if (!transaction.updateDataSourceWithIdempotency) return unavailableTransaction();
+      return transaction.updateDataSourceWithIdempotency(input);
+    },
   };
 }
 
@@ -893,6 +903,51 @@ export function createSupabaseAuthenticatedIntegrationTransactionPort(
         },
         "Integration disconnect could not be committed.",
       );
+    },
+    async createDataSourceWithIdempotency(input) {
+      return invoke<{
+        source: IntegrationDataSourceRow;
+        created: boolean;
+        deduplicated: boolean;
+      }>(
+        "create_integration_data_source_with_idempotency",
+        {
+          p_organization_id: input.source.organization_id,
+          p_actor_id: input.source.created_by,
+          p_data_source_id: input.dataSourceId,
+          p_idempotency_key: input.idempotencyKey,
+          p_request_fingerprint: input.requestFingerprint,
+          p_source_type: input.source.source_type,
+          p_name: input.source.name,
+          p_branch_id: input.source.branch_id,
+          p_column_mapping: input.source.column_mapping,
+          p_correlation_id: input.correlationId,
+        },
+        "Integration data source could not be created.",
+      ).then((result) => ({
+        source: result.dataSource,
+        created: result.created,
+        deduplicated: result.deduplicated,
+      }));
+    },
+    async updateDataSourceWithIdempotency(input) {
+      return invoke<{
+        dataSource: IntegrationDataSourceRow;
+        deduplicated: boolean;
+      }>(
+        "update_integration_data_source_with_idempotency",
+        {
+          p_organization_id: input.organizationId,
+          p_actor_id: input.actorId,
+          p_data_source_id: input.dataSourceId,
+          p_idempotency_key: input.idempotencyKey,
+          p_request_fingerprint: input.requestFingerprint,
+          p_name: input.patch.name ?? null,
+          p_status: input.patch.status ?? null,
+          p_correlation_id: input.correlationId,
+        },
+        "Integration data source could not be updated.",
+      ).then((result) => ({ source: result.dataSource, deduplicated: result.deduplicated }));
     },
   };
 }

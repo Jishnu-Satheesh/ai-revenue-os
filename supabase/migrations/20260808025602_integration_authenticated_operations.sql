@@ -109,6 +109,14 @@ begin
     return operation.response || pg_catalog.jsonb_build_object('deduplicated', true);
   end if;
 
+  select not exists (
+    select 1
+    from public.integration_connections existing_connection
+    where existing_connection.organization_id = p_organization_id
+      and existing_connection.provider_key = p_provider_key
+      and existing_connection.external_account_id = p_external_account_id
+  ) into created;
+
   insert into public.integration_connections (
     organization_id, provider_key, adapter_version, connection_mode, status,
     external_account_id, external_account_label, granted_scopes, credential_reference,
@@ -126,7 +134,7 @@ begin
     granted_scopes = excluded.granted_scopes,
     credential_reference = null,
     token_expires_at = null
-  returning integration_connections.*, (xmax = 0) into connected, created;
+  returning integration_connections.* into connected;
 
   delete from public.integration_capability_grants
   where organization_id = p_organization_id and connection_id = connected.id;

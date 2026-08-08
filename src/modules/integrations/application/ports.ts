@@ -247,6 +247,26 @@ export type IntegrationTransactionPort = {
     actorId: string;
     correlationId: string;
   }): Promise<IntegrationConnectionRow>;
+  createDataSourceWithIdempotency?: (input: {
+    source: IntegrationDataSourceInsert;
+    dataSourceId: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
+    correlationId: string;
+  }) => Promise<{
+    source: IntegrationDataSourceRow;
+    created: boolean;
+    deduplicated: boolean;
+  }>;
+  updateDataSourceWithIdempotency?: (input: {
+    organizationId: string;
+    dataSourceId: string;
+    actorId: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
+    patch: Pick<IntegrationDataSourceInsert, "name" | "status">;
+    correlationId: string;
+  }) => Promise<{ source: IntegrationDataSourceRow; deduplicated: boolean }>;
 };
 
 export type IntegrationRepository = {
@@ -316,6 +336,23 @@ export type IntegrationRepository = {
   disconnect(
     input: Parameters<IntegrationTransactionPort["disconnectConnection"]>[0],
   ): Promise<IntegrationConnectionRow>;
+  createDataSourceWithIdempotency?(
+    input: Parameters<
+      NonNullable<IntegrationTransactionPort["createDataSourceWithIdempotency"]>
+    >[0],
+  ): Promise<{
+    source: IntegrationDataSourceRow;
+    created: boolean;
+    deduplicated: boolean;
+  }>;
+  updateDataSourceWithIdempotency?(
+    input: Parameters<
+      NonNullable<IntegrationTransactionPort["updateDataSourceWithIdempotency"]>
+    >[0],
+  ): Promise<{
+    source: IntegrationDataSourceRow;
+    deduplicated: boolean;
+  }>;
 };
 
 export type IntegrationRunTransitionPort = {

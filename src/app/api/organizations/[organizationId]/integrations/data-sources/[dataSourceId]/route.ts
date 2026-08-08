@@ -11,6 +11,7 @@ const patchSchema = z
   .object({
     name: z.string().trim().min(2).max(160).optional(),
     status: z.literal("archived").optional(),
+    idempotencyKey: z.string().trim().min(16).max(200),
   })
   .strict()
   .refine((value) => value.name !== undefined || value.status !== undefined, {

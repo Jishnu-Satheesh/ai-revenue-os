@@ -1,10 +1,18 @@
 "use client";
 
-import { Check, CircleAlert, CircleDashed, CircleDot, LockKeyhole } from "lucide-react";
+import { useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  CircleAlert,
+  CircleDashed,
+  CircleDot,
+  LockKeyhole,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type {
   OnboardingPhase,
   OnboardingSectionKey,
@@ -46,61 +54,85 @@ function StatusIcon({ status }: { status: OnboardingSectionStatus }) {
   return <CircleDashed aria-hidden="true" data-icon="inline-start" />;
 }
 
+/**
+ * Every section is reachable at any time: onboarding is a data-gathering job
+ * that moves back and forth, and completion is decided by the payload rather
+ * than by the order the operator visited things in.
+ */
 export function OnboardingSectionRail({
   sections,
   currentSectionKey,
-  visitedSectionKeys,
   onSelect,
 }: {
   sections: readonly RailSection[];
   currentSectionKey: OnboardingSectionKey;
-  visitedSectionKeys: readonly OnboardingSectionKey[];
   onSelect: (sectionKey: OnboardingSectionKey) => void;
 }) {
-  const visited = new Set(visitedSectionKeys);
   const phases = [...new Set(sections.map((section) => section.phase))];
+  const currentPhase = sections.find((section) => section.key === currentSectionKey)?.phase;
+  const [openPhases, setOpenPhases] = useState<OnboardingPhase[]>(() => [
+    currentPhase ?? phases[0],
+  ]);
+  const [lastPhase, setLastPhase] = useState(currentPhase);
+
+  // Advancing past a phase boundary must reveal the section that just became
+  // active, even when the operator had collapsed that phase earlier. Adjusting
+  // during render rather than in an effect avoids a frame with the new section
+  // hidden.
+  if (currentPhase && currentPhase !== lastPhase) {
+    setLastPhase(currentPhase);
+    if (!openPhases.includes(currentPhase)) setOpenPhases([...openPhases, currentPhase]);
+  }
 
   return (
-    <ScrollArea className="max-h-[calc(100vh-12rem)] pr-3">
-      <nav aria-label="Onboarding sections" className="flex flex-col gap-5">
-        {phases.map((phase) => (
-          <section
+    <nav aria-label="Onboarding sections" className="flex flex-col gap-2">
+      {phases.map((phase) => {
+        const phaseSections = sections.filter((section) => section.phase === phase);
+        const completed = phaseSections.filter((section) => section.status === "complete").length;
+        const open = openPhases.includes(phase);
+
+        return (
+          <Collapsible
             key={phase}
-            aria-labelledby={`onboarding-phase-${phase}`}
-            className="flex flex-col gap-2"
+            open={open}
+            onOpenChange={(next) =>
+              setOpenPhases((current) =>
+                next ? [...current, phase] : current.filter((entry) => entry !== phase),
+              )
+            }
           >
-            <div className="flex items-center justify-between gap-2 px-2">
-              <h3
-                id={`onboarding-phase-${phase}`}
-                className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-9 w-full justify-start gap-2 px-2"
+                aria-label={`${phaseLabels[phase]}: ${completed} of ${phaseSections.length} complete`}
               >
-                {phaseLabels[phase]}
-              </h3>
-              <span className="text-xs text-muted-foreground">
-                {
-                  sections.filter(
-                    (section) => section.phase === phase && section.status === "complete",
-                  ).length
-                }
-                /{sections.filter((section) => section.phase === phase).length}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1">
-              {sections
-                .filter((section) => section.phase === phase)
-                .map((section) => {
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn("transition-transform duration-200", !open && "-rotate-90")}
+                />
+                <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  {phaseLabels[phase]}
+                </span>
+                <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                  {completed}/{phaseSections.length}
+                </span>
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="overflow-hidden data-closed:animate-collapsible-up data-open:animate-collapsible-down">
+              <div className="flex flex-col gap-1 pt-1 pb-2 pl-3">
+                {phaseSections.map((section) => {
                   const active = section.key === currentSectionKey;
-                  const navigable = visited.has(section.key);
                   return (
                     <Button
                       key={section.key}
                       type="button"
                       variant={active ? "outline" : "ghost"}
                       className={cn(
-                        "h-auto min-h-12 justify-start px-3 py-2 text-left",
+                        "h-auto min-h-12 w-full justify-start px-3 py-2 text-left",
                         active && "border-primary/60 bg-primary/5",
                       )}
-                      disabled={!navigable}
                       aria-current={active ? "step" : undefined}
                       aria-label={`${section.label}: ${statusLabels[section.status]}`}
                       onClick={() => onSelect(section.key)}
@@ -108,7 +140,7 @@ export function OnboardingSectionRail({
                       <StatusIcon status={section.status} />
                       <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
                         <span className="truncate font-medium">{section.label}</span>
-                        <span className="truncate text-xs text-muted-foreground">
+                        <span className="text-xs whitespace-normal text-muted-foreground">
                           {section.description}
                         </span>
                       </span>
@@ -118,10 +150,11 @@ export function OnboardingSectionRail({
                     </Button>
                   );
                 })}
-            </div>
-          </section>
-        ))}
-      </nav>
-    </ScrollArea>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        );
+      })}
+    </nav>
   );
 }

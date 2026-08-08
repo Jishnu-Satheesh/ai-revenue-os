@@ -19,6 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { industryOptions } from "@/domain/organizations/industries";
+import { countryOptions } from "@/domain/reference/countries";
+import { currencyOptions } from "@/domain/reference/currencies";
 
 function slugify(value: string) {
   return value
@@ -148,35 +151,48 @@ export default function NewOrganizationPage() {
                     </Field>
                     <Field>
                       <FieldLabel htmlFor="organization-industry">Industry</FieldLabel>
-                      <Input
-                        id="organization-industry"
-                        required
-                        value={industry}
-                        onChange={(event) => setIndustry(event.target.value)}
-                        placeholder="restaurant"
-                      />
+                      <Select value={industry} onValueChange={setIndustry}>
+                        <SelectTrigger id="organization-industry" className="w-full">
+                          <SelectValue placeholder="Select an industry" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {industryOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field>
-                      <FieldLabel htmlFor="country-code">Country code</FieldLabel>
-                      <Input
-                        id="country-code"
-                        required
-                        maxLength={2}
-                        value={countryCode}
-                        onChange={(event) => setCountryCode(event.target.value.toUpperCase())}
-                        className="uppercase"
-                      />
+                      <FieldLabel htmlFor="country-code">Country</FieldLabel>
+                      <Select value={countryCode} onValueChange={setCountryCode}>
+                        <SelectTrigger id="country-code" className="w-full">
+                          <SelectValue placeholder="Select a country" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {countryOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.value} — {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                     <Field>
                       <FieldLabel htmlFor="base-currency">Base currency</FieldLabel>
-                      <Input
-                        id="base-currency"
-                        required
-                        maxLength={3}
-                        value={currency}
-                        onChange={(event) => setCurrency(event.target.value.toUpperCase())}
-                        className="uppercase"
-                      />
+                      <Select value={currency} onValueChange={setCurrency}>
+                        <SelectTrigger id="base-currency" className="w-full">
+                          <SelectValue placeholder="Select a currency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {currencyOptions.map((option) => (
+                            <SelectItem key={option.code} value={option.code}>
+                              {option.code} — {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                   </div>
                   <Field>

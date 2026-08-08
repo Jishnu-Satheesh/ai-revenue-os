@@ -14,43 +14,65 @@ const sections = onboardingSectionRegistry.map((section, index) => ({
 describe("OnboardingSectionRail", () => {
   afterEach(() => cleanup());
 
-  it("renders all ten sections and groups them into six phases", () => {
+  it("groups sections into six collapsible phases with only the current phase open", () => {
     render(
       <OnboardingSectionRail
         sections={sections}
         currentSectionKey="business_identity"
-        visitedSectionKeys={["business_identity"]}
         onSelect={vi.fn()}
       />,
     );
 
-    expect(screen.getAllByRole("button")).toHaveLength(10);
-    expect(screen.getByText("Foundation")).toBeInTheDocument();
-    expect(screen.getByText("Commercial context")).toBeInTheDocument();
-    expect(screen.getByText("Customer context")).toBeInTheDocument();
-    expect(screen.getByText("Governance")).toBeInTheDocument();
-    expect(screen.getByText("Data intake")).toBeInTheDocument();
-    expect(screen.getByText("Review")).toBeInTheDocument();
+    for (const phase of [
+      "Foundation",
+      "Commercial context",
+      "Customer context",
+      "Governance",
+      "Data intake",
+      "Review",
+    ]) {
+      expect(screen.getByText(phase)).toBeInTheDocument();
+    }
+
+    // Foundation holds the current section, so its two entries are visible and
+    // the other phases stay collapsed.
+    expect(screen.getByRole("button", { name: /Business identity/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Branches and operations/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Products or services/i })).not.toBeInTheDocument();
   });
 
-  it("disables unvisited future sections and allows revisiting visited sections", () => {
+  it("expands a collapsed phase and navigates to any section without gating", () => {
     const onSelect = vi.fn();
     render(
       <OnboardingSectionRail
         sections={sections}
-        currentSectionKey="branches_operations"
-        visitedSectionKeys={["business_identity", "branches_operations"]}
+        currentSectionKey="business_identity"
         onSelect={onSelect}
       />,
     );
 
-    const identity = screen.getByRole("button", { name: /Business identity/i });
+    fireEvent.click(screen.getByRole("button", { name: /Commercial context/i }));
+
     const products = screen.getByRole("button", { name: /Products or services/i });
-    fireEvent.click(identity);
+    expect(products).not.toBeDisabled();
     fireEvent.click(products);
 
-    expect(onSelect).toHaveBeenCalledWith("business_identity");
-    expect(products).toBeDisabled();
-    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("products_services");
+  });
+
+  it("keeps every section in the final phase reachable from the first section", () => {
+    const onSelect = vi.fn();
+    render(
+      <OnboardingSectionRail
+        sections={sections}
+        currentSectionKey="business_identity"
+        onSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Review:/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review and readiness/i }));
+
+    expect(onSelect).toHaveBeenCalledWith("review_readiness");
   });
 });

@@ -1,16 +1,22 @@
 "use client";
 
 import { SectionForm, type SectionSaveStatus } from "@/components/onboarding/sections/shared";
+import {
+  accountOwnershipOptions,
+  channelOptions,
+  conversionTrackingOptions,
+} from "@/domain/onboarding/vocabularies";
 
 export function ChannelsPresenceSection({
   defaultValues = {},
   onSave,
 }: {
-  defaultValues?: Record<string, string>;
-  onSave: (payload: Record<string, string>, status: SectionSaveStatus) => Promise<void>;
+  defaultValues?: Record<string, unknown>;
+  onSave: (payload: Record<string, unknown>, status: SectionSaveStatus) => Promise<void>;
 }) {
   return (
     <SectionForm
+      sectionKey="channels_presence"
       title="Channels and digital presence"
       description="List owned channels and account ownership without collecting credentials."
       defaultValues={defaultValues}
@@ -19,25 +25,34 @@ export function ChannelsPresenceSection({
         {
           name: "channels",
           label: "Owned and marketplace channels",
-          placeholder: "Website; Instagram; Talabat",
+          control: "multiselect",
+          options: channelOptions,
+          placeholder: "Select every active channel",
+          searchPlaceholder: "Search channels…",
           required: true,
-          multiline: true,
         },
         {
           name: "profiles",
-          label: "Public profiles",
-          placeholder: "Website, Google Business Profile, WhatsApp",
+          label: "Public profile links",
+          control: "tags",
+          placeholder: "https://instagram.com/alnoorkitchen",
+          description: "Add one URL or handle at a time.",
         },
         {
           name: "accountOwnership",
           label: "Account ownership",
-          placeholder: "Client-owned; agency-managed",
+          control: "select",
+          options: accountOwnershipOptions,
+          placeholder: "Who owns the channel accounts?",
         },
         {
-          name: "conversionTracking",
+          name: "conversionTrackingStatus",
           label: "Conversion tracking",
-          placeholder: "Connected, partial, or missing",
+          control: "radio",
+          options: conversionTrackingOptions,
           required: true,
+          description:
+            "Only a verified end-to-end setup counts as connected for readiness scoring.",
         },
       ]}
     />
