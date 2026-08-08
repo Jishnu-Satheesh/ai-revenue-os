@@ -236,25 +236,27 @@ create or replace function public.append_integration_health_check_with_execution
   p_normalized_error_code text, p_safe_detail text, p_checked_at timestamptz, p_correlation_id uuid
 ) returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare written public.integration_health_checks;
+declare locked_run public.integration_ingestion_runs;
+declare locked_lease public.integration_worker_execution_leases;
 begin
+  select * into locked_run
+  from public.integration_ingestion_runs
+  where organization_id = p_organization_id and id = p_ingestion_run_id
+  for update;
+  if not found or locked_run.idempotency_key is distinct from p_idempotency_key
+    or locked_run.connection_id is distinct from p_connection_id then return null; end if;
+  select * into locked_lease
+  from public.integration_worker_execution_leases
+  where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
+  for update;
+  if not found or locked_lease.claim_token is distinct from p_claim_token
+    or locked_lease.lease_expires_at <= now() then return null; end if;
   insert into public.integration_health_checks (
     organization_id, connection_id, ingestion_run_id, check_type, outcome, latency_ms,
     normalized_error_code, safe_detail, checked_at, correlation_id
   )
   select p_organization_id, p_connection_id, p_ingestion_run_id, p_check_type, p_outcome,
     p_latency_ms, p_normalized_error_code, p_safe_detail, p_checked_at, p_correlation_id
-  where exists (
-    select 1
-    from public.integration_worker_execution_leases execution_lease
-    join public.integration_ingestion_runs ingestion_run
-      on ingestion_run.organization_id = execution_lease.organization_id
-      and ingestion_run.id = execution_lease.ingestion_run_id
-    where execution_lease.organization_id = p_organization_id
-      and execution_lease.ingestion_run_id = p_ingestion_run_id
-      and execution_lease.claim_token = p_claim_token
-      and execution_lease.lease_expires_at > now()
-      and ingestion_run.idempotency_key = p_idempotency_key
-  )
   returning * into written;
   if not found then return null; end if;
   return pg_catalog.to_jsonb(written);
@@ -269,23 +271,25 @@ create or replace function public.update_integration_connection_with_execution_l
   p_next_scheduled_sync_at timestamptz
 ) returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare written public.integration_connections;
+declare locked_run public.integration_ingestion_runs;
+declare locked_lease public.integration_worker_execution_leases;
 begin
+  select * into locked_run
+  from public.integration_ingestion_runs
+  where organization_id = p_organization_id and id = p_ingestion_run_id
+  for update;
+  if not found or locked_run.idempotency_key is distinct from p_idempotency_key
+    or locked_run.connection_id is distinct from p_connection_id then return null; end if;
+  select * into locked_lease
+  from public.integration_worker_execution_leases
+  where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
+  for update;
+  if not found or locked_lease.claim_token is distinct from p_claim_token
+    or locked_lease.lease_expires_at <= now() then return null; end if;
   update public.integration_connections connection
   set status = coalesce(p_status, connection.status),
     next_scheduled_sync_at = case when p_set_next_scheduled_sync_at then p_next_scheduled_sync_at else connection.next_scheduled_sync_at end
   where connection.organization_id = p_organization_id and connection.id = p_connection_id
-    and exists (
-      select 1
-      from public.integration_worker_execution_leases execution_lease
-      join public.integration_ingestion_runs ingestion_run
-        on ingestion_run.organization_id = execution_lease.organization_id
-        and ingestion_run.id = execution_lease.ingestion_run_id
-      where execution_lease.organization_id = p_organization_id
-        and execution_lease.ingestion_run_id = p_ingestion_run_id
-        and execution_lease.claim_token = p_claim_token
-        and execution_lease.lease_expires_at > now()
-        and ingestion_run.idempotency_key = p_idempotency_key
-    )
   returning * into written;
   if not found then return null; end if;
   return pg_catalog.to_jsonb(written);

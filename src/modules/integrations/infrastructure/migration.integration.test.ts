@@ -140,9 +140,13 @@ describe("Integration Hub migration contract", () => {
     );
 
     for (const write of [health, connection]) {
-      expect(write).toContain("execution_lease.claim_token = p_claim_token");
-      expect(write).toContain("execution_lease.lease_expires_at > now()");
-      expect(write).toContain("ingestion_run.idempotency_key = p_idempotency_key");
+      expect(write).toContain("from public.integration_ingestion_runs");
+      expect(write).toContain("from public.integration_worker_execution_leases");
+      expect(write).toContain("for update");
+      expect(write).toContain("locked_run.idempotency_key is distinct from p_idempotency_key");
+      expect(write).toContain("locked_run.connection_id is distinct from p_connection_id");
+      expect(write).toContain("locked_lease.claim_token is distinct from p_claim_token");
+      expect(write).toContain("locked_lease.lease_expires_at <= now()");
     }
     expect(health).toContain("insert into public.integration_health_checks");
     expect(connection).toContain("update public.integration_connections connection");
