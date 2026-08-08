@@ -6,7 +6,10 @@ import {
   Activity,
   BarChart3,
   Bot,
+  Boxes,
   Building2,
+  Cable,
+  Compass,
   LayoutDashboard,
   Settings2,
   Sparkles,
@@ -39,8 +42,35 @@ const navigation = [
   { label: "Organizations", href: "/organizations", icon: Building2, upcoming: true },
 ];
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The organization group only exists while the reader is inside one. */
+function organizationNavigation(pathname: string) {
+  const segments = pathname.split("/").filter(Boolean);
+  const organizationId =
+    segments[0] === "organizations" && uuidPattern.test(segments[1] ?? "") ? segments[1] : null;
+  if (!organizationId) return null;
+  return {
+    organizationId,
+    items: [
+      {
+        label: "Digital Twin",
+        href: `/organizations/${organizationId}/digital-twin`,
+        icon: Boxes,
+      },
+      {
+        label: "Guided onboarding",
+        href: `/organizations/${organizationId}/onboarding`,
+        icon: Compass,
+      },
+      { label: "Integrations", href: `/organizations/${organizationId}/integrations`, icon: Cable },
+    ],
+  };
+}
+
 export function Sidebar() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "/";
+  const organization = organizationNavigation(pathname);
 
   return (
     <SidebarPrimitive variant="floating" collapsible="icon">
@@ -94,6 +124,29 @@ export function Sidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {organization ? (
+          <SidebarGroup>
+            <SidebarGroupLabel>Organization</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {organization.items.map(({ label, href, icon: Icon }) => (
+                  <SidebarMenuItem key={label}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === href || pathname.startsWith(`${href}/`)}
+                      tooltip={label}
+                    >
+                      <Link href={href}>
+                        <Icon />
+                        <span>{label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
       <SidebarFooter>
         <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />

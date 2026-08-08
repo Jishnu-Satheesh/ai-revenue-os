@@ -538,31 +538,33 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Consumes: authenticated server snapshot, feature gate, safe API responses
 - Produces: protected organization Integration Hub page, four-tab client shell, scoped query keys, truthful breadcrumbs/navigation
 
-- [ ] **Step 1: Write failing component tests.**
+- [x] **Step 1: Write failing component tests.**
 
   Assert the RSC denies disabled/foreign organizations, the shell defaults to Connections, four tabs are keyboard reachable, query keys begin `['organizations', organizationId, 'integrations']`, background refetch retains current data, and active sidebar/breadcrumb labels derive from pathname rather than hardcoded Overview.
 
-- [ ] **Step 2: Run the focused component test and confirm missing components.**
+- [x] **Step 2: Run the focused component test and confirm missing components.**
 
   Run: `pnpm vitest run src/components/integrations/integration-hub-client.test.tsx`
 
-- [ ] **Step 3: Implement the server boundary.**
+- [x] **Step 3: Implement the server boundary.**
 
   Resolve organization context and `integration.read`, enforce allowlist, fetch the snapshot through the application service, and pass dehydrated/safe initial data to the client boundary. Render `loading.tsx` with shadcn Skeleton and `error.tsx` with shadcn Alert/Button.
 
-- [ ] **Step 4: Implement scoped TanStack Query options.**
+- [x] **Step 4: Implement scoped TanStack Query options.**
 
   Define keys for snapshot, catalog, connection detail, health, sources, and activity. Mutations invalidate only affected keys; render a subtle background-refetch indicator without blanking data. Keep server data out of a global store.
 
-- [ ] **Step 5: Implement route-aware app chrome.**
+- [x] **Step 5: Implement route-aware app chrome.**
 
   Use the added shadcn Breadcrumb and existing Sidebar composition. The organization label and `Integrations` location must be correct on desktop/mobile; remove the current hardcoded active Overview behavior. Keep controls as shadcn components.
 
-- [ ] **Step 6: Run component tests, typecheck, and lint.**
+- [x] **Step 6: Run component tests, typecheck, and lint.**
 
   Run: `pnpm vitest run src/components/integrations/integration-hub-client.test.tsx && pnpm typecheck && pnpm lint`
 
-- [ ] **Step 7: Commit with `git commit -m "feat(integrations): add protected workspace shell"`.**
+- [x] **Step 7: Commit with `git commit -m "feat(integrations): add protected workspace shell"`.**
+
+  The organization route resolves membership before the rollout allowlist so a non-member never learns whether the feature is enabled, and `createIntegrationHubService` is now shared by the RSC and every route handler. The Connections tab renders a minimal health list at this task and is replaced by the full experience in Task 11.
 
 ### Task 11: Build the health-first Connections experience
 

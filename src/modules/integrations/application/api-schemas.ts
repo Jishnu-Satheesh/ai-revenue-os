@@ -102,7 +102,13 @@ function createTriggerDispatcher(): IntegrationTaskDispatcher {
   };
 }
 
-function createRouteService(input: {
+/**
+ * Builds the RLS-backed Integration Hub service for a request that already has
+ * an authenticated organization context. Route handlers and the organization
+ * React Server Component share it so both read through the same permissions,
+ * validation, and tenant scoping. It never touches worker credentials.
+ */
+export function createIntegrationHubService(input: {
   supabase: Awaited<ReturnType<typeof getOrganizationContext>>["supabase"];
 }) {
   const { repository } = createAuthenticatedIntegrationRepository({
@@ -146,10 +152,12 @@ type RouteContext = AuthenticatedIntegrationContext & {
   supabase: Awaited<ReturnType<typeof getOrganizationContext>>["supabase"];
 };
 
+export type IntegrationHubService = ReturnType<typeof createIntegrationService>;
+
 type RouteHandler<TParams> = (input: {
   context: RouteContext;
   params: TParams;
-  service: ReturnType<typeof createIntegrationService>;
+  service: IntegrationHubService;
 }) => Promise<{ body: unknown; status?: number }>;
 
 function readCorrelationId(request: Request): string {
@@ -253,7 +261,7 @@ export async function runIntegrationRoute<TParams>(input: {
     const result = await input.handler({
       context,
       params,
-      service: createRouteService({ supabase: organizationContext.supabase }),
+      service: createIntegrationHubService({ supabase: organizationContext.supabase }),
     });
     const response = NextResponse.json(result.body, { status: result.status ?? 200 });
     response.headers.set("x-correlation-id", correlationId);
