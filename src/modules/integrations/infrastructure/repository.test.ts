@@ -278,19 +278,13 @@ describe("Integration repositories", () => {
     expect(snapshot.summary).toMatchObject({ totalConnections: 2, healthyConnections: 1 });
   });
 
-  it("scopes every repository lookup and worker update by organization", async () => {
+  it("scopes every repository lookup by organization", async () => {
     const { port, calls } = createMemoryPort();
     const repository = createIntegrationRepository({ persistence: port });
-    const worker = createIntegrationWorkerRepository({ persistence: port });
 
     await repository.findConnection({ organizationId: organizationA, connectionId });
     await repository.findDataSource({ organizationId: organizationA, dataSourceId });
     await repository.findRun({ organizationId: organizationA, ingestionRunId: runId });
-    await worker.scheduleConnection({
-      organizationId: organizationA,
-      connectionId,
-      nextScheduledSyncAt: "2026-08-08T12:30:00.000Z",
-    });
     await expect(
       repository.findConnection({ organizationId: organizationB, connectionId }),
     ).resolves.toBeNull();
@@ -302,7 +296,6 @@ describe("Integration repositories", () => {
         expect.objectContaining({ method: "findConnection", organizationId: organizationB }),
       ]),
     );
-    expect(calls).toContainEqual({ method: "updateConnection", organizationId: organizationA });
   });
 
   it("uses the atomic reconnect port and fails closed when the RPC port is unavailable", async () => {
@@ -440,6 +433,12 @@ describe("Integration repositories", () => {
       async cancelExecution() {
         return { outcome: "conflict" };
       },
+      async appendHealthCheckWithLease() {
+        return { outcome: "conflict" };
+      },
+      async updateConnectionWithLease() {
+        return { outcome: "conflict" };
+      },
       async markRunRunning(input) {
         if (current.status !== "queued") return { outcome: "conflict" };
         current = { ...current, status: "running", started_at: input.startedAt };
@@ -522,6 +521,12 @@ describe("Integration repositories", () => {
         return { outcome: "acquired" };
       },
       async cancelExecution() {
+        return { outcome: "conflict" };
+      },
+      async appendHealthCheckWithLease() {
+        return { outcome: "conflict" };
+      },
+      async updateConnectionWithLease() {
         return { outcome: "conflict" };
       },
       async markRunRunning(input) {
@@ -608,6 +613,12 @@ describe("Integration repositories", () => {
         return { outcome: "acquired" };
       },
       async cancelExecution() {
+        return { outcome: "conflict" };
+      },
+      async appendHealthCheckWithLease() {
+        return { outcome: "conflict" };
+      },
+      async updateConnectionWithLease() {
         return { outcome: "conflict" };
       },
       async markRunRunning() {

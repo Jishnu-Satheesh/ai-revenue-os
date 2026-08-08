@@ -108,6 +108,7 @@ describe("Integration Hub migration contract", () => {
     expect(claim).toContain("from public.integration_ingestion_runs");
     expect(claim).toContain("for update");
     expect(claim).toContain("existing.lease_expires_at <= now()");
+    expect(claim).toContain("interval '20 minutes'");
     expect(claim).toContain("claim_token = p_claim_token");
     expect(transition).toContain("p_execution_claim_token uuid default null");
     expect(transition).toContain("execution_lease.claim_token = p_execution_claim_token");
@@ -125,6 +126,26 @@ describe("Integration Hub migration contract", () => {
     expect(sql).toContain(
       "grant execute on function public.cancel_integration_worker_execution(uuid, uuid, text, uuid) to service_role",
     );
+  });
+
+  it("makes health and connection writes conditional on the same active execution lease", () => {
+    const sql = readWorkerTransitionsMigration();
+    const health = functionDefinition(
+      sql,
+      "public.append_integration_health_check_with_execution_lease",
+    );
+    const connection = functionDefinition(
+      sql,
+      "public.update_integration_connection_with_execution_lease",
+    );
+
+    for (const write of [health, connection]) {
+      expect(write).toContain("execution_lease.claim_token = p_claim_token");
+      expect(write).toContain("execution_lease.lease_expires_at > now()");
+      expect(write).toContain("ingestion_run.idempotency_key = p_idempotency_key");
+    }
+    expect(health).toContain("insert into public.integration_health_checks");
+    expect(connection).toContain("update public.integration_connections connection");
   });
 
   it("defines organization ownership and composite identity on each tenant table", () => {

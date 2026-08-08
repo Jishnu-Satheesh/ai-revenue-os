@@ -179,6 +179,15 @@ function requiredRunTransitions(
   );
 }
 
+function staleExecutionLeaseError(): IntegrationError {
+  return new IntegrationError(
+    "CONFLICT",
+    "This integration worker no longer holds the execution lease.",
+    false,
+    { staleLease: true },
+  );
+}
+
 export function createIntegrationWorkerRepository(
   dependencies: Pick<RepositoryDependencies, "persistence"> & {
     transitions?: IntegrationRunTransitionPort;
@@ -277,25 +286,11 @@ export function createIntegrationWorkerRepository(
     },
 
     async appendHealthCheck(input) {
-      const connection = await dependencies.persistence.findConnection({
-        organizationId: input.organization_id,
-        connectionId: input.connection_id,
-      });
-      if (!connection) return notFound("Integration connection");
-      if (input.ingestion_run_id) {
-        const ingestionRun = await dependencies.persistence.findRun({
-          organizationId: input.organization_id,
-          ingestionRunId: input.ingestion_run_id,
-        });
-        if (!ingestionRun || ingestionRun.connection_id !== input.connection_id) {
-          throw new IntegrationError(
-            "TENANT_SCOPE_ERROR",
-            "The ingestion run does not belong to this connection.",
-            false,
-          );
-        }
-      }
-      return dependencies.persistence.appendHealthCheck(input);
+      const result = await requiredRunTransitions(
+        dependencies.transitions,
+      ).appendHealthCheckWithLease(input);
+      if (result.outcome === "conflict") throw staleExecutionLeaseError();
+      return result.healthCheck;
     },
 
     async loadGrantRecomputationInput(input) {
@@ -305,32 +300,35 @@ export function createIntegrationWorkerRepository(
     },
 
     async scheduleConnection(input) {
-      const connection = await dependencies.persistence.findConnection(input);
-      if (!connection) return notFound("Integration connection");
-      return dependencies.persistence.updateConnection({
+      const result = await requiredRunTransitions(
+        dependencies.transitions,
+      ).updateConnectionWithLease({
         organizationId: input.organizationId,
         connectionId: input.connectionId,
-        patch: {
-          status: connection.status,
-          last_tested_at: connection.last_tested_at,
-          last_successful_sync_at: connection.last_successful_sync_at,
-          next_scheduled_sync_at: input.nextScheduledSyncAt,
-        },
+        ingestionRunId: input.ingestionRunId,
+        idempotencyKey: input.idempotencyKey,
+        claimToken: input.claimToken,
+        setNextScheduledSyncAt: true,
+        nextScheduledSyncAt: input.nextScheduledSyncAt,
       });
+      if (result.outcome === "conflict") throw staleExecutionLeaseError();
+      return result.connection;
     },
     async setConnectionStatus(input) {
-      const connection = await dependencies.persistence.findConnection(input);
-      if (!connection) return notFound("Integration connection");
-      return dependencies.persistence.updateConnection({
+      const result = await requiredRunTransitions(
+        dependencies.transitions,
+      ).updateConnectionWithLease({
         organizationId: input.organizationId,
         connectionId: input.connectionId,
-        patch: {
-          status: input.status,
-          last_tested_at: connection.last_tested_at,
-          last_successful_sync_at: connection.last_successful_sync_at,
-          next_scheduled_sync_at: null,
-        },
+        ingestionRunId: input.ingestionRunId,
+        idempotencyKey: input.idempotencyKey,
+        claimToken: input.claimToken,
+        status: input.status,
+        setNextScheduledSyncAt: true,
+        nextScheduledSyncAt: null,
       });
+      if (result.outcome === "conflict") throw staleExecutionLeaseError();
+      return result.connection;
     },
   };
 }
@@ -347,7 +345,9 @@ export function createSupabaseIntegrationRunTransitionPort(
       name:
         | "transition_integration_ingestion_run"
         | "claim_integration_worker_execution_lease"
-        | "cancel_integration_worker_execution",
+        | "cancel_integration_worker_execution"
+        | "append_integration_health_check_with_execution_lease"
+        | "update_integration_connection_with_execution_lease",
       args: Record<string, unknown>,
     ): PromiseLike<{ data: IntegrationIngestionRunRow | null; error: unknown }>;
   };
@@ -412,6 +412,49 @@ export function createSupabaseIntegrationRunTransitionPort(
         databaseError("Integration execution could not be cancelled.", result.error);
       return result.data
         ? { outcome: "cancelled" as const, run: result.data }
+        : { outcome: "conflict" as const };
+    },
+    async appendHealthCheckWithLease(input) {
+      const result = await rpc.rpc("append_integration_health_check_with_execution_lease", {
+        p_organization_id: input.organization_id,
+        p_connection_id: input.connection_id,
+        p_ingestion_run_id: input.ingestion_run_id,
+        p_idempotency_key: input.idempotencyKey,
+        p_claim_token: input.claimToken,
+        p_check_type: input.check_type,
+        p_outcome: input.outcome,
+        p_latency_ms: input.latency_ms,
+        p_normalized_error_code: input.normalized_error_code,
+        p_safe_detail: input.safe_detail,
+        p_checked_at: input.checked_at,
+        p_correlation_id: input.correlation_id,
+      });
+      if (result.error)
+        databaseError("Integration health check could not be persisted.", result.error);
+      return result.data
+        ? {
+            outcome: "written" as const,
+            healthCheck: result.data as unknown as IntegrationHealthCheckRow,
+          }
+        : { outcome: "conflict" as const };
+    },
+    async updateConnectionWithLease(input) {
+      const result = await rpc.rpc("update_integration_connection_with_execution_lease", {
+        p_organization_id: input.organizationId,
+        p_connection_id: input.connectionId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_idempotency_key: input.idempotencyKey,
+        p_claim_token: input.claimToken,
+        p_status: input.status ?? null,
+        p_set_next_scheduled_sync_at: input.setNextScheduledSyncAt,
+        p_next_scheduled_sync_at: input.nextScheduledSyncAt,
+      });
+      if (result.error) databaseError("Integration connection could not be updated.", result.error);
+      return result.data
+        ? {
+            outcome: "written" as const,
+            connection: result.data as unknown as IntegrationConnectionRow,
+          }
         : { outcome: "conflict" as const };
     },
     markRunRunning(input) {

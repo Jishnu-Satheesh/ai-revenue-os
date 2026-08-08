@@ -34,6 +34,9 @@ export async function runDisconnectConnection(
     await dependencies.worker.scheduleConnection({
       organizationId: payload.organizationId,
       connectionId: payload.connectionId,
+      ingestionRunId: payload.ingestionRunId,
+      idempotencyKey: payload.idempotencyKey,
+      claimToken: begin.claimToken,
       nextScheduledSyncAt: null,
     });
     if (connection.connection_mode !== "fixture") {
@@ -49,6 +52,9 @@ export async function runDisconnectConnection(
     await dependencies.worker.setConnectionStatus({
       organizationId: payload.organizationId,
       connectionId: payload.connectionId,
+      ingestionRunId: payload.ingestionRunId,
+      idempotencyKey: payload.idempotencyKey,
+      claimToken: begin.claimToken,
       status: "revoked",
     });
     await appendConnectionHealth(payload, dependencies, begin.claimToken, {

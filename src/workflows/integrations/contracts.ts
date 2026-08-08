@@ -373,6 +373,8 @@ export async function appendConnectionHealth(
     safe_detail: input.safeDetail ?? null,
     checked_at: nowIso(dependencies),
     correlation_id: payload.correlationId,
+    idempotencyKey: payload.idempotencyKey,
+    claimToken,
   });
 }
 

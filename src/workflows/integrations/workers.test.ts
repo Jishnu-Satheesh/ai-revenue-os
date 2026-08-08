@@ -336,6 +336,33 @@ describe("Integration Hub workers", () => {
     expect(worker.requeueRun).not.toHaveBeenCalled();
   });
 
+  it("renews a long CSV import lease around each handoff and stops after takeover", async () => {
+    const worker = workerRepository();
+    vi.mocked(worker.assertExecutionLease)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new IntegrationError("CONFLICT", "taken over while importing", false, { staleLease: true }),
+      );
+    const deps = dependencies({ worker });
+
+    await runImportDataSource(
+      {
+        taskName: "integration.import-data-source",
+        organizationId: ids.organizationId,
+        dataSourceId: ids.dataSourceId,
+        ingestionRunId: ids.ingestionRunId,
+        correlationId: ids.correlationId,
+        idempotencyKey: connectionPayload.idempotencyKey,
+      },
+      deps,
+    );
+
+    expect(deps.sink.accept).toHaveBeenCalledOnce();
+    expect(worker.completeRun).not.toHaveBeenCalled();
+    expect(worker.requeueRun).not.toHaveBeenCalled();
+  });
+
   it("reuses the persisted idempotency key and sends a valid sync handoff once", async () => {
     const deps = dependencies();
     await runSyncConnection(

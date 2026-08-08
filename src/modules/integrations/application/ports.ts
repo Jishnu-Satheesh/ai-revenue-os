@@ -321,6 +321,26 @@ export type IntegrationRunTransitionPort = {
     idempotencyKey: string;
     cancellationToken: string;
   }): Promise<{ outcome: "cancelled"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }>;
+  appendHealthCheckWithLease(
+    input: IntegrationHealthCheckInsert & {
+      idempotencyKey: string;
+      claimToken: string;
+    },
+  ): Promise<
+    { outcome: "written"; healthCheck: IntegrationHealthCheckRow } | { outcome: "conflict" }
+  >;
+  updateConnectionWithLease(input: {
+    organizationId: string;
+    connectionId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    claimToken: string;
+    status?: "revoked";
+    setNextScheduledSyncAt: boolean;
+    nextScheduledSyncAt: string | null;
+  }): Promise<
+    { outcome: "written"; connection: IntegrationConnectionRow } | { outcome: "conflict" }
+  >;
   markRunRunning(input: {
     organizationId: string;
     ingestionRunId: string;
@@ -432,7 +452,12 @@ export type IntegrationWorkerRepository = {
     ingestionRunId: string;
     claimToken: string;
   }): Promise<IntegrationIngestionRunRow>;
-  appendHealthCheck(input: IntegrationHealthCheckInsert): Promise<IntegrationHealthCheckRow>;
+  appendHealthCheck(
+    input: IntegrationHealthCheckInsert & {
+      idempotencyKey: string;
+      claimToken: string;
+    },
+  ): Promise<IntegrationHealthCheckRow>;
   loadGrantRecomputationInput(input: {
     organizationId: string;
     connectionId: string;
@@ -440,11 +465,17 @@ export type IntegrationWorkerRepository = {
   scheduleConnection(input: {
     organizationId: string;
     connectionId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    claimToken: string;
     nextScheduledSyncAt: string | null;
   }): Promise<IntegrationConnectionRow>;
   setConnectionStatus(input: {
     organizationId: string;
     connectionId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    claimToken: string;
     status: "revoked";
   }): Promise<IntegrationConnectionRow>;
 };

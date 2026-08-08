@@ -180,12 +180,12 @@ begin
   insert into public.integration_worker_execution_leases (
     organization_id, ingestion_run_id, idempotency_key, claim_token, lease_expires_at
   ) values (
-    p_organization_id, p_ingestion_run_id, p_idempotency_key, p_claim_token, now() + interval '5 minutes'
+    p_organization_id, p_ingestion_run_id, p_idempotency_key, p_claim_token, now() + interval '20 minutes'
   ) on conflict do nothing;
   select * into existing from public.integration_worker_execution_leases where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id for update;
   if existing.idempotency_key <> p_idempotency_key then return jsonb_build_object('outcome','conflict'); end if;
   if existing.claim_token = p_claim_token or existing.lease_expires_at <= now() then
-    update public.integration_worker_execution_leases set claim_token = p_claim_token, lease_expires_at = now() + interval '5 minutes'
+    update public.integration_worker_execution_leases set claim_token = p_claim_token, lease_expires_at = now() + interval '20 minutes'
       where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id;
     return jsonb_build_object('outcome','acquired');
   end if;
@@ -210,10 +210,10 @@ begin
   insert into public.integration_worker_execution_leases (
     organization_id, ingestion_run_id, idempotency_key, claim_token, lease_expires_at
   ) values (
-    p_organization_id, p_ingestion_run_id, p_idempotency_key, p_cancellation_token, now() + interval '5 minutes'
+    p_organization_id, p_ingestion_run_id, p_idempotency_key, p_cancellation_token, now() + interval '20 minutes'
   ) on conflict do nothing;
   update public.integration_worker_execution_leases
-  set claim_token = p_cancellation_token, lease_expires_at = now() + interval '5 minutes'
+  set claim_token = p_cancellation_token, lease_expires_at = now() + interval '20 minutes'
   where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
     and idempotency_key = p_idempotency_key;
 
@@ -229,3 +229,67 @@ end;
 $$;
 revoke all on function public.cancel_integration_worker_execution(uuid, uuid, text, uuid) from public, anon, authenticated;
 grant execute on function public.cancel_integration_worker_execution(uuid, uuid, text, uuid) to service_role;
+
+create or replace function public.append_integration_health_check_with_execution_lease(
+  p_organization_id uuid, p_connection_id uuid, p_ingestion_run_id uuid, p_idempotency_key text,
+  p_claim_token uuid, p_check_type text, p_outcome text, p_latency_ms integer,
+  p_normalized_error_code text, p_safe_detail text, p_checked_at timestamptz, p_correlation_id uuid
+) returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare written public.integration_health_checks;
+begin
+  insert into public.integration_health_checks (
+    organization_id, connection_id, ingestion_run_id, check_type, outcome, latency_ms,
+    normalized_error_code, safe_detail, checked_at, correlation_id
+  )
+  select p_organization_id, p_connection_id, p_ingestion_run_id, p_check_type, p_outcome,
+    p_latency_ms, p_normalized_error_code, p_safe_detail, p_checked_at, p_correlation_id
+  where exists (
+    select 1
+    from public.integration_worker_execution_leases execution_lease
+    join public.integration_ingestion_runs ingestion_run
+      on ingestion_run.organization_id = execution_lease.organization_id
+      and ingestion_run.id = execution_lease.ingestion_run_id
+    where execution_lease.organization_id = p_organization_id
+      and execution_lease.ingestion_run_id = p_ingestion_run_id
+      and execution_lease.claim_token = p_claim_token
+      and execution_lease.lease_expires_at > now()
+      and ingestion_run.idempotency_key = p_idempotency_key
+  )
+  returning * into written;
+  if not found then return null; end if;
+  return pg_catalog.to_jsonb(written);
+end;
+$$;
+revoke all on function public.append_integration_health_check_with_execution_lease(uuid, uuid, uuid, text, uuid, text, text, integer, text, text, timestamptz, uuid) from public, anon, authenticated;
+grant execute on function public.append_integration_health_check_with_execution_lease(uuid, uuid, uuid, text, uuid, text, text, integer, text, text, timestamptz, uuid) to service_role;
+
+create or replace function public.update_integration_connection_with_execution_lease(
+  p_organization_id uuid, p_connection_id uuid, p_ingestion_run_id uuid, p_idempotency_key text,
+  p_claim_token uuid, p_status text, p_set_next_scheduled_sync_at boolean,
+  p_next_scheduled_sync_at timestamptz
+) returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare written public.integration_connections;
+begin
+  update public.integration_connections connection
+  set status = coalesce(p_status, connection.status),
+    next_scheduled_sync_at = case when p_set_next_scheduled_sync_at then p_next_scheduled_sync_at else connection.next_scheduled_sync_at end
+  where connection.organization_id = p_organization_id and connection.id = p_connection_id
+    and exists (
+      select 1
+      from public.integration_worker_execution_leases execution_lease
+      join public.integration_ingestion_runs ingestion_run
+        on ingestion_run.organization_id = execution_lease.organization_id
+        and ingestion_run.id = execution_lease.ingestion_run_id
+      where execution_lease.organization_id = p_organization_id
+        and execution_lease.ingestion_run_id = p_ingestion_run_id
+        and execution_lease.claim_token = p_claim_token
+        and execution_lease.lease_expires_at > now()
+        and ingestion_run.idempotency_key = p_idempotency_key
+    )
+  returning * into written;
+  if not found then return null; end if;
+  return pg_catalog.to_jsonb(written);
+end;
+$$;
+revoke all on function public.update_integration_connection_with_execution_lease(uuid, uuid, uuid, text, uuid, text, boolean, timestamptz) from public, anon, authenticated;
+grant execute on function public.update_integration_connection_with_execution_lease(uuid, uuid, uuid, text, uuid, text, boolean, timestamptz) to service_role;
