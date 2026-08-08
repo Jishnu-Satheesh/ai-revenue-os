@@ -130,6 +130,7 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
           p_ingestion_run_id: input.ingestionRunId,
           p_idempotency_key: input.idempotencyKey,
           p_fingerprint: input.fingerprint,
+          p_claim_token: input.claimToken,
         });
         if (result.error || !result.data)
           throw new IntegrationError(
@@ -145,6 +146,7 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
           p_ingestion_run_id: input.ingestionRunId,
           p_idempotency_key: input.idempotencyKey,
           p_fingerprint: input.fingerprint,
+          p_claim_token: input.claimToken,
           p_accepted: input.accepted,
           p_rejected: input.rejected,
           p_rejection_reasons: [...input.rejectionReasons],

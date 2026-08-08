@@ -70,6 +70,7 @@ export type DurableIngestionHandoffLedger = {
     ingestionRunId: string;
     idempotencyKey: string;
     fingerprint: string;
+    claimToken: string;
   }): Promise<
     | { outcome: "claimed" }
     | { outcome: "in_progress" }
@@ -86,6 +87,7 @@ export type DurableIngestionHandoffLedger = {
     ingestionRunId: string;
     idempotencyKey: string;
     fingerprint: string;
+    claimToken: string;
     accepted: number;
     rejected: number;
     rejectionReasons: readonly string[];
@@ -104,7 +106,8 @@ export function createDurableIngestionSink(input: {
   return {
     async accept(request) {
       const fingerprint = durableFingerprint(request);
-      const claimed = await input.ledger.claim({ ...request, fingerprint });
+      const claimToken = crypto.randomUUID();
+      const claimed = await input.ledger.claim({ ...request, fingerprint, claimToken });
       if (claimed.outcome === "completed") {
         return {
           accepted: claimed.accepted,
@@ -123,7 +126,7 @@ export function createDurableIngestionSink(input: {
         );
       }
       const result = await input.sink.accept(request);
-      return input.ledger.complete({ ...request, fingerprint, ...result });
+      return input.ledger.complete({ ...request, fingerprint, claimToken, ...result });
     },
   };
 }

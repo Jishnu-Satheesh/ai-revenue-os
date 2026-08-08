@@ -181,28 +181,38 @@ export async function beginOrCancel(
   payload: ConnectionTaskPayload | DataSourceTaskPayload,
   dependencies: IntegrationWorkerDependencies,
 ): Promise<boolean> {
-  await dependencies.worker.markRunRunning({
-    organizationId: payload.organizationId,
-    ingestionRunId: payload.ingestionRunId,
-    startedAt: nowIso(dependencies),
-  });
-  const cancelled = await dependencies.isCancelled?.({
-    organizationId: payload.organizationId,
-    ingestionRunId: payload.ingestionRunId,
-  });
-  if (!cancelled) return false;
-  await dependencies.worker.completeRun({
-    organizationId: payload.organizationId,
-    ingestionRunId: payload.ingestionRunId,
-    status: "cancelled",
-    recordsReceived: 0,
-    recordsAccepted: 0,
-    recordsRejected: 0,
-    completedAt: nowIso(dependencies),
-    normalizedErrorCode: "CANCELLED",
-    safeErrorSummary: "The integration task was cancelled.",
-  });
-  return true;
+  try {
+    await dependencies.worker.markRunRunning({
+      organizationId: payload.organizationId,
+      ingestionRunId: payload.ingestionRunId,
+      startedAt: nowIso(dependencies),
+    });
+    const cancelled = await dependencies.isCancelled?.({
+      organizationId: payload.organizationId,
+      ingestionRunId: payload.ingestionRunId,
+    });
+    if (!cancelled) return false;
+    await dependencies.worker.completeRun({
+      organizationId: payload.organizationId,
+      ingestionRunId: payload.ingestionRunId,
+      status: "cancelled",
+      recordsReceived: 0,
+      recordsAccepted: 0,
+      recordsRejected: 0,
+      completedAt: nowIso(dependencies),
+      normalizedErrorCode: "CANCELLED",
+      safeErrorSummary: "The integration task was cancelled.",
+    });
+    return true;
+  } catch (error) {
+    const normalized = normalizedError(error);
+    try {
+      await requeueOrFail(payload, dependencies, normalized);
+    } catch {
+      // A missing CAS boundary remains a hard failure; never emulate the transition.
+    }
+    throw normalized;
+  }
 }
 
 /** Persists a validated preflight error only after all source checks have completed. */

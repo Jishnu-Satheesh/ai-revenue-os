@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { createHash } from "node:crypto";
 
 import { parse } from "csv-parse";
 
@@ -18,6 +19,12 @@ import {
 
 const MAX_CSV_BYTES = 10 * 1024 * 1024;
 const MAX_BATCH_SIZE = 500;
+
+export function batchIdempotencyKey(key: string, batchNumber: number): string {
+  const suffix = `:csv:${batchNumber}`;
+  const digest = createHash("sha256").update(key, "utf8").digest("base64url").slice(0, 16);
+  return `${key.slice(0, 200 - suffix.length - digest.length - 1)}:${digest}${suffix}`;
+}
 
 function assertCsvObject(metadata: {
   contentType: string | null;
@@ -157,7 +164,10 @@ export async function runImportDataSource(
           dependencies,
           organizationId: payload.organizationId,
           ingestionRunId: payload.ingestionRunId,
-          idempotencyKey: `${payload.idempotencyKey}:batch:${recordsReceived / MAX_BATCH_SIZE}`,
+          idempotencyKey: batchIdempotencyKey(
+            payload.idempotencyKey,
+            recordsReceived / MAX_BATCH_SIZE,
+          ),
           records: batch,
         });
         recordsAccepted += result.accepted;
@@ -171,7 +181,10 @@ export async function runImportDataSource(
         dependencies,
         organizationId: payload.organizationId,
         ingestionRunId: payload.ingestionRunId,
-        idempotencyKey: `${payload.idempotencyKey}:batch:${Math.ceil(recordsReceived / MAX_BATCH_SIZE)}`,
+        idempotencyKey: batchIdempotencyKey(
+          payload.idempotencyKey,
+          Math.ceil(recordsReceived / MAX_BATCH_SIZE),
+        ),
         records: batch,
       });
       recordsAccepted += result.accepted;

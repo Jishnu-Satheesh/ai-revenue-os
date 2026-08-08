@@ -8,6 +8,7 @@ import { googleBusinessProfileDefinition } from "@/modules/integrations/provider
 import { runCheckFreshness } from "@/workflows/integrations/check-freshness";
 import { runDisconnectConnection } from "@/workflows/integrations/disconnect-connection";
 import { runImportDataSource } from "@/workflows/integrations/import-data-source";
+import { batchIdempotencyKey } from "@/workflows/integrations/import-data-source";
 import { runSyncConnection } from "@/workflows/integrations/sync-connection";
 import { runTestConnection } from "@/workflows/integrations/test-connection";
 import type {
@@ -208,6 +209,11 @@ const connectionPayload = {
 };
 
 describe("Integration Hub workers", () => {
+  it("bounds deterministic CSV batch idempotency keys to the database limit", () => {
+    const key = batchIdempotencyKey("x".repeat(200), 999999);
+    expect(key).toHaveLength(200);
+    expect(key).toBe(batchIdempotencyKey("x".repeat(200), 999999));
+  });
   it("validates the organization, source, and adapter before starting privileged work", async () => {
     const deps = dependencies();
     deps.providers.getAdapter.mockImplementation(() => {

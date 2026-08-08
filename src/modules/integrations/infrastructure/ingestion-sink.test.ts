@@ -84,6 +84,7 @@ describe("validated integration ingestion sink", () => {
         ingestionRunId: string;
         idempotencyKey: string;
         fingerprint: string;
+        claimToken: string;
       }) {
         const key = `${input.organizationId}:${input.ingestionRunId}:${input.idempotencyKey}`;
         const current = stored.get(key);
@@ -100,6 +101,7 @@ describe("validated integration ingestion sink", () => {
         ingestionRunId: string;
         idempotencyKey: string;
         fingerprint: string;
+        claimToken: string;
         accepted: number;
         rejected: number;
         rejectionReasons: readonly string[];
