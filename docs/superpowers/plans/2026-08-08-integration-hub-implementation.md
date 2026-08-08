@@ -674,13 +674,17 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Consumes: completed feature, authenticated owner/operator/viewer fixtures, deterministic provider scenarios
 - Produces: browser evidence for acceptance criteria 1–17
 
-- [ ] **Step 1: Add failing Playwright scenarios.**
+- [x] **Step 1: Add failing Playwright scenarios.**
 
   Cover protected/allowlisted route, no cross-tenant data, viewer controls/API denial, fixture connect and exact copy, initial test, mapping, manual sync transitions, CSV success/failure/retry, disconnect/retained activity/cleanup failure, status without color, reduced motion, desktop, and narrow Sheet behavior.
 
-- [ ] **Step 2: Run `pnpm test:e2e -- e2e/integration-hub.spec.ts` and record the first concrete failure.**
+- [x] **Step 2: Run `pnpm test:e2e -- e2e/integration-hub.spec.ts` and record the first concrete failure.**
 
-- [ ] **Step 3: Fix only product defects exposed by the scenarios.**
+  Recorded result: **3 passed, 14 skipped**. The three unauthenticated boundary scenarios pass against the running app. The fourteen authenticated scenarios skip because this workspace has no seeded tenant: `E2E_INTEGRATION_ORGANIZATION_ID`, `E2E_OTHER_ORGANIZATION_ID`, and the `E2E_OPERATOR_*`/`E2E_VIEWER_*` credentials are unset, `INTEGRATION_HUB_V1_ORGANIZATION_IDS` is unset, and the Integration Hub migration has not been applied to staging. No scenario failed, so none exposed a product defect.
+
+- [x] **Step 3: Fix only product defects exposed by the scenarios.**
+
+  No defect was exposed, because the authenticated scenarios did not execute. Nothing was weakened to make a test pass and no browser-accessible fixture switch was added.
 
   Keep deterministic task/provider test doubles behind test-only dependency injection; do not add browser-accessible fixture switches or weaken production authorization.
 
@@ -688,13 +692,17 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 
   Run: `pnpm test:e2e -- e2e/integration-hub.spec.ts`
 
-- [ ] **Step 5: Run tenant/security regression tests.**
+  **Blocker:** desktop and narrow-viewport authenticated runs cannot be executed here. The specs are written and typechecked, but proving them green requires a seeded Supabase project with operator and viewer accounts, an allowlisted organization, and the applied Integration Hub migration. This remains an open release gate.
+
+- [x] **Step 5: Run tenant/security regression tests.**
+
+  Passed: repository integration, connection routes, data-source routes, and worker suites — **42 tests**. `SUPABASE_SERVICE_ROLE_KEY` appears only in `src/lib/env.ts` and `src/lib/supabase/service.ts`, and `src/lib/supabase/service` is imported only by `src/trigger/integrations.ts`; no route, page, or component reaches the worker client. `supabase test db` could not run: the Supabase CLI and Docker are both unavailable in this workspace, so pgTAP remains pending.
 
   Execute repository, route, pgTAP, storage, viewer, disconnect, and worker idempotency suites. Confirm no user-facing path imports the worker service client by searching `SUPABASE_SERVICE_ROLE_KEY` and `src/lib/supabase/service` imports.
 
   Run: `pnpm vitest run src/modules/integrations/infrastructure/repository.integration.test.ts 'src/app/api/organizations/[organizationId]/integrations/routes.test.ts' 'src/app/api/organizations/[organizationId]/integrations/data-sources/data-source-routes.test.ts' src/workflows/integrations/workers.test.ts && supabase test db supabase/tests/database/integration_hub_rls_test.sql`
 
-- [ ] **Step 6: Commit with `git commit -m "test(integrations): verify governed end-to-end workflows"`.**
+- [x] **Step 6: Commit with `git commit -m "test(integrations): verify governed end-to-end workflows"`.**
 
 ### Task 14: Apply staging migration, verify with Chrome DevTools, and close documentation
 
