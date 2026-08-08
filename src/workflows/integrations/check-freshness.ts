@@ -26,8 +26,8 @@ export async function runCheckFreshness(
     await persistPreflightFailure(payload, dependencies, normalized);
     throw normalized;
   }
-  const cancelled = await beginOrCancel(payload, dependencies);
-  if (cancelled) return;
+  const begin = await beginOrCancel(payload, dependencies);
+  if (begin.outcome !== "acquired") return;
   try {
     const now = new Date(nowIso(dependencies));
     const threshold = staleAfterMinutes * 60 * 1_000;
@@ -42,7 +42,9 @@ export async function runCheckFreshness(
         ? "The connection has not synchronized within its freshness target."
         : "The connection is within its freshness target.",
     });
-    await complete(payload, dependencies, { status: stale ? "partially_succeeded" : "succeeded" });
+    await complete(payload, dependencies, begin.claimToken, {
+      status: stale ? "partially_succeeded" : "succeeded",
+    });
   } catch (error) {
     const normalized = normalizedError(error);
     await appendConnectionHealth(payload, dependencies, {
@@ -51,7 +53,7 @@ export async function runCheckFreshness(
       normalizedErrorCode: normalized.code,
       safeDetail: normalized.message,
     });
-    await requeueOrFail(payload, dependencies, normalized);
+    await requeueOrFail(payload, dependencies, normalized, begin.claimToken);
     throw normalized;
   }
 }

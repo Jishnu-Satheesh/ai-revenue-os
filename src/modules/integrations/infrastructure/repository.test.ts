@@ -411,6 +411,7 @@ describe("Integration repositories", () => {
       worker.markRunRunning({
         organizationId: organizationA,
         ingestionRunId: runId,
+        claimToken: "00000000-0000-4000-8000-000000000001",
         startedAt: "2026-08-08T11:05:00.000Z",
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
@@ -418,6 +419,7 @@ describe("Integration repositories", () => {
       worker.completeRun({
         organizationId: organizationA,
         ingestionRunId: runId,
+        claimToken: "00000000-0000-4000-8000-000000000001",
         status: "succeeded",
         recordsReceived: 1,
         recordsAccepted: 1,
@@ -432,12 +434,15 @@ describe("Integration repositories", () => {
     const { port } = createMemoryPort({ runs: [initial] });
     let current = initial;
     const transitions: IntegrationRunTransitionPort = {
+      async acquireExecutionLease() {
+        return { outcome: "acquired" };
+      },
       async markRunRunning(input) {
         if (current.status !== "queued") return { outcome: "conflict" };
         current = { ...current, status: "running", started_at: input.startedAt };
         return { outcome: "transitioned", run: current };
       },
-      async resumeRun() {
+      async resumeLeasedRun() {
         return { outcome: "conflict" };
       },
       async completeRun(input) {
@@ -476,6 +481,7 @@ describe("Integration repositories", () => {
     const start = {
       organizationId: organizationA,
       ingestionRunId: runId,
+      claimToken: "00000000-0000-4000-8000-000000000001",
       startedAt: "2026-08-08T11:05:00.000Z",
     };
     const firstStart = await worker.markRunRunning(start);
@@ -485,6 +491,7 @@ describe("Integration repositories", () => {
     const completion = {
       organizationId: organizationA,
       ingestionRunId: runId,
+      claimToken: "00000000-0000-4000-8000-000000000001",
       status: "succeeded" as const,
       recordsReceived: 4,
       recordsAccepted: 4,
@@ -498,6 +505,90 @@ describe("Integration repositories", () => {
     await expect(worker.completeRun(completion)).resolves.toMatchObject({ status: "succeeded" });
   });
 
+  it("rejects a late completion after another worker takes over an expired execution lease", async () => {
+    const initial = run();
+    const { port } = createMemoryPort({ runs: [initial] });
+    let current = initial;
+    let activeClaimToken: string | null = null;
+    let leaseExpired = false;
+    const transitions: IntegrationRunTransitionPort = {
+      async acquireExecutionLease(input) {
+        if (activeClaimToken && !leaseExpired) return { outcome: "in_progress" };
+        activeClaimToken = input.claimToken;
+        leaseExpired = false;
+        return { outcome: "acquired" };
+      },
+      async markRunRunning(input) {
+        if (input.claimToken !== activeClaimToken || current.status !== "queued") {
+          return { outcome: "conflict" };
+        }
+        current = { ...current, status: "running", started_at: input.startedAt };
+        return { outcome: "transitioned", run: current };
+      },
+      async resumeLeasedRun(input) {
+        if (input.claimToken !== activeClaimToken || current.status !== "running") {
+          return { outcome: "conflict" };
+        }
+        return { outcome: "transitioned", run: current };
+      },
+      async completeRun(input) {
+        if (input.claimToken !== activeClaimToken || current.status !== "running") {
+          return { outcome: "conflict" };
+        }
+        current = { ...current, status: input.status, completed_at: input.completedAt };
+        return { outcome: "transitioned", run: current };
+      },
+      async requeueRun() {
+        return { outcome: "conflict" };
+      },
+      async cancelRun() {
+        return { outcome: "conflict" };
+      },
+    };
+    const worker = createIntegrationWorkerRepository({ persistence: port, transitions });
+    const workerA = await worker.acquireExecutionLease({
+      organizationId: organizationA,
+      ingestionRunId: runId,
+      idempotencyKey: initial.idempotency_key,
+    });
+    expect(workerA.outcome).toBe("acquired");
+    if (workerA.outcome !== "acquired") return;
+    await worker.markRunRunning({
+      organizationId: organizationA,
+      ingestionRunId: runId,
+      claimToken: workerA.claimToken,
+      startedAt: "2026-08-08T11:05:00.000Z",
+    });
+
+    leaseExpired = true;
+    const workerB = await worker.acquireExecutionLease({
+      organizationId: organizationA,
+      ingestionRunId: runId,
+      idempotencyKey: initial.idempotency_key,
+    });
+    expect(workerB.outcome).toBe("acquired");
+    if (workerB.outcome !== "acquired") return;
+    await worker.resumeLeasedRun({
+      organizationId: organizationA,
+      ingestionRunId: runId,
+      claimToken: workerB.claimToken,
+    });
+
+    const complete = (claimToken: string) =>
+      worker.completeRun({
+        organizationId: organizationA,
+        ingestionRunId: runId,
+        claimToken,
+        status: "succeeded",
+        recordsReceived: 1,
+        recordsAccepted: 1,
+        recordsRejected: 0,
+        completedAt: "2026-08-08T11:10:00.000Z",
+      });
+    await expect(complete(workerA.claimToken)).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(complete(workerB.claimToken)).resolves.toMatchObject({ status: "succeeded" });
+  });
+
   it("returns an atomic idempotent terminal result while rejecting a conflicting one", async () => {
     const completed = run({
       status: "succeeded",
@@ -507,10 +598,13 @@ describe("Integration repositories", () => {
     });
     const { port } = createMemoryPort({ runs: [completed] });
     const transitions: IntegrationRunTransitionPort = {
+      async acquireExecutionLease() {
+        return { outcome: "acquired" };
+      },
       async markRunRunning() {
         return { outcome: "conflict" };
       },
-      async resumeRun() {
+      async resumeLeasedRun() {
         return { outcome: "conflict" };
       },
       async completeRun(input) {
@@ -528,6 +622,7 @@ describe("Integration repositories", () => {
     const terminal = {
       organizationId: organizationA,
       ingestionRunId: runId,
+      claimToken: "00000000-0000-4000-8000-000000000001",
       status: "succeeded" as const,
       recordsReceived: 4,
       recordsAccepted: 4,

@@ -211,9 +211,17 @@ tasks.onCancel(async ({ task: taskId, payload }) => {
   const parsePayload = cancellationParsers[taskId as keyof typeof cancellationParsers];
   if (!parsePayload) return;
   const parsed = parsePayload(payload);
-  await createWorkerDependencies().worker.cancelRun({
+  const worker = createWorkerDependencies().worker;
+  const lease = await worker.acquireExecutionLease({
     organizationId: parsed.organizationId,
     ingestionRunId: parsed.ingestionRunId,
+    idempotencyKey: parsed.idempotencyKey,
+  });
+  if (lease.outcome !== "acquired") return;
+  await worker.cancelRun({
+    organizationId: parsed.organizationId,
+    ingestionRunId: parsed.ingestionRunId,
+    claimToken: lease.claimToken,
   });
 });
 

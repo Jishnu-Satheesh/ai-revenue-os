@@ -8,6 +8,10 @@ const integrationPgTapPath = resolve(
   process.cwd(),
   "supabase/tests/database/integration_hub_rls_test.sql",
 );
+const workerTransitionsMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260808012410_integration_worker_run_transitions.sql",
+);
 const integrationMigrationNames = readdirSync(migrationsDirectory)
   .filter((name) => /^\d{14}_integration_hub\.sql$/.test(name))
   .sort();
@@ -23,6 +27,10 @@ function readIntegrationMigration() {
 
 function readIntegrationPgTap() {
   return readFileSync(integrationPgTapPath, "utf8");
+}
+
+function readWorkerTransitionsMigration() {
+  return readFileSync(workerTransitionsMigrationPath, "utf8");
 }
 
 function functionDefinition(sql: string, qualifiedName: string) {
@@ -74,6 +82,28 @@ const tenantTables = [
 ] as const;
 
 describe("Integration Hub migration contract", () => {
+  it("leases worker execution by tenant and prevents a late claimant from transitioning a run", () => {
+    const sql = readWorkerTransitionsMigration();
+    const lease = statementContaining(sql, "create table public.integration_worker_execution_leases");
+    const claim = functionDefinition(sql, "public.claim_integration_worker_execution_lease");
+    const transition = functionDefinition(sql, "public.transition_integration_ingestion_run");
+
+    expect(lease).toContain("primary key (organization_id, ingestion_run_id)");
+    expect(lease).toContain(
+      "foreign key (organization_id, ingestion_run_id) references public.integration_ingestion_runs(organization_id, id)",
+    );
+    expect(sql).toContain("force row level security");
+    expect(sql).toContain("revoke all on table public.integration_worker_execution_leases from public, anon, authenticated");
+    expect(sql).toContain("grant execute on function public.claim_integration_worker_execution_lease(uuid, uuid, text, uuid) to service_role");
+    expect(sql).toContain("integration_worker_execution_leases_prevent_identity_change");
+    expect(claim).toContain("existing.idempotency_key <> p_idempotency_key");
+    expect(claim).toContain("existing.lease_expires_at <= now()");
+    expect(claim).toContain("claim_token = p_claim_token");
+    expect(transition).toContain("p_execution_claim_token uuid default null");
+    expect(transition).toContain("execution_lease.claim_token = p_execution_claim_token");
+    expect(transition).toContain("execution_lease.lease_expires_at > now()");
+  });
+
   it("defines organization ownership and composite identity on each tenant table", () => {
     const sql = readIntegrationMigration();
 

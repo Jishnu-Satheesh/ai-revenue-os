@@ -185,6 +185,18 @@ export function createIntegrationWorkerRepository(
   },
 ): IntegrationWorkerRepository {
   return {
+    async acquireExecutionLease(input) {
+      const claimToken = crypto.randomUUID();
+      const result = await requiredRunTransitions(dependencies.transitions).acquireExecutionLease({
+        ...input,
+        claimToken,
+      });
+      if (result.outcome === "conflict") {
+        throw new IntegrationError("CONFLICT", "The execution lease is invalid.", false);
+      }
+      if (result.outcome === "acquired") return { outcome: "acquired", claimToken };
+      return { outcome: "in_progress" };
+    },
     async markRunRunning(input) {
       const result = await requiredRunTransitions(dependencies.transitions).markRunRunning({
         ...input,
@@ -199,8 +211,8 @@ export function createIntegrationWorkerRepository(
       }
       return result.run;
     },
-    async resumeRun(input) {
-      const result = await requiredRunTransitions(dependencies.transitions).resumeRun({
+    async resumeLeasedRun(input) {
+      const result = await requiredRunTransitions(dependencies.transitions).resumeLeasedRun({
         ...input,
         expectedStatus: "running",
       });
@@ -310,7 +322,9 @@ export function createSupabaseIntegrationRunTransitionPort(
 ): IntegrationRunTransitionPort {
   type RpcClient = {
     rpc(
-      name: "transition_integration_ingestion_run",
+      name:
+        | "transition_integration_ingestion_run"
+        | "claim_integration_worker_execution_lease",
       args: Record<string, unknown>,
     ): PromiseLike<{ data: IntegrationIngestionRunRow | null; error: unknown }>;
   };
@@ -327,6 +341,7 @@ export function createSupabaseIntegrationRunTransitionPort(
     normalizedErrorCode?: string | null;
     safeErrorSummary?: string | null;
     startedAt?: string | null;
+    claimToken: string;
   }) => {
     const result = await rpc.rpc("transition_integration_ingestion_run", {
       p_organization_id: input.organizationId,
@@ -340,6 +355,7 @@ export function createSupabaseIntegrationRunTransitionPort(
       p_normalized_error_code: input.normalizedErrorCode ?? null,
       p_safe_error_summary: input.safeErrorSummary ?? null,
       p_started_at: input.startedAt ?? null,
+      p_execution_claim_token: input.claimToken,
     });
     if (result.error)
       databaseError("Integration run transition could not be persisted.", result.error);
@@ -348,10 +364,24 @@ export function createSupabaseIntegrationRunTransitionPort(
       : { outcome: "conflict" as const };
   };
   return {
+    async acquireExecutionLease(input) {
+      const result = await rpc.rpc("claim_integration_worker_execution_lease", {
+        p_organization_id: input.organizationId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_idempotency_key: input.idempotencyKey,
+        p_claim_token: input.claimToken,
+      });
+      if (result.error) databaseError("Integration execution lease could not be acquired.", result.error);
+      const outcome = (result.data as { outcome?: string } | null)?.outcome;
+      if (outcome === "acquired") return { outcome };
+      if (outcome === "in_progress") return { outcome };
+      return { outcome: "conflict" };
+    },
     markRunRunning(input) {
       return transition({
         organizationId: input.organizationId,
         ingestionRunId: input.ingestionRunId,
+        claimToken: input.claimToken,
         expectedStatuses: [input.expectedStatus],
         status: "running",
         recordsReceived: 0,
@@ -360,10 +390,11 @@ export function createSupabaseIntegrationRunTransitionPort(
         startedAt: input.startedAt,
       });
     },
-    resumeRun(input) {
+    resumeLeasedRun(input) {
       return transition({
         organizationId: input.organizationId,
         ingestionRunId: input.ingestionRunId,
+        claimToken: input.claimToken,
         expectedStatuses: [input.expectedStatus],
         status: "running",
         recordsReceived: 0,
@@ -375,6 +406,7 @@ export function createSupabaseIntegrationRunTransitionPort(
       return transition({
         organizationId: input.organizationId,
         ingestionRunId: input.ingestionRunId,
+        claimToken: input.claimToken,
         expectedStatuses: [input.expectedStatus],
         status: input.status,
         recordsReceived: input.recordsReceived,
@@ -389,6 +421,7 @@ export function createSupabaseIntegrationRunTransitionPort(
       return transition({
         organizationId: input.organizationId,
         ingestionRunId: input.ingestionRunId,
+        claimToken: input.claimToken,
         expectedStatuses: [input.expectedStatus],
         status: "queued",
         recordsReceived: input.recordsReceived,
@@ -402,6 +435,7 @@ export function createSupabaseIntegrationRunTransitionPort(
       return transition({
         organizationId: input.organizationId,
         ingestionRunId: input.ingestionRunId,
+        claimToken: input.claimToken,
         expectedStatuses: ["queued", "running"],
         status: "cancelled",
         recordsReceived: 0,

@@ -78,6 +78,11 @@ export type IntegrationWorkerDependencies = {
   };
 };
 
+export type WorkerBeginResult =
+  | { outcome: "acquired"; claimToken: string }
+  | { outcome: "in_progress" }
+  | { outcome: "cancelled" };
+
 function taskValidationError(): never {
   throw new IntegrationError("VALIDATION_ERROR", "The integration task payload is invalid.", false);
 }
@@ -180,30 +185,39 @@ export async function loadValidatedDataSource(
 export async function beginOrCancel(
   payload: ConnectionTaskPayload | DataSourceTaskPayload,
   dependencies: IntegrationWorkerDependencies,
-): Promise<boolean> {
+): Promise<WorkerBeginResult> {
+  const lease = await dependencies.worker.acquireExecutionLease({
+    organizationId: payload.organizationId,
+    ingestionRunId: payload.ingestionRunId,
+    idempotencyKey: payload.idempotencyKey,
+  });
+  if (lease.outcome === "in_progress") return lease;
   try {
     try {
       await dependencies.worker.markRunRunning({
         organizationId: payload.organizationId,
         ingestionRunId: payload.ingestionRunId,
+        claimToken: lease.claimToken,
         startedAt: nowIso(dependencies),
       });
     } catch (error) {
       const normalized = normalizedError(error);
       if (normalized.code !== "CONFLICT") throw normalized;
-      await dependencies.worker.resumeRun({
+      await dependencies.worker.resumeLeasedRun({
         organizationId: payload.organizationId,
         ingestionRunId: payload.ingestionRunId,
+        claimToken: lease.claimToken,
       });
     }
     const cancelled = await dependencies.isCancelled?.({
       organizationId: payload.organizationId,
       ingestionRunId: payload.ingestionRunId,
     });
-    if (!cancelled) return false;
+    if (!cancelled) return lease;
     await dependencies.worker.completeRun({
       organizationId: payload.organizationId,
       ingestionRunId: payload.ingestionRunId,
+      claimToken: lease.claimToken,
       status: "cancelled",
       recordsReceived: 0,
       recordsAccepted: 0,
@@ -212,11 +226,11 @@ export async function beginOrCancel(
       normalizedErrorCode: "CANCELLED",
       safeErrorSummary: "The integration task was cancelled.",
     });
-    return true;
+    return { outcome: "cancelled" };
   } catch (error) {
     const normalized = normalizedError(error);
     try {
-      await requeueOrFail(payload, dependencies, normalized);
+      await requeueOrFail(payload, dependencies, normalized, lease.claimToken);
     } catch {
       // A missing CAS boundary remains a hard failure; never emulate the transition.
     }
@@ -230,13 +244,30 @@ export async function persistPreflightFailure(
   dependencies: IntegrationWorkerDependencies,
   error: IntegrationError,
 ): Promise<void> {
+  const lease = await dependencies.worker.acquireExecutionLease({
+    organizationId: payload.organizationId,
+    ingestionRunId: payload.ingestionRunId,
+    idempotencyKey: payload.idempotencyKey,
+  });
+  if (lease.outcome === "in_progress") return;
   try {
-    await dependencies.worker.markRunRunning({
-      organizationId: payload.organizationId,
-      ingestionRunId: payload.ingestionRunId,
-      startedAt: nowIso(dependencies),
-    });
-    await requeueOrFail(payload, dependencies, error);
+    try {
+      await dependencies.worker.markRunRunning({
+        organizationId: payload.organizationId,
+        ingestionRunId: payload.ingestionRunId,
+        claimToken: lease.claimToken,
+        startedAt: nowIso(dependencies),
+      });
+    } catch (transitionError) {
+      const normalized = normalizedError(transitionError);
+      if (normalized.code !== "CONFLICT") throw normalized;
+      await dependencies.worker.resumeLeasedRun({
+        organizationId: payload.organizationId,
+        ingestionRunId: payload.ingestionRunId,
+        claimToken: lease.claimToken,
+      });
+    }
+    await requeueOrFail(payload, dependencies, error, lease.claimToken);
   } catch {
     // Preserve the original validated error; an unavailable CAS boundary must not be bypassed.
   }
@@ -245,6 +276,7 @@ export async function persistPreflightFailure(
 export async function complete(
   payload: ConnectionTaskPayload | DataSourceTaskPayload,
   dependencies: IntegrationWorkerDependencies,
+  claimToken: string,
   input: {
     status: "succeeded" | "partially_succeeded" | "failed" | "cancelled";
     recordsReceived?: number;
@@ -257,6 +289,7 @@ export async function complete(
   await dependencies.worker.completeRun({
     organizationId: payload.organizationId,
     ingestionRunId: payload.ingestionRunId,
+    claimToken,
     status: input.status,
     recordsReceived: input.recordsReceived ?? 0,
     recordsAccepted: input.recordsAccepted ?? 0,
@@ -271,12 +304,14 @@ export async function requeueOrFail(
   payload: ConnectionTaskPayload | DataSourceTaskPayload,
   dependencies: IntegrationWorkerDependencies,
   error: IntegrationError,
+  claimToken: string,
   counts: { recordsReceived?: number; recordsAccepted?: number; recordsRejected?: number } = {},
 ): Promise<void> {
   if (error.retryable) {
     await dependencies.worker.requeueRun({
       organizationId: payload.organizationId,
       ingestionRunId: payload.ingestionRunId,
+      claimToken,
       recordsReceived: counts.recordsReceived ?? 0,
       recordsAccepted: counts.recordsAccepted ?? 0,
       recordsRejected: counts.recordsRejected ?? 0,
@@ -285,7 +320,7 @@ export async function requeueOrFail(
     });
     return;
   }
-  await complete(payload, dependencies, {
+  await complete(payload, dependencies, claimToken, {
     status: "failed",
     recordsReceived: counts.recordsReceived,
     recordsAccepted: counts.recordsAccepted,

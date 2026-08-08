@@ -131,8 +131,8 @@ export async function runImportDataSource(
     await persistPreflightFailure(payload, dependencies, normalized);
     throw normalized;
   }
-  const cancelled = await beginOrCancel(payload, dependencies);
-  if (cancelled) return;
+  const begin = await beginOrCancel(payload, dependencies);
+  if (begin.outcome !== "acquired") return;
   let recordsReceived = 0;
   let recordsAccepted = 0;
   let recordsRejected = 0;
@@ -190,7 +190,7 @@ export async function runImportDataSource(
       recordsAccepted += result.accepted;
       recordsRejected += result.rejected;
     }
-    await complete(payload, dependencies, {
+    await complete(payload, dependencies, begin.claimToken, {
       status: recordsRejected ? "partially_succeeded" : "succeeded",
       recordsReceived,
       recordsAccepted,
@@ -199,7 +199,7 @@ export async function runImportDataSource(
   } catch (error) {
     const normalized = normalizedError(error);
     if (normalized.metadata.staleLease || normalized.metadata.handoffInProgress) return;
-    await requeueOrFail(payload, dependencies, normalized, {
+    await requeueOrFail(payload, dependencies, normalized, begin.claimToken, {
       recordsReceived,
       recordsAccepted,
       recordsRejected,

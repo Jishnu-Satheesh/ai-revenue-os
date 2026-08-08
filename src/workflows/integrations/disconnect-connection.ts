@@ -26,8 +26,8 @@ export async function runDisconnectConnection(
     await persistPreflightFailure(payload, dependencies, normalized);
     throw normalized;
   }
-  const cancelled = await beginOrCancel(payload, dependencies);
-  if (cancelled) return;
+  const begin = await beginOrCancel(payload, dependencies);
+  if (begin.outcome !== "acquired") return;
   try {
     await dependencies.worker.scheduleConnection({
       organizationId: payload.organizationId,
@@ -51,7 +51,7 @@ export async function runDisconnectConnection(
       outcome: "passed",
       safeDetail: "Credential cleanup completed.",
     });
-    await complete(payload, dependencies, { status: "succeeded" });
+    await complete(payload, dependencies, begin.claimToken, { status: "succeeded" });
   } catch (error) {
     const normalized = normalizedError(error);
     // The synchronous disconnect already disabled grants. This appends a recovery warning only.
@@ -61,7 +61,7 @@ export async function runDisconnectConnection(
       normalizedErrorCode: normalized.code,
       safeDetail: "Credential cleanup requires a retry; capabilities remain disabled.",
     });
-    await requeueOrFail(payload, dependencies, normalized);
+    await requeueOrFail(payload, dependencies, normalized, begin.claimToken);
     throw normalized;
   }
 }

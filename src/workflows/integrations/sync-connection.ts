@@ -27,8 +27,8 @@ export async function runSyncConnection(
     await persistPreflightFailure(payload, dependencies, normalized);
     throw normalized;
   }
-  const cancelled = await beginOrCancel(payload, dependencies);
-  if (cancelled) return;
+  const begin = await beginOrCancel(payload, dependencies);
+  if (begin.outcome !== "acquired") return;
   try {
     const records = validateEnvelopes(
       await adapter.sync({
@@ -56,7 +56,7 @@ export async function runSyncConnection(
           ? "Some provider records were rejected during validation."
           : "Synchronization completed.",
     });
-    await complete(payload, dependencies, {
+    await complete(payload, dependencies, begin.claimToken, {
       status,
       recordsReceived: records.length,
       recordsAccepted: handoff.accepted,
@@ -72,7 +72,7 @@ export async function runSyncConnection(
       normalizedErrorCode: normalized.code,
       safeDetail: normalized.message,
     });
-    await requeueOrFail(payload, dependencies, normalized);
+    await requeueOrFail(payload, dependencies, normalized, begin.claimToken);
     throw normalized;
   }
 }

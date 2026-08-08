@@ -27,8 +27,8 @@ export async function runTestConnection(
     await persistPreflightFailure(payload, dependencies, normalized);
     throw normalized;
   }
-  const cancelled = await beginOrCancel(payload, dependencies);
-  if (cancelled) return;
+  const begin = await beginOrCancel(payload, dependencies);
+  if (begin.outcome !== "acquired") return;
   try {
     const result = await adapter.testConnection({
       organizationId: payload.organizationId,
@@ -48,7 +48,7 @@ export async function runTestConnection(
         : result.outcome === "warning"
           ? "partially_succeeded"
           : "failed";
-    await complete(payload, dependencies, {
+    await complete(payload, dependencies, begin.claimToken, {
       status,
       normalizedErrorCode: result.outcome === "failed" ? "UNKNOWN_PROVIDER_ERROR" : null,
       safeErrorSummary:
@@ -63,7 +63,7 @@ export async function runTestConnection(
       normalizedErrorCode: normalized.code,
       safeDetail: normalized.message,
     });
-    await requeueOrFail(payload, dependencies, normalized);
+    await requeueOrFail(payload, dependencies, normalized, begin.claimToken);
     throw normalized;
   }
 }

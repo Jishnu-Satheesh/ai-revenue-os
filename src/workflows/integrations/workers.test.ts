@@ -99,8 +99,12 @@ function workerRepository(): IntegrationWorkerRepository & {
   return {
     health,
     completions,
+    acquireExecutionLease: vi.fn(async () => ({
+      outcome: "acquired" as const,
+      claimToken: "88888888-8888-4888-8888-888888888888",
+    })),
     markRunRunning: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
-    resumeRun: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
+    resumeLeasedRun: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
     completeRun: vi.fn(async (input) => {
       completions.push(input);
       return runRow({
@@ -238,6 +242,54 @@ describe("Integration Hub workers", () => {
     );
   });
 
+  it("stops active duplicate workers before provider, health, or connection mutations", async () => {
+    const workers = [workerRepository(), workerRepository(), workerRepository(), workerRepository()];
+    const testAdapter = fixtureAdapter({
+      testConnection: vi.fn(() => {
+        throw new Error("duplicate worker reached provider test");
+      }),
+    });
+    const syncAdapter = fixtureAdapter({
+      sync: vi.fn(() => {
+        throw new Error("duplicate worker reached provider sync");
+      }),
+    });
+    const testDependencies = dependencies({ worker: workers[0], adapter: testAdapter });
+    const syncDependencies = dependencies({ worker: workers[1], adapter: syncAdapter });
+    const freshnessDependencies = dependencies({ worker: workers[2] });
+    const disconnectDependencies = dependencies({ worker: workers[3] });
+
+    for (const worker of workers) {
+      vi.mocked(worker.acquireExecutionLease).mockResolvedValue({ outcome: "in_progress" });
+    }
+
+    await runTestConnection(connectionPayload, testDependencies);
+    await runSyncConnection(
+      { ...connectionPayload, taskName: "integration.sync-connection" },
+      syncDependencies,
+    );
+    await runCheckFreshness(
+      { ...connectionPayload, taskName: "integration.check-freshness" },
+      freshnessDependencies,
+    );
+    await runDisconnectConnection(
+      { ...connectionPayload, taskName: "integration.disconnect-connection" },
+      disconnectDependencies,
+    );
+
+    expect(testAdapter.testConnection).not.toHaveBeenCalled();
+    expect(syncAdapter.sync).not.toHaveBeenCalled();
+    for (const [index, worker] of workers.entries()) {
+      expect(worker.markRunRunning, `worker ${index}`).not.toHaveBeenCalled();
+      expect(worker.resumeLeasedRun, `worker ${index}`).not.toHaveBeenCalled();
+      expect(worker.appendHealthCheck, `worker ${index}`).not.toHaveBeenCalled();
+      expect(worker.scheduleConnection, `worker ${index}`).not.toHaveBeenCalled();
+      expect(worker.setConnectionStatus, `worker ${index}`).not.toHaveBeenCalled();
+      expect(worker.completeRun, `worker ${index}`).not.toHaveBeenCalled();
+      expect(worker.requeueRun, `worker ${index}`).not.toHaveBeenCalled();
+    }
+  });
+
   it("reuses the persisted idempotency key and sends a valid sync handoff once", async () => {
     const deps = dependencies();
     await runSyncConnection(
@@ -258,7 +310,7 @@ describe("Integration Hub workers", () => {
     vi.mocked(worker.markRunRunning)
       .mockResolvedValueOnce(runRow({ status: "running", started_at: timestamp }))
       .mockRejectedValueOnce(new IntegrationError("CONFLICT", "terminal", false));
-    vi.mocked(worker.resumeRun).mockRejectedValueOnce(
+    vi.mocked(worker.resumeLeasedRun).mockRejectedValueOnce(
       new IntegrationError("CONFLICT", "terminal", false),
     );
     const deps = dependencies({ worker });

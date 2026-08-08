@@ -309,17 +309,25 @@ export type IntegrationRepository = {
 };
 
 export type IntegrationRunTransitionPort = {
+  acquireExecutionLease(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    claimToken: string;
+  }): Promise<{ outcome: "acquired" | "in_progress" | "conflict" }>;
   markRunRunning(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
     expectedStatus: "queued";
     startedAt: string;
   }): Promise<
     { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
   >;
-  resumeRun(input: {
+  resumeLeasedRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
     expectedStatus: "running";
   }): Promise<
     { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
@@ -327,6 +335,7 @@ export type IntegrationRunTransitionPort = {
   completeRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
     expectedStatus: "running";
     status: "succeeded" | "partially_succeeded" | "failed" | "cancelled";
     recordsReceived: number;
@@ -343,6 +352,7 @@ export type IntegrationRunTransitionPort = {
   requeueRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
     expectedStatus: "running";
     recordsReceived: number;
     recordsAccepted: number;
@@ -355,24 +365,36 @@ export type IntegrationRunTransitionPort = {
   cancelRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
   }): Promise<
     { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
   >;
 };
 
 export type IntegrationWorkerRepository = {
+  acquireExecutionLease(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+  }): Promise<
+    | { outcome: "acquired"; claimToken: string }
+    | { outcome: "in_progress" }
+  >;
   markRunRunning(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
     startedAt: string;
   }): Promise<IntegrationIngestionRunRow>;
-  resumeRun(input: {
+  resumeLeasedRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
   }): Promise<IntegrationIngestionRunRow>;
   completeRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
     status: "succeeded" | "partially_succeeded" | "failed" | "cancelled";
     recordsReceived: number;
     recordsAccepted: number;
@@ -384,6 +406,7 @@ export type IntegrationWorkerRepository = {
   requeueRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
     recordsReceived: number;
     recordsAccepted: number;
     recordsRejected: number;
@@ -393,6 +416,7 @@ export type IntegrationWorkerRepository = {
   cancelRun(input: {
     organizationId: string;
     ingestionRunId: string;
+    claimToken: string;
   }): Promise<IntegrationIngestionRunRow>;
   appendHealthCheck(input: IntegrationHealthCheckInsert): Promise<IntegrationHealthCheckRow>;
   loadGrantRecomputationInput(input: {
