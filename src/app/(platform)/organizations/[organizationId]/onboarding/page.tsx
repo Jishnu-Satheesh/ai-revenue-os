@@ -55,9 +55,7 @@ export default async function OnboardingPage({ params }: PageProps) {
         <Alert className="max-w-sm bg-primary/5">
           <BadgeInfo className="text-accent" />
           <AlertTitle>Complete what is known, request what is missing</AlertTitle>
-          <AlertDescription>
-            Save a draft at any point.
-          </AlertDescription>
+          <AlertDescription>Save a draft at any point.</AlertDescription>
         </Alert>
       </div>
 

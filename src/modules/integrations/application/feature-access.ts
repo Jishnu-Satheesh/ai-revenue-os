@@ -31,9 +31,7 @@ export function parseIntegrationOrganizationIds(value: string | undefined): Set<
 
 export function assertIntegrationHubEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseIntegrationOrganizationIds(
-    env.INTEGRATION_HUB_V1_ORGANIZATION_IDS,
-  ),
+  enabledOrganizationIds = parseIntegrationOrganizationIds(env.INTEGRATION_HUB_V1_ORGANIZATION_IDS),
 ): void {
   if (!enabledOrganizationIds.has(organizationId.toLowerCase())) {
     throw new DomainError(

@@ -4,7 +4,7 @@ import "./globals.css";
 import { Manrope } from "next/font/google";
 import { cn } from "@/lib/utils";
 
-const manrope = Manrope({subsets:['latin'],variable:'--font-sans'});
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "AI Revenue OS",

@@ -57,10 +57,10 @@ export type SectionField = FieldBase &
     | { control: "select"; options: readonly FieldOption[] }
     | { control: "combobox"; options: readonly FieldOption[]; searchPlaceholder?: string }
     | {
-      control: "multiselect";
-      options: readonly FieldOption[];
-      searchPlaceholder?: string;
-    }
+        control: "multiselect";
+        options: readonly FieldOption[];
+        searchPlaceholder?: string;
+      }
     | { control: "tags"; multiline?: boolean }
     | { control: "radio"; options: readonly FieldOption[] }
     | { control: "switch"; switchLabel: string }
@@ -211,7 +211,7 @@ export function SectionForm({
                             selector={(state) =>
                               String(
                                 state.values[(config as { currencyField: string }).currencyField] ??
-                                "",
+                                  "",
                               )
                             }
                           >
