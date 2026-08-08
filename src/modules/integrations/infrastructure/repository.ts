@@ -149,6 +149,9 @@ export function createIntegrationRepository(
         throw error;
       }
     },
+    updateRun(input) {
+      return dependencies.persistence.updateRun(input);
+    },
     async disconnect(input) {
       return requiredTransaction(dependencies.transactions).disconnectConnection(input);
     },

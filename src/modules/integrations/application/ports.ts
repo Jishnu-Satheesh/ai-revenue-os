@@ -262,6 +262,11 @@ export type IntegrationRepository = {
     dataSourceId?: string;
     correlationId: string;
   }): Promise<IntegrationIngestionRunRow>;
+  updateRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    patch: Partial<IntegrationIngestionRunInsert>;
+  }): Promise<IntegrationIngestionRunRow>;
   disconnect(
     input: Parameters<IntegrationTransactionPort["disconnectConnection"]>[0],
   ): Promise<IntegrationConnectionRow>;
