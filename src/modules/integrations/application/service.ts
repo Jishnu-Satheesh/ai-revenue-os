@@ -165,10 +165,6 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
 }
 
-function failureStateKey(idempotencyKey: string, suffix: string): string {
-  return `${idempotencyKey.slice(0, 160)}:${createHash("sha256").update(suffix).digest("hex").slice(0, 16)}`;
-}
-
 function capabilityRows(input: {
   definition: ProviderDefinition;
   connection: Pick<IntegrationConnectionRow, "status" | "granted_scopes" | "adapter_version">;
@@ -381,7 +377,8 @@ export function createIntegrationService({
 
   async function createDataSourceWithIdempotency(
     input: AuthenticatedIntegrationContext &
-      z.input<typeof createDataSourceSchema> & { operationFingerprint?: string },
+      z.input<typeof createDataSourceSchema> &
+      z.input<typeof dataSourceIdempotencySchema> & { operationFingerprint?: string },
   ) {
     authorize(input, "integration.import");
     const parsed = createDataSourceSchema.parse(input);
@@ -436,7 +433,9 @@ export function createIntegrationService({
   }
 
   async function createDataSource(
-    input: AuthenticatedIntegrationContext & z.input<typeof createDataSourceSchema>,
+    input: AuthenticatedIntegrationContext &
+      z.input<typeof createDataSourceSchema> &
+      z.input<typeof dataSourceIdempotencySchema>,
   ) {
     return (await createDataSourceWithIdempotency(input)).source;
   }
@@ -444,7 +443,8 @@ export function createIntegrationService({
   async function updateDataSource(
     input: AuthenticatedIntegrationContext & { dataSourceId: string } & z.input<
         typeof updateDataSourceSchema
-      >,
+      > &
+      z.input<typeof dataSourceIdempotencySchema>,
   ) {
     authorize(input, "integration.import");
     const source = await requireDataSource(input, input.dataSourceId);

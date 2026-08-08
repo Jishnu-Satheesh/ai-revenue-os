@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { IntegrationError } from "@/domain/integrations/errors";
+
 vi.mock("server-only", () => ({}));
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
@@ -171,5 +173,124 @@ describe("data-source routes", () => {
     expect(mocks.service.updateDataSource).toHaveBeenCalledWith(
       expect.objectContaining({ dataSourceId, status: "archived" }),
     );
+  });
+
+  it("refuses to import an archived source and hides the internal cause", async () => {
+    mocks.service.requestImport.mockRejectedValueOnce(
+      new IntegrationError(
+        "CONFLICT",
+        "Archived data sources cannot be imported.",
+        false,
+        {},
+        "data_sources.status=archived",
+      ),
+    );
+
+    const response = await importSource(
+      new Request("http://localhost", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idempotencyKey: "import-archived-1" }),
+      }),
+      sourceParams(),
+    );
+
+    expect(response.status).toBe(409);
+    const payload = await response.text();
+    expect(payload).toContain("Archived data sources cannot be imported.");
+    expect(payload).not.toContain("internalCause");
+    expect(payload).not.toContain("data_sources.status=archived");
+  });
+
+  it("returns a safe 404 for a source outside the caller's organization", async () => {
+    mocks.service.requestImport.mockRejectedValueOnce(
+      new IntegrationError(
+        "NOT_FOUND",
+        "The data source was not found.",
+        false,
+        {},
+        "organization_id mismatch",
+      ),
+    );
+
+    const response = await importSource(
+      new Request("http://localhost", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idempotencyKey: "import-foreign-1" }),
+      }),
+      sourceParams(),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain("organization_id mismatch");
+  });
+
+  it("replays a retried import onto the same persisted run", async () => {
+    mocks.service.requestImport.mockResolvedValue({ runId: "run-42", status: "queued" });
+    const send = () =>
+      importSource(
+        new Request("http://localhost", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ idempotencyKey: "import-retry-key-1" }),
+        }),
+        sourceParams(),
+      );
+
+    const first = await send();
+    const second = await send();
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(await first.json()).toEqual({ runId: "run-42", status: "queued" });
+    expect(await second.json()).toEqual({ runId: "run-42", status: "queued" });
+    expect(mocks.service.requestImport).toHaveBeenCalledTimes(2);
+    for (const call of mocks.service.requestImport.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ idempotencyKey: "import-retry-key-1" }));
+    }
+  });
+
+  it("rejects a malformed CSV without copying any cell value into the response or logs", async () => {
+    const form = new FormData();
+    form.set("name", "Broken CSV");
+    form.set("idempotencyKey", "csv-broken-key-0001");
+    form.set("columnMapping", JSON.stringify({ revenue: "revenue" }));
+    form.set("file", new File(["date,revenue\n2026-08-01"], "broken.csv", { type: "text/csv" }));
+
+    const response = await createSource(
+      new Request("http://localhost", { method: "POST", body: form }),
+      params(),
+    );
+
+    expect(response.status).toBe(400);
+    const payload = await response.text();
+    expect(payload).not.toContain("2026-08-01");
+    expect(mocks.service.createDataSourceWithIdempotency).not.toHaveBeenCalled();
+    const logged = JSON.stringify([
+      mocks.logger.info.mock.calls,
+      mocks.logger.warn.mock.calls,
+      mocks.logger.error.mock.calls,
+    ]);
+    expect(logged).not.toContain("2026-08-01");
+  });
+
+  it("rejects a mapping that names a column the CSV header does not contain", async () => {
+    const form = new FormData();
+    form.set("name", "Mismatched mapping");
+    form.set("idempotencyKey", "csv-mapping-key-0001");
+    form.set("columnMapping", JSON.stringify({ revenue: "not_a_column" }));
+    form.set(
+      "file",
+      new File(["date,revenue\n2026-08-01,12"], "mapping.csv", { type: "text/csv" }),
+    );
+
+    const response = await createSource(
+      new Request("http://localhost", { method: "POST", body: form }),
+      params(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.service.createDataSourceWithIdempotency).not.toHaveBeenCalled();
   });
 });

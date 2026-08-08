@@ -264,7 +264,7 @@ export type IntegrationTransactionPort = {
     actorId: string;
     idempotencyKey: string;
     requestFingerprint: string;
-    patch: Pick<IntegrationDataSourceInsert, "name" | "status">;
+    patch: Partial<Pick<IntegrationDataSourceInsert, "name" | "status">>;
     correlationId: string;
   }) => Promise<{ source: IntegrationDataSourceRow; deduplicated: boolean }>;
 };

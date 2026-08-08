@@ -33,51 +33,52 @@ export type IntegrationTaskName =
   | "integration.sync-connection"
   | "integration.import-data-source"
   | "integration.disconnect-connection"
-  | "integration.check-freshness"
+  | "integration.check-freshness";
 
 export type IntegrationTaskPayload = {
-  taskName: IntegrationTaskName
-  organizationId: string
-  connectionId?: string
-  dataSourceId?: string
-  ingestionRunId?: string
-  correlationId: string
-  idempotencyKey: string
-  adapterVersion?: string
-}
+  taskName: IntegrationTaskName;
+  organizationId: string;
+  connectionId?: string;
+  dataSourceId?: string;
+  ingestionRunId?: string;
+  correlationId: string;
+  idempotencyKey: string;
+  adapterVersion?: string;
+};
 
 export type IntegrationTaskDispatcher = {
-  dispatch(input: IntegrationTaskPayload): Promise<{ triggerRunId: string }>
-}
+  dispatch(input: IntegrationTaskPayload): Promise<{ triggerRunId: string }>;
+};
 
 export type IntegrationWorkerDependencies = {
-  repository: IntegrationWorkerRepository
-  providers: ProviderRegistry
-  credentials: CredentialStore
-  ingestionSink: IngestionSink
-  now: () => Date
-}
+  repository: IntegrationWorkerRepository;
+  providers: ProviderRegistry;
+  credentials: CredentialStore;
+  ingestionSink: IngestionSink;
+  now: () => Date;
+};
 ```
 
 The application service depends on `IntegrationRepository`, `EventPublisher`, `IntegrationTaskDispatcher`, `ProviderRegistry`, and `now`. Worker runners depend only on the stable interfaces above; Trigger.dev imports remain in thin registration files.
 
 ## Proposed File Map
 
-| Area | Files |
-| --- | --- |
-| Domain | `src/domain/integrations/{types,schemas,provider-registry,capabilities,health,errors}.ts` |
-| Application/persistence | `src/modules/integrations/{application,infrastructure}/**` |
-| Provider and workers | `src/modules/integrations/providers/google-business-profile/**`, `src/workflows/integrations/**`, `src/trigger/integrations.ts` |
-| API | `src/app/api/organizations/[organizationId]/integrations/**/route.ts` |
-| UI | `src/app/(platform)/organizations/[organizationId]/integrations/**`, `src/components/integrations/**` |
-| Database | CLI-created `supabase/migrations/*_integration_hub.sql`, `supabase/tests/database/integration_hub_rls_test.sql`, generated `src/lib/supabase/database.types.ts` |
-| Verification | colocated Vitest tests, `e2e/integration-hub.spec.ts`, `progress-tracker.md` |
+| Area                    | Files                                                                                                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain                  | `src/domain/integrations/{types,schemas,provider-registry,capabilities,health,errors}.ts`                                                                       |
+| Application/persistence | `src/modules/integrations/{application,infrastructure}/**`                                                                                                      |
+| Provider and workers    | `src/modules/integrations/providers/google-business-profile/**`, `src/workflows/integrations/**`, `src/trigger/integrations.ts`                                 |
+| API                     | `src/app/api/organizations/[organizationId]/integrations/**/route.ts`                                                                                           |
+| UI                      | `src/app/(platform)/organizations/[organizationId]/integrations/**`, `src/components/integrations/**`                                                           |
+| Database                | CLI-created `supabase/migrations/*_integration_hub.sql`, `supabase/tests/database/integration_hub_rls_test.sql`, generated `src/lib/supabase/database.types.ts` |
+| Verification            | colocated Vitest tests, `e2e/integration-hub.spec.ts`, `progress-tracker.md`                                                                                    |
 
 ---
 
 ### Task 1: Establish tooling, Trigger.dev configuration, and the server-only rollout gate
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `pnpm-lock.yaml`
 - Modify: `trigger.config.ts`
@@ -87,6 +88,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create through shadcn CLI: `src/components/ui/breadcrumb.tsx`
 
 **Interfaces:**
+
 - Consumes: `process.env.INTEGRATION_HUB_V1_ORGANIZATION_IDS`, `TRIGGER_PROJECT_REF`
 - Produces: `parseIntegrationOrganizationIds(value)`, `assertIntegrationHubEnabled(organizationId)`, a valid Trigger.dev v4 config, and the shadcn Breadcrumb primitive
 
@@ -95,11 +97,11 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
   ```ts
   expect(parseIntegrationOrganizationIds(`${organizationA}, ${organizationB}`)).toEqual(
     new Set([organizationA, organizationB]),
-  )
-  expect(() => parseIntegrationOrganizationIds("not-a-uuid")).toThrow()
+  );
+  expect(() => parseIntegrationOrganizationIds("not-a-uuid")).toThrow();
   expect(() => assertIntegrationHubEnabled(organizationB, new Set([organizationA]))).toThrowError(
     expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
-  )
+  );
   ```
 
 - [x] **Step 2: Run `pnpm vitest run src/modules/integrations/application/feature-access.test.ts` and confirm the missing-module failure.**
@@ -123,14 +125,17 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - [x] **Step 5: Replace the incomplete Trigger configuration with the official v4 API.**
 
   ```ts
-  import { defineConfig } from "@trigger.dev/sdk"
+  import { defineConfig } from "@trigger.dev/sdk";
 
   export default defineConfig({
     project: process.env.TRIGGER_PROJECT_REF,
     dirs: ["./src/trigger"],
     runtime: "node-22",
-    retries: { enabledInDev: false, default: { maxAttempts: 3, minTimeoutInMs: 1_000, maxTimeoutInMs: 30_000, factor: 2 } },
-  })
+    retries: {
+      enabledInDev: false,
+      default: { maxAttempts: 3, minTimeoutInMs: 1_000, maxTimeoutInMs: 30_000, factor: 2 },
+    },
+  });
   ```
 
 - [x] **Step 6: Run `pnpm vitest run src/modules/integrations/application/feature-access.test.ts && pnpm typecheck && pnpm lint`.**
@@ -140,6 +145,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 2: Define schemas, provider registry, capability derivation, health, and safe errors
 
 **Files:**
+
 - Create: `src/domain/integrations/types.ts`
 - Create: `src/domain/integrations/schemas.ts`
 - Create: `src/domain/integrations/provider-registry.ts`
@@ -152,6 +158,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/domain/integrations/provider-registry.test.ts`
 
 **Interfaces:**
+
 - Consumes: approved maturity/status/health vocabularies and adapter contract from spec sections 6, 9, and 17
 - Produces: Zod-derived public types, `ProviderRegistry`, `deriveCapabilityGrants`, `deriveConnectionHealth`, and `normalizeProviderError`
 
@@ -190,12 +197,14 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 3: Add the six-table tenant schema, private import bucket, constraints, and RLS
 
 **Files:**
+
 - Create with CLI: `supabase/migrations/<CLI-generated timestamp>_integration_hub.sql`
 - Create: `supabase/tests/database/integration_hub_rls_test.sql`
 - Create: `src/modules/integrations/infrastructure/migration.integration.test.ts`
 - Regenerate: `src/lib/supabase/database.types.ts`
 
 **Interfaces:**
+
 - Consumes: existing `organizations`, `organization_memberships`, `branches`, `private.is_organization_member`, `private.has_organization_role`, and audit helpers
 - Produces: six tenant-owned tables, explicit grants, composite foreign keys, health/activity indexes, private `integration-imports` bucket and path policies
 
@@ -244,6 +253,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 4: Implement tenant-scoped repositories and the health-first read model
 
 **Files:**
+
 - Create: `src/modules/integrations/application/ports.ts`
 - Create: `src/modules/integrations/application/read-model.ts`
 - Create: `src/modules/integrations/infrastructure/repository.ts`
@@ -251,6 +261,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/modules/integrations/infrastructure/repository.integration.test.ts`
 
 **Interfaces:**
+
 - Consumes: generated database types and an authenticated Supabase client
 - Produces: `IntegrationRepository`, `IntegrationWorkerRepository`, and `IntegrationHubSnapshot`
 
@@ -285,12 +296,14 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 5: Implement permissioned application flows, idempotency, audit, and events
 
 **Files:**
+
 - Create: `src/modules/integrations/application/authorization.ts`
 - Create: `src/modules/integrations/application/service.ts`
 - Create: `src/modules/integrations/application/service.test.ts`
 - Modify: `src/domain/events/types.ts`
 
 **Interfaces:**
+
 - Consumes: authenticated organization context, repository, registry, dispatcher, event publisher, permission mapping
 - Produces: `getSnapshot`, `getCatalog`, `connectFixture`, `requestConnectionTest`, `requestSync`, `replaceMappings`, `createDataSource`, `updateDataSource`, `requestImport`, and `disconnectConnection`
 
@@ -327,6 +340,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 6: Build the deterministic Google Business Profile fixture and credential/ingestion boundaries
 
 **Files:**
+
 - Create: `src/modules/integrations/providers/google-business-profile/definition.ts`
 - Create: `src/modules/integrations/providers/google-business-profile/fixture-data.ts`
 - Create: `src/modules/integrations/providers/google-business-profile/fixture-adapter.ts`
@@ -338,6 +352,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/modules/integrations/infrastructure/ingestion-sink.test.ts`
 
 **Interfaces:**
+
 - Consumes: provider/credential/envelope contracts from Task 2
 - Produces: registered `google_business_profile@1`, deterministic adapter behavior, non-serializable fixture credential handle, and a validated ingestion handoff
 
@@ -372,6 +387,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 7: Implement testable worker runners and register the five Trigger.dev tasks
 
 **Files:**
+
 - Create: `src/lib/supabase/service.ts`
 - Create: `src/workflows/integrations/test-connection.ts`
 - Create: `src/workflows/integrations/sync-connection.ts`
@@ -382,6 +398,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/trigger/integrations.ts`
 
 **Interfaces:**
+
 - Consumes: `IntegrationTaskPayload`, worker dependencies, `SUPABASE_SERVICE_ROLE_KEY`, Trigger.dev v4 `task`
 - Produces: five pure runners and five registered tasks with bounded retry, timeout, cancellation, and terminal persistence
 
@@ -414,6 +431,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 8: Expose read, catalog, fixture-connect, and operation APIs
 
 **Files:**
+
 - Create: `src/modules/integrations/application/api-schemas.ts`
 - Create: `src/app/api/organizations/[organizationId]/integrations/route.ts`
 - Create: `src/app/api/organizations/[organizationId]/integrations/catalog/route.ts`
@@ -425,6 +443,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/app/api/organizations/[organizationId]/integrations/routes.test.ts`
 
 **Interfaces:**
+
 - Consumes: organization context, application service, colocated Zod request schemas
 - Produces: first seven exact integration endpoints from spec section 14 with safe public responses
 
@@ -459,6 +478,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 9: Expose manual/CSV source registration, private upload, import, and archive APIs
 
 **Files:**
+
 - Create: `src/modules/integrations/application/csv.ts`
 - Create: `src/modules/integrations/application/csv.test.ts`
 - Create: `src/app/api/organizations/[organizationId]/integrations/data-sources/route.ts`
@@ -467,38 +487,42 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/app/api/organizations/[organizationId]/integrations/data-sources/data-source-routes.test.ts`
 
 **Interfaces:**
+
 - Consumes: authenticated Supabase Storage client, `csv-parse`, source/application service
 - Produces: final three exact APIs, tenant-prefixed upload contract, metadata/header/mapping validation
 
-- [ ] **Step 1: Write failing CSV and route tests.**
+- [x] **Step 1: Write failing CSV and route tests.**
 
   Cover manual source without file, `.csv`/`text/csv`, UTF-8 BOM handling, invalid UTF-8, over-10-MiB metadata, empty/duplicate headers, dangerous path segments, foreign branch/source, malformed mapping, archive blocking imports, partial/failure retention, retry with same run, and no raw cells in errors/logs.
 
-- [ ] **Step 2: Run both focused tests and confirm missing implementations.**
+- [x] **Step 2: Run both focused tests and confirm missing implementations.**
 
   Run: `pnpm vitest run src/modules/integrations/application/csv.test.ts 'src/app/api/organizations/[organizationId]/integrations/data-sources/data-source-routes.test.ts'`
 
-- [ ] **Step 3: Implement bounded CSV validation.**
+- [x] **Step 3: Implement bounded CSV validation.**
 
   Use `csv-parse` streaming or bounded input, normalize BOM, require non-empty unique headers, cap row/column/error counts, validate mapping with Zod, and return safe row numbers/reason codes without copying cell values into logs or run metadata.
 
-- [ ] **Step 4: Implement source registration and private upload.**
+- [x] **Step 4: Implement source registration and private upload.**
 
   Create the source first, generate/validate `organizationId/dataSourceId/uploadId/filename`, upload through the authenticated RLS client, persist only safe metadata, and delete the new object if metadata persistence fails. Do not produce public URLs.
 
-- [ ] **Step 5: Implement import and patch routes.**
+- [x] **Step 5: Implement import and patch routes.**
 
   Import validates the stored object belongs to the scoped source before creating/dispatching a run. Patch permits rename or archive only; archive preserves object/run/activity history and prevents future imports.
 
-- [ ] **Step 6: Run focused tests, typecheck, and lint.**
+- [x] **Step 6: Run focused tests, typecheck, and lint.**
 
   Run: `pnpm vitest run src/modules/integrations/application/csv.test.ts 'src/app/api/organizations/[organizationId]/integrations/data-sources/data-source-routes.test.ts' && pnpm typecheck && pnpm lint`
 
-- [ ] **Step 7: Commit with `git commit -m "feat(integrations): add governed data-source imports"`.**
+- [x] **Step 7: Commit with `git commit -m "feat(integrations): add governed data-source imports"`.**
+
+  Implemented in `fba4f56` with the idempotent data-source operation follow-up in `7310774` and the repair commit that restored `pnpm typecheck`, added static contract tests for `20260808033746_integration_data_source_operations.sql`, and covered archived-import refusal, safe cross-tenant `404`, retried-run replay, and no-raw-cell CSV rejection. Supabase Storage/RLS behavior remains unverified until a database runtime is available.
 
 ### Task 10: Wire the organization route, RSC snapshot, query layer, and route-aware navigation
 
 **Files:**
+
 - Create: `src/app/(platform)/organizations/[organizationId]/integrations/page.tsx`
 - Create: `src/app/(platform)/organizations/[organizationId]/integrations/loading.tsx`
 - Create: `src/app/(platform)/organizations/[organizationId]/integrations/error.tsx`
@@ -510,6 +534,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/components/integrations/integration-hub-client.test.tsx`
 
 **Interfaces:**
+
 - Consumes: authenticated server snapshot, feature gate, safe API responses
 - Produces: protected organization Integration Hub page, four-tab client shell, scoped query keys, truthful breadcrumbs/navigation
 
@@ -542,6 +567,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 11: Build the health-first Connections experience
 
 **Files:**
+
 - Create: `src/components/integrations/health-summary.tsx`
 - Create: `src/components/integrations/connections-tab.tsx`
 - Create: `src/components/integrations/connection-list.tsx`
@@ -552,6 +578,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Create: `src/components/integrations/connections-tab.test.tsx`
 
 **Interfaces:**
+
 - Consumes: snapshot/catalog/query mutations and TanStack Form
 - Produces: desktop list/detail and narrow Sheet UI for health, actions, capabilities, mappings, sync/test, and governed disconnect
 
@@ -588,6 +615,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 12: Build Catalog, Data sources, and Activity experiences
 
 **Files:**
+
 - Create: `src/components/integrations/catalog-tab.tsx`
 - Create: `src/components/integrations/data-sources-tab.tsx`
 - Create: `src/components/integrations/data-source-form.tsx`
@@ -597,6 +625,7 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Modify: `src/components/integrations/integration-hub-client.tsx`
 
 **Interfaces:**
+
 - Consumes: catalog/source/activity APIs, TanStack Query/Form, private file input
 - Produces: complete remaining tabs and accessible source/import workflow
 
@@ -629,11 +658,13 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 13: Prove end-to-end authorization, worker state, responsive UX, and recovery
 
 **Files:**
+
 - Create: `e2e/integration-hub.spec.ts`
 - Create or Modify: the existing authenticated E2E fixture/helper under `e2e/`
 - Modify: focused test fixtures only where required
 
 **Interfaces:**
+
 - Consumes: completed feature, authenticated owner/operator/viewer fixtures, deterministic provider scenarios
 - Produces: browser evidence for acceptance criteria 1–17
 
@@ -662,12 +693,14 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 ### Task 14: Apply staging migration, verify with Chrome DevTools, and close documentation
 
 **Files:**
+
 - Modify: `progress-tracker.md`
 - Modify only if behavior changed: `specs/003-integration-hub.md`
 - Modify only if architecture changed: `adrs/0010-fixture-first-integration-credential-boundary.md`
 - Modify if operational setup changed: `README.md`
 
 **Interfaces:**
+
 - Consumes: all implementation outputs and required verification commands
 - Produces: verified staging schema/UI, a current progress tracker, and an evidence-backed handoff
 
@@ -707,28 +740,28 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 
 ## Spec Coverage Map
 
-| Spec sections | Plan tasks |
-| --- | --- |
-| 1–4 outcome, objective, scope, principles | Global constraints; Tasks 6, 10–14 |
-| 5 permissions | Tasks 3, 5, 8–13 |
-| 6 domain language | Task 2 |
-| 7–8 entities, database, tenancy | Tasks 3–4, 14 |
-| 9 provider/ingestion contracts | Tasks 2 and 6 |
-| 10 Google fixture | Task 6 |
-| 11 credentials | Tasks 2, 6–7, 13–14 |
-| 12 application flows | Tasks 5, 7–9, 11–13 |
-| 13 Trigger.dev tasks | Tasks 1 and 7 |
-| 14 API surface | Tasks 8–9 |
-| 15 events and audit | Tasks 3, 5, and 7 |
-| 16 health-first UX | Tasks 10–12 and 14 |
-| 17 errors/recovery | Tasks 2, 5–9, and 11–13 |
-| 18 security | Global constraints; Tasks 3–9, 13–14 |
-| 19 observability | Tasks 5, 7–9, and 14 |
-| 20 rollout | Tasks 1, 5, 7–10, and 13 |
-| 21 tests | Every task; Tasks 13–14 consolidate evidence |
-| 22 acceptance criteria | Tasks 13–14 |
-| 23 definition of done | Task 14 |
-| 24 external gates | Global constraints and Task 14 |
+| Spec sections                             | Plan tasks                                   |
+| ----------------------------------------- | -------------------------------------------- |
+| 1–4 outcome, objective, scope, principles | Global constraints; Tasks 6, 10–14           |
+| 5 permissions                             | Tasks 3, 5, 8–13                             |
+| 6 domain language                         | Task 2                                       |
+| 7–8 entities, database, tenancy           | Tasks 3–4, 14                                |
+| 9 provider/ingestion contracts            | Tasks 2 and 6                                |
+| 10 Google fixture                         | Task 6                                       |
+| 11 credentials                            | Tasks 2, 6–7, 13–14                          |
+| 12 application flows                      | Tasks 5, 7–9, 11–13                          |
+| 13 Trigger.dev tasks                      | Tasks 1 and 7                                |
+| 14 API surface                            | Tasks 8–9                                    |
+| 15 events and audit                       | Tasks 3, 5, and 7                            |
+| 16 health-first UX                        | Tasks 10–12 and 14                           |
+| 17 errors/recovery                        | Tasks 2, 5–9, and 11–13                      |
+| 18 security                               | Global constraints; Tasks 3–9, 13–14         |
+| 19 observability                          | Tasks 5, 7–9, and 14                         |
+| 20 rollout                                | Tasks 1, 5, 7–10, and 13                     |
+| 21 tests                                  | Every task; Tasks 13–14 consolidate evidence |
+| 22 acceptance criteria                    | Tasks 13–14                                  |
+| 23 definition of done                     | Task 14                                      |
+| 24 external gates                         | Global constraints and Task 14               |
 
 ## Plan Completion Review
 

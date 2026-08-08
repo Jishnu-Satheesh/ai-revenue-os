@@ -16,6 +16,10 @@ const authenticatedOperationsMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260808025602_integration_authenticated_operations.sql",
 );
+const dataSourceOperationsMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260808033746_integration_data_source_operations.sql",
+);
 const integrationMigrationNames = readdirSync(migrationsDirectory)
   .filter((name) => /^\d{14}_integration_hub\.sql$/.test(name))
   .sort();
@@ -39,6 +43,10 @@ function readWorkerTransitionsMigration() {
 
 function readAuthenticatedOperationsMigration() {
   return readFileSync(authenticatedOperationsMigrationPath, "utf8");
+}
+
+function readDataSourceOperationsMigration() {
+  return readFileSync(dataSourceOperationsMigrationPath, "utf8");
 }
 
 function functionDefinition(sql: string, qualifiedName: string) {
@@ -103,7 +111,14 @@ describe("Integration Hub migration contract", () => {
       expect(operation).toContain("(select auth.uid()) <> p_actor_id");
     }
     expect(connect).toContain("on conflict (organization_id, provider_key, external_account_id)");
-    expect(connect).toContain("xmax = 0");
+    expect(
+      connect,
+      "first-creation is derived from an explicit pre-check, not the internal xmax column",
+    ).not.toContain("xmax");
+    expect(connect).toMatch(
+      /select not exists \(\s*select 1\s*from public\.integration_connections existing_connection/,
+    );
+    expect(connect).toContain("into created");
     expect(sql).toContain("create table public.integration_fixture_connect_operations");
     expect(connect).toContain("p_idempotency_key text");
     expect(connect).toContain("md5(");
@@ -141,6 +156,51 @@ describe("Integration Hub migration contract", () => {
     expect(sql).toContain("grant execute on function public.disconnect_integration_connection");
     expect(sql).toContain("current_setting('app.correlation_id', true)");
   });
+  it("replays data-source mutations through a tenant-scoped idempotency record", () => {
+    const sql = readDataSourceOperationsMigration();
+    const operations = statementContaining(
+      sql,
+      "create table public.integration_data_source_operations",
+    );
+    const create = functionDefinition(
+      sql,
+      "public.create_integration_data_source_with_idempotency",
+    );
+    const update = functionDefinition(
+      sql,
+      "public.update_integration_data_source_with_idempotency",
+    );
+
+    expect(operations).toContain("unique (organization_id, idempotency_key)");
+    expect(sql).toContain("force row level security");
+    expect(sql).toContain(
+      "revoke all on table public.integration_data_source_operations from public, anon, authenticated",
+    );
+    for (const operation of [create, update]) {
+      expect(operation).toContain("security definer");
+      expect(operation).toContain("set search_path = ''");
+      expect(operation).toContain("(select auth.uid()) <> p_actor_id");
+      expect(operation).toContain("private.has_organization_role");
+      expect(operation).toContain("array['owner', 'admin', 'operator']");
+      expect(operation).toContain("on conflict (organization_id, idempotency_key) do nothing");
+      expect(operation).toContain("for update");
+      expect(operation).toContain("operation.request_fingerprint <> p_request_fingerprint");
+      expect(operation).toContain("pg_catalog.jsonb_build_object('deduplicated', true)");
+      expect(operation).toContain("perform pg_catalog.set_config('app.correlation_id'");
+    }
+    expect(create).toContain("p_source_type not in ('manual', 'csv_import')");
+    expect(create).toContain("'dataSource', pg_catalog.to_jsonb(source), 'created', true");
+    expect(update).toContain("p_status not in ('archived', 'failed')");
+    expect(update).toContain("where organization_id = p_organization_id and id = p_data_source_id");
+    expect(update).toContain("data source was not found");
+    expect(sql).toContain(
+      "grant execute on function public.create_integration_data_source_with_idempotency",
+    );
+    expect(sql).toContain(
+      "grant execute on function public.update_integration_data_source_with_idempotency",
+    );
+  });
+
   it("leases worker execution by tenant and prevents a late claimant from transitioning a run", () => {
     const sql = readWorkerTransitionsMigration();
     const lease = statementContaining(

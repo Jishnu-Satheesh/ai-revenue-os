@@ -906,7 +906,7 @@ export function createSupabaseAuthenticatedIntegrationTransactionPort(
     },
     async createDataSourceWithIdempotency(input) {
       return invoke<{
-        source: IntegrationDataSourceRow;
+        dataSource: IntegrationDataSourceRow;
         created: boolean;
         deduplicated: boolean;
       }>(

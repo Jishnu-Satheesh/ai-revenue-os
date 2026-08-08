@@ -66,7 +66,7 @@ export async function POST(
         const committed = await service.createDataSourceWithIdempotency({ ...context, ...input });
         return {
           body: { dataSource: committed.source, deduplicated: committed.deduplicated },
-          status: committed.created ? 201 : 200,
+          status: committed.created && !committed.deduplicated ? 201 : 200,
         };
       }
 
@@ -166,7 +166,7 @@ export async function POST(
         });
         return {
           body: { dataSource: source, deduplicated: committed.deduplicated },
-          status: committed.created ? 201 : 200,
+          status: committed.created && !committed.deduplicated ? 201 : 200,
         };
       } catch (error) {
         let cleanupFailed = false;
