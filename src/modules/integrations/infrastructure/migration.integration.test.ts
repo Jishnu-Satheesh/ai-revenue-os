@@ -145,6 +145,7 @@ describe("Integration Hub migration contract", () => {
       expect(write).toContain("for update");
       expect(write).toContain("locked_run.idempotency_key is distinct from p_idempotency_key");
       expect(write).toContain("locked_run.connection_id is distinct from p_connection_id");
+      expect(write).toContain("locked_run.status = 'cancelled'");
       expect(write).toContain("locked_lease.claim_token is distinct from p_claim_token");
       expect(write).toContain("locked_lease.lease_expires_at <= now()");
     }

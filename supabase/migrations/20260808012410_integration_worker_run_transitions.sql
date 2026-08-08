@@ -244,7 +244,8 @@ begin
   where organization_id = p_organization_id and id = p_ingestion_run_id
   for update;
   if not found or locked_run.idempotency_key is distinct from p_idempotency_key
-    or locked_run.connection_id is distinct from p_connection_id then return null; end if;
+    or locked_run.connection_id is distinct from p_connection_id
+    or locked_run.status = 'cancelled' then return null; end if;
   select * into locked_lease
   from public.integration_worker_execution_leases
   where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
@@ -279,7 +280,8 @@ begin
   where organization_id = p_organization_id and id = p_ingestion_run_id
   for update;
   if not found or locked_run.idempotency_key is distinct from p_idempotency_key
-    or locked_run.connection_id is distinct from p_connection_id then return null; end if;
+    or locked_run.connection_id is distinct from p_connection_id
+    or locked_run.status = 'cancelled' then return null; end if;
   select * into locked_lease
   from public.integration_worker_execution_leases
   where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
