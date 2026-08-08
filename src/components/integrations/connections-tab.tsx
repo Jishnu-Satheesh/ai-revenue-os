@@ -26,7 +26,7 @@ import {
 import type { ProviderDefinition } from "@/domain/integrations/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { hasIntegrationPermission } from "@/modules/integrations/application/authorization";
+import { hasIntegrationPermission } from "@/domain/integrations/permissions";
 import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 
 type QueuedOperation = { runId: string; status: string };

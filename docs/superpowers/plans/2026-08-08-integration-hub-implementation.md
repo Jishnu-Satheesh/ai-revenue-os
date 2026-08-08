@@ -633,31 +633,33 @@ The application service depends on `IntegrationRepository`, `EventPublisher`, `I
 - Consumes: catalog/source/activity APIs, TanStack Query/Form, private file input
 - Produces: complete remaining tabs and accessible source/import workflow
 
-- [ ] **Step 1: Write failing tests for all secondary-tab states.**
+- [x] **Step 1: Write failing tests for all secondary-tab states.**
 
   Cover catalog fixture/available/pending/disabled labels; exact fixture copy; no write capability; manual source creation; CSV size/type/encoding/header/mapping errors; upload/import queued/running/succeeded/partial/failed/retry; archive; activity chronology; empty/background-refetch states; viewer read-only behavior.
 
-- [ ] **Step 2: Run the focused test and confirm missing components.**
+- [x] **Step 2: Run the focused test and confirm missing components.**
 
   Run: `pnpm vitest run src/components/integrations/secondary-tabs.test.tsx`
 
-- [ ] **Step 3: Implement Catalog.**
+- [x] **Step 3: Implement Catalog.**
 
   Render definitions from the server registry, not client constants. Use Card/Badge/Alert/Button and explain required access/capabilities/rollout. The Google action opens the fixture confirmation flow; real OAuth controls do not exist.
 
-- [ ] **Step 4: Implement Data sources with TanStack Form.**
+- [x] **Step 4: Implement Data sources with TanStack Form.**
 
   Use shadcn Field/Input/Button/Progress/Alert/Empty composition. A native file input may exist only through the shadcn Input primitive. Display safe validation reasons, accepted/rejected counts, and retry/archive actions; never render raw rejected CSV cells.
 
-- [ ] **Step 5: Implement Activity.**
+- [x] **Step 5: Implement Activity.**
 
   Render tests, syncs, imports, disconnects, and health checks newest-first with actor/time/correlation-safe state. Use semantic list markup inside shadcn Cards, status icons plus text, and organization-timezone display.
 
-- [ ] **Step 6: Run UI tests, typecheck, lint, and format check.**
+- [x] **Step 6: Run UI tests, typecheck, lint, and format check.**
 
   Run: `pnpm vitest run src/components/integrations/secondary-tabs.test.tsx && pnpm typecheck && pnpm lint && pnpm format:check`
 
-- [ ] **Step 7: Commit with `git commit -m "feat(integrations): complete catalog sources and activity UI"`.**
+- [x] **Step 7: Commit with `git commit -m "feat(integrations): complete catalog sources and activity UI"`.**
+
+  The role-to-permission mapping moved to the client-safe `src/domain/integrations/permissions.ts` because the server-only error module made the previous import unbuildable from a Client Component; `assertIntegrationPermission` still owns enforcement on the server. CSV target field names are operator-supplied because V1 has no downstream ingestion vocabulary yet, and the server revalidates every pair against the uploaded header row.
 
 ### Task 13: Prove end-to-end authorization, worker state, responsive UX, and recovery
 

@@ -3,24 +3,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { Activity, BookOpen, Database, Eye, Plug } from "lucide-react";
 
+import { ActivityTab } from "@/components/integrations/activity-tab";
+import { CatalogTab } from "@/components/integrations/catalog-tab";
 import { ConnectionsTab } from "@/components/integrations/connections-tab";
+import { DataSourcesTab } from "@/components/integrations/data-sources-tab";
 import {
   integrationCatalogQueryOptions,
   integrationSnapshotQueryOptions,
 } from "@/components/integrations/query-options";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ProviderDefinition } from "@/domain/integrations/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import { hasIntegrationPermission } from "@/modules/integrations/application/authorization";
+import { hasIntegrationPermission } from "@/domain/integrations/permissions";
 import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 
 export type IntegrationHubClientProps = {
@@ -88,6 +84,10 @@ export function IntegrationHubClient({
         ) : null}
       </div>
 
+      <p className="text-sm text-muted-foreground">
+        Showing integration state for {organizationName}.
+      </p>
+
       {canOperate ? null : (
         <Alert>
           <Eye />
@@ -118,45 +118,20 @@ export function IntegrationHubClient({
           />
         </TabsContent>
         <TabsContent value="catalog" className="min-h-0">
-          <PlaceholderTab
-            icon={BookOpen}
-            title="Catalog"
-            description={`${catalog.length} provider definition(s) published by the server registry.`}
+          <CatalogTab
+            organizationId={organizationId}
+            catalog={catalog}
+            connections={snapshot.connections}
+            role={role}
           />
         </TabsContent>
         <TabsContent value="data-sources" className="min-h-0">
-          <PlaceholderTab
-            icon={Database}
-            title="Data sources"
-            description={`${organizationName} has ${snapshot.summary.dataSources} manual or imported source(s).`}
-          />
+          <DataSourcesTab organizationId={organizationId} snapshot={snapshot} role={role} />
         </TabsContent>
         <TabsContent value="activity" className="min-h-0">
-          <PlaceholderTab
-            icon={Activity}
-            title="Activity"
-            description={`${snapshot.recentActivity.length} recent event(s).`}
-          />
+          <ActivityTab activity={snapshot.recentActivity} isRefreshing={isRefreshing} />
         </TabsContent>
       </Tabs>
     </div>
-  );
-}
-
-function PlaceholderTab({
-  icon: Icon,
-  title,
-  description,
-}: Readonly<{ icon: typeof Plug; title: string; description: string }>) {
-  return (
-    <Empty className="border">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <Icon aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
   );
 }

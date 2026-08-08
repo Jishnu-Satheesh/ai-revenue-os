@@ -1,34 +1,15 @@
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { IntegrationError } from "@/domain/integrations/errors";
+import {
+  hasIntegrationPermission,
+  integrationPermissions,
+  type IntegrationPermission,
+} from "@/domain/integrations/permissions";
 
-export const integrationPermissions = [
-  "integration.read",
-  "integration.connect",
-  "integration.test",
-  "integration.sync",
-  "integration.map",
-  "integration.import",
-  "integration.disconnect",
-] as const;
-
-export type IntegrationPermission = (typeof integrationPermissions)[number];
-
-const readOnly: readonly IntegrationPermission[] = ["integration.read"];
-const operatorPermissions: readonly IntegrationPermission[] = integrationPermissions;
-
-const permissionsByRole: Readonly<Record<OrganizationRole, readonly IntegrationPermission[]>> = {
-  owner: operatorPermissions,
-  admin: operatorPermissions,
-  operator: operatorPermissions,
-  viewer: readOnly,
-};
-
-export function hasIntegrationPermission(
-  role: OrganizationRole,
-  permission: IntegrationPermission,
-): boolean {
-  return permissionsByRole[role].includes(permission);
-}
+// The role mapping itself lives in a client-safe domain module; this file adds
+// the server-only enforcement that raises a public integration error.
+export { hasIntegrationPermission, integrationPermissions };
+export type { IntegrationPermission };
 
 export function assertIntegrationPermission(
   role: OrganizationRole,
