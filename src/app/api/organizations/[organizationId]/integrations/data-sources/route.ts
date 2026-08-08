@@ -76,6 +76,12 @@ export async function POST(
         filename: file.name,
         mediaType: file.type,
       });
+      if (csv.errors.length) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "The CSV contains rows with invalid column counts.",
+        );
+      }
       const mappingInput = parseColumnMapping(form.get("columnMapping"));
       const columnMapping = validateColumnMapping(mappingInput, csv.headers);
       if (!Object.keys(columnMapping).length) {
