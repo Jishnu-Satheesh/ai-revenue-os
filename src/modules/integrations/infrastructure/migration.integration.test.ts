@@ -113,6 +113,8 @@ describe("Integration Hub migration contract", () => {
     expect(connect).toContain("read_google_business_profile");
     expect(connect).toContain("read_reviews");
     expect(connect).toContain("grant_payload ->> 'derived_from_adapter_version' <> '1'");
+    expect(connect).toContain("grant_payload ->> 'availability' not in ('blocked', 'disabled')");
+    expect(connect).toContain("jsonb_array_length(p_grants) <> 2");
     expect(connect).toContain("perform pg_catalog.set_config('app.correlation_id'");
     expect(connect).toContain("delete from public.integration_capability_grants");
     expect(sql).toContain("create table public.integration_mapping_operations");
@@ -123,6 +125,8 @@ describe("Integration Hub migration contract", () => {
     expect(mappings).toContain("left join public.branches branch");
     expect(mappings).toContain("locked_connection.provider_key <> 'google_business_profile'");
     expect(mappings).toContain("grant_payload ->> 'derived_from_adapter_version' <> '1'");
+    expect(mappings).toContain("grant_payload ->> 'availability' = 'available'");
+    expect(mappings).toContain("mapping_row.status = 'mapped'");
     expect(mappings).toContain("perform pg_catalog.set_config('app.correlation_id'");
     expect(disconnect).toContain("for update");
     expect(disconnect).toContain("set status = 'disconnected'");

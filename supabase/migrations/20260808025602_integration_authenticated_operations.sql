@@ -73,6 +73,11 @@ begin
   if p_provider_key <> 'google_business_profile' or p_adapter_version <> '1'
     or coalesce(array_length(p_granted_scopes, 1), 0) <> 0
     or jsonb_typeof(p_grants) <> 'array'
+    or jsonb_array_length(p_grants) <> 2
+    or (
+      select count(distinct grant_payload ->> 'capability_key')
+      from pg_catalog.jsonb_array_elements(p_grants) grant_payload
+    ) <> 2
     or exists (
       select 1
       from pg_catalog.jsonb_array_elements(p_grants) grant_payload
@@ -81,7 +86,7 @@ begin
       ] is false
         or grant_payload ->> 'capability_key' not in ('read_google_business_profile', 'read_reviews')
         or grant_payload ->> 'maturity' <> 'read-only'
-        or grant_payload ->> 'availability' not in ('available', 'blocked', 'disabled')
+        or grant_payload ->> 'availability' not in ('blocked', 'disabled')
         or grant_payload ->> 'derived_from_adapter_version' <> '1'
         or jsonb_typeof(grant_payload -> 'reason_codes') <> 'array'
     ) then
@@ -213,6 +218,11 @@ begin
     or locked_connection.adapter_version <> '1'
     or locked_connection.connection_mode <> 'fixture'
     or jsonb_typeof(p_grants) <> 'array'
+    or jsonb_array_length(p_grants) <> 2
+    or (
+      select count(distinct grant_payload ->> 'capability_key')
+      from pg_catalog.jsonb_array_elements(p_grants) grant_payload
+    ) <> 2
     or exists (
       select 1
       from pg_catalog.jsonb_array_elements(p_grants) grant_payload
@@ -222,6 +232,21 @@ begin
         or grant_payload ->> 'capability_key' not in ('read_google_business_profile', 'read_reviews')
         or grant_payload ->> 'maturity' <> 'read-only'
         or grant_payload ->> 'availability' not in ('available', 'blocked', 'disabled')
+        or (
+          grant_payload ->> 'availability' = 'available'
+          and not exists (
+            select 1
+            from pg_catalog.jsonb_to_recordset(p_mappings) as mapping_row(
+              external_resource_id text,
+              external_resource_label text,
+              branch_id uuid,
+              status text
+            )
+            join public.branches branch
+              on branch.organization_id = p_organization_id and branch.id = mapping_row.branch_id
+            where mapping_row.status = 'mapped'
+          )
+        )
         or grant_payload ->> 'derived_from_adapter_version' <> '1'
         or jsonb_typeof(grant_payload -> 'reason_codes') <> 'array'
     ) then
