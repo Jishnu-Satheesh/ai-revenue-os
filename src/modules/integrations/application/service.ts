@@ -22,6 +22,7 @@ import type {
   IntegrationRepository,
 } from "@/modules/integrations/application/ports";
 import type { OrganizationRole } from "@/domain/organizations/types";
+import { validateDataSourceStoragePath } from "@/modules/integrations/application/csv";
 
 export type IntegrationTaskName =
   | "integration.test-connection"
@@ -57,12 +58,21 @@ export type OrganizationBranchLookup = {
   findBranch(input: { organizationId: string; branchId: string }): Promise<boolean>;
 };
 
+export type DataSourceObjectValidator = {
+  assertAvailable(input: {
+    organizationId: string;
+    dataSourceId: string;
+    storagePath: string;
+  }): Promise<void>;
+};
+
 type ServiceDependencies = {
   repository: IntegrationRepository;
   providers: ProviderRegistry;
   dispatcher: IntegrationTaskDispatcher;
   publisher: EventPublisher;
   branchLookup: OrganizationBranchLookup;
+  sourceObjectValidator?: DataSourceObjectValidator;
   assertFeatureEnabled?: (organizationId: string) => void;
   now?: () => Date;
 };
@@ -85,7 +95,7 @@ const mappingSchema = z.object({
 const createDataSourceSchema = z
   .object({
     sourceType: z.enum(["manual", "csv_import"]),
-    name: z.string().trim().min(1).max(200),
+    name: z.string().trim().min(2).max(160),
     branchId: idSchema.nullable().optional(),
     storagePath: z.string().trim().min(1).max(1024).nullable().optional(),
     originalFilename: z.string().trim().min(1).max(512).nullable().optional(),
@@ -111,10 +121,21 @@ const createDataSourceSchema = z
     }
   });
 const updateDataSourceSchema = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
+  name: z.string().trim().min(2).max(160).optional(),
   branchId: idSchema.nullable().optional(),
-  status: z.enum(["archived"]).optional(),
+  status: z.enum(["archived", "failed"]).optional(),
   columnMapping: z.record(z.string(), z.string()).optional(),
+});
+const finalizeDataSourceUploadSchema = z.object({
+  storagePath: z.string().trim().min(1).max(1024),
+  originalFilename: z.string().trim().min(1).max(255),
+  mediaType: z.literal("text/csv"),
+  sizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(10 * 1024 * 1024),
+  columnMapping: z.record(z.string(), z.string()).default({}),
 });
 
 type SafeRunResponse = { runId: string; status: "queued" };
@@ -164,6 +185,7 @@ export function createIntegrationService({
   dispatcher,
   publisher,
   branchLookup,
+  sourceObjectValidator,
   assertFeatureEnabled = assertIntegrationHubEnabled,
   now = () => new Date(),
 }: ServiceDependencies) {
@@ -397,6 +419,36 @@ export function createIntegrationService({
     });
   }
 
+  async function finalizeDataSourceUpload(
+    input: AuthenticatedIntegrationContext & { dataSourceId: string } & z.input<
+        typeof finalizeDataSourceUploadSchema
+      >,
+  ) {
+    authorize(input, "integration.import");
+    const source = await requireDataSource(input, input.dataSourceId);
+    if (source.source_type !== "csv_import") {
+      throw new IntegrationError(
+        "VALIDATION_ERROR",
+        "Only CSV sources can receive an upload.",
+        false,
+      );
+    }
+    const parsed = finalizeDataSourceUploadSchema.parse(input);
+    validateDataSourceStoragePath(parsed.storagePath, input.organizationId, source.id);
+    return repository.updateDataSource({
+      organizationId: input.organizationId,
+      dataSourceId: source.id,
+      patch: {
+        storage_path: parsed.storagePath,
+        original_filename: parsed.originalFilename,
+        media_type: parsed.mediaType,
+        size_bytes: parsed.sizeBytes,
+        column_mapping: parsed.columnMapping,
+        status: "ready",
+      },
+    });
+  }
+
   async function dispatchRun(input: {
     context: AuthenticatedIntegrationContext;
     operation:
@@ -526,6 +578,21 @@ export function createIntegrationService({
     if (dataSource.status === "archived") {
       throw new IntegrationError("CONFLICT", "Archived data sources cannot be imported.", false);
     }
+    if (dataSource.source_type !== "csv_import" || !dataSource.storage_path) {
+      throw new IntegrationError(
+        "CONFLICT",
+        "This data source does not have an uploaded CSV file.",
+        false,
+      );
+    }
+    validateDataSourceStoragePath(dataSource.storage_path, input.organizationId, dataSource.id);
+    if (sourceObjectValidator) {
+      await sourceObjectValidator.assertAvailable({
+        organizationId: input.organizationId,
+        dataSourceId: dataSource.id,
+        storagePath: dataSource.storage_path,
+      });
+    }
     return dispatchRun({
       context: input,
       operation: "integration.import",
@@ -592,6 +659,7 @@ export function createIntegrationService({
     replaceMappings,
     createDataSource,
     updateDataSource,
+    finalizeDataSourceUpload,
     requestImport,
     disconnectConnection,
   };

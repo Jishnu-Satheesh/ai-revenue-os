@@ -125,6 +125,20 @@ function createRouteService(input: {
         return !error && Boolean(data);
       },
     },
+    sourceObjectValidator: {
+      async assertAvailable({ storagePath }) {
+        const segments = storagePath.split("/");
+        const folder = segments.slice(0, 3).join("/");
+        const filename = segments[3];
+        const listed = await input.supabase.storage.from("integration-imports").list(folder, {
+          limit: 2,
+          search: filename,
+        });
+        if (listed.error || !listed.data.some((candidate) => candidate.name === filename)) {
+          throw new IntegrationError("NOT_FOUND", "The import file is unavailable.", false);
+        }
+      },
+    },
   });
 }
 
