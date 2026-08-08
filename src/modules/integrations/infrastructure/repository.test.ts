@@ -462,6 +462,12 @@ describe("Integration repositories", () => {
         }
         return { outcome: "conflict" };
       },
+      async requeueRun() {
+        return { outcome: "conflict" };
+      },
+      async cancelRun() {
+        return { outcome: "conflict" };
+      },
     };
     const worker = createIntegrationWorkerRepository({ persistence: port, transitions });
     const start = {
@@ -503,6 +509,12 @@ describe("Integration repositories", () => {
       },
       async completeRun(input) {
         if (input.status === "succeeded") return { outcome: "already_terminal", run: completed };
+        return { outcome: "conflict" };
+      },
+      async requeueRun() {
+        return { outcome: "conflict" };
+      },
+      async cancelRun() {
         return { outcome: "conflict" };
       },
     };

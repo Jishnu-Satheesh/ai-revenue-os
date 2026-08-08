@@ -1,4 +1,6 @@
-import { parse } from "csv-parse/sync";
+import { once } from "node:events";
+
+import { parse } from "csv-parse";
 
 import type { IntegrationRecordEnvelope } from "@/domain/integrations/schemas";
 import {
@@ -8,6 +10,7 @@ import {
   normalizedError,
   nowIso,
   parseDataSourceTaskPayload,
+  requeueOrFail,
   type CsvObjectStore,
   type IntegrationWorkerDependencies,
 } from "@/workflows/integrations/contracts";
@@ -25,7 +28,7 @@ function assertCsvObject(metadata: {
     !Number.isInteger(metadata.size) ||
     metadata.size < 1 ||
     metadata.size > MAX_CSV_BYTES ||
-    metadata.encoding?.toLowerCase() !== "utf-8"
+    (metadata.encoding !== null && metadata.encoding.toLowerCase() !== "utf-8")
   ) {
     throw new Error("CSV object metadata is invalid.");
   }
@@ -34,21 +37,38 @@ function assertCsvObject(metadata: {
 async function* parseCsvRows(
   stream: AsyncIterable<Uint8Array>,
 ): AsyncGenerator<Record<string, string>> {
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  for await (const chunk of stream) {
-    totalBytes += chunk.byteLength;
-    if (totalBytes > MAX_CSV_BYTES) throw new Error("CSV file exceeds the allowed size.");
-    chunks.push(chunk);
-  }
-  const records = parse(Buffer.concat(chunks).toString("utf8"), {
+  const parser = parse({
     columns: true,
     bom: true,
     skip_empty_lines: true,
     trim: true,
     max_record_size: 64 * 1024,
   });
-  for (const record of records) yield record as Record<string, string>;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let totalBytes = 0;
+  const write = (async () => {
+    try {
+      for await (const chunk of stream) {
+        totalBytes += chunk.byteLength;
+        if (totalBytes > MAX_CSV_BYTES) throw new Error("CSV file exceeds the allowed size.");
+        const decoded = decoder.decode(chunk, { stream: true });
+        if (decoded && !parser.write(decoded)) await once(parser, "drain");
+      }
+      const tail = decoder.decode();
+      if (tail && !parser.write(tail)) await once(parser, "drain");
+      parser.end();
+    } catch (error) {
+      parser.destroy(error as Error);
+      throw error;
+    }
+  })();
+  try {
+    for await (const record of parser) yield record as Record<string, string>;
+    await write;
+  } catch (error) {
+    await write.catch(() => undefined);
+    throw error;
+  }
 }
 
 function assertMapping(row: Record<string, string>, mapping: Record<string, unknown>): void {
@@ -59,6 +79,18 @@ function assertMapping(row: Record<string, string>, mapping: Record<string, unkn
     fields.some((column) => typeof column !== "string" || !headers.has(column))
   ) {
     throw new Error("CSV column mapping does not match the uploaded headers.");
+  }
+}
+
+function assertTenantStoragePath(path: string, organizationId: string, dataSourceId: string): void {
+  const segments = path.split("/");
+  if (
+    segments.length !== 4 ||
+    segments[0] !== organizationId ||
+    segments[1] !== dataSourceId ||
+    segments.some((segment) => !segment)
+  ) {
+    throw new Error("CSV storage path is outside the validated tenant source.");
   }
 }
 
@@ -92,6 +124,7 @@ export async function runImportDataSource(
   try {
     const objectStore: CsvObjectStore | undefined = dependencies.csvObjects;
     if (!objectStore || !source.storage_path) throw new Error("CSV import storage is unavailable.");
+    assertTenantStoragePath(source.storage_path, payload.organizationId, source.id);
     assertCsvObject(await objectStore.stat({ path: source.storage_path }));
     const fetchedAt = nowIso(dependencies);
     let batch: IntegrationRecordEnvelope[] = [];
@@ -144,13 +177,10 @@ export async function runImportDataSource(
     });
   } catch (error) {
     const normalized = normalizedError(error);
-    await complete(payload, dependencies, {
-      status: "failed",
+    await requeueOrFail(payload, dependencies, normalized, {
       recordsReceived,
       recordsAccepted,
       recordsRejected,
-      normalizedErrorCode: normalized.code,
-      safeErrorSummary: normalized.message,
     });
     throw normalized;
   }

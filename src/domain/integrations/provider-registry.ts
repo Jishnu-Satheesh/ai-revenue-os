@@ -5,6 +5,7 @@ import type { ProviderAdapter, ProviderDefinition } from "@/domain/integrations/
 
 export type ProviderRegistry = {
   listDefinitions(): readonly ProviderDefinition[];
+  getDefinition(providerKey: string): ProviderDefinition;
   getAdapter(providerKey: string, adapterVersion: string): ProviderAdapter;
 };
 
@@ -58,6 +59,13 @@ export function createProviderRegistry(
 
   return {
     listDefinitions: () => [...definitionsByKey.values()],
+    getDefinition(providerKey) {
+      const definition = definitionsByKey.get(providerKey);
+      if (!definition) {
+        throw new IntegrationError("NOT_FOUND", "Provider definition is not registered.", false);
+      }
+      return definition;
+    },
     getAdapter(providerKey, adapterVersion) {
       const adapter = adaptersByProviderAndVersion.get(`${providerKey}:${adapterVersion}`);
       if (!adapter) {

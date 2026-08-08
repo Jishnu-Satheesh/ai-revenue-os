@@ -6,6 +6,7 @@ import {
   normalizedError,
   nowIso,
   parseConnectionTaskPayload,
+  requeueOrFail,
   type IntegrationWorkerDependencies,
 } from "@/workflows/integrations/contracts";
 
@@ -15,12 +16,12 @@ export async function runCheckFreshness(
   dependencies: IntegrationWorkerDependencies,
 ) {
   const payload = parseConnectionTaskPayload("integration.check-freshness", input);
-  const connection = await loadValidatedConnection(payload, dependencies);
+  const { connection, staleAfterMinutes } = await loadValidatedConnection(payload, dependencies);
   const cancelled = await beginOrCancel(payload, dependencies);
   if (cancelled) return;
   try {
     const now = new Date(nowIso(dependencies));
-    const threshold = 65 * 60 * 1_000;
+    const threshold = staleAfterMinutes * 60 * 1_000;
     const lastSync = connection.last_successful_sync_at
       ? new Date(connection.last_successful_sync_at).getTime()
       : 0;
@@ -41,11 +42,7 @@ export async function runCheckFreshness(
       normalizedErrorCode: normalized.code,
       safeDetail: normalized.message,
     });
-    await complete(payload, dependencies, {
-      status: "failed",
-      normalizedErrorCode: normalized.code,
-      safeErrorSummary: normalized.message,
-    });
+    await requeueOrFail(payload, dependencies, normalized);
     throw normalized;
   }
 }

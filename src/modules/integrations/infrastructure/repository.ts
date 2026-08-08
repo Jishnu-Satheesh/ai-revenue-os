@@ -214,6 +214,23 @@ export function createIntegrationWorkerRepository(
       }
       return result.run;
     },
+    async requeueRun(input) {
+      const result = await requiredRunTransitions(dependencies.transitions).requeueRun({
+        ...input,
+        expectedStatus: "running",
+      });
+      if (result.outcome === "conflict") {
+        throw new IntegrationError("CONFLICT", "The ingestion run cannot be retried.", false);
+      }
+      return result.run;
+    },
+    async cancelRun(input) {
+      const result = await requiredRunTransitions(dependencies.transitions).cancelRun(input);
+      if (result.outcome === "conflict") {
+        throw new IntegrationError("CONFLICT", "The ingestion run cannot be cancelled.", false);
+      }
+      return result.run;
+    },
 
     async appendHealthCheck(input) {
       const connection = await dependencies.persistence.findConnection({
@@ -269,6 +286,109 @@ export function createIntegrationWorkerRepository(
           last_successful_sync_at: connection.last_successful_sync_at,
           next_scheduled_sync_at: null,
         },
+      });
+    },
+  };
+}
+
+/**
+ * Worker-only CAS transition adapter. It is backed by the imperative
+ * migration RPC so retries cannot overwrite a terminal run with stale data.
+ */
+export function createSupabaseIntegrationRunTransitionPort(
+  serviceSupabase: SupabaseClient<Database>,
+): IntegrationRunTransitionPort {
+  type RpcClient = {
+    rpc(
+      name: "transition_integration_ingestion_run",
+      args: Record<string, unknown>,
+    ): PromiseLike<{ data: IntegrationIngestionRunRow | null; error: unknown }>;
+  };
+  const rpc = serviceSupabase as unknown as RpcClient;
+  const transition = async (input: {
+    organizationId: string;
+    ingestionRunId: string;
+    expectedStatuses: readonly string[];
+    status: "queued" | "running" | "succeeded" | "partially_succeeded" | "failed" | "cancelled";
+    recordsReceived: number;
+    recordsAccepted: number;
+    recordsRejected: number;
+    completedAt?: string | null;
+    normalizedErrorCode?: string | null;
+    safeErrorSummary?: string | null;
+    startedAt?: string | null;
+  }) => {
+    const result = await rpc.rpc("transition_integration_ingestion_run", {
+      p_organization_id: input.organizationId,
+      p_ingestion_run_id: input.ingestionRunId,
+      p_expected_statuses: [...input.expectedStatuses],
+      p_status: input.status,
+      p_records_received: input.recordsReceived,
+      p_records_accepted: input.recordsAccepted,
+      p_records_rejected: input.recordsRejected,
+      p_completed_at: input.completedAt ?? null,
+      p_normalized_error_code: input.normalizedErrorCode ?? null,
+      p_safe_error_summary: input.safeErrorSummary ?? null,
+      p_started_at: input.startedAt ?? null,
+    });
+    if (result.error)
+      databaseError("Integration run transition could not be persisted.", result.error);
+    return result.data
+      ? { outcome: "transitioned" as const, run: result.data }
+      : { outcome: "conflict" as const };
+  };
+  return {
+    markRunRunning(input) {
+      return transition({
+        organizationId: input.organizationId,
+        ingestionRunId: input.ingestionRunId,
+        expectedStatuses: [input.expectedStatus],
+        status: "running",
+        recordsReceived: 0,
+        recordsAccepted: 0,
+        recordsRejected: 0,
+        startedAt: input.startedAt,
+      });
+    },
+    completeRun(input) {
+      return transition({
+        organizationId: input.organizationId,
+        ingestionRunId: input.ingestionRunId,
+        expectedStatuses: [input.expectedStatus],
+        status: input.status,
+        recordsReceived: input.recordsReceived,
+        recordsAccepted: input.recordsAccepted,
+        recordsRejected: input.recordsRejected,
+        completedAt: input.completedAt,
+        normalizedErrorCode: input.normalizedErrorCode,
+        safeErrorSummary: input.safeErrorSummary,
+      });
+    },
+    requeueRun(input) {
+      return transition({
+        organizationId: input.organizationId,
+        ingestionRunId: input.ingestionRunId,
+        expectedStatuses: [input.expectedStatus],
+        status: "queued",
+        recordsReceived: input.recordsReceived,
+        recordsAccepted: input.recordsAccepted,
+        recordsRejected: input.recordsRejected,
+        normalizedErrorCode: input.normalizedErrorCode,
+        safeErrorSummary: input.safeErrorSummary,
+      });
+    },
+    cancelRun(input) {
+      return transition({
+        organizationId: input.organizationId,
+        ingestionRunId: input.ingestionRunId,
+        expectedStatuses: ["queued", "running"],
+        status: "cancelled",
+        recordsReceived: 0,
+        recordsAccepted: 0,
+        recordsRejected: 0,
+        completedAt: new Date().toISOString(),
+        normalizedErrorCode: "CANCELLED",
+        safeErrorSummary: "The integration task was cancelled.",
       });
     },
   };

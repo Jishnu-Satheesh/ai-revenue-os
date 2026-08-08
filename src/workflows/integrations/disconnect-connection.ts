@@ -5,6 +5,7 @@ import {
   loadValidatedConnection,
   normalizedError,
   parseConnectionTaskPayload,
+  requeueOrFail,
   type IntegrationWorkerDependencies,
 } from "@/workflows/integrations/contracts";
 
@@ -14,7 +15,9 @@ export async function runDisconnectConnection(
   dependencies: IntegrationWorkerDependencies,
 ) {
   const payload = parseConnectionTaskPayload("integration.disconnect-connection", input);
-  const connection = await loadValidatedConnection(payload, dependencies, { allowInactive: true });
+  const { connection } = await loadValidatedConnection(payload, dependencies, {
+    allowInactive: true,
+  });
   const cancelled = await beginOrCancel(payload, dependencies);
   if (cancelled) return;
   try {
@@ -50,11 +53,7 @@ export async function runDisconnectConnection(
       normalizedErrorCode: normalized.code,
       safeDetail: "Credential cleanup requires a retry; capabilities remain disabled.",
     });
-    await complete(payload, dependencies, {
-      status: "failed",
-      normalizedErrorCode: normalized.code,
-      safeErrorSummary: "Credential cleanup requires a retry; capabilities remain disabled.",
-    });
+    await requeueOrFail(payload, dependencies, normalized);
     throw normalized;
   }
 }

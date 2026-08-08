@@ -63,7 +63,7 @@ export type CsvObjectStore = {
 
 export type IntegrationWorkerDependencies = {
   worker: IntegrationWorkerRepository;
-  providers: Pick<ProviderRegistry, "getAdapter">;
+  providers: Pick<ProviderRegistry, "getAdapter" | "getDefinition">;
   sink: IngestionSink;
   findDataSource(input: {
     organizationId: string;
@@ -107,7 +107,11 @@ export async function loadValidatedConnection(
   payload: ConnectionTaskPayload,
   dependencies: IntegrationWorkerDependencies,
   options: { allowInactive?: boolean } = {},
-): Promise<IntegrationConnectionRow> {
+): Promise<{
+  connection: IntegrationConnectionRow;
+  adapter: ProviderAdapter;
+  staleAfterMinutes: number;
+}> {
   dependencies.assertFeatureEnabled?.(payload.organizationId);
   const connection = await dependencies.worker.loadGrantRecomputationInput({
     organizationId: payload.organizationId,
@@ -130,14 +134,10 @@ export async function loadValidatedConnection(
   ) {
     throw new IntegrationError("CONFLICT", "The integration connection is inactive.", false);
   }
-  return connection;
-}
-
-export function resolveValidatedAdapter(
-  connection: IntegrationConnectionRow,
-  payload: ConnectionTaskPayload,
-  dependencies: IntegrationWorkerDependencies,
-): ProviderAdapter {
+  const definition = dependencies.providers.getDefinition(connection.provider_key);
+  if (definition.adapterVersion !== payload.adapterVersion) {
+    throw new IntegrationError("VALIDATION_ERROR", "The provider definition is invalid.", false);
+  }
   const adapter = dependencies.providers.getAdapter(
     connection.provider_key,
     payload.adapterVersion,
@@ -148,7 +148,7 @@ export function resolveValidatedAdapter(
   ) {
     throw new IntegrationError("VALIDATION_ERROR", "The provider adapter is invalid.", false);
   }
-  return adapter;
+  return { connection, adapter, staleAfterMinutes: definition.staleAfterMinutes };
 }
 
 export async function loadValidatedDataSource(
@@ -205,6 +205,24 @@ export async function beginOrCancel(
   return true;
 }
 
+/** Persists a validated preflight error only after all source checks have completed. */
+export async function persistPreflightFailure(
+  payload: ConnectionTaskPayload | DataSourceTaskPayload,
+  dependencies: IntegrationWorkerDependencies,
+  error: IntegrationError,
+): Promise<void> {
+  try {
+    await dependencies.worker.markRunRunning({
+      organizationId: payload.organizationId,
+      ingestionRunId: payload.ingestionRunId,
+      startedAt: nowIso(dependencies),
+    });
+    await requeueOrFail(payload, dependencies, error);
+  } catch {
+    // Preserve the original validated error; an unavailable CAS boundary must not be bypassed.
+  }
+}
+
 export async function complete(
   payload: ConnectionTaskPayload | DataSourceTaskPayload,
   dependencies: IntegrationWorkerDependencies,
@@ -227,6 +245,34 @@ export async function complete(
     completedAt: nowIso(dependencies),
     normalizedErrorCode: input.normalizedErrorCode,
     safeErrorSummary: input.safeErrorSummary,
+  });
+}
+
+export async function requeueOrFail(
+  payload: ConnectionTaskPayload | DataSourceTaskPayload,
+  dependencies: IntegrationWorkerDependencies,
+  error: IntegrationError,
+  counts: { recordsReceived?: number; recordsAccepted?: number; recordsRejected?: number } = {},
+): Promise<void> {
+  if (error.retryable) {
+    await dependencies.worker.requeueRun({
+      organizationId: payload.organizationId,
+      ingestionRunId: payload.ingestionRunId,
+      recordsReceived: counts.recordsReceived ?? 0,
+      recordsAccepted: counts.recordsAccepted ?? 0,
+      recordsRejected: counts.recordsRejected ?? 0,
+      normalizedErrorCode: error.code,
+      safeErrorSummary: error.message,
+    });
+    return;
+  }
+  await complete(payload, dependencies, {
+    status: "failed",
+    recordsReceived: counts.recordsReceived,
+    recordsAccepted: counts.recordsAccepted,
+    recordsRejected: counts.recordsRejected,
+    normalizedErrorCode: error.code,
+    safeErrorSummary: error.message,
   });
 }
 

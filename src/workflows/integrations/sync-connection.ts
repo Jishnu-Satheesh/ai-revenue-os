@@ -5,10 +5,12 @@ import {
   loadValidatedConnection,
   normalizedError,
   parseConnectionTaskPayload,
-  resolveValidatedAdapter,
+  persistPreflightFailure,
+  requeueOrFail,
   validateEnvelopes,
   type IntegrationWorkerDependencies,
 } from "@/workflows/integrations/contracts";
+import type { ProviderAdapter } from "@/domain/integrations/types";
 
 /** Runs one bounded provider sync and hands validated envelopes to Data Ingestion exactly once. */
 export async function runSyncConnection(
@@ -17,10 +19,16 @@ export async function runSyncConnection(
 ) {
   const payload = parseConnectionTaskPayload("integration.sync-connection", input);
   const startedAt = Date.now();
-  const connection = await loadValidatedConnection(payload, dependencies);
+  let adapter: ProviderAdapter;
+  try {
+    ({ adapter } = await loadValidatedConnection(payload, dependencies));
+  } catch (error) {
+    const normalized = normalizedError(error);
+    await persistPreflightFailure(payload, dependencies, normalized);
+    throw normalized;
+  }
   const cancelled = await beginOrCancel(payload, dependencies);
   if (cancelled) return;
-  const adapter = resolveValidatedAdapter(connection, payload, dependencies);
   try {
     const records = validateEnvelopes(
       await adapter.sync({
@@ -63,11 +71,7 @@ export async function runSyncConnection(
       normalizedErrorCode: normalized.code,
       safeDetail: normalized.message,
     });
-    await complete(payload, dependencies, {
-      status: "failed",
-      normalizedErrorCode: normalized.code,
-      safeErrorSummary: normalized.message,
-    });
+    await requeueOrFail(payload, dependencies, normalized);
     throw normalized;
   }
 }

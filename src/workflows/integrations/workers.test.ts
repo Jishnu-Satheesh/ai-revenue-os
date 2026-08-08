@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { IntegrationError } from "@/domain/integrations/errors";
 import type { IngestionSink, ProviderAdapter } from "@/domain/integrations/types";
+import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
 import { runCheckFreshness } from "@/workflows/integrations/check-freshness";
 import { runDisconnectConnection } from "@/workflows/integrations/disconnect-connection";
 import { runImportDataSource } from "@/workflows/integrations/import-data-source";
@@ -111,6 +112,17 @@ function workerRepository(): IntegrationWorkerRepository & {
         safe_error_summary: input.safeErrorSummary ?? null,
       });
     }),
+    requeueRun: vi.fn(async (input) =>
+      runRow({
+        status: "queued",
+        records_received: input.recordsReceived,
+        records_accepted: input.recordsAccepted,
+        records_rejected: input.recordsRejected,
+        normalized_error_code: input.normalizedErrorCode,
+        safe_error_summary: input.safeErrorSummary,
+      }),
+    ),
+    cancelRun: vi.fn(async () => runRow({ status: "cancelled" })),
     appendHealthCheck: vi.fn(async (input) => {
       health.push(input);
       return { id: "health", ...input };
@@ -165,7 +177,10 @@ function dependencies(
   return {
     worker,
     sink,
-    providers: { getAdapter: vi.fn(() => adapter) },
+    providers: {
+      getAdapter: vi.fn(() => adapter),
+      getDefinition: vi.fn(() => googleBusinessProfileDefinition),
+    },
     findDataSource: vi.fn(async () => input.dataSource ?? dataSource),
     assertFeatureEnabled: vi.fn(),
     isCancelled: vi.fn(async () => input.cancelled ?? false),
@@ -290,18 +305,19 @@ describe("Integration Hub workers", () => {
   });
 
   it("records a cancelled run without calling the provider", async () => {
-    const deps = dependencies({ cancelled: true });
+    const adapter = fixtureAdapter();
+    const deps = dependencies({ cancelled: true, adapter });
     await runSyncConnection(
       { ...connectionPayload, taskName: "integration.sync-connection" },
       deps,
     );
-    expect(deps.providers.getAdapter).not.toHaveBeenCalled();
+    expect(adapter.sync).not.toHaveBeenCalled();
     expect(deps.worker.completions).toContainEqual(
       expect.objectContaining({ status: "cancelled" }),
     );
   });
 
-  it("keeps prior good data and records a failed test when an adapter rejects", async () => {
+  it("keeps prior good data and atomically requeues a retryable adapter failure", async () => {
     const deps = dependencies({
       adapter: fixtureAdapter({
         testConnection: vi
@@ -313,9 +329,25 @@ describe("Integration Hub workers", () => {
       code: "PROVIDER_UNAVAILABLE",
     });
     expect(deps.worker.scheduleConnection).not.toHaveBeenCalled();
-    expect(deps.worker.completions).toContainEqual(expect.objectContaining({ status: "failed" }));
+    expect(deps.worker.requeueRun).toHaveBeenCalledWith(
+      expect.objectContaining({ normalizedErrorCode: "PROVIDER_UNAVAILABLE" }),
+    );
     expect(deps.worker.health).toContainEqual(
       expect.objectContaining({ outcome: "failed", normalized_error_code: "PROVIDER_UNAVAILABLE" }),
+    );
+  });
+
+  it("maps a failed connection test result to a failed terminal run", async () => {
+    const deps = dependencies({
+      adapter: fixtureAdapter({
+        testConnection: vi
+          .fn()
+          .mockResolvedValue({ outcome: "failed", safeDetail: "Fixture failed." }),
+      }),
+    });
+    await runTestConnection(connectionPayload, deps);
+    expect(deps.worker.completions).toContainEqual(
+      expect.objectContaining({ status: "failed", normalizedErrorCode: "UNKNOWN_PROVIDER_ERROR" }),
     );
   });
 
@@ -371,6 +403,55 @@ describe("Integration Hub workers", () => {
     expect(deps.worker.health).toContainEqual(
       expect.objectContaining({ check_type: "freshness", outcome: "warning" }),
     );
+  });
+
+  it("uses the provider-defined freshness threshold instead of the Google fixture default", async () => {
+    const deps = dependencies({
+      adapter: fixtureAdapter({ providerKey: "short-window-provider" }),
+    });
+    deps.providers.getDefinition.mockReturnValue({
+      ...googleBusinessProfileDefinition,
+      key: "short-window-provider",
+      staleAfterMinutes: 5,
+    });
+    vi.mocked(deps.worker.loadGrantRecomputationInput).mockResolvedValueOnce({
+      ...(await deps.worker.loadGrantRecomputationInput({
+        organizationId: ids.organizationId,
+        connectionId: ids.connectionId,
+      })),
+      provider_key: "short-window-provider",
+      last_successful_sync_at: "2026-08-08T00:54:00.000Z",
+    });
+    await runCheckFreshness(
+      { ...connectionPayload, taskName: "integration.check-freshness" },
+      deps,
+    );
+    expect(deps.worker.health).toContainEqual(
+      expect.objectContaining({ check_type: "freshness", outcome: "warning" }),
+    );
+  });
+
+  it("rejects CSV streams that contain invalid UTF-8", async () => {
+    const deps = dependencies();
+    deps.csvObjects.open.mockResolvedValueOnce(
+      (async function* () {
+        yield Buffer.from([0xc3, 0x28]);
+      })(),
+    );
+    await expect(
+      runImportDataSource(
+        {
+          taskName: "integration.import-data-source",
+          organizationId: ids.organizationId,
+          dataSourceId: ids.dataSourceId,
+          ingestionRunId: ids.ingestionRunId,
+          correlationId: ids.correlationId,
+          idempotencyKey: connectionPayload.idempotencyKey,
+        },
+        deps,
+      ),
+    ).rejects.toMatchObject({ code: "UNKNOWN_PROVIDER_ERROR" });
+    expect(deps.sink.accept).not.toHaveBeenCalled();
   });
 
   it("leaves capabilities disabled and records a warning when credential cleanup fails", async () => {

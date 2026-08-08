@@ -291,6 +291,7 @@ function createDependencies(
       publisher,
       providers: {
         listDefinitions: () => [definition],
+        getDefinition: () => definition,
         getAdapter: () => {
           throw new Error("not used");
         },

@@ -6,9 +6,11 @@ import {
   normalizedError,
   nowIso,
   parseConnectionTaskPayload,
-  resolveValidatedAdapter,
+  persistPreflightFailure,
+  requeueOrFail,
   type IntegrationWorkerDependencies,
 } from "@/workflows/integrations/contracts";
+import type { ProviderAdapter } from "@/domain/integrations/types";
 
 /** Executes a connection check after the task payload and tenant source are revalidated. */
 export async function runTestConnection(
@@ -17,10 +19,16 @@ export async function runTestConnection(
 ) {
   const payload = parseConnectionTaskPayload("integration.test-connection", input);
   const startedAt = Date.now();
-  const connection = await loadValidatedConnection(payload, dependencies);
+  let adapter: ProviderAdapter;
+  try {
+    ({ adapter } = await loadValidatedConnection(payload, dependencies));
+  } catch (error) {
+    const normalized = normalizedError(error);
+    await persistPreflightFailure(payload, dependencies, normalized);
+    throw normalized;
+  }
   const cancelled = await beginOrCancel(payload, dependencies);
   if (cancelled) return;
-  const adapter = resolveValidatedAdapter(connection, payload, dependencies);
   try {
     const result = await adapter.testConnection({
       organizationId: payload.organizationId,
@@ -34,8 +42,17 @@ export async function runTestConnection(
       latencyMs: Date.now() - startedAt,
       safeDetail: result.safeDetail,
     });
+    const status =
+      result.outcome === "passed"
+        ? "succeeded"
+        : result.outcome === "warning"
+          ? "partially_succeeded"
+          : "failed";
     await complete(payload, dependencies, {
-      status: result.outcome === "passed" ? "succeeded" : "partially_succeeded",
+      status,
+      normalizedErrorCode: result.outcome === "failed" ? "UNKNOWN_PROVIDER_ERROR" : null,
+      safeErrorSummary:
+        result.outcome === "failed" ? (result.safeDetail ?? "The connection test failed.") : null,
     });
   } catch (error) {
     const normalized = normalizedError(error);
@@ -46,11 +63,7 @@ export async function runTestConnection(
       normalizedErrorCode: normalized.code,
       safeDetail: normalized.message,
     });
-    await complete(payload, dependencies, {
-      status: "failed",
-      normalizedErrorCode: normalized.code,
-      safeErrorSummary: normalized.message,
-    });
+    await requeueOrFail(payload, dependencies, normalized);
     throw normalized;
   }
 }

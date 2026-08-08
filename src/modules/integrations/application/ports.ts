@@ -333,6 +333,24 @@ export type IntegrationRunTransitionPort = {
     | { outcome: "already_terminal"; run: IntegrationIngestionRunRow }
     | { outcome: "conflict" }
   >;
+  requeueRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    expectedStatus: "running";
+    recordsReceived: number;
+    recordsAccepted: number;
+    recordsRejected: number;
+    normalizedErrorCode: string;
+    safeErrorSummary: string;
+  }): Promise<
+    { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
+  >;
+  cancelRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
+  }): Promise<
+    { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
+  >;
 };
 
 export type IntegrationWorkerRepository = {
@@ -351,6 +369,19 @@ export type IntegrationWorkerRepository = {
     completedAt: string;
     normalizedErrorCode?: string | null;
     safeErrorSummary?: string | null;
+  }): Promise<IntegrationIngestionRunRow>;
+  requeueRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    recordsReceived: number;
+    recordsAccepted: number;
+    recordsRejected: number;
+    normalizedErrorCode: string;
+    safeErrorSummary: string;
+  }): Promise<IntegrationIngestionRunRow>;
+  cancelRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
   }): Promise<IntegrationIngestionRunRow>;
   appendHealthCheck(input: IntegrationHealthCheckInsert): Promise<IntegrationHealthCheckRow>;
   loadGrantRecomputationInput(input: {
