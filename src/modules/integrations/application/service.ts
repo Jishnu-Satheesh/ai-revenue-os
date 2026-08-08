@@ -290,12 +290,13 @@ export function createIntegrationService({
       source: { connection: committed.connection },
       idempotencyKey: parsed.idempotencyKey,
     });
-    return { connection: committed.connection, initialTest };
+    return { connection: committed.connection, initialTest, created: committed.created };
   }
 
   async function replaceMappings(
     input: AuthenticatedIntegrationContext & {
       connectionId: string;
+      idempotencyKey: string;
       mappings: z.input<typeof mappingSchema>[];
     },
   ) {
@@ -327,6 +328,7 @@ export function createIntegrationService({
       organizationId: input.organizationId,
       connectionId: connection.id,
       actorId: input.actorId,
+      idempotencyKey: idempotencyKeySchema.parse(input.idempotencyKey),
       mappings: mappingRows,
       grants: capabilityRows({
         definition,

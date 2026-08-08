@@ -46,6 +46,7 @@ export const queuedOperationRequestSchema = z
 
 export const replaceMappingsRequestSchema = z
   .object({
+    idempotencyKey: idempotencyKeySchema,
     mappings: z
       .array(
         z
@@ -251,7 +252,13 @@ export async function runIntegrationRoute<TParams>(input: {
       { status: publicResponse.status },
     );
     if (correlationId) response.headers.set("x-correlation-id", correlationId);
-    logger.warn("integration_api.failed", { organizationId, correlationId });
+    logger.warn("integration_api.failed", {
+      organizationId,
+      correlationId,
+      durationMs: Math.round(performance.now() - startedAt),
+      errorCode: publicResponse.error.code,
+      httpStatus: publicResponse.status,
+    });
     return response;
   } finally {
     const durationMs = Math.round(performance.now() - startedAt);

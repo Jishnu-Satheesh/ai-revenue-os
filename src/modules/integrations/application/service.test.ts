@@ -203,6 +203,12 @@ function createDependencies(
     },
     async connectFixtureWithGrants(input) {
       if (options.atomicConnectFails) throw new Error("transaction rolled back");
+      const existed = connections.some(
+        (item) =>
+          item.organization_id === input.organizationId &&
+          item.provider_key === input.providerKey &&
+          item.external_account_id === input.externalAccountId,
+      );
       const connected = await repository.upsertFixtureConnection(input);
       const grants = await repository.replaceCapabilityGrants({
         organizationId: input.organizationId,
@@ -210,7 +216,7 @@ function createDependencies(
         grants: input.grants,
         correlationId: input.correlationId,
       });
-      return { connection: connected, grants };
+      return { connection: connected, grants, created: !existed };
     },
     async replaceMappingsWithGrants(input) {
       if (options.atomicMappingFails) throw new Error("transaction rolled back");
@@ -357,7 +363,12 @@ describe("Integration application service", () => {
     [
       "mapping",
       (service: ReturnType<typeof createIntegrationService>) =>
-        service.replaceMappings({ ...viewer, connectionId, mappings: [] }),
+        service.replaceMappings({
+          ...viewer,
+          connectionId,
+          idempotencyKey: "viewer-map",
+          mappings: [],
+        }),
     ],
     [
       "create source",
@@ -422,6 +433,29 @@ describe("Integration application service", () => {
     });
   });
 
+  it("reports whether the atomic fixture upsert inserted the connection", async () => {
+    const { service } = createDependencies();
+    const first = await service.connectFixture({
+      ...operator,
+      providerKey: definition.key,
+      externalAccountId: "account-new",
+      externalAccountLabel: "A label that must stay private",
+      grantedScopes: ["business.manage"],
+      idempotencyKey: "connect-created",
+    });
+    const retry = await service.connectFixture({
+      ...operator,
+      providerKey: definition.key,
+      externalAccountId: "account-new",
+      externalAccountLabel: "A label that must stay private",
+      grantedScopes: ["business.manage"],
+      idempotencyKey: "connect-created",
+    });
+
+    expect(first.created).toBe(true);
+    expect(retry.created).toBe(false);
+  });
+
   it("fails closed when the atomic fixture connection and grant transaction fails", async () => {
     const { service, dispatches } = createDependencies({ atomicConnectFails: true });
     await expect(
@@ -469,6 +503,7 @@ describe("Integration application service", () => {
       service.replaceMappings({
         ...operator,
         connectionId,
+        idempotencyKey: "foreign-map",
         mappings: [
           {
             externalResourceId: "location-1",
@@ -487,6 +522,7 @@ describe("Integration application service", () => {
       service.replaceMappings({
         ...operator,
         connectionId,
+        idempotencyKey: "atomic-map",
         mappings: [
           {
             externalResourceId: "location-1",

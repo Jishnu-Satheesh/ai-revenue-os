@@ -12,6 +12,10 @@ const workerTransitionsMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260808012410_integration_worker_run_transitions.sql",
 );
+const authenticatedOperationsMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260808025602_integration_authenticated_operations.sql",
+);
 const integrationMigrationNames = readdirSync(migrationsDirectory)
   .filter((name) => /^\d{14}_integration_hub\.sql$/.test(name))
   .sort();
@@ -31,6 +35,10 @@ function readIntegrationPgTap() {
 
 function readWorkerTransitionsMigration() {
   return readFileSync(workerTransitionsMigrationPath, "utf8");
+}
+
+function readAuthenticatedOperationsMigration() {
+  return readFileSync(authenticatedOperationsMigrationPath, "utf8");
 }
 
 function functionDefinition(sql: string, qualifiedName: string) {
@@ -82,6 +90,37 @@ const tenantTables = [
 ] as const;
 
 describe("Integration Hub migration contract", () => {
+  it("uses authenticated, tenant-checked atomic RPCs for connection operations", () => {
+    const sql = readAuthenticatedOperationsMigration();
+    const connect = functionDefinition(sql, "public.connect_fixture_integration_with_grants");
+    const mappings = functionDefinition(sql, "public.replace_integration_mappings_with_grants");
+    const disconnect = functionDefinition(sql, "public.disconnect_integration_connection");
+
+    for (const operation of [connect, mappings, disconnect]) {
+      expect(operation).toContain("security definer");
+      expect(operation).toContain("set search_path = ''");
+      expect(operation).toContain("private.has_organization_role");
+      expect(operation).toContain("(select auth.uid()) <> p_actor_id");
+    }
+    expect(connect).toContain("on conflict (organization_id, provider_key, external_account_id)");
+    expect(connect).toContain("xmax = 0");
+    expect(connect).toContain("delete from public.integration_capability_grants");
+    expect(sql).toContain("create table public.integration_mapping_operations");
+    expect(mappings).toContain("md5(p_mappings::text || p_grants::text)");
+    expect(mappings).toContain("for update");
+    expect(mappings).toContain("delete from public.integration_account_mappings");
+    expect(mappings).toContain("delete from public.integration_capability_grants");
+    expect(mappings).toContain("left join public.branches branch");
+    expect(disconnect).toContain("for update");
+    expect(disconnect).toContain("set status = 'disconnected'");
+    expect(sql).toContain(
+      "grant execute on function public.connect_fixture_integration_with_grants",
+    );
+    expect(sql).toContain(
+      "grant execute on function public.replace_integration_mappings_with_grants",
+    );
+    expect(sql).toContain("grant execute on function public.disconnect_integration_connection");
+  });
   it("leases worker execution by tenant and prevents a late claimant from transitioning a run", () => {
     const sql = readWorkerTransitionsMigration();
     const lease = statementContaining(

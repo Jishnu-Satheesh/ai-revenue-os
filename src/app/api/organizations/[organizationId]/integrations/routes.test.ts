@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
     replaceMappings: vi.fn(),
     disconnectConnection: vi.fn(),
   },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 const { getOrganizationContext, createIntegrationService, service } = mocks;
@@ -44,7 +45,7 @@ vi.mock("@trigger.dev/sdk", () => ({
   tasks: { trigger: vi.fn() },
 }));
 vi.mock("@/lib/logger", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: mocks.logger,
 }));
 
 import { GET as getCatalog } from "@/app/api/organizations/[organizationId]/integrations/catalog/route";
@@ -148,6 +149,14 @@ describe("Integration Hub API routes", () => {
 
     expect(response.status).toBe(404);
     expect(await response.text()).not.toContain("must never leak");
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "integration_api.failed",
+      expect.objectContaining({
+        errorCode: "NOT_FOUND",
+        httpStatus: 404,
+        durationMs: expect.any(Number),
+      }),
+    );
   });
 
   it("returns a feature-disabled public error without exposing internal causes", async () => {
@@ -267,6 +276,7 @@ describe("Integration Hub API routes", () => {
   it("validates mappings before asking the service to replace them", async () => {
     const invalid = await replaceMappings(
       jsonRequest("PUT", "/mappings", {
+        idempotencyKey: "mapping-1",
         mappings: [
           {
             externalResourceId: "location-1",
@@ -279,6 +289,7 @@ describe("Integration Hub API routes", () => {
     );
     const valid = await replaceMappings(
       jsonRequest("PUT", "/mappings", {
+        idempotencyKey: "mapping-2",
         mappings: [
           {
             externalResourceId: "location-1",
@@ -294,8 +305,31 @@ describe("Integration Hub API routes", () => {
     expect(invalid.status).toBe(400);
     expect(valid.status).toBe(200);
     expect(service.replaceMappings).toHaveBeenCalledWith(
-      expect.objectContaining({ connectionId, mappings: expect.any(Array) }),
+      expect.objectContaining({
+        connectionId,
+        idempotencyKey: "mapping-2",
+        mappings: expect.any(Array),
+      }),
     );
+  });
+
+  it("requires an idempotency key for a mapping replacement", async () => {
+    const response = await replaceMappings(
+      jsonRequest("PUT", "/mappings", {
+        mappings: [
+          {
+            externalResourceId: "location-1",
+            externalResourceLabel: "Main branch",
+            branchId,
+            status: "mapped",
+          },
+        ],
+      }),
+      connectionParams(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(service.replaceMappings).not.toHaveBeenCalled();
   });
 
   it("requires the exact disconnect confirmation before queuing cleanup", async () => {

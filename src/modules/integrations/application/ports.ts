@@ -224,12 +224,14 @@ export type IntegrationTransactionPort = {
   ) => Promise<{
     connection: IntegrationConnectionRow;
     grants: IntegrationCapabilityGrantRow[];
+    created: boolean;
   }>;
   /** Atomic RPC boundary. Absence must fail closed for application mapping flows. */
   replaceMappingsWithGrants?: (input: {
     organizationId: string;
     connectionId: string;
     actorId: string;
+    idempotencyKey: string;
     mappings: readonly IntegrationAccountMappingInsert[];
     grants: readonly IntegrationCapabilityGrantInsert[];
     correlationId: string;
@@ -267,7 +269,11 @@ export type IntegrationRepository = {
   ): Promise<IntegrationConnectionRow>;
   connectFixtureWithGrants(
     input: FixtureConnectionUpsertInput & { grants: readonly IntegrationCapabilityGrantInsert[] },
-  ): Promise<{ connection: IntegrationConnectionRow; grants: IntegrationCapabilityGrantRow[] }>;
+  ): Promise<{
+    connection: IntegrationConnectionRow;
+    grants: IntegrationCapabilityGrantRow[];
+    created: boolean;
+  }>;
   replaceCapabilityGrants(
     input: Parameters<IntegrationTransactionPort["replaceCapabilityGrants"]>[0],
   ): Promise<IntegrationCapabilityGrantRow[]>;
@@ -278,6 +284,7 @@ export type IntegrationRepository = {
     organizationId: string;
     connectionId: string;
     actorId: string;
+    idempotencyKey: string;
     mappings: readonly IntegrationAccountMappingInsert[];
     grants: readonly IntegrationCapabilityGrantInsert[];
     correlationId: string;

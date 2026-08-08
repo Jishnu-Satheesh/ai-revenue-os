@@ -20,6 +20,7 @@ export async function PUT(
           mappings: await service.replaceMappings({
             ...context,
             connectionId: route.connectionId,
+            idempotencyKey: input.idempotencyKey,
             mappings: input.mappings,
           }),
         },

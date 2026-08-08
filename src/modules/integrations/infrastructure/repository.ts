@@ -6,6 +6,8 @@ import type { Database } from "@/lib/supabase/database.types";
 import { buildIntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 import type {
   IntegrationAuditEvent,
+  IntegrationAccountMappingRow,
+  IntegrationCapabilityGrantRow,
   IntegrationConnectionRow,
   IntegrationDataSourceRow,
   IntegrationHealthCheckRow,
@@ -544,6 +546,38 @@ function databaseError(message: string, error: unknown): never {
   throw new IntegrationError("UNKNOWN_PROVIDER_ERROR", message, false, {}, error);
 }
 
+function authenticatedOperationError(message: string, error: unknown): never {
+  const code =
+    error && typeof error === "object" && "code" in error && typeof error.code === "string"
+      ? error.code
+      : undefined;
+  if (code === "42501") {
+    throw new IntegrationError(
+      "AUTHORIZATION_ERROR",
+      "You do not have permission for this integration action.",
+      false,
+    );
+  }
+  if (code === "P0002") {
+    throw new IntegrationError(
+      "NOT_FOUND",
+      "Integration connection was not found for this organization.",
+      false,
+    );
+  }
+  if (code === "23505") {
+    throw new IntegrationError(
+      "CONFLICT",
+      "This integration request conflicts with existing state.",
+      false,
+    );
+  }
+  if (code === "23514" || code === "22023") {
+    throw new IntegrationError("VALIDATION_ERROR", "Please check the submitted fields.", false);
+  }
+  databaseError(message, error);
+}
+
 /**
  * Authenticated Supabase adapter. Its single cast is isolated because the
  * generated `Database` type has not yet been regenerated after Task 3.
@@ -776,6 +810,91 @@ export function createSupabaseIntegrationPersistencePort(
   };
 }
 
+/**
+ * User-request transaction boundary. These security-definer RPCs verify the
+ * authenticated actor and tenant role internally, so RLS-backed routes retain
+ * atomic reconnect, mapping, and disconnect invariants without a service key.
+ */
+export function createSupabaseAuthenticatedIntegrationTransactionPort(
+  authenticatedSupabase: SupabaseClient<Database>,
+): IntegrationTransactionPort {
+  type RpcClient = {
+    rpc(
+      name: string,
+      args: Record<string, unknown>,
+    ): PromiseLike<{ data: unknown; error: unknown }>;
+  };
+  const rpc = authenticatedSupabase as unknown as RpcClient;
+  const invoke = async <T>(name: string, args: Record<string, unknown>, message: string) => {
+    const result = await rpc.rpc(name, args);
+    if (result.error || result.data === null) authenticatedOperationError(message, result.error);
+    return result.data as T;
+  };
+
+  return {
+    async upsertFixtureConnection() {
+      return unavailableTransaction();
+    },
+    async replaceCapabilityGrants() {
+      return unavailableTransaction();
+    },
+    async replaceMappings() {
+      return unavailableTransaction();
+    },
+    async connectFixtureWithGrants(input) {
+      return invoke<{
+        connection: IntegrationConnectionRow;
+        grants: IntegrationCapabilityGrantRow[];
+        created: boolean;
+      }>(
+        "connect_fixture_integration_with_grants",
+        {
+          p_organization_id: input.organizationId,
+          p_actor_id: input.actorId,
+          p_provider_key: input.providerKey,
+          p_adapter_version: input.adapterVersion,
+          p_external_account_id: input.externalAccountId,
+          p_external_account_label: input.externalAccountLabel,
+          p_granted_scopes: [...input.grantedScopes],
+          p_correlation_id: input.correlationId,
+          p_grants: input.grants,
+        },
+        "Integration fixture connection could not be committed.",
+      );
+    },
+    async replaceMappingsWithGrants(input) {
+      return invoke<{
+        mappings: IntegrationAccountMappingRow[];
+        grants: IntegrationCapabilityGrantRow[];
+      }>(
+        "replace_integration_mappings_with_grants",
+        {
+          p_organization_id: input.organizationId,
+          p_connection_id: input.connectionId,
+          p_actor_id: input.actorId,
+          p_correlation_id: input.correlationId,
+          p_idempotency_key: input.idempotencyKey,
+          p_mappings: input.mappings,
+          p_grants: input.grants,
+        },
+        "Integration mappings could not be committed.",
+      );
+    },
+    async disconnectConnection(input) {
+      return invoke<IntegrationConnectionRow>(
+        "disconnect_integration_connection",
+        {
+          p_organization_id: input.organizationId,
+          p_connection_id: input.connectionId,
+          p_actor_id: input.actorId,
+          p_correlation_id: input.correlationId,
+        },
+        "Integration disconnect could not be committed.",
+      );
+    },
+  };
+}
+
 export function createAuthenticatedIntegrationRepository(input: {
   supabase: SupabaseClient<Database>;
   transactions?: IntegrationTransactionPort;
@@ -787,7 +906,8 @@ export function createAuthenticatedIntegrationRepository(input: {
   return {
     repository: createIntegrationRepository({
       persistence,
-      transactions: input.transactions,
+      transactions:
+        input.transactions ?? createSupabaseAuthenticatedIntegrationTransactionPort(input.supabase),
       catalog: input.catalog,
       now: input.now,
     }),
