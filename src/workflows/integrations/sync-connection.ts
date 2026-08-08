@@ -64,6 +64,7 @@ export async function runSyncConnection(
     });
   } catch (error) {
     const normalized = normalizedError(error);
+    if (normalized.metadata.staleLease) return;
     await appendConnectionHealth(payload, dependencies, {
       checkType: "sync",
       outcome: "failed",

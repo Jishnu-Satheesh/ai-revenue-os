@@ -198,6 +198,7 @@ export async function runImportDataSource(
     });
   } catch (error) {
     const normalized = normalizedError(error);
+    if (normalized.metadata.staleLease) return;
     await requeueOrFail(payload, dependencies, normalized, {
       recordsReceived,
       recordsAccepted,

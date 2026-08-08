@@ -132,7 +132,13 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
           p_fingerprint: input.fingerprint,
           p_claim_token: input.claimToken,
         });
-        if (result.error || !result.data)
+        if (result.error)
+          throw new IntegrationError(
+            "CONFLICT",
+            "The ingestion handoff claim is unavailable.",
+            false,
+          );
+        if (!result.data)
           throw new IntegrationError(
             "CONFLICT",
             "The ingestion handoff claim is unavailable.",
@@ -151,12 +157,13 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
           p_rejected: input.rejected,
           p_rejection_reasons: [...input.rejectionReasons],
         });
-        if (result.error || !result.data)
+        if (result.error)
           throw new IntegrationError(
             "CONFLICT",
             "The ingestion handoff completion is unavailable.",
             false,
           );
+        if (!result.data) return { outcome: "stale_lease" as const };
         return result.data as {
           accepted: number;
           rejected: number;

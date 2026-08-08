@@ -91,7 +91,10 @@ export type DurableIngestionHandoffLedger = {
     accepted: number;
     rejected: number;
     rejectionReasons: readonly string[];
-  }): Promise<{ accepted: number; rejected: number; rejectionReasons: readonly string[] }>;
+  }): Promise<
+    | { accepted: number; rejected: number; rejectionReasons: readonly string[] }
+    | { outcome: "stale_lease" }
+  >;
 };
 
 function durableFingerprint(input: Parameters<IngestionSink["accept"]>[0]): string {
@@ -126,7 +129,21 @@ export function createDurableIngestionSink(input: {
         );
       }
       const result = await input.sink.accept(request);
-      return input.ledger.complete({ ...request, fingerprint, claimToken, ...result });
+      const completed = await input.ledger.complete({
+        ...request,
+        fingerprint,
+        claimToken,
+        ...result,
+      });
+      if ("outcome" in completed) {
+        throw new IntegrationError(
+          "CONFLICT",
+          "The ingestion handoff lease was superseded.",
+          false,
+          { staleLease: true },
+        );
+      }
+      return completed;
     },
   };
 }

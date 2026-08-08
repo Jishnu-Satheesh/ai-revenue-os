@@ -149,6 +149,31 @@ describe("validated integration ingestion sink", () => {
     expect(handoff.ingest).toHaveBeenCalledOnce();
   });
 
+  it("marks a superseded claimant completion as a stale lease", async () => {
+    const sink = createDurableIngestionSink({
+      sink: createValidatedIngestionSink({
+        handoff: createHandoff(),
+        sourceResolver: { resolve: async () => source },
+      }),
+      ledger: {
+        async claim() {
+          return { outcome: "claimed" as const };
+        },
+        async complete() {
+          return { outcome: "stale_lease" as const };
+        },
+      },
+    });
+    await expect(
+      sink.accept({
+        organizationId,
+        ingestionRunId: "run-stale",
+        idempotencyKey: "sync-stale-a",
+        records: [baseRecord],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT", metadata: { staleLease: true } });
+  });
+
   it("rejects malformed, cross-tenant, and wrong-source records with safe reasons", async () => {
     const handoff = createHandoff();
     const sink = createValidatedIngestionSink({
