@@ -106,8 +106,17 @@ function run(overrides: Partial<IntegrationIngestionRunRow> = {}): IntegrationIn
   };
 }
 
-function createDependencies(options: { dispatchFails?: boolean } = {}) {
-  const connections = [connection()];
+function createDependencies(
+  options: {
+    dispatchFails?: boolean;
+    connectionStatus?: IntegrationConnectionRow["status"];
+    atomicConnectFails?: boolean;
+    atomicMappingFails?: boolean;
+  } = {},
+) {
+  const connections = [
+    connection(options.connectionStatus ? { status: options.connectionStatus } : {}),
+  ];
   const sources = [source()];
   const runs: IntegrationIngestionRunRow[] = [];
   const published: Array<{ eventName: string; payload: Record<string, unknown> }> = [];
@@ -191,6 +200,28 @@ function createDependencies(options: { dispatchFails?: boolean } = {}) {
         updated_at: "2026-08-08T00:00:00.000Z",
         ...mapping,
       })) as IntegrationAccountMappingRow[];
+    },
+    async connectFixtureWithGrants(input) {
+      if (options.atomicConnectFails) throw new Error("transaction rolled back");
+      const connected = await repository.upsertFixtureConnection(input);
+      const grants = await repository.replaceCapabilityGrants({
+        organizationId: input.organizationId,
+        connectionId: connected.id,
+        grants: input.grants,
+        correlationId: input.correlationId,
+      });
+      return { connection: connected, grants };
+    },
+    async replaceMappingsWithGrants(input) {
+      if (options.atomicMappingFails) throw new Error("transaction rolled back");
+      const mappings = await repository.replaceMappings(input);
+      const grants = await repository.replaceCapabilityGrants({
+        organizationId: input.organizationId,
+        connectionId: input.connectionId,
+        grants: input.grants,
+        correlationId: input.correlationId,
+      });
+      return { mappings, grants };
     },
     async createDataSource(input: IntegrationDataSourceInsert) {
       const created = source({ ...input, id: dataSourceId });
@@ -299,6 +330,64 @@ describe("Integration application service", () => {
     ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
   });
 
+  it.each([
+    [
+      "connect",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.connectFixture({
+          ...viewer,
+          providerKey: definition.key,
+          externalAccountId: "account-1",
+          externalAccountLabel: "A label that must stay private",
+          grantedScopes: ["business.manage"],
+          idempotencyKey: "viewer-connect",
+        }),
+    ],
+    [
+      "test",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.requestConnectionTest({ ...viewer, connectionId, idempotencyKey: "viewer-test" }),
+    ],
+    [
+      "sync",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.requestSync({ ...viewer, connectionId, idempotencyKey: "viewer-sync" }),
+    ],
+    [
+      "mapping",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.replaceMappings({ ...viewer, connectionId, mappings: [] }),
+    ],
+    [
+      "create source",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.createDataSource({ ...viewer, sourceType: "manual", name: "Manual source" }),
+    ],
+    [
+      "update source",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.updateDataSource({ ...viewer, dataSourceId, name: "Renamed source" }),
+    ],
+    [
+      "import",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.requestImport({ ...viewer, dataSourceId, idempotencyKey: "viewer-import" }),
+    ],
+    [
+      "disconnect",
+      (service: ReturnType<typeof createIntegrationService>) =>
+        service.disconnectConnection({
+          ...viewer,
+          connectionId,
+          idempotencyKey: "viewer-disconnect",
+          confirmation: "A label that must stay private",
+        }),
+    ],
+  ] as const)("denies viewers the %s mutation", async (_name, mutate) => {
+    const { service } = createDependencies();
+    await expect(mutate(service)).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
+  });
+
   it("uses organization-scoped lookups before operators can mutate", async () => {
     const { service } = createDependencies();
     await expect(
@@ -312,18 +401,53 @@ describe("Integration application service", () => {
   });
 
   it("returns the same fixture connection on a duplicate connect", async () => {
-    const { service } = createDependencies();
+    const { service, dispatches } = createDependencies();
     const input = {
       ...operator,
       providerKey: definition.key,
       externalAccountId: "account-1",
       externalAccountLabel: "A label that must stay private",
       grantedScopes: ["business.manage"],
+      idempotencyKey: "connect-1",
     };
     const first = await service.connectFixture(input);
     const retry = await service.connectFixture(input);
-    expect(retry.id).toBe(first.id);
+    expect(retry.connection.id).toBe(first.connection.id);
+    expect(first.initialTest).toEqual({ runId: retry.initialTest.runId, status: "queued" });
+    expect(dispatches).toHaveLength(1);
+    expect(dispatches[0]).toMatchObject({
+      taskName: "integration.test-connection",
+      connectionId,
+    });
   });
+
+  it("fails closed when the atomic fixture connection and grant transaction fails", async () => {
+    const { service, dispatches } = createDependencies({ atomicConnectFails: true });
+    await expect(
+      service.connectFixture({
+        ...operator,
+        providerKey: definition.key,
+        externalAccountId: "account-1",
+        externalAccountLabel: "A label that must stay private",
+        grantedScopes: ["business.manage"],
+        idempotencyKey: "connect-fails",
+      }),
+    ).rejects.toThrow("transaction rolled back");
+    expect(dispatches).toEqual([]);
+  });
+
+  it.each(["disconnected", "revoked"] as const)(
+    "rejects %s connections before connection testing or synchronization",
+    async (status) => {
+      const { service } = createDependencies({ connectionStatus: status });
+      await expect(
+        service.requestConnectionTest({ ...operator, connectionId, idempotencyKey: "test-1" }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      await expect(
+        service.requestSync({ ...operator, connectionId, idempotencyKey: "sync-1" }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    },
+  );
 
   it("creates one queued run for a duplicate idempotency key and never reports success", async () => {
     const { service, dispatches } = createDependencies();
@@ -356,12 +480,31 @@ describe("Integration application service", () => {
     ).rejects.toMatchObject({ code: "TENANT_SCOPE_ERROR" });
   });
 
+  it("fails closed when the atomic mapping and grant transaction fails", async () => {
+    const { service } = createDependencies({ atomicMappingFails: true });
+    await expect(
+      service.replaceMappings({
+        ...operator,
+        connectionId,
+        mappings: [
+          {
+            externalResourceId: "location-1",
+            externalResourceLabel: "private label",
+            branchId,
+            status: "mapped",
+          },
+        ],
+      }),
+    ).rejects.toThrow("transaction rolled back");
+  });
+
   it("disconnects synchronously before it dispatches credential cleanup", async () => {
     const { service, disabled, dispatches } = createDependencies();
     const result = await service.disconnectConnection({
       ...operator,
       connectionId,
       idempotencyKey: "disconnect-1",
+      confirmation: "A label that must stay private",
     });
     expect(disabled).toEqual([connectionId]);
     expect(result.status).toBe("queued");
@@ -369,6 +512,19 @@ describe("Integration application service", () => {
       taskName: "integration.disconnect-connection",
       connectionId,
     });
+  });
+
+  it("requires exact authoritative account-label confirmation before disconnect", async () => {
+    const { service, disabled } = createDependencies();
+    await expect(
+      service.disconnectConnection({
+        ...operator,
+        connectionId,
+        idempotencyKey: "disconnect-1",
+        confirmation: "a label that must stay private",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(disabled).toEqual([]);
   });
 
   it("marks a run failed with safe output when dispatch fails", async () => {
@@ -392,6 +548,7 @@ describe("Integration application service", () => {
       externalAccountId: "account-2",
       externalAccountLabel: "A label that must stay private",
       grantedScopes: ["business.manage"],
+      idempotencyKey: "connect-safe-event",
     });
     expect(published.at(-1)).toMatchObject({ eventName: "integration.connected" });
     expect(JSON.stringify(published)).not.toContain("A label that must stay private");

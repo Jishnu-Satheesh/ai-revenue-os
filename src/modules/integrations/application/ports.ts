@@ -139,6 +139,24 @@ export type IntegrationIngestionRunInsert = Omit<
   "id" | "created_at" | "updated_at"
 >;
 export type IntegrationHealthCheckInsert = Omit<IntegrationHealthCheckRow, "id">;
+export type IntegrationCapabilityGrantInsert = Omit<
+  IntegrationCapabilityGrantRow,
+  "id" | "organization_id" | "connection_id" | "created_at" | "updated_at"
+>;
+export type IntegrationAccountMappingInsert = Omit<
+  IntegrationAccountMappingRow,
+  "id" | "organization_id" | "connection_id" | "created_by" | "created_at" | "updated_at"
+>;
+export type FixtureConnectionUpsertInput = {
+  organizationId: string;
+  actorId: string;
+  providerKey: string;
+  adapterVersion: string;
+  externalAccountId: string;
+  externalAccountLabel: string;
+  grantedScopes: readonly string[];
+  correlationId: string;
+};
 
 export type IntegrationPersistencePort = {
   listConnections(input: { organizationId: string }): Promise<IntegrationConnectionRow[]>;
@@ -186,35 +204,39 @@ export type IntegrationPersistencePort = {
 };
 
 export type IntegrationTransactionPort = {
-  upsertFixtureConnection(input: {
-    organizationId: string;
-    actorId: string;
-    providerKey: string;
-    adapterVersion: string;
-    externalAccountId: string;
-    externalAccountLabel: string;
-    grantedScopes: readonly string[];
-    correlationId: string;
-  }): Promise<IntegrationConnectionRow>;
+  upsertFixtureConnection(input: FixtureConnectionUpsertInput): Promise<IntegrationConnectionRow>;
   replaceCapabilityGrants(input: {
     organizationId: string;
     connectionId: string;
-    grants: readonly Omit<
-      IntegrationCapabilityGrantRow,
-      "id" | "organization_id" | "connection_id" | "created_at" | "updated_at"
-    >[];
+    grants: readonly IntegrationCapabilityGrantInsert[];
     correlationId: string;
   }): Promise<IntegrationCapabilityGrantRow[]>;
   replaceMappings(input: {
     organizationId: string;
     connectionId: string;
     actorId: string;
-    mappings: readonly Omit<
-      IntegrationAccountMappingRow,
-      "id" | "organization_id" | "connection_id" | "created_by" | "created_at" | "updated_at"
-    >[];
+    mappings: readonly IntegrationAccountMappingInsert[];
     correlationId: string;
   }): Promise<IntegrationAccountMappingRow[]>;
+  /** Atomic RPC boundary. Absence must fail closed for application connect flows. */
+  connectFixtureWithGrants?: (
+    input: FixtureConnectionUpsertInput & { grants: readonly IntegrationCapabilityGrantInsert[] },
+  ) => Promise<{
+    connection: IntegrationConnectionRow;
+    grants: IntegrationCapabilityGrantRow[];
+  }>;
+  /** Atomic RPC boundary. Absence must fail closed for application mapping flows. */
+  replaceMappingsWithGrants?: (input: {
+    organizationId: string;
+    connectionId: string;
+    actorId: string;
+    mappings: readonly IntegrationAccountMappingInsert[];
+    grants: readonly IntegrationCapabilityGrantInsert[];
+    correlationId: string;
+  }) => Promise<{
+    mappings: IntegrationAccountMappingRow[];
+    grants: IntegrationCapabilityGrantRow[];
+  }>;
   disconnectConnection(input: {
     organizationId: string;
     connectionId: string;
@@ -243,12 +265,26 @@ export type IntegrationRepository = {
   upsertFixtureConnection(
     input: Parameters<IntegrationTransactionPort["upsertFixtureConnection"]>[0],
   ): Promise<IntegrationConnectionRow>;
+  connectFixtureWithGrants(
+    input: FixtureConnectionUpsertInput & { grants: readonly IntegrationCapabilityGrantInsert[] },
+  ): Promise<{ connection: IntegrationConnectionRow; grants: IntegrationCapabilityGrantRow[] }>;
   replaceCapabilityGrants(
     input: Parameters<IntegrationTransactionPort["replaceCapabilityGrants"]>[0],
   ): Promise<IntegrationCapabilityGrantRow[]>;
   replaceMappings(
     input: Parameters<IntegrationTransactionPort["replaceMappings"]>[0],
   ): Promise<IntegrationAccountMappingRow[]>;
+  replaceMappingsWithGrants(input: {
+    organizationId: string;
+    connectionId: string;
+    actorId: string;
+    mappings: readonly IntegrationAccountMappingInsert[];
+    grants: readonly IntegrationCapabilityGrantInsert[];
+    correlationId: string;
+  }): Promise<{
+    mappings: IntegrationAccountMappingRow[];
+    grants: IntegrationCapabilityGrantRow[];
+  }>;
   createDataSource(input: IntegrationDataSourceInsert): Promise<IntegrationDataSourceRow>;
   updateDataSource(input: {
     organizationId: string;

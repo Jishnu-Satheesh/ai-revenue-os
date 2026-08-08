@@ -74,6 +74,7 @@ const connectFixtureSchema = z.object({
   externalAccountId: z.string().trim().min(1).max(500),
   externalAccountLabel: z.string().trim().min(1).max(500),
   grantedScopes: z.array(z.string().trim().min(1).max(300)).max(50),
+  idempotencyKey: idempotencyKeySchema,
 });
 const mappingSchema = z.object({
   externalResourceId: z.string().trim().min(1).max(500),
@@ -137,7 +138,7 @@ function dispatchIdempotencyKey(
 
 function capabilityRows(input: {
   definition: ProviderDefinition;
-  connection: IntegrationConnectionRow;
+  connection: Pick<IntegrationConnectionRow, "status" | "granted_scopes" | "adapter_version">;
   mappingStatus: "unmapped" | "mapped" | "ignored";
 }) {
   return deriveCapabilityGrants({
@@ -210,6 +211,16 @@ export function createIntegrationService({
     return source ?? notFound("Integration data source");
   }
 
+  function assertConnectionOperable(connection: IntegrationConnectionRow): void {
+    if (connection.status === "disconnected" || connection.status === "revoked") {
+      throw new IntegrationError(
+        "CONFLICT",
+        "Reconnect this integration before testing or synchronizing it.",
+        false,
+      );
+    }
+  }
+
   async function ensureBranchScope(organizationId: string, branchId: string | null | undefined) {
     if (!branchId) return;
     if (!(await branchLookup.findBranch({ organizationId, branchId }))) {
@@ -246,7 +257,12 @@ export function createIntegrationService({
         false,
       );
     }
-    const connection = await repository.upsertFixtureConnection({
+    const projectedConnection = {
+      status: "active" as const,
+      granted_scopes: parsed.grantedScopes,
+      adapter_version: definition.adapterVersion,
+    };
+    const committed = await repository.connectFixtureWithGrants({
       organizationId: input.organizationId,
       actorId: input.actorId,
       providerKey: definition.key,
@@ -255,20 +271,26 @@ export function createIntegrationService({
       externalAccountLabel: parsed.externalAccountLabel,
       grantedScopes: parsed.grantedScopes,
       correlationId: input.correlationId,
-    });
-    const grants = await repository.replaceCapabilityGrants({
-      organizationId: input.organizationId,
-      connectionId: connection.id,
-      grants: capabilityRows({ definition, connection, mappingStatus: "unmapped" }),
-      correlationId: input.correlationId,
+      grants: capabilityRows({
+        definition,
+        connection: projectedConnection,
+        mappingStatus: "unmapped",
+      }),
     });
     await publish(input, "integration.connected", {
-      connectionId: connection.id,
-      providerKey: connection.provider_key,
-      status: connection.status,
-      capabilityCount: grants.length,
+      connectionId: committed.connection.id,
+      providerKey: committed.connection.provider_key,
+      status: committed.connection.status,
+      capabilityCount: committed.grants.length,
     });
-    return connection;
+    const initialTest = await dispatchRun({
+      context: input,
+      operation: "integration.test",
+      taskName: "integration.test-connection",
+      source: { connection: committed.connection },
+      idempotencyKey: parsed.idempotencyKey,
+    });
+    return { connection: committed.connection, initialTest };
   }
 
   async function replaceMappings(
@@ -286,18 +308,12 @@ export function createIntegrationService({
       }
       await ensureBranchScope(input.organizationId, mapping.branchId);
     }
-    const saved = await repository.replaceMappings({
-      organizationId: input.organizationId,
-      connectionId: connection.id,
-      actorId: input.actorId,
-      mappings: mappings.map((mapping) => ({
-        external_resource_id: mapping.externalResourceId,
-        external_resource_label: mapping.externalResourceLabel,
-        branch_id: mapping.branchId ?? null,
-        status: mapping.status,
-      })),
-      correlationId: input.correlationId,
-    });
+    const mappingRows = mappings.map((mapping) => ({
+      external_resource_id: mapping.externalResourceId,
+      external_resource_label: mapping.externalResourceLabel,
+      branch_id: mapping.branchId ?? null,
+      status: mapping.status,
+    }));
     const definition = providers
       .listDefinitions()
       .find(
@@ -307,17 +323,21 @@ export function createIntegrationService({
       );
     if (!definition)
       throw new IntegrationError("NOT_FOUND", "The provider definition is unavailable.", false);
-    await repository.replaceCapabilityGrants({
+    const committed = await repository.replaceMappingsWithGrants({
       organizationId: input.organizationId,
       connectionId: connection.id,
+      actorId: input.actorId,
+      mappings: mappingRows,
       grants: capabilityRows({
         definition,
         connection,
-        mappingStatus: saved.some((mapping) => mapping.status === "mapped") ? "mapped" : "unmapped",
+        mappingStatus: mappingRows.some((mapping) => mapping.status === "mapped")
+          ? "mapped"
+          : "unmapped",
       }),
       correlationId: input.correlationId,
     });
-    return saved;
+    return committed.mappings;
   }
 
   async function createDataSource(
@@ -468,6 +488,7 @@ export function createIntegrationService({
   ) {
     authorize(input, "integration.test");
     const connection = await requireConnection(input, input.connectionId);
+    assertConnectionOperable(connection);
     return dispatchRun({
       context: input,
       operation: "integration.test",
@@ -482,6 +503,7 @@ export function createIntegrationService({
   ) {
     authorize(input, "integration.sync");
     const connection = await requireConnection(input, input.connectionId);
+    assertConnectionOperable(connection);
     return dispatchRun({
       context: input,
       operation: "integration.sync",
@@ -509,10 +531,21 @@ export function createIntegrationService({
   }
 
   async function disconnectConnection(
-    input: AuthenticatedIntegrationContext & { connectionId: string; idempotencyKey: string },
+    input: AuthenticatedIntegrationContext & {
+      connectionId: string;
+      idempotencyKey: string;
+      confirmation: string;
+    },
   ) {
     authorize(input, "integration.disconnect");
     const connection = await requireConnection(input, input.connectionId);
+    if (input.confirmation !== connection.external_account_label) {
+      throw new IntegrationError(
+        "VALIDATION_ERROR",
+        "Enter the displayed account name exactly to disconnect this integration.",
+        false,
+      );
+    }
     const persistedKey = taskIdempotencyKey(
       "integration.disconnect",
       idempotencyKeySchema.parse(input.idempotencyKey),

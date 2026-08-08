@@ -94,11 +94,21 @@ export function createIntegrationRepository(
     async upsertFixtureConnection(input) {
       return requiredTransaction(dependencies.transactions).upsertFixtureConnection(input);
     },
+    async connectFixtureWithGrants(input) {
+      const transaction = requiredTransaction(dependencies.transactions);
+      if (!transaction.connectFixtureWithGrants) return unavailableTransaction();
+      return transaction.connectFixtureWithGrants(input);
+    },
     async replaceCapabilityGrants(input) {
       return requiredTransaction(dependencies.transactions).replaceCapabilityGrants(input);
     },
     async replaceMappings(input) {
       return requiredTransaction(dependencies.transactions).replaceMappings(input);
+    },
+    async replaceMappingsWithGrants(input) {
+      const transaction = requiredTransaction(dependencies.transactions);
+      if (!transaction.replaceMappingsWithGrants) return unavailableTransaction();
+      return transaction.replaceMappingsWithGrants(input);
     },
     createDataSource(input) {
       return dependencies.persistence.createDataSource(input);
