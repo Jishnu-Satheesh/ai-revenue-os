@@ -362,4 +362,9 @@ export type IntegrationWorkerRepository = {
     connectionId: string;
     nextScheduledSyncAt: string | null;
   }): Promise<IntegrationConnectionRow>;
+  setConnectionStatus(input: {
+    organizationId: string;
+    connectionId: string;
+    status: "revoked";
+  }): Promise<IntegrationConnectionRow>;
 };

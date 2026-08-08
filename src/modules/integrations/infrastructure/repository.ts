@@ -257,6 +257,20 @@ export function createIntegrationWorkerRepository(
         },
       });
     },
+    async setConnectionStatus(input) {
+      const connection = await dependencies.persistence.findConnection(input);
+      if (!connection) return notFound("Integration connection");
+      return dependencies.persistence.updateConnection({
+        organizationId: input.organizationId,
+        connectionId: input.connectionId,
+        patch: {
+          status: input.status,
+          last_tested_at: connection.last_tested_at,
+          last_successful_sync_at: connection.last_successful_sync_at,
+          next_scheduled_sync_at: null,
+        },
+      });
+    },
   };
 }
 
