@@ -103,6 +103,8 @@ function workerRepository(): IntegrationWorkerRepository & {
       outcome: "acquired" as const,
       claimToken: "88888888-8888-4888-8888-888888888888",
     })),
+    assertExecutionLease: vi.fn(async () => undefined),
+    cancelExecution: vi.fn(async () => runRow({ status: "cancelled" })),
     markRunRunning: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
     resumeLeasedRun: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
     completeRun: vi.fn(async (input) => {
@@ -243,7 +245,12 @@ describe("Integration Hub workers", () => {
   });
 
   it("stops active duplicate workers before provider, health, or connection mutations", async () => {
-    const workers = [workerRepository(), workerRepository(), workerRepository(), workerRepository()];
+    const workers = [
+      workerRepository(),
+      workerRepository(),
+      workerRepository(),
+      workerRepository(),
+    ];
     const testAdapter = fixtureAdapter({
       testConnection: vi.fn(() => {
         throw new Error("duplicate worker reached provider test");
@@ -288,6 +295,45 @@ describe("Integration Hub workers", () => {
       expect(worker.completeRun, `worker ${index}`).not.toHaveBeenCalled();
       expect(worker.requeueRun, `worker ${index}`).not.toHaveBeenCalled();
     }
+  });
+
+  it("fences provider completion after mid-run cancellation without late health or run writes", async () => {
+    const worker = workerRepository();
+    vi.mocked(worker.assertExecutionLease)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new IntegrationError("CONFLICT", "cancelled by another worker", false, {
+          staleLease: true,
+        }),
+      );
+    const adapter = fixtureAdapter();
+    const deps = dependencies({ worker, adapter });
+
+    await runTestConnection(connectionPayload, deps);
+
+    expect(adapter.testConnection).toHaveBeenCalledOnce();
+    expect(worker.appendHealthCheck).not.toHaveBeenCalled();
+    expect(worker.completeRun).not.toHaveBeenCalled();
+    expect(worker.requeueRun).not.toHaveBeenCalled();
+  });
+
+  it("fences disconnect schedule and status writes after execution lease takeover", async () => {
+    const worker = workerRepository();
+    vi.mocked(worker.assertExecutionLease).mockRejectedValueOnce(
+      new IntegrationError("CONFLICT", "taken over by a cancellation", false, { staleLease: true }),
+    );
+    const deps = dependencies({ worker });
+
+    await runDisconnectConnection(
+      { ...connectionPayload, taskName: "integration.disconnect-connection" },
+      deps,
+    );
+
+    expect(worker.scheduleConnection).not.toHaveBeenCalled();
+    expect(worker.setConnectionStatus).not.toHaveBeenCalled();
+    expect(worker.appendHealthCheck).not.toHaveBeenCalled();
+    expect(worker.completeRun).not.toHaveBeenCalled();
+    expect(worker.requeueRun).not.toHaveBeenCalled();
   });
 
   it("reuses the persisted idempotency key and sends a valid sync handoff once", async () => {

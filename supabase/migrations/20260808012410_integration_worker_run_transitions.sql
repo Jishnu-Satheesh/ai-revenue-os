@@ -168,8 +168,18 @@ create or replace function public.claim_integration_worker_execution_lease(
   p_organization_id uuid, p_ingestion_run_id uuid, p_idempotency_key text, p_claim_token uuid
 ) returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare existing public.integration_worker_execution_leases;
+declare locked_run public.integration_ingestion_runs;
 begin
-  insert into public.integration_worker_execution_leases values (
+  select * into locked_run
+  from public.integration_ingestion_runs
+  where organization_id = p_organization_id and id = p_ingestion_run_id
+  for update;
+  if not found or locked_run.idempotency_key <> p_idempotency_key then
+    return jsonb_build_object('outcome','conflict');
+  end if;
+  insert into public.integration_worker_execution_leases (
+    organization_id, ingestion_run_id, idempotency_key, claim_token, lease_expires_at
+  ) values (
     p_organization_id, p_ingestion_run_id, p_idempotency_key, p_claim_token, now() + interval '5 minutes'
   ) on conflict do nothing;
   select * into existing from public.integration_worker_execution_leases where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id for update;
@@ -184,3 +194,38 @@ end;
 $$;
 revoke all on function public.claim_integration_worker_execution_lease(uuid, uuid, text, uuid) from public, anon, authenticated;
 grant execute on function public.claim_integration_worker_execution_lease(uuid, uuid, text, uuid) to service_role;
+
+create or replace function public.cancel_integration_worker_execution(
+  p_organization_id uuid, p_ingestion_run_id uuid, p_idempotency_key text, p_cancellation_token uuid
+) returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare locked_run public.integration_ingestion_runs;
+declare cancelled public.integration_ingestion_runs;
+begin
+  select * into locked_run
+  from public.integration_ingestion_runs
+  where organization_id = p_organization_id and id = p_ingestion_run_id
+  for update;
+  if not found or locked_run.idempotency_key <> p_idempotency_key then return null; end if;
+
+  insert into public.integration_worker_execution_leases (
+    organization_id, ingestion_run_id, idempotency_key, claim_token, lease_expires_at
+  ) values (
+    p_organization_id, p_ingestion_run_id, p_idempotency_key, p_cancellation_token, now() + interval '5 minutes'
+  ) on conflict do nothing;
+  update public.integration_worker_execution_leases
+  set claim_token = p_cancellation_token, lease_expires_at = now() + interval '5 minutes'
+  where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
+    and idempotency_key = p_idempotency_key;
+
+  update public.integration_ingestion_runs
+  set status = 'cancelled', completed_at = now(), normalized_error_code = 'CANCELLED',
+    safe_error_summary = 'The integration task was cancelled.'
+  where organization_id = p_organization_id and id = p_ingestion_run_id
+    and status in ('queued', 'running')
+  returning * into cancelled;
+  if not found then return null; end if;
+  return pg_catalog.to_jsonb(cancelled);
+end;
+$$;
+revoke all on function public.cancel_integration_worker_execution(uuid, uuid, text, uuid) from public, anon, authenticated;
+grant execute on function public.cancel_integration_worker_execution(uuid, uuid, text, uuid) to service_role;

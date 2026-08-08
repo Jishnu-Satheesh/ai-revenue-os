@@ -315,6 +315,12 @@ export type IntegrationRunTransitionPort = {
     idempotencyKey: string;
     claimToken: string;
   }): Promise<{ outcome: "acquired" | "in_progress" | "conflict" }>;
+  cancelExecution(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    cancellationToken: string;
+  }): Promise<{ outcome: "cancelled"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }>;
   markRunRunning(input: {
     organizationId: string;
     ingestionRunId: string;
@@ -376,10 +382,18 @@ export type IntegrationWorkerRepository = {
     organizationId: string;
     ingestionRunId: string;
     idempotencyKey: string;
-  }): Promise<
-    | { outcome: "acquired"; claimToken: string }
-    | { outcome: "in_progress" }
-  >;
+  }): Promise<{ outcome: "acquired"; claimToken: string } | { outcome: "in_progress" }>;
+  assertExecutionLease(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    claimToken: string;
+  }): Promise<void>;
+  cancelExecution(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+  }): Promise<IntegrationIngestionRunRow>;
   markRunRunning(input: {
     organizationId: string;
     ingestionRunId: string;

@@ -238,6 +238,20 @@ export async function beginOrCancel(
   }
 }
 
+/** Renews the worker's claim immediately before or after an external side effect. */
+export async function assertActiveExecutionLease(
+  payload: ConnectionTaskPayload | DataSourceTaskPayload,
+  dependencies: IntegrationWorkerDependencies,
+  claimToken: string,
+): Promise<void> {
+  await dependencies.worker.assertExecutionLease({
+    organizationId: payload.organizationId,
+    ingestionRunId: payload.ingestionRunId,
+    idempotencyKey: payload.idempotencyKey,
+    claimToken,
+  });
+}
+
 /** Persists a validated preflight error only after all source checks have completed. */
 export async function persistPreflightFailure(
   payload: ConnectionTaskPayload | DataSourceTaskPayload,
@@ -338,6 +352,7 @@ export function normalizedError(error: unknown): IntegrationError {
 export async function appendConnectionHealth(
   payload: ConnectionTaskPayload,
   dependencies: IntegrationWorkerDependencies,
+  claimToken: string,
   input: {
     checkType: "connectivity" | "authentication" | "freshness" | "sync";
     outcome: "passed" | "warning" | "failed";
@@ -346,6 +361,7 @@ export async function appendConnectionHealth(
     safeDetail?: string | null;
   },
 ): Promise<void> {
+  await assertActiveExecutionLease(payload, dependencies, claimToken);
   await dependencies.worker.appendHealthCheck({
     organization_id: payload.organizationId,
     connection_id: payload.connectionId,

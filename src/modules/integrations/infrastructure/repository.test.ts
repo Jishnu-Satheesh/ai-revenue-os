@@ -437,6 +437,9 @@ describe("Integration repositories", () => {
       async acquireExecutionLease() {
         return { outcome: "acquired" };
       },
+      async cancelExecution() {
+        return { outcome: "conflict" };
+      },
       async markRunRunning(input) {
         if (current.status !== "queued") return { outcome: "conflict" };
         current = { ...current, status: "running", started_at: input.startedAt };
@@ -517,6 +520,9 @@ describe("Integration repositories", () => {
         activeClaimToken = input.claimToken;
         leaseExpired = false;
         return { outcome: "acquired" };
+      },
+      async cancelExecution() {
+        return { outcome: "conflict" };
       },
       async markRunRunning(input) {
         if (input.claimToken !== activeClaimToken || current.status !== "queued") {
@@ -600,6 +606,9 @@ describe("Integration repositories", () => {
     const transitions: IntegrationRunTransitionPort = {
       async acquireExecutionLease() {
         return { outcome: "acquired" };
+      },
+      async cancelExecution() {
+        return { outcome: "conflict" };
       },
       async markRunRunning() {
         return { outcome: "conflict" };

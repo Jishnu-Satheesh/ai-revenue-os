@@ -1,5 +1,6 @@
 import {
   appendConnectionHealth,
+  assertActiveExecutionLease,
   beginOrCancel,
   complete,
   loadValidatedConnection,
@@ -29,13 +30,14 @@ export async function runCheckFreshness(
   const begin = await beginOrCancel(payload, dependencies);
   if (begin.outcome !== "acquired") return;
   try {
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     const now = new Date(nowIso(dependencies));
     const threshold = staleAfterMinutes * 60 * 1_000;
     const lastSync = connection.last_successful_sync_at
       ? new Date(connection.last_successful_sync_at).getTime()
       : 0;
     const stale = !lastSync || now.getTime() - lastSync > threshold;
-    await appendConnectionHealth(payload, dependencies, {
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: "freshness",
       outcome: stale ? "warning" : "passed",
       safeDetail: stale
@@ -47,7 +49,8 @@ export async function runCheckFreshness(
     });
   } catch (error) {
     const normalized = normalizedError(error);
-    await appendConnectionHealth(payload, dependencies, {
+    if (normalized.metadata.staleLease) return;
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: "freshness",
       outcome: "failed",
       normalizedErrorCode: normalized.code,

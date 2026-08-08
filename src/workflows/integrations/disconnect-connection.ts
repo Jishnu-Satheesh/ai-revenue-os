@@ -1,5 +1,6 @@
 import {
   appendConnectionHealth,
+  assertActiveExecutionLease,
   beginOrCancel,
   complete,
   loadValidatedConnection,
@@ -29,6 +30,7 @@ export async function runDisconnectConnection(
   const begin = await beginOrCancel(payload, dependencies);
   if (begin.outcome !== "acquired") return;
   try {
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     await dependencies.worker.scheduleConnection({
       organizationId: payload.organizationId,
       connectionId: payload.connectionId,
@@ -36,17 +38,20 @@ export async function runDisconnectConnection(
     });
     if (connection.connection_mode !== "fixture") {
       if (!dependencies.credentialCleanup) throw new Error("Credential cleanup is unavailable.");
+      await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
       await dependencies.credentialCleanup.revoke({
         organizationId: payload.organizationId,
         connectionId: payload.connectionId,
       });
+      await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     }
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     await dependencies.worker.setConnectionStatus({
       organizationId: payload.organizationId,
       connectionId: payload.connectionId,
       status: "revoked",
     });
-    await appendConnectionHealth(payload, dependencies, {
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: "authentication",
       outcome: "passed",
       safeDetail: "Credential cleanup completed.",
@@ -54,8 +59,9 @@ export async function runDisconnectConnection(
     await complete(payload, dependencies, begin.claimToken, { status: "succeeded" });
   } catch (error) {
     const normalized = normalizedError(error);
+    if (normalized.metadata.staleLease) return;
     // The synchronous disconnect already disabled grants. This appends a recovery warning only.
-    await appendConnectionHealth(payload, dependencies, {
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: "authentication",
       outcome: "warning",
       normalizedErrorCode: normalized.code,

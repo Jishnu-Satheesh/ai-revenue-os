@@ -197,6 +197,28 @@ export function createIntegrationWorkerRepository(
       if (result.outcome === "acquired") return { outcome: "acquired", claimToken };
       return { outcome: "in_progress" };
     },
+    async assertExecutionLease(input) {
+      const result = await requiredRunTransitions(dependencies.transitions).acquireExecutionLease(
+        input,
+      );
+      if (result.outcome === "acquired") return;
+      throw new IntegrationError(
+        "CONFLICT",
+        "This integration worker no longer holds the execution lease.",
+        false,
+        { staleLease: true },
+      );
+    },
+    async cancelExecution(input) {
+      const result = await requiredRunTransitions(dependencies.transitions).cancelExecution({
+        ...input,
+        cancellationToken: crypto.randomUUID(),
+      });
+      if (result.outcome === "conflict") {
+        throw new IntegrationError("CONFLICT", "The ingestion run cannot be cancelled.", false);
+      }
+      return result.run;
+    },
     async markRunRunning(input) {
       const result = await requiredRunTransitions(dependencies.transitions).markRunRunning({
         ...input,
@@ -324,7 +346,8 @@ export function createSupabaseIntegrationRunTransitionPort(
     rpc(
       name:
         | "transition_integration_ingestion_run"
-        | "claim_integration_worker_execution_lease",
+        | "claim_integration_worker_execution_lease"
+        | "cancel_integration_worker_execution",
       args: Record<string, unknown>,
     ): PromiseLike<{ data: IntegrationIngestionRunRow | null; error: unknown }>;
   };
@@ -371,11 +394,25 @@ export function createSupabaseIntegrationRunTransitionPort(
         p_idempotency_key: input.idempotencyKey,
         p_claim_token: input.claimToken,
       });
-      if (result.error) databaseError("Integration execution lease could not be acquired.", result.error);
+      if (result.error)
+        databaseError("Integration execution lease could not be acquired.", result.error);
       const outcome = (result.data as { outcome?: string } | null)?.outcome;
       if (outcome === "acquired") return { outcome };
       if (outcome === "in_progress") return { outcome };
       return { outcome: "conflict" };
+    },
+    async cancelExecution(input) {
+      const result = await rpc.rpc("cancel_integration_worker_execution", {
+        p_organization_id: input.organizationId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_idempotency_key: input.idempotencyKey,
+        p_cancellation_token: input.cancellationToken,
+      });
+      if (result.error)
+        databaseError("Integration execution could not be cancelled.", result.error);
+      return result.data
+        ? { outcome: "cancelled" as const, run: result.data }
+        : { outcome: "conflict" as const };
     },
     markRunRunning(input) {
       return transition({

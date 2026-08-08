@@ -1,5 +1,6 @@
 import {
   appendConnectionHealth,
+  assertActiveExecutionLease,
   beginOrCancel,
   complete,
   loadValidatedConnection,
@@ -30,13 +31,15 @@ export async function runTestConnection(
   const begin = await beginOrCancel(payload, dependencies);
   if (begin.outcome !== "acquired") return;
   try {
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     const result = await adapter.testConnection({
       organizationId: payload.organizationId,
       connectionId: payload.connectionId,
       adapterVersion: payload.adapterVersion,
       correlationId: payload.correlationId,
     });
-    await appendConnectionHealth(payload, dependencies, {
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: "connectivity",
       outcome: result.outcome,
       latencyMs: Date.now() - startedAt,
@@ -56,7 +59,8 @@ export async function runTestConnection(
     });
   } catch (error) {
     const normalized = normalizedError(error);
-    await appendConnectionHealth(payload, dependencies, {
+    if (normalized.metadata.staleLease) return;
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: normalized.code === "AUTHENTICATION_FAILED" ? "authentication" : "connectivity",
       outcome: "failed",
       latencyMs: Date.now() - startedAt,

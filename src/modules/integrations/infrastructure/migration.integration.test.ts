@@ -84,7 +84,10 @@ const tenantTables = [
 describe("Integration Hub migration contract", () => {
   it("leases worker execution by tenant and prevents a late claimant from transitioning a run", () => {
     const sql = readWorkerTransitionsMigration();
-    const lease = statementContaining(sql, "create table public.integration_worker_execution_leases");
+    const lease = statementContaining(
+      sql,
+      "create table public.integration_worker_execution_leases",
+    );
     const claim = functionDefinition(sql, "public.claim_integration_worker_execution_lease");
     const transition = functionDefinition(sql, "public.transition_integration_ingestion_run");
 
@@ -93,15 +96,35 @@ describe("Integration Hub migration contract", () => {
       "foreign key (organization_id, ingestion_run_id) references public.integration_ingestion_runs(organization_id, id)",
     );
     expect(sql).toContain("force row level security");
-    expect(sql).toContain("revoke all on table public.integration_worker_execution_leases from public, anon, authenticated");
-    expect(sql).toContain("grant execute on function public.claim_integration_worker_execution_lease(uuid, uuid, text, uuid) to service_role");
+    expect(sql).toContain(
+      "revoke all on table public.integration_worker_execution_leases from public, anon, authenticated",
+    );
+    expect(sql).toContain(
+      "grant execute on function public.claim_integration_worker_execution_lease(uuid, uuid, text, uuid) to service_role",
+    );
     expect(sql).toContain("integration_worker_execution_leases_prevent_identity_change");
     expect(claim).toContain("existing.idempotency_key <> p_idempotency_key");
+    expect(claim).toContain("locked_run.idempotency_key <> p_idempotency_key");
+    expect(claim).toContain("from public.integration_ingestion_runs");
+    expect(claim).toContain("for update");
     expect(claim).toContain("existing.lease_expires_at <= now()");
     expect(claim).toContain("claim_token = p_claim_token");
     expect(transition).toContain("p_execution_claim_token uuid default null");
     expect(transition).toContain("execution_lease.claim_token = p_execution_claim_token");
     expect(transition).toContain("execution_lease.lease_expires_at > now()");
+  });
+
+  it("supersedes an active worker lease before marking a matching run cancelled", () => {
+    const sql = readWorkerTransitionsMigration();
+    const cancellation = functionDefinition(sql, "public.cancel_integration_worker_execution");
+
+    expect(cancellation).toContain("locked_run.idempotency_key <> p_idempotency_key");
+    expect(cancellation).toContain("for update");
+    expect(cancellation).toContain("set claim_token = p_cancellation_token");
+    expect(cancellation).toContain("status in ('queued', 'running')");
+    expect(sql).toContain(
+      "grant execute on function public.cancel_integration_worker_execution(uuid, uuid, text, uuid) to service_role",
+    );
   });
 
   it("defines organization ownership and composite identity on each tenant table", () => {

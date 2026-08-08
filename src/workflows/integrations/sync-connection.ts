@@ -1,5 +1,6 @@
 import {
   appendConnectionHealth,
+  assertActiveExecutionLease,
   beginOrCancel,
   complete,
   loadValidatedConnection,
@@ -30,6 +31,7 @@ export async function runSyncConnection(
   const begin = await beginOrCancel(payload, dependencies);
   if (begin.outcome !== "acquired") return;
   try {
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     const records = validateEnvelopes(
       await adapter.sync({
         organizationId: payload.organizationId,
@@ -40,14 +42,16 @@ export async function runSyncConnection(
         correlationId: payload.correlationId,
       }),
     );
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     const handoff = await dependencies.sink.accept({
       organizationId: payload.organizationId,
       ingestionRunId: payload.ingestionRunId,
       idempotencyKey: payload.idempotencyKey,
       records,
     });
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     const status = handoff.rejected > 0 ? "partially_succeeded" : "succeeded";
-    await appendConnectionHealth(payload, dependencies, {
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: "sync",
       outcome: handoff.rejected > 0 ? "warning" : "passed",
       latencyMs: Date.now() - startedAt,
@@ -65,7 +69,7 @@ export async function runSyncConnection(
   } catch (error) {
     const normalized = normalizedError(error);
     if (normalized.metadata.staleLease || normalized.metadata.handoffInProgress) return;
-    await appendConnectionHealth(payload, dependencies, {
+    await appendConnectionHealth(payload, dependencies, begin.claimToken, {
       checkType: "sync",
       outcome: "failed",
       latencyMs: Date.now() - startedAt,

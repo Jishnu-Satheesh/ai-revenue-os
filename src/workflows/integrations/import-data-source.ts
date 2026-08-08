@@ -6,6 +6,7 @@ import { parse } from "csv-parse";
 import type { IntegrationRecordEnvelope } from "@/domain/integrations/schemas";
 import {
   beginOrCancel,
+  assertActiveExecutionLease,
   complete,
   loadValidatedDataSource,
   normalizedError,
@@ -137,6 +138,7 @@ export async function runImportDataSource(
   let recordsAccepted = 0;
   let recordsRejected = 0;
   try {
+    await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
     const objectStore: CsvObjectStore | undefined = dependencies.csvObjects;
     if (!objectStore || !source.storage_path) throw new Error("CSV import storage is unavailable.");
     assertTenantStoragePath(source.storage_path, payload.organizationId, source.id);
@@ -160,6 +162,7 @@ export async function runImportDataSource(
         payload: { values: row, columnMapping: source.column_mapping },
       });
       if (batch.length === MAX_BATCH_SIZE) {
+        await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
         const result = await handoffBatch({
           dependencies,
           organizationId: payload.organizationId,
@@ -170,6 +173,7 @@ export async function runImportDataSource(
           ),
           records: batch,
         });
+        await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
         recordsAccepted += result.accepted;
         recordsRejected += result.rejected;
         batch = [];
@@ -177,6 +181,7 @@ export async function runImportDataSource(
     }
     if (!mappingValidated) throw new Error("CSV upload has no usable rows.");
     if (batch.length) {
+      await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
       const result = await handoffBatch({
         dependencies,
         organizationId: payload.organizationId,
@@ -187,6 +192,7 @@ export async function runImportDataSource(
         ),
         records: batch,
       });
+      await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
       recordsAccepted += result.accepted;
       recordsRejected += result.rejected;
     }
