@@ -5,6 +5,7 @@ import {
   loadValidatedConnection,
   normalizedError,
   parseConnectionTaskPayload,
+  persistPreflightFailure,
   requeueOrFail,
   type IntegrationWorkerDependencies,
 } from "@/workflows/integrations/contracts";
@@ -15,9 +16,16 @@ export async function runDisconnectConnection(
   dependencies: IntegrationWorkerDependencies,
 ) {
   const payload = parseConnectionTaskPayload("integration.disconnect-connection", input);
-  const { connection } = await loadValidatedConnection(payload, dependencies, {
-    allowInactive: true,
-  });
+  let connection;
+  try {
+    ({ connection } = await loadValidatedConnection(payload, dependencies, {
+      allowInactive: true,
+    }));
+  } catch (error) {
+    const normalized = normalizedError(error);
+    await persistPreflightFailure(payload, dependencies, normalized);
+    throw normalized;
+  }
   const cancelled = await beginOrCancel(payload, dependencies);
   if (cancelled) return;
   try {

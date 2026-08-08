@@ -64,6 +64,70 @@ export type IngestionSourceResolver = {
   }): Promise<{ kind: "connection" | "data_source"; id: string } | null>;
 };
 
+export type DurableIngestionHandoffLedger = {
+  claim(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    fingerprint: string;
+  }): Promise<
+    | { outcome: "claimed" }
+    | { outcome: "in_progress" }
+    | { outcome: "conflict" }
+    | {
+        outcome: "completed";
+        accepted: number;
+        rejected: number;
+        rejectionReasons: readonly string[];
+      }
+  >;
+  complete(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    idempotencyKey: string;
+    fingerprint: string;
+    accepted: number;
+    rejected: number;
+    rejectionReasons: readonly string[];
+  }): Promise<{ accepted: number; rejected: number; rejectionReasons: readonly string[] }>;
+};
+
+function durableFingerprint(input: Parameters<IngestionSink["accept"]>[0]): string {
+  return createHash("sha256").update(JSON.stringify(input), "utf8").digest("base64url");
+}
+
+/** Persists idempotency state outside the worker process before a downstream handoff. */
+export function createDurableIngestionSink(input: {
+  sink: IngestionSink;
+  ledger: DurableIngestionHandoffLedger;
+}): IngestionSink {
+  return {
+    async accept(request) {
+      const fingerprint = durableFingerprint(request);
+      const claimed = await input.ledger.claim({ ...request, fingerprint });
+      if (claimed.outcome === "completed") {
+        return {
+          accepted: claimed.accepted,
+          rejected: claimed.rejected,
+          rejectionReasons: claimed.rejectionReasons,
+        };
+      }
+      if (claimed.outcome === "conflict") {
+        throw new IntegrationError("CONFLICT", "The ingestion idempotency key was reused.", false);
+      }
+      if (claimed.outcome === "in_progress") {
+        throw new IntegrationError(
+          "CONFLICT",
+          "The ingestion handoff is already in progress.",
+          true,
+        );
+      }
+      const result = await input.sink.accept(request);
+      return input.ledger.complete({ ...request, fingerprint, ...result });
+    },
+  };
+}
+
 /**
  * Temporary downstream boundary until the Data Ingestion module owns typed
  * record schemas. It deliberately acknowledges only the current bounded batch.

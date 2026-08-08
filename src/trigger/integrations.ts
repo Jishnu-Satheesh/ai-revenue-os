@@ -8,8 +8,10 @@ import {
 } from "@/modules/integrations/infrastructure/repository";
 import {
   createAcknowledgingDataIngestionPort,
+  createDurableIngestionSink,
   createValidatedIngestionSink,
 } from "@/modules/integrations/infrastructure/ingestion-sink";
+import type { DurableIngestionHandoffLedger } from "@/modules/integrations/infrastructure/ingestion-sink";
 import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
 import { createGoogleBusinessProfileFixtureAdapter } from "@/modules/integrations/providers/google-business-profile/fixture-adapter";
 import { assertIntegrationHubEnabled } from "@/modules/integrations/application/feature-access";
@@ -104,7 +106,7 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
     [googleBusinessProfileDefinition],
     [createGoogleBusinessProfileFixtureAdapter()],
   );
-  const sink = createValidatedIngestionSink({
+  const validatedSink = createValidatedIngestionSink({
     handoff: createAcknowledgingDataIngestionPort(),
     sourceResolver: {
       async resolve({ organizationId, ingestionRunId }) {
@@ -113,6 +115,51 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
         if (run.connection_id) return { kind: "connection" as const, id: run.connection_id };
         if (run.data_source_id) return { kind: "data_source" as const, id: run.data_source_id };
         return null;
+      },
+    },
+  });
+  const rpc = supabase as unknown as {
+    rpc(name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }>;
+  };
+  const sink = createDurableIngestionSink({
+    sink: validatedSink,
+    ledger: {
+      async claim(input) {
+        const result = await rpc.rpc("claim_integration_ingestion_handoff", {
+          p_organization_id: input.organizationId,
+          p_ingestion_run_id: input.ingestionRunId,
+          p_idempotency_key: input.idempotencyKey,
+          p_fingerprint: input.fingerprint,
+        });
+        if (result.error || !result.data)
+          throw new IntegrationError(
+            "CONFLICT",
+            "The ingestion handoff claim is unavailable.",
+            false,
+          );
+        return result.data as Awaited<ReturnType<DurableIngestionHandoffLedger["claim"]>>;
+      },
+      async complete(input) {
+        const result = await rpc.rpc("complete_integration_ingestion_handoff", {
+          p_organization_id: input.organizationId,
+          p_ingestion_run_id: input.ingestionRunId,
+          p_idempotency_key: input.idempotencyKey,
+          p_fingerprint: input.fingerprint,
+          p_accepted: input.accepted,
+          p_rejected: input.rejected,
+          p_rejection_reasons: [...input.rejectionReasons],
+        });
+        if (result.error || !result.data)
+          throw new IntegrationError(
+            "CONFLICT",
+            "The ingestion handoff completion is unavailable.",
+            false,
+          );
+        return result.data as {
+          accepted: number;
+          rejected: number;
+          rejectionReasons: readonly string[];
+        };
       },
     },
   });
@@ -139,18 +186,27 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
   };
 }
 
-function registerCancellation(
-  taskId: string,
-  parsePayload: (payload: unknown) => { organizationId: string; ingestionRunId: string },
-) {
-  tasks.onCancel(taskId, async ({ payload }) => {
-    const parsed = parsePayload(payload);
-    await createWorkerDependencies().worker.cancelRun({
-      organizationId: parsed.organizationId,
-      ingestionRunId: parsed.ingestionRunId,
-    });
+const cancellationParsers = {
+  "integration.test-connection": (payload: unknown) =>
+    parseConnectionTaskPayload("integration.test-connection", payload),
+  "integration.sync-connection": (payload: unknown) =>
+    parseConnectionTaskPayload("integration.sync-connection", payload),
+  "integration.import-data-source": parseDataSourceTaskPayload,
+  "integration.disconnect-connection": (payload: unknown) =>
+    parseConnectionTaskPayload("integration.disconnect-connection", payload),
+  "integration.check-freshness": (payload: unknown) =>
+    parseConnectionTaskPayload("integration.check-freshness", payload),
+} as const;
+
+tasks.onCancel(async ({ task: taskId, payload }) => {
+  const parsePayload = cancellationParsers[taskId as keyof typeof cancellationParsers];
+  if (!parsePayload) return;
+  const parsed = parsePayload(payload);
+  await createWorkerDependencies().worker.cancelRun({
+    organizationId: parsed.organizationId,
+    ingestionRunId: parsed.ingestionRunId,
   });
-}
+});
 
 export const integrationTestConnectionTask = task({
   id: "integration.test-connection",
@@ -186,17 +242,3 @@ export const integrationCheckFreshnessTask = task({
   maxDuration: 180,
   run: async (payload: unknown) => runCheckFreshness(payload, createWorkerDependencies()),
 });
-
-registerCancellation("integration.test-connection", (payload) =>
-  parseConnectionTaskPayload("integration.test-connection", payload),
-);
-registerCancellation("integration.sync-connection", (payload) =>
-  parseConnectionTaskPayload("integration.sync-connection", payload),
-);
-registerCancellation("integration.import-data-source", parseDataSourceTaskPayload);
-registerCancellation("integration.disconnect-connection", (payload) =>
-  parseConnectionTaskPayload("integration.disconnect-connection", payload),
-);
-registerCancellation("integration.check-freshness", (payload) =>
-  parseConnectionTaskPayload("integration.check-freshness", payload),
-);

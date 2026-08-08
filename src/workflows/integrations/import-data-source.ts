@@ -10,6 +10,7 @@ import {
   normalizedError,
   nowIso,
   parseDataSourceTaskPayload,
+  persistPreflightFailure,
   requeueOrFail,
   type CsvObjectStore,
   type IntegrationWorkerDependencies,
@@ -115,7 +116,14 @@ export async function runImportDataSource(
   dependencies: IntegrationWorkerDependencies,
 ) {
   const payload = parseDataSourceTaskPayload(input);
-  const source = await loadValidatedDataSource(payload, dependencies);
+  let source;
+  try {
+    source = await loadValidatedDataSource(payload, dependencies);
+  } catch (error) {
+    const normalized = normalizedError(error);
+    await persistPreflightFailure(payload, dependencies, normalized);
+    throw normalized;
+  }
   const cancelled = await beginOrCancel(payload, dependencies);
   if (cancelled) return;
   let recordsReceived = 0;

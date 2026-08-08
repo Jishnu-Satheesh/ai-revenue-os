@@ -45,3 +45,76 @@ revoke all on function public.transition_integration_ingestion_run(
 grant execute on function public.transition_integration_ingestion_run(
   uuid, uuid, text[], text, integer, integer, integer, timestamptz, text, text, timestamptz
 ) to service_role;
+
+create table public.integration_ingestion_handoffs (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  ingestion_run_id uuid not null,
+  idempotency_key text not null,
+  fingerprint text not null,
+  status text not null check (status in ('claimed', 'completed')),
+  accepted integer,
+  rejected integer,
+  rejection_reasons text[],
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, ingestion_run_id, idempotency_key),
+  foreign key (organization_id, ingestion_run_id)
+    references public.integration_ingestion_runs(organization_id, id) on delete restrict,
+  check (
+    (status = 'claimed' and accepted is null and rejected is null and rejection_reasons is null)
+    or (status = 'completed' and accepted >= 0 and rejected >= 0 and rejection_reasons is not null)
+  )
+);
+alter table public.integration_ingestion_handoffs enable row level security;
+alter table public.integration_ingestion_handoffs force row level security;
+revoke all on table public.integration_ingestion_handoffs from public, anon, authenticated;
+
+create or replace function public.claim_integration_ingestion_handoff(
+  p_organization_id uuid, p_ingestion_run_id uuid, p_idempotency_key text, p_fingerprint text
+)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare existing public.integration_ingestion_handoffs;
+declare inserted boolean := false;
+begin
+  insert into public.integration_ingestion_handoffs (
+    organization_id, ingestion_run_id, idempotency_key, fingerprint, status
+  ) values (p_organization_id, p_ingestion_run_id, p_idempotency_key, p_fingerprint, 'claimed')
+  on conflict (organization_id, ingestion_run_id, idempotency_key) do nothing
+  returning true into inserted;
+  select * into existing from public.integration_ingestion_handoffs
+    where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
+      and idempotency_key = p_idempotency_key;
+  if existing.fingerprint <> p_fingerprint then return jsonb_build_object('outcome', 'conflict'); end if;
+  if existing.status = 'completed' then return jsonb_build_object(
+    'outcome', 'completed', 'accepted', existing.accepted, 'rejected', existing.rejected,
+    'rejectionReasons', existing.rejection_reasons
+  ); end if;
+  if inserted then return jsonb_build_object('outcome', 'claimed'); end if;
+  return jsonb_build_object('outcome', 'in_progress');
+end;
+$$;
+
+create or replace function public.complete_integration_ingestion_handoff(
+  p_organization_id uuid, p_ingestion_run_id uuid, p_idempotency_key text, p_fingerprint text,
+  p_accepted integer, p_rejected integer, p_rejection_reasons text[]
+)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare completed public.integration_ingestion_handoffs;
+begin
+  update public.integration_ingestion_handoffs set
+    status = 'completed', accepted = p_accepted, rejected = p_rejected,
+    rejection_reasons = p_rejection_reasons
+  where organization_id = p_organization_id and ingestion_run_id = p_ingestion_run_id
+    and idempotency_key = p_idempotency_key and fingerprint = p_fingerprint and status = 'claimed'
+  returning * into completed;
+  if not found then return null; end if;
+  return jsonb_build_object('accepted', completed.accepted, 'rejected', completed.rejected,
+    'rejectionReasons', completed.rejection_reasons);
+end;
+$$;
+
+revoke all on function public.claim_integration_ingestion_handoff(uuid, uuid, text, text) from public, anon, authenticated;
+revoke all on function public.complete_integration_ingestion_handoff(uuid, uuid, text, text, integer, integer, text[]) from public, anon, authenticated;
+grant execute on function public.claim_integration_ingestion_handoff(uuid, uuid, text, text) to service_role;
+grant execute on function public.complete_integration_ingestion_handoff(uuid, uuid, text, text, integer, integer, text[]) to service_role;

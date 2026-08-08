@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   createAcknowledgingDataIngestionPort,
+  createDurableIngestionSink,
   createValidatedIngestionSink,
   type DataIngestionPort,
 } from "@/modules/integrations/infrastructure/ingestion-sink";
@@ -66,6 +67,84 @@ describe("validated integration ingestion sink", () => {
       idempotencyKey: "sync-a",
       records: [baseRecord],
     });
+  });
+
+  it("returns the durable stored handoff result across separate worker sink instances", async () => {
+    const handoff = createHandoff();
+    const stored = new Map<
+      string,
+      {
+        fingerprint: string;
+        result?: { accepted: number; rejected: number; rejectionReasons: readonly string[] };
+      }
+    >();
+    const ledger = {
+      async claim(input: {
+        organizationId: string;
+        ingestionRunId: string;
+        idempotencyKey: string;
+        fingerprint: string;
+      }) {
+        const key = `${input.organizationId}:${input.ingestionRunId}:${input.idempotencyKey}`;
+        const current = stored.get(key);
+        if (!current) {
+          stored.set(key, { fingerprint: input.fingerprint });
+          return { outcome: "claimed" as const };
+        }
+        if (current.fingerprint !== input.fingerprint) return { outcome: "conflict" as const };
+        if (current.result) return { outcome: "completed" as const, ...current.result };
+        return { outcome: "in_progress" as const };
+      },
+      async complete(input: {
+        organizationId: string;
+        ingestionRunId: string;
+        idempotencyKey: string;
+        fingerprint: string;
+        accepted: number;
+        rejected: number;
+        rejectionReasons: readonly string[];
+      }) {
+        const key = `${input.organizationId}:${input.ingestionRunId}:${input.idempotencyKey}`;
+        const result = {
+          accepted: input.accepted,
+          rejected: input.rejected,
+          rejectionReasons: input.rejectionReasons,
+        };
+        stored.set(key, { fingerprint: input.fingerprint, result });
+        return result;
+      },
+    };
+    const request = {
+      organizationId,
+      ingestionRunId: "run-durable",
+      idempotencyKey: "sync-durable-a",
+      records: [baseRecord],
+    };
+    const first = createDurableIngestionSink({
+      sink: createValidatedIngestionSink({
+        handoff,
+        sourceResolver: { resolve: async () => source },
+      }),
+      ledger,
+    });
+    const second = createDurableIngestionSink({
+      sink: createValidatedIngestionSink({
+        handoff,
+        sourceResolver: { resolve: async () => source },
+      }),
+      ledger,
+    });
+    await expect(first.accept(request)).resolves.toEqual({
+      accepted: 1,
+      rejected: 0,
+      rejectionReasons: [],
+    });
+    await expect(second.accept(request)).resolves.toEqual({
+      accepted: 1,
+      rejected: 0,
+      rejectionReasons: [],
+    });
+    expect(handoff.ingest).toHaveBeenCalledOnce();
   });
 
   it("rejects malformed, cross-tenant, and wrong-source records with safe reasons", async () => {
