@@ -138,10 +138,17 @@ function cacheResult(
   }
 }
 
-function safeDownstreamReasons(reasons: readonly string[]): string[] {
-  return reasons.map((reason) =>
+function safeDownstreamReasons(reasons: readonly string[], rejected: number): string[] {
+  const safeReasons = reasons.map((reason) =>
     safeDownstreamReasonSchema.safeParse(reason).success ? reason : "DOWNSTREAM_REJECTION",
   );
+  return [
+    ...safeReasons.slice(0, rejected),
+    ...Array.from(
+      { length: Math.max(0, rejected - safeReasons.length) },
+      () => "DOWNSTREAM_REJECTION" as const,
+    ),
+  ];
 }
 
 class PayloadLimitError extends Error {}
@@ -183,10 +190,12 @@ function canonicalPayloadDigest(payload: unknown): { digest: string; serializedB
     if (Array.isArray(value)) {
       if (value.length > MAX_PAYLOAD_ARRAY_ITEMS) throw new PayloadLimitError();
       write("[");
-      value.forEach((item, index) => {
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, index);
+        if (!descriptor || !("value" in descriptor)) throw new PayloadLimitError();
         if (index > 0) write(",");
-        serialize(item, depth + 1);
-      });
+        serialize(descriptor.value, depth + 1);
+      }
       write("]");
       return;
     }
@@ -388,7 +397,10 @@ export function createValidatedIngestionSink(
             handoffResult = {
               accepted: handoff.data.accepted,
               rejected: handoff.data.rejected,
-              rejectionReasons: safeDownstreamReasons(handoff.data.rejectionReasons),
+              rejectionReasons: safeDownstreamReasons(
+                handoff.data.rejectionReasons,
+                handoff.data.rejected,
+              ),
             };
           }
 

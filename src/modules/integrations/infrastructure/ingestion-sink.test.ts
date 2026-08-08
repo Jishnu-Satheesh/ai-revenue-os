@@ -237,6 +237,48 @@ describe("validated integration ingestion sink", () => {
     expect(handoff.ingest).not.toHaveBeenCalled();
   });
 
+  it("rejects sparse arrays and treats same-key sparse reuse as a conflict", async () => {
+    const handoff = createHandoff();
+    const sink = createValidatedIngestionSink({
+      handoff,
+      sourceResolver: { resolve: async () => source },
+    });
+    const sparsePayload: unknown[] = [];
+    sparsePayload[1] = "fixture";
+
+    await expect(
+      sink.accept({
+        organizationId,
+        ingestionRunId: "run-a",
+        idempotencyKey: "sync-sparse-a",
+        records: [{ ...baseRecord, payload: sparsePayload }],
+      }),
+    ).resolves.toEqual({
+      accepted: 0,
+      rejected: 1,
+      rejectionReasons: ["INVALID_PAYLOAD"],
+    });
+    await sink.accept({
+      organizationId,
+      ingestionRunId: "run-a",
+      idempotencyKey: "sync-sparse-conflict-a",
+      records: [{ ...baseRecord, payload: [] }],
+    });
+    await expect(
+      sink.accept({
+        organizationId,
+        ingestionRunId: "run-a",
+        idempotencyKey: "sync-sparse-conflict-a",
+        records: [{ ...baseRecord, payload: sparsePayload }],
+      }),
+    ).resolves.toEqual({
+      accepted: 0,
+      rejected: 1,
+      rejectionReasons: ["IDEMPOTENCY_KEY_REUSED"],
+    });
+    expect(handoff.ingest).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     { accepted: 0, rejected: 0, label: "under-counts" },
     { accepted: 2, rejected: 0, label: "over-counts" },
@@ -288,4 +330,46 @@ describe("validated integration ingestion sink", () => {
       rejectionReasons: ["UNSUPPORTED_RECORD_TYPE"],
     });
   });
+
+  it.each([
+    {
+      expectedReasons: ["INVALID_PAYLOAD", "DOWNSTREAM_REJECTION"],
+      rejectionReasons: ["INVALID_PAYLOAD"],
+    },
+    {
+      expectedReasons: ["DOWNSTREAM_REJECTION", "DOWNSTREAM_REJECTION"],
+      rejectionReasons: [],
+    },
+  ])(
+    "pads missing downstream rejection reasons with a safe deterministic code",
+    async ({ rejectionReasons, expectedReasons }) => {
+      const handoff: DataIngestionPort = {
+        ingest: vi.fn(async () => ({
+          accepted: 0,
+          rejected: 2,
+          rejectionReasons,
+        })),
+      };
+      const sink = createValidatedIngestionSink({
+        handoff,
+        sourceResolver: { resolve: async () => source },
+      });
+
+      await expect(
+        sink.accept({
+          organizationId,
+          ingestionRunId: "run-a",
+          idempotencyKey: "sync-short-reasons-a",
+          records: [
+            baseRecord,
+            { ...baseRecord, externalRecordId: "reviews/fixture-harbor-house-001" },
+          ],
+        }),
+      ).resolves.toEqual({
+        accepted: 0,
+        rejected: 2,
+        rejectionReasons: expectedReasons,
+      });
+    },
+  );
 });
