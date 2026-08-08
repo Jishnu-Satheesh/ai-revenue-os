@@ -13,6 +13,7 @@ import type {
   IntegrationIngestionRunRow,
   IntegrationPersistencePort,
   IntegrationRepository,
+  IntegrationRunTransitionPort,
   IntegrationTransactionPort,
   IntegrationWorkerRepository,
 } from "@/modules/integrations/application/ports";
@@ -23,13 +24,6 @@ type RepositoryDependencies = {
   catalog?: readonly ProviderDefinition[];
   now?: () => Date;
 };
-
-const terminalStatuses = new Set<IntegrationIngestionRunRow["status"]>([
-  "succeeded",
-  "partially_succeeded",
-  "failed",
-  "cancelled",
-]);
 
 function unavailableTransaction(): never {
   throw new IntegrationError(
@@ -47,21 +41,6 @@ function requiredTransaction(
 
 function notFound(entity: string): never {
   throw new IntegrationError("NOT_FOUND", `${entity} was not found for this organization.`, false);
-}
-
-function terminalResultMatches(
-  current: IntegrationIngestionRunRow,
-  input: Parameters<IntegrationWorkerRepository["completeRun"]>[0],
-): boolean {
-  return (
-    current.status === input.status &&
-    current.records_received === input.recordsReceived &&
-    current.records_accepted === input.recordsAccepted &&
-    current.records_rejected === input.recordsRejected &&
-    current.completed_at === input.completedAt &&
-    current.normalized_error_code === (input.normalizedErrorCode ?? null) &&
-    current.safe_error_summary === (input.safeErrorSummary ?? null)
-  );
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -173,57 +152,54 @@ export function createIntegrationRepository(
     async disconnect(input) {
       return requiredTransaction(dependencies.transactions).disconnectConnection(input);
     },
-    appendAuditEvent(input) {
-      return dependencies.persistence.appendAuditEvent(input);
-    },
   };
 }
 
+function requiredRunTransitions(
+  transitions: IntegrationRunTransitionPort | undefined,
+): IntegrationRunTransitionPort {
+  if (transitions) return transitions;
+  throw new IntegrationError(
+    "CONFLICT",
+    "The required atomic ingestion-run database operation is unavailable.",
+    false,
+  );
+}
+
 export function createIntegrationWorkerRepository(
-  dependencies: Pick<RepositoryDependencies, "persistence">,
+  dependencies: Pick<RepositoryDependencies, "persistence"> & {
+    transitions?: IntegrationRunTransitionPort;
+  },
 ): IntegrationWorkerRepository {
   return {
     async markRunRunning(input) {
-      const current = await dependencies.persistence.findRun(input);
-      if (!current) return notFound("Ingestion run");
-      if (terminalStatuses.has(current.status)) {
+      const result = await requiredRunTransitions(dependencies.transitions).markRunRunning({
+        ...input,
+        expectedStatus: "queued",
+      });
+      if (result.outcome === "conflict") {
         throw new IntegrationError(
           "CONFLICT",
-          "A terminal ingestion run cannot be restarted.",
+          "The ingestion run was changed by another worker.",
           false,
         );
       }
-      return dependencies.persistence.updateRun({
-        organizationId: input.organizationId,
-        ingestionRunId: input.ingestionRunId,
-        patch: { status: "running", started_at: input.startedAt },
-      });
+      return result.run;
     },
 
     async completeRun(input) {
-      const current = await dependencies.persistence.findRun(input);
-      if (!current) return notFound("Ingestion run");
-      if (terminalStatuses.has(current.status)) {
-        if (terminalResultMatches(current, input)) return current;
+      const result = await requiredRunTransitions(dependencies.transitions).completeRun({
+        ...input,
+        expectedStatus: "running",
+      });
+      if (result.outcome === "conflict") {
         throw new IntegrationError(
           "CONFLICT",
-          "A terminal ingestion run cannot be changed.",
+          "The ingestion run was changed by another worker.",
           false,
         );
       }
-      return dependencies.persistence.updateRun({
-        organizationId: input.organizationId,
-        ingestionRunId: input.ingestionRunId,
-        patch: {
-          status: input.status,
-          records_received: input.recordsReceived,
-          records_accepted: input.recordsAccepted,
-          records_rejected: input.recordsRejected,
-          completed_at: input.completedAt,
-          normalized_error_code: input.normalizedErrorCode ?? null,
-          safe_error_summary: input.safeErrorSummary ?? null,
-        },
-      });
+      return result.run;
     },
 
     async appendHealthCheck(input) {
@@ -515,23 +491,13 @@ export function createSupabaseIntegrationPersistencePort(
         "Integration connection could not be updated.",
       );
     },
-    async appendAuditEvent(input) {
-      return query<IntegrationAuditEvent>(
-        fluent(supabase.from("audit_events").insert(input))
-          .select(auditColumns)
-          .single() as unknown as PromiseLike<{
-          data: IntegrationAuditEvent | null;
-          error: unknown;
-        }>,
-        "Integration audit event could not be appended.",
-      );
-    },
   };
 }
 
 export function createAuthenticatedIntegrationRepository(input: {
   supabase: SupabaseClient<Database>;
   transactions?: IntegrationTransactionPort;
+  runTransitions?: IntegrationRunTransitionPort;
   catalog?: readonly ProviderDefinition[];
   now?: () => Date;
 }): { repository: IntegrationRepository; workerRepository: IntegrationWorkerRepository } {
@@ -543,6 +509,9 @@ export function createAuthenticatedIntegrationRepository(input: {
       catalog: input.catalog,
       now: input.now,
     }),
-    workerRepository: createIntegrationWorkerRepository({ persistence }),
+    workerRepository: createIntegrationWorkerRepository({
+      persistence,
+      transitions: input.runTransitions,
+    }),
   };
 }

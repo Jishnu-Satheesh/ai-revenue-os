@@ -9,6 +9,7 @@ import type {
   IntegrationHealthCheckRow,
   IntegrationIngestionRunRow,
   IntegrationPersistencePort,
+  IntegrationRunTransitionPort,
   IntegrationTransactionPort,
 } from "@/modules/integrations/application/ports";
 import {
@@ -230,10 +231,6 @@ function createMemoryPort(
         organization_id: input.organizationId,
       });
     },
-    async appendAuditEvent(input) {
-      calls.push({ method: "appendAuditEvent", organizationId: input.organization_id });
-      return input as IntegrationAuditEvent;
-    },
   };
   return { port, calls };
 }
@@ -406,7 +403,93 @@ describe("Integration repositories", () => {
     expect(result).toBe(existing);
   });
 
-  it("rejects a conflicting terminal run update while accepting an identical retry result", async () => {
+  it("fails closed when atomic worker run transitions are unavailable", async () => {
+    const { port } = createMemoryPort();
+    const worker = createIntegrationWorkerRepository({ persistence: port });
+
+    await expect(
+      worker.markRunRunning({
+        organizationId: organizationA,
+        ingestionRunId: runId,
+        startedAt: "2026-08-08T11:05:00.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      worker.completeRun({
+        organizationId: organizationA,
+        ingestionRunId: runId,
+        status: "succeeded",
+        recordsReceived: 1,
+        recordsAccepted: 1,
+        recordsRejected: 0,
+        completedAt: "2026-08-08T11:10:00.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("uses atomic compare-and-set transitions when stale workers interleave", async () => {
+    const initial = run();
+    const { port } = createMemoryPort({ runs: [initial] });
+    let current = initial;
+    const transitions: IntegrationRunTransitionPort = {
+      async markRunRunning(input) {
+        if (current.status !== "queued") return { outcome: "conflict" };
+        current = { ...current, status: "running", started_at: input.startedAt };
+        return { outcome: "transitioned", run: current };
+      },
+      async completeRun(input) {
+        if (current.status === "running") {
+          current = {
+            ...current,
+            status: input.status,
+            records_received: input.recordsReceived,
+            records_accepted: input.recordsAccepted,
+            records_rejected: input.recordsRejected,
+            completed_at: input.completedAt,
+            normalized_error_code: input.normalizedErrorCode ?? null,
+            safe_error_summary: input.safeErrorSummary ?? null,
+          };
+          return { outcome: "transitioned", run: current };
+        }
+        if (
+          current.status === input.status &&
+          current.records_received === input.recordsReceived &&
+          current.records_accepted === input.recordsAccepted &&
+          current.records_rejected === input.recordsRejected &&
+          current.completed_at === input.completedAt
+        ) {
+          return { outcome: "already_terminal", run: current };
+        }
+        return { outcome: "conflict" };
+      },
+    };
+    const worker = createIntegrationWorkerRepository({ persistence: port, transitions });
+    const start = {
+      organizationId: organizationA,
+      ingestionRunId: runId,
+      startedAt: "2026-08-08T11:05:00.000Z",
+    };
+    const firstStart = await worker.markRunRunning(start);
+    await expect(worker.markRunRunning(start)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(firstStart.status).toBe("running");
+
+    const completion = {
+      organizationId: organizationA,
+      ingestionRunId: runId,
+      status: "succeeded" as const,
+      recordsReceived: 4,
+      recordsAccepted: 4,
+      recordsRejected: 0,
+      completedAt: "2026-08-08T11:10:00.000Z",
+    };
+    await expect(worker.completeRun(completion)).resolves.toMatchObject({ status: "succeeded" });
+    await expect(
+      worker.completeRun({ ...completion, status: "failed", safeErrorSummary: "stale overwrite" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(worker.completeRun(completion)).resolves.toMatchObject({ status: "succeeded" });
+  });
+
+  it("returns an atomic idempotent terminal result while rejecting a conflicting one", async () => {
     const completed = run({
       status: "succeeded",
       completed_at: "2026-08-08T11:10:00.000Z",
@@ -414,7 +497,16 @@ describe("Integration repositories", () => {
       records_accepted: 4,
     });
     const { port } = createMemoryPort({ runs: [completed] });
-    const worker = createIntegrationWorkerRepository({ persistence: port });
+    const transitions: IntegrationRunTransitionPort = {
+      async markRunRunning() {
+        return { outcome: "conflict" };
+      },
+      async completeRun(input) {
+        if (input.status === "succeeded") return { outcome: "already_terminal", run: completed };
+        return { outcome: "conflict" };
+      },
+    };
+    const worker = createIntegrationWorkerRepository({ persistence: port, transitions });
     const terminal = {
       organizationId: organizationA,
       ingestionRunId: runId,

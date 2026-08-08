@@ -139,9 +139,6 @@ export type IntegrationIngestionRunInsert = Omit<
   "id" | "created_at" | "updated_at"
 >;
 export type IntegrationHealthCheckInsert = Omit<IntegrationHealthCheckRow, "id">;
-export type IntegrationAuditEventInsert = Omit<IntegrationAuditEvent, "id" | "occurred_at"> & {
-  occurred_at?: string;
-};
 
 export type IntegrationPersistencePort = {
   listConnections(input: { organizationId: string }): Promise<IntegrationConnectionRow[]>;
@@ -186,7 +183,6 @@ export type IntegrationPersistencePort = {
       "status" | "last_tested_at" | "last_successful_sync_at" | "next_scheduled_sync_at"
     >;
   }): Promise<IntegrationConnectionRow>;
-  appendAuditEvent(input: IntegrationAuditEventInsert): Promise<IntegrationAuditEvent>;
 };
 
 export type IntegrationTransactionPort = {
@@ -269,7 +265,33 @@ export type IntegrationRepository = {
   disconnect(
     input: Parameters<IntegrationTransactionPort["disconnectConnection"]>[0],
   ): Promise<IntegrationConnectionRow>;
-  appendAuditEvent(input: IntegrationAuditEventInsert): Promise<IntegrationAuditEvent>;
+};
+
+export type IntegrationRunTransitionPort = {
+  markRunRunning(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    expectedStatus: "queued";
+    startedAt: string;
+  }): Promise<
+    { outcome: "transitioned"; run: IntegrationIngestionRunRow } | { outcome: "conflict" }
+  >;
+  completeRun(input: {
+    organizationId: string;
+    ingestionRunId: string;
+    expectedStatus: "running";
+    status: "succeeded" | "partially_succeeded" | "failed" | "cancelled";
+    recordsReceived: number;
+    recordsAccepted: number;
+    recordsRejected: number;
+    completedAt: string;
+    normalizedErrorCode?: string | null;
+    safeErrorSummary?: string | null;
+  }): Promise<
+    | { outcome: "transitioned"; run: IntegrationIngestionRunRow }
+    | { outcome: "already_terminal"; run: IntegrationIngestionRunRow }
+    | { outcome: "conflict" }
+  >;
 };
 
 export type IntegrationWorkerRepository = {
