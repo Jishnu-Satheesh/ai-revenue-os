@@ -104,6 +104,16 @@ describe("Integration Hub migration contract", () => {
     }
     expect(connect).toContain("on conflict (organization_id, provider_key, external_account_id)");
     expect(connect).toContain("xmax = 0");
+    expect(sql).toContain("create table public.integration_fixture_connect_operations");
+    expect(connect).toContain("p_idempotency_key text");
+    expect(connect).toContain("md5(");
+    expect(connect).toContain("fixture connect idempotency key was reused");
+    expect(connect).toContain("p_provider_key <> 'google_business_profile'");
+    expect(connect).toContain("p_adapter_version <> '1'");
+    expect(connect).toContain("read_google_business_profile");
+    expect(connect).toContain("read_reviews");
+    expect(connect).toContain("grant_payload ->> 'derived_from_adapter_version' <> '1'");
+    expect(connect).toContain("perform pg_catalog.set_config('app.correlation_id'");
     expect(connect).toContain("delete from public.integration_capability_grants");
     expect(sql).toContain("create table public.integration_mapping_operations");
     expect(mappings).toContain("md5(p_mappings::text || p_grants::text)");
@@ -111,8 +121,13 @@ describe("Integration Hub migration contract", () => {
     expect(mappings).toContain("delete from public.integration_account_mappings");
     expect(mappings).toContain("delete from public.integration_capability_grants");
     expect(mappings).toContain("left join public.branches branch");
+    expect(mappings).toContain("locked_connection.provider_key <> 'google_business_profile'");
+    expect(mappings).toContain("grant_payload ->> 'derived_from_adapter_version' <> '1'");
+    expect(mappings).toContain("perform pg_catalog.set_config('app.correlation_id'");
     expect(disconnect).toContain("for update");
     expect(disconnect).toContain("set status = 'disconnected'");
+    expect(disconnect).toContain("next_scheduled_sync_at = null");
+    expect(disconnect).toContain("perform pg_catalog.set_config('app.correlation_id'");
     expect(sql).toContain(
       "grant execute on function public.connect_fixture_integration_with_grants",
     );
@@ -120,6 +135,7 @@ describe("Integration Hub migration contract", () => {
       "grant execute on function public.replace_integration_mappings_with_grants",
     );
     expect(sql).toContain("grant execute on function public.disconnect_integration_connection");
+    expect(sql).toContain("current_setting('app.correlation_id', true)");
   });
   it("leases worker execution by tenant and prevents a late claimant from transitioning a run", () => {
     const sql = readWorkerTransitionsMigration();

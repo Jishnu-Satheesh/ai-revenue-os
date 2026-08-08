@@ -270,6 +270,7 @@ export function createIntegrationService({
       externalAccountId: parsed.externalAccountId,
       externalAccountLabel: parsed.externalAccountLabel,
       grantedScopes: parsed.grantedScopes,
+      idempotencyKey: parsed.idempotencyKey,
       correlationId: input.correlationId,
       grants: capabilityRows({
         definition,
@@ -277,12 +278,14 @@ export function createIntegrationService({
         mappingStatus: "unmapped",
       }),
     });
-    await publish(input, "integration.connected", {
-      connectionId: committed.connection.id,
-      providerKey: committed.connection.provider_key,
-      status: committed.connection.status,
-      capabilityCount: committed.grants.length,
-    });
+    if (!committed.deduplicated) {
+      await publish(input, "integration.connected", {
+        connectionId: committed.connection.id,
+        providerKey: committed.connection.provider_key,
+        status: committed.connection.status,
+        capabilityCount: committed.grants.length,
+      });
+    }
     const initialTest = await dispatchRun({
       context: input,
       operation: "integration.test",

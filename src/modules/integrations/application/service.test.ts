@@ -216,7 +216,7 @@ function createDependencies(
         grants: input.grants,
         correlationId: input.correlationId,
       });
-      return { connection: connected, grants, created: !existed };
+      return { connection: connected, grants, created: !existed, deduplicated: existed };
     },
     async replaceMappingsWithGrants(input) {
       if (options.atomicMappingFails) throw new Error("transaction rolled back");

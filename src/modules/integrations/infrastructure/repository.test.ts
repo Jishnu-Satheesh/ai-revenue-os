@@ -308,6 +308,7 @@ describe("Integration repositories", () => {
       externalAccountId: "account-a",
       externalAccountLabel: "Restaurant A",
       grantedScopes: ["business.manage"],
+      idempotencyKey: "fixture-connect-1",
       correlationId: "82d32f7e-283f-45a6-97e2-bde93fdf1bc9",
     };
     await expect(

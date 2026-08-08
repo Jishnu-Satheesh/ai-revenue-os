@@ -846,6 +846,7 @@ export function createSupabaseAuthenticatedIntegrationTransactionPort(
         connection: IntegrationConnectionRow;
         grants: IntegrationCapabilityGrantRow[];
         created: boolean;
+        deduplicated: boolean;
       }>(
         "connect_fixture_integration_with_grants",
         {
@@ -856,6 +857,7 @@ export function createSupabaseAuthenticatedIntegrationTransactionPort(
           p_external_account_id: input.externalAccountId,
           p_external_account_label: input.externalAccountLabel,
           p_granted_scopes: [...input.grantedScopes],
+          p_idempotency_key: input.idempotencyKey,
           p_correlation_id: input.correlationId,
           p_grants: input.grants,
         },

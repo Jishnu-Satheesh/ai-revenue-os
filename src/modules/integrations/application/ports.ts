@@ -155,6 +155,7 @@ export type FixtureConnectionUpsertInput = {
   externalAccountId: string;
   externalAccountLabel: string;
   grantedScopes: readonly string[];
+  idempotencyKey: string;
   correlationId: string;
 };
 
@@ -225,6 +226,7 @@ export type IntegrationTransactionPort = {
     connection: IntegrationConnectionRow;
     grants: IntegrationCapabilityGrantRow[];
     created: boolean;
+    deduplicated: boolean;
   }>;
   /** Atomic RPC boundary. Absence must fail closed for application mapping flows. */
   replaceMappingsWithGrants?: (input: {
@@ -273,6 +275,7 @@ export type IntegrationRepository = {
     connection: IntegrationConnectionRow;
     grants: IntegrationCapabilityGrantRow[];
     created: boolean;
+    deduplicated: boolean;
   }>;
   replaceCapabilityGrants(
     input: Parameters<IntegrationTransactionPort["replaceCapabilityGrants"]>[0],
