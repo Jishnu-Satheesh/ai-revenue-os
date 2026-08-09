@@ -171,7 +171,11 @@ describe("createMemoryRetrieval", () => {
   });
 
   it("runs hybrid retrieval when the embedding succeeds", async () => {
-    const search = vi.fn(async (_parameters: unknown) => [searchRow()]);
+    let searchParameters: { queryEmbedding: unknown } | undefined;
+    const search = async (parameters: { queryEmbedding: unknown }) => {
+      searchParameters = parameters;
+      return [searchRow()];
+    };
     const embeddings = {
       model: "test",
       dimensions: 1536,
@@ -183,7 +187,7 @@ describe("createMemoryRetrieval", () => {
 
     expect(response.retrievalMode).toBe("hybrid");
     expect(response.degradedReason).toBeUndefined();
-    expect(search.mock.calls.at(0)?.at(0)).toMatchObject({ queryEmbedding: expect.any(Array) });
+    expect(searchParameters).toMatchObject({ queryEmbedding: expect.any(Array) });
   });
 
   it("does not fail the retrieval when the log write fails", async () => {
