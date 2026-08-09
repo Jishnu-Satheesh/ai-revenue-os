@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { MemoryError, safeMemoryErrorCopy } from "@/domain/memory/errors";
-import { createMemoryWorkspaceApi, memoryRequest, runMemoryRoute } from "@/modules/memory/application/api";
+import {
+  createMemoryWorkspaceApi,
+  memoryRequest,
+  runMemoryRoute,
+} from "@/modules/memory/application/api";
 import { updateMemoryItemSchema } from "@/modules/memory/application/api-schemas";
 import { assertMemoryPermission } from "@/modules/memory/application/authorization";
 
@@ -66,6 +70,7 @@ export async function PATCH(
             actor: context.actor,
             itemId: routeParams.itemId,
             body,
+            correlationId: context.correlationId,
           }),
         },
       };

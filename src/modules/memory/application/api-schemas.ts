@@ -73,8 +73,8 @@ export const searchMemorySchema = z
 
 export const timelineCursorSchema = z
   .object({
-    observedAt: z.string().datetime().nullable(),
-    createdAt: z.string().datetime(),
+    observedAt: z.string().datetime({ offset: true }).nullable(),
+    createdAt: z.string().datetime({ offset: true }),
     id: z.string().uuid(),
   })
   .strict();

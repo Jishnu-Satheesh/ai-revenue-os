@@ -57,6 +57,8 @@
 - Modify: `src/modules/memory/application/service.ts`
 - Modify: `src/modules/memory/infrastructure/repository.ts`
 - Modify: `src/modules/memory/infrastructure/persistence.ts`
+- Create: `supabase/migrations/*_memory_workspace_write_operations.sql`
+- Create: `supabase/tests/database/business_memory_workspace_write_test.sql`
 - Test: `src/modules/memory/application/service.test.ts`
 - Test: `src/modules/memory/infrastructure/repository.test.ts`
 
@@ -181,8 +183,17 @@
   map `MemoryError`/Zod/session errors to safe `400`, `401`, `403`, `404`, or `409`
   JSON envelopes. It must set `x-correlation-id` for both success and failure.
 
-  Extend the existing authenticated persistence/repository/service path rather than
-  adding SQL or a migration:
+  Extend the existing authenticated persistence/repository/service path. During the
+  Task 1 review, direct create/update writes were found to accept idempotency keys
+  without atomically replaying them. The user approved a narrow deviation: add
+  authenticated, security-definer create/update RPCs backed by the existing
+  `memory_write_operations` table. They must authorize through
+  `private.has_organization_role`, lock/replay by `(organization_id, idempotency_key)`,
+  reject a key reused for a different request fingerprint, use `search_path = ''`,
+  revoke `PUBLIC`/`anon`, and grant only `authenticated`. Do not add a new table, RLS
+  policy, cache adapter, service-role client, or direct client-table query.
+
+  Also extend the existing path to:
 
   - `listTimeline` accepts an optional bounded `sourceSystems` filter and a
     `{ observedAt, createdAt, id }` cursor, orders by `observed_at desc,

@@ -14,6 +14,14 @@ function promotionMigration(): string {
   return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
 }
 
+function authenticatedWriteMigration(): string {
+  const matches = readdirSync(migrationsDirectory)
+    .filter((name) => /^\d{14}_memory_authenticated_write_operations\.sql$/.test(name))
+    .sort();
+  expect(matches).toHaveLength(1);
+  return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
+}
+
 describe("Business Memory proposal-promotion migration contract", () => {
   it("uses a locked authenticated security-definer operation with tenant-scoped idempotency", () => {
     const sql = promotionMigration();
@@ -75,5 +83,32 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(rlsPgtap).toContain("direct REST cannot verify a fact proposal");
     expect(rlsPgtap).toContain("direct REST cannot forge a verification actor");
     expect(rlsPgtap).toContain("direct REST cannot reject a proposal without a governed reason");
+  });
+
+  it("adds authenticated create/update RPCs without reopening direct table writes", () => {
+    const sql = authenticatedWriteMigration();
+    const pgtap = readFileSync(
+      resolve(databaseTestsDirectory, "business_memory_write_test.sql"),
+      "utf8",
+    );
+
+    expect(sql).toContain("create or replace function public.create_authenticated_memory_item");
+    expect(sql).toContain("create or replace function public.update_authenticated_memory_item");
+    expect(sql).toContain("security definer");
+    expect(sql).toContain("set search_path = ''");
+    expect(sql).toContain("(select auth.uid()) <> p_actor_id");
+    expect(sql).toContain("private.has_organization_role");
+    expect(sql).toContain("memory_write_operations");
+    expect(sql).toContain("revoke insert, update on table public.memory_items from authenticated");
+    expect(sql).toContain("for update");
+    expect(sql).toContain("p_correlation_id");
+    expect(sql).toContain("revoke all on function public.create_authenticated_memory_item");
+    expect(sql).toContain("revoke all on function public.update_authenticated_memory_item");
+    expect(sql).toContain("to authenticated");
+    expect(pgtap).toContain("create_authenticated_memory_item");
+    expect(pgtap).toContain("update_authenticated_memory_item");
+    expect(pgtap).toContain("replaying an authenticated memory create does not duplicate the item");
+    expect(pgtap).toContain("a reused authenticated memory write key conflicts");
+    expect(pgtap).toContain("direct REST cannot create a governed memory item");
   });
 });

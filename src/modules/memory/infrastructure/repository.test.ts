@@ -321,6 +321,7 @@ describe("createSupabaseMemoryPersistence", () => {
       sensitivity: "internal",
       reason: "The source was corrected.",
       idempotencyKey: "supersede-key-1",
+      correlationId: "correlation-3",
     });
     expect(rpc).toHaveBeenLastCalledWith("supersede_memory_item", {
       p_organization_id: "org-1",
@@ -331,7 +332,32 @@ describe("createSupabaseMemoryPersistence", () => {
       p_sensitivity: "internal",
       p_supersession_reason: "The source was corrected.",
       p_idempotency_key: "supersede-key-1",
+      p_correlation_id: "correlation-3",
     });
+
+    await transactions.createItem({
+      organizationId: "org-1",
+      actorId: "actor-1",
+      memoryType: "note",
+      title: "Idempotent note",
+      body: undefined,
+      branchId: undefined,
+      sensitivity: "internal",
+      markVerified: true,
+      reviewDueAt: undefined,
+      expiresAt: undefined,
+      idempotencyKey: "create-key-1",
+      correlationId: "correlation-4",
+    });
+    expect(rpc).toHaveBeenLastCalledWith(
+      "create_authenticated_memory_item",
+      expect.objectContaining({
+        p_organization_id: "org-1",
+        p_actor_id: "actor-1",
+        p_idempotency_key: "create-key-1",
+        p_correlation_id: "correlation-4",
+      }),
+    );
   });
 
   it("projects a validated provider record through the scoped atomic RPC", async () => {

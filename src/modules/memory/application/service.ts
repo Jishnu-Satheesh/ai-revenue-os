@@ -22,6 +22,32 @@ import type { MemoryItemRow, MemorySnapshotCounts } from "@/modules/memory/appli
 import type { MemoryRepository } from "@/modules/memory/infrastructure/repository";
 
 export type MemoryTransactionPort = {
+  createItem(input: {
+    organizationId: string;
+    actorId: string;
+    memoryType: "note" | "document";
+    title: string;
+    body?: string;
+    branchId?: string;
+    sensitivity: Sensitivity;
+    markVerified: boolean;
+    reviewDueAt?: string;
+    expiresAt?: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<{ item: MemoryItemRow; replayed: boolean }>;
+  updateItem(input: {
+    organizationId: string;
+    actorId: string;
+    itemId: string;
+    action: UpdateMemoryItemInput["action"];
+    reason?: string;
+    sensitivity?: Sensitivity;
+    reviewDueAt?: string | null;
+    setReviewDueAt: boolean;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<{ item: MemoryItemRow; replayed: boolean }>;
   confirmProposal(input: {
     organizationId: string;
     actorId: string;
@@ -47,7 +73,8 @@ export type MemoryTransactionPort = {
     sensitivity: Sensitivity;
     reason: string;
     idempotencyKey: string;
-  }): Promise<{ replacementId: string; supersededId: string }>;
+    correlationId: string;
+  }): Promise<{ replacementId: string; supersededId: string; replayed: boolean }>;
 };
 
 export type MemoryFactPromotion = {
@@ -209,6 +236,7 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
     actor: MemoryActor,
     eventName: TName,
     payload: MemoryEventPayloads[TName],
+    correlationId: string,
   ) => {
     try {
       await dependencies.events.publish({
@@ -218,7 +246,7 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
         organizationId,
         actorType: "user",
         actorId: actor.userId,
-        correlationId: crypto.randomUUID(),
+        correlationId,
         schemaVersion: 1,
         payload,
       });
@@ -244,36 +272,42 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       organizationId: string;
       actor: MemoryActor;
       body: CreateMemoryItemInput;
+      correlationId?: string;
     }): Promise<MemoryItemView> {
       assertMemoryPermission(input.actor, "memory.write");
       assertCanAssignSensitivity(input.actor, input.body.sensitivity);
 
-      const timestamp = now().toISOString();
-      const row = await dependencies.repository.insertItem({
-        organization_id: input.organizationId,
-        branch_id: input.body.branchId ?? null,
-        memory_type: input.body.memoryType,
+      if (!dependencies.transactions) throw memoryError("CONFLICT");
+      const correlationId = input.correlationId ?? crypto.randomUUID();
+      const result = await dependencies.transactions.createItem({
+        organizationId: input.organizationId,
+        actorId: input.actor.userId,
+        memoryType: input.body.memoryType,
         title: input.body.title,
-        body: input.body.body ?? null,
-        // A browser session may only ever author direct user input. The RLS
-        // insert policy enforces the same thing independently.
-        origin: "user_verified",
+        body: input.body.body,
+        branchId: input.body.branchId,
         sensitivity: input.body.sensitivity,
-        verification_state: input.body.markVerified ? "verified" : "unverified",
-        review_due_at: input.body.reviewDueAt ?? null,
-        expires_at: input.body.expiresAt ?? null,
-        created_by: input.actor.userId,
-        verified_by: input.body.markVerified ? input.actor.userId : null,
-        verified_at: input.body.markVerified ? timestamp : null,
+        markVerified: input.body.markVerified,
+        reviewDueAt: input.body.reviewDueAt,
+        expiresAt: input.body.expiresAt,
+        idempotencyKey: input.body.idempotencyKey,
+        correlationId,
       });
-
-      await publish(input.organizationId, input.actor, "memory.item_created", {
-        itemId: row.id,
-        memoryType: row.memory_type,
-        origin: row.origin,
-        verificationState: row.verification_state,
-        sensitivity: row.sensitivity,
-      });
+      const row = result.item;
+      if (!result.replayed)
+        await publish(
+          input.organizationId,
+          input.actor,
+          "memory.item_created",
+          {
+            itemId: row.id,
+            memoryType: row.memory_type,
+            origin: row.origin,
+            verificationState: row.verification_state,
+            sensitivity: row.sensitivity,
+          },
+          correlationId,
+        );
       await invalidate(input.organizationId);
 
       return toMemoryItemView(row, now());
@@ -284,71 +318,58 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       actor: MemoryActor;
       itemId: string;
       body: UpdateMemoryItemInput;
+      correlationId?: string;
     }): Promise<MemoryItemView> {
-      const existing = await requireItem(input.organizationId, input.itemId);
-      const timestamp = now().toISOString();
-
-      if (input.body.action === "verify") {
+      if (input.body.action === "verify" || input.body.action === "reject")
         assertMemoryPermission(input.actor, "memory.verify");
-        // A model cannot confirm its own proposal; only a person can.
-        if (existing.verification_state === "rejected") {
-          throw memoryError("CONFLICT");
-        }
-        const row = await dependencies.repository.updateItem({
-          organizationId: input.organizationId,
-          itemId: input.itemId,
-          patch: {
-            verification_state: "verified",
-            verified_by: input.actor.userId,
-            verified_at: timestamp,
-          },
-        });
-        await publish(input.organizationId, input.actor, "memory.item_verified", {
-          itemId: row.id,
-          memoryType: row.memory_type,
-          origin: row.origin,
-          verificationState: row.verification_state,
-          sensitivity: row.sensitivity,
-        });
-        await invalidate(input.organizationId);
-        return toMemoryItemView(row, now());
+      else {
+        assertMemoryPermission(input.actor, "memory.write");
+        if (input.body.sensitivity) assertCanAssignSensitivity(input.actor, input.body.sensitivity);
       }
-
-      if (input.body.action === "reject") {
-        assertMemoryPermission(input.actor, "memory.verify");
-        const row = await dependencies.repository.updateItem({
-          organizationId: input.organizationId,
-          itemId: input.itemId,
-          patch: {
-            verification_state: "rejected",
-            rejection_reason: input.body.reason ?? null,
-            embedding_status: "skipped",
-          },
-        });
-        await publish(input.organizationId, input.actor, "memory.item_rejected", {
-          itemId: row.id,
-          memoryType: row.memory_type,
-          origin: row.origin,
-          verificationState: row.verification_state,
-          sensitivity: row.sensitivity,
-          reasonProvided: Boolean(input.body.reason),
-        });
-        await invalidate(input.organizationId);
-        return toMemoryItemView(row, now());
-      }
-
-      assertMemoryPermission(input.actor, "memory.write");
-      if (input.body.sensitivity) {
-        assertCanAssignSensitivity(input.actor, input.body.sensitivity);
-      }
-      const row = await dependencies.repository.updateItem({
+      if (!dependencies.transactions) throw memoryError("CONFLICT");
+      const correlationId = input.correlationId ?? crypto.randomUUID();
+      const result = await dependencies.transactions.updateItem({
         organizationId: input.organizationId,
+        actorId: input.actor.userId,
         itemId: input.itemId,
-        patch: {
-          sensitivity: input.body.sensitivity,
-          review_due_at: input.body.reviewDueAt ?? undefined,
-        },
+        action: input.body.action,
+        reason: input.body.reason,
+        sensitivity: input.body.sensitivity,
+        reviewDueAt: input.body.reviewDueAt,
+        setReviewDueAt: Object.hasOwn(input.body, "reviewDueAt"),
+        idempotencyKey: input.body.idempotencyKey,
+        correlationId,
       });
+      const row = result.item;
+      if (!result.replayed && input.body.action === "verify")
+        await publish(
+          input.organizationId,
+          input.actor,
+          "memory.item_verified",
+          {
+            itemId: row.id,
+            memoryType: row.memory_type,
+            origin: row.origin,
+            verificationState: row.verification_state,
+            sensitivity: row.sensitivity,
+          },
+          correlationId,
+        );
+      if (!result.replayed && input.body.action === "reject")
+        await publish(
+          input.organizationId,
+          input.actor,
+          "memory.item_rejected",
+          {
+            itemId: row.id,
+            memoryType: row.memory_type,
+            origin: row.origin,
+            verificationState: row.verification_state,
+            sensitivity: row.sensitivity,
+            reasonProvided: Boolean(input.body.reason),
+          },
+          correlationId,
+        );
       await invalidate(input.organizationId);
       return toMemoryItemView(row, now());
     },
@@ -358,12 +379,10 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       actor: MemoryActor;
       itemId: string;
       body: SupersedeMemoryItemInput;
+      correlationId?: string;
     }): Promise<{ replacementId: string; supersededId: string }> {
       assertMemoryPermission(input.actor, "memory.supersede");
       assertCanAssignSensitivity(input.actor, input.body.sensitivity);
-
-      const existing = await requireItem(input.organizationId, input.itemId);
-      if (existing.superseded_by_id) throw memoryError("MEMORY_SUPERSESSION_INVALID");
 
       if (!dependencies.transactions) {
         // Without the atomic operation the replacement and the state change
@@ -371,6 +390,7 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
         throw memoryError("CONFLICT", {}, "memory supersession transaction unavailable");
       }
 
+      const correlationId = input.correlationId ?? crypto.randomUUID();
       const result = await dependencies.transactions.supersede({
         organizationId: input.organizationId,
         actorId: input.actor.userId,
@@ -380,19 +400,28 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
         sensitivity: input.body.sensitivity,
         reason: input.body.reason,
         idempotencyKey: input.body.idempotencyKey,
+        correlationId,
       });
-
-      await publish(input.organizationId, input.actor, "memory.item_superseded", {
-        itemId: result.supersededId,
-        memoryType: existing.memory_type,
-        origin: existing.origin,
-        verificationState: existing.verification_state,
-        sensitivity: existing.sensitivity,
-        replacementId: result.replacementId,
-      });
+      if (!result.replayed) {
+        const existing = await requireItem(input.organizationId, input.itemId);
+        await publish(
+          input.organizationId,
+          input.actor,
+          "memory.item_superseded",
+          {
+            itemId: result.supersededId,
+            memoryType: existing.memory_type,
+            origin: existing.origin,
+            verificationState: existing.verification_state,
+            sensitivity: existing.sensitivity,
+            replacementId: result.replacementId,
+          },
+          correlationId,
+        );
+      }
       await invalidate(input.organizationId);
 
-      return result;
+      return { replacementId: result.replacementId, supersededId: result.supersededId };
     },
 
     async confirmProposal(input: {
@@ -400,19 +429,21 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       actor: MemoryActor;
       itemId: string;
       body: ConfirmProposalInput;
+      correlationId?: string;
     }): Promise<MemoryProposalConfirmation> {
       assertMemoryPermission(input.actor, "memory.promote_fact");
       if (!dependencies.transactions) {
         throw memoryError("CONFLICT", {}, "memory promotion transaction unavailable");
       }
 
+      const correlationId = input.correlationId ?? crypto.randomUUID();
       const result = await dependencies.transactions.confirmProposal({
         organizationId: input.organizationId,
         actorId: input.actor.userId,
         itemId: input.itemId,
         overrideVerified: input.body.overrideVerified,
         idempotencyKey: input.body.idempotencyKey,
-        correlationId: crypto.randomUUID(),
+        correlationId,
       });
 
       await invalidate(input.organizationId);
@@ -421,20 +452,32 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       // already-committed write, but must never create a second event.
       if (result.replayed === false) {
         if (result.promoted) {
-          await publish(input.organizationId, input.actor, "memory.fact_promoted", {
-            itemId: result.itemId,
-            factKey: result.factKey,
-            branchScoped: result.branchScoped,
-            overrodeVerified: result.overrodeVerified,
-          });
+          await publish(
+            input.organizationId,
+            input.actor,
+            "memory.fact_promoted",
+            {
+              itemId: result.itemId,
+              factKey: result.factKey,
+              branchScoped: result.branchScoped,
+              overrodeVerified: result.overrodeVerified,
+            },
+            correlationId,
+          );
         } else {
-          await publish(input.organizationId, input.actor, "memory.proposal_confirmed", {
-            itemId: result.itemId,
-            memoryType: result.memoryType,
-            origin: result.origin,
-            verificationState: result.verificationState,
-            sensitivity: result.sensitivity,
-          });
+          await publish(
+            input.organizationId,
+            input.actor,
+            "memory.proposal_confirmed",
+            {
+              itemId: result.itemId,
+              memoryType: result.memoryType,
+              origin: result.origin,
+              verificationState: result.verificationState,
+              sensitivity: result.sensitivity,
+            },
+            correlationId,
+          );
         }
       }
       return result;
@@ -445,29 +488,37 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       actor: MemoryActor;
       itemId: string;
       body: RejectProposalInput;
+      correlationId?: string;
     }): Promise<MemoryProposalRejection> {
       assertMemoryPermission(input.actor, "memory.verify");
       if (!dependencies.transactions) {
         throw memoryError("CONFLICT", {}, "memory proposal rejection transaction unavailable");
       }
+      const correlationId = input.correlationId ?? crypto.randomUUID();
       const result = await dependencies.transactions.rejectProposal({
         organizationId: input.organizationId,
         actorId: input.actor.userId,
         itemId: input.itemId,
         reason: input.body.reason,
         idempotencyKey: input.body.idempotencyKey,
-        correlationId: crypto.randomUUID(),
+        correlationId,
       });
       await invalidate(input.organizationId);
       if (result.replayed === false) {
-        await publish(input.organizationId, input.actor, "memory.item_rejected", {
-          itemId: result.itemId,
-          memoryType: result.memoryType,
-          origin: result.origin,
-          verificationState: result.verificationState,
-          sensitivity: result.sensitivity,
-          reasonProvided: true,
-        });
+        await publish(
+          input.organizationId,
+          input.actor,
+          "memory.item_rejected",
+          {
+            itemId: result.itemId,
+            memoryType: result.memoryType,
+            origin: result.origin,
+            verificationState: result.verificationState,
+            sensitivity: result.sensitivity,
+            reasonProvided: true,
+          },
+          correlationId,
+        );
       }
       return result;
     },
@@ -565,8 +616,17 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
         organizationId: input.organizationId,
         itemIds: rows.map((row) => row.id),
       });
-      const evidence = links.reduce<Record<string, string[]>>((accumulator, link) => {
-        if (link.relation !== "derived_from") return accumulator;
+      const derivedFrom = links.filter((link) => link.relation === "derived_from");
+      const hydrated = await dependencies.repository.hydrateByIds({
+        organizationId: input.organizationId,
+        ids: [...new Set(derivedFrom.map((link) => link.to_item_id))],
+        sensitivities: sensitivitiesWithinCeiling(operatorCeiling(input.actor)),
+        includeSuperseded: false,
+        includeExpired: false,
+      });
+      const visibleIds = new Set(hydrated.map((row) => row.id));
+      const evidence = derivedFrom.reduce<Record<string, string[]>>((accumulator, link) => {
+        if (!visibleIds.has(link.to_item_id)) return accumulator;
         accumulator[link.from_item_id] = [
           ...(accumulator[link.from_item_id] ?? []),
           link.to_item_id,

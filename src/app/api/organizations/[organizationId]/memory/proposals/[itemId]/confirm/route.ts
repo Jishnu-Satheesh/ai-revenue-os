@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { createMemoryWorkspaceApi, memoryRequest, runMemoryRoute } from "@/modules/memory/application/api";
+import {
+  createMemoryWorkspaceApi,
+  memoryRequest,
+  runMemoryRoute,
+} from "@/modules/memory/application/api";
 import { confirmProposalSchema } from "@/modules/memory/application/api-schemas";
 import { assertMemoryPermission } from "@/modules/memory/application/authorization";
 
@@ -23,6 +27,7 @@ export async function POST(
           actor: context.actor,
           itemId: routeParams.itemId,
           body: await memoryRequest(request, confirmProposalSchema),
+          correlationId: context.correlationId,
         }),
       };
     },

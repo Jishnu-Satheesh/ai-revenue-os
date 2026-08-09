@@ -68,6 +68,11 @@ function jsonRequest(method: string, path: string, body: unknown) {
   });
 }
 
+function withCorrelation(request: Request, correlationId = "44444444-4444-4444-8444-444444444444") {
+  request.headers.set("x-correlation-id", correlationId);
+  return request;
+}
+
 const validNote = {
   memoryType: "note",
   title: "Kitchen staffing",
@@ -119,7 +124,10 @@ beforeEach(() => {
   });
   mocks.service.createItem.mockResolvedValue(item);
   mocks.service.updateItem.mockResolvedValue(item);
-  mocks.service.supersedeItem.mockResolvedValue({ replacementId: otherItemId, supersededId: itemId });
+  mocks.service.supersedeItem.mockResolvedValue({
+    replacementId: otherItemId,
+    supersededId: itemId,
+  });
   mocks.service.confirmProposal.mockResolvedValue({
     itemId,
     factId: null,
@@ -139,7 +147,10 @@ beforeEach(() => {
     replayed: false,
   });
   mocks.service.listTimeline.mockResolvedValue({ items: [item], nextCursor: undefined });
-  mocks.service.listLessons.mockResolvedValue({ items: [item], evidence: { [itemId]: [otherItemId] } });
+  mocks.service.listLessons.mockResolvedValue({
+    items: [item],
+    evidence: { [itemId]: [otherItemId] },
+  });
   mocks.service.getItemDetail.mockResolvedValue({ item, chain: [], links: [] });
 });
 
@@ -194,7 +205,9 @@ describe("Business Memory API routes", () => {
   });
 
   it("returns a safe 404 without exposing whether a cross-tenant item exists", async () => {
-    mocks.service.getItemDetail.mockRejectedValueOnce(new MemoryError("NOT_FOUND", "internal detail"));
+    mocks.service.getItemDetail.mockRejectedValueOnce(
+      new MemoryError("NOT_FOUND", "internal detail"),
+    );
 
     const response = await getItem(new Request("http://localhost"), itemParams());
 
@@ -216,7 +229,10 @@ describe("Business Memory API routes", () => {
       organizationParams(),
     );
     const updateWithoutKey = await updateItem(
-      jsonRequest("PATCH", `/memory/items/${itemId}`, { ...validUpdate, idempotencyKey: undefined }),
+      jsonRequest("PATCH", `/memory/items/${itemId}`, {
+        ...validUpdate,
+        idempotencyKey: undefined,
+      }),
       itemParams(),
     );
     const supersedeWithoutKey = await supersedeItem(
@@ -313,5 +329,83 @@ describe("Business Memory API routes", () => {
       items: [item],
       evidence: { [itemId]: [otherItemId] },
     });
+  });
+
+  it("round-trips a generated timeline cursor with a PostgreSQL +00:00 offset", async () => {
+    const cursor = {
+      observedAt: "2026-08-09T00:00:00+00:00",
+      createdAt: "2026-08-09T00:00:01+00:00",
+      id: itemId,
+    };
+    mocks.service.listTimeline.mockResolvedValueOnce({ items: [item], nextCursor: cursor });
+    const first = await getTimeline(
+      new Request("http://localhost/memory/timeline"),
+      organizationParams(),
+    );
+    const firstBody = (await first.json()) as { nextCursor: string };
+    await getTimeline(
+      new Request(
+        `http://localhost/memory/timeline?cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+      ),
+      organizationParams(),
+    );
+
+    expect(firstBody.nextCursor).toBe(JSON.stringify(cursor));
+    expect(mocks.service.listTimeline).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cursor }),
+    );
+  });
+
+  it("preserves the request correlation ID through every mutation service call", async () => {
+    const correlationId = "44444444-4444-4444-8444-444444444444";
+    await createItem(
+      withCorrelation(jsonRequest("POST", "/memory/items", validNote), correlationId),
+      organizationParams(),
+    );
+    await updateItem(
+      withCorrelation(jsonRequest("PATCH", `/memory/items/${itemId}`, validUpdate), correlationId),
+      itemParams(),
+    );
+    await supersedeItem(
+      withCorrelation(
+        jsonRequest("POST", `/memory/items/${itemId}/supersede`, {
+          title: "Correction",
+          sensitivity: "internal",
+          reason: "The source was stale.",
+          idempotencyKey: "supersede-correlation-key",
+        }),
+        correlationId,
+      ),
+      itemParams(),
+    );
+    await confirmProposal(
+      withCorrelation(
+        jsonRequest("POST", `/memory/proposals/${itemId}/confirm`, {
+          idempotencyKey: "confirm-correlation-key",
+        }),
+        correlationId,
+      ),
+      itemParams(),
+    );
+    await rejectProposal(
+      withCorrelation(
+        jsonRequest("POST", `/memory/proposals/${itemId}/reject`, {
+          reason: "Unsupported.",
+          idempotencyKey: "reject-correlation-key",
+        }),
+        correlationId,
+      ),
+      itemParams(),
+    );
+
+    for (const call of [
+      mocks.service.createItem,
+      mocks.service.updateItem,
+      mocks.service.supersedeItem,
+      mocks.service.confirmProposal,
+      mocks.service.rejectProposal,
+    ]) {
+      expect(call).toHaveBeenCalledWith(expect.objectContaining({ correlationId }));
+    }
   });
 });

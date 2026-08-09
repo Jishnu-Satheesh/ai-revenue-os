@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(33);
+select extensions.plan(39);
 
 insert into auth.users (id)
 values
@@ -47,7 +47,8 @@ select extensions.lives_ok(
       'The corrected version.',
       'internal',
       'The original overstated the limit.',
-      'supersede-key-1'
+      'supersede-key-1',
+      '56000000-0000-4000-8000-000000000010'::uuid
     )$$,
   'supersede_memory_item runs end to end'
 );
@@ -99,7 +100,8 @@ select extensions.is(
       'The corrected version.',
       'internal',
       'The original overstated the limit.',
-      'supersede-key-1'
+      'supersede-key-1',
+      '56000000-0000-4000-8000-000000000011'::uuid
     )) ->> 'supersededId'
   ),
   '46000000-0000-4000-8000-000000000001',
@@ -126,7 +128,8 @@ select extensions.throws_ok(
       '26000000-0000-4000-8000-000000000001'::uuid,
       '16000000-0000-4000-8000-000000000002'::uuid,
       '46000000-0000-4000-8000-000000000001'::uuid,
-      'Viewer correction', null, 'internal', 'not allowed', 'supersede-key-2'
+      'Viewer correction', null, 'internal', 'not allowed', 'supersede-key-2',
+      '56000000-0000-4000-8000-000000000012'::uuid
     )$$,
   '42501',
   null,
@@ -567,6 +570,70 @@ select extensions.is(
   0::bigint,
   'rejecting a proposal never writes business facts'
 );
+
+-- Authenticated item writes share the existing operation ledger with
+-- supersession, so retries return the committed response without a new write.
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.is(
+  (select (public.create_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    'note', 'Authenticated note', 'Only once.', null, 'internal', true,
+    null, null, 'authenticated-create-key', '56000000-0000-4000-8000-000000000013'::uuid
+  )) ->> 'replayed'),
+  'false',
+  'the first authenticated memory create is not a replay'
+);
+
+select extensions.is(
+  (select (public.create_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    'note', 'Authenticated note', 'Only once.', null, 'internal', true,
+    null, null, 'authenticated-create-key', '56000000-0000-4000-8000-000000000014'::uuid
+  )) ->> 'replayed'),
+  'true',
+  'replaying an authenticated memory create does not duplicate the item'
+);
+
+select extensions.is(
+  (select count(*) from public.memory_items where organization_id = '26000000-0000-4000-8000-000000000001'::uuid and title = 'Authenticated note'),
+  1::bigint,
+  'an authenticated create replay leaves one item'
+);
+
+select extensions.throws_ok(
+  $$select public.create_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    'note', 'Different authenticated note', null, null, 'internal', true,
+    null, null, 'authenticated-create-key', '56000000-0000-4000-8000-000000000015'::uuid
+  )$$,
+  '23505', null,
+  'a reused authenticated memory write key conflicts'
+);
+
+select extensions.lives_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    (select id from public.memory_items where title = 'Authenticated note'),
+    'reclassify', null, 'internal', null, false, 'authenticated-update-key',
+    '56000000-0000-4000-8000-000000000016'::uuid
+  )$$,
+  'the authenticated memory update RPC runs end to end'
+);
+
+select extensions.throws_ok(
+  $$insert into public.memory_items (organization_id, memory_type, title, origin, sensitivity, verification_state, created_by)
+    values ('26000000-0000-4000-8000-000000000001'::uuid, 'note', 'Bypass attempt', 'user_verified', 'internal', 'verified', '16000000-0000-4000-8000-000000000001'::uuid)$$,
+  '42501', null,
+  'direct REST cannot create a governed memory item'
+);
+
+reset role;
 
 select * from extensions.finish();
 

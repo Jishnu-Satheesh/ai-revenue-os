@@ -125,6 +125,44 @@ export function createSupabaseMemoryPromotionTransactionPort(
   };
 
   return {
+    async createItem(input) {
+      const result = await client.rpc("create_authenticated_memory_item", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_memory_type: input.memoryType,
+        p_title: input.title,
+        p_body: input.body ?? null,
+        p_branch_id: input.branchId ?? null,
+        p_sensitivity: input.sensitivity,
+        p_mark_verified: input.markVerified,
+        p_review_due_at: input.reviewDueAt ?? null,
+        p_expires_at: input.expiresAt ?? null,
+        p_idempotency_key: input.idempotencyKey,
+        p_correlation_id: input.correlationId,
+      });
+      if (result.error || result.data === null) {
+        databaseError("The memory item could not be created.", result.error);
+      }
+      return result.data as { item: MemoryItemRow; replayed: boolean };
+    },
+    async updateItem(input) {
+      const result = await client.rpc("update_authenticated_memory_item", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_item_id: input.itemId,
+        p_action: input.action,
+        p_reason: input.reason ?? null,
+        p_sensitivity: input.sensitivity ?? null,
+        p_review_due_at: input.reviewDueAt ?? null,
+        p_set_review_due_at: input.setReviewDueAt,
+        p_idempotency_key: input.idempotencyKey,
+        p_correlation_id: input.correlationId,
+      });
+      if (result.error || result.data === null) {
+        databaseError("The memory item could not be updated.", result.error);
+      }
+      return result.data as { item: MemoryItemRow; replayed: boolean };
+    },
     async confirmProposal(input) {
       const result = await client.rpc("confirm_memory_fact_proposal", {
         p_organization_id: input.organizationId,
@@ -163,11 +201,21 @@ export function createSupabaseMemoryPromotionTransactionPort(
         p_sensitivity: input.sensitivity,
         p_supersession_reason: input.reason,
         p_idempotency_key: input.idempotencyKey,
+        p_correlation_id: input.correlationId,
       });
       if (result.error || result.data === null) {
         databaseError("The memory item could not be superseded.", result.error);
       }
-      return result.data as { replacementId: string; supersededId: string };
+      const response = result.data as {
+        replacementId: string;
+        supersededId: string;
+        replayed?: boolean;
+      };
+      return {
+        replacementId: response.replacementId,
+        supersededId: response.supersededId,
+        replayed: response.replayed === true,
+      };
     },
   };
 }
@@ -316,7 +364,8 @@ export function createSupabaseMemoryPersistence(
         .in("memory_type", ["episode", "decision", "outcome"])
         .in("verification_state", ["unverified", "verified"]);
       if (branchId) request = request.eq("branch_id", branchId);
-      if (sourceSystems && sourceSystems.length > 0) request = request.in("source_system", sourceSystems);
+      if (sourceSystems && sourceSystems.length > 0)
+        request = request.in("source_system", sourceSystems);
       if (cursor) {
         request =
           cursor.observedAt === null
