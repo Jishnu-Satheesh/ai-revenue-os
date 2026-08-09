@@ -161,4 +161,18 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(pgtap).toContain("an operator cannot replay a confidential update");
     expect(pgtap).toContain("an operator cannot replay a confidential supersede");
   });
+
+  it("checks the stored update snapshot sensitivity before returning a replay", () => {
+    const sql = authenticatedWriteMigration();
+    const pgtap = readFileSync(
+      resolve(databaseTestsDirectory, "business_memory_write_test.sql"),
+      "utf8",
+    );
+
+    expect(sql).toContain("operation.response -> 'item' ->> 'sensitivity'");
+    expect(sql).toContain("memory write replay is not authorized");
+    expect(pgtap).toContain(
+      "an operator cannot replay a confidential update snapshot after the row is lowered",
+    );
+  });
 });

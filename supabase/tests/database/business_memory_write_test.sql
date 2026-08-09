@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(55);
+select extensions.plan(57);
 
 insert into auth.users (id)
 values
@@ -666,6 +666,10 @@ values (
   '46000000-0000-4000-8000-000000000025'::uuid,
   '26000000-0000-4000-8000-000000000001'::uuid,
   'note', 'Confidential supersede original', 'user_verified', 'unverified', 'confidential'
+), (
+  '46000000-0000-4000-8000-000000000026'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'note', 'Sensitive snapshot replay target', 'user_verified', 'unverified', 'internal'
 );
 insert into public.memory_write_operations (
   organization_id, idempotency_key, request_fingerprint, response
@@ -892,6 +896,52 @@ select extensions.throws_ok(
   )$$,
   '42501', null,
   'an operator cannot replay a confidential supersede'
+);
+
+reset role;
+
+-- The saved update response itself can be more sensitive than the row is now.
+-- Replay must inspect that immutable snapshot before returning it.
+update public.organization_memberships
+set role = 'admin'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and user_id = '16000000-0000-4000-8000-000000000001'::uuid;
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.lives_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000026'::uuid,
+    'reclassify', null, 'confidential', null, false, 'confidential-snapshot-update-key',
+    '56000000-0000-4000-8000-000000000036'::uuid
+  )$$,
+  'an admin can save a confidential update replay snapshot'
+);
+
+reset role;
+update public.memory_items
+set sensitivity = 'internal'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and id = '46000000-0000-4000-8000-000000000026'::uuid;
+update public.organization_memberships
+set role = 'operator'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and user_id = '16000000-0000-4000-8000-000000000001'::uuid;
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000026'::uuid,
+    'reclassify', null, 'confidential', null, false, 'confidential-snapshot-update-key',
+    '56000000-0000-4000-8000-000000000037'::uuid
+  )$$,
+  '42501', null,
+  'an operator cannot replay a confidential update snapshot after the row is lowered'
 );
 
 reset role;

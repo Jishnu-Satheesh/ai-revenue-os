@@ -143,6 +143,12 @@ begin
   select * into updated from public.memory_items item where item.organization_id = p_organization_id and item.id = p_item_id for update;
   if not found then raise exception 'memory item was not found' using errcode = 'P0002'; end if;
   if operation.response <> '{}'::jsonb then
+    if (
+      p_sensitivity in ('confidential', 'customer_content')
+      or operation.response -> 'item' ->> 'sensitivity' in ('confidential', 'customer_content')
+    ) and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then
+      raise exception 'memory write replay is not authorized' using errcode = '42501';
+    end if;
     if updated.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then
       raise exception 'memory write replay is not authorized' using errcode = '42501';
     end if;
