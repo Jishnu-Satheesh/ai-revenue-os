@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(47);
+select extensions.plan(55);
 
 insert into auth.users (id)
 values
@@ -658,6 +658,14 @@ values (
   '46000000-0000-4000-8000-000000000023'::uuid,
   '26000000-0000-4000-8000-000000000001'::uuid,
   'note', 'Legacy supersede original', 'user_verified', 'unverified', 'internal'
+), (
+  '46000000-0000-4000-8000-000000000024'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'note', 'Legacy supersede replacement', 'user_verified', 'unverified', 'internal'
+), (
+  '46000000-0000-4000-8000-000000000025'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'note', 'Confidential supersede original', 'user_verified', 'unverified', 'confidential'
 );
 insert into public.memory_write_operations (
   organization_id, idempotency_key, request_fingerprint, response
@@ -665,11 +673,11 @@ insert into public.memory_write_operations (
 values (
   '26000000-0000-4000-8000-000000000001'::uuid,
   'legacy-supersede-key',
-  pg_catalog.encode(pg_catalog.digest(pg_catalog.concat_ws(
+  pg_catalog.encode(extensions.digest(pg_catalog.concat_ws(
     '|', '46000000-0000-4000-8000-000000000023', 'Legacy correction', 'Legacy body', 'internal'
   ), 'sha256'), 'hex'),
   pg_catalog.jsonb_build_object(
-    'fingerprint', pg_catalog.encode(pg_catalog.digest(pg_catalog.concat_ws(
+    'fingerprint', pg_catalog.encode(extensions.digest(pg_catalog.concat_ws(
       '|', '46000000-0000-4000-8000-000000000023', 'Legacy correction', 'Legacy body', 'internal'
     ), 'sha256'), 'hex'),
     'replacementId', '46000000-0000-4000-8000-000000000024',
@@ -743,7 +751,7 @@ select extensions.is(
     '56000000-0000-4000-8000-000000000025'::uuid
   )) ->> 'replayed'),
   'true',
-  'a matching legacy supersede operation replays safely'
+  'legacy supersede RPC executes with extensions.digest; a matching legacy supersede operation replays safely'
 );
 
 select extensions.is(
@@ -768,6 +776,122 @@ select extensions.throws_ok(
   )$$,
   '23505', null,
   'a mismatched legacy supersede request conflicts'
+);
+
+reset role;
+
+-- Replays are tenant-keyed rather than actor-keyed, but they must still be
+-- authorized against the current item sensitivity after an actor changes role.
+update public.organization_memberships
+set role = 'admin'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and user_id = '16000000-0000-4000-8000-000000000001'::uuid;
+update public.organization_memberships
+set role = 'operator'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and user_id = '16000000-0000-4000-8000-000000000002'::uuid;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.lives_ok(
+  $$select public.create_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    'note', 'Admin confidential replay target', null, null, 'confidential', true,
+    null, null, 'admin-confidential-create-key', '56000000-0000-4000-8000-000000000028'::uuid
+  )$$,
+  'an admin can create a confidential replay target'
+);
+
+select extensions.lives_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000022'::uuid,
+    'reclassify', null, 'confidential', null, false, 'admin-confidential-update-key',
+    '56000000-0000-4000-8000-000000000029'::uuid
+  )$$,
+  'an admin can update a confidential replay target'
+);
+
+select extensions.lives_ok(
+  $$select public.supersede_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000025'::uuid,
+    'Admin confidential replacement', null, 'confidential', 'Admin correction.',
+    'admin-confidential-supersede-key', '56000000-0000-4000-8000-000000000030'::uuid
+  )$$,
+  'an admin can supersede a confidential replay target'
+);
+
+select extensions.lives_ok(
+  $$select public.create_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    'note', 'Shared replay target', null, null, 'internal', true,
+    null, null, 'same-org-shared-key', '56000000-0000-4000-8000-000000000031'::uuid
+  )$$,
+  'an admin can create an allowed same-org replay target'
+);
+
+reset role;
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000002';
+
+select extensions.is(
+  (select (public.create_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000002'::uuid,
+    'note', 'Shared replay target', null, null, 'internal', true,
+    null, null, 'same-org-shared-key', '56000000-0000-4000-8000-000000000032'::uuid
+  )) ->> 'replayed'),
+  'true',
+  'a same-org operator can replay an allowed known key'
+);
+
+reset role;
+update public.organization_memberships
+set role = 'operator'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and user_id = '16000000-0000-4000-8000-000000000001'::uuid;
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.create_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    'note', 'Admin confidential replay target', null, null, 'confidential', true,
+    null, null, 'admin-confidential-create-key', '56000000-0000-4000-8000-000000000033'::uuid
+  )$$,
+  '42501', null,
+  'an operator cannot replay an admin confidential create'
+);
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000022'::uuid,
+    'reclassify', null, 'confidential', null, false, 'admin-confidential-update-key',
+    '56000000-0000-4000-8000-000000000034'::uuid
+  )$$,
+  '42501', null,
+  'an operator cannot replay a confidential update'
+);
+
+select extensions.throws_ok(
+  $$select public.supersede_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000025'::uuid,
+    'Admin confidential replacement', null, 'confidential', 'Admin correction.',
+    'admin-confidential-supersede-key', '56000000-0000-4000-8000-000000000035'::uuid
+  )$$,
+  '42501', null,
+  'an operator cannot replay a confidential supersede'
 );
 
 reset role;

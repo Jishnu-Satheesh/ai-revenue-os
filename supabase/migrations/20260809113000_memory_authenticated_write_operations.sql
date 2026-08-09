@@ -60,6 +60,7 @@ create or replace function public.create_authenticated_memory_item(
 declare
   operation public.memory_write_operations;
   created public.memory_items;
+  replayed_item_id uuid;
   request_fingerprint text := pg_catalog.md5(pg_catalog.jsonb_build_object(
     'operation', 'create', 'memory_type', p_memory_type, 'title', p_title, 'body', p_body,
     'branch_id', p_branch_id, 'sensitivity', p_sensitivity, 'mark_verified', p_mark_verified,
@@ -86,7 +87,19 @@ begin
   select * into operation from public.memory_write_operations stored_operation
   where stored_operation.organization_id = p_organization_id and stored_operation.idempotency_key = p_idempotency_key for update;
   if operation.request_fingerprint <> request_fingerprint then raise exception 'memory write idempotency key was reused with a different request' using errcode = '23505'; end if;
-  if operation.response <> '{}'::jsonb then return operation.response || pg_catalog.jsonb_build_object('replayed', true); end if;
+  if operation.response <> '{}'::jsonb then
+    if not (operation.response ? 'item') or not ((operation.response -> 'item') ? 'id') then
+      raise exception 'memory write replay response is invalid' using errcode = '23505';
+    end if;
+    replayed_item_id := (operation.response -> 'item' ->> 'id')::uuid;
+    select * into created from public.memory_items item
+    where item.organization_id = p_organization_id and item.id = replayed_item_id for update;
+    if not found then raise exception 'memory write replay response is invalid' using errcode = '23505'; end if;
+    if created.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then
+      raise exception 'memory write replay is not authorized' using errcode = '42501';
+    end if;
+    return operation.response || pg_catalog.jsonb_build_object('replayed', true);
+  end if;
   insert into public.memory_items (organization_id, branch_id, memory_type, title, body, origin, sensitivity, verification_state, review_due_at, expires_at, created_by, verified_by, verified_at)
   values (p_organization_id, p_branch_id, p_memory_type, pg_catalog.btrim(p_title), p_body, 'user_verified', p_sensitivity, case when p_mark_verified then 'verified' else 'unverified' end, p_review_due_at, p_expires_at, p_actor_id, case when p_mark_verified then p_actor_id end, case when p_mark_verified then pg_catalog.now() end)
   returning * into created;
@@ -127,9 +140,14 @@ begin
   select * into operation from public.memory_write_operations stored_operation
   where stored_operation.organization_id = p_organization_id and stored_operation.idempotency_key = p_idempotency_key for update;
   if operation.request_fingerprint <> request_fingerprint then raise exception 'memory write idempotency key was reused with a different request' using errcode = '23505'; end if;
-  if operation.response <> '{}'::jsonb then return operation.response || pg_catalog.jsonb_build_object('replayed', true); end if;
   select * into updated from public.memory_items item where item.organization_id = p_organization_id and item.id = p_item_id for update;
   if not found then raise exception 'memory item was not found' using errcode = 'P0002'; end if;
+  if operation.response <> '{}'::jsonb then
+    if updated.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then
+      raise exception 'memory write replay is not authorized' using errcode = '42501';
+    end if;
+    return operation.response || pg_catalog.jsonb_build_object('replayed', true);
+  end if;
   -- Proposal terminal transitions belong exclusively to the Task 10 governed
   -- confirmation/rejection RPCs. SECURITY DEFINER would otherwise bypass the
   -- authenticated-only trigger guard below the table.
@@ -164,11 +182,13 @@ declare
   operation public.memory_write_operations;
   original public.memory_items;
   replacement public.memory_items;
+  replay_replacement public.memory_items;
+  replay_replacement_id uuid;
   request_fingerprint text := pg_catalog.md5(pg_catalog.jsonb_build_object(
     'operation', 'supersede', 'item_id', p_item_id, 'title', p_title, 'body', p_body,
     'sensitivity', p_sensitivity, 'reason', p_supersession_reason
   )::text);
-  legacy_fingerprint text := pg_catalog.encode(pg_catalog.digest(pg_catalog.concat_ws('|', p_item_id::text, p_title, coalesce(p_body, ''), p_sensitivity), 'sha256'), 'hex');
+  legacy_fingerprint text := pg_catalog.encode(extensions.digest(pg_catalog.concat_ws('|', p_item_id::text, p_title, coalesce(p_body, ''), p_sensitivity), 'sha256'), 'hex');
   response_payload jsonb;
 begin
   if p_organization_id is null or p_actor_id is null or p_item_id is null or p_title is null
@@ -182,6 +202,22 @@ begin
   perform pg_catalog.set_config('app.correlation_id', p_correlation_id::text, true);
   insert into public.memory_write_operations (organization_id, idempotency_key, request_fingerprint, response) values (p_organization_id, p_idempotency_key, request_fingerprint, '{}'::jsonb) on conflict (organization_id, idempotency_key) do nothing;
   select * into operation from public.memory_write_operations stored_operation where stored_operation.organization_id = p_organization_id and stored_operation.idempotency_key = p_idempotency_key for update;
+  select * into original from public.memory_items item where item.organization_id = p_organization_id and item.id = p_item_id for update;
+  if not found then raise exception 'memory item was not found' using errcode = 'P0002'; end if;
+  if original.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then
+    if operation.response <> '{}'::jsonb then raise exception 'memory write replay is not authorized' using errcode = '42501'; end if;
+    raise exception 'memory write is not authorized' using errcode = '42501';
+  end if;
+  if operation.response <> '{}'::jsonb then
+    if not (operation.response ? 'replacementId') then raise exception 'memory write replay response is invalid' using errcode = '23505'; end if;
+    replay_replacement_id := (operation.response ->> 'replacementId')::uuid;
+    select * into replay_replacement from public.memory_items item
+    where item.organization_id = p_organization_id and item.id = replay_replacement_id for update;
+    if not found then raise exception 'memory write replay response is invalid' using errcode = '23505'; end if;
+    if replay_replacement.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then
+      raise exception 'memory write replay is not authorized' using errcode = '42501';
+    end if;
+  end if;
   if operation.response ? 'fingerprint' then
     -- Before this migration, supersession persisted a SHA-256 fingerprint in
     -- its response and omitted the reason. Accept only a record whose stored
@@ -199,9 +235,6 @@ begin
   end if;
   if operation.request_fingerprint <> request_fingerprint then raise exception 'memory write idempotency key was reused with a different request' using errcode = '23505'; end if;
   if operation.response <> '{}'::jsonb then return operation.response || pg_catalog.jsonb_build_object('replayed', true); end if;
-  select * into original from public.memory_items item where item.organization_id = p_organization_id and item.id = p_item_id for update;
-  if not found then raise exception 'memory item was not found' using errcode = 'P0002'; end if;
-  if original.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then raise exception 'memory write is not authorized' using errcode = '42501'; end if;
   if original.superseded_by_id is not null then raise exception 'memory item is already superseded' using errcode = '23505'; end if;
   insert into public.memory_items (organization_id, branch_id, memory_type, title, body, structured_value, origin, sensitivity, verification_state, created_by, verified_by, verified_at)
   values (p_organization_id, original.branch_id, original.memory_type, pg_catalog.btrim(p_title), p_body, original.structured_value, 'user_verified', p_sensitivity, 'verified', p_actor_id, p_actor_id, pg_catalog.now()) returning * into replacement;

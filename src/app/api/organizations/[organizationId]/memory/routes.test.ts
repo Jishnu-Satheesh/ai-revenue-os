@@ -428,4 +428,23 @@ describe("Business Memory API routes", () => {
       },
     });
   });
+
+  it("never exposes an RPC failure while rejecting a denied replay", async () => {
+    mocks.service.createItem.mockRejectedValueOnce(
+      new Error("rpc denied replay for confidential record: raw payload"),
+    );
+
+    const response = await createItem(
+      jsonRequest("POST", "/memory/items", validNote),
+      organizationParams(),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "UNEXPECTED_ERROR",
+        message: "Something went wrong. Please try again.",
+      },
+    });
+  });
 });

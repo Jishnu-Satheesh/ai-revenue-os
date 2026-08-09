@@ -141,4 +141,24 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(pgtap).toContain("a matching legacy supersede operation replays safely");
     expect(pgtap).toContain("a mismatched legacy supersede request conflicts");
   });
+
+  it("uses the extension-qualified digest and verifies current access before every replay response", () => {
+    const sql = authenticatedWriteMigration();
+    const pgtap = readFileSync(
+      resolve(databaseTestsDirectory, "business_memory_write_test.sql"),
+      "utf8",
+    );
+
+    expect(sql).toContain("extensions.digest");
+    expect(sql).not.toContain("pg_catalog.digest");
+    expect(sql).toContain("select * into created from public.memory_items");
+    expect(sql).toContain("select * into updated from public.memory_items");
+    expect(sql).toContain("select * into original from public.memory_items");
+    expect(sql).toContain("replay is not authorized");
+    expect(pgtap).toContain("legacy supersede RPC executes with extensions.digest");
+    expect(pgtap).toContain("an operator cannot replay an admin confidential create");
+    expect(pgtap).toContain("a same-org operator can replay an allowed known key");
+    expect(pgtap).toContain("an operator cannot replay a confidential update");
+    expect(pgtap).toContain("an operator cannot replay a confidential supersede");
+  });
 });
