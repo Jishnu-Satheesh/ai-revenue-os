@@ -7,7 +7,7 @@
 - Date: 2026-08-09
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation, Organization + Digital Twin vertical slice, and the Integration Hub V1 runtime.
-- Current active work: Business Memory V1, on branch `feat/business-memory`. Plan tasks 1-7 of 17 are implemented, verified, and committed; tasks 8-17 (Redis cache, cached retrieval, fact promotion, ingestion projector, workers, rebuild cron, API routes, workspace UI, E2E) are not started. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
+- Current active work: Business Memory V1, on branch `feat/business-memory`. Plan tasks 1-7 and 11 of 17 are implemented, verified, and committed; tasks 8-10 and 12-17 (Redis cache, cached retrieval, fact promotion, workers, rebuild cron, API routes, workspace UI, E2E) are not started. The Integration Hub now projects Google Business Profile fixture records into Business Memory and honestly rejects CSV rows pending the Data Ingestion slice. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
 - Current implementation plan: `docs/superpowers/plans/2026-08-09-business-memory-implementation.md`.

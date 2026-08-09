@@ -195,6 +195,10 @@ export function DataSourcesTab({
                 }
               }}
             />
+            <p className="mt-3 text-sm text-muted-foreground">
+              Rows validated. Business Memory V1 stores Google Business Profile records only; CSV
+              storage arrives with Data Ingestion.
+            </p>
           </CardContent>
         </Card>
       ) : null}

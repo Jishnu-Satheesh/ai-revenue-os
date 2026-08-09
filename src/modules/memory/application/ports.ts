@@ -188,6 +188,21 @@ export type MemorySnapshotCounts = {
   total: number;
 };
 
+export type GoogleBusinessProfileProjectionWrite = {
+  organizationId: string;
+  ingestionRunId: string;
+  sourceConnectionId: string;
+  sourceSystem: "google_business_profile";
+  sourceRecordId: string;
+  branchId?: string;
+  title: string;
+  body: string | null;
+  structuredValue: Record<string, unknown> | null;
+  sensitivity: "internal" | "customer_content";
+  observedAt: string;
+  locationFactValues: Record<string, unknown>;
+};
+
 /**
  * Every method takes an authenticated `organizationId` and scopes by it. The
  * persistence implementation additionally runs under the caller's RLS context,
@@ -201,6 +216,7 @@ export type MemoryPersistencePort = {
     branchId?: string;
     limit: number;
   }): Promise<BusinessFactRow[]>;
+  projectGoogleBusinessProfileRecord(input: GoogleBusinessProfileProjectionWrite): Promise<void>;
   hydrateByIds(input: {
     organizationId: string;
     ids: readonly string[];

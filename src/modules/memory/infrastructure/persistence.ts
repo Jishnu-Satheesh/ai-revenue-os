@@ -199,6 +199,24 @@ export function createSupabaseMemoryPersistence(
       );
     },
 
+    async projectGoogleBusinessProfileRecord(input) {
+      const result = await client.rpc("project_google_business_profile_record", {
+        p_organization_id: input.organizationId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_source_connection_id: input.sourceConnectionId,
+        p_source_system: input.sourceSystem,
+        p_source_record_id: input.sourceRecordId,
+        p_branch_id: input.branchId ?? null,
+        p_title: input.title,
+        p_body: input.body,
+        p_structured_value: input.structuredValue,
+        p_sensitivity: input.sensitivity,
+        p_observed_at: input.observedAt,
+        p_location_fact_values: input.locationFactValues,
+      });
+      if (result.error) databaseError("The provider record could not be projected.", result.error);
+    },
+
     async hydrateByIds({ organizationId, ids, sensitivities, includeSuperseded, includeExpired }) {
       if (ids.length === 0) return [];
       const now = new Date().toISOString();

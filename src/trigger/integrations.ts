@@ -7,11 +7,13 @@ import {
   createSupabaseIntegrationRunTransitionPort,
 } from "@/modules/integrations/infrastructure/repository";
 import {
-  createAcknowledgingDataIngestionPort,
   createDurableIngestionSink,
   createValidatedIngestionSink,
 } from "@/modules/integrations/infrastructure/ingestion-sink";
 import type { DurableIngestionHandoffLedger } from "@/modules/integrations/infrastructure/ingestion-sink";
+import { createMemoryProjectionPort } from "@/modules/memory/infrastructure/memory-projection-port";
+import { createSupabaseMemoryPersistence } from "@/modules/memory/infrastructure/persistence";
+import { createMemoryRepository } from "@/modules/memory/infrastructure/repository";
 import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
 import { createGoogleBusinessProfileFixtureAdapter } from "@/modules/integrations/providers/google-business-profile/fixture-adapter";
 import { assertIntegrationHubEnabled } from "@/modules/integrations/application/feature-access";
@@ -106,8 +108,9 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
     [googleBusinessProfileDefinition],
     [createGoogleBusinessProfileFixtureAdapter()],
   );
+  const memoryRepository = createMemoryRepository(createSupabaseMemoryPersistence(supabase));
   const validatedSink = createValidatedIngestionSink({
-    handoff: createAcknowledgingDataIngestionPort(),
+    handoff: createMemoryProjectionPort({ store: memoryRepository }),
     sourceResolver: {
       async resolve({ organizationId, ingestionRunId }) {
         const run = await repository.findRun({ organizationId, ingestionRunId });

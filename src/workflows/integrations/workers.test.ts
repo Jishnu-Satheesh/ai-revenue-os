@@ -378,6 +378,35 @@ describe("Integration Hub workers", () => {
     );
   });
 
+  it("invalidates memory once only after a successful sync is terminal, swallowing cache failure", async () => {
+    const sequence: string[] = [];
+    const worker = workerRepository();
+    vi.mocked(worker.completeRun).mockImplementationOnce(async (input) => {
+      sequence.push("complete");
+      return runRow({ status: input.status, completed_at: input.completedAt });
+    });
+    const deps = {
+      ...dependencies({ worker }),
+      memoryCache: {
+        invalidateOrganization: async () => {
+          sequence.push("invalidate");
+          throw new Error("cache unavailable");
+        },
+      },
+      logger: { warn: vi.fn() },
+    };
+
+    await expect(
+      runSyncConnection({ ...connectionPayload, taskName: "integration.sync-connection" }, deps),
+    ).resolves.toBeUndefined();
+
+    expect(sequence).toEqual(["complete", "invalidate"]);
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      "memory.cache_invalidation_failed",
+      expect.objectContaining({ organizationId: ids.organizationId, runId: ids.ingestionRunId }),
+    );
+  });
+
   it("does not send a second handoff when an idempotent retry sees a terminal run", async () => {
     const worker = workerRepository();
     vi.mocked(worker.markRunRunning)

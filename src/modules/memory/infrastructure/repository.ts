@@ -6,6 +6,7 @@ import type {
   MemoryItemStateUpdate,
   MemoryLinkRow,
   MemoryPersistencePort,
+  GoogleBusinessProfileProjectionWrite,
   MemoryRetrievalLogInsert,
   MemorySearchParameters,
   MemorySearchRow,
@@ -35,6 +36,7 @@ export type MemoryRepository = {
     branchId?: string;
     limit: number;
   }): Promise<Awaited<ReturnType<MemoryPersistencePort["searchFacts"]>>>;
+  projectGoogleBusinessProfileRecord(input: GoogleBusinessProfileProjectionWrite): Promise<void>;
   hydrateByIds(input: {
     organizationId: string;
     ids: readonly string[];
@@ -97,6 +99,11 @@ export function createMemoryRepository(persistence: MemoryPersistencePort): Memo
     async searchFacts(input) {
       requireOrganizationId(input.organizationId);
       return persistence.searchFacts({ ...input, limit: cap(input.limit, MAX_RETRIEVAL_LIMIT) });
+    },
+
+    async projectGoogleBusinessProfileRecord(input) {
+      requireOrganizationId(input.organizationId);
+      return persistence.projectGoogleBusinessProfileRecord(input);
     },
 
     async hydrateByIds(input) {

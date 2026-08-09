@@ -76,6 +76,12 @@ export type IntegrationWorkerDependencies = {
   credentialCleanup?: {
     revoke(input: { organizationId: string; connectionId: string }): Promise<void>;
   };
+  memoryCache?: {
+    invalidateOrganization(organizationId: string): Promise<void>;
+  } | null;
+  logger?: {
+    warn(message: string, context?: { organizationId?: string; runId?: string }): void;
+  };
 };
 
 export type WorkerBeginResult =

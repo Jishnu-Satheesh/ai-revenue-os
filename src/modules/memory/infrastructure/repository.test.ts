@@ -178,6 +178,44 @@ describe("createMemoryRepository", () => {
 });
 
 describe("createSupabaseMemoryPersistence", () => {
+  it("projects a validated provider record through the scoped atomic RPC", async () => {
+    vi.resetModules();
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const client = { from: vi.fn(), rpc };
+    const { createSupabaseMemoryPersistence } = await import(
+      "@/modules/memory/infrastructure/persistence"
+    );
+
+    await createSupabaseMemoryPersistence(client as never).projectGoogleBusinessProfileRecord({
+      organizationId: "org-1",
+      ingestionRunId: "run-1",
+      sourceConnectionId: "connection-1",
+      sourceSystem: "google_business_profile",
+      sourceRecordId: "locations/opaque",
+      title: "Google Business Profile location record",
+      body: null,
+      structuredValue: null,
+      sensitivity: "internal",
+      observedAt: "2026-08-09T00:00:00.000Z",
+      locationFactValues: { "google_business_profile.location.hours": "09:00-17:00" },
+    });
+
+    expect(rpc).toHaveBeenCalledWith("project_google_business_profile_record", {
+      p_organization_id: "org-1",
+      p_ingestion_run_id: "run-1",
+      p_source_connection_id: "connection-1",
+      p_source_system: "google_business_profile",
+      p_source_record_id: "locations/opaque",
+      p_branch_id: null,
+      p_location_fact_values: { "google_business_profile.location.hours": "09:00-17:00" },
+      p_body: null,
+      p_structured_value: null,
+      p_sensitivity: "internal",
+      p_observed_at: "2026-08-09T00:00:00.000Z",
+      p_title: "Google Business Profile location record",
+    });
+  });
+
   it("never selects the embedding or the search vector", async () => {
     vi.resetModules();
     const selected: string[] = [];

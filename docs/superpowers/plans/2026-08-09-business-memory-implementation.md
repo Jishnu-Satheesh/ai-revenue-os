@@ -573,7 +573,7 @@ export type MemoryWorkerDependencies = {
 - Produces: `createMemoryProjectionPort(deps): DataIngestionPort`
 - Removes: `createAcknowledgingDataIngestionPort`
 
-- [ ] **Step 1: Write failing projector tests.**
+- [x] **Step 1: Write failing projector tests.**
 
   ```ts
   const result = await port.ingest({ ...run, records: [locationRecord, reviewRecord, csvRow] });
@@ -583,19 +583,19 @@ export type MemoryWorkerDependencies = {
 
   Assert that a location record whose hours differ from the current fact creates exactly one `fact_proposal`; that an identical re-sync creates none and duplicates nothing; that a review record lands at `customer_content` with `observed_at` set and no reviewer name anywhere in the row; and that the projector never writes `business_facts`.
 
-- [ ] **Step 2: Run the tests and confirm they fail.**
+- [x] **Step 2: Run the tests and confirm they fail.**
 
-- [ ] **Step 3: Implement routing** for the two Google record types, the tracked-field list from spec section 10.4, reviewer-name stripping, and idempotency on `(organization_id, source_system, source_record_id)`.
+- [x] **Step 3: Implement routing** for the two Google record types, the tracked-field list from spec section 10.4, reviewer-name stripping, and idempotency on `(organization_id, source_system, source_record_id)`.
 
-- [ ] **Step 4: Delete `createAcknowledgingDataIngestionPort` and its test coverage,** then wire `createMemoryProjectionPort` into `src/trigger/integrations.ts`. Deleting the stub is part of the definition of done; bypassing it is not sufficient.
+- [x] **Step 4: Delete `createAcknowledgingDataIngestionPort` and its test coverage,** then wire `createMemoryProjectionPort` into `src/trigger/integrations.ts`. Deleting the stub is part of the definition of done; bypassing it is not sufficient.
 
-- [ ] **Step 5: Update the Data sources tab copy** to state plainly that rows were validated and that Business Memory V1 stores Google Business Profile records only. Do not restore a silent success path.
+- [x] **Step 5: Update the Data sources tab copy** to state plainly that rows were validated and that Business Memory V1 stores Google Business Profile records only. Do not restore a silent success path.
 
-- [ ] **Step 6: Invalidate the organization once per ingestion run,** after the run reaches a terminal state, not once per record. A sync that writes 500 items must bump the version once.
+- [x] **Step 6: Invalidate the organization once per ingestion run,** after the run reaches a terminal state, not once per record. A sync that writes 500 items must bump the version once.
 
-- [ ] **Step 7: Run `pnpm vitest run src/modules/memory src/modules/integrations src/trigger && pnpm typecheck && pnpm lint`.**
+- [x] **Step 7: Run `pnpm vitest run src/modules/memory src/modules/integrations src/trigger && pnpm typecheck && pnpm lint`.**
 
-- [ ] **Step 8: Commit with `git commit -m "feat(memory): land integration records in business memory"`.**
+- [x] **Step 8: Commit with `git commit -m "feat(memory): land integration records in business memory"`.**
 
 ### Task 12: Embedding and expiry workers
 
@@ -835,7 +835,7 @@ These are environment gates, not implementation work. They inherit the two open 
 ## Implementation status (2026-08-09)
 
 Tasks 1 through 7 are implemented, verified, and committed on `feat/business-memory`.
-Tasks 8 through 17 are not started.
+Tasks 8 through 10 and 12 through 17 are not started. Task 11 is implemented, reviewed, and committed.
 
 Environment notes for whoever continues:
 
