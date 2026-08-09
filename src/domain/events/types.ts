@@ -89,3 +89,55 @@ export type IntegrationDomainEvent<TName extends IntegrationEventName> = DomainE
 > & {
   eventName: TName;
 };
+
+export const memoryEventNames = [
+  "memory.item_created",
+  "memory.item_verified",
+  "memory.item_rejected",
+  "memory.item_superseded",
+  "memory.proposal_created",
+  "memory.proposal_confirmed",
+  "memory.fact_promoted",
+  "memory.embedding_failed",
+] as const;
+
+export type MemoryEventName = (typeof memoryEventNames)[number];
+
+/**
+ * Memory event payloads carry identifiers, classifications, and counts only.
+ * Titles, bodies, structured values, and query text are excluded: an event
+ * stream is a poor place to leak the content the sensitivity rules exist to
+ * protect.
+ */
+type SafeMemoryEventPayload = {
+  itemId: string;
+  memoryType: string;
+  origin: string;
+  verificationState: "proposed" | "unverified" | "verified" | "rejected";
+  sensitivity: "public" | "internal" | "confidential" | "customer_content";
+};
+
+export type MemoryEventPayloads = {
+  "memory.item_created": SafeMemoryEventPayload;
+  "memory.item_verified": SafeMemoryEventPayload;
+  "memory.item_rejected": SafeMemoryEventPayload & { reasonProvided: boolean };
+  "memory.item_superseded": SafeMemoryEventPayload & { replacementId: string };
+  "memory.proposal_created": SafeMemoryEventPayload & { evidenceCount: number };
+  "memory.proposal_confirmed": SafeMemoryEventPayload;
+  "memory.fact_promoted": {
+    itemId: string;
+    factKey: string;
+    branchScoped: boolean;
+    overrodeVerified: boolean;
+  };
+  "memory.embedding_failed": {
+    itemId: string;
+    attempts: number;
+  };
+};
+
+export type MemoryDomainEvent<TName extends MemoryEventName> = DomainEvent<
+  MemoryEventPayloads[TName]
+> & {
+  eventName: TName;
+};
