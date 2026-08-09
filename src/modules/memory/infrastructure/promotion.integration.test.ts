@@ -198,8 +198,69 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(updateFunction).toContain(
       "return operation.response || pg_catalog.jsonb_build_object('replayed', true)",
     );
+    expect(pgtap).toContain("an operator cannot replay an update with an absent stored item");
+    expect(pgtap).toContain("an operator cannot replay an update with a null stored item");
+    expect(pgtap).toContain("an operator cannot replay an update with a non-object stored item");
+    expect(pgtap).toContain("an operator cannot replay an update with a mismatched stored item ID");
     expect(pgtap).toContain(
-      "an operator cannot replay an update with malformed stored response metadata",
+      "an operator cannot replay an update with a mismatched stored organization ID",
+    );
+    expect(pgtap).toContain(
+      "an operator cannot replay an update with an unknown stored sensitivity",
+    );
+  });
+
+  it("allows only the invocation that claims an empty operation to mutate", () => {
+    const sql = authenticatedWriteMigration();
+    const createFunction = sql.slice(
+      sql.indexOf("create or replace function public.create_authenticated_memory_item"),
+      sql.indexOf("create or replace function public.update_authenticated_memory_item"),
+    );
+    const updateFunction = sql.slice(
+      sql.indexOf("create or replace function public.update_authenticated_memory_item"),
+      sql.indexOf("-- The previous eight-argument function remains"),
+    );
+    const supersedeFunction = sql.slice(
+      sql.indexOf("create or replace function public.supersede_memory_item"),
+      sql.indexOf("revoke all on function public.create_authenticated_memory_item"),
+    );
+    const pgtap = readFileSync(
+      resolve(databaseTestsDirectory, "business_memory_write_test.sql"),
+      "utf8",
+    );
+
+    for (const operationFunction of [createFunction, updateFunction, supersedeFunction]) {
+      expect(operationFunction).toContain("claimed_operation boolean := false");
+      expect(operationFunction).toContain("returning true into claimed_operation");
+      expect(operationFunction).toContain(
+        "if operation.response = '{}'::jsonb and not coalesce(claimed_operation, false) then",
+      );
+    }
+    expect(
+      createFunction.indexOf(
+        "if operation.response = '{}'::jsonb and not coalesce(claimed_operation, false) then",
+      ),
+    ).toBeLessThan(createFunction.indexOf("insert into public.memory_items (organization_id"));
+    expect(
+      updateFunction.indexOf(
+        "if operation.response = '{}'::jsonb and not coalesce(claimed_operation, false) then",
+      ),
+    ).toBeLessThan(updateFunction.indexOf("update public.memory_items set"));
+    expect(
+      supersedeFunction.indexOf(
+        "if operation.response = '{}'::jsonb and not coalesce(claimed_operation, false) then",
+      ),
+    ).toBeLessThan(supersedeFunction.indexOf("insert into public.memory_items (organization_id"));
+    expect(updateFunction).toContain("memory write operation is incomplete");
+    expect(updateFunction).toContain(
+      "return operation.response || pg_catalog.jsonb_build_object('replayed', true)",
+    );
+    expect(pgtap).toContain("a matching pre-existing empty update operation fails closed");
+    expect(pgtap).toContain(
+      "a valid update replay returns its exact stored response plus replay metadata",
+    );
+    expect(pgtap).toContain(
+      "a valid update replay does not emit a duplicate verification audit action",
     );
   });
 });

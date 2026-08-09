@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(59);
+select extensions.plan(69);
 
 insert into auth.users (id)
 values
@@ -674,6 +674,10 @@ values (
   '46000000-0000-4000-8000-000000000027'::uuid,
   '26000000-0000-4000-8000-000000000001'::uuid,
   'note', 'Malformed replay response target', 'user_verified', 'unverified', 'internal'
+), (
+  '46000000-0000-4000-8000-000000000028'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'note', 'Incomplete operation target', 'user_verified', 'unverified', 'internal'
 );
 insert into public.memory_write_operations (
   organization_id, idempotency_key, request_fingerprint, response
@@ -691,6 +695,20 @@ values (
     'replacementId', '46000000-0000-4000-8000-000000000024',
     'supersededId', '46000000-0000-4000-8000-000000000023'
   )
+);
+
+insert into public.memory_write_operations (
+  organization_id, idempotency_key, request_fingerprint, response
+)
+values (
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'preexisting-empty-update-key',
+  pg_catalog.md5(pg_catalog.jsonb_build_object(
+    'operation', 'update', 'item_id', '46000000-0000-4000-8000-000000000028'::uuid,
+    'action', 'verify', 'reason', null, 'sensitivity', null,
+    'review_due_at', null, 'set_review_due_at', false
+  )::text),
+  '{}'::jsonb
 );
 
 set local role authenticated;
@@ -950,6 +968,46 @@ select extensions.throws_ok(
 
 reset role;
 
+-- A pre-existing empty operation was not claimed by this invocation. It must
+-- fail closed rather than be mistaken for a newly claimed write.
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000028'::uuid,
+    'verify', null, null, null, false, 'preexisting-empty-update-key',
+    '56000000-0000-4000-8000-000000000038'::uuid
+  )$$,
+  '23505', null,
+  'a matching pre-existing empty update operation fails closed'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select verification_state
+    from public.memory_items
+    where id = '46000000-0000-4000-8000-000000000028'::uuid
+  ),
+  'unverified',
+  'an incomplete operation leaves its update target unchanged'
+);
+
+select extensions.is(
+  (
+    select count(*)
+    from public.audit_events
+    where entity_id = '46000000-0000-4000-8000-000000000028'::uuid
+      and event_name = 'memory.item_verified'
+  ),
+  0::bigint,
+  'an incomplete operation does not emit an update audit action'
+);
+
 -- A replay response is untrusted operation data: it must name exactly the
 -- requested tenant/item and a supported sensitivity before any payload returns.
 update public.organization_memberships
@@ -970,14 +1028,42 @@ select extensions.lives_ok(
   'an admin can save a valid internal update replay response'
 );
 
+select extensions.is(
+  (
+    select (
+      public.update_authenticated_memory_item(
+        '26000000-0000-4000-8000-000000000001'::uuid,
+        '16000000-0000-4000-8000-000000000001'::uuid,
+        '46000000-0000-4000-8000-000000000027'::uuid,
+        'verify', null, null, null, false, 'malformed-update-replay-key',
+        '56000000-0000-4000-8000-000000000039'::uuid
+      ) - 'replayed'
+    ) = (
+      select response
+      from public.memory_write_operations
+      where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+        and idempotency_key = 'malformed-update-replay-key'
+    )
+  ),
+  true,
+  'a valid update replay returns its exact stored response plus replay metadata'
+);
+
+select extensions.is(
+  (
+    select count(*)
+    from public.audit_events
+    where entity_id = '46000000-0000-4000-8000-000000000027'::uuid
+      and event_name = 'memory.item_verified'
+  ),
+  1::bigint,
+  'a valid update replay does not emit a duplicate verification audit action'
+);
+
 reset role;
 update public.memory_write_operations
 set response = pg_catalog.jsonb_build_object(
-  'item', pg_catalog.jsonb_build_object(
-    'id', '46000000-0000-4000-8000-000000000026',
-    'organization_id', '26000000-0000-4000-8000-000000000001',
-    'sensitivity', 'unknown'
-  )
+  'unexpected', true
 )
 where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
   and idempotency_key = 'malformed-update-replay-key';
@@ -994,10 +1080,128 @@ select extensions.throws_ok(
     '16000000-0000-4000-8000-000000000001'::uuid,
     '46000000-0000-4000-8000-000000000027'::uuid,
     'verify', null, null, null, false, 'malformed-update-replay-key',
-    '56000000-0000-4000-8000-000000000039'::uuid
+    '56000000-0000-4000-8000-000000000040'::uuid
   )$$,
   '23505', null,
-  'an operator cannot replay an update with malformed stored response metadata'
+  'an operator cannot replay an update with an absent stored item'
+);
+
+reset role;
+update public.memory_write_operations
+set response = pg_catalog.jsonb_build_object('item', 'null'::jsonb)
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and idempotency_key = 'malformed-update-replay-key';
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000027'::uuid,
+    'verify', null, null, null, false, 'malformed-update-replay-key',
+    '56000000-0000-4000-8000-000000000041'::uuid
+  )$$,
+  '23505', null,
+  'an operator cannot replay an update with a null stored item'
+);
+
+reset role;
+update public.memory_write_operations
+set response = pg_catalog.jsonb_build_object('item', pg_catalog.jsonb_build_array())
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and idempotency_key = 'malformed-update-replay-key';
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000027'::uuid,
+    'verify', null, null, null, false, 'malformed-update-replay-key',
+    '56000000-0000-4000-8000-000000000042'::uuid
+  )$$,
+  '23505', null,
+  'an operator cannot replay an update with a non-object stored item'
+);
+
+reset role;
+update public.memory_write_operations
+set response = pg_catalog.jsonb_build_object(
+  'item', pg_catalog.jsonb_build_object(
+    'id', '46000000-0000-4000-8000-000000000026',
+    'organization_id', '26000000-0000-4000-8000-000000000001',
+    'sensitivity', 'internal'
+  )
+)
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and idempotency_key = 'malformed-update-replay-key';
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000027'::uuid,
+    'verify', null, null, null, false, 'malformed-update-replay-key',
+    '56000000-0000-4000-8000-000000000043'::uuid
+  )$$,
+  '23505', null,
+  'an operator cannot replay an update with a mismatched stored item ID'
+);
+
+reset role;
+update public.memory_write_operations
+set response = pg_catalog.jsonb_build_object(
+  'item', pg_catalog.jsonb_build_object(
+    'id', '46000000-0000-4000-8000-000000000027',
+    'organization_id', '26000000-0000-4000-8000-000000000002',
+    'sensitivity', 'internal'
+  )
+)
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and idempotency_key = 'malformed-update-replay-key';
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000027'::uuid,
+    'verify', null, null, null, false, 'malformed-update-replay-key',
+    '56000000-0000-4000-8000-000000000044'::uuid
+  )$$,
+  '23505', null,
+  'an operator cannot replay an update with a mismatched stored organization ID'
+);
+
+reset role;
+update public.memory_write_operations
+set response = pg_catalog.jsonb_build_object(
+  'item', pg_catalog.jsonb_build_object(
+    'id', '46000000-0000-4000-8000-000000000027',
+    'organization_id', '26000000-0000-4000-8000-000000000001',
+    'sensitivity', 'unknown'
+  )
+)
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and idempotency_key = 'malformed-update-replay-key';
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000027'::uuid,
+    'verify', null, null, null, false, 'malformed-update-replay-key',
+    '56000000-0000-4000-8000-000000000045'::uuid
+  )$$,
+  '23505', null,
+  'an operator cannot replay an update with an unknown stored sensitivity'
 );
 
 reset role;
