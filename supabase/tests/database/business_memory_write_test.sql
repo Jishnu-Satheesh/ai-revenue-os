@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(39);
+select extensions.plan(47);
 
 insert into auth.users (id)
 values
@@ -631,6 +631,143 @@ select extensions.throws_ok(
     values ('26000000-0000-4000-8000-000000000001'::uuid, 'note', 'Bypass attempt', 'user_verified', 'internal', 'verified', '16000000-0000-4000-8000-000000000001'::uuid)$$,
   '42501', null,
   'direct REST cannot create a governed memory item'
+);
+
+reset role;
+
+-- The generic authenticated PATCH RPC is intentionally not a proposal review
+-- path: only the Task 10 confirmation/rejection RPCs may transition proposals.
+insert into public.memory_items (
+  id, organization_id, memory_type, title, origin, verification_state, sensitivity,
+  proposed_fact_key, proposed_fact_value
+)
+values (
+  '46000000-0000-4000-8000-000000000021'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'fact_proposal', 'Generic patch target', 'provider_imported', 'proposed', 'internal',
+  'generic.patch.regression', '"never promoted"'::jsonb
+);
+insert into public.memory_items (
+  id, organization_id, memory_type, title, origin, verification_state, sensitivity
+)
+values (
+  '46000000-0000-4000-8000-000000000022'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'note', 'Confidential UUID target', 'provider_imported', 'unverified', 'confidential'
+), (
+  '46000000-0000-4000-8000-000000000023'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'note', 'Legacy supersede original', 'user_verified', 'unverified', 'internal'
+);
+insert into public.memory_write_operations (
+  organization_id, idempotency_key, request_fingerprint, response
+)
+values (
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'legacy-supersede-key',
+  pg_catalog.encode(pg_catalog.digest(pg_catalog.concat_ws(
+    '|', '46000000-0000-4000-8000-000000000023', 'Legacy correction', 'Legacy body', 'internal'
+  ), 'sha256'), 'hex'),
+  pg_catalog.jsonb_build_object(
+    'fingerprint', pg_catalog.encode(pg_catalog.digest(pg_catalog.concat_ws(
+      '|', '46000000-0000-4000-8000-000000000023', 'Legacy correction', 'Legacy body', 'internal'
+    ), 'sha256'), 'hex'),
+    'replacementId', '46000000-0000-4000-8000-000000000024',
+    'supersededId', '46000000-0000-4000-8000-000000000023'
+  )
+);
+
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000021'::uuid,
+    'verify', null, null, null, false, 'generic-proposal-verify-key',
+    '56000000-0000-4000-8000-000000000021'::uuid
+  )$$,
+  '23505', null,
+  'generic PATCH cannot verify a fact proposal'
+);
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000021'::uuid,
+    'reject', 'Not through generic PATCH.', null, null, false, 'generic-proposal-reject-key',
+    '56000000-0000-4000-8000-000000000022'::uuid
+  )$$,
+  '23505', null,
+  'generic PATCH cannot reject a fact proposal'
+);
+
+select extensions.is(
+  (select count(*) from public.business_facts where organization_id = '26000000-0000-4000-8000-000000000001'::uuid and fact_key = 'generic.patch.regression'),
+  0::bigint,
+  'generic proposal PATCH leaves business facts unchanged'
+);
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000022'::uuid,
+    'verify', null, 'internal', null, false, 'confidential-update-key',
+    '56000000-0000-4000-8000-000000000023'::uuid
+  )$$,
+  '42501', null,
+  'an operator cannot update a confidential item by UUID'
+);
+
+select extensions.throws_ok(
+  $$select public.supersede_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000022'::uuid,
+    'Unauthorized replacement', null, 'internal', 'Not authorized.', 'confidential-supersede-key',
+    '56000000-0000-4000-8000-000000000024'::uuid
+  )$$,
+  '42501', null,
+  'an operator cannot supersede a confidential item by UUID'
+);
+
+select extensions.is(
+  (select (public.supersede_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000023'::uuid,
+    'Legacy correction', 'Legacy body', 'internal', 'Legacy reason.', 'legacy-supersede-key',
+    '56000000-0000-4000-8000-000000000025'::uuid
+  )) ->> 'replayed'),
+  'true',
+  'a matching legacy supersede operation replays safely'
+);
+
+select extensions.is(
+  (select public.supersede_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000023'::uuid,
+    'Legacy correction', 'Legacy body', 'internal', 'Legacy reason.', 'legacy-supersede-key',
+    '56000000-0000-4000-8000-000000000026'::uuid
+  ) ? 'fingerprint'),
+  false,
+  'legacy supersede replay does not expose its stored fingerprint'
+);
+
+select extensions.throws_ok(
+  $$select public.supersede_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000023'::uuid,
+    'Mismatched correction', 'Legacy body', 'internal', 'Legacy reason.', 'legacy-supersede-key',
+    '56000000-0000-4000-8000-000000000027'::uuid
+  )$$,
+  '23505', null,
+  'a mismatched legacy supersede request conflicts'
 );
 
 reset role;

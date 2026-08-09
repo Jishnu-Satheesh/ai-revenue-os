@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import type { EventPublisher } from "@/domain/events/types";
+import { memoryError } from "@/domain/memory/errors";
 import type { MemoryItemRow } from "@/modules/memory/application/ports";
 import { createMemoryService } from "@/modules/memory/application/service";
 import type { MemoryRepository } from "@/modules/memory/infrastructure/repository";
@@ -891,6 +892,43 @@ describe("createMemoryService", () => {
         correlationId: "44444444-4444-4444-8444-444444444444",
       }),
     ).resolves.toEqual({ replacementId: "replacement-id", supersededId: "superseded-id" });
+    expect(published).toEqual([]);
+  });
+
+  it("does not publish an event when the governed operation denies a sensitive row by UUID", async () => {
+    const { published, service } = createService(
+      {},
+      {
+        updateItem: async () => {
+          throw memoryError("AUTHORIZATION_ERROR");
+        },
+        supersede: async () => {
+          throw memoryError("AUTHORIZATION_ERROR");
+        },
+      },
+    );
+
+    await expect(
+      service.updateItem({
+        organizationId: ORGANIZATION_ID,
+        actor: operator,
+        itemId: itemRow().id,
+        body: { action: "verify", idempotencyKey: "sensitive-update-key" },
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
+    await expect(
+      service.supersedeItem({
+        organizationId: ORGANIZATION_ID,
+        actor: operator,
+        itemId: itemRow().id,
+        body: {
+          title: "No access",
+          sensitivity: "internal",
+          reason: "Cannot inspect this item.",
+          idempotencyKey: "sensitive-supersede-key",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
     expect(published).toEqual([]);
   });
 

@@ -408,4 +408,24 @@ describe("Business Memory API routes", () => {
       expect(call).toHaveBeenCalledWith(expect.objectContaining({ correlationId }));
     }
   });
+
+  it("returns a safe conflict when the governed PATCH rejects a fact proposal", async () => {
+    mocks.service.updateItem.mockRejectedValueOnce(
+      new MemoryError("CONFLICT", "internal fact proposal transition detail"),
+    );
+
+    const response = await updateItem(
+      jsonRequest("PATCH", `/memory/items/${itemId}`, validUpdate),
+      itemParams(),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "CONFLICT",
+        message: "This item changed while you were working on it. Reload and try again.",
+        retryable: false,
+      },
+    });
+  });
 });

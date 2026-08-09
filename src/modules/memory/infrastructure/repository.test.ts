@@ -260,10 +260,12 @@ describe("createMemoryRepository", () => {
 describe("createSupabaseMemoryPersistence", () => {
   it("calls the authenticated promotion RPC with only scoped identifiers and flags", async () => {
     vi.resetModules();
-    const rpc = vi.fn(async () => ({
-      data: { itemId: "proposal-1", factId: "fact-1", promoted: true, replayed: false },
-      error: null,
-    }));
+    const rpc = vi.fn(
+      async (): Promise<{ data: unknown; error: null }> => ({
+        data: { itemId: "proposal-1", factId: "fact-1", promoted: true, replayed: false },
+        error: null,
+      }),
+    );
     const { createSupabaseMemoryPromotionTransactionPort } = await import(
       "@/modules/memory/infrastructure/persistence"
     );
@@ -333,6 +335,32 @@ describe("createSupabaseMemoryPersistence", () => {
       p_supersession_reason: "The source was corrected.",
       p_idempotency_key: "supersede-key-1",
       p_correlation_id: "correlation-3",
+    });
+
+    rpc.mockResolvedValueOnce({
+      data: {
+        replacementId: "legacy-replacement",
+        supersededId: "legacy-superseded",
+        fingerprint: "must-not-leak",
+        replayed: true,
+      },
+      error: null,
+    });
+    await expect(
+      transactions.supersede({
+        organizationId: "org-1",
+        actorId: "actor-1",
+        itemId: "proposal-1",
+        title: "Corrected note",
+        sensitivity: "internal",
+        reason: "The source was corrected.",
+        idempotencyKey: "legacy-supersede-key",
+        correlationId: "correlation-legacy",
+      }),
+    ).resolves.toEqual({
+      replacementId: "legacy-replacement",
+      supersededId: "legacy-superseded",
+      replayed: true,
     });
 
     await transactions.createItem({

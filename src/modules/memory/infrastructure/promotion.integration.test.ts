@@ -111,4 +111,34 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(pgtap).toContain("a reused authenticated memory write key conflicts");
     expect(pgtap).toContain("direct REST cannot create a governed memory item");
   });
+
+  it("keeps fact proposals and existing sensitive rows behind their dedicated governance paths", () => {
+    const sql = authenticatedWriteMigration();
+    const pgtap = readFileSync(
+      resolve(databaseTestsDirectory, "business_memory_write_test.sql"),
+      "utf8",
+    );
+
+    expect(sql).toContain("updated.memory_type = 'fact_proposal'");
+    expect(sql).toContain("original.sensitivity in ('confidential', 'customer_content')");
+    expect(sql).toContain("updated.sensitivity in ('confidential', 'customer_content')");
+    expect(pgtap).toContain("generic PATCH cannot verify a fact proposal");
+    expect(pgtap).toContain("generic PATCH cannot reject a fact proposal");
+    expect(pgtap).toContain("an operator cannot update a confidential item by UUID");
+    expect(pgtap).toContain("an operator cannot supersede a confidential item by UUID");
+  });
+
+  it("replays legacy supersede operations without exposing their stored fingerprint", () => {
+    const sql = authenticatedWriteMigration();
+    const pgtap = readFileSync(
+      resolve(databaseTestsDirectory, "business_memory_write_test.sql"),
+      "utf8",
+    );
+
+    expect(sql).toContain("legacy_fingerprint");
+    expect(sql).toContain("operation.response ? 'fingerprint'");
+    expect(sql).toContain("pg_catalog.jsonb_build_object('replacementId'");
+    expect(pgtap).toContain("a matching legacy supersede operation replays safely");
+    expect(pgtap).toContain("a mismatched legacy supersede request conflicts");
+  });
 });

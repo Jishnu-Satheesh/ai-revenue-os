@@ -130,7 +130,12 @@ begin
   if operation.response <> '{}'::jsonb then return operation.response || pg_catalog.jsonb_build_object('replayed', true); end if;
   select * into updated from public.memory_items item where item.organization_id = p_organization_id and item.id = p_item_id for update;
   if not found then raise exception 'memory item was not found' using errcode = 'P0002'; end if;
+  -- Proposal terminal transitions belong exclusively to the Task 10 governed
+  -- confirmation/rejection RPCs. SECURITY DEFINER would otherwise bypass the
+  -- authenticated-only trigger guard below the table.
+  if updated.memory_type = 'fact_proposal' then raise exception 'fact proposals require their governed operation' using errcode = '23505'; end if;
   if updated.superseded_by_id is not null then raise exception 'memory item is superseded' using errcode = '23505'; end if;
+  if updated.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then raise exception 'memory write is not authorized' using errcode = '42501'; end if;
   if p_sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then raise exception 'memory write is not authorized' using errcode = '42501'; end if;
   update public.memory_items set
     verification_state = case when p_action = 'verify' then 'verified' when p_action = 'reject' then 'rejected' else verification_state end,
@@ -163,6 +168,7 @@ declare
     'operation', 'supersede', 'item_id', p_item_id, 'title', p_title, 'body', p_body,
     'sensitivity', p_sensitivity, 'reason', p_supersession_reason
   )::text);
+  legacy_fingerprint text := pg_catalog.encode(pg_catalog.digest(pg_catalog.concat_ws('|', p_item_id::text, p_title, coalesce(p_body, ''), p_sensitivity), 'sha256'), 'hex');
   response_payload jsonb;
 begin
   if p_organization_id is null or p_actor_id is null or p_item_id is null or p_title is null
@@ -176,10 +182,26 @@ begin
   perform pg_catalog.set_config('app.correlation_id', p_correlation_id::text, true);
   insert into public.memory_write_operations (organization_id, idempotency_key, request_fingerprint, response) values (p_organization_id, p_idempotency_key, request_fingerprint, '{}'::jsonb) on conflict (organization_id, idempotency_key) do nothing;
   select * into operation from public.memory_write_operations stored_operation where stored_operation.organization_id = p_organization_id and stored_operation.idempotency_key = p_idempotency_key for update;
+  if operation.response ? 'fingerprint' then
+    -- Before this migration, supersession persisted a SHA-256 fingerprint in
+    -- its response and omitted the reason. Accept only a record whose stored
+    -- request and response fingerprints both match the legacy request shape.
+    if operation.request_fingerprint = legacy_fingerprint
+      and operation.response ->> 'fingerprint' = legacy_fingerprint
+      and operation.response ?& array['replacementId', 'supersededId'] then
+      return pg_catalog.jsonb_build_object(
+        'replacementId', operation.response ->> 'replacementId',
+        'supersededId', operation.response ->> 'supersededId',
+        'replayed', true
+      );
+    end if;
+    raise exception 'memory write idempotency key was reused with a different request' using errcode = '23505';
+  end if;
   if operation.request_fingerprint <> request_fingerprint then raise exception 'memory write idempotency key was reused with a different request' using errcode = '23505'; end if;
   if operation.response <> '{}'::jsonb then return operation.response || pg_catalog.jsonb_build_object('replayed', true); end if;
   select * into original from public.memory_items item where item.organization_id = p_organization_id and item.id = p_item_id for update;
   if not found then raise exception 'memory item was not found' using errcode = 'P0002'; end if;
+  if original.sensitivity in ('confidential', 'customer_content') and not private.has_organization_role(p_organization_id, array['owner', 'admin']::public.organization_role[]) then raise exception 'memory write is not authorized' using errcode = '42501'; end if;
   if original.superseded_by_id is not null then raise exception 'memory item is already superseded' using errcode = '23505'; end if;
   insert into public.memory_items (organization_id, branch_id, memory_type, title, body, structured_value, origin, sensitivity, verification_state, created_by, verified_by, verified_at)
   values (p_organization_id, original.branch_id, original.memory_type, pg_catalog.btrim(p_title), p_body, original.structured_value, 'user_verified', p_sensitivity, 'verified', p_actor_id, p_actor_id, pg_catalog.now()) returning * into replacement;
