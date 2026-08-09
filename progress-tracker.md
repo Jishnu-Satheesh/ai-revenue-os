@@ -146,6 +146,48 @@ not further implementation. Gates 1 and 2 also block the Business Memory migrati
 
 ## Verification record
 
+### Business Memory retrieval verification against a seeded corpus (2026-08-09)
+
+Seeded 1430 realistic memory items plus 14 business facts into **Al Noor Kitchen**
+(`2dda45b8-82db-4f5f-b17d-611b9bbb7846`) with `node scripts/seed-business-memory.mjs --reset`.
+Content is grounded in `industry-packs/restaurant/dubai-pilot.md` and `playbooks.md`, not filler:
+Google reviews, marketplace listing snapshots, daypart observations, agency lessons, decisions,
+measured outcomes with baseline and attribution window, client notes, brand documents, and fact
+proposals. Distribution: 647 customer-content, 121 proposed, 6 superseded, 30 expired. Two extra
+branches (Al Barsha, Deira) were added alongside the existing Jumeirah branch.
+
+**Two retrieval defects were found that an empty table cannot reveal, and both are fixed:**
+
+1. **Filtered HNSW recall was 5%.** A normal operator query returned 1 of the 20 true nearest
+   neighbours. An HNSW scan walks roughly `hnsw.ef_search` (default 40) globally nearest
+   candidates and applies the WHERE clause afterwards; Business Memory's filter removes
+   customer content the caller cannot read, proposed, superseded, and expired items, which is
+   close to half a realistic corpus, so almost nothing survived. Fixed in
+   `20260809065550_memory_search_hnsw_recall.sql` with pgvector 0.8 iterative scans
+   (`hnsw.iterative_scan = relaxed_order`, `hnsw.ef_search = 200`) attached to the function.
+   Candidate-pool recall is now 20/20.
+2. **The lexical half was effectively dead.** `websearch_to_tsquery` joins terms with AND, so
+   "biryani margin discount talabat" matched 1 row where OR matches 202, and
+   "packaging leaked delivery" matched 1 where OR matches 15. Fixed in
+   `20260809065808_memory_search_lexical_recall.sql` by rebuilding the query as OR'd lexemes;
+   precision comes from `ts_rank_cd` ordering rather than from the filter. Lexical signal now
+   appears on 12-20 of 20 results instead of about 1.
+
+**A trap worth remembering:** `CREATE OR REPLACE FUNCTION` replaces the function's configuration
+too, so the second migration had to restate all three `SET` clauses. Omitting them would have
+silently reverted HNSW recall to 5%. `pg_proc.proconfig` is asserted after the change.
+
+Verified after both fixes: all four pgTAP suites pass, `pnpm test` 329 tests, typecheck, lint, and
+format clean. The plan uses `memory_items_embedding_idx` (HNSW) and `memory_items_search_idx`
+(GIN); the organization predicate is applied inside the scan, and no other tenant's rows are
+reachable.
+
+**Not verified:** semantic relevance quality. No embedding API key is configured
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and the Google key are all empty), so the seed wrote
+deterministic hashed bag-of-words vectors labelled `embedding_model = 'local-hashed-bow-v1'`.
+Those exercise the index and the hybrid merge but say nothing about semantic quality. Re-run the
+seed with a real key to replace them.
+
 ### Business Memory tasks 1-7 (2026-08-09)
 
 - Applied to the remote database and verified there: `20260809053839_business_memory`,
