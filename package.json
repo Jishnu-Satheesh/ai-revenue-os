@@ -23,7 +23,8 @@
     "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts",
     "db:migrations:list": "supabase migration list --db-url \"$(node scripts/supabase-session-url.mjs)\"",
     "db:migrations:dry-run": "supabase db push --include-all --dry-run --db-url \"$(node scripts/supabase-session-url.mjs)\"",
-    "db:migrations:push": "supabase db push --include-all --db-url \"$(node scripts/supabase-session-url.mjs)\""
+    "db:migrations:push": "supabase db push --include-all --db-url \"$(node scripts/supabase-session-url.mjs)\"",
+    "db:test": "node scripts/run-pgtap.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.7.0",
