@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(57);
+select extensions.plan(59);
 
 insert into auth.users (id)
 values
@@ -669,7 +669,11 @@ values (
 ), (
   '46000000-0000-4000-8000-000000000026'::uuid,
   '26000000-0000-4000-8000-000000000001'::uuid,
-  'note', 'Sensitive snapshot replay target', 'user_verified', 'unverified', 'internal'
+  'note', 'Sensitive snapshot replay target', 'user_verified', 'unverified', 'confidential'
+), (
+  '46000000-0000-4000-8000-000000000027'::uuid,
+  '26000000-0000-4000-8000-000000000001'::uuid,
+  'note', 'Malformed replay response target', 'user_verified', 'unverified', 'internal'
 );
 insert into public.memory_write_operations (
   organization_id, idempotency_key, request_fingerprint, response
@@ -914,10 +918,10 @@ select extensions.lives_ok(
     '26000000-0000-4000-8000-000000000001'::uuid,
     '16000000-0000-4000-8000-000000000001'::uuid,
     '46000000-0000-4000-8000-000000000026'::uuid,
-    'reclassify', null, 'confidential', null, false, 'confidential-snapshot-update-key',
+    'verify', null, null, null, false, 'confidential-snapshot-update-key',
     '56000000-0000-4000-8000-000000000036'::uuid
   )$$,
-  'an admin can save a confidential update replay snapshot'
+  'an admin can save a confidential update replay snapshot without changing sensitivity'
 );
 
 reset role;
@@ -937,11 +941,63 @@ select extensions.throws_ok(
     '26000000-0000-4000-8000-000000000001'::uuid,
     '16000000-0000-4000-8000-000000000001'::uuid,
     '46000000-0000-4000-8000-000000000026'::uuid,
-    'reclassify', null, 'confidential', null, false, 'confidential-snapshot-update-key',
+    'verify', null, null, null, false, 'confidential-snapshot-update-key',
     '56000000-0000-4000-8000-000000000037'::uuid
   )$$,
   '42501', null,
-  'an operator cannot replay a confidential update snapshot after the row is lowered'
+  'an operator cannot replay a confidential update snapshot after the row is lowered without requesting sensitivity'
+);
+
+reset role;
+
+-- A replay response is untrusted operation data: it must name exactly the
+-- requested tenant/item and a supported sensitivity before any payload returns.
+update public.organization_memberships
+set role = 'admin'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and user_id = '16000000-0000-4000-8000-000000000001'::uuid;
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.lives_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000027'::uuid,
+    'verify', null, null, null, false, 'malformed-update-replay-key',
+    '56000000-0000-4000-8000-000000000038'::uuid
+  )$$,
+  'an admin can save a valid internal update replay response'
+);
+
+reset role;
+update public.memory_write_operations
+set response = pg_catalog.jsonb_build_object(
+  'item', pg_catalog.jsonb_build_object(
+    'id', '46000000-0000-4000-8000-000000000026',
+    'organization_id', '26000000-0000-4000-8000-000000000001',
+    'sensitivity', 'unknown'
+  )
+)
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and idempotency_key = 'malformed-update-replay-key';
+update public.organization_memberships
+set role = 'operator'
+where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
+  and user_id = '16000000-0000-4000-8000-000000000001'::uuid;
+set local role authenticated;
+set local request.jwt.claim.sub = '16000000-0000-4000-8000-000000000001';
+
+select extensions.throws_ok(
+  $$select public.update_authenticated_memory_item(
+    '26000000-0000-4000-8000-000000000001'::uuid,
+    '16000000-0000-4000-8000-000000000001'::uuid,
+    '46000000-0000-4000-8000-000000000027'::uuid,
+    'verify', null, null, null, false, 'malformed-update-replay-key',
+    '56000000-0000-4000-8000-000000000039'::uuid
+  )$$,
+  '23505', null,
+  'an operator cannot replay an update with malformed stored response metadata'
 );
 
 reset role;

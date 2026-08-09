@@ -172,7 +172,34 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(sql).toContain("operation.response -> 'item' ->> 'sensitivity'");
     expect(sql).toContain("memory write replay is not authorized");
     expect(pgtap).toContain(
-      "an operator cannot replay a confidential update snapshot after the row is lowered",
+      "an operator cannot replay a confidential update snapshot after the row is lowered without requesting sensitivity",
+    );
+  });
+
+  it("fails closed when a stored update replay response does not identify the requested item", () => {
+    const sql = authenticatedWriteMigration();
+    const updateFunction = sql.slice(
+      sql.indexOf("create or replace function public.update_authenticated_memory_item"),
+      sql.indexOf("-- The previous eight-argument function remains"),
+    );
+    const pgtap = readFileSync(
+      resolve(databaseTestsDirectory, "business_memory_write_test.sql"),
+      "utf8",
+    );
+
+    expect(updateFunction).toContain("if not coalesce(");
+    expect(updateFunction).toContain(
+      "pg_catalog.jsonb_typeof(operation.response -> 'item') = 'object'",
+    );
+    expect(updateFunction).toContain("p_item_id::text");
+    expect(updateFunction).toContain("p_organization_id::text");
+    expect(updateFunction).toContain("'public', 'internal', 'confidential', 'customer_content'");
+    expect(updateFunction).toContain("memory write replay response is invalid");
+    expect(updateFunction).toContain(
+      "return operation.response || pg_catalog.jsonb_build_object('replayed', true)",
+    );
+    expect(pgtap).toContain(
+      "an operator cannot replay an update with malformed stored response metadata",
     );
   });
 });

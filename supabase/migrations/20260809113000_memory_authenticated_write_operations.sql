@@ -143,6 +143,18 @@ begin
   select * into updated from public.memory_items item where item.organization_id = p_organization_id and item.id = p_item_id for update;
   if not found then raise exception 'memory item was not found' using errcode = 'P0002'; end if;
   if operation.response <> '{}'::jsonb then
+    if not coalesce(
+      pg_catalog.jsonb_typeof(operation.response -> 'item') = 'object'
+      and pg_catalog.jsonb_typeof(operation.response -> 'item' -> 'id') = 'string'
+      and operation.response -> 'item' ->> 'id' = p_item_id::text
+      and pg_catalog.jsonb_typeof(operation.response -> 'item' -> 'organization_id') = 'string'
+      and operation.response -> 'item' ->> 'organization_id' = p_organization_id::text
+      and pg_catalog.jsonb_typeof(operation.response -> 'item' -> 'sensitivity') = 'string'
+      and operation.response -> 'item' ->> 'sensitivity' in ('public', 'internal', 'confidential', 'customer_content'),
+      false
+    ) then
+      raise exception 'memory write replay response is invalid' using errcode = '23505';
+    end if;
     if (
       p_sensitivity in ('confidential', 'customer_content')
       or operation.response -> 'item' ->> 'sensitivity' in ('confidential', 'customer_content')
