@@ -200,7 +200,7 @@ created_at desc, id desc`, and returns the final item tuple as `nextCursor`;
   ```ts
   GET    /memory                         -> { snapshot: MemorySnapshot }
   POST   /memory/search                  -> MemoryRetrievalResponse
-  GET    /memory/timeline                -> { items: MemoryItemView[], nextBefore?: string }
+  GET    /memory/timeline                -> { items: MemoryItemView[], nextCursor?: string }
   GET    /memory/lessons                 -> { items: MemoryItemView[], evidence: Record<string, string[]> }
   POST   /memory/items                   -> { item: MemoryItemView }
   GET    /memory/items/:itemId           -> { item: MemoryItemView, chain: MemoryItemView[], links: MemoryLinkView[] }
@@ -210,11 +210,12 @@ created_at desc, id desc`, and returns the final item tuple as `nextCursor`;
   POST   /memory/proposals/:itemId/reject  -> MemoryProposalRejection
   ```
 
-  For search, ignore any caller-supplied `sensitivityAllowance` default only by
-  setting it to `operatorCeiling(context.actor)` before retrieval. A caller asking
-  for a lower sensitivity may be honored; a caller asking higher must be denied by
-  retrieval. Every successful search response explicitly contains
-  `servedFromCache: false` and removes `builtAt`.
+  For search, resolve `sensitivityAllowance` to the request value when present or
+  `operatorCeiling(context.actor)` when absent. Pass that value to retrieval; its
+  existing ceiling check must reject a request above the authenticated role ceiling,
+  while a lower requested ceiling intentionally narrows the result set. Every
+  successful search response explicitly contains `servedFromCache: false` and
+  removes `builtAt`.
 
 - [ ] **Step 5: Run focused GREEN verification.**
 
