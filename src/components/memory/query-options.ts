@@ -1,6 +1,15 @@
+"use client";
+
+import { keepPreviousData } from "@tanstack/react-query";
+import { useRef } from "react";
+
 import type { MemoryRetrievalResponse } from "@/domain/memory/schemas";
 import type { Sensitivity } from "@/domain/memory/types";
-import type { MemoryItemDetail, MemorySnapshot } from "@/modules/memory/application/service";
+import type {
+  MemoryItemDetail,
+  MemoryItemView,
+  MemorySnapshot,
+} from "@/modules/memory/application/service";
 
 /**
  * Exactly the memory types `searchMemorySchema` accepts. It deliberately omits
@@ -167,6 +176,126 @@ export function memorySearchQueryOptions(input: {
     // reader rows their role may no longer reach.
     staleTime: 0,
     gcTime: 60_000,
+  };
+}
+
+/**
+ * Timeline filters the route actually parses. `branchId` is accepted by the
+ * contract but deliberately unused here: nothing the browser can read lists an
+ * organization's branches, and `MemoryItemView` carries no `branchId` to derive
+ * them from, so offering the control would mean inventing its options.
+ */
+export type MemoryTimelineFilters = {
+  sourceSystems: readonly string[];
+  limit?: number;
+};
+
+export type MemoryTimelinePage = {
+  items: MemoryItemView[];
+  nextCursor?: string;
+};
+
+export function hashTimelineFilters(filters: MemoryTimelineFilters): string {
+  return JSON.stringify([[...filters.sourceSystems].sort(), filters.limit ?? null]);
+}
+
+export function memoryTimelineQueryOptions(input: {
+  organizationId: string;
+  filters: MemoryTimelineFilters;
+}) {
+  const { organizationId, filters } = input;
+  return {
+    queryKey: memoryQueryKeys.timeline(organizationId, hashTimelineFilters(filters)),
+    queryFn: async ({ pageParam }: { pageParam?: string }) => {
+      const search = new URLSearchParams();
+      search.set("limit", String(filters.limit ?? 50));
+      for (const sourceSystem of filters.sourceSystems) search.append("sourceSystem", sourceSystem);
+      if (pageParam) search.set("cursor", pageParam);
+      return memoryRequest<MemoryTimelinePage>(
+        `${memoryBasePath(organizationId)}/timeline?${search.toString()}`,
+      );
+    },
+    initialPageParam: undefined as string | undefined,
+    /**
+     * Only the cursor the server returned is followed; the client never builds
+     * one. The read model emits a cursor whenever a page has any rows, so a
+     * short page is also treated as the end — otherwise the workspace would
+     * keep offering "load older" for a page that can only come back empty.
+     */
+    getNextPageParam: (lastPage: MemoryTimelinePage) =>
+      lastPage.items.length < (filters.limit ?? 50) ? undefined : lastPage.nextCursor,
+    // A filter change must not blank the entries already being read.
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+  };
+}
+
+export type MemoryLessonsResponse = {
+  items: MemoryItemView[];
+  evidence: Record<string, string[]>;
+};
+
+export function memoryLessonsQueryOptions(input: { organizationId: string; limit?: number }) {
+  return {
+    queryKey: memoryQueryKeys.lessons(input.organizationId),
+    queryFn: async () =>
+      memoryRequest<MemoryLessonsResponse>(
+        `${memoryBasePath(input.organizationId)}/lessons?limit=${input.limit ?? 50}`,
+      ),
+    staleTime: 15_000,
+  };
+}
+
+/**
+ * Refreshes every organization-scoped read a governed write can affect. It runs
+ * only after the server has confirmed the write: nothing here is optimistic, so
+ * a row changes on screen because the next authenticated read said so.
+ */
+export async function invalidateMemoryQueries(
+  queryClient: {
+    invalidateQueries: (filters: { queryKey: readonly unknown[] }) => Promise<void>;
+  },
+  organizationId: string,
+): Promise<void> {
+  const root = memoryQueryKeys.root(organizationId);
+  await Promise.all(
+    [
+      memoryQueryKeys.snapshot(organizationId),
+      [...root, "item"],
+      [...root, "search"],
+      [...root, "timeline"],
+      memoryQueryKeys.lessons(organizationId),
+    ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
+}
+
+/** Every retried side effect carries the same key, so a replay never doubles. */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Keeps one idempotency key per distinct request payload.
+ *
+ * Retrying the *same* submission must reuse its key so a write whose response
+ * was lost replays instead of committing twice. Submitting *different* content
+ * must mint a new one: the server rejects a key reused for another request
+ * fingerprint, so carrying the old key forward would make an edited resubmit
+ * permanently unacceptable. Keying off the payload satisfies both.
+ */
+export function useIdempotencyKey() {
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return {
+    keyFor(payload: unknown): string {
+      const fingerprint = JSON.stringify(payload);
+      if (attempt.current?.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: newIdempotencyKey() };
+      }
+      return attempt.current.key;
+    },
+    reset() {
+      attempt.current = null;
+    },
   };
 }
 

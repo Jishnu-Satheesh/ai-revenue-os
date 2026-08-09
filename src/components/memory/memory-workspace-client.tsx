@@ -2,24 +2,21 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Clock3, Eye, History, Layers, ScrollText, Search, ShieldCheck } from "lucide-react";
+import { Clock3, Eye, ScrollText, Search, ShieldCheck } from "lucide-react";
 
 import {
   memorySearchQueryOptions,
   memorySnapshotQueryOptions,
   type MemorySearchInput,
 } from "@/components/memory/query-options";
+import { LessonsTab } from "@/components/memory/lessons-tab";
+import { NoteDialog } from "@/components/memory/note-dialog";
+import { ReviewTab } from "@/components/memory/review-tab";
 import { SearchTab } from "@/components/memory/search-tab";
+import { TimelineTab } from "@/components/memory/timeline-tab";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { hasMemoryPermission } from "@/domain/memory/permissions";
@@ -65,28 +62,6 @@ function SnapshotFact({
         {detail ? <span className="text-[10px] text-muted-foreground">{detail}</span> : null}
       </span>
     </div>
-  );
-}
-
-function DeferredView({
-  title,
-  description,
-  icon: Icon,
-}: {
-  title: string;
-  description: string;
-  icon: typeof Search;
-}) {
-  return (
-    <Empty className="border">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <Icon />
-        </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
   );
 }
 
@@ -158,7 +133,11 @@ export function MemoryWorkspaceClient({
         <SnapshotFact label="Retrieval" value={retrievalHealth} />
       </Card>
 
-      {canWrite ? null : (
+      {canWrite ? (
+        <div className="flex justify-end">
+          <NoteDialog organizationId={organizationId} ceiling={snapshot.ceiling} />
+        </div>
+      ) : (
         <Alert>
           <Eye />
           <AlertTitle>Read-only access</AlertTitle>
@@ -200,7 +179,10 @@ export function MemoryWorkspaceClient({
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="search" className="min-h-0 min-w-0">
+        {/* Kept mounted so the composed query and its filters survive a trip to
+            another tab; an unmounted Search would silently reset filters while
+            its results stayed cached, misstating what produced them. */}
+        <TabsContent value="search" forceMount className="min-h-0 min-w-0 data-[state=inactive]:hidden">
           <SearchTab
             organizationId={organizationId}
             snapshot={snapshot}
@@ -209,24 +191,17 @@ export function MemoryWorkspaceClient({
           />
         </TabsContent>
         <TabsContent value="timeline" className="min-h-0 min-w-0">
-          <DeferredView
-            icon={History}
-            title="Timeline is not built yet"
-            description="Episodic memory by observation date arrives with the Timeline view. Nothing is shown here rather than showing placeholder history."
-          />
+          <TimelineTab organizationId={organizationId} role={role} ceiling={snapshot.ceiling} />
         </TabsContent>
         <TabsContent value="lessons" className="min-h-0 min-w-0">
-          <DeferredView
-            icon={Layers}
-            title="Lessons are not built yet"
-            description="Lessons, decisions, and their supporting evidence arrive with the Lessons view. Nothing is shown here rather than showing placeholder findings."
-          />
+          <LessonsTab organizationId={organizationId} role={role} ceiling={snapshot.ceiling} />
         </TabsContent>
         <TabsContent value="review" className="min-h-0 min-w-0">
-          <DeferredView
-            icon={ShieldCheck}
-            title="Review is not built yet"
-            description={`${snapshot.counts.reviewQueueDepth} proposals are waiting in the queue. Confirming and rejecting them is a governed action that arrives with the Review view.`}
+          <ReviewTab
+            organizationId={organizationId}
+            reviewQueue={snapshot.reviewQueue}
+            role={role}
+            ceiling={snapshot.ceiling}
           />
         </TabsContent>
       </Tabs>
