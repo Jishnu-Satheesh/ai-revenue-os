@@ -12,6 +12,11 @@ import type {
   MemorySearchRow,
   MemorySnapshotCounts,
 } from "@/modules/memory/application/ports";
+import type {
+  MemoryProposalConfirmation,
+  MemoryProposalRejection,
+  MemoryTransactionPort,
+} from "@/modules/memory/application/service";
 
 /**
  * `embedding` and `search_vector` are deliberately absent from every column
@@ -103,6 +108,53 @@ type FluentQuery = {
   single(): PromiseLike<{ data: unknown; error: unknown }>;
   maybeSingle(): PromiseLike<{ data: unknown; error: unknown }>;
 };
+
+/**
+ * A browser-authenticated client invokes the security-definer RPC only through
+ * this narrow port. The RPC independently binds the auth user, membership,
+ * role, and organization before it mutates either store.
+ */
+export function createSupabaseMemoryPromotionTransactionPort(
+  authenticatedSupabase: SupabaseClient<Database>,
+): Pick<MemoryTransactionPort, "confirmProposal" | "rejectProposal"> {
+  const client = authenticatedSupabase as unknown as {
+    rpc(
+      name: string,
+      args: Record<string, unknown>,
+    ): PromiseLike<{ data: unknown; error: unknown }>;
+  };
+
+  return {
+    async confirmProposal(input) {
+      const result = await client.rpc("confirm_memory_fact_proposal", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_item_id: input.itemId,
+        p_override_verified: input.overrideVerified,
+        p_idempotency_key: input.idempotencyKey,
+        p_correlation_id: input.correlationId,
+      });
+      if (result.error || result.data === null) {
+        databaseError("The fact proposal could not be confirmed.", result.error);
+      }
+      return result.data as MemoryProposalConfirmation;
+    },
+    async rejectProposal(input) {
+      const result = await client.rpc("reject_memory_proposal", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_item_id: input.itemId,
+        p_reason: input.reason,
+        p_idempotency_key: input.idempotencyKey,
+        p_correlation_id: input.correlationId,
+      });
+      if (result.error || result.data === null) {
+        databaseError("The memory proposal could not be rejected.", result.error);
+      }
+      return result.data as MemoryProposalRejection;
+    },
+  };
+}
 
 /**
  * The generated `Database` type predates the memory migration, so the dynamic

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(42);
+select extensions.plan(45);
 
 select extensions.has_table('public', 'memory_items', 'memory items exist');
 select extensions.has_table('public', 'memory_links', 'memory links exist');
@@ -92,6 +92,17 @@ values (
   '44000000-0000-4000-8000-000000000002'::uuid,
   'derived_from',
   '14000000-0000-4000-8000-000000000001'::uuid
+);
+
+insert into public.memory_items (
+  id, organization_id, memory_type, title, origin, verification_state, sensitivity,
+  proposed_fact_key, proposed_fact_value
+)
+values (
+  '44000000-0000-4000-8000-000000000007'::uuid,
+  '24000000-0000-4000-8000-000000000001'::uuid,
+  'fact_proposal', 'Governed fact proposal', 'ai_proposed', 'proposed', 'internal',
+  'google_business_profile.location.hours', '"09:00-17:00"'::jsonb
 );
 
 -- Source tier is derived, never supplied. Mirrors src/domain/memory/trust.ts.
@@ -278,12 +289,13 @@ set local role authenticated;
 
 -- Operator in tenant one: sees internal only, never confidential or customer content.
 set local request.jwt.claim.sub = '14000000-0000-4000-8000-000000000001';
--- Tenant one holds five items: internal lesson, customer-content review,
--- confidential note, internal model lesson, internal document. An operator may
--- see only the three at or below `internal`.
+-- Tenant one holds six items: internal lesson, customer-content review,
+-- confidential note, governed internal fact proposal, internal model lesson,
+-- and an internal document. An operator may see the four at or below
+-- `internal`.
 select extensions.is(
   (select count(*) from public.memory_items),
-  3::bigint,
+  4::bigint,
   'an operator reads only non-sensitive items in their own organization'
 );
 select extensions.is(
@@ -306,7 +318,7 @@ select extensions.is(
 set local request.jwt.claim.sub = '14000000-0000-4000-8000-000000000004';
 select extensions.is(
   (select count(*) from public.memory_items),
-  5::bigint,
+  6::bigint,
   'an admin reads confidential and customer content in their own organization'
 );
 select extensions.is(
@@ -327,7 +339,7 @@ select extensions.is(
 set local request.jwt.claim.sub = '14000000-0000-4000-8000-000000000003';
 select extensions.is(
   (select count(*) from public.memory_items),
-  3::bigint,
+  4::bigint,
   'a viewer reads non-sensitive items in their own organization'
 );
 select extensions.throws_ok(
@@ -385,6 +397,37 @@ select extensions.throws_ok(
   '42501',
   null,
   'an operator cannot write into another organization'
+);
+
+select extensions.throws_ok(
+  $$update public.memory_items
+      set verification_state = 'verified',
+          verified_by = '14000000-0000-4000-8000-000000000001'::uuid,
+          verified_at = now()
+    where id = '44000000-0000-4000-8000-000000000007'::uuid$$,
+  '42501',
+  null,
+  'direct REST cannot verify a fact proposal'
+);
+
+select extensions.throws_ok(
+  $$update public.memory_items
+      set verified_by = '14000000-0000-4000-8000-000000000001'::uuid,
+          verified_at = now()
+    where id = '44000000-0000-4000-8000-000000000007'::uuid$$,
+  '42501',
+  null,
+  'direct REST cannot forge a verification actor'
+);
+
+select extensions.throws_ok(
+  $$update public.memory_items
+      set verification_state = 'rejected',
+          rejection_reason = null
+    where id = '44000000-0000-4000-8000-000000000007'::uuid$$,
+  '42501',
+  null,
+  'direct REST cannot reject a proposal without a governed reason'
 );
 
 select extensions.lives_ok(

@@ -537,25 +537,25 @@ export type MemoryWorkerDependencies = {
 
 - Produces: `public.confirm_memory_fact_proposal(...)`, `service.confirmProposal`, `service.rejectProposal`
 
-- [ ] **Step 1: Write the failing promotion tests.**
+- [x] **Step 1: Write the failing promotion tests.**
 
   Assert that confirming a `fact_proposal` writes `business_facts` and sets the proposal to `verified` atomically; that a forced failure inside the function rolls both back; that a second confirm with the same idempotency key returns the first result without a second write; and that confirming emits `memory.fact_promoted`.
 
-- [ ] **Step 2: Create the migration with `pnpm supabase migration new memory_promotion_operations`.**
+- [x] **Step 2: Create the migration with `pnpm supabase migration new memory_promotion_operations`.**
 
-- [ ] **Step 3: Implement the operation.**
+- [x] **Step 3: Implement the operation.**
 
   Follow the pattern in `20260808025602_integration_authenticated_operations.sql`: an operations table keyed by `(organization_id, idempotency_key)` with forced RLS and all privileges revoked, plus a `security definer` function with `set search_path = ''` that validates membership and role, upserts the fact, updates the proposal, and appends the audit row in one transaction.
 
-- [ ] **Step 4: Preserve the source hierarchy.** The promoted fact takes `status = 'verified'` with the confirming user as `updated_by`. A proposal may never downgrade an existing `verified` fact silently; if the current fact is `verified` and differs, the confirmation body must include an explicit `overrideVerified: true`.
+- [x] **Step 4: Preserve the source hierarchy.** The promoted fact takes `status = 'verified'` with the confirming user as `updated_by`. A proposal may never downgrade an existing `verified` fact silently; if the current fact is `verified` and differs, the confirmation body must include an explicit `overrideVerified: true`.
 
-- [ ] **Step 5: Extend the pgTAP test** to cover the function's membership check, its role check, and its refusal to touch another organization's fact.
+- [x] **Step 5: Extend the pgTAP test** to cover the function's membership check, its role check, and its refusal to touch another organization's fact.
 
-- [ ] **Step 6: Invalidate the organization after a successful promotion,** and assert in a test that a ranking cached before the promotion does not survive it. Promotion changes a `business_facts` row that read-through projection returns, so skipping this leaves a stale fact retrievable.
+- [x] **Step 6: Invalidate the organization after a successful promotion,** and assert in a test that a ranking cached before the promotion does not survive it. Promotion changes a `business_facts` row that read-through projection returns, so skipping this leaves a stale fact retrievable.
 
-- [ ] **Step 7: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`, plus the pgTAP suite when Docker is available.**
+- [x] **Step 7: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`, plus the pgTAP suite when Docker is available.**
 
-- [ ] **Step 8: Commit with `git commit -m "feat(memory): promote confirmed fact proposals atomically"`.**
+- [x] **Step 8: Commit with `git commit -m "feat(memory): promote confirmed fact proposals atomically"`.**
 
 ### Task 11: Replace the acknowledging ingestion stub with the memory projector
 
@@ -834,7 +834,7 @@ These are environment gates, not implementation work. They inherit the two open 
 
 ## Implementation status (2026-08-09)
 
-Tasks 1 through 7, 11, and 12 are implemented, reviewed, verified, and committed on `feat/business-memory`.
+Tasks 1 through 7 and 10 through 12 are implemented, reviewed, verified, and committed on `feat/business-memory`.
 Tasks 8 through 10 and 13 through 17 are not started.
 
 Task 12 adds tenant-scoped embedding leases and service-role-only batch-state/completion RPCs,

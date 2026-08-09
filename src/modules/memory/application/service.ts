@@ -1,4 +1,4 @@
-import type { EventPublisher } from "@/domain/events/types";
+import type { EventPublisher, MemoryEventName, MemoryEventPayloads } from "@/domain/events/types";
 import { memoryError } from "@/domain/memory/errors";
 import { deriveFreshness } from "@/domain/memory/freshness";
 import { sensitivitiesWithinCeiling } from "@/domain/memory/purposes";
@@ -11,7 +11,9 @@ import {
   type MemoryActor,
 } from "@/modules/memory/application/authorization";
 import type {
+  ConfirmProposalInput,
   CreateMemoryItemInput,
+  RejectProposalInput,
   SupersedeMemoryItemInput,
   UpdateMemoryItemInput,
 } from "@/modules/memory/application/api-schemas";
@@ -19,6 +21,22 @@ import type { MemoryItemRow, MemorySnapshotCounts } from "@/modules/memory/appli
 import type { MemoryRepository } from "@/modules/memory/infrastructure/repository";
 
 export type MemoryTransactionPort = {
+  confirmProposal(input: {
+    organizationId: string;
+    actorId: string;
+    itemId: string;
+    overrideVerified: boolean;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<MemoryProposalConfirmation>;
+  rejectProposal(input: {
+    organizationId: string;
+    actorId: string;
+    itemId: string;
+    reason: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<MemoryProposalRejection>;
   supersede(input: {
     organizationId: string;
     actorId: string;
@@ -29,6 +47,42 @@ export type MemoryTransactionPort = {
     reason: string;
     idempotencyKey: string;
   }): Promise<{ replacementId: string; supersededId: string }>;
+};
+
+export type MemoryFactPromotion = {
+  itemId: string;
+  factId: string;
+  promoted: true;
+  factKey: string;
+  branchScoped: boolean;
+  overrodeVerified: boolean;
+  /**
+   * The RPC returns `true` only when the idempotency operation already held a
+   * committed response. It is transport metadata, never event payload data.
+   */
+  replayed: boolean;
+};
+
+export type MemoryNonFactProposalConfirmation = {
+  itemId: string;
+  factId: null;
+  promoted: false;
+  memoryType: string;
+  origin: string;
+  sensitivity: Sensitivity;
+  verificationState: "verified";
+  replayed: boolean;
+};
+
+export type MemoryProposalConfirmation = MemoryFactPromotion | MemoryNonFactProposalConfirmation;
+
+export type MemoryProposalRejection = {
+  itemId: string;
+  memoryType: string;
+  origin: string;
+  sensitivity: Sensitivity;
+  verificationState: "rejected";
+  replayed: boolean;
 };
 
 export type MemoryCacheInvalidator = {
@@ -136,23 +190,33 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
     }
   };
 
-  const publish = async (
+  const publish = async <TName extends MemoryEventName>(
     organizationId: string,
     actor: MemoryActor,
-    eventName: string,
-    payload: Record<string, unknown>,
+    eventName: TName,
+    payload: MemoryEventPayloads[TName],
   ) => {
-    await dependencies.events.publish({
-      eventId: crypto.randomUUID(),
-      eventName,
-      occurredAt: now().toISOString(),
-      organizationId,
-      actorType: "user",
-      actorId: actor.userId,
-      correlationId: crypto.randomUUID(),
-      schemaVersion: 1,
-      payload,
-    });
+    try {
+      await dependencies.events.publish({
+        eventId: crypto.randomUUID(),
+        eventName,
+        occurredAt: now().toISOString(),
+        organizationId,
+        actorType: "user",
+        actorId: actor.userId,
+        correlationId: crypto.randomUUID(),
+        schemaVersion: 1,
+        payload,
+      });
+    } catch (error) {
+      // Database state is authoritative and already committed. Publishing is
+      // deliberately best-effort until a durable outbox replaces this boundary.
+      dependencies.logger?.warn("memory.event_publish_failed", {
+        organizationId,
+        eventName,
+        error,
+      });
+    }
   };
 
   const requireItem = async (organizationId: string, itemId: string): Promise<MemoryItemRow> => {
@@ -314,6 +378,83 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       });
       await invalidate(input.organizationId);
 
+      return result;
+    },
+
+    async confirmProposal(input: {
+      organizationId: string;
+      actor: MemoryActor;
+      itemId: string;
+      body: ConfirmProposalInput;
+    }): Promise<MemoryProposalConfirmation> {
+      assertMemoryPermission(input.actor, "memory.promote_fact");
+      if (!dependencies.transactions) {
+        throw memoryError("CONFLICT", {}, "memory promotion transaction unavailable");
+      }
+
+      const result = await dependencies.transactions.confirmProposal({
+        organizationId: input.organizationId,
+        actorId: input.actor.userId,
+        itemId: input.itemId,
+        overrideVerified: input.body.overrideVerified,
+        idempotencyKey: input.body.idempotencyKey,
+        correlationId: crypto.randomUUID(),
+      });
+
+      await invalidate(input.organizationId);
+      // An idempotent replay may have a different authenticated caller and a
+      // fresh correlation/event ID. It must still refresh cache after the
+      // already-committed write, but must never create a second event.
+      if (result.replayed === false) {
+        if (result.promoted) {
+          await publish(input.organizationId, input.actor, "memory.fact_promoted", {
+            itemId: result.itemId,
+            factKey: result.factKey,
+            branchScoped: result.branchScoped,
+            overrodeVerified: result.overrodeVerified,
+          });
+        } else {
+          await publish(input.organizationId, input.actor, "memory.proposal_confirmed", {
+            itemId: result.itemId,
+            memoryType: result.memoryType,
+            origin: result.origin,
+            verificationState: result.verificationState,
+            sensitivity: result.sensitivity,
+          });
+        }
+      }
+      return result;
+    },
+
+    async rejectProposal(input: {
+      organizationId: string;
+      actor: MemoryActor;
+      itemId: string;
+      body: RejectProposalInput;
+    }): Promise<MemoryProposalRejection> {
+      assertMemoryPermission(input.actor, "memory.verify");
+      if (!dependencies.transactions) {
+        throw memoryError("CONFLICT", {}, "memory proposal rejection transaction unavailable");
+      }
+      const result = await dependencies.transactions.rejectProposal({
+        organizationId: input.organizationId,
+        actorId: input.actor.userId,
+        itemId: input.itemId,
+        reason: input.body.reason,
+        idempotencyKey: input.body.idempotencyKey,
+        correlationId: crypto.randomUUID(),
+      });
+      await invalidate(input.organizationId);
+      if (result.replayed === false) {
+        await publish(input.organizationId, input.actor, "memory.item_rejected", {
+          itemId: result.itemId,
+          memoryType: result.memoryType,
+          origin: result.origin,
+          verificationState: result.verificationState,
+          sensitivity: result.sensitivity,
+          reasonProvided: true,
+        });
+      }
       return result;
     },
 

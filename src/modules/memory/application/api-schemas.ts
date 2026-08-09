@@ -80,4 +80,6 @@ export const timelineQuerySchema = z.object({
 export type CreateMemoryItemInput = z.infer<typeof createMemoryItemSchema>;
 export type UpdateMemoryItemInput = z.infer<typeof updateMemoryItemSchema>;
 export type SupersedeMemoryItemInput = z.infer<typeof supersedeMemoryItemSchema>;
+export type ConfirmProposalInput = z.infer<typeof confirmProposalSchema>;
+export type RejectProposalInput = z.infer<typeof rejectProposalSchema>;
 export type SearchMemoryInput = z.infer<typeof searchMemorySchema>;

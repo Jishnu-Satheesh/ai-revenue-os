@@ -178,6 +178,61 @@ describe("createMemoryRepository", () => {
 });
 
 describe("createSupabaseMemoryPersistence", () => {
+  it("calls the authenticated promotion RPC with only scoped identifiers and flags", async () => {
+    vi.resetModules();
+    const rpc = vi.fn(async () => ({
+      data: { itemId: "proposal-1", factId: "fact-1", promoted: true, replayed: false },
+      error: null,
+    }));
+    const { createSupabaseMemoryPromotionTransactionPort } = await import(
+      "@/modules/memory/infrastructure/persistence"
+    );
+
+    const transactions = createSupabaseMemoryPromotionTransactionPort({
+      rpc,
+    } as never);
+    const result = await transactions.confirmProposal({
+      organizationId: "org-1",
+      actorId: "actor-1",
+      itemId: "proposal-1",
+      overrideVerified: true,
+      idempotencyKey: "promotion-key-1",
+      correlationId: "correlation-1",
+    });
+
+    expect(result).toEqual({
+      itemId: "proposal-1",
+      factId: "fact-1",
+      promoted: true,
+      replayed: false,
+    });
+    expect(rpc).toHaveBeenCalledWith("confirm_memory_fact_proposal", {
+      p_organization_id: "org-1",
+      p_actor_id: "actor-1",
+      p_item_id: "proposal-1",
+      p_override_verified: true,
+      p_idempotency_key: "promotion-key-1",
+      p_correlation_id: "correlation-1",
+    });
+
+    await transactions.rejectProposal({
+      organizationId: "org-1",
+      actorId: "actor-1",
+      itemId: "proposal-1",
+      reason: "The source is stale.",
+      idempotencyKey: "rejection-key-1",
+      correlationId: "correlation-2",
+    });
+    expect(rpc).toHaveBeenLastCalledWith("reject_memory_proposal", {
+      p_organization_id: "org-1",
+      p_actor_id: "actor-1",
+      p_item_id: "proposal-1",
+      p_reason: "The source is stale.",
+      p_idempotency_key: "rejection-key-1",
+      p_correlation_id: "correlation-2",
+    });
+  });
+
   it("projects a validated provider record through the scoped atomic RPC", async () => {
     vi.resetModules();
     const rpc = vi.fn(async () => ({ data: null, error: null }));
