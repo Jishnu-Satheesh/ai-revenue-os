@@ -14,7 +14,7 @@ The sidebar's account-wide navigation is limited to **Overview**. On an organiza
 
 The group order is fixed:
 
-1. **Dashboard** — links to `/organizations/[organizationId]/dashboard`.
+1. **Dashboard** — links to **digital twin** and rename the route to `/organizations/[organizationId]/dashboard` and function name to Dashboard too.
 2. **Campaigns** — disabled and marked **Soon**.
 3. **Agents** — disabled and marked **Soon**.
 4. **Executions** — disabled and marked **Soon**.
