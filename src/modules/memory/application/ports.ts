@@ -175,6 +175,7 @@ export type MemoryItemStateUpdate = {
   superseded_by_id?: string | null;
   superseded_at?: string | null;
   supersession_reason?: string | null;
+  embedding_status?: EmbeddingStatus;
   title?: string;
   body?: string | null;
 };

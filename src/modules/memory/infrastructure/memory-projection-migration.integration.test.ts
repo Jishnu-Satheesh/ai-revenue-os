@@ -15,7 +15,10 @@ function projectionMigration(): string {
 }
 
 function projectionPgtapTest(): string {
-  return readFileSync(resolve(databaseTestsDirectory, "business_memory_projection_test.sql"), "utf8");
+  return readFileSync(
+    resolve(databaseTestsDirectory, "business_memory_projection_test.sql"),
+    "utf8",
+  );
 }
 
 describe("Business Memory projection migration contract", () => {
@@ -24,7 +27,9 @@ describe("Business Memory projection migration contract", () => {
 
     expect(sql).toContain("create unique index memory_items_open_fact_proposal_idx");
     expect(sql).toContain("nulls not distinct");
-    expect(sql).toContain("create or replace function public.project_google_business_profile_record");
+    expect(sql).toContain(
+      "create or replace function public.project_google_business_profile_record",
+    );
     expect(sql).toContain("security definer");
     expect(sql).toContain("set search_path = ''");
     expect(sql).toContain("from public.integration_ingestion_runs");
@@ -32,7 +37,9 @@ describe("Business Memory projection migration contract", () => {
     expect(sql).toContain("on conflict (organization_id, source_system, source_record_id)");
     expect(sql).toContain("on conflict (organization_id, proposed_branch_id, proposed_fact_key)");
     expect(sql).toContain("revoke all on function public.project_google_business_profile_record");
-    expect(sql).toContain("grant execute on function public.project_google_business_profile_record");
+    expect(sql).toContain(
+      "grant execute on function public.project_google_business_profile_record",
+    );
     expect(sql).toContain("to service_role");
   });
 
@@ -40,13 +47,15 @@ describe("Business Memory projection migration contract", () => {
     const sql = projectionMigration();
 
     const pgtap = projectionPgtapTest();
-    expect(pgtap).toContain("select extensions.plan(11);");
-    expect(pgtap.match(/extensions\.(?:lives_ok|is|throws_ok)\(/g)).toHaveLength(11);
+    expect(pgtap).toContain("select extensions.plan(12);");
+    expect(pgtap.match(/extensions\.(?:lives_ok|is|throws_ok)\(/g)).toHaveLength(12);
     expect(sql).toContain("verification_state = case");
     expect(sql).toContain("verified_by = case");
     expect(sql).toContain("verified_at = case");
     expect(sql).toContain("rejection_reason = case");
-    expect(sql).toContain("memory_items.structured_value is not distinct from excluded.structured_value");
+    expect(sql).toContain(
+      "memory_items.structured_value is not distinct from excluded.structured_value",
+    );
     expect(sql).toContain("then memory_items.verification_state else 'unverified' end");
   });
 });

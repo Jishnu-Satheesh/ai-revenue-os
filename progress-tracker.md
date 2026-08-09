@@ -7,7 +7,7 @@
 - Date: 2026-08-09
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation, Organization + Digital Twin vertical slice, and the Integration Hub V1 runtime.
-- Current active work: Business Memory V1, on branch `feat/business-memory`. Plan tasks 1-7 and 11 of 17 are implemented, verified, and committed; tasks 8-10 and 12-17 (Redis cache, cached retrieval, fact promotion, workers, rebuild cron, API routes, workspace UI, E2E) are not started. The Integration Hub now projects Google Business Profile fixture records into Business Memory and honestly rejects CSV rows pending the Data Ingestion slice. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
+- Current active work: Business Memory V1, on branch `feat/business-memory`. Plan tasks 1-7, 11, and 12 of 17 are implemented, reviewed, verified, and committed; tasks 8-10 and 13-17 (Redis cache, cached retrieval, fact promotion, rebuild cron, API routes, workspace UI, E2E) are not started. The Integration Hub now projects Google Business Profile fixture records into Business Memory and honestly rejects CSV rows pending the Data Ingestion slice. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
 - Current implementation plan: `docs/superpowers/plans/2026-08-09-business-memory-implementation.md`.
@@ -123,6 +123,10 @@ Active implementation work is Business Memory V1. Resume at **Task 8** of
 `specs/004-business-memory.md`, `adrs/0011-business-memory-read-through-facts.md`, and
 `adrs/0012-business-memory-cache-boundary.md` first. The plan has seventeen tasks.
 Tasks 8, 9, and 13 need a Redis instance, and all three must also pass with `REDIS_URL` unset.
+
+Task 12 embedding and expiry workers are complete and committed. Their migrations remain staging-gated
+until the database password/security gates are cleared; local pgTAP execution is unavailable without a
+container runtime.
 
 Everything below is an Integration Hub release gate that needs credentials or a database runtime,
 not further implementation. Gates 1 and 2 also block the Business Memory migrations.

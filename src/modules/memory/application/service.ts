@@ -244,6 +244,7 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
           patch: {
             verification_state: "rejected",
             rejection_reason: input.body.reason ?? null,
+            embedding_status: "skipped",
           },
         });
         await publish(input.organizationId, input.actor, "memory.item_rejected", {

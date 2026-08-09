@@ -22,3 +22,20 @@ export function createIntegrationWorkerServiceClient(): SupabaseClient<Database>
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 }
+
+/**
+ * Trigger worker-only client for Business Memory. This must only be created
+ * after the task payload has passed its strict UUID validation.
+ */
+export function createMemoryWorkerServiceClient(): SupabaseClient<Database> {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new IntegrationError(
+      "FEATURE_NOT_AVAILABLE",
+      "Memory workers are not configured.",
+      false,
+    );
+  }
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}

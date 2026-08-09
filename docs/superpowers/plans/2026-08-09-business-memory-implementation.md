@@ -613,21 +613,21 @@ export type MemoryWorkerDependencies = {
 
 - Produces: the three tasks in `MemoryTaskName`, each with a testable runner separate from its Trigger.dev registration
 
-- [ ] **Step 1: Write failing worker tests.**
+- [x] **Step 1: Write failing worker tests.**
 
   Assert that `embed-items` claims at most 64 pending rows per run, writes `embedding`, `embedding_model`, and `embedding_updated_at` together, sets `failed` after exhausting bounded retries, emits `memory.embedding_failed`, and leaves a failed item lexically retrievable. Assert that `reembed-item` resets status on content change. Assert that `expire-items` sets `skipped` on newly expired and superseded rows and changes nothing else.
 
-- [ ] **Step 2: Run the tests and confirm they fail.**
+- [x] **Step 2: Run the tests and confirm they fail.**
 
-- [ ] **Step 3: Implement the runners** against `MemoryWorkerDependencies` only, keeping Trigger.dev imports inside `src/trigger/memory.ts`.
+- [x] **Step 3: Implement the runners** against `MemoryWorkerDependencies` only, keeping Trigger.dev imports inside `src/trigger/memory.ts`.
 
-- [ ] **Step 4: Validate `organizationId` inside every worker before using a privileged client,** and scope every query by organization.
+- [x] **Step 4: Validate `organizationId` inside every worker before using a privileged client,** and scope every query by organization.
 
-- [ ] **Step 5: Invalidate the organization after an embedding batch completes and after the expiry sweep,** once per batch rather than once per item. Expiry is the case write-driven invalidation would otherwise miss, because nothing but the clock changed.
+- [x] **Step 5: Invalidate the organization after an embedding batch completes and after the expiry sweep,** once per batch rather than once per item. Expiry is the case write-driven invalidation would otherwise miss, because nothing but the clock changed.
 
-- [ ] **Step 6: Run `pnpm vitest run src/workflows/memory src/trigger && pnpm typecheck && pnpm lint`.**
+- [x] **Step 6: Run `pnpm vitest run src/workflows/memory src/trigger && pnpm typecheck && pnpm lint`.**
 
-- [ ] **Step 7: Commit with `git commit -m "feat(memory): add embedding and expiry workers"`.**
+- [x] **Step 7: Commit with `git commit -m "feat(memory): add embedding and expiry workers"`.**
 
 ### Task 13: Snapshot cache and the daily rebuild schedule
 
@@ -834,8 +834,14 @@ These are environment gates, not implementation work. They inherit the two open 
 
 ## Implementation status (2026-08-09)
 
-Tasks 1 through 7 are implemented, verified, and committed on `feat/business-memory`.
-Tasks 8 through 10 and 12 through 17 are not started. Task 11 is implemented, reviewed, and committed.
+Tasks 1 through 7, 11, and 12 are implemented, reviewed, verified, and committed on `feat/business-memory`.
+Tasks 8 through 10 and 13 through 17 are not started.
+
+Task 12 adds tenant-scoped embedding leases and service-role-only batch-state/completion RPCs,
+revision-guarded embedding writes, cancellation-aware bounded retries, expiry/re-embedding workers,
+and a forward projection migration that resets vectors when provider content changes. Runtime pgTAP
+execution for the new migrations remains environment-gated because this workspace has no container
+runtime and the migrations have not been applied remotely.
 
 Environment notes for whoever continues:
 

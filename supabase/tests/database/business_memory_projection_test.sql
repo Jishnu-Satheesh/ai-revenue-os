@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(11);
+select extensions.plan(12);
 
 insert into auth.users (id)
 values
@@ -101,6 +101,17 @@ select extensions.is(
   'identical provider content preserves human verification'
 );
 
+update public.memory_items
+set embedding = (
+      '[' || pg_catalog.array_to_string(pg_catalog.array_fill(0::real, array[1536]), ',') || ']'
+    )::extensions.vector,
+    embedding_model = 'test-model',
+    embedding_status = 'ready',
+    embedding_updated_at = '2026-08-09T02:00:00Z'::timestamptz
+where organization_id = '27000000-0000-4000-8000-000000000001'::uuid
+  and memory_type = 'episode'
+  and source_record_id = 'locations/shared-opaque-id';
+
 select extensions.lives_ok(
   $$select public.project_google_business_profile_record(
     '27000000-0000-4000-8000-000000000001'::uuid,
@@ -121,6 +132,18 @@ select extensions.is(
      and memory_type = 'episode' and source_record_id = 'locations/shared-opaque-id'),
   true,
   'changed provider content clears human verification'
+);
+
+select extensions.is(
+  (select embedding is null
+          and embedding_model is null
+          and embedding_status = 'pending'
+          and embedding_updated_at is null
+   from public.memory_items
+   where organization_id = '27000000-0000-4000-8000-000000000001'::uuid
+     and memory_type = 'episode' and source_record_id = 'locations/shared-opaque-id'),
+  true,
+  'changed projection clears a ready embedding for reprocessing'
 );
 
 select extensions.is(

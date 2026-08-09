@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { embeddingTextFor } from "@/domain/memory/embedding-text";
 import { memoryError } from "@/domain/memory/errors";
 import { env } from "@/lib/env";
 
@@ -17,6 +18,7 @@ export type EmbeddingProvider = {
     organizationId: string;
     correlationId: string;
     texts: readonly string[];
+    signal?: AbortSignal;
   }): Promise<readonly (readonly number[])[]>;
 };
 
@@ -53,7 +55,7 @@ export function createEmbeddingProvider(options: ProviderOptions = {}): Embeddin
   return {
     model,
     dimensions: EMBEDDING_DIMENSIONS,
-    async embed({ texts }) {
+    async embed({ texts, signal }) {
       if (texts.length === 0) return [];
 
       const response = await doFetch("https://api.openai.com/v1/embeddings", {
@@ -63,7 +65,9 @@ export function createEmbeddingProvider(options: ProviderOptions = {}): Embeddin
           authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({ model, input: [...texts], dimensions: EMBEDDING_DIMENSIONS }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal
+          ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
+          : AbortSignal.timeout(timeoutMs),
       });
 
       if (!response.ok) {
@@ -98,7 +102,4 @@ export function createEmbeddingProvider(options: ProviderOptions = {}): Embeddin
   };
 }
 
-/** The text an item is embedded from. `structured_value` is never embedded. */
-export function embeddingTextFor(input: { title: string; body?: string | null }): string {
-  return [input.title, input.body ?? ""].join("\n\n").slice(0, 8_000).trim();
-}
+export { embeddingTextFor };

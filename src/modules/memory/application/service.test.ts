@@ -198,7 +198,7 @@ describe("createMemoryService", () => {
   });
 
   it("records the rejection reason without putting it in the event payload", async () => {
-    const { service, published } = createService();
+    const { service, published, updated } = createService();
 
     await service.updateItem({
       organizationId: ORGANIZATION_ID,
@@ -210,6 +210,7 @@ describe("createMemoryService", () => {
     const event = published.find((entry) => entry.eventName === "memory.item_rejected");
     expect(event?.payload).toMatchObject({ reasonProvided: true });
     expect(JSON.stringify(event?.payload)).not.toContain("The owner disagreed");
+    expect(updated[0]).toMatchObject({ patch: { embedding_status: "skipped" } });
   });
 
   it("never puts item content into an event payload", async () => {
