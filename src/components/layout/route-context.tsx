@@ -40,6 +40,7 @@ const segmentLabels: Readonly<Record<string, string>> = {
   onboarding: "Guided onboarding",
   "digital-twin": "Digital Twin",
   integrations: "Integrations",
+  memory: "Business Memory",
 };
 
 export type RouteCrumb = {

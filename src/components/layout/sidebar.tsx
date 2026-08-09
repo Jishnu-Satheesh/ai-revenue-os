@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bot,
   Boxes,
+  BrainCircuit,
   Building2,
   Cable,
   Compass,
@@ -64,6 +65,11 @@ function organizationNavigation(pathname: string) {
         icon: Compass,
       },
       { label: "Integrations", href: `/organizations/${organizationId}/integrations`, icon: Cable },
+      {
+        label: "Business Memory",
+        href: `/organizations/${organizationId}/memory`,
+        icon: BrainCircuit,
+      },
     ],
   };
 }
