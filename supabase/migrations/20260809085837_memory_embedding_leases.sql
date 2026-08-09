@@ -137,8 +137,18 @@ begin
     where lease.organization_id = item.organization_id
       and lease.item_id = item.id
       and lease.lease_expires_at <= pg_catalog.now()
+    -- A data-modifying CTE may only be referenced when it returns rows, and the
+    -- cross join below is what forces this delete to finish before the reclaim
+    -- inserts over the same primary key. Without the RETURNING the whole
+    -- function fails to plan at its first call (SQLSTATE 0A000), which would
+    -- leave every item unembedded and retrieval permanently lexical-only.
+    returning lease.item_id
   ), claimed as (
-    insert into public.memory_embedding_leases (
+    -- Aliased so RETURNING names the table rather than this function's
+    -- RETURNS TABLE columns; `organization_id`, `claim_token`, and
+    -- `item_revision` are output names too, and unqualified they resolve
+    -- ambiguously (SQLSTATE 42702) once the CTE above is referencable.
+    insert into public.memory_embedding_leases as claimed_lease (
       organization_id, item_id, idempotency_key, claim_token, item_revision, lease_expires_at
     )
     select
@@ -146,7 +156,11 @@ begin
       pg_catalog.now() + interval '10 minutes'
     from candidates item
     cross join (select count(*) from expired_leases) as expired
-    returning organization_id, item_id, claim_token, item_revision
+    returning
+      claimed_lease.organization_id,
+      claimed_lease.item_id,
+      claimed_lease.claim_token,
+      claimed_lease.item_revision
   )
   select
     item.id,

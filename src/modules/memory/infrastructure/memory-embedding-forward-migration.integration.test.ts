@@ -78,6 +78,22 @@ describe("Business Memory forward embedding migrations", () => {
     expect(sql).toContain("get_memory_embedding_batch_state");
   });
 
+  it("lets the expired-lease reclaim be referenced by the claim it sequences", () => {
+    const sql = embeddingLeaseMigration();
+
+    // PostgreSQL refuses to reference a data-modifying CTE that returns no rows
+    // (SQLSTATE 0A000). plpgsql plans lazily, so a missing RETURNING here does
+    // not fail the migration — it fails every claim at runtime instead, which
+    // silently pins retrieval to lexical-only mode.
+    const deleteAt = sql.indexOf("delete from public.memory_embedding_leases lease");
+    const crossJoinAt = sql.indexOf("cross join (select count(*) from expired_leases)");
+    const returningAt = sql.indexOf("returning lease.item_id");
+    expect(deleteAt).toBeGreaterThan(-1);
+    expect(crossJoinAt).toBeGreaterThan(-1);
+    expect(returningAt).toBeGreaterThan(deleteAt);
+    expect(returningAt).toBeLessThan(crossJoinAt);
+  });
+
   it("uses a memory-items-only strictly increasing revision trigger", () => {
     const sql = memoryItemRevisionMigration();
 

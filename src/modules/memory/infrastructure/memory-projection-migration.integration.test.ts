@@ -43,6 +43,28 @@ describe("Business Memory projection migration contract", () => {
     expect(sql).toContain("to service_role");
   });
 
+  it("collapses pre-existing duplicate open proposals before creating their unique index", () => {
+    const sql = projectionMigration();
+
+    // Ingestion predating this guard left several identical open proposals per
+    // fact key, which made the index uncreatable. The backfill must stay ahead
+    // of the index and in the same migration, or the push fails again on any
+    // database that still holds duplicates.
+    const backfillAt = sql.indexOf("update public.memory_items item");
+    const indexAt = sql.indexOf("create unique index memory_items_open_fact_proposal_idx");
+    expect(backfillAt).toBeGreaterThan(-1);
+    expect(backfillAt).toBeLessThan(indexAt);
+
+    expect(sql).toContain(
+      "partition by organization_id, proposed_branch_id, proposed_fact_key",
+    );
+    expect(sql).toContain("order by created_at desc, id desc");
+    // The correction is auditable: losing rows are rejected, never deleted.
+    expect(sql).toContain("verification_state = 'rejected'");
+    expect(sql).toContain("rejection_reason = 'Deduplicated:");
+    expect(sql).not.toMatch(/delete\s+from\s+public\.memory_items/i);
+  });
+
   it("counts its pgTAP assertions and resets human review only when provider content changes", () => {
     const sql = projectionMigration();
 

@@ -2,6 +2,30 @@
 -- `business_facts` remains read-only here; provider observations become an
 -- episode and (where different) a proposal for human confirmation.
 
+-- Provider ingestion ran before this guard existed, so an organization can
+-- already hold several identical open proposals for one fact key. The index
+-- below is also the ON CONFLICT arbiter for the projection function, so it must
+-- be creatable: collapse each group to its newest row first. The losers are
+-- rejected with a reason rather than deleted, because a correction that erases
+-- the records it corrected is not auditable. Rejected rows leave the partial
+-- index and the review queue while staying readable in the chain.
+with ranked as (
+  select
+    id,
+    row_number() over (
+      partition by organization_id, proposed_branch_id, proposed_fact_key
+      order by created_at desc, id desc
+    ) as duplicate_rank
+  from public.memory_items
+  where memory_type = 'fact_proposal' and verification_state = 'proposed'
+)
+update public.memory_items item
+set
+  verification_state = 'rejected',
+  rejection_reason = 'Deduplicated: an identical newer proposal for this fact key is open.'
+from ranked
+where ranked.id = item.id and ranked.duplicate_rank > 1;
+
 create unique index memory_items_open_fact_proposal_idx
   on public.memory_items (organization_id, proposed_branch_id, proposed_fact_key) nulls not distinct
   where memory_type = 'fact_proposal' and verification_state = 'proposed';
