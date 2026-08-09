@@ -1,15 +1,16 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { Building2, CircleDashed, GitBranch, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { ItemChainDialog } from "@/components/memory/item-chain-dialog";
-import { ProvenanceBadges } from "@/components/memory/provenance-badges";
+import { ProvenanceBadges, StatusLabel } from "@/components/memory/provenance-badges";
 import {
   invalidateMemoryQueries,
   memoryBasePath,
+  memoryItemQueryOptions,
   memoryRequest,
   useIdempotencyKey,
 } from "@/components/memory/query-options";
@@ -33,6 +34,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { hasMemoryPermission } from "@/domain/memory/permissions";
@@ -46,13 +48,23 @@ function renderFactValue(value: unknown): string {
 }
 
 /**
- * The proposed side of a fact proposal. The current Digital Twin value is
- * deliberately absent: no authenticated read available to the browser returns
- * it, and the item detail route carries only the proposal. Naming the gap is
- * the honest option; rendering a placeholder beside a real proposed value would
- * read as a comparison that was never made.
+ * Proposed value beside the value it would replace. The current side comes from
+ * the item detail route, which resolves it with the same identity the promotion
+ * RPC locks on, so what a reviewer compares is what confirmation would actually
+ * overwrite. An absent fact is stated as such rather than rendered blank.
  */
-function FactComparison({ item }: { item: MemoryItemView }) {
+function FactComparison({
+  organizationId,
+  item,
+}: {
+  organizationId: string;
+  item: MemoryItemView;
+}) {
+  const detailQuery = useQuery(
+    memoryItemQueryOptions({ organizationId, itemId: item.id, enabled: true }),
+  );
+  const currentFact = detailQuery.data?.currentFact ?? null;
+
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       <div className="rounded-md border p-2.5">
@@ -63,14 +75,37 @@ function FactComparison({ item }: { item: MemoryItemView }) {
           {renderFactValue(item.proposedFactValue)}
         </pre>
       </div>
-      <div className="rounded-md border border-dashed p-2.5">
+      <div className="rounded-md border p-2.5">
         <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
           Current value
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          The current value is not available in this view. Confirming writes the proposed value into
-          the Digital Twin.
-        </p>
+        {detailQuery.isPending ? (
+          <Skeleton className="mt-1 h-4 w-32 rounded" />
+        ) : detailQuery.isError ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            The current value could not be read, so this is not a comparison yet.
+          </p>
+        ) : currentFact ? (
+          <>
+            <pre className="mt-1 text-xs break-words whitespace-pre-wrap">
+              {renderFactValue(currentFact.value)}
+            </pre>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <StatusLabel
+                label={currentFact.status}
+                icon={currentFact.status === "verified" ? ShieldCheck : CircleDashed}
+              />
+              <StatusLabel
+                label={currentFact.branchScoped ? "Branch scoped" : "Organization wide"}
+                icon={currentFact.branchScoped ? GitBranch : Building2}
+              />
+            </div>
+          </>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">
+            No value is recorded yet. Confirming would create this fact.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -284,7 +319,7 @@ function ProposalRow({
         {isFactProposal ? (
           <div className="space-y-2">
             <p className="font-mono text-xs break-all">{item.proposedFactKey}</p>
-            <FactComparison item={item} />
+            <FactComparison organizationId={organizationId} item={item} />
           </div>
         ) : item.body ? (
           <p className="text-sm text-muted-foreground">{item.body}</p>

@@ -85,6 +85,12 @@ export type MemorySearchRow = {
   blended: number;
 };
 
+/** The minimum a branch filter needs. Never carries address or contact data. */
+export type MemoryBranchOption = {
+  id: string;
+  name: string;
+};
+
 export type BusinessFactRow = {
   id: string;
   organization_id: string;
@@ -227,6 +233,18 @@ export type MemoryPersistencePort = {
     includeExpired: boolean;
   }): Promise<MemoryItemRow[]>;
   getItem(input: { organizationId: string; itemId: string }): Promise<MemoryItemRow | null>;
+  /**
+   * The single current fact for one proposal identity. `branchId` is matched
+   * with null-equality so it mirrors the `is not distinct from` predicate the
+   * Task 10 promotion RPC locks on; a second, looser rule here would let the
+   * workspace show a comparison the promotion would not actually make.
+   */
+  getCurrentFact(input: {
+    organizationId: string;
+    factKey: string;
+    branchId: string | null;
+  }): Promise<BusinessFactRow | null>;
+  listBranchOptions(input: { organizationId: string }): Promise<MemoryBranchOption[]>;
   listTimeline(input: {
     organizationId: string;
     sensitivities: readonly Sensitivity[];

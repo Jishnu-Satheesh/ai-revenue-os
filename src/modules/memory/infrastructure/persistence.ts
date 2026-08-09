@@ -6,6 +6,7 @@ import { memoryError } from "@/domain/memory/errors";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
   BusinessFactRow,
+  MemoryBranchOption,
   MemoryItemRow,
   MemoryLinkRow,
   MemoryPersistencePort,
@@ -92,7 +93,12 @@ function databaseError(message: string, cause: unknown): never {
   throw memoryError("CONFLICT", {}, { message, cause });
 }
 
-type MemoryTable = "memory_items" | "memory_links" | "memory_retrieval_log" | "business_facts";
+type MemoryTable =
+  | "memory_items"
+  | "memory_links"
+  | "memory_retrieval_log"
+  | "business_facts"
+  | "branches";
 
 type FluentQuery = {
   eq(column: string, match: string): FluentQuery;
@@ -354,6 +360,23 @@ export function createSupabaseMemoryPersistence(
         .maybeSingle()) as { data: unknown; error: unknown };
       if (result.error) databaseError("The memory item could not be loaded.", result.error);
       return (result.data as MemoryItemRow | null) ?? null;
+    },
+
+    async getCurrentFact({ organizationId, factKey, branchId }) {
+      // Null-equality, not `eq`, so an organization-wide fact is never matched
+      // by a branch-scoped proposal or the other way round.
+      const base = scoped("business_facts", factColumns, organizationId).eq("fact_key", factKey);
+      const request = branchId === null ? base.is("branch_id", null) : base.eq("branch_id", branchId);
+      const result = (await request.maybeSingle()) as { data: unknown; error: unknown };
+      if (result.error) databaseError("The current fact could not be loaded.", result.error);
+      return (result.data as BusinessFactRow | null) ?? null;
+    },
+
+    async listBranchOptions({ organizationId }) {
+      return rows<MemoryBranchOption>(
+        scoped("branches", "id, name", organizationId).order("name", { ascending: true }),
+        "The organization's branches could not be loaded.",
+      );
     },
 
     async listTimeline({ organizationId, sensitivities, branchId, sourceSystems, limit, cursor }) {

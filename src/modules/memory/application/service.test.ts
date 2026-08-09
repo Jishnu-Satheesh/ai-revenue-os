@@ -74,8 +74,10 @@ function createService(
       return itemRow(input.patch as Partial<MemoryItemRow>);
     },
     listByTypes: async () => [],
-    listTimeline: async () => [],
+    listTimeline: async () => ({ items: [], hasMore: false }),
     listLinks: async () => [],
+    getCurrentFact: async () => null,
+    listBranchOptions: async () => [],
     countsFor: async () => ({
       byType: {},
       byVerificationState: {},
@@ -1002,5 +1004,195 @@ describe("createMemoryService", () => {
       },
     ]);
     expect(detail.links.map((link) => link.relatedItemId)).not.toContain("cross-tenant-item");
+  });
+});
+
+describe("Business Memory review contracts", () => {
+  const operatorActor = { userId: "user-1", role: "operator" as const };
+
+  function proposalRow() {
+    return itemRow({
+      id: "22222222-2222-4222-8222-222222222299",
+      memory_type: "fact_proposal",
+      verification_state: "proposed",
+      proposed_fact_key: "google_business_profile.location.phone",
+      proposed_fact_value: "+49 30 1234567",
+      proposed_branch_id: null,
+    });
+  }
+
+  it("offers a cursor only when the repository saw a further page", async () => {
+    const rows = [
+      itemRow({ id: "a", observed_at: "2026-08-09T10:00:00.000Z" }),
+      itemRow({ id: "b", observed_at: "2026-08-09T09:00:00.000Z" }),
+    ];
+    const { service } = createService({
+      listTimeline: async () => ({ items: rows, hasMore: true }),
+    } as never);
+
+    const page = await service.listTimeline({
+      organizationId: ORGANIZATION_ID,
+      actor: operatorActor,
+      limit: 2,
+    });
+
+    expect(page.items).toHaveLength(2);
+    // The cursor is the last row the caller received, never the look-ahead row.
+    expect(page.nextCursor).toEqual({
+      observedAt: "2026-08-09T09:00:00.000Z",
+      createdAt: "2026-08-09T00:00:00.000Z",
+      id: "b",
+    });
+  });
+
+  it("omits the cursor on a final short page", async () => {
+    const { service } = createService({
+      listTimeline: async () => ({ items: [itemRow({ id: "only" })], hasMore: false }),
+    } as never);
+
+    const page = await service.listTimeline({
+      organizationId: ORGANIZATION_ID,
+      actor: operatorActor,
+      limit: 50,
+    });
+
+    expect(page.items).toHaveLength(1);
+    expect(page.nextCursor).toBeUndefined();
+  });
+
+  it("reads the current fact with the promotion rule's own identity", async () => {
+    const lookups: unknown[] = [];
+    const { service } = createService({
+      getItemDetail: async () => ({ item: proposalRow(), chain: [], links: [] }),
+      getCurrentFact: async (input: unknown) => {
+        lookups.push(input);
+        return {
+          id: "fact-1",
+          organization_id: ORGANIZATION_ID,
+          branch_id: null,
+          fact_key: "google_business_profile.location.phone",
+          value: "+49 30 7654321",
+          source: "provider_import",
+          source_reference: null,
+          status: "verified",
+          confidence: 0.9,
+          effective_from: null,
+          effective_to: null,
+          last_verified_at: "2026-08-01T00:00:00.000Z",
+          updated_at: "2026-08-02T00:00:00.000Z",
+        };
+      },
+    } as never);
+
+    const detail = await service.getItemDetail({
+      organizationId: ORGANIZATION_ID,
+      actor: operatorActor,
+      itemId: "22222222-2222-4222-8222-222222222299",
+    });
+
+    expect(lookups).toEqual([
+      {
+        organizationId: ORGANIZATION_ID,
+        factKey: "google_business_profile.location.phone",
+        branchId: null,
+      },
+    ]);
+    expect(detail.currentFact).toEqual({
+      factKey: "google_business_profile.location.phone",
+      value: "+49 30 7654321",
+      branchId: null,
+      branchScoped: false,
+      status: "verified",
+      confidence: 0.9,
+      lastVerifiedAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+    });
+  });
+
+  it("returns an explicit null when a proposal has no current fact", async () => {
+    const { service } = createService({
+      getItemDetail: async () => ({ item: proposalRow(), chain: [], links: [] }),
+      getCurrentFact: async () => null,
+    } as never);
+
+    const detail = await service.getItemDetail({
+      organizationId: ORGANIZATION_ID,
+      actor: operatorActor,
+      itemId: "22222222-2222-4222-8222-222222222299",
+    });
+
+    expect(detail.currentFact).toBeNull();
+  });
+
+  it("never reads a fact for an item that is not a fact proposal", async () => {
+    let called = false;
+    const { service } = createService({
+      getItemDetail: async () => ({ item: itemRow(), chain: [], links: [] }),
+      getCurrentFact: async () => {
+        called = true;
+        return null;
+      },
+    } as never);
+
+    const detail = await service.getItemDetail({
+      organizationId: ORGANIZATION_ID,
+      actor: operatorActor,
+      itemId: "22222222-2222-4222-8222-222222222221",
+    });
+
+    expect(called).toBe(false);
+    expect(detail.currentFact).toBeNull();
+  });
+
+  it("scopes the branch-scoped identity to the proposal's own branch", async () => {
+    const lookups: unknown[] = [];
+    const { service } = createService({
+      getItemDetail: async () => ({
+        item: itemRow({
+          memory_type: "fact_proposal",
+          verification_state: "proposed",
+          proposed_fact_key: "google_business_profile.location.hours",
+          proposed_fact_value: { mon: "09:00" },
+          proposed_branch_id: "55555555-5555-4555-8555-555555555555",
+        }),
+        chain: [],
+        links: [],
+      }),
+      getCurrentFact: async (input: unknown) => {
+        lookups.push(input);
+        return null;
+      },
+    } as never);
+
+    await service.getItemDetail({
+      organizationId: ORGANIZATION_ID,
+      actor: operatorActor,
+      itemId: "22222222-2222-4222-8222-222222222221",
+    });
+
+    expect(lookups).toEqual([
+      {
+        organizationId: ORGANIZATION_ID,
+        factKey: "google_business_profile.location.hours",
+        branchId: "55555555-5555-4555-8555-555555555555",
+      },
+    ]);
+  });
+
+  it("supplies branch options with the snapshot", async () => {
+    const { service } = createService({
+      listBranchOptions: async () => [
+        { id: "55555555-5555-4555-8555-555555555555", name: "Central kitchen" },
+      ],
+    } as never);
+
+    const snapshot = await service.getSnapshot({
+      organizationId: ORGANIZATION_ID,
+      actor: operatorActor,
+    });
+
+    expect(snapshot.branches).toEqual([
+      { id: "55555555-5555-4555-8555-555555555555", name: "Central kitchen" },
+    ]);
   });
 });

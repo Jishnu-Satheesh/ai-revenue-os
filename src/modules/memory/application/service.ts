@@ -18,7 +18,12 @@ import type {
   UpdateMemoryItemInput,
 } from "@/modules/memory/application/api-schemas";
 import type { TimelineCursor } from "@/modules/memory/application/api-schemas";
-import type { MemoryItemRow, MemorySnapshotCounts } from "@/modules/memory/application/ports";
+import type {
+  BusinessFactRow,
+  MemoryBranchOption,
+  MemoryItemRow,
+  MemorySnapshotCounts,
+} from "@/modules/memory/application/ports";
 import type { MemoryRepository } from "@/modules/memory/infrastructure/repository";
 
 export type MemoryTransactionPort = {
@@ -157,6 +162,8 @@ export type MemorySnapshot = {
   counts: MemorySnapshotCounts;
   recent: MemoryItemView[];
   reviewQueue: MemoryItemView[];
+  /** Branch filter options, read under the caller's own RLS context. */
+  branches: MemoryBranchOption[];
   ceiling: Sensitivity;
   serverTime: string;
 };
@@ -168,11 +175,44 @@ export type MemoryLinkView = {
   relatedItemId: string;
 };
 
+/**
+ * The comparison side of a fact proposal. It is a deliberate projection of
+ * `business_facts`, not the row: ownership columns, the internal source
+ * reference, and the surrogate id stay server-side because a reviewer needs to
+ * judge the value, not to address the record.
+ */
+export type MemoryCurrentFactView = {
+  factKey: string;
+  value: unknown;
+  branchId: string | null;
+  branchScoped: boolean;
+  status: string;
+  confidence?: number;
+  lastVerifiedAt?: string;
+  updatedAt: string;
+};
+
 export type MemoryItemDetail = {
   item: MemoryItemView;
   chain: readonly MemoryItemView[];
   links: readonly MemoryLinkView[];
+  /** Null for a non-proposal, and for a proposal with no fact recorded yet. */
+  currentFact: MemoryCurrentFactView | null;
 };
+
+export function toCurrentFactView(row: BusinessFactRow | null): MemoryCurrentFactView | null {
+  if (!row) return null;
+  return {
+    factKey: row.fact_key,
+    value: row.value,
+    branchId: row.branch_id,
+    branchScoped: row.branch_id !== null,
+    status: row.status,
+    confidence: row.confidence ?? undefined,
+    lastVerifiedAt: row.last_verified_at ?? undefined,
+    updatedAt: row.updated_at,
+  };
+}
 
 export function toMemoryItemView(row: MemoryItemRow, now: Date): MemoryItemView {
   const freshness = deriveFreshness({
@@ -532,7 +572,7 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       const sensitivities = sensitivitiesWithinCeiling(ceiling);
       const evaluatedAt = now();
 
-      const [counts, recent, reviewQueue] = await Promise.all([
+      const [counts, recent, reviewQueue, branches] = await Promise.all([
         dependencies.repository.countsFor({ organizationId: input.organizationId }),
         dependencies.repository.listByTypes({
           organizationId: input.organizationId,
@@ -556,12 +596,14 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
           verificationStates: ["proposed"],
           limit: 50,
         }),
+        dependencies.repository.listBranchOptions({ organizationId: input.organizationId }),
       ]);
 
       return {
         counts,
         recent: recent.map((row) => toMemoryItemView(row, evaluatedAt)),
         reviewQueue: reviewQueue.map((row) => toMemoryItemView(row, evaluatedAt)),
+        branches,
         ceiling,
         serverTime: evaluatedAt.toISOString(),
       };
@@ -577,7 +619,7 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
     }): Promise<{ items: MemoryItemView[]; nextCursor?: TimelineCursor }> {
       assertMemoryPermission(input.actor, "memory.read");
       const evaluatedAt = now();
-      const rows = await dependencies.repository.listTimeline({
+      const { items, hasMore } = await dependencies.repository.listTimeline({
         organizationId: input.organizationId,
         sensitivities: sensitivitiesWithinCeiling(operatorCeiling(input.actor)),
         branchId: input.branchId,
@@ -585,16 +627,20 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
         limit: input.limit,
         cursor: input.cursor,
       });
-      const final = rows.at(-1);
+      // The cursor addresses the last row the caller actually received, so the
+      // next page resumes exactly where this one ended. It is withheld unless a
+      // further page exists, because a cursor is a promise that one does.
+      const final = items.at(-1);
       return {
-        items: rows.map((row) => toMemoryItemView(row, evaluatedAt)),
-        nextCursor: final
-          ? {
-              observedAt: final.observed_at,
-              createdAt: final.created_at,
-              id: final.id,
-            }
-          : undefined,
+        items: items.map((row) => toMemoryItemView(row, evaluatedAt)),
+        nextCursor:
+          hasMore && final
+            ? {
+                observedAt: final.observed_at,
+                createdAt: final.created_at,
+                id: final.id,
+              }
+            : undefined,
       };
     },
 
@@ -649,10 +695,24 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       });
       if (!detail) throw memoryError("NOT_FOUND");
       const evaluatedAt = now();
+      // A reviewer confirming a fact proposal is about to overwrite whatever
+      // the Digital Twin holds today, so the comparison is read here under the
+      // same authenticated client and the same identity the promotion locks on.
+      const currentFact =
+        detail.item.memory_type === "fact_proposal" && detail.item.proposed_fact_key
+          ? toCurrentFactView(
+              await dependencies.repository.getCurrentFact({
+                organizationId: input.organizationId,
+                factKey: detail.item.proposed_fact_key,
+                branchId: detail.item.proposed_branch_id ?? null,
+              }),
+            )
+          : null;
       return {
         item: toMemoryItemView(detail.item, evaluatedAt),
         chain: detail.chain.map((row) => toMemoryItemView(row, evaluatedAt)),
         links: detail.links,
+        currentFact,
       };
     },
   };

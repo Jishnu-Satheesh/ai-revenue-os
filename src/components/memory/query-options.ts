@@ -180,13 +180,13 @@ export function memorySearchQueryOptions(input: {
 }
 
 /**
- * Timeline filters the route actually parses. `branchId` is accepted by the
- * contract but deliberately unused here: nothing the browser can read lists an
- * organization's branches, and `MemoryItemView` carries no `branchId` to derive
- * them from, so offering the control would mean inventing its options.
+ * Timeline filters the route actually parses. Branch options come from the
+ * authenticated snapshot, so the control offers only branches this reader can
+ * already see rather than any value the route would accept.
  */
 export type MemoryTimelineFilters = {
   sourceSystems: readonly string[];
+  branchId?: string;
   limit?: number;
 };
 
@@ -196,7 +196,11 @@ export type MemoryTimelinePage = {
 };
 
 export function hashTimelineFilters(filters: MemoryTimelineFilters): string {
-  return JSON.stringify([[...filters.sourceSystems].sort(), filters.limit ?? null]);
+  return JSON.stringify([
+    [...filters.sourceSystems].sort(),
+    filters.branchId ?? null,
+    filters.limit ?? null,
+  ]);
 }
 
 export function memoryTimelineQueryOptions(input: {
@@ -210,6 +214,7 @@ export function memoryTimelineQueryOptions(input: {
       const search = new URLSearchParams();
       search.set("limit", String(filters.limit ?? 50));
       for (const sourceSystem of filters.sourceSystems) search.append("sourceSystem", sourceSystem);
+      if (filters.branchId) search.set("branchId", filters.branchId);
       if (pageParam) search.set("cursor", pageParam);
       return memoryRequest<MemoryTimelinePage>(
         `${memoryBasePath(organizationId)}/timeline?${search.toString()}`,

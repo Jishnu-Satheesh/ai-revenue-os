@@ -86,6 +86,7 @@ function snapshot(overrides: Partial<MemorySnapshot> = {}): MemorySnapshot {
     },
     recent: [],
     reviewQueue: [],
+    branches: [],
     ceiling: "confidential",
     serverTime,
     ...overrides,
@@ -137,6 +138,7 @@ function itemDetail(): MemoryItemDetail {
         relatedItemId: supersededItemId,
       },
     ],
+    currentFact: null,
   };
 }
 

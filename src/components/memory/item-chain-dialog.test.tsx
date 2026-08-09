@@ -75,7 +75,7 @@ function searchResult(): MemoryRetrievalResult {
 
 function detailFor(itemId: string): MemoryItemDetail {
   if (itemId === historicalId) {
-    return { item: historicalView, chain: [itemView()], links: [] };
+    return { item: historicalView, chain: [itemView()], links: [], currentFact: null };
   }
   return {
     item: itemView(),
@@ -88,6 +88,7 @@ function detailFor(itemId: string): MemoryItemDetail {
         relatedItemId: historicalId,
       },
     ],
+    currentFact: null,
   };
 }
 

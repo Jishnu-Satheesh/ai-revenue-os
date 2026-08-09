@@ -1,6 +1,8 @@
 import { memoryError } from "@/domain/memory/errors";
 import type { PersistableMemoryType, Sensitivity } from "@/domain/memory/types";
 import type {
+  BusinessFactRow,
+  MemoryBranchOption,
   MemoryItemInsert,
   MemoryItemRow,
   MemoryItemStateUpdate,
@@ -65,7 +67,13 @@ export type MemoryRepository = {
     sourceSystems?: readonly string[];
     limit: number;
     cursor?: TimelineCursor;
-  }): Promise<MemoryItemRow[]>;
+  }): Promise<{ items: MemoryItemRow[]; hasMore: boolean }>;
+  getCurrentFact(input: {
+    organizationId: string;
+    factKey: string;
+    branchId: string | null;
+  }): Promise<BusinessFactRow | null>;
+  listBranchOptions(input: { organizationId: string }): Promise<MemoryBranchOption[]>;
   getItemDetail(input: {
     organizationId: string;
     itemId: string;
@@ -141,8 +149,23 @@ export function createMemoryRepository(persistence: MemoryPersistencePort): Memo
 
     async listTimeline(input) {
       requireOrganizationId(input.organizationId);
-      if (input.sensitivities.length === 0) return [];
-      return persistence.listTimeline({ ...input, limit: cap(input.limit, MAX_TIMELINE_LIMIT) });
+      if (input.sensitivities.length === 0) return { items: [], hasMore: false };
+      const pageSize = cap(input.limit, MAX_TIMELINE_LIMIT);
+      // One row past the page is the only reliable "is there more" signal: the
+      // ordering key is a composite, so a count would need a second scan and a
+      // cursor alone cannot tell a full page from the last one.
+      const rows = await persistence.listTimeline({ ...input, limit: pageSize + 1 });
+      return { items: rows.slice(0, pageSize), hasMore: rows.length > pageSize };
+    },
+
+    async getCurrentFact(input) {
+      requireOrganizationId(input.organizationId);
+      return persistence.getCurrentFact(input);
+    },
+
+    async listBranchOptions(input) {
+      requireOrganizationId(input.organizationId);
+      return persistence.listBranchOptions(input);
     },
 
     async getItemDetail(input) {

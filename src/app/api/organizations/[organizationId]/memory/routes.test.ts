@@ -448,3 +448,153 @@ describe("Business Memory API routes", () => {
     });
   });
 });
+
+describe("Business Memory review contract routes", () => {
+  it("round-trips a cursor carrying a PostgreSQL timestamp offset", async () => {
+    const cursor = {
+      observedAt: "2026-08-09T10:00:00.000+02:00",
+      createdAt: "2026-08-09T08:00:00.000+00:00",
+      id: itemId,
+    };
+    mocks.service.listTimeline.mockResolvedValueOnce({ items: [], nextCursor: cursor });
+
+    const first = await getTimeline(
+      new Request("http://localhost/memory/timeline?limit=2"),
+      organizationParams(),
+    );
+    const firstBody = (await first.json()) as { nextCursor?: string };
+    expect(first.status).toBe(200);
+    expect(typeof firstBody.nextCursor).toBe("string");
+
+    // The encoded cursor must be accepted back verbatim by the same route.
+    mocks.service.listTimeline.mockResolvedValueOnce({ items: [] });
+    const second = await getTimeline(
+      new Request(
+        `http://localhost/memory/timeline?limit=2&cursor=${encodeURIComponent(firstBody.nextCursor!)}`,
+      ),
+      organizationParams(),
+    );
+
+    expect(second.status).toBe(200);
+    expect(mocks.service.listTimeline).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cursor }),
+    );
+    expect(await second.json()).not.toHaveProperty("nextCursor");
+  });
+
+  it("omits nextCursor entirely when the service reports the final page", async () => {
+    mocks.service.listTimeline.mockResolvedValueOnce({ items: [], nextCursor: undefined });
+
+    const response = await getTimeline(
+      new Request("http://localhost/memory/timeline"),
+      organizationParams(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty("nextCursor");
+  });
+
+  it("returns the current fact beside a proposal without leaking raw fact columns", async () => {
+    mocks.service.getItemDetail.mockResolvedValueOnce({
+      item: { id: itemId, title: "Proposed phone", memoryType: "fact_proposal" },
+      chain: [],
+      links: [],
+      currentFact: {
+        factKey: "google_business_profile.location.phone",
+        value: "+49 30 7654321",
+        branchId: null,
+        branchScoped: false,
+        status: "verified",
+        confidence: 0.9,
+        lastVerifiedAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+      },
+    });
+
+    const response = await getItem(new Request("http://localhost/memory/items/x"), itemParams());
+    const body = (await response.json()) as { currentFact: Record<string, unknown> };
+
+    expect(response.status).toBe(200);
+    expect(body.currentFact).toMatchObject({ status: "verified", branchScoped: false });
+    // Ownership and internal source columns stay server-side.
+    for (const leaked of ["created_by", "updated_by", "id", "source_reference", "organization_id"]) {
+      expect(body.currentFact).not.toHaveProperty(leaked);
+    }
+  });
+
+  it("passes a null current fact straight through", async () => {
+    mocks.service.getItemDetail.mockResolvedValueOnce({
+      item: { id: itemId, title: "Proposed phone", memoryType: "fact_proposal" },
+      chain: [],
+      links: [],
+      currentFact: null,
+    });
+
+    const response = await getItem(new Request("http://localhost/memory/items/x"), itemParams());
+
+    expect(await response.json()).toMatchObject({ currentFact: null });
+  });
+
+  it("exposes branch options through the authenticated snapshot only", async () => {
+    mocks.service.getSnapshot.mockResolvedValueOnce({
+      counts: {
+        byType: {},
+        byVerificationState: {},
+        bySensitivity: {},
+        reviewQueueDepth: 0,
+        embeddingBacklog: 0,
+        total: 0,
+      },
+      recent: [],
+      reviewQueue: [],
+      branches: [{ id: "55555555-5555-4555-8555-555555555555", name: "Central kitchen" }],
+      ceiling: "internal",
+      serverTime: "2026-08-09T00:00:00.000Z",
+    });
+
+    const response = await getSnapshot(new Request("http://localhost/memory"), organizationParams());
+    const body = (await response.json()) as { snapshot: { branches: unknown[] } };
+
+    expect(response.status).toBe(200);
+    expect(body.snapshot.branches).toEqual([
+      { id: "55555555-5555-4555-8555-555555555555", name: "Central kitchen" },
+    ]);
+  });
+
+  it("refuses branch options and item detail to a non-member before any read", async () => {
+    mocks.getOrganizationContext.mockRejectedValueOnce(
+      new DomainError("AUTHORIZATION_ERROR", "You do not have access to this organization."),
+    );
+    const snapshotResponse = await getSnapshot(
+      new Request("http://localhost/memory"),
+      organizationParams(),
+    );
+
+    mocks.getOrganizationContext.mockRejectedValueOnce(
+      new DomainError("AUTHORIZATION_ERROR", "You do not have access to this organization."),
+    );
+    const detailResponse = await getItem(
+      new Request("http://localhost/memory/items/x"),
+      itemParams(),
+    );
+
+    expect(snapshotResponse.status).toBe(403);
+    expect(detailResponse.status).toBe(403);
+    expect(mocks.service.getSnapshot).not.toHaveBeenCalled();
+    expect(mocks.service.getItemDetail).not.toHaveBeenCalled();
+  });
+
+  it("maps a cross-tenant fact proposal to a safe 404", async () => {
+    mocks.service.getItemDetail.mockRejectedValueOnce(
+      new MemoryError("TENANT_SCOPE_ERROR", "business_facts row 9f2 belongs to organization beta"),
+    );
+
+    const response = await getItem(new Request("http://localhost/memory/items/x"), itemParams());
+    const body = (await response.json()) as { error: { message: string } };
+
+    expect(response.status).toBe(404);
+    // The safe envelope replaces the thrown text; no internal cause escapes.
+    expect(body.error.message).not.toContain("business_facts");
+    expect(body.error.message).not.toContain("organization beta");
+  });
+});

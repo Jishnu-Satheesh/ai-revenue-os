@@ -18,11 +18,19 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { Freshness, Sensitivity, VerificationState } from "@/domain/memory/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
+import type { MemoryBranchOption } from "@/modules/memory/application/ports";
 import type { MemoryItemView } from "@/modules/memory/application/service";
 
 function formatObserved(item: MemoryItemView): string {
@@ -33,18 +41,26 @@ function formatObserved(item: MemoryItemView): string {
   return item.observedAt ? `Observed ${label}` : `Recorded ${label}`;
 }
 
+const ALL_BRANCHES = "__all_branches__";
+
 export function TimelineTab({
   organizationId,
   role,
   ceiling,
+  branches,
 }: {
   organizationId: string;
   role: OrganizationRole;
   ceiling: Sensitivity;
+  branches: readonly MemoryBranchOption[];
 }) {
   const [sourceSystems, setSourceSystems] = useState<string[]>([]);
+  const [branch, setBranch] = useState<string>(ALL_BRANCHES);
   const timelineQuery = useInfiniteQuery(
-    memoryTimelineQueryOptions({ organizationId, filters: { sourceSystems } }),
+    memoryTimelineQueryOptions({
+      organizationId,
+      filters: { sourceSystems, branchId: branch === ALL_BRANCHES ? undefined : branch },
+    }),
   );
 
   const items = useMemo(
@@ -52,10 +68,9 @@ export function TimelineTab({
     [timelineQuery.data],
   );
 
-  // The filter offers only source systems the loaded rows actually carry. The
-  // timeline contract also accepts a branch filter, but nothing readable by the
-  // browser lists this organization's branches and `MemoryItemView` has no
-  // branch field, so a branch control would have to invent its own options.
+  // The source filter offers only systems the loaded rows actually carry; the
+  // branch filter offers only branches the snapshot returned under this
+  // reader's own RLS context. Neither invents an option.
   const availableSources = useMemo(() => {
     const present = new Set<string>(sourceSystems);
     for (const item of items) if (item.sourceSystem) present.add(item.sourceSystem);
@@ -65,6 +80,24 @@ export function TimelineTab({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {branches.length > 0 ? (
+          <>
+            <Label className="shrink-0 text-xs text-muted-foreground">Branch</Label>
+            <Select value={branch} onValueChange={setBranch}>
+              <SelectTrigger size="sm" aria-label="Branch" className="w-48 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_BRANCHES}>All branches</SelectItem>
+                {branches.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        ) : null}
         <Label className="shrink-0 text-xs text-muted-foreground">Source</Label>
         {availableSources.length > 0 ? (
           <ToggleGroup

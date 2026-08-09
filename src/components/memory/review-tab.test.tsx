@@ -67,6 +67,7 @@ function snapshot(overrides: Partial<MemorySnapshot> = {}): MemorySnapshot {
     },
     recent: [],
     reviewQueue: [factProposal()],
+    branches: [],
     ceiling: "confidential",
     serverTime,
     ...overrides,
@@ -121,6 +122,7 @@ function mockApi(routes: Routes = {}) {
           }),
           chain: [],
           links: [],
+          currentFact: null,
         },
       );
     }
@@ -201,7 +203,7 @@ describe("Review tab governance", () => {
     await waitFor(() => expect(toastMocks.success).toHaveBeenCalled());
   });
 
-  it("shows the proposed fact value and never invents the current one", async () => {
+  it("names the fact key and the proposed value it would write", async () => {
     mockApi({});
     renderWorkspace();
     openTab(/review/i);
@@ -209,7 +211,45 @@ describe("Review tab governance", () => {
     const row = await screen.findByRole("group", { name: /fact proposal/i });
     expect(within(row).getByText("google_business_profile.location.phone")).toBeVisible();
     expect(within(row).getByText(/\+49 30 1234567/)).toBeVisible();
-    expect(within(row).getByText(/current value is not available/i)).toBeVisible();
+  });
+
+  it("shows the current Digital Twin value beside the proposed one", async () => {
+    mockApi({
+      itemDetail: () => ({
+        item: factProposal(),
+        chain: [],
+        links: [],
+        currentFact: {
+          factKey: "google_business_profile.location.phone",
+          value: "+49 30 7654321",
+          branchId: null,
+          branchScoped: false,
+          status: "verified",
+          confidence: 0.9,
+          lastVerifiedAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-02T00:00:00.000Z",
+        },
+      }),
+    });
+    renderWorkspace();
+    openTab(/review/i);
+
+    const row = await screen.findByRole("group", { name: /fact proposal/i });
+    expect(within(row).getByText(/\+49 30 1234567/)).toBeVisible();
+    expect(await within(row).findByText(/\+49 30 7654321/)).toBeVisible();
+    expect(within(row).getByText("Organization wide")).toBeVisible();
+    expect(within(row).queryByText(/not available/i)).not.toBeInTheDocument();
+  });
+
+  it("says a fact would be created when none exists yet", async () => {
+    mockApi({
+      itemDetail: () => ({ item: factProposal(), chain: [], links: [], currentFact: null }),
+    });
+    renderWorkspace();
+    openTab(/review/i);
+
+    const row = await screen.findByRole("group", { name: /fact proposal/i });
+    expect(await within(row).findByText(/no value is recorded yet/i)).toBeVisible();
   });
 
   it("requires a reason before it will post a rejection", async () => {
@@ -325,6 +365,33 @@ describe("Timeline tab", () => {
     const cursored = urls.filter((url) => url.includes("cursor="));
     expect(cursored).toHaveLength(1);
     expect(decodeURIComponent(cursored[0]!)).toContain(timelineIdOne);
+  });
+
+  it("filters by a branch the snapshot actually returned", async () => {
+    const urls: string[] = [];
+    const branchId = "88888888-8888-4888-8888-888888888888";
+    mockApi({ onRequest: (url) => urls.push(url) });
+    renderWorkspace({
+      snapshot: snapshot({ branches: [{ id: branchId, name: "Central kitchen" }] }),
+    });
+    openTab(/timeline/i);
+
+    await screen.findByText("Supplier confirmed a delivery delay");
+    // Radix Select opens from the keyboard, which also proves the filter is
+    // reachable without a pointer.
+    fireEvent.keyDown(screen.getByRole("combobox", { name: /branch/i }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "Central kitchen" }));
+
+    await waitFor(() => expect(urls.some((url) => url.includes(`branchId=${branchId}`))).toBe(true));
+  });
+
+  it("offers no branch control when the organization has no branches", async () => {
+    mockApi({});
+    renderWorkspace();
+    openTab(/timeline/i);
+
+    await screen.findByText("Supplier confirmed a delivery delay");
+    expect(screen.queryByRole("combobox", { name: /branch/i })).not.toBeInTheDocument();
   });
 
   it("filters by a source system actually present in the data", async () => {

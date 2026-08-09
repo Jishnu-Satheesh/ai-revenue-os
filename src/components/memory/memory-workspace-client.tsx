@@ -191,7 +191,12 @@ export function MemoryWorkspaceClient({
           />
         </TabsContent>
         <TabsContent value="timeline" className="min-h-0 min-w-0">
-          <TimelineTab organizationId={organizationId} role={role} ceiling={snapshot.ceiling} />
+          <TimelineTab
+            organizationId={organizationId}
+            role={role}
+            ceiling={snapshot.ceiling}
+            branches={snapshot.branches}
+          />
         </TabsContent>
         <TabsContent value="lessons" className="min-h-0 min-w-0">
           <LessonsTab organizationId={organizationId} role={role} ceiling={snapshot.ceiling} />

@@ -6,6 +6,7 @@ import type { MemoryItemRow, MemoryPersistencePort } from "@/modules/memory/appl
 import {
   createMemoryRepository,
   MAX_RETRIEVAL_LIMIT,
+  MAX_TIMELINE_LIMIT,
 } from "@/modules/memory/infrastructure/repository";
 
 function createPersistence(): {
@@ -90,9 +91,11 @@ describe("createMemoryRepository", () => {
         includeExpired: false,
       }),
     ).resolves.toEqual([]);
+    // The timeline reports pages, so "nothing permitted" is an empty page with
+    // no further page rather than an empty row list.
     await expect(
       repository.listTimeline({ organizationId: "org-1", sensitivities: [], limit: 10 }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ items: [], hasMore: false });
 
     expect(calls.search).toBeUndefined();
     expect(calls.hydrateByIds).toBeUndefined();
@@ -470,5 +473,110 @@ describe("createSupabaseMemoryPersistence", () => {
       expect(columns).not.toContain("embedding,");
       expect(columns).not.toContain("search_vector");
     }
+  });
+});
+
+describe("timeline look-ahead pagination", () => {
+  function timelineRow(id: string): MemoryItemRow {
+    return { id, organization_id: "org-1" } as unknown as MemoryItemRow;
+  }
+
+  function persistenceReturning(rows: MemoryItemRow[]) {
+    const calls: { limit: number }[] = [];
+    const port = {
+      listTimeline: async (input: { limit: number }) => {
+        calls.push({ limit: input.limit });
+        return rows;
+      },
+    } as unknown as MemoryPersistencePort;
+    return { port, calls };
+  }
+
+  it("reads one row beyond the page and reports that more exist", async () => {
+    const { port, calls } = persistenceReturning([
+      timelineRow("a"),
+      timelineRow("b"),
+      timelineRow("c"),
+    ]);
+    const repository = createMemoryRepository(port);
+
+    const page = await repository.listTimeline({
+      organizationId: "org-1",
+      sensitivities: ["internal"],
+      limit: 2,
+    });
+
+    // The look-ahead row is read but never returned to the caller.
+    expect(calls[0]?.limit).toBe(3);
+    expect(page.items.map((row) => row.id)).toEqual(["a", "b"]);
+    expect(page.hasMore).toBe(true);
+  });
+
+  it("reports no further page when the read came back short", async () => {
+    const { port, calls } = persistenceReturning([timelineRow("a")]);
+    const repository = createMemoryRepository(port);
+
+    const page = await repository.listTimeline({
+      organizationId: "org-1",
+      sensitivities: ["internal"],
+      limit: 2,
+    });
+
+    expect(calls[0]?.limit).toBe(3);
+    expect(page.items).toHaveLength(1);
+    expect(page.hasMore).toBe(false);
+  });
+
+  it("keeps the look-ahead inside the repository's own ceiling", async () => {
+    const { port, calls } = persistenceReturning([]);
+    const repository = createMemoryRepository(port);
+
+    await repository.listTimeline({
+      organizationId: "org-1",
+      sensitivities: ["internal"],
+      limit: 10_000,
+    });
+
+    expect(calls[0]?.limit).toBe(MAX_TIMELINE_LIMIT + 1);
+  });
+
+  it("returns an empty page without a read when nothing is permitted", async () => {
+    const { port, calls } = persistenceReturning([timelineRow("a")]);
+    const repository = createMemoryRepository(port);
+
+    const page = await repository.listTimeline({
+      organizationId: "org-1",
+      sensitivities: [],
+      limit: 5,
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(page).toEqual({ items: [], hasMore: false });
+  });
+});
+
+describe("tenant-scoped review reads", () => {
+  it("refuses a fact read without an organization and passes the branch identity through", async () => {
+    const calls: unknown[] = [];
+    const port = {
+      getCurrentFact: async (input: unknown) => {
+        calls.push(input);
+        return null;
+      },
+      listBranchOptions: async (input: unknown) => {
+        calls.push(input);
+        return [];
+      },
+    } as unknown as MemoryPersistencePort;
+    const repository = createMemoryRepository(port);
+
+    await expect(
+      repository.getCurrentFact({ organizationId: "", factKey: "a.b", branchId: null }),
+    ).rejects.toThrow();
+    await expect(repository.listBranchOptions({ organizationId: "" })).rejects.toThrow();
+    expect(calls).toHaveLength(0);
+
+    await repository.getCurrentFact({ organizationId: "org-1", factKey: "a.b", branchId: null });
+    expect(calls[0]).toEqual({ organizationId: "org-1", factKey: "a.b", branchId: null });
   });
 });
