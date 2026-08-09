@@ -4,13 +4,14 @@
 
 ## Current state
 
-- Date: 2026-08-08
+- Date: 2026-08-09
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation, Organization + Digital Twin vertical slice, and the Integration Hub V1 runtime.
-- Current active work: all fourteen Integration Hub plan tasks are implemented and committed. Remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
+- Current active work: Business Memory V1 is specified, decided, and planned; implementation has not started. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
-- Current implementation plan: `docs/superpowers/plans/2026-08-08-integration-hub-implementation.md`.
+- Current implementation plan: `docs/superpowers/plans/2026-08-09-business-memory-implementation.md`.
+- Previous Integration Hub plan: `docs/superpowers/plans/2026-08-08-integration-hub-implementation.md`.
 - Previous onboarding plan: `docs/superpowers/plans/2026-08-08-guided-onboarding-implementation.md`.
 
 ## Completed
@@ -41,6 +42,24 @@
 - Integration UI must compose shadcn/ui and use RSC initial reads, TanStack Query for interactive server state, and TanStack Form for mapping forms.
 - Approved Superdesign: `https://p.superdesign.dev/draft/035fe2fe-c036-4158-afb8-972e4222c075`.
 
+## Approved Business Memory decisions
+
+- `public.business_facts` stays the single writable source of truth. Business Memory owns episodic, semantic, decision, outcome, lesson, and fact-proposal items and never copies facts.
+- `structured_fact` is a virtual retrieval type produced by read-through projection over `business_facts`, so one API returns both stores ranked together with provenance.
+- Ordering is lexicographic: a derived trust rank sorts first and blended relevance only breaks ties inside a rank, so no weight change can rank an inference above a verified fact.
+- Retrieval is hybrid Postgres full-text search plus pgvector, shipped enabled with **no** organization allowlist and no feature flag. The bounded 1500 ms embedding call with a lexical-only degrade path replaces the kill switch.
+- Embedding is asynchronous; an item is lexically retrievable before its vector exists. The column is fixed at 1536 dimensions and every row stores its `embedding_model`.
+- The Integration Hub's `createAcknowledgingDataIngestionPort` stub is deleted and replaced by a real projector for `google_business_profile.location.v1` and `.review.v1`.
+- The projector never writes `business_facts`; a divergence becomes a `fact_proposal` that a human confirms through the digital-twin service inside one transaction.
+- `csv_import.row` has no destination in this slice and is rejected with `UNSUPPORTED_RECORD_TYPE`. CSV imports will report zero accepted rows with honest operator copy until the Data Ingestion slice lands.
+- The workspace at `/organizations/[organizationId]/memory` is Hub-scale with Search, Timeline, Lessons, and Review tabs.
+- Redis caches the **ranking, never the content**. Entries hold result identifiers, scores, aggregates, and query vectors; rows are always hydrated from Postgres under the caller's RLS context, so the cache cannot answer a question the database would have refused.
+- Every cache key carries the organization ID, a version stamp, and the effective sensitivity ceiling. Omitting the ceiling would serve an admin's ranking to an operator.
+- Invalidation bumps a per-organization version stamp holding epoch milliseconds. `KEYS`, unbounded `SCAN`, and `INCR` counters are prohibited; an `INCR` counter resets to 1 after eviction and can collide with live keys, while a timestamp always misses.
+- `REDIS_URL` is server-only and optional. Absent, unreachable, or flushed must change latency and nothing else; the suite runs identically in all three states.
+- `memory.rebuild-organization-cache` runs daily after `memory.expire-items` to warm snapshot aggregates and recurring-purpose embeddings. It is a warm-and-repair pass, **not** the invalidation mechanism, and nothing may depend on it having run.
+- Recorded in `specs/004-business-memory.md`, `adrs/0011-business-memory-read-through-facts.md`, and `adrs/0012-business-memory-cache-boundary.md`.
+
 ## Approved onboarding decisions
 
 - Agency operator owns the flow; missing information can be assigned to client contacts.
@@ -58,7 +77,7 @@
 
 ## Canonical documents
 
-- Product requirements: `specs/002-guided-onboarding.md`, `specs/003-integration-hub.md`, `specs/008-ai-readiness-score.md`.
+- Product requirements: `specs/002-guided-onboarding.md`, `specs/003-integration-hub.md`, `specs/004-business-memory.md`, `specs/008-ai-readiness-score.md`.
 - Approved designs: `docs/superpowers/specs/2026-08-08-guided-onboarding-design.md`, `docs/superpowers/specs/2026-08-08-integration-hub-design.md`.
 - UI language: `context/13-ui-ux-context.md`, `.superdesign/design-system.md`.
 - Architecture: `context/03-architecture.md`, `context/04-domain-model.md`, `context/05-module-map.md`.
@@ -99,8 +118,15 @@
 
 ## Next implementation sequence
 
-Integration Hub code is complete. Everything below is a release gate that needs credentials or a
-database runtime, not further implementation.
+Active implementation work is Business Memory V1. Start at Task 1 of
+`docs/superpowers/plans/2026-08-09-business-memory-implementation.md` and read
+`specs/004-business-memory.md`, `adrs/0011-business-memory-read-through-facts.md`, and
+`adrs/0012-business-memory-cache-boundary.md` first. The plan has seventeen tasks.
+Tasks 1, 4 through 9, and 13 need no database runtime; Tasks 2, 3, 10, 11, and 17 do.
+Tasks 8, 9, and 13 need a local Redis, and all three must also pass with `REDIS_URL` unset.
+
+Everything below is an Integration Hub release gate that needs credentials or a database runtime,
+not further implementation. Gates 1 and 2 also block the Business Memory migrations.
 
 1. Rotate the staging database password and enable leaked-password protection in Supabase Auth.
    Both need dashboard authority no agent in this workspace has.
@@ -170,6 +196,17 @@ database runtime, not further implementation.
 - Never report a connection as healthy, a sync or import as succeeded, a capability as available, or
   a disconnect as complete from an accepted request alone. Only refetched persisted worker state may
   say so; the UI shows queued or running until then.
+- For Business Memory work, never write `business_facts` from the projector or from a model. Memory
+  proposes; a human confirms; the digital-twin service performs the write. Never add a rollout flag
+  or organization allowlist to Business Memory — the lexical degrade path is the deliberate
+  replacement for one, and it must be tested as a first-class behavior rather than an edge case.
+- Business Memory retrieval must filter by `organization_id` in SQL before any similarity
+  computation. A query plan that filters tenants after the vector operation is a cross-tenant leak,
+  not a performance problem.
+- Never put memory content in Redis, and never let a cache hit skip RLS hydration. The cache holds
+  identifiers and scores; Postgres returns the rows. Both the sensitivity ceiling and the version
+  stamp belong in every ranking key. If a change makes the cache faster by removing the hydration
+  read, it has removed the only thing making the cache safe.
 - The client may read the role-to-permission mapping from `src/domain/integrations/permissions.ts`,
   but enforcement lives only in the service, the routes, and RLS. Do not import
   `src/domain/integrations/errors.ts` from a Client Component: it is server-only and will break the
