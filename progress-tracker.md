@@ -7,7 +7,7 @@
 - Date: 2026-08-09
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation, Organization + Digital Twin vertical slice, and the Integration Hub V1 runtime.
-- Current active work: Business Memory V1 is specified, decided, and planned; implementation has not started. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
+- Current active work: Business Memory V1, on branch `feat/business-memory`. Plan tasks 1-7 of 17 are implemented, verified, and committed; tasks 8-17 (Redis cache, cached retrieval, fact promotion, ingestion projector, workers, rebuild cron, API routes, workspace UI, E2E) are not started. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
 - Current implementation plan: `docs/superpowers/plans/2026-08-09-business-memory-implementation.md`.
@@ -118,12 +118,11 @@
 
 ## Next implementation sequence
 
-Active implementation work is Business Memory V1. Start at Task 1 of
+Active implementation work is Business Memory V1. Resume at **Task 8** of
 `docs/superpowers/plans/2026-08-09-business-memory-implementation.md` and read
 `specs/004-business-memory.md`, `adrs/0011-business-memory-read-through-facts.md`, and
 `adrs/0012-business-memory-cache-boundary.md` first. The plan has seventeen tasks.
-Tasks 1, 4 through 9, and 13 need no database runtime; Tasks 2, 3, 10, 11, and 17 do.
-Tasks 8, 9, and 13 need a local Redis, and all three must also pass with `REDIS_URL` unset.
+Tasks 8, 9, and 13 need a Redis instance, and all three must also pass with `REDIS_URL` unset.
 
 Everything below is an Integration Hub release gate that needs credentials or a database runtime,
 not further implementation. Gates 1 and 2 also block the Business Memory migrations.
@@ -146,6 +145,38 @@ not further implementation. Gates 1 and 2 also block the Business Memory migrati
    import, disconnect, keyboard/focus, 200% zoom, reduced motion, and background refetch.
 
 ## Verification record
+
+### Business Memory tasks 1-7 (2026-08-09)
+
+- Applied to the remote database and verified there: `20260809053839_business_memory`,
+  `20260809054943_memory_search_function`, `20260809060450_memory_write_operations`, and
+  `20260809060647_fix_memory_supersede_digest_schema`. Local and remote histories match.
+- pgTAP against the remote database: `business_memory_rls_test` 42 assertions,
+  `business_memory_search_test` 8, `business_memory_write_test` 11 - all passing. The
+  pre-existing `organization_audit_trigger_test` still passes after the shared audit function
+  was extended.
+- `pnpm test` passes with **329 tests in 48 files**, up from 249 before this work.
+  `pnpm typecheck`, `pnpm lint`, and `pnpm format:check` are clean.
+- Remote `supabase db lint` reports no schema errors for `public` and `private`. All three new
+  memory trigger functions carry an empty `search_path`.
+- Acceptance criterion 2 is proved twice: as a 200-corpus property test over the comparator, and
+  in SQL against the real database, where an inference that scores strictly higher on both
+  lexical and semantic similarity still ranks below a verified item.
+- Not yet verified, because it needs a seeded corpus: that the retrieval query plan uses the GIN
+  and HNSW indexes. Against an empty table Postgres sequential-scans regardless, so this is
+  deferred to Task 17 step 4 as planned.
+- `supabase test db`, `supabase db reset`, and `supabase gen types` cannot run here - no
+  container runtime. `pnpm db:test <file>` runs a pgTAP file against the configured database
+  instead.
+- Three bugs were caught by tests rather than by review, and are described in their commits: a
+  pgcrypto function qualified as `pg_catalog.digest` that would have failed on first call, a
+  pgTAP assertion that called a function inside a `WHERE` clause and so passed vacuously against
+  an empty table, and a fixture that set `verification_state = 'verified'` with no verifying
+  actor, which the schema correctly rejected.
+- **Correction to an earlier tracker entry:** the four Integration Hub migrations listed as a
+  pending staging gate were already applied remotely. `pnpm db:migrations:list` shows all
+  thirteen prior versions present on the remote. That gate is closed; the password rotation and
+  leaked-password-protection gates remain open.
 
 ### Integration Hub V1 (2026-08-08)
 

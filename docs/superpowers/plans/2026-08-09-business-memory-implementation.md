@@ -203,13 +203,13 @@ export type MemoryWorkerDependencies = {
 
 - Produces: `public.memory_items`, `public.memory_links`, `public.memory_retrieval_log`, the pgvector extension, and both search indexes
 
-- [ ] **Step 1: Create the migration with `pnpm supabase migration new business_memory`.** Do not invent a timestamp.
+- [x] **Step 1: Create the migration with `pnpm supabase migration new business_memory`.** Do not invent a timestamp.
 
-- [ ] **Step 2: Write the failing pgTAP test first.**
+- [x] **Step 2: Write the failing pgTAP test first.**
 
   Cover two organizations and assert: cross-tenant select returns zero rows; an operator cannot select a `confidential` or `customer_content` row through RLS; an admin can; a viewer cannot insert; `memory_type = 'structured_fact'` is rejected; `(organization_id, source_system, source_record_id)` rejects a duplicate; an item cannot reference another organization's branch or supersede an item in another organization; `memory_retrieval_log` has no update or delete privilege; `anon` has zero table privileges; every foreign key has a supporting index.
 
-- [ ] **Step 3: Install pgvector and create the tables.**
+- [x] **Step 3: Install pgvector and create the tables.**
 
   ```sql
   create extension if not exists vector with schema extensions;
@@ -217,7 +217,7 @@ export type MemoryWorkerDependencies = {
 
   Declare the column as `embedding extensions.vector(1536)` so the definition does not depend on the caller's `search_path`. Implement every field, check constraint, and uniqueness rule in spec sections 7.1 through 7.3, including the paired `verified_by`/`verified_at` check, the `fact_proposal` column requirements, and `from_item_id <> to_item_id`.
 
-- [ ] **Step 4: Add the generated search vector and indexes.**
+- [x] **Step 4: Add the generated search vector and indexes.**
 
   ```sql
   search_vector tsvector generated always as (
@@ -228,13 +228,13 @@ export type MemoryWorkerDependencies = {
 
   Add a GIN index on `search_vector`, an HNSW index on `embedding` using `vector_cosine_ops`, and the composite and partial indexes listed in spec section 8.
 
-- [ ] **Step 5: Enable and force RLS, then write policies.**
+- [x] **Step 5: Enable and force RLS, then write policies.**
 
   Reuse `private.is_organization_member` and `private.has_organization_role`, wrapping `auth.uid()` in `select`. The `SELECT` policy on `memory_items` must include the sensitivity predicate so the boundary exists in the database, not only in the service. `UPDATE` policies carry both `USING` and tenant-preserving `WITH CHECK`. Grant only the required operations to `authenticated`; grant nothing to `anon`; grant `memory_retrieval_log` only `INSERT` and `SELECT`.
 
-- [ ] **Step 6: Run `pnpm supabase db reset` and `pnpm supabase test db supabase/tests/database/business_memory_rls_test.sql` when Docker is available.** If Docker is unavailable, record the gap in `progress-tracker.md` and do not claim the test passed.
+- [x] **Step 6: Run `pnpm supabase db reset` and `pnpm supabase test db supabase/tests/database/business_memory_rls_test.sql` when Docker is available.** If Docker is unavailable, record the gap in `progress-tracker.md` and do not claim the test passed.
 
-- [ ] **Step 7: Commit with `git commit -m "feat(memory): add tenant-safe memory schema and indexes"`.**
+- [x] **Step 7: Commit with `git commit -m "feat(memory): add tenant-safe memory schema and indexes"`.**
 
 ### Task 3: Generated types and the memory repository
 
@@ -250,23 +250,23 @@ export type MemoryWorkerDependencies = {
 
 - Produces: `MemoryRepository` with `search`, `listTimeline`, `listReviewQueue`, `getItem`, `createItem`, `updateItemState`, `insertLink`, `logRetrieval`, and `snapshot`
 
-- [ ] **Step 1: Regenerate types with `pnpm db:types`.** Remove any provisional row type once the generated schema covers it.
+- [x] **Step 1: Regenerate types with `pnpm db:types`.** Remove any provisional row type once the generated schema covers it.
 
-- [ ] **Step 2: Write failing repository tests.**
+- [x] **Step 2: Write failing repository tests.**
 
   Assert that every method scopes by `organizationId`, that `search` emits a single statement whose organization predicate precedes the similarity expression, that `limit` is capped at 50, and that a null embedding argument produces the lexical-only statement.
 
-- [ ] **Step 3: Implement the repository.**
+- [x] **Step 3: Implement the repository.**
 
   Express hybrid search as one RPC-backed query that takes the organization, the filter set, the optional query vector, and the weights, returning `lexical`, `semantic`, and the raw row. Order in SQL by `trust_rank asc, blended desc, observed_at desc nulls last, id asc`. Never assemble candidate sets in application code.
 
-- [ ] **Step 4: Write the integration test against a reset local database.**
+- [x] **Step 4: Write the integration test against a reset local database.**
 
   Seed two organizations, assert cross-tenant isolation, assert the sensitivity boundary, and assert that a verified item with a deliberately poor lexical match outranks an unverified inference with an exact match.
 
-- [ ] **Step 5: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
+- [x] **Step 5: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
 
-- [ ] **Step 6: Commit with `git commit -m "feat(memory): add organization-scoped memory repository"`.**
+- [x] **Step 6: Commit with `git commit -m "feat(memory): add organization-scoped memory repository"`.**
 
 ### Task 4: Retrieval schemas, ranking, and sensitivity gating
 
@@ -282,7 +282,7 @@ export type MemoryWorkerDependencies = {
 
 - Produces: `memoryRetrievalQuerySchema`, `memoryRetrievalResponseSchema`, `blendScores`, `createMemoryRetrieval(deps): MemoryRetrievalPort`
 
-- [ ] **Step 1: Write failing retrieval tests with a fake repository.**
+- [x] **Step 1: Write failing retrieval tests with a fake repository.**
 
   ```ts
   await expect(
@@ -296,17 +296,17 @@ export type MemoryWorkerDependencies = {
 
   Also assert that superseded, expired, and rejected items are absent by default, that `includeSuperseded` returns them labelled, and that a denial writes a retrieval log row with zero results.
 
-- [ ] **Step 2: Run the tests and confirm they fail.**
+- [x] **Step 2: Run the tests and confirm they fail.**
 
-- [ ] **Step 3: Implement schemas, blending, and the retrieval service.**
+- [x] **Step 3: Implement schemas, blending, and the retrieval service.**
 
   Weights are exported constants. The comparator from Task 1 does the ordering; blending only breaks ties within a rank. A request above its ceiling throws `MEMORY_SENSITIVITY_DENIED` and is never silently downgraded.
 
-- [ ] **Step 4: Log every retrieval, including empty and denied ones,** with truncated query text and at most 50 result IDs.
+- [x] **Step 4: Log every retrieval, including empty and denied ones,** with truncated query text and at most 50 result IDs.
 
-- [ ] **Step 5: Run `pnpm vitest run src/modules/memory src/domain/memory && pnpm typecheck && pnpm lint`.**
+- [x] **Step 5: Run `pnpm vitest run src/modules/memory src/domain/memory && pnpm typecheck && pnpm lint`.**
 
-- [ ] **Step 6: Commit with `git commit -m "feat(memory): add governed hybrid retrieval service"`.**
+- [x] **Step 6: Commit with `git commit -m "feat(memory): add governed hybrid retrieval service"`.**
 
 ### Task 5: Embedding provider and the degrade path
 
@@ -323,7 +323,7 @@ export type MemoryWorkerDependencies = {
 - Consumes: `OPENAI_API_KEY`, new optional `MEMORY_EMBEDDING_MODEL`
 - Produces: `createEmbeddingProvider(): EmbeddingProvider | null`, `retrievalMode` and `degradedReason` on every response
 
-- [ ] **Step 1: Write failing degrade tests.**
+- [x] **Step 1: Write failing degrade tests.**
 
   ```ts
   expect(await retrieveWith({ embeddings: null })).toMatchObject({
@@ -342,17 +342,17 @@ export type MemoryWorkerDependencies = {
 
   Assert in each case that results are still returned and that the request does not reject.
 
-- [ ] **Step 2: Run the tests and confirm they fail.**
+- [x] **Step 2: Run the tests and confirm they fail.**
 
-- [ ] **Step 3: Add `MEMORY_EMBEDDING_MODEL` to `serverEnvSchema` as an optional server-only string.** Do not prefix it with `NEXT_PUBLIC_`. Return `null` from the factory when no key is configured; absence is a supported state, not an error.
+- [x] **Step 3: Add `MEMORY_EMBEDDING_MODEL` to `serverEnvSchema` as an optional server-only string.** Do not prefix it with `NEXT_PUBLIC_`. Return `null` from the factory when no key is configured; absence is a supported state, not an error.
 
-- [ ] **Step 4: Implement the provider with a validated response shape,** asserting the returned dimensionality equals 1536 and rejecting a mismatch before it reaches the database.
+- [x] **Step 4: Implement the provider with a validated response shape,** asserting the returned dimensionality equals 1536 and rejecting a mismatch before it reaches the database.
 
-- [ ] **Step 5: Wrap the read-path embedding call at 1500 ms with no retry** using `AbortSignal.timeout`, and map every failure mode to its `degradedReason`.
+- [x] **Step 5: Wrap the read-path embedding call at 1500 ms with no retry** using `AbortSignal.timeout`, and map every failure mode to its `degradedReason`.
 
-- [ ] **Step 6: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
+- [x] **Step 6: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
 
-- [ ] **Step 7: Commit with `git commit -m "feat(memory): add embeddings with deterministic lexical degrade"`.**
+- [x] **Step 7: Commit with `git commit -m "feat(memory): add embeddings with deterministic lexical degrade"`.**
 
 ### Task 6: Read-through structured-fact projection
 
@@ -367,21 +367,21 @@ export type MemoryWorkerDependencies = {
 
 - Produces: `projectBusinessFact(row): MemoryRetrievalResult`, merged ranking across memory rows and projected facts
 
-- [ ] **Step 1: Write failing projection tests.**
+- [x] **Step 1: Write failing projection tests.**
 
   Assert the field mapping in spec section 7.4, that `itemId` is null and `sourceReference` points at the `business_facts` row, that a `verified` fact projects to trust rank 0, that an `inferred` fact projects to source tier 5, that a `stale` fact projects with freshness `stale`, and that a projected fact always carries semantic score 0.
 
-- [ ] **Step 2: Write the merge test.** A verified projected fact must outrank a semantically closer `lesson`. This is the concrete form of acceptance criterion 2 across both stores.
+- [x] **Step 2: Write the merge test.** A verified projected fact must outrank a semantically closer `lesson`. This is the concrete form of acceptance criterion 2 across both stores.
 
-- [ ] **Step 3: Run the tests and confirm they fail.**
+- [x] **Step 3: Run the tests and confirm they fail.**
 
-- [ ] **Step 4: Implement the projection and the merged query.**
+- [x] **Step 4: Implement the projection and the merged query.**
 
   Fetch matching `business_facts` rows with the same organization filter and a lexical predicate over `fact_key` and the text content of `value`, project them, then merge into the single comparator before truncation. Do not write to `business_facts` anywhere in this task.
 
-- [ ] **Step 5: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
+- [x] **Step 5: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
 
-- [ ] **Step 6: Commit with `git commit -m "feat(memory): retrieve digital-twin facts through read-through projection"`.**
+- [x] **Step 6: Commit with `git commit -m "feat(memory): retrieve digital-twin facts through read-through projection"`.**
 
 ### Task 7: Write paths, permissions, events, and audit
 
@@ -398,7 +398,7 @@ export type MemoryWorkerDependencies = {
 - Produces: `createMemoryService(deps)` with `createItem`, `verifyItem`, `rejectItem`, `supersedeItem`, `getSnapshot`, `listTimeline`
 - Produces: the eight `memory.*` event names and their payload types
 
-- [ ] **Step 1: Write failing service tests.**
+- [x] **Step 1: Write failing service tests.**
 
   ```ts
   await expect(service.createItem({ ...base, origin: "ai_proposed", verificationState: "verified" }))
@@ -411,17 +411,17 @@ export type MemoryWorkerDependencies = {
 
   Assert that a viewer is refused every mutation, that verification sets both `verified_by` and `verified_at`, that an `outcome` without baseline, measured value, unit, and attribution window is refused, and that each mutation publishes its event and appends an audit row.
 
-- [ ] **Step 2: Run the tests and confirm they fail.**
+- [x] **Step 2: Run the tests and confirm they fail.**
 
-- [ ] **Step 3: Extend the event vocabulary** with the eight names from spec section 14. Payloads carry identifiers, type, origin, verification state, sensitivity class, and counts only — never `body`, `structured_value`, or query text.
+- [x] **Step 3: Extend the event vocabulary** with the eight names from spec section 14. Payloads carry identifiers, type, origin, verification state, sensitivity class, and counts only — never `body`, `structured_value`, or query text.
 
-- [ ] **Step 4: Implement authorization and the service.**
+- [x] **Step 4: Implement authorization and the service.**
 
   Every method takes an authenticated organization context, checks the permission from Task 1, and re-reads the target entity tenant-scoped before mutating. Supersession runs through a `security definer` function so the insert and the state change are one transaction; depth is limited to 32 and self-supersession is rejected.
 
-- [ ] **Step 5: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
+- [x] **Step 5: Run `pnpm vitest run src/modules/memory && pnpm typecheck && pnpm lint`.**
 
-- [ ] **Step 6: Commit with `git commit -m "feat(memory): add governed memory write paths"`.**
+- [x] **Step 6: Commit with `git commit -m "feat(memory): add governed memory write paths"`.**
 
 ### Task 8: Cache port, key composition, and the Redis adapter
 
@@ -829,3 +829,30 @@ These are environment gates, not implementation work. They inherit the two open 
 6. Set `REDIS_URL` in the deployment environment and in Trigger.dev, not only in `.env.local`. The daily rebuild runs in the worker runtime and silently no-ops without it, which looks like a working system doing nothing.
 7. Confirm the eviction policy cannot break correctness. The version stamp is designed to be eviction-safe, but verify it by evicting the stamp deliberately and asserting the next read misses rather than serving a stale entry.
 8. Enable the daily schedule only after the first manual run is inspected. Verify its duration, the organizations touched, the embedding spend, and that it caused no database load spike before letting it run unattended.
+
+---
+
+## Implementation status (2026-08-09)
+
+Tasks 1 through 7 are implemented, verified, and committed on `feat/business-memory`.
+Tasks 8 through 17 are not started.
+
+Environment notes for whoever continues:
+
+- **No container runtime here.** `supabase start`, `supabase db reset`, `supabase test db`,
+  and `supabase gen types` all require Docker and cannot run in this workspace. Migrations were
+  applied to the remote database with `pnpm db:migrations:push`, and pgTAP suites run against it
+  with `pnpm db:test <file>` (`scripts/run-pgtap.mjs`, added in Task 2).
+- **Row types remain provisional** in `src/modules/memory/application/ports.ts` for the same
+  reason. Regenerating `database.types.ts` and deleting them is still open, alongside the
+  identical debt in `src/modules/integrations/application/ports.ts`.
+- **Two deviations from this plan**, both recorded in their commits: Task 3 needed a search RPC
+  migration that the file map did not anticipate, and Tasks 4 through 6 were committed together
+  because retrieval cannot typecheck without the embedding provider and fact projection it
+  composes.
+- Tasks 4 and 5 wrote `retrieval.ts` to accept `embeddings: EmbeddingProvider | null` and a
+  `ceilingFor` callback, so Task 9 wraps it rather than rewriting it. `service.ts` already accepts
+  an optional `cache` invalidator and calls it after every committed write, so Task 8 only has to
+  supply the adapter.
+- `supersede_memory_item` and `create_proposed_memory_item` exist and are tested; Task 10 adds
+  `confirm_memory_fact_proposal` alongside them in `memory_write_operations`-style form.
