@@ -116,7 +116,7 @@ type FluentQuery = {
  */
 export function createSupabaseMemoryPromotionTransactionPort(
   authenticatedSupabase: SupabaseClient<Database>,
-): Pick<MemoryTransactionPort, "confirmProposal" | "rejectProposal"> {
+): MemoryTransactionPort {
   const client = authenticatedSupabase as unknown as {
     rpc(
       name: string,
@@ -152,6 +152,22 @@ export function createSupabaseMemoryPromotionTransactionPort(
         databaseError("The memory proposal could not be rejected.", result.error);
       }
       return result.data as MemoryProposalRejection;
+    },
+    async supersede(input) {
+      const result = await client.rpc("supersede_memory_item", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_item_id: input.itemId,
+        p_title: input.title,
+        p_body: input.body ?? null,
+        p_sensitivity: input.sensitivity,
+        p_supersession_reason: input.reason,
+        p_idempotency_key: input.idempotencyKey,
+      });
+      if (result.error || result.data === null) {
+        databaseError("The memory item could not be superseded.", result.error);
+      }
+      return result.data as { replacementId: string; supersededId: string };
     },
   };
 }
@@ -292,7 +308,7 @@ export function createSupabaseMemoryPersistence(
       return (result.data as MemoryItemRow | null) ?? null;
     },
 
-    async listTimeline({ organizationId, sensitivities, branchId, limit, before }) {
+    async listTimeline({ organizationId, sensitivities, branchId, sourceSystems, limit, cursor }) {
       let request = withSensitivity(
         scoped("memory_items", itemColumns, organizationId),
         sensitivities,
@@ -300,13 +316,43 @@ export function createSupabaseMemoryPersistence(
         .in("memory_type", ["episode", "decision", "outcome"])
         .in("verification_state", ["unverified", "verified"]);
       if (branchId) request = request.eq("branch_id", branchId);
-      if (before) request = request.lt("created_at", before);
+      if (sourceSystems && sourceSystems.length > 0) request = request.in("source_system", sourceSystems);
+      if (cursor) {
+        request =
+          cursor.observedAt === null
+            ? request.or(
+                `and(observed_at.is.null,created_at.lt.${cursor.createdAt}),and(observed_at.is.null,created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+              )
+            : request.or(
+                `observed_at.is.null,observed_at.lt.${cursor.observedAt},and(observed_at.eq.${cursor.observedAt},created_at.lt.${cursor.createdAt}),and(observed_at.eq.${cursor.observedAt},created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+              );
+      }
       return rows<MemoryItemRow>(
         request
           .order("observed_at", { ascending: false, nullsFirst: false })
           .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .limit(limit),
         "The memory timeline could not be loaded.",
+      );
+    },
+
+    async listSupersessionPredecessors({ organizationId, itemId, limit }) {
+      return rows<MemoryItemRow>(
+        scoped("memory_items", itemColumns, organizationId)
+          .eq("superseded_by_id", itemId)
+          .order("created_at", { ascending: false })
+          .limit(limit),
+        "The memory supersession chain could not be loaded.",
+      );
+    },
+
+    async listItemLinks({ organizationId, itemId }) {
+      return rows<MemoryLinkRow>(
+        scoped("memory_links", linkColumns, organizationId).or(
+          `from_item_id.eq.${itemId},to_item_id.eq.${itemId}`,
+        ),
+        "The memory evidence links could not be loaded.",
       );
     },
 

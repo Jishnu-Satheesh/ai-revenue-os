@@ -17,6 +17,7 @@ import type {
   SupersedeMemoryItemInput,
   UpdateMemoryItemInput,
 } from "@/modules/memory/application/api-schemas";
+import type { TimelineCursor } from "@/modules/memory/application/api-schemas";
 import type { MemoryItemRow, MemorySnapshotCounts } from "@/modules/memory/application/ports";
 import type { MemoryRepository } from "@/modules/memory/infrastructure/repository";
 
@@ -131,6 +132,19 @@ export type MemorySnapshot = {
   reviewQueue: MemoryItemView[];
   ceiling: Sensitivity;
   serverTime: string;
+};
+
+export type MemoryLinkView = {
+  id: string;
+  relation: "derived_from" | "supports" | "contradicts" | "explains";
+  direction: "from" | "to";
+  relatedItemId: string;
+};
+
+export type MemoryItemDetail = {
+  item: MemoryItemView;
+  chain: readonly MemoryItemView[];
+  links: readonly MemoryLinkView[];
 };
 
 export function toMemoryItemView(row: MemoryItemRow, now: Date): MemoryItemView {
@@ -506,19 +520,31 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
       organizationId: string;
       actor: MemoryActor;
       branchId?: string;
+      sourceSystems?: readonly string[];
       limit: number;
-      before?: string;
-    }): Promise<MemoryItemView[]> {
+      cursor?: TimelineCursor;
+    }): Promise<{ items: MemoryItemView[]; nextCursor?: TimelineCursor }> {
       assertMemoryPermission(input.actor, "memory.read");
       const evaluatedAt = now();
       const rows = await dependencies.repository.listTimeline({
         organizationId: input.organizationId,
         sensitivities: sensitivitiesWithinCeiling(operatorCeiling(input.actor)),
         branchId: input.branchId,
+        sourceSystems: input.sourceSystems,
         limit: input.limit,
-        before: input.before,
+        cursor: input.cursor,
       });
-      return rows.map((row) => toMemoryItemView(row, evaluatedAt));
+      const final = rows.at(-1);
+      return {
+        items: rows.map((row) => toMemoryItemView(row, evaluatedAt)),
+        nextCursor: final
+          ? {
+              observedAt: final.observed_at,
+              createdAt: final.created_at,
+              id: final.id,
+            }
+          : undefined,
+      };
     },
 
     async listLessons(input: {
@@ -548,6 +574,26 @@ export function createMemoryService(dependencies: MemoryServiceDependencies) {
         return accumulator;
       }, {});
       return { items: rows.map((row) => toMemoryItemView(row, evaluatedAt)), evidence };
+    },
+
+    async getItemDetail(input: {
+      organizationId: string;
+      actor: MemoryActor;
+      itemId: string;
+    }): Promise<MemoryItemDetail> {
+      assertMemoryPermission(input.actor, "memory.read");
+      const detail = await dependencies.repository.getItemDetail({
+        organizationId: input.organizationId,
+        itemId: input.itemId,
+        sensitivities: sensitivitiesWithinCeiling(operatorCeiling(input.actor)),
+      });
+      if (!detail) throw memoryError("NOT_FOUND");
+      const evaluatedAt = now();
+      return {
+        item: toMemoryItemView(detail.item, evaluatedAt),
+        chain: detail.chain.map((row) => toMemoryItemView(row, evaluatedAt)),
+        links: detail.links,
+      };
     },
   };
 }

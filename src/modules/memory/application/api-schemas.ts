@@ -71,11 +71,22 @@ export const searchMemorySchema = z
   })
   .strict();
 
-export const timelineQuerySchema = z.object({
-  branchId: z.string().uuid().optional(),
-  limit: z.coerce.number().int().positive().max(100).default(50),
-  before: z.string().datetime().optional(),
-});
+export const timelineCursorSchema = z
+  .object({
+    observedAt: z.string().datetime().nullable(),
+    createdAt: z.string().datetime(),
+    id: z.string().uuid(),
+  })
+  .strict();
+
+export const timelineQuerySchema = z
+  .object({
+    branchId: z.string().uuid().optional(),
+    sourceSystems: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
+    limit: z.coerce.number().int().positive().max(100).default(50),
+    cursor: timelineCursorSchema.optional(),
+  })
+  .strict();
 
 export type CreateMemoryItemInput = z.infer<typeof createMemoryItemSchema>;
 export type UpdateMemoryItemInput = z.infer<typeof updateMemoryItemSchema>;
@@ -83,3 +94,5 @@ export type SupersedeMemoryItemInput = z.infer<typeof supersedeMemoryItemSchema>
 export type ConfirmProposalInput = z.infer<typeof confirmProposalSchema>;
 export type RejectProposalInput = z.infer<typeof rejectProposalSchema>;
 export type SearchMemoryInput = z.infer<typeof searchMemorySchema>;
+export type TimelineCursor = z.infer<typeof timelineCursorSchema>;
+export type TimelineQuery = z.infer<typeof timelineQuerySchema>;

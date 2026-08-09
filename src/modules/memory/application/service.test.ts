@@ -692,4 +692,41 @@ describe("createMemoryService", () => {
       "customer_content",
     );
   });
+
+  it("returns only the RLS-visible detail chain and evidence links, capped at 32 hops", async () => {
+    const visibleChain = Array.from({ length: 32 }, (_, index) =>
+      itemRow({ id: `visible-${index}`, title: `Visible ${index}` }),
+    );
+    const { service } = createService({
+      getItemDetail: async () => ({
+        item: itemRow(),
+        chain: visibleChain,
+        links: [
+          {
+            id: "visible-link",
+            relation: "derived_from",
+            direction: "to",
+            relatedItemId: "visible-0",
+          },
+        ],
+      }),
+    } as never);
+
+    const detail = await service.getItemDetail({
+      organizationId: ORGANIZATION_ID,
+      actor: operator,
+      itemId: "22222222-2222-4222-8222-222222222221",
+    });
+
+    expect(detail.chain).toHaveLength(32);
+    expect(detail.links).toEqual([
+      {
+        id: "visible-link",
+        relation: "derived_from",
+        direction: "to",
+        relatedItemId: "visible-0",
+      },
+    ]);
+    expect(detail.links.map((link) => link.relatedItemId)).not.toContain("cross-tenant-item");
+  });
 });

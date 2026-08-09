@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import type { MemoryPersistencePort } from "@/modules/memory/application/ports";
+import type { MemoryItemRow, MemoryPersistencePort } from "@/modules/memory/application/ports";
 import {
   createMemoryRepository,
   MAX_RETRIEVAL_LIMIT,
@@ -175,6 +175,86 @@ describe("createMemoryRepository", () => {
 
     expect((calls.hydrateByIds[0] as { ids: string[] }).ids).toHaveLength(MAX_RETRIEVAL_LIMIT);
   });
+
+  it("builds detail from only tenant-visible predecessors, successors, and link targets", async () => {
+    const { port } = createPersistence();
+    const root = {
+      id: "root",
+      organization_id: "org-1",
+      sensitivity: "internal",
+      superseded_by_id: "successor",
+    } as MemoryItemRow;
+    const successor = {
+      id: "successor",
+      organization_id: "org-1",
+      sensitivity: "internal",
+      superseded_by_id: null,
+    } as MemoryItemRow;
+    const predecessors = Array.from(
+      { length: 40 },
+      (_, index) =>
+        ({
+          id: `predecessor-${index}`,
+          organization_id: "org-1",
+          sensitivity: "internal",
+          superseded_by_id: null,
+        }) as MemoryItemRow,
+    );
+    const calls: string[] = [];
+    Object.assign(port, {
+      getItem: async ({ itemId }: { itemId: string }) => {
+        calls.push(itemId);
+        if (itemId === "root") return root;
+        if (itemId === "successor") return successor;
+        if (itemId === "visible-target") {
+          return { id: "visible-target", sensitivity: "internal" } as MemoryItemRow;
+        }
+        return null;
+      },
+      listSupersessionPredecessors: async () => predecessors,
+      listItemLinks: async () => [
+        {
+          id: "visible-link",
+          organization_id: "org-1",
+          from_item_id: "root",
+          to_item_id: "visible-target",
+          relation: "derived_from",
+          created_by: null,
+          created_at: "2026-08-09T00:00:00.000Z",
+        },
+        {
+          id: "hidden-link",
+          organization_id: "org-1",
+          from_item_id: "root",
+          to_item_id: "cross-tenant-target",
+          relation: "supports",
+          created_by: null,
+          created_at: "2026-08-09T00:00:00.000Z",
+        },
+      ],
+    });
+    const repository = createMemoryRepository(port);
+
+    const detail = await repository.getItemDetail({
+      organizationId: "org-1",
+      itemId: "root",
+      sensitivities: ["public", "internal"],
+    });
+
+    expect(detail?.item.id).toBe("root");
+    expect(detail?.chain).toHaveLength(32);
+    expect(detail?.chain.some((item) => item.organization_id !== "org-1")).toBe(false);
+    expect(detail?.links).toEqual([
+      {
+        id: "visible-link",
+        relation: "derived_from",
+        direction: "to",
+        relatedItemId: "visible-target",
+      },
+    ]);
+    expect(calls).toContain("visible-target");
+    expect(calls).toContain("cross-tenant-target");
+  });
 });
 
 describe("createSupabaseMemoryPersistence", () => {
@@ -230,6 +310,27 @@ describe("createSupabaseMemoryPersistence", () => {
       p_reason: "The source is stale.",
       p_idempotency_key: "rejection-key-1",
       p_correlation_id: "correlation-2",
+    });
+
+    await transactions.supersede({
+      organizationId: "org-1",
+      actorId: "actor-1",
+      itemId: "proposal-1",
+      title: "Corrected note",
+      body: "The previous note was stale.",
+      sensitivity: "internal",
+      reason: "The source was corrected.",
+      idempotencyKey: "supersede-key-1",
+    });
+    expect(rpc).toHaveBeenLastCalledWith("supersede_memory_item", {
+      p_organization_id: "org-1",
+      p_actor_id: "actor-1",
+      p_item_id: "proposal-1",
+      p_title: "Corrected note",
+      p_body: "The previous note was stale.",
+      p_sensitivity: "internal",
+      p_supersession_reason: "The source was corrected.",
+      p_idempotency_key: "supersede-key-1",
     });
   });
 

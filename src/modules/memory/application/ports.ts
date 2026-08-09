@@ -10,6 +10,7 @@ import type {
   TrustRank,
   VerificationState,
 } from "@/domain/memory/types";
+import type { TimelineCursor } from "@/modules/memory/application/api-schemas";
 
 /**
  * Provisional schema boundary for Business Memory tables.
@@ -230,9 +231,19 @@ export type MemoryPersistencePort = {
     organizationId: string;
     sensitivities: readonly Sensitivity[];
     branchId?: string;
+    sourceSystems?: readonly string[];
     limit: number;
-    before?: string;
+    cursor?: TimelineCursor;
   }): Promise<MemoryItemRow[]>;
+  listSupersessionPredecessors(input: {
+    organizationId: string;
+    itemId: string;
+    limit: number;
+  }): Promise<MemoryItemRow[]>;
+  listItemLinks(input: {
+    organizationId: string;
+    itemId: string;
+  }): Promise<MemoryLinkRow[]>;
   listByTypes(input: {
     organizationId: string;
     sensitivities: readonly Sensitivity[];

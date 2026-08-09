@@ -12,9 +12,22 @@ import type {
   MemorySearchRow,
   MemorySnapshotCounts,
 } from "@/modules/memory/application/ports";
+import type { TimelineCursor } from "@/modules/memory/application/api-schemas";
 
 export const MAX_RETRIEVAL_LIMIT = 50;
 export const MAX_TIMELINE_LIMIT = 100;
+export const MAX_DETAIL_CHAIN_HOPS = 32;
+
+export type MemoryItemDetailRow = {
+  item: MemoryItemRow;
+  chain: readonly MemoryItemRow[];
+  links: readonly {
+    id: string;
+    relation: "derived_from" | "supports" | "contradicts" | "explains";
+    direction: "from" | "to";
+    relatedItemId: string;
+  }[];
+};
 
 function requireOrganizationId(organizationId: string): string {
   if (!organizationId || organizationId.trim() === "") {
@@ -49,9 +62,15 @@ export type MemoryRepository = {
     organizationId: string;
     sensitivities: readonly Sensitivity[];
     branchId?: string;
+    sourceSystems?: readonly string[];
     limit: number;
-    before?: string;
+    cursor?: TimelineCursor;
   }): Promise<MemoryItemRow[]>;
+  getItemDetail(input: {
+    organizationId: string;
+    itemId: string;
+    sensitivities: readonly Sensitivity[];
+  }): Promise<MemoryItemDetailRow | null>;
   listByTypes(input: {
     organizationId: string;
     sensitivities: readonly Sensitivity[];
@@ -124,6 +143,79 @@ export function createMemoryRepository(persistence: MemoryPersistencePort): Memo
       requireOrganizationId(input.organizationId);
       if (input.sensitivities.length === 0) return [];
       return persistence.listTimeline({ ...input, limit: cap(input.limit, MAX_TIMELINE_LIMIT) });
+    },
+
+    async getItemDetail(input) {
+      requireOrganizationId(input.organizationId);
+      if (input.sensitivities.length === 0) return null;
+
+      const item = await persistence.getItem({
+        organizationId: input.organizationId,
+        itemId: input.itemId,
+      });
+      if (!item || !input.sensitivities.includes(item.sensitivity)) return null;
+
+      const chain: MemoryItemRow[] = [];
+      const seen = new Set([item.id]);
+
+      let successorId = item.superseded_by_id;
+      while (successorId && chain.length < MAX_DETAIL_CHAIN_HOPS && !seen.has(successorId)) {
+        const successor = await persistence.getItem({
+          organizationId: input.organizationId,
+          itemId: successorId,
+        });
+        if (!successor || !input.sensitivities.includes(successor.sensitivity)) break;
+        chain.push(successor);
+        seen.add(successor.id);
+        successorId = successor.superseded_by_id;
+      }
+
+      let predecessorId = item.id;
+      while (chain.length < MAX_DETAIL_CHAIN_HOPS) {
+        const predecessors = await persistence.listSupersessionPredecessors({
+          organizationId: input.organizationId,
+          itemId: predecessorId,
+          limit: 1,
+        });
+        const predecessor = predecessors.find(
+          (candidate) =>
+            !seen.has(candidate.id) && input.sensitivities.includes(candidate.sensitivity),
+        );
+        if (!predecessor) break;
+        chain.unshift(predecessor);
+        seen.add(predecessor.id);
+        predecessorId = predecessor.id;
+      }
+
+      const rawLinks = await persistence.listItemLinks({
+        organizationId: input.organizationId,
+        itemId: item.id,
+      });
+      const targetIds = rawLinks.map((link) =>
+        link.from_item_id === item.id ? link.to_item_id : link.from_item_id,
+      );
+      const targetRows = await Promise.all(
+        [...new Set(targetIds)].map(async (targetId) =>
+          persistence.getItem({ organizationId: input.organizationId, itemId: targetId }),
+        ),
+      );
+      const visibleTargetIds = new Set(
+        targetRows
+          .filter(
+            (target): target is MemoryItemRow =>
+              target !== null && input.sensitivities.includes(target.sensitivity),
+          )
+          .map((target) => target.id),
+      );
+      const links = rawLinks.flatMap((link) => {
+        const direction: "from" | "to" = link.from_item_id === item.id ? "to" : "from";
+        const relatedItemId = direction === "to" ? link.to_item_id : link.from_item_id;
+        return visibleTargetIds.has(relatedItemId)
+          ? [{ id: link.id, relation: link.relation, direction, relatedItemId }]
+          : [];
+      });
+
+      return { item, chain, links };
     },
 
     async listByTypes(input) {
