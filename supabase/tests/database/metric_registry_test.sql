@@ -119,9 +119,9 @@ select extensions.throws_ok(
       period_start, period_end, period_timezone, value_numerator, currency, quality_tier, observed_at
     )
     select
-      '4b2f0c1f-1760-4b25-8b15-200000000001'::uuid, id, 'count', 'day',
+      '4b2f0c1f-1760-4b25-8b15-200000000001'::uuid, id, 'duration', 'day',
       timestamptz '2026-08-01 20:00+00', timestamptz '2026-08-02 20:00+00', 'Asia/Dubai',
-      125000, 'AED', 'measured', timestamptz '2026-08-02 20:00+00'
+      125000, null, 'measured', timestamptz '2026-08-02 20:00+00'
     from public.metric_definitions where key = 'revenue.gross'
   $$,
   '23503',
@@ -168,7 +168,15 @@ select extensions.throws_ok(
   'an observation cannot be edited in place'
 );
 
--- A restatement: retire the incumbent, then land the corrected revision.
+-- A restatement retires the incumbent before the successor exists, which is the
+-- only possible order: inserting first would collide with the partial unique
+-- index on current rows. The supersession foreign key is deferred so the
+-- dangling pointer resolves within the transaction.
+update public.normalized_metrics
+set superseded_by_id = '4b2f0c1f-1760-4b25-8b15-300000000002'::uuid,
+    supersede_reason = 'provider restatement'
+where id = '4b2f0c1f-1760-4b25-8b15-300000000001'::uuid;
+
 insert into public.normalized_metrics (
   id, organization_id, metric_definition_id, value_kind, period_grain,
   period_start, period_end, period_timezone, value_numerator, currency, quality_tier, observed_at, revision
@@ -178,13 +186,12 @@ select
   '4b2f0c1f-1760-4b25-8b15-200000000001'::uuid, id, 'money', 'day',
   timestamptz '2026-08-01 20:00+00', timestamptz '2026-08-02 20:00+00', 'Asia/Dubai',
   130000, 'AED', 'measured', timestamptz '2026-08-02 20:00+00', 2
-from public.metric_definitions where key = 'revenue.gross'
-on conflict do nothing;
+from public.metric_definitions where key = 'revenue.gross';
 
-update public.normalized_metrics
-set superseded_by_id = '4b2f0c1f-1760-4b25-8b15-300000000002'::uuid,
-    supersede_reason = 'provider restatement'
-where id = '4b2f0c1f-1760-4b25-8b15-300000000001'::uuid;
+-- The suite rolls back rather than commits, so force the deferred foreign key
+-- to be validated here. Without this the restatement would appear to pass even
+-- if the pointer never resolved.
+set constraints all immediate;
 
 select extensions.is(
   (

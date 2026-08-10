@@ -103,6 +103,8 @@ Providers restate. A marketplace corrects last week's order counts; a POS export
 
 Observations are **append-only with revisions**. A restatement writes a new revision that supersedes the prior one for the same `(metric_key, subject, dimensions, period)` tuple, carrying the reason and the ingestion run that produced it. Reads resolve to the current revision by default and can resolve as-of a timestamp.
 
+A restatement has exactly one valid statement order: **retire the incumbent, then insert the successor, in one transaction.** Inserting first collides with the partial unique index on current rows, which is checked per statement and cannot be deferred. Retiring first leaves the supersession pointer briefly dangling, so that foreign key is deferred to commit. Any writer that reverses the order will fail, and that is intended rather than incidental.
+
 This mirrors the revision pattern already implemented for memory items. It also settles an open caveat elsewhere: `specs/005-decision-engine-v1.md` section 5.3 noted that reconstruction of a screened-out candidate set is exact only up to restatement of the underlying data. With pinned revisions in the decision record's inputs digest, reconstruction becomes exact, and that section is amended accordingly.
 
 ### 4.8 Dimensions
