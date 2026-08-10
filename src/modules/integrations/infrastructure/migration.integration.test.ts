@@ -12,6 +12,12 @@ const workerTransitionsMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260808012410_integration_worker_run_transitions.sql",
 );
+const storagePolicyFixMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260810150000_fix_integration_import_storage_policies.sql",
+);
+/** Retains the captured subquery it was corrected for; excluded from that guard. */
+const supersededStoragePolicyMigration = "20260807230118_integration_hub.sql";
 const authenticatedOperationsMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260808025602_integration_authenticated_operations.sql",
@@ -579,19 +585,69 @@ describe("Integration Hub migration contract", () => {
     expect(bucket).toContain("10485760");
     expect(bucket).toContain("array['text/csv']::text[]");
 
+    // The policy bodies in this migration were superseded by
+    // 20260810150000_fix_integration_import_storage_policies.sql, so the
+    // effective definitions are asserted there rather than here.
+    const effective = readFileSync(storagePolicyFixMigrationPath, "utf8");
+
     for (const policyName of [
       "members can read integration imports",
       "operators can upload integration imports",
       "operators can update integration imports",
       "operators can delete integration imports",
     ]) {
-      const policy = statementContaining(sql, `create policy \"${policyName}\"`);
+      const policy = statementContaining(effective, `create policy \"${policyName}\"`);
       expect(policy).toContain("bucket_id = 'integration-imports'");
-      expect(policy).toContain("cardinality(storage.foldername(name)) = 3");
-      expect(policy).toContain("(storage.foldername(name))[1]");
-      expect(policy).toContain("(storage.foldername(name))[2]");
-      expect(policy).toContain("(storage.foldername(name))[3]");
+      expect(policy).toContain("cardinality(storage.foldername(objects.name)) = 3");
+      expect(policy).toContain("(storage.foldername(objects.name))[1]");
+      expect(policy).toContain("(storage.foldername(objects.name))[2]");
+      expect(policy).toContain("(storage.foldername(objects.name))[3]");
       expect(policy).toContain("source.source_type = 'csv_import'");
     }
   });
+
+  it("qualifies the storage column inside every policy subquery", () => {
+    // `integration_data_sources` has a `name` column of its own, so an
+    // unqualified storage.foldername(name) inside `exists (...)` binds to the
+    // data source's display name instead of the object path and evaluates false
+    // for every row. That silently disabled the whole bucket once already, and
+    // a permissive policy that never matches denies everything.
+    for (const file of readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql"))) {
+      if (file === supersededStoragePolicyMigration) continue;
+
+      // Comment lines are dropped first: the corrective migration quotes the
+      // broken form to explain it, and that explanation is not a policy.
+      const sql = readFileSync(resolve(migrationsDirectory, file), "utf8").replace(
+        /^[ \t]*--.*$/gm,
+        "",
+      );
+
+      for (const subquery of existsSubqueries(sql)) {
+        expect(subquery, `${file} captures an unqualified column inside a subquery`).not.toMatch(
+          /storage\.foldername\(\s*name\s*\)/,
+        );
+      }
+    }
+  });
 });
+
+/** Every `exists ( ... )` block, matched to its balancing parenthesis. */
+function existsSubqueries(sql: string): string[] {
+  const blocks: string[] = [];
+  const opener = /exists\s*\(/gi;
+
+  for (let match = opener.exec(sql); match !== null; match = opener.exec(sql)) {
+    let depth = 1;
+    let index = match.index + match[0].length;
+
+    while (index < sql.length && depth > 0) {
+      if (sql[index] === "(") depth += 1;
+      else if (sql[index] === ")") depth -= 1;
+      index += 1;
+    }
+
+    blocks.push(sql.slice(match.index, index));
+  }
+
+  return blocks;
+}
