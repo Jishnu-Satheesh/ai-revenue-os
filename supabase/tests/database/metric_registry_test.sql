@@ -73,8 +73,10 @@ select extensions.throws_ok(
   'an organization key that shadows shared vocabulary is rejected'
 );
 
+-- A fixture-only key. Using a real one would collide with seeded vocabulary
+-- the moment a pack registers it, which is exactly what happened once.
 insert into public.metric_definitions (key, label, owner_scope, value_kind, aggregation)
-values ('listing.conversion_rate', 'Conversion rate', 'core', 'ratio', 'ratio_of_sums');
+values ('testing.conversion_rate', 'Conversion rate', 'core', 'ratio', 'ratio_of_sums');
 
 -- Observations ---------------------------------------------------------------
 
@@ -88,7 +90,7 @@ select extensions.throws_ok(
       '4b2f0c1f-1760-4b25-8b15-200000000001'::uuid, id, 'ratio', 'day',
       timestamptz '2026-08-01 20:00+00', timestamptz '2026-08-02 20:00+00', 'Asia/Dubai',
       0.12, 'measured', timestamptz '2026-08-02 20:00+00'
-    from public.metric_definitions where key = 'listing.conversion_rate'
+    from public.metric_definitions where key = 'testing.conversion_rate'
   $$,
   '23514',
   null,

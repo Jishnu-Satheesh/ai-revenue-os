@@ -82,18 +82,34 @@ describe("aggregateObservations", () => {
     expect(recombined).toBeCloseTo(whole.value, 12);
   });
 
+  const preparationTime: MetricDefinition = {
+    key: "kitchen.preparation_time",
+    valueKind: "duration",
+    aggregation: "percentile",
+    percentileP: 0.5,
+  };
+
   it("refuses to recombine a percentile across periods", () => {
     expect(() =>
       aggregateObservations({
-        definition: {
-          key: "kitchen.preparation_time",
-          valueKind: "duration",
-          aggregation: "percentile",
-          percentileP: 0.5,
-        },
-        observations: [observation("2026-08-01T00:00:00Z", 900_000)],
+        definition: preparationTime,
+        observations: [
+          observation("2026-08-01T00:00:00Z", 900_000),
+          observation("2026-08-02T00:00:00Z", 840_000),
+        ],
       }),
     ).toThrow(MetricError);
+  });
+
+  it("passes a single period's percentile through, which is not a recombination", () => {
+    const outcome = aggregateObservations({
+      definition: preparationTime,
+      observations: [observation("2026-08-01T00:00:00Z", 900_000)],
+    });
+
+    // Refusing this too would make a percentile metric unreadable at every
+    // grain, including the one it was recorded at.
+    expect(outcome).toMatchObject({ status: "ok", value: 900_000 });
   });
 
   it("refuses to combine two currencies", () => {

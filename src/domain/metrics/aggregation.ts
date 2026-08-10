@@ -52,13 +52,6 @@ export function aggregateObservations({
   expectedPeriodStarts,
   gapPolicy = "mark_missing",
 }: AggregateInput): MetricAggregateOutcome {
-  if (definition.aggregation === "percentile")
-    throw metricError("METRIC_AGGREGATION_UNSUPPORTED", {
-      key: definition.key,
-      aggregation: definition.aggregation,
-      reason: "a percentile of periods is not a percentile of the whole",
-    });
-
   const missingPeriodCount = expectedPeriodStarts
     ? findMissingPeriodStarts(
         expectedPeriodStarts,
@@ -81,6 +74,18 @@ export function aggregateObservations({
       observationCount: observations.length,
       missingPeriodCount,
     };
+
+  // Combining percentiles is impossible: daily medians hold no information
+  // about the weekly median. Reading a single period is not combining, though,
+  // so a one-period window passes through rather than refusing a metric that
+  // would otherwise be unreadable at every grain.
+  if (definition.aggregation === "percentile" && observations.length > 1)
+    throw metricError("METRIC_AGGREGATION_UNSUPPORTED", {
+      key: definition.key,
+      aggregation: definition.aggregation,
+      observationCount: observations.length,
+      reason: "a percentile of periods is not a percentile of the whole",
+    });
 
   const currency = resolveCurrency(definition, observations);
   const numerator = sum(observations.map((observation) => observation.numerator));
@@ -122,8 +127,10 @@ function deriveValue(
     case "last":
       return latestObservationValue(observations);
 
+    // Guarded above to a single observation, so this passes the stored
+    // percentile through rather than computing one.
     case "percentile":
-      throw metricError("METRIC_AGGREGATION_UNSUPPORTED", { key: definition.key });
+      return observations[0].numerator;
   }
 }
 

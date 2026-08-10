@@ -87,7 +87,14 @@ pnpm build
 
 ## Database workflow
 
-**There is no local or development database.** Development and testing both run against the shared hosted **staging** Supabase project, and every command below acts on it.
+**There is no local or development database.** Development and testing both run against the shared hosted **staging** Supabase project, and every command below acts on it. Production is served from a separate database, so staging data is safe to work with.
+
+Use one fixed **development organization** for workflow testing, so results stay comparable between sessions and nobody has to rebuild a fixture to reproduce a bug:
+
+| | |
+| --- | --- |
+| Organization | `2dda45b8-82db-4f5f-b17d-611b9bbb7846` — Al Noor Kitchen |
+| Industry pack | `restaurant`, AED, `Asia/Dubai`, 3 branches |
 
 ```bash
 pnpm db:migrations:list      # what staging has applied
