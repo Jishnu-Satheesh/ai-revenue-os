@@ -848,7 +848,8 @@ Environment notes for whoever continues:
 - **No container runtime here.** `supabase start`, `supabase db reset`, `supabase test db`,
   and `supabase gen types` all require Docker and cannot run in this workspace. Migrations were
   applied to the remote database with `pnpm db:migrations:push`, and pgTAP suites run against it
-  with `pnpm db:test <file>` (`scripts/run-pgtap.mjs`, added in Task 2).
+  with `pnpm db:test` (all suites) or `pnpm db:test <file>` (a selected suite;
+  `scripts/run-pgtap.mjs`, added in Task 2).
 - **Row types remain provisional** in `src/modules/memory/application/ports.ts` for the same
   reason. Regenerating `database.types.ts` and deleting them is still open, alongside the
   identical debt in `src/modules/integrations/application/ports.ts`.

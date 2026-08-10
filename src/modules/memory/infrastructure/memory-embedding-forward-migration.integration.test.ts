@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -25,6 +26,14 @@ function embeddingLeaseMigration(): string {
 function memoryItemRevisionMigration(): string {
   const matches = readdirSync(migrationsDirectory)
     .filter((name) => /^\d{14}_memory_item_revision\.sql$/.test(name))
+    .sort();
+  expect(matches).toHaveLength(1);
+  return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
+}
+
+function memoryItemRevisionFixMigration(): string {
+  const matches = readdirSync(migrationsDirectory)
+    .filter((name) => /^\d{14}_fix_memory_item_revision_greatest\.sql$/.test(name))
     .sort();
   expect(matches).toHaveLength(1);
   return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
@@ -94,17 +103,51 @@ describe("Business Memory forward embedding migrations", () => {
     expect(returningAt).toBeLessThan(crossJoinAt);
   });
 
-  it("uses a memory-items-only strictly increasing revision trigger", () => {
-    const sql = memoryItemRevisionMigration();
+  it("repairs the memory-items revision trigger with the PostgreSQL greatest expression", () => {
+    const originalSql = memoryItemRevisionMigration();
+    const fixSql = memoryItemRevisionFixMigration();
 
-    expect(sql).toContain("create or replace function public.set_memory_item_updated_at");
-    expect(sql).toContain("new.updated_at = pg_catalog.greatest(");
-    expect(sql).toContain(
+    expect(originalSql).toContain("create or replace function public.set_memory_item_updated_at");
+    expect(fixSql).toContain("create or replace function public.set_memory_item_updated_at");
+    expect(fixSql).toContain("new.updated_at = greatest(");
+    expect(fixSql).not.toContain("pg_catalog.greatest(");
+    expect(fixSql).toContain(
       "pg_catalog.clock_timestamp(), old.updated_at + interval '1 microsecond'",
     );
-    expect(sql).toContain(
-      "drop trigger if exists memory_items_set_updated_at on public.memory_items",
+  });
+
+  it("selects all database suites by default and preserves explicit selectors", () => {
+    const invocation = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        [
+          'import { resolvePgTapDatabaseUrl, resolvePgTapSuites } from "./scripts/pgtap-suites.mjs";',
+          "console.log(JSON.stringify({",
+          "  all: resolvePgTapSuites([]),",
+          '  explicit: resolvePgTapSuites(["supabase/tests/database/business_memory_write_test.sql"]),',
+          "  localUrl: resolvePgTapDatabaseUrl(),",
+          '  pooledUrl: resolvePgTapDatabaseUrl("postgresql://user:password@host:6543/database"),',
+          "}));",
+        ].join("\n"),
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
     );
-    expect(sql).toContain("create trigger memory_items_set_updated_at");
+    expect(invocation.status).toBe(0);
+    const selected = JSON.parse(invocation.stdout) as {
+      all: string[];
+      explicit: string[];
+      localUrl: string;
+      pooledUrl: string;
+    };
+
+    expect(selected.all).toEqual([...selected.all].sort());
+    expect(selected.all).toContain(
+      resolve(databaseTestsDirectory, "business_memory_embedding_lease_test.sql"),
+    );
+    expect(selected.explicit).toEqual(["supabase/tests/database/business_memory_write_test.sql"]);
+    expect(selected.localUrl).toBe("postgresql://postgres:postgres@127.0.0.1:54322/postgres");
+    expect(selected.pooledUrl).toBe("postgresql://user:password@host:5432/database");
   });
 });
