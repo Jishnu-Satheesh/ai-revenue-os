@@ -97,13 +97,24 @@ function renderCatalog(role: OrganizationRole = "operator") {
   );
 }
 
+const metricTargets = [
+  { key: "revenue.gross", label: "Gross revenue", importable: true },
+  { key: "transactions.count", label: "Transactions", importable: true },
+  { key: "listing.conversion_rate", label: "Conversion rate", importable: false },
+];
+
 function renderSources(
-  options: { role?: OrganizationRole; snapshot?: IntegrationHubSnapshot } = {},
+  options: {
+    role?: OrganizationRole;
+    snapshot?: IntegrationHubSnapshot;
+    metricTargets?: typeof metricTargets;
+  } = {},
 ) {
   return wrap(
     <DataSourcesTab
       organizationId={organizationId}
       snapshot={options.snapshot ?? snapshot()}
+      metricTargets={options.metricTargets ?? metricTargets}
       role={options.role ?? "operator"}
     />,
   );

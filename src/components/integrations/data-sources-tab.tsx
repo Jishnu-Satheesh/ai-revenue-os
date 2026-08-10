@@ -10,6 +10,7 @@ import {
   type CsvSourceSubmission,
   type ManualSourceSubmission,
 } from "@/components/integrations/data-source-form";
+import type { MetricTargetChoice } from "@/components/integrations/csv-mapping-form";
 import { formatInstant, runStatusLabel } from "@/components/integrations/health-status";
 import {
   integrationQueryKeys,
@@ -50,10 +51,12 @@ function operationKey(prefix: string): string {
 export function DataSourcesTab({
   organizationId,
   snapshot,
+  metricTargets,
   role,
 }: Readonly<{
   organizationId: string;
   snapshot: IntegrationHubSnapshot;
+  metricTargets: readonly MetricTargetChoice[];
   role: OrganizationRole;
 }>) {
   const queryClient = useQueryClient();
@@ -179,6 +182,7 @@ export function DataSourcesTab({
           <CardContent>
             <DataSourceForm
               branches={snapshot.branches}
+              metricTargets={metricTargets}
               isSubmitting={registerManual.isPending || uploadCsv.isPending}
               onRegisterManual={async (input) => {
                 try {

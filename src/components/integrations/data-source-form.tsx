@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import {
   CsvMappingForm,
+  type MetricTargetChoice,
   suggestTargetField,
   toColumnMapping,
   type CsvColumnMappingEntry,
@@ -78,11 +79,13 @@ function validateFile(file: File): string | null {
 
 export function DataSourceForm({
   branches,
+  metricTargets,
   isSubmitting,
   onRegisterManual,
   onUploadCsv,
 }: Readonly<{
   branches: readonly IntegrationBranchOption[];
+  metricTargets: readonly MetricTargetChoice[];
   isSubmitting: boolean;
   onRegisterManual: (input: ManualSourceSubmission) => Promise<void>;
   onUploadCsv: (input: CsvSourceSubmission) => Promise<void>;
@@ -253,7 +256,12 @@ export function DataSourceForm({
               <FieldDescription>UTF-8, at most 10 MiB, stored privately.</FieldDescription>
             </Field>
             {columns.length > 0 ? (
-              <CsvMappingForm entries={columns} onChange={setColumns} disabled={isSubmitting} />
+              <CsvMappingForm
+                entries={columns}
+                metricTargets={metricTargets}
+                onChange={setColumns}
+                disabled={isSubmitting}
+              />
             ) : null}
             {isSubmitting ? <Progress value={null} aria-label="Uploading the CSV file" /> : null}
           </>

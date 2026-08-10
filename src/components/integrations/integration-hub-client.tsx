@@ -7,6 +7,7 @@ import { ActivityTab } from "@/components/integrations/activity-tab";
 import { CatalogTab } from "@/components/integrations/catalog-tab";
 import { ConnectionsTab } from "@/components/integrations/connections-tab";
 import { DataSourcesTab } from "@/components/integrations/data-sources-tab";
+import type { MetricTargetChoice } from "@/components/integrations/csv-mapping-form";
 import {
   integrationCatalogQueryOptions,
   integrationSnapshotQueryOptions,
@@ -30,6 +31,8 @@ export type IntegrationHubClientProps = {
    * decide whether the first client render should refetch.
    */
   initialDataUpdatedAt?: number;
+  /** Registered metric keys this organization can map a CSV column onto. */
+  metricTargets: readonly MetricTargetChoice[];
 };
 
 const tabs = [
@@ -46,6 +49,7 @@ export function IntegrationHubClient({
   initialSnapshot,
   initialCatalog,
   initialDataUpdatedAt,
+  metricTargets,
 }: IntegrationHubClientProps) {
   const snapshotQuery = useQuery(
     integrationSnapshotQueryOptions({
@@ -126,7 +130,12 @@ export function IntegrationHubClient({
           />
         </TabsContent>
         <TabsContent value="data-sources" className="min-h-0">
-          <DataSourcesTab organizationId={organizationId} snapshot={snapshot} role={role} />
+          <DataSourcesTab
+            organizationId={organizationId}
+            snapshot={snapshot}
+            metricTargets={metricTargets}
+            role={role}
+          />
         </TabsContent>
         <TabsContent value="activity" className="min-h-0">
           <ActivityTab activity={snapshot.recentActivity} isRefreshing={isRefreshing} />

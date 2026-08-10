@@ -32,6 +32,21 @@ export type MetricObservationRecord = {
   qualityTier: MetricQualityTier;
 };
 
+/**
+ * A metric key offered as a CSV mapping target.
+ *
+ * `importable` is false for ratio and rating kinds: they need a numerator and a
+ * denominator, a single CSV column can only supply a quotient, and the
+ * projection refuses one. Surfacing that in the picker is better than letting an
+ * operator choose a rate and discover at import time that every row rejected.
+ */
+export type MetricTargetOption = {
+  key: string;
+  label: string;
+  valueKind: MetricValueKind;
+  importable: boolean;
+};
+
 export type MetricSeriesQuery = {
   organizationId: string;
   metricKey: string;

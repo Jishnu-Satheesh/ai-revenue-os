@@ -100,6 +100,7 @@ function renderClient(options: { fetchNeverResolves?: boolean } = {}) {
         initialCatalog={[]}
         // A zero timestamp marks the server payload as stale so the client
         // performs the background refetch this test observes.
+        metricTargets={[]}
         initialDataUpdatedAt={options.fetchNeverResolves ? 0 : Date.now()}
       />
     </QueryClientProvider>,
@@ -115,7 +116,15 @@ beforeEach(() => {
     organizationId,
     user: { id: "user-1" },
     membership: { role: "operator" },
-    supabase: {},
+    // The page also reads the metric registry for CSV mapping targets, which
+    // goes straight to the client rather than through the hub service.
+    supabase: {
+      from: () => ({
+        select: () => ({
+          eq: () => ({ or: () => ({ order: async () => ({ data: [], error: null }) }) }),
+        }),
+      }),
+    },
   });
   mocks.getOrganization.mockResolvedValue({ id: organizationId, name: "Fixture Bakery" });
   mocks.createIntegrationHubService.mockReturnValue(mocks.service);

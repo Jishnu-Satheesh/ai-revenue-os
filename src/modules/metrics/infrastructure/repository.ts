@@ -10,6 +10,7 @@ import type {
   MetricObservationWrite,
   MetricProjectionStore,
   MetricSeriesPort,
+  MetricTargetOption,
 } from "@/modules/metrics/application/ports";
 
 type MetricsClient = SupabaseClient<Database>;
@@ -83,6 +84,39 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
       return (data ?? []).map(toObservation);
     },
   };
+}
+
+/**
+ * Metric keys an organization may map a CSV column onto: shared vocabulary plus
+ * its own custom definitions. Read-only, so an authenticated client is enough.
+ */
+export async function listMetricTargets(
+  supabase: MetricsClient,
+  organizationId: string,
+): Promise<MetricTargetOption[]> {
+  const { data, error } = await supabase
+    .from("metric_definitions")
+    .select("key, label, value_kind, organization_id")
+    .eq("is_active", true)
+    .or(`organization_id.is.null,organization_id.eq.${organizationId}`)
+    .order("key", { ascending: true });
+
+  if (error) throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+
+  const byKey = new Map<string, MetricTargetOption>();
+  for (const row of data ?? []) {
+    // A custom definition outranks shared vocabulary for the same key.
+    if (byKey.has(row.key) && row.organization_id === null) continue;
+    const valueKind = row.value_kind as MetricTargetOption["valueKind"];
+    byKey.set(row.key, {
+      key: row.key,
+      label: row.label,
+      valueKind,
+      importable: valueKind !== "ratio" && valueKind !== "rating",
+    });
+  }
+
+  return [...byKey.values()].sort((left, right) => left.key.localeCompare(right.key));
 }
 
 const UNIQUE_VIOLATION = "23505";
