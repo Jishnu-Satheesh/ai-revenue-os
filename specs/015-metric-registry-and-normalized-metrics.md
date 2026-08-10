@@ -160,6 +160,15 @@ A **projection** maps a record type onto one or more metric observations. Projec
 
 Manual and CSV import route through the same projections, with column mapping proposed by a model and confirmed by a human, mirroring the ledger's treatment of provider line-item labels.
 
+The CSV projection reads `integration_data_sources.column_mapping` directly: the reserved targets `period`, `channel` and `currency` carry the row's dimensions, and every other target is a metric key. Four consequences are decided rather than incidental:
+
+- **Grain is not in the mapping.** Mapping values are validated as CSV headers, so a literal grain cannot ride there. Imports project at `day`, and a source needing another grain needs somewhere real to declare it.
+- **A ratio or rating key is refused.** One column can only supply a quotient, and storing that is the shape 4.2 forbids. A conversion-rate column cannot be ingested at all rather than being flattened.
+- **Dates are never guessed.** Only an ISO date, an ISO timestamp with an offset, and an ISO timestamp without one are accepted, the last read as a wall-clock reading at the branch. `Date.parse` is not the fallback: it accepts `03/04/2026` as 4 March, which would file a Dubai client's 3 April a month early with no error raised.
+- **A period that already holds a current revision is reported, not overwritten.** Re-uploading a corrected file is a restatement, and 4.7 makes that a governed act rather than a side effect of re-importing. The duplicate is counted and logged; the row is not treated as malformed input.
+
+Counters returned to the ingestion run are per row, because the worker reconciles them against the row count it read from the file. A row counts as accepted when at least one of its cells projected.
+
 ## 7. Consumers
 
 - **Decision Engine** — screening predicates, freshness bounds, and `observed`-tier value estimates.
@@ -238,7 +247,7 @@ Minimal by design. The store is arithmetic over ingested records.
 
 **First slice applied** in `supabase/migrations/20260810130000_metric_registry_and_normalized_metrics.sql`: `metric_definitions`, `metric_dimension_definitions`, `normalized_metrics` with revisions and append-only enforcement, `goals.metric_key`, RLS and read-only grants, and a two-key industry-neutral core seed.
 
-Deferred to later slices: `metric_baselines`, the pack definition seed, and the projection layer of section 6. Writes are service-role only until those exist, so nothing yet populates a series.
+Deferred to later slices: `metric_baselines` and the pack definition seed. The CSV projection of section 6 has shipped; writes remain service-role only, so the ingestion path is the sole route into a series.
 
 Remaining work per section 5, plus two changes to existing schema:
 

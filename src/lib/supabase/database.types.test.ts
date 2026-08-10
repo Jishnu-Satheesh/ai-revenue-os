@@ -30,7 +30,6 @@ const UNTYPED_TABLES = new Set([
   "integration_capability_grants",
   "integration_connections",
   "integration_data_source_operations",
-  "integration_data_sources",
   "integration_fixture_connect_operations",
   "integration_health_checks",
   "integration_ingestion_handoffs",

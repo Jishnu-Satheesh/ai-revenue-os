@@ -7,6 +7,8 @@ import type { Database } from "@/lib/supabase/database.types";
 import type {
   MetricDefinitionRecord,
   MetricObservationRecord,
+  MetricObservationWrite,
+  MetricProjectionStore,
   MetricSeriesPort,
 } from "@/modules/metrics/application/ports";
 
@@ -80,6 +82,131 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
 
       return (data ?? []).map(toObservation);
     },
+  };
+}
+
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * The write side of the projection.
+ *
+ * Requires a service-role client: `normalized_metrics` carries no authenticated
+ * write grant, so the ingestion path is the only way in and the browser has no
+ * route to a decision input.
+ */
+export function createMetricProjectionStore(supabase: MetricsClient): MetricProjectionStore {
+  return {
+    async loadProjectionContext({ organizationId, dataSourceId }) {
+      const { data: source } = await supabase
+        .from("integration_data_sources")
+        .select("branch_id")
+        .eq("organization_id", organizationId)
+        .eq("id", dataSourceId)
+        .maybeSingle();
+
+      if (!source) return null;
+
+      const { data: organization } = await supabase
+        .from("organizations")
+        .select("default_timezone, base_currency")
+        .eq("id", organizationId)
+        .maybeSingle();
+
+      if (!organization) return null;
+
+      // The branch timezone wins where there is one, because period boundaries
+      // belong to the place the trade happened, not to the tenant's default.
+      let timeZone = organization.default_timezone;
+      if (source.branch_id) {
+        const { data: branch } = await supabase
+          .from("branches")
+          .select("timezone")
+          .eq("organization_id", organizationId)
+          .eq("id", source.branch_id)
+          .maybeSingle();
+        if (branch?.timezone) timeZone = branch.timezone;
+      }
+
+      return {
+        branchId: source.branch_id,
+        timeZone,
+        defaultCurrency: organization.base_currency,
+      };
+    },
+
+    async loadDefinitionsByKey(organizationId, keys) {
+      if (keys.length === 0) return new Map();
+
+      const { data, error } = await supabase
+        .from("metric_definitions")
+        .select("id, key, value_kind, aggregation, percentile_p, is_active, organization_id")
+        .in("key", [...keys])
+        .eq("is_active", true)
+        .or(`organization_id.is.null,organization_id.eq.${organizationId}`);
+
+      if (error) throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+
+      const byKey = new Map<string, MetricDefinitionRecord>();
+      for (const row of data ?? []) {
+        // A custom definition outranks shared vocabulary for the same key.
+        const existing = byKey.get(row.key);
+        if (existing && row.organization_id === null) continue;
+        byKey.set(row.key, toDefinition(row));
+      }
+
+      return byKey;
+    },
+
+    async writeObservations(observations) {
+      if (observations.length === 0) return { written: 0, duplicates: 0 };
+
+      const rows = observations.map(toInsertRow);
+      const { error } = await supabase.from("normalized_metrics").insert(rows);
+      if (!error) return { written: rows.length, duplicates: 0 };
+      if (error.code !== UNIQUE_VIOLATION) throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+
+      // The batch collided with a period that already holds a current revision.
+      // Postgres aborts the whole statement, so the rest are retried
+      // individually to find out which ones were actually duplicates rather
+      // than discarding a batch for one clash.
+      let written = 0;
+      let duplicates = 0;
+
+      for (const row of rows) {
+        const { error: rowError } = await supabase.from("normalized_metrics").insert(row);
+        if (!rowError) {
+          written += 1;
+          continue;
+        }
+        if (rowError.code === UNIQUE_VIOLATION) {
+          duplicates += 1;
+          continue;
+        }
+        throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+      }
+
+      return { written, duplicates };
+    },
+  };
+}
+
+function toInsertRow(observation: MetricObservationWrite) {
+  return {
+    organization_id: observation.organizationId,
+    branch_id: observation.branchId,
+    metric_definition_id: observation.metricDefinitionId,
+    value_kind: observation.valueKind,
+    period_grain: observation.periodGrain,
+    period_start: observation.periodStart.toISOString(),
+    period_end: observation.periodEnd.toISOString(),
+    period_timezone: observation.periodTimezone,
+    value_numerator: observation.numerator,
+    value_denominator: observation.denominator,
+    currency: observation.currency,
+    channel: observation.channel,
+    quality_tier: observation.qualityTier,
+    source_ingestion_run_id: observation.sourceIngestionRunId,
+    observed_at: observation.observedAt.toISOString(),
   };
 }
 

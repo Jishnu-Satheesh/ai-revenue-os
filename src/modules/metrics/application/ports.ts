@@ -59,3 +59,53 @@ export type MetricSeriesPort = {
    */
   loadObservations(query: MetricSeriesQuery): Promise<MetricObservationRecord[]>;
 };
+
+/**
+ * Everything a CSV row needs that the row itself cannot carry. Grain, timezone
+ * and currency are properties of the branch and the import, not of the file.
+ */
+export type MetricProjectionContext = {
+  branchId: string | null;
+  timeZone: string;
+  defaultCurrency: string | null;
+};
+
+export type MetricObservationWrite = {
+  organizationId: string;
+  branchId: string | null;
+  metricDefinitionId: string;
+  valueKind: MetricValueKind;
+  periodGrain: MetricPeriodGrain;
+  periodStart: Date;
+  periodEnd: Date;
+  periodTimezone: string;
+  numerator: number;
+  denominator: number | null;
+  currency: string | null;
+  channel: string | null;
+  qualityTier: MetricQualityTier;
+  sourceIngestionRunId: string | null;
+  observedAt: Date;
+};
+
+export type MetricProjectionStore = {
+  /** Resolves the branch timezone and the organization's currency for an import. */
+  loadProjectionContext(input: {
+    organizationId: string;
+    dataSourceId: string;
+  }): Promise<MetricProjectionContext | null>;
+
+  loadDefinitionsByKey(
+    organizationId: string,
+    keys: readonly string[],
+  ): Promise<Map<string, MetricDefinitionRecord>>;
+
+  /**
+   * Inserts observations, reporting rather than overwriting a period that
+   * already holds a current revision. A re-uploaded file is a restatement, and
+   * a restatement is a governed act rather than a side effect of re-importing.
+   */
+  writeObservations(
+    observations: readonly MetricObservationWrite[],
+  ): Promise<{ written: number; duplicates: number }>;
+};

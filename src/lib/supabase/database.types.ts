@@ -146,6 +146,32 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["subject_kinds"]["Insert"]>;
         Relationships: [];
       };
+      integration_data_sources: {
+        Row: {
+          id: string;
+          organization_id: string;
+          source_type: "manual" | "csv_import";
+          name: string;
+          branch_id: string | null;
+          status: "pending" | "ready" | "processing" | "failed" | "archived";
+          storage_path: string | null;
+          original_filename: string | null;
+          media_type: string | null;
+          size_bytes: number | null;
+          schema_version: number;
+          column_mapping: Record<string, string>;
+          last_successful_import_at: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["integration_data_sources"]["Row"],
+          "id" | "created_at" | "updated_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["integration_data_sources"]["Insert"]>;
+        Relationships: [];
+      };
       metric_definitions: {
         Row: {
           id: string;
