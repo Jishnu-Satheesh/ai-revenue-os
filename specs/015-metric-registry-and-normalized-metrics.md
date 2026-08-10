@@ -170,6 +170,10 @@ Manual and CSV import route through the same projections, with column mapping pr
 
 All read through one port. No consumer queries the tables directly, so that revision resolution, gap policy, and aggregation semantics are enforced in one place rather than reimplemented.
 
+The port resolves current revisions only. An as-of read needs a `distinct on` per series tuple, which PostgREST cannot express and which therefore needs a database function; it ships with the projection slice. Until then a caller cannot reconstruct what a decision read at the time, and the decision record's inputs digest is the only record of it.
+
+The port additionally refuses a series whose observations were bucketed in more than one timezone. That happens when a branch's timezone is corrected after data exists: historical rows keep the zone in force when they were written, precisely so the mismatch surfaces rather than being averaged away.
+
 ## 8. AI behavior
 
 Minimal by design. The store is arithmetic over ingested records.

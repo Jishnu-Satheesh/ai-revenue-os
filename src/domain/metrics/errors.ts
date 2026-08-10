@@ -12,7 +12,8 @@ export type MetricErrorCode =
   | "METRIC_DENOMINATOR_MISSING"
   | "METRIC_DENOMINATOR_INVALID"
   | "METRIC_PERIOD_RANGE_INVALID"
-  | "METRIC_TIMEZONE_INVALID";
+  | "METRIC_TIMEZONE_INVALID"
+  | "METRIC_TIMEZONE_MIXED";
 
 export class MetricError extends Error {
   readonly name = "MetricError";
@@ -41,6 +42,8 @@ const safeMetricErrorCopy: Readonly<Record<MetricErrorCode, string>> = {
   METRIC_DENOMINATOR_INVALID: "A denominator must be greater than zero.",
   METRIC_PERIOD_RANGE_INVALID: "The requested period range is empty or inverted.",
   METRIC_TIMEZONE_INVALID: "The requested timezone is not recognised.",
+  METRIC_TIMEZONE_MIXED:
+    "This series was bucketed in more than one timezone and cannot be combined.",
 };
 
 export function metricError(
