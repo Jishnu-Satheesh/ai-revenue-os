@@ -189,7 +189,11 @@ function dependencies(
       getAdapter: vi.fn(() => adapter),
       getDefinition: vi.fn(() => googleBusinessProfileDefinition),
     },
-    findDataSource: vi.fn(async () => input.dataSource ?? dataSource),
+    // `in` rather than `??`, so an explicit null means "no such source" instead
+    // of coalescing back to the default fixture.
+    findDataSource: vi.fn(async (): Promise<IntegrationDataSourceRow | null> =>
+      "dataSource" in input ? (input.dataSource ?? null) : dataSource,
+    ),
     assertFeatureEnabled: vi.fn(),
     isCancelled: vi.fn(async () => input.cancelled ?? false),
     now: () => new Date(timestamp),
@@ -212,6 +216,9 @@ const connectionPayload = {
   ingestionRunId: ids.ingestionRunId,
   correlationId: ids.correlationId,
   idempotencyKey: "dispatch:integration:11111111-1111-4111-8111-111111111111",
+  // Deliberately different from the dispatch key. The lease is checked against
+  // the run row, and conflating the two made every lease request conflict.
+  runIdempotencyKey: "integration.test-connection:client-22222222-2222-4222-8222-222222222222",
   adapterVersion: "1",
 };
 
@@ -354,6 +361,7 @@ describe("Integration Hub workers", () => {
         ingestionRunId: ids.ingestionRunId,
         correlationId: ids.correlationId,
         idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
       },
       deps,
     );
@@ -361,6 +369,61 @@ describe("Integration Hub workers", () => {
     expect(deps.sink.accept).toHaveBeenCalledOnce();
     expect(worker.completeRun).not.toHaveBeenCalled();
     expect(worker.requeueRun).not.toHaveBeenCalled();
+  });
+
+  it("leases against the run key and hands off with the dispatch key", async () => {
+    // These are two different keys for two different jobs. The lease RPC
+    // compares its argument to integration_ingestion_runs.idempotency_key, so
+    // passing the dispatch key -- which is derived from the run id and can
+    // never equal it -- made every lease conflict. Worse, the failure was
+    // silent: persistPreflightFailure needs its own lease to record why
+    // preflight failed, so the original error never reached the run row.
+    const deps = dependencies();
+    await runSyncConnection(
+      { ...connectionPayload, taskName: "integration.sync-connection" },
+      deps,
+    );
+
+    expect(deps.worker.acquireExecutionLease).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.runIdempotencyKey }),
+    );
+    expect(deps.worker.assertExecutionLease).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.runIdempotencyKey }),
+    );
+
+    // The handoff is a different concern and keeps the dispatch key.
+    expect(deps.sink.accept).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.idempotencyKey }),
+    );
+  });
+
+  it("records why preflight failed instead of dying in the error handler", async () => {
+    // The lease bug surfaced as "lease could not be acquired" thrown from the
+    // failure path, which discarded the real cause. A missing data source must
+    // reach the run row.
+    const deps = dependencies({ dataSource: null });
+
+    await expect(
+      runImportDataSource(
+        {
+          taskName: "integration.import-data-source",
+          organizationId: ids.organizationId,
+          dataSourceId: ids.dataSourceId,
+          ingestionRunId: ids.ingestionRunId,
+          correlationId: ids.correlationId,
+          idempotencyKey: connectionPayload.idempotencyKey,
+          runIdempotencyKey: connectionPayload.runIdempotencyKey,
+        },
+        deps,
+      ),
+    ).rejects.toThrow();
+
+    expect(deps.worker.acquireExecutionLease).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.runIdempotencyKey }),
+    );
+    expect(deps.worker.completions).toContainEqual(
+      expect.objectContaining({ status: "failed", normalizedErrorCode: "TENANT_SCOPE_ERROR" }),
+    );
   });
 
   it("reuses the persisted idempotency key and sends a valid sync handoff once", async () => {
@@ -525,6 +588,7 @@ describe("Integration Hub workers", () => {
         ingestionRunId: ids.ingestionRunId,
         correlationId: ids.correlationId,
         idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
       },
       deps,
     ).catch((error: IntegrationError) => {
@@ -611,6 +675,7 @@ describe("Integration Hub workers", () => {
           ingestionRunId: ids.ingestionRunId,
           correlationId: ids.correlationId,
           idempotencyKey: connectionPayload.idempotencyKey,
+          runIdempotencyKey: connectionPayload.runIdempotencyKey,
         },
         deps,
       ),

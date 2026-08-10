@@ -49,8 +49,40 @@ describe("parseCsvMetricMapping", () => {
     );
   });
 
-  it("rejects a target that is neither reserved nor a valid metric key", () => {
-    expect(() => parseCsvMetricMapping({ period: "Date", Revenue: "Total" })).toThrow(MetricError);
+  it("ignores targets that belong to another consumer of the mapping", () => {
+    // column_mapping is shared Integration Hub configuration. A non-metric
+    // target is somebody else's, so metrics takes what it recognises rather
+    // than refusing the whole import.
+    const mixed = parseCsvMetricMapping({
+      period: "Date",
+      order_id: "Order ID",
+      notes: "Comments",
+      "revenue.gross": "Total",
+    });
+
+    expect([...mixed.metricColumns.keys()]).toEqual(["revenue.gross"]);
+  });
+
+  it("still claims a mistyped metric key so it surfaces per row", () => {
+    // Dotted targets are metric keys by definition, so a typo is not silently
+    // dropped here; it reaches the registry lookup and rejects as unknown.
+    const typo = parseCsvMetricMapping({ period: "Date", "revenue.gros": "Total" });
+    expect([...typo.metricColumns.keys()]).toEqual(["revenue.gros"]);
+
+    const { rejections } = projectCsvRows({
+      ...dubai,
+      mapping: typo,
+      rows: [{ Date: "2026-08-01", Total: "10.00" }],
+    });
+    expect(rejections).toEqual([
+      { row: 1, metricKey: "revenue.gros", reason: "UNKNOWN_METRIC_KEY" },
+    ]);
+  });
+
+  it("still refuses a mapping that carries no metric key at all", () => {
+    expect(() => parseCsvMetricMapping({ period: "Date", order_id: "Order ID" })).toThrow(
+      MetricError,
+    );
   });
 });
 

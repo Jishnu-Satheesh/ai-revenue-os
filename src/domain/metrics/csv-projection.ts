@@ -96,8 +96,16 @@ export function parseCsvMetricMapping(mapping: Readonly<Record<string, string>>)
 
   for (const [target, header] of Object.entries(mapping)) {
     if (reserved.has(target)) continue;
-    if (!METRIC_KEY_PATTERN.test(target))
-      throw metricError("METRIC_CSV_MAPPING_INVALID", { target });
+
+    // A target that is not a dotted metric key belongs to another consumer of
+    // this mapping, not to metrics. `column_mapping` is shared Integration Hub
+    // configuration, so refusing the whole import over one foreign target would
+    // make a mixed mapping unusable. A dotted target is claimed as a metric key
+    // and validated against the registry per row, so a typo like
+    // `revenue.gros` still surfaces as UNKNOWN_METRIC_KEY rather than
+    // disappearing here.
+    if (!METRIC_KEY_PATTERN.test(target)) continue;
+
     metricColumns.set(target, header);
   }
 

@@ -29,7 +29,23 @@ const baseTaskPayloadSchema = z.object({
   dataSourceId: idSchema.optional(),
   ingestionRunId: idSchema,
   correlationId: idSchema,
+  /**
+   * Deduplicates the dispatch itself. Derived per run, so a redelivered task is
+   * the same task.
+   */
   idempotencyKey: idempotencyKeySchema,
+  /**
+   * The key stored on `integration_ingestion_runs.idempotency_key`.
+   *
+   * The lease RPC compares this against the run row before handing out a claim,
+   * which is what stops a stale or foreign task from seizing a run. It has to
+   * travel separately from `idempotencyKey`: that one identifies the dispatch
+   * and is built from the run id, so it can never equal the run's own key. The
+   * two were conflated, every lease request conflicted, and the failure was
+   * invisible because the error handler needs a lease of its own to record why
+   * preflight failed.
+   */
+  runIdempotencyKey: idempotencyKeySchema,
   adapterVersion: z.string().trim().min(1).max(80).optional(),
 });
 
@@ -195,7 +211,7 @@ export async function beginOrCancel(
   const lease = await dependencies.worker.acquireExecutionLease({
     organizationId: payload.organizationId,
     ingestionRunId: payload.ingestionRunId,
-    idempotencyKey: payload.idempotencyKey,
+    idempotencyKey: payload.runIdempotencyKey,
   });
   if (lease.outcome === "in_progress") return lease;
   try {
@@ -253,7 +269,7 @@ export async function assertActiveExecutionLease(
   await dependencies.worker.assertExecutionLease({
     organizationId: payload.organizationId,
     ingestionRunId: payload.ingestionRunId,
-    idempotencyKey: payload.idempotencyKey,
+    idempotencyKey: payload.runIdempotencyKey,
     claimToken,
   });
 }
@@ -267,7 +283,7 @@ export async function persistPreflightFailure(
   const lease = await dependencies.worker.acquireExecutionLease({
     organizationId: payload.organizationId,
     ingestionRunId: payload.ingestionRunId,
-    idempotencyKey: payload.idempotencyKey,
+    idempotencyKey: payload.runIdempotencyKey,
   });
   if (lease.outcome === "in_progress") return;
   try {
@@ -379,7 +395,7 @@ export async function appendConnectionHealth(
     safe_detail: input.safeDetail ?? null,
     checked_at: nowIso(dependencies),
     correlation_id: payload.correlationId,
-    idempotencyKey: payload.idempotencyKey,
+    idempotencyKey: payload.runIdempotencyKey,
     claimToken,
   });
 }

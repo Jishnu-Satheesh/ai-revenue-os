@@ -39,7 +39,10 @@ export type IntegrationTaskPayload = {
   dataSourceId?: string;
   ingestionRunId?: string;
   correlationId: string;
+  /** Deduplicates the dispatch. Derived from the run id, so never equal to the run's own key. */
   idempotencyKey: string;
+  /** The key persisted on the run row, which the execution lease is checked against. */
+  runIdempotencyKey: string;
   adapterVersion?: string;
 };
 
@@ -550,6 +553,9 @@ export function createIntegrationService({
         ingestionRunId: run.id,
         correlationId: input.context.correlationId,
         idempotencyKey: dispatchKey,
+        // The worker leases against the run row, so it needs the key that row
+        // actually holds rather than the dispatch key derived from its id.
+        runIdempotencyKey: persistedIdempotencyKey,
         ...(input.source.connection
           ? { adapterVersion: input.source.connection.adapter_version }
           : {}),
