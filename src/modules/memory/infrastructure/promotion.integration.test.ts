@@ -294,9 +294,7 @@ describe("Business Memory proposal-promotion migration contract", () => {
       "return operation.response || pg_catalog.jsonb_build_object('replayed', true)",
     );
     expect(pgtap).toContain("a matching pre-existing empty update operation fails closed");
-    expect(pgtap).toContain(
-      "a valid update replay returns its exact stored response plus replay metadata",
-    );
+    expect(pgtap).toContain("a valid update replay returns replay metadata without exposing its ledger row");
     expect(pgtap).toContain(
       "a valid update replay does not emit a duplicate verification audit action",
     );

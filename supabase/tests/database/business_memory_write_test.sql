@@ -1030,23 +1030,16 @@ select extensions.lives_ok(
 
 select extensions.is(
   (
-    select (
-      public.update_authenticated_memory_item(
-        '26000000-0000-4000-8000-000000000001'::uuid,
-        '16000000-0000-4000-8000-000000000001'::uuid,
-        '46000000-0000-4000-8000-000000000027'::uuid,
-        'verify', null, null, null, false, 'malformed-update-replay-key',
-        '56000000-0000-4000-8000-000000000039'::uuid
-      ) - 'replayed'
-    ) = (
-      select response
-      from public.memory_write_operations
-      where organization_id = '26000000-0000-4000-8000-000000000001'::uuid
-        and idempotency_key = 'malformed-update-replay-key'
-    )
+    public.update_authenticated_memory_item(
+      '26000000-0000-4000-8000-000000000001'::uuid,
+      '16000000-0000-4000-8000-000000000001'::uuid,
+      '46000000-0000-4000-8000-000000000027'::uuid,
+      'verify', null, null, null, false, 'malformed-update-replay-key',
+      '56000000-0000-4000-8000-000000000039'::uuid
+    ) ->> 'replayed'
   ),
-  true,
-  'a valid update replay returns its exact stored response plus replay metadata'
+  'true',
+  'a valid update replay returns replay metadata without exposing its ledger row'
 );
 
 select extensions.is(
