@@ -79,7 +79,12 @@ function reviewDetails(payload: z.infer<typeof reviewDataSchema>): Record<string
   return Object.keys(details).length > 0 ? details : null;
 }
 
-function baseProjection(record: IntegrationRecordEnvelope): Omit<GoogleBusinessProfileProjectionWrite, "title" | "body" | "structuredValue" | "sensitivity" | "locationFactValues"> {
+function baseProjection(
+  record: IntegrationRecordEnvelope,
+): Omit<
+  GoogleBusinessProfileProjectionWrite,
+  "title" | "body" | "structuredValue" | "sensitivity" | "locationFactValues"
+> {
   return {
     organizationId: record.organizationId,
     ingestionRunId: "",

@@ -112,6 +112,7 @@ export type Database = {
           organization_id: string;
           name: string;
           metric: string;
+          metric_key: string | null;
           baseline_status: "known" | "unknown" | "estimated";
           baseline_value: number | null;
           target_value: number;
@@ -127,20 +128,146 @@ export type Database = {
         };
         Insert: Omit<
           Database["public"]["Tables"]["goals"]["Row"],
+          "id" | "created_at" | "updated_at" | "metric_key"
+        > &
+          Partial<Pick<Database["public"]["Tables"]["goals"]["Row"], "metric_key">>;
+        Update: Partial<Database["public"]["Tables"]["goals"]["Insert"]>;
+        Relationships: [];
+      };
+      subject_kinds: {
+        Row: {
+          key: string;
+          label: string;
+          owner_scope: "core" | "pack";
+          pack_slug: string | null;
+          created_at: string;
+        };
+        Insert: Omit<Database["public"]["Tables"]["subject_kinds"]["Row"], "created_at">;
+        Update: Partial<Database["public"]["Tables"]["subject_kinds"]["Insert"]>;
+        Relationships: [];
+      };
+      metric_definitions: {
+        Row: {
+          id: string;
+          organization_id: string | null;
+          key: string;
+          label: string;
+          owner_scope: "core" | "pack" | "organization";
+          pack_slug: string | null;
+          value_kind: "count" | "money" | "ratio" | "duration" | "rating";
+          unit: string | null;
+          aggregation: "sum" | "ratio_of_sums" | "mean" | "weighted_mean" | "percentile" | "last";
+          percentile_p: number | null;
+          rating_min: number | null;
+          rating_max: number | null;
+          default_quality_tier: "measured" | "derived" | "estimated" | "assumed";
+          replaced_by_key: string | null;
+          effective_from: string;
+          effective_to: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["metric_definitions"]["Row"],
           "id" | "created_at" | "updated_at"
         >;
-        Update: Partial<Database["public"]["Tables"]["goals"]["Insert"]>;
+        Update: Partial<Database["public"]["Tables"]["metric_definitions"]["Insert"]>;
+        Relationships: [];
+      };
+      metric_dimension_definitions: {
+        Row: {
+          id: string;
+          key: string;
+          label: string;
+          owner_scope: "core" | "pack";
+          pack_slug: string | null;
+          cardinality_max: number;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["metric_dimension_definitions"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["metric_dimension_definitions"]["Insert"]>;
+        Relationships: [];
+      };
+      normalized_metrics: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string | null;
+          metric_definition_id: string;
+          value_kind: "count" | "money" | "ratio" | "duration" | "rating";
+          subject_kind: string;
+          subject_ref: string | null;
+          channel: string | null;
+          dimensions: Record<string, unknown>;
+          period_grain: "hour" | "day" | "week" | "month";
+          period_start: string;
+          period_end: string;
+          period_timezone: string;
+          value_numerator: number;
+          value_denominator: number | null;
+          currency: string | null;
+          quality_tier: "measured" | "derived" | "estimated" | "assumed";
+          revision: number;
+          superseded_by_id: string | null;
+          supersede_reason: string | null;
+          source_ingestion_run_id: string | null;
+          observed_at: string;
+          ingested_at: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["normalized_metrics"]["Row"],
+          | "id"
+          | "created_at"
+          | "ingested_at"
+          | "subject_kind"
+          | "subject_ref"
+          | "channel"
+          | "dimensions"
+          | "revision"
+          | "superseded_by_id"
+          | "supersede_reason"
+          | "source_ingestion_run_id"
+          | "branch_id"
+        > &
+          Partial<
+            Pick<
+              Database["public"]["Tables"]["normalized_metrics"]["Row"],
+              | "ingested_at"
+              | "subject_kind"
+              | "subject_ref"
+              | "channel"
+              | "dimensions"
+              | "revision"
+              | "superseded_by_id"
+              | "supersede_reason"
+              | "source_ingestion_run_id"
+              | "branch_id"
+            >
+          >;
+        Update: Partial<Database["public"]["Tables"]["normalized_metrics"]["Insert"]>;
         Relationships: [];
       };
       constraints: {
         Row: {
           id: string;
           organization_id: string;
+          constraint_key: string;
           name: string;
           constraint_type: string;
           value: unknown;
           severity: "soft" | "hard";
           source: string;
+          scope_kind: string;
+          scope_ref: string | null;
+          version: number;
+          effective_from: string;
+          effective_to: string | null;
+          superseded_by_id: string | null;
           is_active: boolean;
           created_by: string | null;
           updated_at: string;
@@ -148,8 +275,29 @@ export type Database = {
         };
         Insert: Omit<
           Database["public"]["Tables"]["constraints"]["Row"],
-          "id" | "created_at" | "updated_at"
-        >;
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "scope_kind"
+          | "scope_ref"
+          | "version"
+          | "effective_from"
+          | "effective_to"
+          | "superseded_by_id"
+          | "is_active"
+        > &
+          Partial<
+            Pick<
+              Database["public"]["Tables"]["constraints"]["Row"],
+              | "scope_kind"
+              | "scope_ref"
+              | "version"
+              | "effective_from"
+              | "effective_to"
+              | "superseded_by_id"
+              | "is_active"
+            >
+          >;
         Update: Partial<Database["public"]["Tables"]["constraints"]["Insert"]>;
         Relationships: [];
       };
@@ -456,6 +604,37 @@ export type Database = {
       archive_draft_organization: {
         Args: { target_organization_id: string };
         Returns: Database["public"]["Tables"]["organizations"]["Row"];
+      };
+      save_policy_version: {
+        Args: {
+          target_organization_id: string;
+          input_policy_type: string;
+          input_name: string;
+          input_mode:
+            | "recommendation_only"
+            | "approval_required"
+            | "bounded_auto_execution"
+            | "fully_autonomous";
+          input_configuration: Record<string, unknown>;
+          input_monthly_budget_minor: number | null;
+          input_budget_currency: string | null;
+        };
+        Returns: Database["public"]["Tables"]["policies"]["Row"];
+      };
+      save_constraint_version: {
+        Args: {
+          target_organization_id: string;
+          input_constraint_key: string;
+          input_name: string;
+          input_constraint_type: string;
+          input_value: unknown;
+          input_severity: "soft" | "hard";
+          input_source: string;
+          input_scope_kind: string;
+          input_scope_ref: string | null;
+          input_effective_from: string | null;
+        };
+        Returns: Database["public"]["Tables"]["constraints"]["Row"];
       };
     };
     Enums: {

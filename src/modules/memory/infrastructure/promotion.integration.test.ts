@@ -80,11 +80,15 @@ describe("Business Memory proposal-promotion migration contract", () => {
     const sql = operationLedgerRlsMigration();
 
     expect(sql).toContain("alter table public.memory_write_operations no force row level security");
-    expect(sql).toContain("alter table public.memory_promotion_operations no force row level security");
+    expect(sql).toContain(
+      "alter table public.memory_promotion_operations no force row level security",
+    );
     expect(sql).toContain(
       "alter table public.memory_proposal_rejection_operations no force row level security",
     );
-    expect(sql).toContain("revoke all on table public.memory_write_operations from public, anon, authenticated");
+    expect(sql).toContain(
+      "revoke all on table public.memory_write_operations from public, anon, authenticated",
+    );
   });
 
   it("keeps fact promotion, proposal verification, and safe auditing inside one operation", () => {
@@ -294,7 +298,9 @@ describe("Business Memory proposal-promotion migration contract", () => {
       "return operation.response || pg_catalog.jsonb_build_object('replayed', true)",
     );
     expect(pgtap).toContain("a matching pre-existing empty update operation fails closed");
-    expect(pgtap).toContain("a valid update replay returns replay metadata without exposing its ledger row");
+    expect(pgtap).toContain(
+      "a valid update replay returns replay metadata without exposing its ledger row",
+    );
     expect(pgtap).toContain(
       "a valid update replay does not emit a duplicate verification audit action",
     );

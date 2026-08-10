@@ -517,7 +517,13 @@ describe("Business Memory review contract routes", () => {
     expect(response.status).toBe(200);
     expect(body.currentFact).toMatchObject({ status: "verified", branchScoped: false });
     // Ownership and internal source columns stay server-side.
-    for (const leaked of ["created_by", "updated_by", "id", "source_reference", "organization_id"]) {
+    for (const leaked of [
+      "created_by",
+      "updated_by",
+      "id",
+      "source_reference",
+      "organization_id",
+    ]) {
       expect(body.currentFact).not.toHaveProperty(leaked);
     }
   });
@@ -552,7 +558,10 @@ describe("Business Memory review contract routes", () => {
       serverTime: "2026-08-09T00:00:00.000Z",
     });
 
-    const response = await getSnapshot(new Request("http://localhost/memory"), organizationParams());
+    const response = await getSnapshot(
+      new Request("http://localhost/memory"),
+      organizationParams(),
+    );
     const body = (await response.json()) as { snapshot: { branches: unknown[] } };
 
     expect(response.status).toBe(200);

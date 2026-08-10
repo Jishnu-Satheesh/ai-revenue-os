@@ -126,7 +126,8 @@ export function SupersedeDialog({
     },
     onError: (error) => {
       setConfirming(false);
-      const message = error instanceof Error ? error.message : "The memory could not be superseded.";
+      const message =
+        error instanceof Error ? error.message : "The memory could not be superseded.";
       setErrors([message]);
       toast.error(message);
     },

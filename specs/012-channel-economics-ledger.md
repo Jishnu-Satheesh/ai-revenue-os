@@ -1,0 +1,192 @@
+# Feature Specification: Channel Economics Ledger
+
+## Status
+
+Draft.
+
+## 1. Business outcome
+
+Show an organization what it actually earns per transaction, per channel, after every variable cost — the number most small businesses cannot produce for themselves.
+
+This is the platform's diagnostic wedge. It requires no model, and it establishes the denominator that every later opportunity, impact estimate, and margin guardrail is expressed in. A recommendation denominated in a number the client already trusts inherits that trust.
+
+## 2. Industry neutrality
+
+The core owns the *structure* of unit economics: revenue, an extensible set of variable cost components, and the contribution margin derived from them, dimensioned by channel and period.
+
+The core does not own the *vocabulary*. "Order", "commission", "packaging", and "preparation" are restaurant concepts and live in the Restaurant Industry Pack, which registers them as cost component definitions. A core table must never gain a `commission_amount` column. Per ADR 0006, the second vertical is the test of whether this boundary is real; a distributor's cost components would be freight and returns, registered the same way.
+
+The core term for the unit is **transaction**. The pack maps its own entity onto it.
+
+## 3. Scope
+
+### 3.1 Included
+
+- A cost component registry, seeded by industry packs and extensible per organization.
+- Transaction-grain economics where transaction-level data exists.
+- Period-grain economics where only aggregates exist, which is the common case early.
+- Channel dimension, including marketplace, direct, dine-in, and any pack-registered channel.
+- A completeness and quality grade on every computed margin.
+- The operator view that presents contribution margin by channel, and by item where the pack supplies item mapping.
+- Recomputation when cost inputs change.
+
+### 3.2 Explicitly excluded
+
+- Fixed and overhead cost allocation. Contribution margin only. Allocating rent across orders invites arguments the platform cannot win and does not need for decisions.
+- Full accounting reconciliation. This is a decision instrument, not a general ledger, and it never claims to agree with the client's books to the fils.
+- Tax computation beyond recording tax treatment as a component.
+- Customer lifetime value. Separate, later, and dependent on consented first-party identity.
+- Forecasting.
+
+## 4. Domain rules
+
+### 4.1 The identity
+
+For a transaction or a period aggregate:
+
+```
+contribution_margin = gross_revenue
+                    - sum(variable_cost_components)
+```
+
+All money is stored in integer minor units with an ISO currency code. Every component is signed and stored at the same grain as the revenue it offsets. A component that cannot be attributed to a grain is recorded at the coarser grain rather than apportioned silently.
+
+### 4.2 Cost component definitions
+
+A component definition carries a stable key, a display label, an owning scope (core, pack, or organization), an applicability rule by channel, a computation kind, and a default quality tier.
+
+Computation kinds:
+
+- `fixed_amount` — a flat amount per transaction.
+- `rate_of_revenue` — a percentage of gross revenue, which is how most marketplace commissions behave.
+- `per_unit` — an amount per unit of quantity.
+- `sourced` — supplied directly by an integration or import, not computed.
+
+### 4.3 Quality tiers
+
+Every component value on every row carries a tier, in descending trust:
+
+1. `measured` — supplied by a system of record or a provider report.
+2. `derived` — computed deterministically from measured inputs.
+3. `estimated` — computed from a documented assumption the client accepted.
+4. `assumed` — a platform default the client has not reviewed.
+5. `missing` — no value available.
+
+The tiers deliberately mirror the source hierarchy in `context/09-business-memory.md`. A cost assumption is a fact about the business and follows the same trust rules; a platform default must never present as a client-verified number.
+
+### 4.4 Completeness grade
+
+A computed margin carries a grade derived from the tiers of its components and the share of gross revenue each covers:
+
+- `complete` — every applicable component is `measured` or `derived`.
+- `partial` — at least one component is `estimated` or `assumed`, and no applicable component is `missing`.
+- `indicative` — at least one applicable component is `missing`.
+
+**A margin graded `indicative` is never presented as a contribution margin figure.** It is presented as a bounded range with the missing components named. This is the rule that keeps the ledger honest against the reality that most small businesses do not know their true cost of goods, and it is enforced at the API boundary rather than in UI copy.
+
+Nothing downstream may consume an `indicative` margin as a decision input. The Decision Engine treats it as `needs_data`.
+
+### 4.5 Effective dating
+
+Component definitions and their values are effective-dated. A marketplace commission tier change does not retroactively rewrite last month's margins; it creates a new effective period. Historical rows retain the rates in force when they occurred.
+
+## 5. Data model
+
+Core tables, industry-neutral:
+
+- `cost_component_definitions` — organization-scoped, seeded from a pack catalog, effective-dated, with the fields in 4.2.
+- `channel_economics_entries` — grain (`transaction` or `period`), channel, branch, period bounds, gross revenue, quantity, contribution margin, completeness grade, currency, source references.
+- `channel_economics_components` — per-entry component values with amount, quality tier, and the definition reference.
+- `channel_economics_snapshots` — materialized rollups by organization, branch, channel, and day, for the operator view and for firewall evaluation.
+
+The Restaurant Pack maps `Order` and `OrderLine` onto transaction-grain entries and registers commission, packaging, food cost, promotion funding share, delivery cost, and payment fees as component definitions. That mapping lives in the pack, not the core.
+
+## 6. Inputs
+
+- Normalized metrics and ingestion runs from the Integration Hub.
+- Verified facts from the Digital Twin for rates the client confirmed, such as a commission percentage from a contract.
+- Manual and CSV import where no API exists, which is expected to be the primary path initially.
+- Pack-supplied item cost data where available.
+
+Where a rate exists both as a provider-reported value and a client-stated fact, the provider value wins for `measured` tier and the divergence raises a `fact_proposal` through Business Memory rather than overwriting anything.
+
+## 7. UX flow
+
+The operator view answers three questions in order:
+
+1. **Which channel actually makes money?** Contribution margin by channel for the period, with the completeness grade visible per row, never hidden behind a tooltip.
+2. **What is eating the margin?** Component breakdown as a waterfall from gross revenue to contribution margin.
+3. **What would I have to fix to trust this number?** The missing and assumed components, each linking to the action that would upgrade its tier.
+
+The third question is the retention mechanism. It converts a data-quality problem into a guided task list, and it is the natural on-ramp to the AI Readiness Score.
+
+Follows `context/13-ui-ux-context.md` and the shadcn/ui requirement.
+
+## 8. AI behavior
+
+Almost none, deliberately. The ledger is arithmetic.
+
+Models are used only for:
+
+- Extracting rates and fee structures from uploaded contracts and provider statements, as a `fact_proposal` requiring confirmation.
+- Mapping provider line-item labels onto registered component definitions, as a suggestion with a confidence score and a human confirmation step.
+
+No model computes, adjusts, or explains a margin figure. A generated narrative over a financial number is an unsupported-claim risk with no upside here.
+
+## 9. Security and tenancy
+
+- RLS on every table per `context/06-multi-tenancy-and-security.md`.
+- Cost structure is commercially sensitive. Default sensitivity is `confidential`; component definitions and rates are never included in cross-organization aggregation without the privacy path in `context/11-playbooks-and-experiments.md`.
+- Customer identifiers are not required and are not stored here.
+
+## 10. Observability
+
+- Share of revenue covered by `measured` components, per organization. This is the single best indicator of whether the ledger is trustworthy for a given client.
+- Completeness grade distribution over entries.
+- Count of entries blocked from decision use by `indicative` grading.
+- Recomputation lag after a rate change.
+- Divergence events between provider-reported and client-stated rates.
+
+## 11. Failure states
+
+- **No cost data at all.** The view renders gross revenue by channel with every margin `indicative`, and leads with the readiness task list. It does not render zeros or invent defaults.
+- **Partial period coverage.** Entries are marked and excluded from period comparisons rather than extrapolated.
+- **Currency mismatch across sources.** Rejected at ingestion; no implicit conversion.
+- **Retroactive provider restatement.** Creates a correcting entry with a reference to the original; entries are never silently mutated.
+
+## 12. Acceptance criteria
+
+- No core table contains an industry-specific cost column.
+- Every margin figure carries a completeness grade, and `indicative` margins cannot be read through the API as a scalar contribution margin.
+- No downstream consumer can treat an `indicative` margin as a decision input.
+- Component rates are effective-dated and historical entries are stable across a rate change.
+- Money is stored in integer minor units with an explicit currency throughout.
+- Provider and client rate divergence produces a proposal, never an overwrite.
+- The operator view names missing components explicitly and links each to a resolving action.
+- Tenant isolation is tested, including snapshot tables.
+
+## 13. Test plan
+
+- Unit: the margin identity across computation kinds, tier and grade derivation, effective-date resolution at boundaries.
+- Database: RLS, effective-dated uniqueness, snapshot consistency with source entries.
+- Integration: a seeded organization with deliberately incomplete cost data, asserting `indicative` grading propagates and blocks decision use.
+- Component: the operator view under complete, partial, and empty data.
+
+## 14. Migration and rollback
+
+New tables only; no changes to existing schemas. The pack catalog seed is idempotent and versioned. Rollback is a table drop, since no other module reads the ledger until the Margin Firewall ships.
+
+## 15. Documentation updates
+
+- `context/04-domain-model.md` — cost component and channel economics entities in the core.
+- `industry-packs/restaurant/domain-model.md` — the mapping from `Order` and `MenuItem` onto core grains.
+- `context/19-glossary.md` — contribution margin, cost component, completeness grade.
+
+## 16. References
+
+- `specs/013-margin-firewall.md`, the first consumer
+- `specs/003-integration-hub.md`
+- `specs/001-organization-digital-twin.md`
+- `adrs/0006-use-industry-packs.md`
+- `context/09-business-memory.md`
+- `industry-packs/restaurant/domain-model.md`

@@ -366,7 +366,8 @@ export function createSupabaseMemoryPersistence(
       // Null-equality, not `eq`, so an organization-wide fact is never matched
       // by a branch-scoped proposal or the other way round.
       const base = scoped("business_facts", factColumns, organizationId).eq("fact_key", factKey);
-      const request = branchId === null ? base.is("branch_id", null) : base.eq("branch_id", branchId);
+      const request =
+        branchId === null ? base.is("branch_id", null) : base.eq("branch_id", branchId);
       const result = (await request.maybeSingle()) as { data: unknown; error: unknown };
       if (result.error) databaseError("The current fact could not be loaded.", result.error);
       return (result.data as BusinessFactRow | null) ?? null;

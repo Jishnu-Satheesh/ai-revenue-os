@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { operatorCeiling } from "@/modules/memory/application/authorization";
-import { createMemoryWorkspaceApi, memoryRequest, runMemoryRoute } from "@/modules/memory/application/api";
+import {
+  createMemoryWorkspaceApi,
+  memoryRequest,
+  runMemoryRoute,
+} from "@/modules/memory/application/api";
 import { searchMemorySchema } from "@/modules/memory/application/api-schemas";
 
 const paramsSchema = z.object({ organizationId: z.string().uuid() });

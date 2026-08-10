@@ -258,10 +258,7 @@ export type MemoryPersistencePort = {
     itemId: string;
     limit: number;
   }): Promise<MemoryItemRow[]>;
-  listItemLinks(input: {
-    organizationId: string;
-    itemId: string;
-  }): Promise<MemoryLinkRow[]>;
+  listItemLinks(input: { organizationId: string; itemId: string }): Promise<MemoryLinkRow[]>;
   listByTypes(input: {
     organizationId: string;
     sensitivities: readonly Sensitivity[];

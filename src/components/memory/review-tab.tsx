@@ -335,10 +335,7 @@ function ProposalRow({
           {canVerify ? <RejectProposal onReject={reject.mutate} isPending={isPending} /> : null}
           {canPromote ? (
             <>
-              <OverrideConfirmation
-                onOverride={() => confirm.mutate(true)}
-                isPending={isPending}
-              />
+              <OverrideConfirmation onOverride={() => confirm.mutate(true)} isPending={isPending} />
               <Button
                 size="sm"
                 className="h-7 text-xs"

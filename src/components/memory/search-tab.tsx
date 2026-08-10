@@ -137,8 +137,7 @@ export function SearchTab({
     onSearchInputChange({
       query: trimmed,
       memoryTypes: selectedTypes.length > 0 ? (selectedTypes as SearchableMemoryType[]) : undefined,
-      sensitivityAllowance:
-        sensitivity === "default" ? undefined : (sensitivity as Sensitivity),
+      sensitivityAllowance: sensitivity === "default" ? undefined : (sensitivity as Sensitivity),
       maxAgeDays: ageOptions.find((option) => option.value === age)?.maxAgeDays,
       includeSuperseded: history.includes("superseded"),
       includeExpired: history.includes("expired"),
@@ -153,9 +152,7 @@ export function SearchTab({
       : searchQuery.isPending
         ? "Searching business memory…"
         : `${results.length} ${results.length === 1 ? "result" : "results"} for “${searchInput.query}”, grouped by trust rank. ${
-            response?.retrievalMode === "hybrid"
-              ? "Hybrid retrieval."
-              : "Keyword-only retrieval."
+            response?.retrievalMode === "hybrid" ? "Hybrid retrieval." : "Keyword-only retrieval."
           }`;
 
   return (
@@ -351,8 +348,7 @@ export function SearchTab({
                     {heading.label}
                   </h3>
                   <span className="text-[11px] text-muted-foreground">
-                    {group.results.length}{" "}
-                    {group.results.length === 1 ? "result" : "results"}
+                    {group.results.length} {group.results.length === 1 ? "result" : "results"}
                   </span>
                 </div>
                 <p className="text-[11px] text-muted-foreground">{heading.description}</p>

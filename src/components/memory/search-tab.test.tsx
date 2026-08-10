@@ -235,9 +235,7 @@ describe("Business Memory search workspace", () => {
     expect(degraded).toBeVisible();
     expect(degraded).toHaveTextContent(/keyword/i);
     // The degrade notice must never replace the results it qualifies.
-    expect(
-      await screen.findByText("Weekend brunch service starts at 09:00"),
-    ).toBeVisible();
+    expect(await screen.findByText("Weekend brunch service starts at 09:00")).toBeVisible();
   });
 
   it("opens Inspect chain in a labelled dialog and restores focus on close", async () => {
@@ -247,9 +245,7 @@ describe("Business Memory search workspace", () => {
 
     const trigger = await screen.findByRole("button", { name: /inspect chain/i });
     // Item detail is a privileged read: it must not be fetched until asked for.
-    expect(
-      fetchSpy.mock.calls.some(([url]) => String(url).includes("/memory/items/")),
-    ).toBe(false);
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/memory/items/"))).toBe(false);
 
     fireEvent.click(trigger);
 
@@ -309,14 +305,19 @@ describe("Business Memory search workspace", () => {
     // Every status label carries an icon beside its text, so no state is
     // signalled by colour alone.
     for (const label of ["Verified", "Fresh", "Internal"]) {
-      expect(within(verifiedGroup).getByTestId(`memory-status-${label.toLowerCase()}`)
-        .querySelector("svg")).not.toBeNull();
+      expect(
+        within(verifiedGroup)
+          .getByTestId(`memory-status-${label.toLowerCase()}`)
+          .querySelector("svg"),
+      ).not.toBeNull();
     }
   });
 
   it("distinguishes no memory, no match, and withheld content", async () => {
     mockApi({ search: searchResponse({ results: [] }) });
-    const empty = renderWorkspace({ snapshot: snapshot({ counts: { ...snapshot().counts, total: 0 } }) });
+    const empty = renderWorkspace({
+      snapshot: snapshot({ counts: { ...snapshot().counts, total: 0 } }),
+    });
 
     expect(screen.getByText(/no business memory yet/i)).toBeVisible();
     empty.unmount();
@@ -418,7 +419,10 @@ describe("Business Memory search workspace", () => {
     fireEvent.click(await screen.findByRole("button", { name: /inspect chain/i }));
     await screen.findByRole("dialog");
 
-    const keys = queryClient.getQueryCache().getAll().map((query) => query.queryKey);
+    const keys = queryClient
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.queryKey);
     expect(keys.length).toBeGreaterThanOrEqual(3);
     for (const key of keys) {
       expect(key[0]).toBe("organizations");

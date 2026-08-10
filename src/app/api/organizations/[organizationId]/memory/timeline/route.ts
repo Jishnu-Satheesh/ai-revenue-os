@@ -2,7 +2,10 @@ import { z } from "zod";
 
 import { MemoryError, safeMemoryErrorCopy } from "@/domain/memory/errors";
 import { createMemoryWorkspaceApi, runMemoryRoute } from "@/modules/memory/application/api";
-import { timelineCursorSchema, timelineQuerySchema } from "@/modules/memory/application/api-schemas";
+import {
+  timelineCursorSchema,
+  timelineQuerySchema,
+} from "@/modules/memory/application/api-schemas";
 
 const paramsSchema = z.object({ organizationId: z.string().uuid() });
 

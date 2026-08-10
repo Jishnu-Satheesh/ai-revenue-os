@@ -14,6 +14,8 @@ import type {
 type OrganizationClient = SupabaseClient<Database>;
 type OrganizationRow = Database["public"]["Tables"]["organizations"]["Row"];
 type BranchRow = Database["public"]["Tables"]["branches"]["Row"];
+type ConstraintRow = Database["public"]["Tables"]["constraints"]["Row"];
+type PolicyRow = Database["public"]["Tables"]["policies"]["Row"];
 
 export type DigitalTwinSnapshot = {
   organization: OrganizationRow;
@@ -258,62 +260,56 @@ export async function createGoal(
   return data;
 }
 
-export async function createConstraint(
+/**
+ * Writes a new constraint version. The RPC retires the incumbent at the same
+ * key and scope in the same transaction, which the partial unique index on
+ * active rows requires and a two-statement client cannot guarantee.
+ */
+export async function saveConstraintVersion(
   supabase: OrganizationClient,
   organizationId: string,
-  userId: string,
   input: ConstraintInput,
-) {
+): Promise<ConstraintRow> {
   const { data, error } = await supabase
-    .from("constraints")
-    .insert({
-      organization_id: organizationId,
-      name: input.name,
-      constraint_type: input.constraintType,
-      value: input.value,
-      severity: input.severity,
-      source: input.source,
-      is_active: input.isActive,
-      created_by: userId,
+    .rpc("save_constraint_version", {
+      target_organization_id: organizationId,
+      input_constraint_key: input.constraintKey,
+      input_name: input.name,
+      input_constraint_type: input.constraintType,
+      input_value: input.value,
+      input_severity: input.severity,
+      input_source: input.source,
+      input_scope_kind: input.scopeKind,
+      input_scope_ref: input.scopeRef ?? null,
+      input_effective_from: input.effectiveFrom ?? null,
     })
-    .select("*")
     .single();
-  if (error || !data) raise("Constraint could not be created.", error);
+  if (error || !data) raise("Constraint could not be saved.", error);
   return data;
 }
 
+/**
+ * Writes a new policy version. Version allocation and retirement of the
+ * incumbent happen inside one transaction: the previous implementation read
+ * the highest version and inserted a new active row without retiring its
+ * predecessor, so a policy type accumulated active versions and the version
+ * tuple in `specs/011-learning-ledger.md` could not resolve one.
+ */
 export async function savePolicy(
   supabase: OrganizationClient,
   organizationId: string,
-  userId: string,
   input: PolicyInput,
-) {
-  const { data: latest, error: latestError } = await supabase
-    .from("policies")
-    .select("version")
-    .eq("organization_id", organizationId)
-    .eq("policy_type", input.policyType)
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (latestError) raise("Current policy could not be loaded.", latestError);
-  const nextVersion = (latest?.version ?? 0) + 1;
+): Promise<PolicyRow> {
   const { data, error } = await supabase
-    .from("policies")
-    .insert({
-      organization_id: organizationId,
-      policy_type: input.policyType,
-      name: input.name,
-      mode: input.mode,
-      configuration: input.configuration,
-      monthly_budget_minor: input.monthlyBudgetMinor ?? null,
-      budget_currency: input.budgetCurrency ?? null,
-      version: nextVersion,
-      is_active: true,
-      created_by: userId,
-      updated_by: userId,
+    .rpc("save_policy_version", {
+      target_organization_id: organizationId,
+      input_policy_type: input.policyType,
+      input_name: input.name,
+      input_mode: input.mode,
+      input_configuration: input.configuration,
+      input_monthly_budget_minor: input.monthlyBudgetMinor ?? null,
+      input_budget_currency: input.budgetCurrency ?? null,
     })
-    .select("*")
     .single();
   if (error || !data) raise("Policy could not be saved.", error);
   return data;

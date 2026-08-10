@@ -14,12 +14,7 @@ export async function POST(
   try {
     const context = await getOrganizationContext(params, ["owner", "admin"]);
     const input = policyInputSchema.parse(await request.json());
-    const policy = await savePolicy(
-      context.supabase,
-      context.organizationId,
-      context.user.id,
-      input,
-    );
+    const policy = await savePolicy(context.supabase, context.organizationId, input);
     await publishOrganizationEvent({
       organizationId: context.organizationId,
       userId: context.user.id,

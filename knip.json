@@ -1,0 +1,27 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/app/**/page.tsx",
+    "src/app/**/layout.tsx",
+    "src/app/**/route.ts",
+    "src/app/**/{error,loading,not-found,global-error,template}.tsx",
+    "src/trigger/**/*.ts",
+    "e2e/**/*.spec.ts",
+    "scripts/*.mjs"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs"],
+  "ignore": ["src/components/ui/**"],
+  "ignoreDependencies": [
+    "tw-animate-css",
+    "shadcn",
+    "tailwindcss",
+    "trigger.dev",
+    "tsx",
+    "date-fns",
+    "@date-fns/tz",
+    "pure-rand",
+    "simple-statistics",
+    "fast-check"
+  ],
+  "ignoreExportsUsedInFile": true
+}

@@ -14,7 +14,12 @@ export async function GET(
     paramsSchema,
     createApi: createMemoryWorkspaceApi,
     handler: async ({ context, service }) => ({
-      body: { snapshot: await service.getSnapshot({ organizationId: context.organizationId, actor: context.actor }) },
+      body: {
+        snapshot: await service.getSnapshot({
+          organizationId: context.organizationId,
+          actor: context.actor,
+        }),
+      },
     }),
   });
 }

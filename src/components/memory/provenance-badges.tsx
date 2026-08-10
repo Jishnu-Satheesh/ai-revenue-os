@@ -83,9 +83,7 @@ const freshnessLabels: Readonly<
   expired: { label: "Expired", icon: CalendarX, className: "text-destructive" },
 };
 
-const sensitivityLabels: Readonly<
-  Record<Sensitivity, { label: string; icon: LucideIcon }>
-> = {
+const sensitivityLabels: Readonly<Record<Sensitivity, { label: string; icon: LucideIcon }>> = {
   public: { label: "Public", icon: Globe },
   internal: { label: "Internal", icon: Building2 },
   confidential: { label: "Confidential", icon: Lock },
@@ -183,9 +181,7 @@ export function SourceLabel({
 
 export function ConfidenceLabel({ confidence }: { confidence?: number }) {
   if (confidence === undefined) return null;
-  return (
-    <StatusLabel label={`Confidence ${Math.round(confidence * 100)}%`} icon={Gauge} />
-  );
+  return <StatusLabel label={`Confidence ${Math.round(confidence * 100)}%`} icon={Gauge} />;
 }
 
 /**

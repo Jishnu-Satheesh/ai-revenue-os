@@ -158,7 +158,9 @@ describe("Inspect chain dialog", () => {
     const dialog = await screen.findByRole("dialog");
 
     fireEvent.click(
-      await within(dialog).findByRole("button", { name: /inspect Opening hours are 10:00 to 22:00/i }),
+      await within(dialog).findByRole("button", {
+        name: /inspect Opening hours are 10:00 to 22:00/i,
+      }),
     );
 
     // The superseded item stays reachable and is labelled as history, not hidden.
@@ -166,7 +168,9 @@ describe("Inspect chain dialog", () => {
     await waitFor(() =>
       expect(within(dialog).getByTestId("memory-status-superseded")).toBeVisible(),
     );
-    expect(within(dialog).getByText(/Opening time corrected after the service review\./)).toBeVisible();
+    expect(
+      within(dialog).getByText(/Opening time corrected after the service review\./),
+    ).toBeVisible();
 
     fireEvent.click(within(dialog).getByRole("button", { name: /back to the current version/i }));
     await waitFor(() =>

@@ -72,9 +72,17 @@ A logical source such as a POS export, marketplace report, ads account, review f
 
 An import or sync attempt with status, counts, validation results, and errors.
 
+### MetricDefinition
+
+A registered metric key with label, unit, and owning scope. The core owns the structure; Industry Packs supply the vocabulary, following the cost component registry pattern. Goals, playbook primary metrics, and guardrails reference metric keys. Free-text metric names are never consumed by the Decision Engine.
+
 ### NormalizedMetric
 
-A time-series metric with organization, branch, channel, dimensions, value, currency, source, and quality status.
+A period-grain observation of a registered metric, with organization, branch, subject reference, registered dimensions, value kind, declared aggregation semantics, currency where applicable, quality tier, source, and revision. Ratio metrics store numerator and denominator rather than a quotient. Period boundaries are computed in the branch timezone. A missing period has no row and is never read as zero.
+
+### MetricBaseline
+
+A versioned, declared function over a metric series: comparison window, aggregation, filters, minimum observation count, and exclusion set. Returns `insufficient_data` rather than a number below its minimum.
 
 ### Signal
 
@@ -84,11 +92,19 @@ A normalized observation that may indicate an opportunity or risk.
 
 ### Playbook
 
-A reusable, versioned strategy containing eligibility rules, required capabilities, steps, metrics, policies, and evaluation windows.
+A reusable, versioned strategy containing eligibility rules, required capabilities, steps, metric keys, policies, evaluation windows, a human-authored prior with its basis, and a declared resurfacing condition. Exactly one version is active per definition per organization.
+
+### DecisionCycle
+
+One evaluation pass for one organization from one trigger, carrying a single correlation ID and a slot budget. It runs sequential decisions until the budget is spent or no candidate clears.
+
+### Candidate
+
+A playbook version bound to a concrete subject and parameter set, identified by a fingerprint over those three. The fingerprint keys suppression, deduplication, and outcome joins.
 
 ### Opportunity
 
-A proposed business action with evidence, expected impact, confidence, cost, risk, effort, and status.
+A proposed business action carrying evidence, an expected impact range in integer minor units with its evidence tier, rule-derived confidence, cost, risk tier, effort, time to impact, guardrails, assertions that must hold at execution time, an evaluation plan, an expiry, and status. An action with no defensible value estimate is not an Opportunity; it is a `needs_data` decision.
 
 ### Hypothesis
 
@@ -100,7 +116,7 @@ A validated sequence of actions generated from an opportunity and playbook.
 
 ### DecisionRecord
 
-The full reasoning artifact: inputs, evidence, selected action, alternatives, assumptions, policy checks, and model metadata.
+The full reasoning artifact for one decision: inputs digest, evidence, the scored candidate set with component values exposed individually, the screening rejection histogram, the selected action or an explicit `no_action` or `needs_data`, assumptions, policy checks, propensity and exploration flag, the artifact version tuple, and model metadata.
 
 ### ApprovalRequest
 

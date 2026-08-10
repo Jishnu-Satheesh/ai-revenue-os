@@ -15,7 +15,10 @@ import { operatorCeiling, type MemoryActor } from "@/modules/memory/application/
 import { createMemoryService, type MemoryService } from "@/modules/memory/application/service";
 import { createMemoryRetrieval } from "@/modules/memory/application/retrieval";
 import { createEmbeddingProvider } from "@/modules/memory/infrastructure/embedding-provider";
-import { createSupabaseMemoryPersistence, createSupabaseMemoryPromotionTransactionPort } from "@/modules/memory/infrastructure/persistence";
+import {
+  createSupabaseMemoryPersistence,
+  createSupabaseMemoryPromotionTransactionPort,
+} from "@/modules/memory/infrastructure/persistence";
 import { createMemoryRepository } from "@/modules/memory/infrastructure/repository";
 
 export function createMemoryWorkspaceApi(input: {
@@ -88,7 +91,11 @@ function publicError(error: unknown): {
     };
     return {
       status: statusByCode[error.code],
-      error: { code: error.code, message: safeMemoryErrorCopy[error.code], retryable: error.retryable },
+      error: {
+        code: error.code,
+        message: safeMemoryErrorCopy[error.code],
+        retryable: error.retryable,
+      },
     };
   }
   if (error instanceof DomainError) {

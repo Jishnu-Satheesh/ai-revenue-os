@@ -10,6 +10,13 @@
 - `adrs/0005-use-event-driven-architecture.md`
 - `adrs/0006-use-industry-packs.md`
 - `adrs/0007-risk-based-human-approvals.md`
+- `adrs/0008-selective-tanstack-adoption.md`
+- `adrs/0009-guided-onboarding-control-plane.md`
+- `adrs/0010-fixture-first-integration-credential-boundary.md`
+- `adrs/0011-business-memory-read-through-facts.md`
+- `adrs/0012-business-memory-cache-boundary.md`
+- `adrs/0013-gated-artifact-learning.md`
+- `adrs/0014-decision-value-and-evidence-tiers.md`
 - `context/00-vision.md`
 - `context/01-project-overview.md`
 - `context/02-product-principles.md`
@@ -31,6 +38,8 @@
 - `context/18-anti-patterns.md`
 - `context/19-glossary.md`
 - `context/20-roadmap.md`
+- `context/21-learning-system.md`
+- `context/22-opportunity-backlog.md`
 - `industry-packs/restaurant/README.md`
 - `industry-packs/restaurant/domain-model.md`
 - `industry-packs/restaurant/dubai-pilot.md`
@@ -48,3 +57,8 @@
 - `specs/008-ai-readiness-score.md`
 - `specs/009-restaurant-menu-intelligence.md`
 - `specs/010-human-approval-governance.md`
+- `specs/011-learning-ledger.md`
+- `specs/012-channel-economics-ledger.md`
+- `specs/013-margin-firewall.md`
+- `specs/014-switchback-experiments.md`
+- `specs/015-metric-registry-and-normalized-metrics.md`

@@ -168,7 +168,12 @@ describe("createMemoryProjectionPort", () => {
       }),
     ];
 
-    await port.ingest({ organizationId, ingestionRunId, idempotencyKey: "sync-a", records: [records[0]!] });
+    await port.ingest({
+      organizationId,
+      ingestionRunId,
+      idempotencyKey: "sync-a",
+      records: [records[0]!],
+    });
     await port.ingest({
       organizationId: otherOrganizationId,
       ingestionRunId,

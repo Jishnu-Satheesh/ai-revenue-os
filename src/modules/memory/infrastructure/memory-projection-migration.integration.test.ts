@@ -63,9 +63,7 @@ describe("Business Memory projection migration contract", () => {
     expect(backfillAt).toBeGreaterThan(-1);
     expect(backfillAt).toBeLessThan(indexAt);
 
-    expect(sql).toContain(
-      "partition by organization_id, proposed_branch_id, proposed_fact_key",
-    );
+    expect(sql).toContain("partition by organization_id, proposed_branch_id, proposed_fact_key");
     expect(sql).toContain("order by created_at desc, id desc");
     // The correction is auditable: losing rows are rejected, never deleted.
     expect(sql).toContain("verification_state = 'rejected'");

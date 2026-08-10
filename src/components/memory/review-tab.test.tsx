@@ -107,9 +107,37 @@ function mockApi(routes: Routes = {}) {
     if (url.includes("/memory/lessons")) {
       return jsonResponse(routes.lessons ?? { items: [], evidence: {} });
     }
-    if (url.includes("/confirm")) return routes.confirm?.() ?? jsonResponse({ itemId: proposalId, factId: null, promoted: false, memoryType: "fact_proposal", origin: "provider_imported", sensitivity: "internal", verificationState: "verified", replayed: false });
-    if (url.includes("/reject")) return routes.reject?.() ?? jsonResponse({ itemId: proposalId, memoryType: "fact_proposal", origin: "provider_imported", sensitivity: "internal", verificationState: "rejected", replayed: false });
-    if (url.includes("/supersede")) return routes.supersede?.() ?? jsonResponse({ replacementId: evidenceId, supersededId: timelineIdOne });
+    if (url.includes("/confirm"))
+      return (
+        routes.confirm?.() ??
+        jsonResponse({
+          itemId: proposalId,
+          factId: null,
+          promoted: false,
+          memoryType: "fact_proposal",
+          origin: "provider_imported",
+          sensitivity: "internal",
+          verificationState: "verified",
+          replayed: false,
+        })
+      );
+    if (url.includes("/reject"))
+      return (
+        routes.reject?.() ??
+        jsonResponse({
+          itemId: proposalId,
+          memoryType: "fact_proposal",
+          origin: "provider_imported",
+          sensitivity: "internal",
+          verificationState: "rejected",
+          replayed: false,
+        })
+      );
+    if (url.includes("/supersede"))
+      return (
+        routes.supersede?.() ??
+        jsonResponse({ replacementId: evidenceId, supersededId: timelineIdOne })
+      );
     if (/\/memory\/items\/[0-9a-f-]+$/.test(url)) {
       const itemId = url.split("/").pop()!;
       return jsonResponse(
@@ -126,9 +154,15 @@ function mockApi(routes: Routes = {}) {
         },
       );
     }
-    if (url.endsWith("/memory/items")) return routes.createItem?.() ?? jsonResponse({ item: itemView() });
+    if (url.endsWith("/memory/items"))
+      return routes.createItem?.() ?? jsonResponse({ item: itemView() });
     if (url.endsWith("/memory/search")) {
-      return jsonResponse({ results: [], retrievalMode: "hybrid", servedFromCache: false, serverTime });
+      return jsonResponse({
+        results: [],
+        retrievalMode: "hybrid",
+        servedFromCache: false,
+        serverTime,
+      });
     }
     return jsonResponse({ snapshot: routes.snapshot ?? snapshot() });
   }) as typeof fetch);
@@ -179,13 +213,17 @@ describe("Review tab governance", () => {
     renderWorkspace();
     openTab(/review/i);
 
-    const proposal = await screen.findByText(/Proposed update to google_business_profile\.location\.phone/i);
+    const proposal = await screen.findByText(
+      /Proposed update to google_business_profile\.location\.phone/i,
+    );
     expect(proposal).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /confirm proposal/i }));
 
     // Non-optimistic: the row must not disappear while the request is in flight.
-    expect(screen.getByText(/Proposed update to google_business_profile\.location\.phone/i)).toBeVisible();
+    expect(
+      screen.getByText(/Proposed update to google_business_profile\.location\.phone/i),
+    ).toBeVisible();
     expect(toastMocks.success).not.toHaveBeenCalled();
 
     pending.resolve(
@@ -291,8 +329,12 @@ describe("Review tab governance", () => {
     // The override is a separate, deliberate act behind its own confirmation.
     fireEvent.click(screen.getByRole("button", { name: /override verification/i }));
     const override = await screen.findByRole("alertdialog");
-    expect(within(override).getByText(/records a confirmation the source never made/i)).toBeVisible();
-    fireEvent.click(within(override).getByRole("button", { name: /confirm without verification/i }));
+    expect(
+      within(override).getByText(/records a confirmation the source never made/i),
+    ).toBeVisible();
+    fireEvent.click(
+      within(override).getByRole("button", { name: /confirm without verification/i }),
+    );
     await waitFor(() => expect(bodies).toHaveLength(2));
     expect(bodies[1]).toMatchObject({ overrideVerified: true });
   });
@@ -301,7 +343,12 @@ describe("Review tab governance", () => {
     mockApi({
       confirm: async () =>
         jsonResponse(
-          { error: { code: "MEMORY_PROPOSAL_INVALID", message: "This proposal can no longer be confirmed." } },
+          {
+            error: {
+              code: "MEMORY_PROPOSAL_INVALID",
+              message: "This proposal can no longer be confirmed.",
+            },
+          },
           400,
         ),
     });
@@ -312,7 +359,9 @@ describe("Review tab governance", () => {
     await waitFor(() => expect(toastMocks.error).toHaveBeenCalled());
     expect(toastMocks.error.mock.calls[0]?.[0]).toBe("This proposal can no longer be confirmed.");
     expect(toastMocks.error.mock.calls[0]?.[0]).not.toContain("MEMORY_PROPOSAL_INVALID");
-    expect(screen.getByText(/Proposed update to google_business_profile\.location\.phone/i)).toBeVisible();
+    expect(
+      screen.getByText(/Proposed update to google_business_profile\.location\.phone/i),
+    ).toBeVisible();
   });
 
   it("hides every governance control from a viewer", async () => {
@@ -323,7 +372,9 @@ describe("Review tab governance", () => {
     expect(await screen.findByText(/Proposed update to/i)).toBeVisible();
     expect(screen.queryByRole("button", { name: /confirm proposal/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reject proposal/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /override verification/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /override verification/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add note/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^supersede$/i })).not.toBeInTheDocument();
   });
@@ -348,7 +399,9 @@ describe("Timeline tab", () => {
             ),
           ],
           nextCursor:
-            '{"observedAt":null,"createdAt":"2026-08-08T09:00:00.000Z","id":"' + timelineIdOne + '"}',
+            '{"observedAt":null,"createdAt":"2026-08-08T09:00:00.000Z","id":"' +
+            timelineIdOne +
+            '"}',
         },
         { items: [itemView({ id: timelineIdTwo, title: "Second page entry" })] },
       ],
@@ -382,7 +435,9 @@ describe("Timeline tab", () => {
     fireEvent.keyDown(screen.getByRole("combobox", { name: /branch/i }), { key: "ArrowDown" });
     fireEvent.click(await screen.findByRole("option", { name: "Central kitchen" }));
 
-    await waitFor(() => expect(urls.some((url) => url.includes(`branchId=${branchId}`))).toBe(true));
+    await waitFor(() =>
+      expect(urls.some((url) => url.includes(`branchId=${branchId}`))).toBe(true),
+    );
   });
 
   it("offers no branch control when the organization has no branches", async () => {
@@ -426,7 +481,11 @@ describe("Lessons tab", () => {
       onRequest: (url) => urls.push(url),
       lessons: {
         items: [
-          itemView({ id: lessonId, memoryType: "lesson", title: "Weekday lunch demand is understated" }),
+          itemView({
+            id: lessonId,
+            memoryType: "lesson",
+            title: "Weekday lunch demand is understated",
+          }),
         ],
         evidence: { [lessonId]: [evidenceId] },
       },
@@ -464,7 +523,10 @@ describe("Lessons tab", () => {
         });
       }
       if (url.includes(`/memory/items/${evidenceId}`)) {
-        return jsonResponse({ error: { code: "NOT_FOUND", message: "That memory item is unavailable." } }, 404);
+        return jsonResponse(
+          { error: { code: "NOT_FOUND", message: "That memory item is unavailable." } },
+          404,
+        );
       }
       if (url.includes("/memory/timeline")) return jsonResponse({ items: [] });
       return jsonResponse({ snapshot: snapshot() });

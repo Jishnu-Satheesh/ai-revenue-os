@@ -140,7 +140,11 @@ function LessonCard({
               >
                 <ChevronDown
                   aria-hidden="true"
-                  className={expanded ? "size-3 rotate-180 transition-transform" : "size-3 transition-transform"}
+                  className={
+                    expanded
+                      ? "size-3 rotate-180 transition-transform"
+                      : "size-3 transition-transform"
+                  }
                 />
                 {evidenceIds.length} supporting {evidenceIds.length === 1 ? "item" : "items"}
               </button>

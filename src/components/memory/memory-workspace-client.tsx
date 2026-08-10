@@ -43,15 +43,7 @@ const sensitivityLabels: Readonly<Record<Sensitivity, string>> = {
   customer_content: "Customer content",
 };
 
-function SnapshotFact({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-}) {
+function SnapshotFact({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="flex shrink-0 items-center gap-2.5 border-l pl-4 first:border-l-0 first:pl-0">
       <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
@@ -106,7 +98,11 @@ export function MemoryWorkspaceClient({
     <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4">
       <div aria-live="polite" className="flex h-5 items-center gap-2 text-xs text-muted-foreground">
         {isRefreshing ? (
-          <span role="status" aria-label="Refreshing memory data" className="flex items-center gap-2">
+          <span
+            role="status"
+            aria-label="Refreshing memory data"
+            className="flex items-center gap-2"
+          >
             <Spinner className="size-3" />
             Refreshing memory data
           </span>
@@ -182,7 +178,11 @@ export function MemoryWorkspaceClient({
         {/* Kept mounted so the composed query and its filters survive a trip to
             another tab; an unmounted Search would silently reset filters while
             its results stayed cached, misstating what produced them. */}
-        <TabsContent value="search" forceMount className="min-h-0 min-w-0 data-[state=inactive]:hidden">
+        <TabsContent
+          value="search"
+          forceMount
+          className="min-h-0 min-w-0 data-[state=inactive]:hidden"
+        >
           <SearchTab
             organizationId={organizationId}
             snapshot={snapshot}

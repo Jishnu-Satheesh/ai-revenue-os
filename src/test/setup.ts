@@ -1,4 +1,13 @@
 import "@testing-library/jest-dom/vitest";
+import { afterAll, afterEach, beforeAll } from "vitest";
+
+import { mswServer } from "./msw/server";
+
+// An outbound request with no handler fails the test rather than escaping to a
+// real provider. Handlers are registered per test with `mswServer.use(...)`.
+beforeAll(() => mswServer.listen({ onUnhandledRequest: "error" }));
+afterEach(() => mswServer.resetHandlers());
+afterAll(() => mswServer.close());
 
 if (typeof window !== "undefined") {
   window.scrollTo = () => undefined;

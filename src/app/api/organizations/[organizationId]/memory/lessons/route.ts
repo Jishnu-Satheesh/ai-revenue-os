@@ -3,7 +3,9 @@ import { z } from "zod";
 import { createMemoryWorkspaceApi, runMemoryRoute } from "@/modules/memory/application/api";
 
 const paramsSchema = z.object({ organizationId: z.string().uuid() });
-const querySchema = z.object({ limit: z.coerce.number().int().positive().max(100).default(50) }).strict();
+const querySchema = z
+  .object({ limit: z.coerce.number().int().positive().max(100).default(50) })
+  .strict();
 
 export async function GET(
   request: Request,

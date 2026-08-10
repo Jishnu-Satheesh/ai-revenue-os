@@ -235,10 +235,7 @@ export type ItemChainDialogProps = {
    * than guessing what the role is allowed to assign.
    */
   ceiling?: Sensitivity;
-} & (
-  | { result: MemoryRetrievalResult; item?: never }
-  | { item: MemoryItemView; result?: never }
-);
+} & ({ result: MemoryRetrievalResult; item?: never } | { item: MemoryItemView; result?: never });
 
 export function ItemChainDialog({
   organizationId,
@@ -270,7 +267,9 @@ export function ItemChainDialog({
   // While a hop is in flight there is nothing truthful to show for the version
   // being opened, and falling back to the original would put the current item's
   // provenance under a "historical" banner and point Supersede at the wrong id.
-  const summary: InspectedSummary | null = viewingHistory ? loadedSummary : (loadedSummary ?? origin);
+  const summary: InspectedSummary | null = viewingHistory
+    ? loadedSummary
+    : (loadedSummary ?? origin);
   const trust = summary ? trustRankGroups[summary.trustRank] : null;
   const canSupersede = Boolean(role && ceiling && hasMemoryPermission(role, "memory.supersede"));
 

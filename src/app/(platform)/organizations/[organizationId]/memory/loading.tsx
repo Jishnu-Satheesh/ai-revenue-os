@@ -2,7 +2,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function MemoryLoading() {
   return (
-    <div data-testid="memory-workspace-skeleton" className="flex min-h-0 w-full flex-1 flex-col gap-6">
+    <div
+      data-testid="memory-workspace-skeleton"
+      className="flex min-h-0 w-full flex-1 flex-col gap-6"
+    >
       <div className="flex items-center gap-3">
         <Skeleton className="size-11 rounded-xl" />
         <div className="flex flex-col gap-2">
