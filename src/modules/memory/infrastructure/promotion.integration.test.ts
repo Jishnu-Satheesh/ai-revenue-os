@@ -22,6 +22,14 @@ function authenticatedWriteMigration(): string {
   return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
 }
 
+function runtimeRepairMigration(): string {
+  const matches = readdirSync(migrationsDirectory)
+    .filter((name) => /^\d{14}_fix_memory_plpgsql_alias_conflicts\.sql$/.test(name))
+    .sort();
+  expect(matches).toHaveLength(1);
+  return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
+}
+
 describe("Business Memory proposal-promotion migration contract", () => {
   it("uses a locked authenticated security-definer operation with tenant-scoped idempotency", () => {
     const sql = promotionMigration();
@@ -48,6 +56,16 @@ describe("Business Memory proposal-promotion migration contract", () => {
     );
     expect(sql).toContain("current_user = 'authenticated'");
     expect(sql).toContain("to authenticated");
+  });
+
+  it("repairs the promotion and rejection RPC alias collisions without widening grants", () => {
+    const sql = runtimeRepairMigration();
+
+    expect(sql).toContain("public.confirm_memory_fact_proposal(uuid, uuid, uuid, boolean");
+    expect(sql).toContain("public.reject_memory_proposal(uuid, uuid, uuid, text");
+    expect(sql).toContain("pg_catalog.pg_get_functiondef(function_identifier)");
+    expect(sql).toContain("#variable_conflict use_column");
+    expect(sql).not.toContain("grant execute");
   });
 
   it("keeps fact promotion, proposal verification, and safe auditing inside one operation", () => {
@@ -83,6 +101,7 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(rlsPgtap).toContain("direct REST cannot verify a fact proposal");
     expect(rlsPgtap).toContain("direct REST cannot forge a verification actor");
     expect(rlsPgtap).toContain("direct REST cannot reject a proposal without a governed reason");
+    expect(rlsPgtap).toContain("direct REST cannot create a governed memory item");
   });
 
   it("adds authenticated create/update RPCs without reopening direct table writes", () => {

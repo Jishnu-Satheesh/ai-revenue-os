@@ -354,16 +354,19 @@ select extensions.throws_ok(
   'a viewer cannot create memory'
 );
 
--- Operator write path: only direct user input, only their own organization.
+-- Operator writes go through the authenticated RPC, so a direct table insert
+-- cannot bypass validation, audit, or idempotency.
 set local request.jwt.claim.sub = '14000000-0000-4000-8000-000000000001';
-select extensions.lives_ok(
+select extensions.throws_ok(
   $$insert into public.memory_items (organization_id, memory_type, title, origin, created_by)
     values (
       '24000000-0000-4000-8000-000000000001'::uuid,
       'note', 'Operator note', 'user_verified',
       '14000000-0000-4000-8000-000000000001'::uuid
     )$$,
-  'an operator can create a user-authored note'
+  '42501',
+  null,
+  'direct REST cannot create a governed memory item'
 );
 select extensions.throws_ok(
   $$insert into public.memory_items (organization_id, memory_type, title, origin, created_by)

@@ -21,6 +21,14 @@ function projectionPgtapTest(): string {
   );
 }
 
+function runtimeRepairMigration(): string {
+  const matches = readdirSync(migrationsDirectory)
+    .filter((name) => /^\d{14}_fix_memory_plpgsql_alias_conflicts\.sql$/.test(name))
+    .sort();
+  expect(matches).toHaveLength(1);
+  return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
+}
+
 describe("Business Memory projection migration contract", () => {
   it("uses a service-role-only atomic tenant-scoped projection RPC", () => {
     const sql = projectionMigration();
@@ -79,5 +87,14 @@ describe("Business Memory projection migration contract", () => {
       "memory_items.structured_value is not distinct from excluded.structured_value",
     );
     expect(sql).toContain("then memory_items.verification_state else 'unverified' end");
+  });
+
+  it("sets a function-local column-precedence policy for the runtime projection alias collision", () => {
+    const sql = runtimeRepairMigration();
+
+    expect(sql).toContain("public.project_google_business_profile_record(uuid, uuid, uuid");
+    expect(sql).toContain("pg_catalog.pg_get_functiondef(function_identifier)");
+    expect(sql).toContain("#variable_conflict use_column");
+    expect(sql).toContain("pg_catalog.chr(10)");
   });
 });
