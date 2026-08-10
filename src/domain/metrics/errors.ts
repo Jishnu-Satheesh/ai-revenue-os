@@ -13,7 +13,8 @@ export type MetricErrorCode =
   | "METRIC_DENOMINATOR_INVALID"
   | "METRIC_PERIOD_RANGE_INVALID"
   | "METRIC_TIMEZONE_INVALID"
-  | "METRIC_TIMEZONE_MIXED";
+  | "METRIC_TIMEZONE_MIXED"
+  | "METRIC_CSV_MAPPING_INVALID";
 
 export class MetricError extends Error {
   readonly name = "MetricError";
@@ -44,6 +45,8 @@ const safeMetricErrorCopy: Readonly<Record<MetricErrorCode, string>> = {
   METRIC_TIMEZONE_INVALID: "The requested timezone is not recognised.",
   METRIC_TIMEZONE_MIXED:
     "This series was bucketed in more than one timezone and cannot be combined.",
+  METRIC_CSV_MAPPING_INVALID:
+    "This import's column mapping must name a period column and at least one metric key.",
 };
 
 export function metricError(
