@@ -65,6 +65,10 @@ select extensions.is(
 select extensions.is(
   (select count(*) from public.memory_items
    where memory_type = 'fact_proposal'
+     and organization_id in (
+       '27000000-0000-4000-8000-000000000001'::uuid,
+       '27000000-0000-4000-8000-000000000002'::uuid
+     )
      and proposed_fact_key = 'google_business_profile.location.hours'),
   2::bigint,
   'open proposal keys remain tenant-scoped'

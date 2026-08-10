@@ -30,6 +30,14 @@ function runtimeRepairMigration(): string {
   return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
 }
 
+function operationLedgerRlsMigration(): string {
+  const matches = readdirSync(migrationsDirectory)
+    .filter((name) => /^\d{14}_memory_operation_ledger_rls\.sql$/.test(name))
+    .sort();
+  expect(matches).toHaveLength(1);
+  return readFileSync(resolve(migrationsDirectory, matches[0]!), "utf8");
+}
+
 describe("Business Memory proposal-promotion migration contract", () => {
   it("uses a locked authenticated security-definer operation with tenant-scoped idempotency", () => {
     const sql = promotionMigration();
@@ -66,6 +74,17 @@ describe("Business Memory proposal-promotion migration contract", () => {
     expect(sql).toContain("pg_catalog.pg_get_functiondef(function_identifier)");
     expect(sql).toContain("#variable_conflict use_column");
     expect(sql).not.toContain("grant execute");
+  });
+
+  it("keeps private operation ledgers RLS-enabled without forcing definer RPCs through empty policies", () => {
+    const sql = operationLedgerRlsMigration();
+
+    expect(sql).toContain("alter table public.memory_write_operations no force row level security");
+    expect(sql).toContain("alter table public.memory_promotion_operations no force row level security");
+    expect(sql).toContain(
+      "alter table public.memory_proposal_rejection_operations no force row level security",
+    );
+    expect(sql).toContain("revoke all on table public.memory_write_operations from public, anon, authenticated");
   });
 
   it("keeps fact promotion, proposal verification, and safe auditing inside one operation", () => {

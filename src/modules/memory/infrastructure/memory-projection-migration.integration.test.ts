@@ -79,6 +79,8 @@ describe("Business Memory projection migration contract", () => {
     const pgtap = projectionPgtapTest();
     expect(pgtap).toContain("select extensions.plan(12);");
     expect(pgtap.match(/extensions\.(?:lives_ok|is|throws_ok)\(/g)).toHaveLength(12);
+    expect(pgtap).toContain("organization_id in (");
+    expect(pgtap).toContain("'27000000-0000-4000-8000-000000000001'::uuid");
     expect(sql).toContain("verification_state = case");
     expect(sql).toContain("verified_by = case");
     expect(sql).toContain("verified_at = case");
