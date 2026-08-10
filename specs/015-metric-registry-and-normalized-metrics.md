@@ -82,7 +82,9 @@ Repository convention still holds: instants are stored in UTC and rendered in th
 
 **A period with no observation is absent, not zero.** A closed Monday is not a Monday with zero orders, and the difference determines whether a baseline is right or catastrophically wrong.
 
-Absence is represented by the absence of a row. The read port returns an explicit `missing` marker for gaps and never fills them. A consumer that requires a dense series must state its gap policy — the port offers `reject`, `mark_missing`, or `interpolate_with_flag`, and the choice is recorded on whatever decision consumes it. Silent zero-filling is prohibited.
+Absence is represented by the absence of a row. The read port reports gaps explicitly and never fills them. A consumer that requires a dense series must state its gap policy — the port offers `reject`, which returns `insufficient_data` when any expected period is missing, or `mark_missing`, which aggregates the observed periods and returns the gap count alongside the result. The choice is recorded on whatever decision consumes it. Silent zero-filling is prohibited.
+
+An `interpolate_with_flag` policy was considered and deliberately not built. Every honest interpolation needs an assumption about why the period is missing — a closed branch, a broken integration, a provider yet to report — and the store cannot distinguish them. Inventing values before that distinction exists would manufacture exactly the false confidence these rules protect against.
 
 ### 4.6 Quality tiers
 
