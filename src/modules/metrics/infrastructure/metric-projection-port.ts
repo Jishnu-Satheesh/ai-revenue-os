@@ -26,6 +26,9 @@ import type {
 
 const CSV_ROW_RECORD_TYPE = "csv_import.row";
 
+/** Record types this consumer owns, for the ingestion router. */
+export const METRIC_PROJECTION_RECORD_TYPES = [CSV_ROW_RECORD_TYPE] as const;
+
 /**
  * Grain is a property of the import, and `column_mapping` cannot carry it: its
  * values are validated as CSV headers, so a literal would be rejected. Daily is

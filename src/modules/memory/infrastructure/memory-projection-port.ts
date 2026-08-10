@@ -95,6 +95,12 @@ function baseProjection(
   };
 }
 
+/** Record types this consumer owns, for the ingestion router. */
+export const MEMORY_PROJECTION_RECORD_TYPES = [
+  "google_business_profile.location.v1",
+  "google_business_profile.review.v1",
+] as const;
+
 export function createMemoryProjectionPort(
   dependencies: MemoryProjectionDependencies,
 ): DataIngestionPort {

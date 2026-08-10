@@ -11,7 +11,16 @@ import {
   createValidatedIngestionSink,
 } from "@/modules/integrations/infrastructure/ingestion-sink";
 import type { DurableIngestionHandoffLedger } from "@/modules/integrations/infrastructure/ingestion-sink";
-import { createMemoryProjectionPort } from "@/modules/memory/infrastructure/memory-projection-port";
+import {
+  createMemoryProjectionPort,
+  MEMORY_PROJECTION_RECORD_TYPES,
+} from "@/modules/memory/infrastructure/memory-projection-port";
+import { createRecordTypeRouter } from "@/modules/integrations/infrastructure/record-type-router";
+import {
+  createMetricProjectionPort,
+  METRIC_PROJECTION_RECORD_TYPES,
+} from "@/modules/metrics/infrastructure/metric-projection-port";
+import { createMetricProjectionStore } from "@/modules/metrics/infrastructure/repository";
 import { createSupabaseMemoryPersistence } from "@/modules/memory/infrastructure/persistence";
 import { createMemoryRepository } from "@/modules/memory/infrastructure/repository";
 import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
@@ -110,7 +119,19 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
   );
   const memoryRepository = createMemoryRepository(createSupabaseMemoryPersistence(supabase));
   const validatedSink = createValidatedIngestionSink({
-    handoff: createMemoryProjectionPort({ store: memoryRepository }),
+    // One handoff, several consumers. Routing by record type keeps their
+    // accepted and rejected counts disjoint, which the ingestion run's own
+    // check constraint depends on.
+    handoff: createRecordTypeRouter([
+      {
+        recordTypes: MEMORY_PROJECTION_RECORD_TYPES,
+        port: createMemoryProjectionPort({ store: memoryRepository }),
+      },
+      {
+        recordTypes: METRIC_PROJECTION_RECORD_TYPES,
+        port: createMetricProjectionPort({ store: createMetricProjectionStore(supabase) }),
+      },
+    ]),
     sourceResolver: {
       async resolve({ organizationId, ingestionRunId }) {
         const run = await repository.findRun({ organizationId, ingestionRunId });
