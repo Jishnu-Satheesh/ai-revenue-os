@@ -72,10 +72,9 @@ All user-facing controls and surface primitives must use shadcn/ui components or
 ## Local setup
 
 1. Install Node.js 22+ and pnpm, then copy `.env.example` to `.env.local`.
-2. Fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+2. Fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, plus `DATABASE_URL` for the shared staging project.
 3. Install dependencies with `pnpm install`.
-4. Apply migrations with `pnpm supabase:start` and `pnpm supabase:reset` for a local Supabase instance.
-5. Run `pnpm dev` and open `http://localhost:3000`.
+4. Run `pnpm dev` and open `http://localhost:3000`.
 
 Quality checks:
 
@@ -85,6 +84,25 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+## Database workflow
+
+**There is no local or development database.** Development and testing both run against the shared hosted **staging** Supabase project, and every command below acts on it.
+
+```bash
+pnpm db:migrations:list      # what staging has applied
+pnpm db:migrations:dry-run   # what a push would apply
+pnpm db:migrations:push      # apply pending migrations to staging
+pnpm db:test                 # pgTAP suites against DATABASE_URL
+```
+
+Three consequences follow from having no local stack, and they explain choices that otherwise look odd:
+
+- **pgTAP suites run against a hosted project**, which restricts operations a local Postgres allows. Direct deletes on `storage.objects` are blocked by the platform, so those assertions detect the restriction and report `SKIP` rather than failing or silently passing. The same suites run against a throwaway local stack in CI, where the assertions execute for real.
+- **`pnpm db:types` cannot be run here.** `supabase gen types` needs Docker for both `--local` and `--db-url`. CI generates the file and publishes it as a build artifact; `src/lib/supabase/database.types.ts` is maintained by hand until it is adopted.
+- **Migrations are only ever applied incrementally**, since staging is never rebuilt from scratch. CI is the only place migrations are proven to apply to an empty database, which is why the `supabase start` step there is worth keeping.
+
+Because staging is shared, a destructive migration affects everyone. Prefer additive changes and corrective follow-up migrations over editing one that has already been applied.
 
 ## Integration Hub
 
