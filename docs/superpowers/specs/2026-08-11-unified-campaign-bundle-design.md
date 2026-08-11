@@ -19,11 +19,11 @@ The first production experience combines three mutually reinforcing jobs:
 2. governed organic social publishing; and
 3. a bounded paid-media experiment with business-outcome measurement.
 
-Messaging through Telegram and WhatsApp belongs to the same campaign bundle
-when the organization has the required capability, consent, and provider
-readiness. The resulting experience should feel autonomous after approval, but
-the autonomy remains constrained by an exact proposal, deterministic policy,
-and explicit spend and channel limits.
+Telegram is used only for operator notification, review, revision, attestation,
+and approval in this slice. Customer messaging through Telegram, WhatsApp, or
+any other provider is deferred. The resulting experience should feel
+autonomous after approval, but the autonomy remains constrained by an exact
+proposal, deterministic policy, and explicit spend and channel limits.
 
 ## Product conclusion
 
@@ -52,14 +52,16 @@ addition over an already-existing campaign runtime.
   credentials. A declared channel must not be mistaken for a connected or
   executable provider capability.
 - Integration Hub V1 currently rejects write-capable and webhook-capable
-  provider definitions. Campaign publishing therefore needs a separately
-  governed write-adapter contract; it cannot be enabled by relabelling an
-  existing read integration.
+  provider definitions. Campaign publishing will extend the Integration Hub's
+  provider and organization-capability model to represent governed actions and
+  webhook intake with their exact scopes and restrictions. It will not create
+  a parallel connection system or relabel an existing read integration as
+  write-ready.
 - Decision Engine V1 is specified as recommendation-only and the roadmap places
   the Tool Gateway, durable execution, outcome measurement, and controlled
   publishing after its data and economics prerequisites.
-- No production Campaign Bundle, campaign route, write-capable Meta,
-  WhatsApp, or Telegram adapter, Telegram Mini App identity link, or campaign
+- No production Campaign Bundle, campaign route, write-capable Meta adapter,
+  campaign webhook intake, Telegram Mini App identity link, or campaign
   execution workflow exists in the current application. Campaigns and
   Executions remain visible future navigation destinations.
 - Postgres, Supabase Auth, and RLS are the authoritative control-plane boundary.
@@ -84,11 +86,12 @@ product experience, not evidence that any provider capability already exists.
 - **Prompting is a governed edit surface.** Operator prompts produce typed,
   reviewable revisions; they never bypass validation, policy, or approval.
 - **Exploration is mandatory but bounded.** Every proposal includes a distinct
-  experimental direction that may challenge soft brand conventions while
-  respecting hard factual, legal, policy, and safety constraints.
+  experimental direction within the operator-selected generation profile. It
+  may challenge soft brand conventions only when that profile permits it and
+  always respects hard factual, legal, policy, and safety constraints.
 - **Capabilities are organization-scoped.** A channel is executable only when
   that organization has the required connection, permissions, credentials,
-  consent model, and provider readiness.
+  action grants, and provider readiness.
 - **Business proof outranks activity volume.** Reach, clicks, and engagement are
   useful diagnostics. They are not automatically evidence of incremental gross
   profit or customer acquisition.
@@ -107,24 +110,20 @@ The first production slice includes:
   surface;
 - generated static images and channel-specific image adaptations;
 - control, evidence-led, and experimental creative directions;
-- editable hooks, captions, tags, calls to action, timing rationale, and
-  schedule;
+- editable hooks, captions, channel-appropriate hashtags, internal content
+  tags, calls to action, timing rationale, and schedule;
 - Instagram and Facebook image posts and image Stories;
 - one bounded Meta Ads experiment with a locked spend ceiling;
 - Telegram-native operator notification and a Telegram Mini App for complete
   review, prompt revision, visual-truth attestation, and approval;
-- capability-gated customer messaging through Telegram and WhatsApp;
 - provider-confirmed execution, reconciliation, and exposure records;
 - a preregistered measurement plan and evidence-qualified business conclusion;
   and
 - campaign-scoped learning with a separately approved path to reusable recipes.
 
-Customer messaging content must be consented and explicitly approved. WhatsApp
-also requires the applicable provider-approved template and category. Telegram
-customer messaging uses an organization-approved campaign template and can run
-only where the bot or account has a valid, consented recipient relationship.
-Operator review through Telegram is a separate capability from customer
-messaging through Telegram.
+Telegram does not deliver campaign content to customers in this slice. Its
+connection is an operator-control capability and cannot be selected as a
+campaign audience channel.
 
 ### Explicit non-goals
 
@@ -132,6 +131,8 @@ This slice does not include:
 
 - video or Reels generation and editing;
 - autonomous comments, direct messages, or community moderation;
+- customer messaging through WhatsApp, Telegram, or another messaging
+  provider;
 - an unrestricted agent controlling an entire social account;
 - automatic budget expansion, audience expansion, or channel substitution;
 - paid-media providers beyond Meta;
@@ -183,10 +184,11 @@ an explicit experimental design and recorded assignment probability; it must
 not be inferred from the existence of three creative directions.
 
 Public organic publishing, broad outbound messaging, and paid-media execution
-are Tier 3 actions under the current approval specification. They require human
-approval initially. Automatic execution after approval is permitted only
-inside the approved Campaign Bundle envelope and does not reduce their risk
-tier.
+are Tier 3 actions under the current approval specification. Broad outbound
+messaging is out of scope for this slice. Public organic publishing and
+paid-media execution require human approval initially. Automatic execution
+after approval is permitted only inside the approved Campaign Bundle envelope
+and does not reduce their risk tier.
 
 ### Manual operator brief
 
@@ -196,8 +198,8 @@ same qualification pipeline. It does not receive a weaker safety path.
 The operator may provide an objective, audience, offer, dates, channels, spend
 preference, and creative direction. The platform enriches the brief with known
 organization context and clearly identifies missing evidence. It must not
-invent an expected impact, baseline, audience permission, consent, or economic
-case. Required missing data moves the campaign to `needs_data`; it cannot be
+invent an expected impact, baseline, audience permission, or economic case.
+Required missing data moves the campaign to `needs_data`; it cannot be
 approved or executed until resolved.
 
 ## System architecture
@@ -217,12 +219,8 @@ flowchart LR
     AE --> TG[Deterministic Tool Gateway]
     TG --> MO[Meta organic adapter]
     TG --> MA[Meta Ads adapter]
-    TG --> WA[WhatsApp adapter]
-    TG --> TC[Telegram customer-message adapter]
     MO --> R[Receipts and exposures]
     MA --> R
-    WA --> R
-    TC --> R
     R --> M[Outcome measurement]
     M --> L[Campaign-scoped learning]
 ```
@@ -233,8 +231,8 @@ flowchart LR
 not generate executable provider calls.
 
 **Campaign qualification** validates completeness, capability availability,
-consent requirements, economic plausibility, registered measurement, and hard
-policy constraints. It produces blockers rather than fabricated defaults.
+economic plausibility, registered measurement, and hard policy constraints. It
+produces blockers rather than fabricated defaults.
 
 **Creative Planner** generates the creative treatments, images, copy, timing
 ideas, and channel adaptations inside the strategy envelope. It cannot expand
@@ -267,6 +265,39 @@ campaign unless separately promoted.
 Trigger.dev is suitable for durable execution, retries, reconciliation, and
 measurement windows. Postgres remains authoritative for campaign state,
 approval, authorization, budget reservation, provider receipts, and audit.
+
+## Campaign AI runtime
+
+The Campaign Agent is a governed product role composed from bounded services
+and tasks. It is not one long-lived model process and it does not receive
+provider side-effect tools.
+
+The selected first-slice runtime is:
+
+- Trigger.dev `schemaTask` workflows for qualification, generation,
+  regeneration, validation, scheduling, dispatch, reconciliation, measurement,
+  and learning proposals;
+- Vercel AI SDK generation calls inside the tasks for creative judgment and
+  typed structured output, followed by application-level Zod validation and
+  deterministic policy checks;
+- Postgres records as the authoritative checkpoints between stages; and
+- the Tool Gateway as the only path from an approved channel action to a Meta
+  provider adapter.
+
+Task inputs carry organization, campaign, bundle-version, and stage identities
+rather than duplicating the whole mutable campaign document. Task-level
+idempotency, organization-aware queues, bounded retries, cancellation fences,
+and provider reconciliation complement—but never replace—the database
+authorization and action ledger.
+
+Trigger.dev `chat.agent` is not the primary campaign orchestrator because the
+campaign lifecycle is a versioned workflow, not a conversation. If the Studio
+later needs a durable multi-turn creative copilot, `chat.agent` may provide that
+conversation shell. Its tools are limited to reading the current review
+snapshot, proposing a typed patch, requesting regeneration, and explaining a
+diff. The application service must validate and persist every accepted patch as
+a new Campaign Bundle version. The Telegram Mini App uses the same revision
+service or revision task rather than a separate agent state.
 
 ## Proposed logical records
 
@@ -304,6 +335,32 @@ and application boundaries.
 
 ## Creative generation and controlled exploration
 
+Before generation, the operator selects a bundle-level generation profile and
+may override it for an individual creative direction:
+
+- **Brand restricted** preserves both hard rules and the active brand's soft
+  visual system, including approved palette, typography, logo treatment,
+  composition rules, and tone boundaries.
+- **Brand guided** is the default. It preserves hard constraints and core brand
+  identity while permitting an explicitly disclosed stretch of soft
+  conventions in the experimental direction.
+- **Full visual generative freedom** preserves hard factual, legal, policy,
+  intellectual-property, offer, and safety constraints but does not require
+  adherence to soft visual conventions.
+
+The selected profile is stored on the bundle version and each generated asset,
+shown in Studio and Telegram review, and included in the approval digest.
+Changing the profile or a direction override creates a new bundle version and
+invalidates prior approval. Full visual freedom never relaxes visual-truth
+attestation or permits an unsupported real-world representation.
+
+The Creative Planner also proposes a channel-specific hashtag set with a short
+rationale. Hashtags remain directly editable and are distinct from internal
+content tags. Deterministic validation enforces provider count and character
+limits, removes duplicates, checks organization restrictions and prohibited or
+misleading terms, and preserves operator-authored changes. Hashtags are a
+discoverability treatment to test, not a guaranteed reach claim.
+
 Every reviewable proposal contains exactly one clearly labelled control
 direction and at least one evidence-led variant and one experimental direction.
 The experimental direction is not decorative variation. It must articulate:
@@ -311,15 +368,16 @@ The experimental direction is not decorative variation. It must articulate:
 - the assumption it challenges;
 - how it differs from the control;
 - why the difference could improve the registered outcome;
-- which soft brand convention it stretches; and
+- which soft brand convention it stretches, or which other treatment
+  hypothesis it explores when the profile is Brand restricted; and
 - which evidence will determine whether the direction was useful.
 
-The generator has full visual generative freedom inside hard constraints. Hard
-constraints include factual accuracy, required disclaimers, legal and provider
-policy, intellectual-property rules, protected-class restrictions, consent,
-organization prohibitions, and the approved offer. Soft conventions—such as
-familiar composition, tone intensity, or palette emphasis—may be challenged by
-the experimental direction and must be disclosed in review.
+Hard constraints include factual accuracy, required disclaimers, legal and
+provider policy, intellectual-property rules, protected-class restrictions,
+privacy and audience restrictions, organization prohibitions, and the approved
+offer. Soft conventions—such as familiar composition, tone intensity, or
+palette emphasis—may be challenged only under a profile that permits it and
+must be disclosed in review.
 
 Generated assets retain generation provenance and a synthetic-content
 classification. Assets must never be presented as verified photographs of a
@@ -333,12 +391,12 @@ assets. It contains:
 
 - strategy, objective, hypothesis, audience, offer, and evidence;
 - control, evidence-led, and experimental directions;
-- images, channel adaptations, copy, hooks, tags, calls to action, and asset
+- images, channel adaptations, copy, hooks, channel-appropriate hashtags,
+  internal content tags, calls to action, generation profiles, and asset
   provenance;
 - organic post and Story schedule with timing rationale;
 - paid experiment structure, audience, placements, creative mapping, budget,
   schedule, and stopping conditions;
-- consented message templates, recipient eligibility rules, and schedule;
 - channel capability status and blockers;
 - policy results, assertions, risks, and uncertainty;
 - measurement baseline, tracking requirements, outcome definition,
@@ -352,13 +410,14 @@ channel is ready. The UI must make this distinction explicit before approval.
 ## Prompt editing and versioning
 
 Operators can edit directly or submit a natural-language instruction scoped to
-the whole bundle, one direction, channel, asset, caption, or schedule. A model
-turns a prompt into a typed patch against the current version. The server then:
+the whole bundle, one direction, channel, asset, caption, hashtag set,
+generation profile, or schedule. A model turns a prompt into a typed patch
+against the current version. The server then:
 
 1. validates the patch schema and target version;
 2. rejects changes outside the requested scope or operator permissions;
-3. reruns factual assertions, policy, capability, consent, economics, tracking,
-   and readiness checks affected by the change;
+3. reruns factual assertions, policy, capability, economics, tracking, and
+   readiness checks affected by the change;
 4. generates a new immutable Campaign Bundle version;
 5. computes and presents a human-readable and machine-readable diff; and
 6. invalidates any approval that covered an earlier version.
@@ -369,8 +428,8 @@ hard constraint is rejected with a safe explanation.
 
 Material changes always create a new version. This includes creative or copy,
 factual claims, destination, audience, schedule, channel, budget, offer,
-measurement, consent, template, and execution mode. Approved versions are never
-mutated in place.
+measurement, generation profile, and execution mode. Approved versions are
+never mutated in place.
 
 ## Studio and Telegram review contract
 
@@ -383,10 +442,14 @@ The Studio presents the campaign in review order:
 3. creative directions and visual-truth status;
 4. organic schedule and channel previews;
 5. Meta ad experiment, audience, placements, and spend;
-6. consented Telegram and WhatsApp messages;
-7. measurement, baseline, attribution, and outcome window;
-8. policy, capability, assertions, blockers, and warnings; and
-9. version history, prompt revisions, and diffs.
+6. measurement, baseline, attribution, and outcome window;
+7. policy, capability, assertions, blockers, and warnings; and
+8. version history, prompt revisions, and diffs.
+
+The creative section exposes the bundle-level generation-profile selector and
+per-direction overrides. Hashtags have direct-edit controls as well as scoped
+prompt revision. Both changes create a new bundle version and appear in the
+review diff.
 
 Every preview identifies its channel and format. Any unavailable capability is
 shown as blocked, not simulated. The operator can approve only when mandatory
@@ -402,7 +465,8 @@ assets, then opens a Telegram Mini App for the full review. The Mini App must:
 - recheck live organization membership, role, and campaign permission on every
   sensitive mutation;
 - display the organization, exact bundle version and digest, media, channels,
-  blocked channels, spend ceiling, schedule, audience summary, and expiry;
+  generation profiles, captions, hashtags, blocked channels, spend ceiling,
+  schedule, audience summary, and expiry;
 - support scoped prompt revisions and show the resulting version diff;
 - collect the mandatory visual-truth attestation; and
 - approve only the exact version currently displayed.
@@ -420,7 +484,7 @@ envelope. It locks:
 - approving user and organization;
 - approval timestamp and expiry;
 - selected channels and required/optional status;
-- audience and recipient eligibility boundaries;
+- audience and targeting boundaries;
 - schedule window and organization timezone;
 - paid spend ceiling, currency, and any action-level limits;
 - provider capability assumptions;
@@ -438,26 +502,54 @@ After approval, the agent may schedule, publish, and spend automatically only
 inside this envelope. Any material change creates a new version and requires a
 new attestation and approval.
 
-## Capability gating
+## Integration Hub capability gating
 
-Capabilities are evaluated per organization and per channel action. A visible
-connection record alone is insufficient. Readiness includes:
+Campaign publishing integrations extend the existing Integration Hub. The Hub
+remains the organization-facing inventory of connections, capabilities,
+restrictions, credential health, and provider readiness for both data ingestion
+and governed actions.
+
+A provider definition must describe more than a coarse `supportsWrites` or
+`supportsWebhooks` flag. It declares:
+
+- its integration character: data source, action destination, bidirectional
+  provider, or operator-control surface;
+- its registered read, publish, advertise, metrics, webhook-intake, and
+  operator-review capabilities;
+- required account types, authorization scopes, assets, and provider
+  prerequisites for each capability;
+- content formats, placements, rate limits, geographic or account restrictions,
+  and unsupported operations; and
+- the versioned adapter and policy class allowed to implement each action.
+
+An organization's connection stores the evaluated state of those declared
+capabilities. Each state distinguishes configured, verified-ready, temporarily
+blocked, revoked, unsupported, and disabled, with a safe reason and last-check
+time. Registering a provider capability does not grant it to an organization.
+
+Integration Hub V1's blanket rejection of write and webhook definitions is
+replaced only for bounded capabilities backed by an installed adapter and
+organization authorization. An outbound action capability additionally
+requires deterministic policy and a Tool Gateway route. An inbound webhook
+capability instead requires signature verification, replay protection,
+organization mapping, and an allowlisted event contract. No user-facing
+request path calls a write adapter directly.
+
+Campaign readiness is evaluated per organization and per channel action. A
+visible connection record alone is insufficient. It includes:
 
 - supported provider and account type;
 - valid authorization and current scopes;
 - credential health and revocation state;
 - provider-specific publishing or advertising eligibility;
-- correct asset and content format;
-- recipient consent and suppression state where applicable;
-- provider-approved WhatsApp template where applicable;
-- organization-approved messaging template;
+- correct asset, content format, and placement;
 - required tracking and destination validity; and
 - current policy and feature entitlement.
 
-Meta organic, Meta Ads, Telegram review, Telegram customer messaging, and
-WhatsApp customer messaging are separate capabilities. Each can be enabled or
-blocked independently. There is no silent fallback from one provider, account,
-or channel to another.
+Meta organic publishing, Meta Ads management, Meta webhook intake, and Telegram
+operator review are separate capabilities. Telegram operator review cannot be
+selected as a customer campaign channel. There is no silent fallback from one
+provider, account, placement, or channel to another.
 
 Provider behavior and permissions change. Implementation must verify the live,
 official provider contract and scopes for each capability rather than treating
@@ -477,7 +569,6 @@ inside a transactional authorization boundary. It checks:
 - action idempotency and prior provider outcomes;
 - budget availability and reservation for paid actions;
 - current channel capability and credential health;
-- recipient consent, suppression, and template status;
 - asset, destination, and tracking readiness; and
 - applicable guardrails and stopping conditions.
 
@@ -495,7 +586,7 @@ Each channel action progresses independently:
 Terminal or intervention states include `failed`, `blocked`, `cancelled`, and
 `provider_outcome_unknown`. A timeout after a request may not be retried as if
 nothing happened. The adapter must first reconcile by idempotency identity or
-provider reference to prevent duplicate posts, messages, or spend.
+provider reference to prevent duplicate posts, ads, or spend.
 
 Retries are allowed only for classified transient failures and only inside the
 approved schedule and spend envelope. Cancellation fences stale workers and
@@ -505,8 +596,8 @@ records of actions that already happened.
 
 ### Partial success
 
-There is no false rollback of a post, message, or ad that a provider has
-already accepted. In `best_effort` mode, unaffected ready actions may continue
+There is no false rollback of a post or ad that a provider has already
+accepted. In `best_effort` mode, unaffected ready actions may continue
 unless policy or a campaign guardrail requires a pause. In
 `all_channels_required` mode, preflight blocks dispatch unless the complete
 required set is ready. Once execution has begun, all observed partial outcomes
@@ -523,8 +614,8 @@ The campaign lifecycle is:
 
 Important branches are:
 
-- `needs_data` when required strategy, evidence, consent, capability, or
-  measurement inputs are missing;
+- `needs_data` when required strategy, evidence, capability, or measurement
+  inputs are missing;
 - `revising` when direct or prompted edits are being validated into a new
   version;
 - `blocked` when current deterministic policy or readiness prevents execution;
@@ -561,7 +652,7 @@ one of four honest conclusions:
 - **validated outcome**: the preregistered evidence standard was met;
 - **inconclusive**: execution occurred, but evidence cannot support the causal
   or incremental claim;
-- **guardrail breach**: a cost, quality, consent, or business guardrail failed;
+- **guardrail breach**: a cost, quality, privacy, or business guardrail failed;
   or
 - **execution-only**: provider activity is verified, but no qualified business
   outcome is available.
@@ -582,13 +673,13 @@ may inform later variants inside that campaign while remaining within the
 approved envelope.
 
 At conclusion, the system may propose a reusable recipe such as a creative
-pattern, timing hypothesis, message structure, or soft brand convention. That
+pattern, timing hypothesis, copy structure, or soft brand convention. That
 proposal includes supporting and contradicting evidence, affected segments and
 channels, known limitations, and an expiry or review date. It requires separate
 operator approval before entering Business Memory or influencing other
 campaigns.
 
-Hard policy, factual truth, consent requirements, and provider restrictions are
+Hard policy, factual truth, privacy requirements, and provider restrictions are
 never weakened by learned creative performance.
 
 ## Tenancy, authorization, and data protection
@@ -605,12 +696,13 @@ never weakened by learned creative performance.
   boundary.
 - Approvals, attestations, execution authorizations, and sensitive changes emit
   stable audit events.
-- Provider tokens, raw customer lists, message payloads containing unnecessary
-  PII, and raw signed Telegram initialization data are not written to logs.
+- Provider tokens, raw audience exports, provider payloads containing
+  unnecessary PII, and raw signed Telegram initialization data are not written
+  to logs.
 - Stored assets use private organization-scoped access and controlled signed
   delivery where provider upload requires it.
-- Customer suppression, opt-out, and consent changes take precedence over an
-  older campaign approval at execution time.
+- Tracking-consent, privacy, and audience-eligibility changes take precedence
+  over an older campaign approval at execution time.
 - Retrieval and generation context is minimized to the campaign need and must
   not cross organization boundaries.
 
@@ -631,8 +723,8 @@ The AI may:
 
 The AI may not:
 
-- determine authorization, channel capability, consent, policy compliance,
-  budget availability, or final eligibility;
+- determine authorization, channel capability, privacy compliance, policy
+  compliance, budget availability, or final eligibility;
 - create an unregistered fact, metric, baseline, or business-impact claim;
 - call provider APIs or money-moving tools;
 - mutate an approved proposal; or
@@ -648,7 +740,7 @@ distinct.
 
 ## Failure handling and observability
 
-Failures are typed as validation, authorization, policy, capability, consent,
+Failures are typed as validation, authorization, policy, capability, privacy,
 budget, provider-transient, provider-terminal, provider-unknown, measurement,
 or internal errors. Public errors remain safe and actionable. Uncertain
 provider or business states are never reported as success.
@@ -662,12 +754,12 @@ available. Operational views should expose:
 - provider latency and rate-limit pressure;
 - approval invalidation and expiry;
 - reserved, requested, confirmed, and reconciled spend;
-- consent/template/capability blockers;
+- capability, policy, privacy, and tracking blockers;
 - measurement readiness, evidence delay, and conclusion quality; and
 - model generation cost and evaluation failures.
 
 Alerts should prioritize stuck provider-unknown actions, budget inconsistencies,
-cross-tenant authorization failures, invalid webhook signatures, consent
+cross-tenant authorization failures, invalid webhook signatures, privacy
 violations, repeated adapter failures, and guardrail breaches.
 
 ## Delivery sequence
@@ -685,9 +777,7 @@ gates:
    reconciliation.
 5. One capped Meta Ads experiment with transactional budget reservation and
    stopping conditions.
-6. Telegram and WhatsApp customer messaging as each organization passes its
-   separate capability, consent, and template checks.
-7. Outcome-window processing, evidence-qualified conclusion, and learning
+6. Outcome-window processing, evidence-qualified conclusion, and learning
    proposal.
 
 These gates are implementation and rollout controls, not separate disconnected
@@ -711,8 +801,8 @@ industry-neutral.
 - direct RPC misuse and organization/body mismatch;
 - concurrent budget reservation and spend-ceiling enforcement;
 - idempotent action claims, cancellation fences, and stale workers; and
-- consent, suppression, template, capability, and policy changes after
-  approval.
+- authorization-scope, capability, tracking-readiness, privacy, and policy
+  changes after approval.
 
 ### AI and generation
 
@@ -720,6 +810,9 @@ industry-neutral.
 - hallucinated facts, metrics, baselines, offers, or permissions;
 - source-content and operator prompt injection;
 - synthetic-content truth classification;
+- generation-profile switching and approval invalidation;
+- hashtag relevance, platform limits, duplicate removal, and restricted-term
+  handling;
 - hard-constraint adherence and meaningful experimental novelty;
 - cross-organization context leakage; and
 - bounded cost, latency, retries, and generation loops.
@@ -744,21 +837,22 @@ The reference production test must demonstrate:
 1. a qualified Decision Engine opportunity and a manual brief both enter the
    shared pipeline;
 2. the bundle contains complete control, evidence-led, and experimental
-   directions;
-3. an operator uses a prompt to create a new version and reviews the diff;
+   directions plus editable channel-appropriate hashtags;
+3. an operator switches generation profile, uses a prompt to create a new
+   version, and reviews the diff;
 4. the Telegram Mini App rejects an invalid, expired, unlinked, or revoked
    identity and permits a currently authorized operator;
 5. visual-truth attestation and exact-version approval are recorded;
 6. a later material edit cannot reuse the old approval;
 7. approved Meta organic content is actually published and reconciled;
 8. the capped Meta Ads experiment cannot exceed its approved spend envelope;
-9. a ready consented message can execute while an unavailable optional channel
-   remains truthfully blocked;
+9. an unavailable optional Meta placement remains truthfully blocked while
+   ready actions may execute only in `best_effort` mode;
 10. provider receipts and exposures feed the approved outcome window; and
 11. the final conclusion states validated, inconclusive, guardrail breach, or
     execution-only with its evidence and uncertainty.
 
-No critical or high-severity tenant, authorization, consent, money-movement,
+No critical or high-severity tenant, authorization, privacy, money-movement,
 provider-duplication, or truthfulness issue may remain at production enablement.
 
 ## Alternative approaches considered
@@ -771,11 +865,11 @@ across assets. It remains useful as an interface, not as the system of record.
 
 ### Independent channel agents
 
-Separate agents for Instagram, Facebook, Meta Ads, Telegram, and WhatsApp could
+Separate agents for Instagram organic, Facebook organic, and Meta Ads could
 optimize locally, but they would create conflicting objectives, duplicated
 budgets, inconsistent approvals, and difficult attribution. Channel-specific
 reasoning is better implemented as bounded planners and adapters under one
-bundle.
+bundle. Telegram remains a review surface, not a campaign executor.
 
 ### Asset-generation-only module
 
@@ -788,6 +882,10 @@ closed-loop business proof and therefore is not the selected product boundary.
 Implementation should add or update ADRs for:
 
 - the Campaign Bundle as the cross-channel system of record;
+- the Integration Hub's action-capability and restriction model for publishing
+  providers;
+- Trigger.dev tasks with Vercel AI SDK generation as the primary Campaign Agent
+  runtime boundary;
 - immutable version-exact approval and material-edit invalidation;
 - deterministic Tool Gateway authorization and provider-outcome reconciliation;
 - Telegram Mini App identity linking and live authorization checks;
