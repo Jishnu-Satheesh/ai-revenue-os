@@ -1,3 +1,4 @@
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { DomainError, toPublicError } from "@/lib/errors";
@@ -19,7 +20,20 @@ export async function getOrganizationContext(
   const supabase = await createClient();
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
+
+  // A network failure reaching Supabase is not a missing session, and calling
+  // it one sends a signed-in operator to the login page over a dropped packet.
+  // Observed for real: two connect timeouts, then "Authentication is required"
+  // on a page that had rendered a moment earlier.
+  if (isAuthRetryableFetchError(error))
+    throw new DomainError(
+      "INTEGRATION_ERROR",
+      "The authentication service could not be reached. Try again.",
+      error,
+    );
+
   if (!user) throw new DomainError("AUTHENTICATION_ERROR", "Authentication is required.");
   const membership = await requireOrganizationAccess(supabase, parsed.data, user.id, allowedRoles);
   return { supabase, user, organizationId: parsed.data, membership };
