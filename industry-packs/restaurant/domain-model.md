@@ -89,3 +89,20 @@ Every ratio above stores its numerator and denominator, never a quotient, so tha
 The pack also registers `menu_item` and `marketplace_listing` as subject kinds, which is what allows a playbook to screen individual items on their own metrics without the core learning what a menu item is.
 
 All of the above is seeded by `supabase/migrations/20260810160000_restaurant_pack_metric_definitions.sql` as shared vocabulary with no organization, per `specs/015-metric-registry-and-normalized-metrics.md` section 5.
+
+## Cost components
+
+What the pack subtracts from gross revenue to reach contribution margin. Registered as shared vocabulary the same way; see `specs/012-channel-economics-ledger.md`.
+
+| Key | Computation | Notes |
+| --- | --- | --- |
+| `commission` | rate_of_revenue | Recalculated on the discounted price wherever a promotion applies |
+| `food_cost` | rate_of_revenue | Cost of goods only; contribution margin excludes fixed cost by design |
+| `packaging` | per_unit | Per item, not per order: a three-item basket uses three containers |
+| `promotion_funding` | sourced | Varies per campaign, so it comes from the provider report |
+| `delivery_cost` | fixed_amount | Per order where the operator delivers or subsidises delivery |
+| `payment_fees` | rate_of_revenue | |
+
+**A definition is vocabulary; a rate is the tenant's own fact.** No migration ships a commission percentage, because that number belongs to one business and inventing it would put an unconfirmed figure behind a margin.
+
+Every component applies to every channel. A channel that genuinely incurs no cost is expressed as a **measured zero rate** rather than as an inapplicable component: dine-in commission really is zero, and saying so is both more accurate and free of any assumption about which marketplaces a tenant sells through.
