@@ -76,7 +76,7 @@ const verifiedFixture = {
           {
             key: "idempotency_key",
             source: "request" as const,
-            valueReference: "tool_invocation.idempotency_key",
+            valueReference: "request.idempotency_key",
           },
         ],
         resultIdentityField: "id",
@@ -237,6 +237,32 @@ describe("verified provider contract boundary", () => {
         NOW,
       ),
     ).toThrow(/request|preflight/i);
+  });
+
+  it("rejects response-derived reconciliation references disguised as request inputs", () => {
+    expect(() =>
+      parseVerifiedProviderContract(
+        {
+          ...verifiedFixture,
+          actions: [
+            {
+              ...verifiedFixture.actions[0],
+              reconciliationLookup: {
+                ...verifiedFixture.actions[0].reconciliationLookup,
+                lookupInputs: [
+                  {
+                    key: "idempotency_key",
+                    source: "request",
+                    valueReference: "create_response.id",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        NOW,
+      ),
+    ).toThrow(/request/i);
   });
 
   it("rejects an action that is not verified", () => {

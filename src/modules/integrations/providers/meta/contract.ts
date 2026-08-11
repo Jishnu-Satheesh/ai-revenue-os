@@ -54,6 +54,31 @@ const placementSchema = z
   })
   .strict();
 
+const reconciliationLookupInputSchema = z.discriminatedUnion(
+  "source",
+  [
+    z
+      .object({
+        key: contractKeySchema,
+        source: z.literal("preflight"),
+        valueReference: z.string().regex(/^preflight\.[a-z0-9]+(?:[._-][a-z0-9]+)*$/, {
+          message: "Preflight reconciliation references must use the preflight.* namespace.",
+        }),
+      })
+      .strict(),
+    z
+      .object({
+        key: contractKeySchema,
+        source: z.literal("request"),
+        valueReference: z.string().regex(/^request\.[a-z0-9]+(?:[._-][a-z0-9]+)*$/, {
+          message: "Request reconciliation references must use the request.* namespace.",
+        }),
+      })
+      .strict(),
+  ],
+  "Reconciliation input source must be preflight or request.",
+);
+
 const actionSchema = z
   .object({
     key: contractKeySchema,
@@ -74,17 +99,7 @@ const actionSchema = z
       .object({
         method: z.literal("GET"),
         pathTemplate: contractStringSchema,
-        lookupInputs: z
-          .array(
-            z
-              .object({
-                key: contractKeySchema,
-                source: z.enum(["preflight", "request"]),
-                valueReference: contractStringSchema,
-              })
-              .strict(),
-          )
-          .min(1),
+        lookupInputs: z.array(reconciliationLookupInputSchema).min(1),
         resultIdentityField: contractStringSchema,
       })
       .strict()
