@@ -32,7 +32,7 @@ export async function readMetricSeries(
   const definition = await port.loadDefinition(query.organizationId, query.metricKey);
 
   if (!definition || !definition.isActive)
-    throw metricError("METRIC_AGGREGATION_UNSUPPORTED", {
+    throw metricError("METRIC_DEFINITION_UNAVAILABLE", {
       key: query.metricKey,
       reason: definition ? "definition is inactive" : "no such metric key",
     });
@@ -44,7 +44,10 @@ export async function readMetricSeries(
     query.timeZone,
   );
 
-  const observations = await port.loadObservations(query);
+  const observations = await port.loadObservations({
+    ...query,
+    metricDefinitionId: definition.id,
+  });
   assertSingleTimeZone(observations, query.timeZone);
 
   const outcome = aggregateObservations({

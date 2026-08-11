@@ -8,6 +8,8 @@
  */
 export type MetricErrorCode =
   | "METRIC_AGGREGATION_UNSUPPORTED"
+  | "METRIC_DEFINITION_UNAVAILABLE"
+  | "METRIC_QUERY_FAILED"
   | "METRIC_CURRENCY_MISMATCH"
   | "METRIC_DENOMINATOR_MISSING"
   | "METRIC_DENOMINATOR_INVALID"
@@ -38,6 +40,8 @@ export class MetricError extends Error {
 
 const safeMetricErrorCopy: Readonly<Record<MetricErrorCode, string>> = {
   METRIC_AGGREGATION_UNSUPPORTED: "This metric cannot be combined across periods.",
+  METRIC_DEFINITION_UNAVAILABLE: "That metric is not registered for this organization.",
+  METRIC_QUERY_FAILED: "This metric series could not be read.",
   METRIC_CURRENCY_MISMATCH: "This series mixes currencies and cannot be combined.",
   METRIC_DENOMINATOR_MISSING: "This metric needs a denominator on every observation.",
   METRIC_DENOMINATOR_INVALID: "A denominator must be greater than zero.",

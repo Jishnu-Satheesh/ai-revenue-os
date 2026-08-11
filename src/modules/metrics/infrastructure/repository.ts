@@ -33,20 +33,24 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
         .limit(1)
         .maybeSingle();
 
-      if (error) throw metricError("METRIC_AGGREGATION_UNSUPPORTED", { key: metricKey });
+      if (error) throw metricError("METRIC_QUERY_FAILED", { key: metricKey });
       if (!data) return null;
 
       return toDefinition(data);
     },
 
     async loadObservations(query) {
+      // Filtered by resolved definition id, never by an embed. Two foreign keys
+      // join these tables — the plain one and the composite
+      // (metric_definition_id, value_kind) behind the declarative value checks
+      // — so `metric_definitions!inner(key)` fails with PGRST201.
       let request = supabase
         .from("normalized_metrics")
         .select(
-          "period_start, period_timezone, value_numerator, value_denominator, currency, quality_tier, metric_definitions!inner(key)",
+          "period_start, period_timezone, value_numerator, value_denominator, currency, quality_tier",
         )
         .eq("organization_id", query.organizationId)
-        .eq("metric_definitions.key", query.metricKey)
+        .eq("metric_definition_id", query.metricDefinitionId)
         .eq("period_grain", query.grain)
         // "Current" has one definition and no second source of truth: a
         // restatement supersedes rather than updates.
@@ -79,7 +83,11 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
             : request.eq("channel", query.channel);
 
       const { data, error } = await request;
-      if (error) throw metricError("METRIC_AGGREGATION_UNSUPPORTED", { key: query.metricKey });
+      if (error)
+        throw metricError("METRIC_QUERY_FAILED", {
+          key: query.metricKey,
+          code: error.code ?? "unknown",
+        });
 
       return (data ?? []).map(toObservation);
     },
@@ -101,7 +109,7 @@ export async function listMetricTargets(
     .or(`organization_id.is.null,organization_id.eq.${organizationId}`)
     .order("key", { ascending: true });
 
-  if (error) throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+  if (error) throw metricError("METRIC_QUERY_FAILED");
 
   const byKey = new Map<string, MetricTargetOption>();
   for (const row of data ?? []) {
@@ -178,7 +186,7 @@ export function createMetricProjectionStore(supabase: MetricsClient): MetricProj
         .eq("is_active", true)
         .or(`organization_id.is.null,organization_id.eq.${organizationId}`);
 
-      if (error) throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+      if (error) throw metricError("METRIC_QUERY_FAILED");
 
       const byKey = new Map<string, MetricDefinitionRecord>();
       for (const row of data ?? []) {
@@ -197,7 +205,7 @@ export function createMetricProjectionStore(supabase: MetricsClient): MetricProj
       const rows = observations.map(toInsertRow);
       const { error } = await supabase.from("normalized_metrics").insert(rows);
       if (!error) return { written: rows.length, duplicates: 0 };
-      if (error.code !== UNIQUE_VIOLATION) throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+      if (error.code !== UNIQUE_VIOLATION) throw metricError("METRIC_QUERY_FAILED");
 
       // The batch collided with a period that already holds a current revision.
       // Postgres aborts the whole statement, so the rest are retried
@@ -216,7 +224,7 @@ export function createMetricProjectionStore(supabase: MetricsClient): MetricProj
           duplicates += 1;
           continue;
         }
-        throw metricError("METRIC_AGGREGATION_UNSUPPORTED");
+        throw metricError("METRIC_QUERY_FAILED");
       }
 
       return { written, duplicates };

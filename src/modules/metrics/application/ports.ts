@@ -65,6 +65,18 @@ export type MetricSeriesQuery = {
   channel?: string | null;
 };
 
+/**
+ * Observations are fetched by resolved definition id rather than by key.
+ *
+ * The obvious alternative — embedding `metric_definitions` and filtering on the
+ * joined key — cannot work: two foreign keys link these tables, the plain one
+ * and the composite `(metric_definition_id, value_kind)` that makes the ratio
+ * and currency checks declarative, and PostgREST refuses an ambiguous embed
+ * with PGRST201. The caller has already resolved the definition, so passing its
+ * id costs nothing and removes a join.
+ */
+export type MetricObservationQuery = MetricSeriesQuery & { metricDefinitionId: string };
+
 export type MetricSeriesPort = {
   loadDefinition(organizationId: string, metricKey: string): Promise<MetricDefinitionRecord | null>;
 
@@ -72,7 +84,7 @@ export type MetricSeriesPort = {
    * Current revisions only, ordered by period. A restated observation is
    * superseded rather than updated, so "current" is `superseded_by_id is null`.
    */
-  loadObservations(query: MetricSeriesQuery): Promise<MetricObservationRecord[]>;
+  loadObservations(query: MetricObservationQuery): Promise<MetricObservationRecord[]>;
 };
 
 /**
