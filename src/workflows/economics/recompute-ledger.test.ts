@@ -13,7 +13,10 @@ import type {
   MetricObservationRecord,
   MetricSeriesPort,
 } from "@/modules/metrics/application/ports";
-import { runRecomputeLedger } from "@/workflows/economics/recompute-ledger";
+import {
+  recomputeLedgerPayloadSchema,
+  runRecomputeLedger,
+} from "@/workflows/economics/recompute-ledger";
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const INGESTION_RUN_ID = "22222222-2222-4222-8222-222222222222";
@@ -216,5 +219,35 @@ describe("runRecomputeLedger", () => {
     await expect(
       runRecomputeLedger({ organizationId: ORGANIZATION_ID, ingestionRunId: "run-1" }, deps),
     ).rejects.toThrow();
+  });
+});
+
+describe("recomputeLedgerPayloadSchema", () => {
+  it("accepts a rate-capture recompute with no ingestion run", () => {
+    // The task once declared its own copy of this schema, which still required
+    // an ingestionRunId and knew nothing of `reason`. Every recompute queued by
+    // the cost-structure form was rejected at the task boundary before the
+    // workflow ran, and the route swallowed the failure, so the only symptom
+    // was margins that silently never updated.
+    const parsed = recomputeLedgerPayloadSchema.parse({
+      organizationId: ORGANIZATION_ID,
+      reason: "rates_changed",
+    });
+
+    expect(parsed.reason).toBe("rates_changed");
+    expect(parsed.ingestionRunId).toBeUndefined();
+  });
+
+  it("defaults an unlabelled payload to an ingestion recompute", () => {
+    expect(
+      recomputeLedgerPayloadSchema.parse({
+        organizationId: ORGANIZATION_ID,
+        ingestionRunId: INGESTION_RUN_ID,
+      }).reason,
+    ).toBe("ingestion");
+  });
+
+  it("refuses a payload with no organization to scope it to", () => {
+    expect(() => recomputeLedgerPayloadSchema.parse({ reason: "rates_changed" })).toThrow();
   });
 });

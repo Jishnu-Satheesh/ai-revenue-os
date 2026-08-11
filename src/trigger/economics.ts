@@ -1,5 +1,4 @@
 import { logger, queue, schemaTask } from "@trigger.dev/sdk";
-import { z } from "zod";
 
 import { createIntegrationWorkerServiceClient } from "@/lib/supabase/service";
 import {
@@ -11,6 +10,7 @@ import {
   createMetricSeriesRepository,
 } from "@/modules/metrics/infrastructure/repository";
 import {
+  recomputeLedgerPayloadSchema,
   runRecomputeLedger,
   type RecomputeLedgerDependencies,
 } from "@/workflows/economics/recompute-ledger";
@@ -33,11 +33,10 @@ export const economicsLedgerQueue = queue({
   concurrencyLimit: 1,
 });
 
-const payloadSchema = z.object({
-  organizationId: z.string().uuid(),
-  ingestionRunId: z.string().uuid(),
-  reconciliationToleranceMinor: z.number().int().nonnegative().optional(),
-});
+// The workflow's schema, not a copy of it. There were two, and they drifted:
+// this one still required an ingestionRunId and knew nothing of `reason`, so
+// every rate-capture recompute was rejected at the task boundary before the
+// workflow ever ran. One payload has one definition.
 
 function createDependencies(): RecomputeLedgerDependencies {
   const supabase = createIntegrationWorkerServiceClient();
@@ -56,7 +55,7 @@ function createDependencies(): RecomputeLedgerDependencies {
 
 export const economicsRecomputeLedgerTask = schemaTask({
   id: "economics.recompute-ledger",
-  schema: payloadSchema,
+  schema: recomputeLedgerPayloadSchema,
   queue: economicsLedgerQueue,
   retry,
   maxDuration: 600,

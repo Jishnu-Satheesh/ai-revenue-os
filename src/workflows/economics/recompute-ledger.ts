@@ -35,7 +35,7 @@ import type {
  * force for, which no single ingestion run knows about. Naming the reason in
  * the payload keeps the window honest instead of guessing one.
  */
-const payloadSchema = z.object({
+export const recomputeLedgerPayloadSchema = z.object({
   organizationId: z.string().uuid(),
   ingestionRunId: z.string().uuid().optional(),
   reason: z.enum(["ingestion", "rates_changed"]).default("ingestion"),
@@ -43,7 +43,7 @@ const payloadSchema = z.object({
   reconciliationToleranceMinor: z.number().int().nonnegative().optional(),
 });
 
-export type RecomputeLedgerPayload = z.infer<typeof payloadSchema>;
+export type RecomputeLedgerPayload = z.infer<typeof recomputeLedgerPayloadSchema>;
 
 export type RecomputeLedgerDependencies = {
   metrics: MetricSeriesPort;
@@ -64,7 +64,7 @@ export async function runRecomputeLedger(
   input: unknown,
   dependencies: RecomputeLedgerDependencies,
 ): Promise<RecomputeLedgerOutcome> {
-  const payload = payloadSchema.parse(input);
+  const payload = recomputeLedgerPayloadSchema.parse(input);
   const metricKeys = await dependencies.catalog.loadMetricBinding(payload.organizationId);
 
   const window =

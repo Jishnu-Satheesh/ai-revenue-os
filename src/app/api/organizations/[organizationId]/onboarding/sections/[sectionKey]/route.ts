@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createEventPublisher } from "@/domain/events/publisher";
+import { logger } from "@/lib/logger";
 import { onboardingSectionKeySchema, sectionSaveSchema } from "@/domain/onboarding/types";
 import { apiErrorResponse, getOrganizationContext } from "@/lib/api/organization-context";
 import { createOnboardingService } from "@/modules/onboarding/application/service";
 import { createOnboardingRepository } from "@/modules/onboarding/infrastructure/repository";
+import type { economicsRecomputeLedgerTask } from "@/trigger/economics";
 
 const routeParamsSchema = z.object({
   organizationId: z.string().uuid(),
@@ -35,13 +37,23 @@ const sectionRequestSchema = z.object({
 async function queueLedgerRecompute(organizationId: string): Promise<void> {
   try {
     const { tasks } = await import("@trigger.dev/sdk");
-    await tasks.trigger(
+    // Typed against the task so a change to its payload is a compile error here
+    // rather than a run that fails validation after the operator has left.
+    const handle = await tasks.trigger<typeof economicsRecomputeLedgerTask>(
       "economics.recompute-ledger",
       { organizationId, reason: "rates_changed" },
       { concurrencyKey: organizationId },
     );
-  } catch {
-    // Swallowed on purpose; see above. The next import reprices anyway.
+    logger.info("economics.ledger.recompute_queued", { organizationId, runId: handle.id });
+  } catch (error) {
+    // Not rethrown — the rates are saved and the save must stand. But not
+    // silent either: swallowed without a trace, a misconfigured key or a
+    // renamed task looks exactly like a working system whose margins simply
+    // never update, and the only symptom is a stale number nobody can explain.
+    logger.warn("economics.ledger.recompute_not_queued", {
+      organizationId,
+      errorCode: error instanceof Error ? error.name : "unknown",
+    });
   }
 }
 
