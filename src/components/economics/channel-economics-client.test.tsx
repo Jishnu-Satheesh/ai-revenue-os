@@ -205,3 +205,42 @@ describe("ChannelEconomicsClient", () => {
     expect(screen.getByText("No trade recorded in this window")).toBeInTheDocument();
   });
 });
+
+describe("reported-margin disagreement", () => {
+  const disputed: ChannelRollup = {
+    ...derived,
+    disagreement: {
+      reportedMinor: 2_400_000,
+      differenceMinor: 1_203_400,
+      periodCount: 30,
+      differencePoints: 6.8,
+    },
+  };
+
+  it("warns above the table, before the figure can be read as settled", () => {
+    renderView({ rollup: { channels: [disputed], currency: "AED", hasAnyDerivedChannel: true } });
+
+    const alert = screen.getByText(/do not match the figures your export reports/).closest("div");
+    expect(alert).toBeInTheDocument();
+    expect(screen.getByText(/6.8 points/)).toBeInTheDocument();
+    // It names both possibilities rather than deciding between them.
+    expect(screen.getByText(/Either a rate here is wrong or the export is/)).toBeInTheDocument();
+  });
+
+  it("shows what the export says on the row itself, not a bare flag", () => {
+    renderView({ rollup: { channels: [disputed], currency: "AED", hasAnyDerivedChannel: true } });
+
+    // With no threshold this marker is on wherever the figures differ at all,
+    // so it has to carry the size rather than merely assert a problem.
+    expect(screen.getByText(/Export says AED 24,000\.00/)).toBeInTheDocument();
+  });
+
+  it("says nothing at all when every channel reconciles", () => {
+    renderView({ rollup: { channels: [derived], currency: "AED", hasAnyDerivedChannel: true } });
+
+    expect(
+      screen.queryByText(/do not match the figures your export reports/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Export says/)).not.toBeInTheDocument();
+  });
+});

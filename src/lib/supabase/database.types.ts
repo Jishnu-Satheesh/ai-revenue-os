@@ -240,6 +240,8 @@ export type Database = {
           contribution_margin_minor: number | null;
           at_most_minor: number | null;
           reported_quality_tier: "measured" | "derived" | "estimated" | "assumed" | null;
+          /** What the source reported, kept only where a derived figure took precedence. */
+          reported_margin_minor: number | null;
           source_reference: string | null;
           computed_at: string;
           created_at: string;

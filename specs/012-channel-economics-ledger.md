@@ -107,6 +107,12 @@ A reported margin is a usable decision input, because the figure is measured. Wh
 
 Where an entry has both — components that derive a margin and a reported figure for the same period — the ledger keeps the derived value and raises the disagreement. A silent reconciliation would hide either a wrong rate or a wrong export, and both matter.
 
+**Raised means visible to the operator, not logged.** The entry keeps the figure the source reported alongside the derived one, and the operator view states the gap above the channel table — before the margin column can be read as settled — and marks each affected row with what the export says. The difference is never stored, only derived from the two figures on the row, so the stored copies cannot drift apart.
+
+Every non-zero gap is surfaced; there is no threshold below which a contradiction stops being one. A gap of exactly zero is agreement rather than a very small disagreement, and shows nothing. Only periods carrying both figures are compared, so a window where the export was silent for half its days does not read as disagreeing by the value of the missing half.
+
+The platform does not adjudicate. It names both possibilities — a rate that is wrong, or an export that is — and leaves the judgement with the operator, because picking a side would be the silent reconciliation this section exists to forbid.
+
 Where the derivation is `indicative` and a reported figure exists, the entry records the **reported** margin. There is no derived value to keep in that case, and grading the period `indicative` would discard a measured number the operator already has and block it from decisions — leaving them worse informed than their own spreadsheet does. This is the common case at the start of an engagement rather than an edge: no rate has been captured yet, so nothing derives, while the marketplace export states a margin on every line. The reported figure answers "how much" and still declines to answer "what is eating it", which is exactly what section 7 needs it to do.
 
 The rule in one line: **the derived margin wins wherever it can be stated; a reported figure is the fallback, and where both stand the disagreement is raised.**

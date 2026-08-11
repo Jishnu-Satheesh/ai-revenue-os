@@ -139,6 +139,7 @@ export async function loadLedgerEntries(
     .select(
       `channel, period_start, gross_revenue_minor, transaction_count, currency,
        margin_source, completeness_grade, contribution_margin_minor, at_most_minor,
+       reported_margin_minor,
        channel_economics_components (amount_minor, quality_tier, cost_component_definitions (key, label))`,
     )
     .eq("organization_id", query.organizationId)
@@ -204,6 +205,7 @@ type LedgerEntryRow = {
   completeness_grade: string;
   contribution_margin_minor: number | string | null;
   at_most_minor: number | string | null;
+  reported_margin_minor: number | string | null;
   channel_economics_components:
     | {
         amount_minor: number | string;
@@ -225,6 +227,10 @@ function toLedgerEntry(row: LedgerEntryRow): LedgerEntry {
     contributionMarginMinor:
       row.contribution_margin_minor === null ? null : toNumber(row.contribution_margin_minor),
     atMostMinor: row.at_most_minor === null ? null : toNumber(row.at_most_minor),
+    reportedMarginMinor:
+      row.reported_margin_minor === null || row.reported_margin_minor === undefined
+        ? null
+        : toNumber(row.reported_margin_minor),
     components: (row.channel_economics_components ?? []).flatMap((component) =>
       component.cost_component_definitions
         ? [
@@ -285,6 +291,7 @@ function toEntryPayload(entry: EconomicsEntryWrite) {
     contribution_margin_minor: entry.contributionMarginMinor,
     at_most_minor: entry.atMostMinor,
     reported_quality_tier: entry.reportedQualityTier,
+    reported_margin_minor: entry.reportedMarginMinor,
     source_reference: entry.sourceReference,
     components: entry.components.map((component) => ({
       definition_id: component.definitionId,

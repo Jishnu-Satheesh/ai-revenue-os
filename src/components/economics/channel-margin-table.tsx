@@ -2,6 +2,8 @@
 
 import { ChevronRight } from "lucide-react";
 
+import { TriangleAlert } from "lucide-react";
+
 import { GradeBadge } from "@/components/economics/grade-badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils";
@@ -110,8 +112,22 @@ export function ChannelMarginTable({
                       At most {money(channel.atMostMinor, currency)}
                     </span>
                   ) : (
-                    <span className="font-medium">
-                      {money(channel.contributionMarginMinor, currency)}
+                    <span className="flex flex-col items-end gap-0.5">
+                      <span className="font-medium">
+                        {money(channel.contributionMarginMinor, currency)}
+                      </span>
+                      {/* The size of the gap, not a binary flag. With no
+                          threshold this marker is on wherever the two figures
+                          differ at all, so it has to say how much rather than
+                          merely that. */}
+                      {channel.disagreement ? (
+                        <span className="flex items-center gap-1 text-xs font-normal text-warning">
+                          <TriangleAlert aria-hidden="true" className="size-3" />
+                          <span>
+                            Export says {money(channel.disagreement.reportedMinor, currency)}
+                          </span>
+                        </span>
+                      ) : null}
                     </span>
                   )}
                 </td>

@@ -37,6 +37,13 @@ export type LedgerEntry = {
   /** Null exactly when the grade is indicative. */
   contributionMarginMinor: number | null;
   atMostMinor: number | null;
+  /**
+   * What the source reported for this period, where a derived figure won.
+   *
+   * Null on a reported entry, and null where the source stated nothing. Only a
+   * period holding both figures can disagree with itself.
+   */
+  reportedMarginMinor: number | null;
   components: readonly RolledComponent[];
 };
 
@@ -57,6 +64,26 @@ type ChannelTotals = {
   transactionCount: number;
   periodCount: number;
   marginSource: RolledMarginSource;
+  /**
+   * Where the derived figure and the source's own differ over the window.
+   *
+   * Absent when the source reported nothing, and absent when the two agree
+   * exactly — a disagreement of zero is agreement, and marking it would make
+   * the marker meaningless. specs/012 section 4.4.1 requires this raised rather
+   * than reconciled: one of the two is wrong and only the operator knows which.
+   */
+  disagreement?: MarginDisagreement;
+};
+
+export type MarginDisagreement = {
+  /** Summed across the periods that carried a reported figure. */
+  reportedMinor: number;
+  /** Derived less reported. Positive means the rates flatter the export. */
+  differenceMinor: number;
+  /** How many of the channel's periods carried a figure to compare against. */
+  periodCount: number;
+  /** Derived rate less reported rate, in points. Null when revenue is zero. */
+  differencePoints: number | null;
 };
 
 export type ChannelRollup = ChannelTotals &
@@ -118,6 +145,8 @@ export function rollUpWindow(entries: readonly LedgerEntry[]): WindowRollup {
 function rollUpChannel(entries: readonly LedgerEntry[], currency: string): ChannelRollup {
   const grossRevenueMinor = sum(entries.map((entry) => entry.grossRevenueMinor));
 
+  const disagreement = rollUpDisagreement(entries, grossRevenueMinor);
+
   const totals: ChannelTotals = {
     channel: entries[0].channel,
     currency,
@@ -125,6 +154,7 @@ function rollUpChannel(entries: readonly LedgerEntry[], currency: string): Chann
     transactionCount: sum(entries.map((entry) => entry.transactionCount)),
     periodCount: entries.length,
     marginSource: rollUpSource(entries),
+    ...(disagreement ? { disagreement } : {}),
   };
 
   const grade = deriveCompletenessGrade(
@@ -189,6 +219,43 @@ function gradeAsTier(grade: CompletenessGrade): EconomicsQualityTier {
  * missing for the window — a cost known on some days and not others is not a
  * known cost.
  */
+/**
+ * Where the derived figure and the source's own disagree over a window.
+ *
+ * Only periods that carry both are compared: a channel where the export was
+ * silent for half the window would otherwise look like it disagreed by the
+ * value of the missing half. The rate is computed from those periods' revenue
+ * alone for the same reason.
+ *
+ * Returns nothing when the two agree exactly. Every non-zero gap is surfaced —
+ * there is no threshold below which a contradiction stops being one — but a
+ * difference of zero is agreement, not a very small disagreement.
+ */
+function rollUpDisagreement(
+  entries: readonly LedgerEntry[],
+  _grossRevenueMinor: number,
+): MarginDisagreement | undefined {
+  const comparable = entries.filter(
+    (entry) => entry.reportedMarginMinor !== null && entry.contributionMarginMinor !== null,
+  );
+  if (comparable.length === 0) return undefined;
+
+  const reportedMinor = sum(comparable.map((entry) => entry.reportedMarginMinor ?? 0));
+  const derivedMinor = sum(comparable.map((entry) => entry.contributionMarginMinor ?? 0));
+  const differenceMinor = derivedMinor - reportedMinor;
+  if (differenceMinor === 0) return undefined;
+
+  const comparableRevenueMinor = sum(comparable.map((entry) => entry.grossRevenueMinor));
+
+  return {
+    reportedMinor,
+    differenceMinor,
+    periodCount: comparable.length,
+    differencePoints:
+      comparableRevenueMinor === 0 ? null : (differenceMinor / comparableRevenueMinor) * 100,
+  };
+}
+
 export function rollUpComponents(entries: readonly LedgerEntry[]): RolledComponent[] {
   const byKey = new Map<string, RolledComponent>();
 

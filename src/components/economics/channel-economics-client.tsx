@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Receipt } from "lucide-react";
+import { Receipt, TriangleAlert } from "lucide-react";
 
 import { ChannelMarginTable } from "@/components/economics/channel-margin-table";
 import { MarginWaterfall } from "@/components/economics/margin-waterfall";
@@ -113,6 +113,8 @@ export function ChannelEconomicsClient({
           {trustSection}
         </>
       ) : null}
+
+      <DisagreementAlert channels={rollup.channels} currency={currency} href={costStructureHref} />
 
       <Section
         question="Which channel actually makes money"
@@ -247,4 +249,78 @@ function PeriodControl({
       </Tabs>
     </div>
   );
+}
+
+/**
+ * Says the derived figures and the client's own export do not agree.
+ *
+ * Above the table rather than below it. specs/012 section 4.4.1 requires the
+ * disagreement to be raised, and a reader who reaches the margin column before
+ * learning it is contradicted has already taken the number at face value.
+ *
+ * It deliberately does not adjudicate. Either the rates are wrong or the export
+ * is, and the platform cannot tell which — saying so plainly is more useful
+ * than picking a side, and picking one would be the silent reconciliation the
+ * spec forbids.
+ */
+function DisagreementAlert({
+  channels,
+  currency,
+  href,
+}: {
+  channels: EconomicsView["rollup"]["channels"];
+  currency: string;
+  href: string;
+}) {
+  const disagreeing = channels.filter((channel) => channel.disagreement);
+  if (disagreeing.length === 0) return null;
+
+  const widest = disagreeing.reduce((worst, channel) =>
+    Math.abs(channel.disagreement!.differenceMinor) > Math.abs(worst.disagreement!.differenceMinor)
+      ? channel
+      : worst,
+  );
+  const gap = widest.disagreement!;
+  const points = gap.differencePoints;
+
+  return (
+    <Alert>
+      <TriangleAlert />
+      <AlertTitle>These margins do not match the figures your export reports</AlertTitle>
+      <AlertDescription className="flex flex-col items-start gap-3">
+        <span>
+          {disagreeing.length === 1
+            ? `On ${widest.channel ?? "all channels"}, `
+            : `Across ${disagreeing.length} channels, the widest gap is on ${widest.channel ?? "all channels"}: `}
+          the costs recorded here produce a margin {gap.differenceMinor > 0 ? "higher" : "lower"}{" "}
+          than the one reported, by{" "}
+          <span className="font-medium text-foreground">
+            {formatMoney(Math.abs(gap.differenceMinor), currency)}
+          </span>
+          {points === null ? null : (
+            <>
+              {" "}
+              over {gap.periodCount} {gap.periodCount === 1 ? "day" : "days"} — about{" "}
+              <span className="font-medium text-foreground">
+                {Math.abs(points).toFixed(1)} points
+              </span>{" "}
+              of revenue
+            </>
+          )}
+          . Either a rate here is wrong or the export is, and only you can say which.
+        </span>
+        <Button asChild variant="outline" size="sm">
+          <Link href={href}>Review your costs</Link>
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function formatMoney(amountMinor: number, currency: string) {
+  return new Intl.NumberFormat("en-AE", {
+    style: "currency",
+    currency: currency || "AED",
+    minimumFractionDigits: 2,
+  }).format(amountMinor / 100);
 }

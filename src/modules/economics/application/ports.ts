@@ -70,6 +70,15 @@ export type EconomicsEntryWrite = {
   contributionMarginMinor: number | null;
   atMostMinor: number | null;
   reportedQualityTier: Exclude<EconomicsQualityTier, "missing"> | null;
+  /**
+   * What the source reported, kept only where a derived figure took precedence.
+   *
+   * Null on a reported entry, where the stated figure already is the
+   * contribution margin. specs/012 section 4.4.1 requires the disagreement to
+   * be raised, and it cannot be raised on a screen if it never leaves the
+   * worker's log.
+   */
+  reportedMarginMinor: number | null;
   sourceReference: string | null;
   components: readonly EconomicsComponentWrite[];
 };

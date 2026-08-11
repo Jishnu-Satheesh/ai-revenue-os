@@ -33,11 +33,20 @@ try {
         }
       }
       const suiteFailures = lines.filter((line) => /^not ok/.test(line));
-      failedAssertions += suiteFailures.length;
+
+      // A plan mismatch is a failure, not a note. pgTAP reports it as a bare
+      // "Looks like you planned N tests but ran M" diagnostic rather than a
+      // `not ok`, so counting only `not ok` reported a green suite that had
+      // silently gained an assertion -- and would do the same for one that
+      // silently stopped running a dozen.
+      const planMismatch = lines.filter((line) => /^# Looks like you planned/.test(line));
+      const suiteProblems = suiteFailures.length + planMismatch.length;
+
+      failedAssertions += suiteProblems;
       console.log(`\n# ${suitePath}`);
       console.log(lines.join("\n"));
       console.log(
-        `\n--- ${suiteFailures.length === 0 ? "PASS" : "FAIL"}: ${suiteFailures.length} failing assertion(s)`,
+        `\n--- ${suiteProblems === 0 ? "PASS" : "FAIL"}: ${suiteProblems} failing assertion(s)`,
       );
     } catch (error) {
       failedSuites += 1;

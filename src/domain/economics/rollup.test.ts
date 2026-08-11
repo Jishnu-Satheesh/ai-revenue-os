@@ -14,6 +14,7 @@ function entry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
     completenessGrade: "complete",
     contributionMarginMinor: 420_000,
     atMostMinor: null,
+    reportedMarginMinor: null,
     components: [],
     ...overrides,
   };
@@ -177,5 +178,88 @@ describe("rollUpComponents", () => {
     ]);
 
     expect(rolled.map((component) => component.key)).toEqual(["food", "commission", "fees"]);
+  });
+});
+
+describe("reported-margin disagreement", () => {
+  it("reports the gap in money and in points", () => {
+    const rollup = rollUpWindow([
+      entry({ contributionMarginMinor: 420_000, reportedMarginMinor: 300_000 }),
+      entry({
+        periodStart: new Date("2026-07-02T20:00:00Z"),
+        contributionMarginMinor: 380_000,
+        reportedMarginMinor: 300_000,
+      }),
+    ]);
+
+    // Derived 800,000 against a reported 600,000 on 2,000,000 of revenue.
+    expect(rollup.channels[0].disagreement).toEqual({
+      reportedMinor: 600_000,
+      differenceMinor: 200_000,
+      periodCount: 2,
+      differencePoints: 10,
+    });
+  });
+
+  it("says nothing when the two agree exactly", () => {
+    // A disagreement of zero is agreement. Marking it would make the marker
+    // meaningless on every channel that reconciles.
+    const rollup = rollUpWindow([
+      entry({ contributionMarginMinor: 420_000, reportedMarginMinor: 420_000 }),
+    ]);
+
+    expect(rollup.channels[0].disagreement).toBeUndefined();
+  });
+
+  it("surfaces a gap of any size, with no threshold", () => {
+    const rollup = rollUpWindow([
+      entry({ contributionMarginMinor: 420_001, reportedMarginMinor: 420_000 }),
+    ]);
+
+    expect(rollup.channels[0].disagreement).toMatchObject({ differenceMinor: 1 });
+  });
+
+  it("compares only the periods that carry both figures", () => {
+    // A window where the export was silent for half the days would otherwise
+    // look like it disagreed by the value of the missing half.
+    const rollup = rollUpWindow([
+      entry({ contributionMarginMinor: 420_000, reportedMarginMinor: 400_000 }),
+      entry({
+        periodStart: new Date("2026-07-02T20:00:00Z"),
+        contributionMarginMinor: 380_000,
+        reportedMarginMinor: null,
+      }),
+    ]);
+
+    expect(rollup.channels[0].disagreement).toMatchObject({
+      reportedMinor: 400_000,
+      differenceMinor: 20_000,
+      periodCount: 1,
+      // Two points of the one comparable period's revenue, not of the window's.
+      differencePoints: 2,
+    });
+  });
+
+  it("keeps the sign, so an over-reported margin reads as one", () => {
+    const rollup = rollUpWindow([
+      entry({ contributionMarginMinor: 300_000, reportedMarginMinor: 420_000 }),
+    ]);
+
+    expect(rollup.channels[0].disagreement).toMatchObject({ differenceMinor: -120_000 });
+    expect(rollup.channels[0].disagreement?.differencePoints).toBeCloseTo(-12, 10);
+  });
+
+  it("has nothing to compare on a reported channel", () => {
+    // The stated figure is the contribution margin there; it cannot differ
+    // from itself.
+    const rollup = rollUpWindow([
+      entry({
+        marginSource: "reported",
+        contributionMarginMinor: 420_000,
+        reportedMarginMinor: null,
+      }),
+    ]);
+
+    expect(rollup.channels[0].disagreement).toBeUndefined();
   });
 });

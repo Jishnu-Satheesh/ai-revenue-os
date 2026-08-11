@@ -220,6 +220,12 @@ export function toEntryWrite(
     contributionMarginMinor: margin.grade === "indicative" ? null : margin.contributionMarginMinor,
     atMostMinor: margin.grade === "indicative" ? margin.atMostMinor : null,
     reportedQualityTier: margin.marginSource === "reported" ? margin.qualityTier : null,
+    // Only where a derived figure won. On a reported entry the stated figure is
+    // already the contribution margin, and storing it twice invites drift.
+    reportedMarginMinor:
+      margin.marginSource === "derived"
+        ? (entry.reportedDisagreement?.reportedMinor ?? null)
+        : null,
     sourceReference: null,
     components,
   };

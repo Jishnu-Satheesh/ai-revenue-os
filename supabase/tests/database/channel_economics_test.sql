@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(22);
+select extensions.plan(23);
 
 insert into auth.users (id)
 values ('6c3a0c1f-1760-4b25-8b15-100000000001'::uuid);
@@ -210,6 +210,25 @@ select extensions.throws_ok(
   '23514',
   null,
   'a missing component cannot carry an amount'
+);
+
+select extensions.throws_ok(
+  $$
+    insert into public.channel_economics_entries (
+      organization_id, grain, channel, period_start, period_end, period_timezone,
+      gross_revenue_minor, transaction_count, currency, margin_source,
+      completeness_grade, contribution_margin_minor, reported_quality_tier,
+      reported_margin_minor
+    )
+    values (
+      '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid, 'period', 'careem',
+      timestamptz '2026-08-01 20:00+00', timestamptz '2026-08-02 20:00+00', 'Asia/Dubai',
+      1000000, 200, 'AED', 'reported', 'complete', 345000, 'measured', 300000
+    )
+  $$,
+  '23514',
+  null,
+  'a reported entry cannot also hold a separate reported figure to disagree with'
 );
 
 -- Recomputation ----------------------------------------------------------------
