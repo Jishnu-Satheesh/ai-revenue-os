@@ -106,11 +106,27 @@ export async function recomputeChannelEconomics(
 
   const catalog = await deps.catalog.loadCatalog(input.organizationId);
 
+  // A sourced component is priced from its own series rather than a rate, so
+  // each one that names a metric contributes another read. Registered by the
+  // pack, never named here, so the core stays neutral.
+  const sourcedBindings = catalog.components.flatMap((component) =>
+    component.definition.sourceMetricKey
+      ? [[component.definition.key, component.definition.sourceMetricKey] as const]
+      : [],
+  );
+
+  const sourced: Record<string, readonly MetricObservationRecord[]> = {};
+  for (const [componentKey, metricKey] of sourcedBindings) {
+    const points = await optional(metricKey);
+    if (points) sourced[componentKey] = points;
+  }
+
   const periods = groupPeriods({
     revenue: revenue.points,
     ...(transactions ? { transactions } : {}),
     ...(units ? { units } : {}),
     ...(reportedMargin ? { reportedMargin } : {}),
+    ...(Object.keys(sourced).length > 0 ? { sourced } : {}),
     periodEndFor: (periodStart) => nextPeriodStart(periodStart, input.grain, input.timeZone),
   });
 

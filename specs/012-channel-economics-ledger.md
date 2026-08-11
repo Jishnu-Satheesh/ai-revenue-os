@@ -64,6 +64,10 @@ Computation kinds:
 - `per_unit` — an amount per unit of quantity.
 - `sourced` — supplied directly by an integration or import, not computed.
 
+**A `sourced` component names the metric that supplies it.** Its amount is a measured cost per period per channel, which is exactly what a normalized metric observation is; modelling it as a rate would mean calling a period total a rate, and the rate table deliberately has no column for one. The binding is `source_metric_key` on the definition, so the pack that registers the component also registers the metric that feeds it, and only a `sourced` component may carry one. A period with no observation leaves the component `missing`, which is the honest answer rather than a zero.
+
+Because the definition is shared vocabulary, the binding is the same for every tenant on the pack. An organization whose data arrives under a different key registers a custom metric with that key — the same override path economics roles use, so there is one mechanism rather than two.
+
 ### 4.3 Quality tiers
 
 Every component value on every row carries a tier, in descending trust:
@@ -219,7 +223,7 @@ No model computes, adjusts, or explains a margin figure. A generated narrative o
 ## 11. Failure states
 
 - **No cost data at all.** The view renders gross revenue by channel with every margin `indicative`, and leads with the readiness task list. It does not render zeros or invent defaults. Where the source reported a margin, section 4.4.1 applies instead and the entry is `reported`.
-- **A component that cannot yet be priced by any rate.** Two of the pack's six components are in this state today: `packaging` is `per_unit` and needs a registered unit-count metric, and `promotion_funding` is `sourced` and needs a provider line-item path. Neither is a missing rate an operator could supply, so the readiness task list must not ask them for one. Until both land, no derived margin in the Restaurant Pack can grade better than `indicative`, and the ledger's usable output for a marketplace tenant is the reported figure.
+- **A component that cannot yet be priced by any rate.** A `per_unit` component with no unit-count metric imported, or a `sourced` one whose bound metric has no observations, is not a missing rate an operator could supply. The readiness task list names it and explains why, but offers no action: a button nobody can complete is worse than none. Both of the pack's original cases are now closed — `units.count` is registered core vocabulary and `promotion_funding` is bound to a metric per 4.2 — so the state is reachable again only where the data has genuinely not arrived.
 - **Partial period coverage.** Entries are marked and excluded from period comparisons rather than extrapolated.
 - **Currency mismatch across sources.** Rejected at ingestion; no implicit conversion.
 - **Retroactive provider restatement.** Creates a correcting entry with a reference to the original; entries are never silently mutated.

@@ -182,6 +182,8 @@ export type Database = {
           pack_slug: string | null;
           computation_kind: "fixed_amount" | "rate_of_revenue" | "per_unit" | "sourced";
           applies_to_channels: string[] | null;
+          /** Set only for a `sourced` component: the metric supplying its amount. */
+          source_metric_key: string | null;
           default_quality_tier: "measured" | "derived" | "estimated" | "assumed";
           is_active: boolean;
           created_at: string;

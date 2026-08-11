@@ -74,7 +74,9 @@ export function computeComponentAmount(
         : Math.round(basis.grossRevenueMinor * rate.rateOfRevenue);
 
     case "sourced":
-      return rate.sourcedAmountMinor ?? null;
+      // Never from a rate. A sourced cost is a measured amount for the period,
+      // so it arrives with the period or not at all.
+      return basis.sourcedAmounts?.[definition.key]?.amountMinor ?? null;
   }
 }
 
@@ -115,14 +117,31 @@ export function computeDerivedMargin(input: ComputeMarginInput): DerivedMargin |
   for (const definition of input.definitions) {
     if (!appliesToChannel(definition, input.channel)) continue;
 
+    const sourced = input.basis.sourcedAmounts?.[definition.key];
     const rate = ratesByKey.get(definition.key);
-    const amount = rate ? computeComponentAmount(definition, rate, input.basis) : null;
+
+    // A sourced component needs no rate, so it is priced from the period alone.
+    // Every other kind needs one, and without it the amount is unknown rather
+    // than zero.
+    const priceable = definition.computationKind === "sourced" ? Boolean(sourced) : Boolean(rate);
+    const amount = priceable
+      ? computeComponentAmount(
+          definition,
+          rate ?? { key: definition.key, qualityTier: "assumed" },
+          input.basis,
+        )
+      : null;
+
+    // The tier follows whichever side supplied the figure: the report for a
+    // sourced amount, the rate for everything else.
+    const tier =
+      definition.computationKind === "sourced" ? sourced?.qualityTier : rate?.qualityTier;
 
     components.push({
       key: definition.key,
       label: definition.label,
       amountMinor: amount ?? 0,
-      qualityTier: amount === null ? "missing" : rate!.qualityTier,
+      qualityTier: amount === null || !tier ? "missing" : tier,
     });
   }
 

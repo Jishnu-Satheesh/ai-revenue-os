@@ -34,7 +34,9 @@ export function createEconomicsCatalogRepository(supabase: EconomicsClient): Eco
       // vocabulary is rejected at write time, so a key is never both.
       const { data: definitions, error: definitionError } = await supabase
         .from("cost_component_definitions")
-        .select("id, key, label, computation_kind, applies_to_channels, organization_id")
+        .select(
+          "id, key, label, computation_kind, applies_to_channels, source_metric_key, organization_id",
+        )
         .eq("is_active", true)
         .or(`organization_id.is.null,organization_id.eq.${organizationId}`)
         .order("key", { ascending: true });
@@ -299,6 +301,7 @@ type DefinitionRow = {
   label: string;
   computation_kind: string;
   applies_to_channels: string[] | null;
+  source_metric_key: string | null;
 };
 
 function toDefinition(row: DefinitionRow): CostComponentDefinition {
@@ -307,6 +310,7 @@ function toDefinition(row: DefinitionRow): CostComponentDefinition {
     label: row.label,
     computationKind: row.computation_kind as CostComponentDefinition["computationKind"],
     appliesToChannels: row.applies_to_channels,
+    sourceMetricKey: row.source_metric_key,
   };
 }
 

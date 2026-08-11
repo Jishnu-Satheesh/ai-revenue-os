@@ -212,6 +212,64 @@ describe("computeDerivedMargin", () => {
   });
 });
 
+describe("sourced components", () => {
+  const promotion: CostComponentDefinition = {
+    key: "promotion_funding",
+    label: "Promotion funding share",
+    computationKind: "sourced",
+    appliesToChannels: null,
+    sourceMetricKey: "promotion.funding",
+  };
+
+  it("prices a sourced component from the period with no rate at all", () => {
+    // A sourced cost is a measured amount for the period. There is no rate for
+    // it, and inventing one would mean calling a period total a rate.
+    const outcome = computeDerivedMargin({
+      basis: {
+        ...basis,
+        sourcedAmounts: { promotion_funding: { amountMinor: 40_000, qualityTier: "measured" } },
+      },
+      channel: "talabat",
+      definitions: [promotion],
+      rates: [],
+    });
+
+    expect(outcome).toMatchObject({ grade: "complete", contributionMarginMinor: 960_000 });
+    expect(outcome.components[0]).toMatchObject({
+      key: "promotion_funding",
+      amountMinor: 40_000,
+      qualityTier: "measured",
+    });
+  });
+
+  it("leaves a sourced component missing when the provider reported nothing", () => {
+    const outcome = computeDerivedMargin({
+      basis,
+      channel: "talabat",
+      definitions: [promotion],
+      rates: [],
+    });
+
+    expect(outcome.grade).toBe("indicative");
+    expect(outcome.components[0].qualityTier).toBe("missing");
+  });
+
+  it("takes its tier from the report rather than from any rate", () => {
+    // The figure is only as trustworthy as the report it came from.
+    const outcome = computeDerivedMargin({
+      basis: {
+        ...basis,
+        sourcedAmounts: { promotion_funding: { amountMinor: 40_000, qualityTier: "estimated" } },
+      },
+      channel: "talabat",
+      definitions: [promotion],
+      rates: [],
+    });
+
+    expect(outcome.grade).toBe("partial");
+  });
+});
+
 describe("recordReportedMargin", () => {
   it("accepts a figure an export stated outright", () => {
     const outcome = recordReportedMargin({

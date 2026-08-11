@@ -114,6 +114,34 @@ describe("groupPeriods", () => {
     ).toThrow(EconomicsError);
   });
 
+  it("attaches a sourced cost to its period, with the reporter's tier", () => {
+    const periods = groupPeriods({
+      revenue: [point("2026-05-31T20:00:00Z", 1_000_000)],
+      sourced: {
+        promotion_funding: [point("2026-05-31T20:00:00Z", 31_500, { qualityTier: "measured" })],
+      },
+      periodEndFor: nextDay,
+    });
+
+    expect(periods[0].sourcedAmounts).toEqual({
+      promotion_funding: { amountMinor: 31_500, qualityTier: "measured" },
+    });
+  });
+
+  it("refuses a sourced cost denominated in another currency", () => {
+    // A cost in another currency is a different number, not the same one in
+    // other units.
+    expect(() =>
+      groupPeriods({
+        revenue: [point("2026-05-31T20:00:00Z", 1_000_000)],
+        sourced: {
+          promotion_funding: [point("2026-05-31T20:00:00Z", 31_500, { currency: "SAR" })],
+        },
+        periodEndFor: nextDay,
+      }),
+    ).toThrow(EconomicsError);
+  });
+
   it("refuses a reported margin denominated in another currency", () => {
     // specs/012 section 11: no implicit conversion, ever.
     expect(() =>

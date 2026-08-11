@@ -156,20 +156,20 @@ export function buildEconomicsView(input: {
 }
 
 function toGap(component: EconomicsCatalogEntry): TrustGap[] {
-  // A per-unit component needs an item count that nothing imports yet, and a
-  // sourced one needs a provider line-item feed. Neither is a rate the operator
-  // could type, so neither may appear as a task with a button: an action nobody
-  // can complete is worse than no action at all.
-  if (component.computationKind === "per_unit" && !component.hasRate)
-    return [
-      {
-        key: component.key,
-        label: component.label,
-        state: "not_yet_possible",
-        reason: "Charged per item, and no item count is being imported yet.",
-      },
-    ];
+  // Covered components come first, whatever their kind. A sourced component
+  // whose provider data has arrived is not a gap, and listing it as one while
+  // its amount is visible in the waterfall tells the operator two contradictory
+  // things at once.
+  if (
+    component.hasRate &&
+    component.weakestTier !== "estimated" &&
+    component.weakestTier !== "assumed"
+  )
+    return [];
 
+  // A sourced component with nothing behind it needs a provider feed, not a
+  // rate, so it may not appear as a task with a button: an action nobody can
+  // complete is worse than no action at all.
   if (component.computationKind === "sourced")
     return [
       {
@@ -177,6 +177,18 @@ function toGap(component: EconomicsCatalogEntry): TrustGap[] {
         label: component.label,
         state: "not_yet_possible",
         reason: "Comes from provider reports rather than a rate you can enter.",
+      },
+    ];
+
+  // The same for a per-unit cost with no unit count being imported: no rate the
+  // operator could type would price it.
+  if (component.computationKind === "per_unit" && !component.hasRate)
+    return [
+      {
+        key: component.key,
+        label: component.label,
+        state: "not_yet_possible",
+        reason: "Charged per item, and no item count is being imported yet.",
       },
     ];
 

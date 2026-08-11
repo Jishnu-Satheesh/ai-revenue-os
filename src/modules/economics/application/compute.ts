@@ -39,6 +39,10 @@ export type EconomicsPeriodInput = {
   reportedMarginMinor?: number;
   /** The tier of that stated figure, which is the tier the entry inherits. */
   reportedQualityTier?: Exclude<EconomicsQualityTier, "missing">;
+  /** Costs a provider reported outright for this period, keyed by component. */
+  sourcedAmounts?: Readonly<
+    Record<string, { amountMinor: number; qualityTier: Exclude<EconomicsQualityTier, "missing"> }>
+  >;
 };
 
 export type ComputedEntry = {
@@ -87,6 +91,7 @@ export function computeEntries(input: ComputeEntriesInput): ComputedEntry[] {
         transactionCount: period.transactionCount,
         unitCount: period.unitCount,
         currency: period.currency,
+        ...(period.sourcedAmounts ? { sourcedAmounts: period.sourcedAmounts } : {}),
       },
       channel: period.channel,
       definitions: input.definitions,
@@ -149,6 +154,11 @@ export function groupPeriods(input: {
   transactions?: readonly MetricObservationRecord[];
   units?: readonly MetricObservationRecord[];
   reportedMargin?: readonly MetricObservationRecord[];
+  /**
+   * One series per `sourced` component, keyed by component. Each is a cost the
+   * provider reported per period rather than one computed from a rate.
+   */
+  sourced?: Readonly<Record<string, readonly MetricObservationRecord[]>>;
   periodEndFor: (periodStart: Date) => Date;
 }): EconomicsPeriodInput[] {
   const keyOf = (record: MetricObservationRecord) =>
@@ -160,6 +170,9 @@ export function groupPeriods(input: {
   const transactions = index(input.transactions);
   const units = index(input.units);
   const reported = index(input.reportedMargin);
+  const sourced = Object.entries(input.sourced ?? {}).map(
+    ([componentKey, records]) => [componentKey, index(records)] as const,
+  );
 
   return input.revenue.map((record) => {
     const key = keyOf(record);
@@ -184,6 +197,30 @@ export function groupPeriods(input: {
         reported: reportedRecord.currency ?? "",
       });
 
+    const sourcedAmounts: Record<
+      string,
+      { amountMinor: number; qualityTier: Exclude<EconomicsQualityTier, "missing"> }
+    > = {};
+    for (const [componentKey, byPeriod] of sourced) {
+      const sourcedRecord = byPeriod.get(key);
+      if (!sourcedRecord) continue;
+
+      // A sourced cost is money, so a mismatched currency is a different number
+      // rather than the same one in other units.
+      if (sourcedRecord.currency !== record.currency)
+        throw economicsError("ECONOMICS_CURRENCY_MISMATCH", {
+          periodStart: record.periodStart.toISOString(),
+          component: componentKey,
+          revenue: record.currency,
+          sourced: sourcedRecord.currency ?? "",
+        });
+
+      sourcedAmounts[componentKey] = {
+        amountMinor: sourcedRecord.numerator,
+        qualityTier: sourcedRecord.qualityTier,
+      };
+    }
+
     return {
       periodStart: record.periodStart,
       periodEnd: input.periodEndFor(record.periodStart),
@@ -193,6 +230,7 @@ export function groupPeriods(input: {
       transactionCount: transactions.get(key)?.numerator ?? 0,
       ...(unitRecord ? { unitCount: unitRecord.numerator } : {}),
       currency: record.currency,
+      ...(Object.keys(sourcedAmounts).length > 0 ? { sourcedAmounts } : {}),
       ...(reportedRecord
         ? {
             reportedMarginMinor: reportedRecord.numerator,

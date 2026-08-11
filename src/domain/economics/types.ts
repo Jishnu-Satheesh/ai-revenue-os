@@ -63,6 +63,14 @@ export type CostComponentDefinition = {
   computationKind: CostComputationKind;
   /** Channels the component applies to. `null` means every channel. */
   appliesToChannels: readonly string[] | null;
+  /**
+   * For a `sourced` component, the registered metric supplying its amount.
+   *
+   * A sourced cost is a measured amount per period per channel, which is what a
+   * metric observation already is. It has no rate, and modelling one would mean
+   * calling a period total a rate.
+   */
+  sourceMetricKey?: string | null;
 };
 
 /**
@@ -77,8 +85,6 @@ export type CostComponentRate = {
   amountMinor?: number;
   /** A share in `0..1`, for `rate_of_revenue`. */
   rateOfRevenue?: number;
-  /** Minor units already totalled for the period, for `sourced`. */
-  sourcedAmountMinor?: number;
 };
 
 /**
@@ -93,6 +99,15 @@ export type EconomicsBasis = {
   transactionCount: number;
   unitCount?: number;
   currency: string;
+  /**
+   * Amounts a source reported outright for this period, keyed by component.
+   *
+   * Each carries its own tier, because the figure is only as trustworthy as the
+   * report it came from and nothing else in the period can vouch for it.
+   */
+  sourcedAmounts?: Readonly<
+    Record<string, { amountMinor: number; qualityTier: Exclude<EconomicsQualityTier, "missing"> }>
+  >;
 };
 
 export type ComputedComponent = {
