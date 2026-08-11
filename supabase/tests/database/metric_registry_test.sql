@@ -24,9 +24,16 @@ values
 
 -- Definitions ----------------------------------------------------------------
 
+-- The set, not the count. A bare count fails on any legitimate addition while
+-- saying nothing about neutrality; naming the keys makes an industry-specific
+-- one impossible to add here without deliberately writing it down.
 select extensions.is(
-  (select count(*)::bigint from public.metric_definitions where owner_scope = 'core'),
-  2::bigint,
+  (
+    select pg_catalog.array_agg(key order by key)
+    from public.metric_definitions
+    where owner_scope = 'core'
+  ),
+  array['revenue.gross', 'transactions.count', 'units.count'],
   'the core metric vocabulary is seeded and stays industry-neutral'
 );
 
