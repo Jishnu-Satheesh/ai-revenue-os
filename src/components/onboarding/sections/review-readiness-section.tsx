@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import type { ReadinessResult } from "@/domain/onboarding/readiness";
 import { useState } from "react";
+import { ReadinessTaskList } from "@/components/onboarding/readiness-task-list";
 import { useOnboardingWorkspace } from "@/components/onboarding/onboarding-workspace";
 
 export function ReviewReadinessSection({
@@ -82,16 +83,8 @@ export function ReviewReadinessSection({
               Prioritized actions stay visible even when onboarding is incomplete.
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {(readiness?.nextActions ?? []).map((action) => (
-              <div
-                key={action.reasonId}
-                className="flex items-center justify-between gap-3 rounded-md border p-3"
-              >
-                <span className="text-sm font-medium">{action.reasonId}</span>
-                <Badge variant="outline">{action.owner.replaceAll("_", " ")}</Badge>
-              </div>
-            ))}
+          <CardContent>
+            <ReadinessTaskList actions={readiness?.nextActions ?? []} />
           </CardContent>
         </Card>
       </div>

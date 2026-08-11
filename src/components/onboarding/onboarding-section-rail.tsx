@@ -8,6 +8,7 @@ import {
   CircleDashed,
   CircleDot,
   LockKeyhole,
+  TriangleAlert,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,14 @@ export type RailSection = {
   label: string;
   description: string;
   status: OnboardingSectionStatus;
+  /**
+   * Carries an unsatisfied critical requirement.
+   *
+   * Distinct from being incomplete. The rail's completed count already says how
+   * much is left; it says nothing about what is stopping the review from being
+   * confirmed, and those are different questions with different urgency.
+   */
+  blocking?: boolean;
 };
 
 const phaseLabels: Record<OnboardingPhase, string> = {
@@ -84,8 +93,29 @@ export function OnboardingSectionRail({
     if (!openPhases.includes(currentPhase)) setOpenPhases([...openPhases, currentPhase]);
   }
 
+  const blocking = sections.filter((section) => section.blocking).length;
+  const outstanding = sections.filter((section) => section.status !== "complete").length;
+
   return (
     <nav aria-label="Onboarding sections" className="flex flex-col gap-2">
+      {/* What is left, and what is stopping confirmation, without having to
+          reach the last section to find out. */}
+      {outstanding > 0 ? (
+        <p className="flex flex-wrap items-center gap-1.5 px-2 pb-1 text-xs text-muted-foreground">
+          <span>
+            {outstanding} section{outstanding === 1 ? "" : "s"} outstanding
+          </span>
+          {blocking > 0 ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="inline-flex items-center gap-1 font-medium text-foreground">
+                <TriangleAlert aria-hidden="true" className="size-3.5 text-warning" />
+                {blocking} blocking review
+              </span>
+            </>
+          ) : null}
+        </p>
+      ) : null}
       {phases.map((phase) => {
         const phaseSections = sections.filter((section) => section.phase === phase);
         const completed = phaseSections.filter((section) => section.status === "complete").length;
@@ -139,7 +169,15 @@ export function OnboardingSectionRail({
                     >
                       <StatusIcon status={section.status} />
                       <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                        <span className="truncate font-medium">{section.label}</span>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate font-medium">{section.label}</span>
+                          {section.blocking ? (
+                            <TriangleAlert
+                              aria-label="Blocks review"
+                              className="size-3.5 shrink-0 text-warning"
+                            />
+                          ) : null}
+                        </span>
                         <span className="text-xs whitespace-normal text-muted-foreground">
                           {section.description}
                         </span>

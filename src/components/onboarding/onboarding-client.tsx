@@ -22,6 +22,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { onboardingSectionRegistry } from "@/domain/onboarding/section-registry";
 import { normalizeIndustry } from "@/domain/organizations/industries";
+import { findReadinessRequirement, isOnboardingSectionKey } from "@/domain/onboarding/readiness";
 import type { ReadinessResult } from "@/domain/onboarding/readiness";
 import type { OnboardingSectionKey } from "@/domain/onboarding/types";
 import type {
@@ -85,9 +86,20 @@ function mapReadiness(snapshot: OnboardingSnapshot): ReadinessResult | null {
       if (!action || typeof action !== "object") return [];
       const value = action as Record<string, unknown>;
       if (typeof value.reasonId !== "string") return [];
+
+      // An assessment stored before labels were carried through holds only the
+      // id. Recovering the rest from the registry keeps those rows readable
+      // instead of showing a key or dropping the task entirely.
+      const requirement = findReadinessRequirement(value.reasonId);
+      if (!requirement) return [];
+
       return [
         {
           reasonId: value.reasonId,
+          label: typeof value.label === "string" ? value.label : requirement.label,
+          sectionKey: isOnboardingSectionKey(String(value.sectionKey))
+            ? (value.sectionKey as OnboardingSectionKey)
+            : requirement.sectionKey,
           owner:
             value.owner === "client_contact"
               ? ("client_contact" as const)
@@ -98,6 +110,7 @@ function mapReadiness(snapshot: OnboardingSnapshot): ReadinessResult | null {
               : value.effort === "medium"
                 ? ("medium" as const)
                 : ("small" as const),
+          critical: typeof value.critical === "boolean" ? value.critical : requirement.critical,
         },
       ];
     }),
@@ -208,6 +221,21 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKey(organizationId) }),
   });
 
+  const readiness = mapReadiness(snapshot);
+
+  // Which sections hold an unsatisfied critical requirement, so the rail can
+  // say what is blocking confirmation rather than only how much is left.
+  const blockingSections = useMemo(
+    () =>
+      new Set(
+        (readiness?.criticalBlockers ?? []).flatMap((reasonId) => {
+          const requirement = findReadinessRequirement(reasonId);
+          return requirement ? [requirement.sectionKey] : [];
+        }),
+      ),
+    [readiness],
+  );
+
   const sections = useMemo<readonly RailSection[]>(
     () =>
       onboardingSectionRegistry.map((definition) => ({
@@ -215,8 +243,9 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
         status:
           snapshot.sections.find((state) => state.section_key === definition.key)?.status ??
           "not_started",
+        blocking: blockingSections.has(definition.key),
       })),
-    [snapshot.sections],
+    [snapshot.sections, blockingSections],
   );
   const sectionStates = useMemo(
     () => new Map(snapshot.sections.map((state) => [state.section_key, state])),
@@ -227,7 +256,6 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
   )
     ? (snapshot.session?.current_section_key as OnboardingSectionKey)
     : "business_identity";
-  const readiness = mapReadiness(snapshot);
 
   function save(sectionKey: OnboardingSectionKey) {
     return (payload: Record<string, unknown>, status: "in_progress" | "complete") =>
