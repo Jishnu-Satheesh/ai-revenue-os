@@ -4,7 +4,7 @@
 
 Blocked. This document records official API facts and intended stable keys; it does not prove that a controlled Meta account, app, Page, Instagram account, ad account, permission grant, webhook subscription, or placement is executable.
 
-Checked-in contract: `src/modules/integrations/providers/meta/contract.ts`
+Checked-in contract: `src/modules/integrations/providers/meta/contract.ts`. Consumers obtain it only through `getMetaCampaignProviderContract()`, which performs strict shape, evidence, future-date, and expiry validation against the current time.
 
 ## Review window
 
@@ -13,6 +13,8 @@ Checked-in contract: `src/modules/integrations/providers/meta/contract.ts`
 - Verified at: `2026-08-11T00:00:00.000Z`
 - Expires at: `2026-09-10T00:00:00.000Z`
 - Review rule: expiry is fail-closed; recheck official documentation and controlled-account evidence before renewing.
+
+The raw checked-in literal is private to the module so a caller cannot accidentally bypass temporal validation.
 
 ## Official sources consulted
 
@@ -32,6 +34,8 @@ No blog, forum, aggregator, SDK guess, or onboarding channel declaration is trea
 - Live controlled-account proof for app access level/review, credential health, exact scopes, account ownership and mapping, placement eligibility, and each requested capability.
 
 The final prerequisite is not satisfied by this repository. Therefore no action or webhook is verified.
+
+Official facts are stored in the contract evidence registry with stable IDs and check times. A controlled-account check additionally requires a sanitized evidence-artifact reference and SHA-256 digest. A future action must cite official-source evidence, controlled-account evidence, and verified prerequisite keys. A label alone cannot make an action executable.
 
 ## Exact documented scope set
 
@@ -67,6 +71,8 @@ This list records names present in the consulted publishing material. It does no
 - Unknown-outcome reconciliation lookup: none complete enough to authorize a write.
 
 The Instagram container-status lookup and Page returned post ID are useful evidence, but they do not by themselves prove a complete duplicate-safe lookup after a timeout where the create response was not received. Every write remains blocked by `meta.unknown_outcome_reconciliation_unverified` until that ambiguity is tested against the controlled account.
+
+A future reconciliation contract may use only lookup inputs persisted during preflight or included in the outbound request. A provider ID learned only from the possibly lost create response cannot satisfy unknown-outcome reconciliation.
 
 ## Webhooks
 

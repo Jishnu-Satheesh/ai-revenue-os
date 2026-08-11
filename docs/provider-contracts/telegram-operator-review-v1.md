@@ -4,7 +4,7 @@
 
 Blocked. Telegram's official Bot API and Mini App contracts are documented, but no controlled bot, webhook, Mini App configuration, linked operator, or live review session is evidenced in this repository.
 
-Checked-in contract: `src/modules/integrations/providers/telegram-operator-review/contract.ts`
+Checked-in contract: `src/modules/integrations/providers/telegram-operator-review/contract.ts`. Consumers obtain it only through `getTelegramOperatorReviewProviderContract()`, which performs strict shape, evidence, future-date, and expiry validation against the current time.
 
 ## Review window
 
@@ -13,6 +13,8 @@ Checked-in contract: `src/modules/integrations/providers/telegram-operator-revie
 - Verified at: `2026-08-11T00:00:00.000Z`
 - Expires at: `2026-09-10T00:00:00.000Z`
 - Review rule: expiry is fail-closed; recheck the official Bot API, Mini App contract, and controlled configuration before renewing.
+
+The raw checked-in literal is private to the module so a caller cannot accidentally bypass temporal validation.
 
 ## Official sources consulted
 
@@ -28,6 +30,8 @@ Checked-in contract: `src/modules/integrations/providers/telegram-operator-revie
 - Controlled evidence that the bot, webhook secret, Mini App launch, linked operator, and review session work together.
 
 Telegram has no OAuth scope list for this Bot API path, so `exactScopes` is intentionally empty. An empty list does not waive bot configuration, identity, or platform authorization checks.
+
+Official facts are stored in the contract evidence registry with stable IDs and check times. A controlled-bot check additionally requires a sanitized evidence-artifact reference and SHA-256 digest. No controlled-account evidence entry exists, and both account prerequisites remain blocked; a future action must cite official evidence, controlled-bot evidence, and verified prerequisite keys.
 
 ## Fixed product boundary
 

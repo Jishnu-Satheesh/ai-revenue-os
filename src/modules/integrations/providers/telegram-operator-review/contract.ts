@@ -14,7 +14,7 @@ export {
 const TELEGRAM_BOT_API_SOURCE = "https://core.telegram.org/bots/api";
 const TELEGRAM_MINI_APPS_SOURCE = "https://core.telegram.org/bots/webapps";
 
-export const telegramOperatorReviewProviderContract = {
+const telegramOperatorReviewProviderContract = {
   schemaVersion: 1,
   providerKey: "telegram_operator_review",
   contractVersion: "telegram_operator_review_v1",
@@ -22,11 +22,35 @@ export const telegramOperatorReviewProviderContract = {
   verifiedAt: "2026-08-11T00:00:00.000Z",
   expiresAt: "2026-09-10T00:00:00.000Z",
   officialSourceUrls: [TELEGRAM_BOT_API_SOURCE, TELEGRAM_MINI_APPS_SOURCE],
+  evidence: [
+    {
+      id: "telegram.official.bot_api",
+      kind: "official_source",
+      sourceUrl: TELEGRAM_BOT_API_SOURCE,
+      checkedAt: "2026-08-10T00:00:00.000Z",
+      detail: "The official Bot API documents bot authorization, updates, and webhooks.",
+    },
+    {
+      id: "telegram.official.mini_apps",
+      kind: "official_source",
+      sourceUrl: TELEGRAM_MINI_APPS_SOURCE,
+      checkedAt: "2026-08-10T00:00:00.000Z",
+      detail: "The official Mini Apps guide documents launch and initData validation.",
+    },
+  ],
   accountPrerequisites: [
-    "A bot created through Telegram and a server-held bot token are required.",
-    "The Mini App URL and webhook must be configured for the controlled bot.",
-    "A Telegram user must be linked to a platform user, and live organization membership and campaign permission must be rechecked for each sensitive mutation.",
-    "The controlled bot configuration, webhook secret, linked operator, and Mini App launch path must pass live verification before the capability can become available.",
+    {
+      key: "telegram.controlled_bot",
+      detail: "The controlled bot, server-held token, webhook, and Mini App must pass.",
+      verificationStatus: "blocked",
+      evidenceIds: ["telegram.official.bot_api", "telegram.official.mini_apps"],
+    },
+    {
+      key: "telegram.linked_operator",
+      detail: "A linked operator and live platform authorization checks must pass.",
+      verificationStatus: "blocked",
+      evidenceIds: ["telegram.official.mini_apps"],
+    },
   ],
   exactScopes: [],
   placements: [],
@@ -78,3 +102,9 @@ export const telegramOperatorReviewProviderContract = {
     },
   ],
 } satisfies VerifiedProviderContractInput;
+
+export function getTelegramOperatorReviewProviderContract(
+  now: Date = new Date(),
+): VerifiedProviderContract {
+  return parseVerifiedProviderContract(telegramOperatorReviewProviderContract, now);
+}

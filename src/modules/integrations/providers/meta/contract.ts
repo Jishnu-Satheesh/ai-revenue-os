@@ -7,10 +7,43 @@ const contractKeySchema = z
   .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/);
 const nullablePositiveIntegerSchema = z.number().int().positive().nullable();
 
+const evidenceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      id: contractKeySchema,
+      kind: z.literal("official_source"),
+      sourceUrl: z.string().url(),
+      checkedAt: z.string().datetime({ offset: true }),
+      detail: contractStringSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: contractKeySchema,
+      kind: z.literal("controlled_account_check"),
+      sourceUrl: z.string().url(),
+      checkedAt: z.string().datetime({ offset: true }),
+      detail: contractStringSchema,
+      artifactReference: contractStringSchema,
+      artifactSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .strict(),
+]);
+
+const accountPrerequisiteSchema = z
+  .object({
+    key: contractKeySchema,
+    detail: contractStringSchema,
+    verificationStatus: z.enum(["verified", "blocked"]),
+    evidenceIds: z.array(contractKeySchema),
+  })
+  .strict();
+
 const placementSchema = z
   .object({
     key: contractKeySchema,
     verificationStatus: z.enum(["verified", "blocked"]),
+    evidenceIds: z.array(contractKeySchema),
     limits: z
       .object({
         maxPayloadBytes: nullablePositiveIntegerSchema,
@@ -28,6 +61,9 @@ const actionSchema = z
     effect: z.enum(["read", "public_write", "money_moving", "operator_control"]),
     placementKey: contractKeySchema.nullable(),
     requiredScopes: z.array(contractStringSchema),
+    sourceEvidenceIds: z.array(contractKeySchema).min(1),
+    controlledAccountEvidenceIds: z.array(contractKeySchema).min(1),
+    requiredPrerequisiteKeys: z.array(contractKeySchema).min(1),
     idempotency: z
       .object({
         mode: z.enum(["provider_key", "provider_reference", "platform_ledger"]),
@@ -38,7 +74,18 @@ const actionSchema = z
       .object({
         method: z.literal("GET"),
         pathTemplate: contractStringSchema,
-        externalReferenceField: contractStringSchema,
+        lookupInputs: z
+          .array(
+            z
+              .object({
+                key: contractKeySchema,
+                source: z.enum(["preflight", "request"]),
+                valueReference: contractStringSchema,
+              })
+              .strict(),
+          )
+          .min(1),
+        resultIdentityField: contractStringSchema,
       })
       .strict()
       .nullable(),
@@ -102,7 +149,8 @@ export const verifiedProviderContractSchema = z
     verifiedAt: z.string().datetime({ offset: true }),
     expiresAt: z.string().datetime({ offset: true }),
     officialSourceUrls: z.array(z.string().url()).min(1),
-    accountPrerequisites: z.array(contractStringSchema).min(1),
+    evidence: z.array(evidenceSchema).min(1),
+    accountPrerequisites: z.array(accountPrerequisiteSchema).min(1),
     exactScopes: z.array(contractStringSchema),
     placements: z.array(placementSchema),
     actions: z.array(actionSchema),
@@ -121,6 +169,16 @@ export const verifiedProviderContractSchema = z
     }
 
     addUniqueIssue(contract.officialSourceUrls, ["officialSourceUrls"], context);
+    addUniqueIssue(
+      contract.evidence.map(({ id }) => id),
+      ["evidence"],
+      context,
+    );
+    addUniqueIssue(
+      contract.accountPrerequisites.map(({ key }) => key),
+      ["accountPrerequisites"],
+      context,
+    );
     addUniqueIssue(contract.exactScopes, ["exactScopes"], context);
     addUniqueIssue(
       contract.placements.map(({ key }) => key),
@@ -142,8 +200,152 @@ export const verifiedProviderContractSchema = z
     const exactScopes = new Set(contract.exactScopes);
     const placements = new Map(contract.placements.map((placement) => [placement.key, placement]));
     const officialSources = new Set(contract.officialSourceUrls);
+    const evidenceById = new Map(contract.evidence.map((evidence) => [evidence.id, evidence]));
+    const prerequisitesByKey = new Map(
+      contract.accountPrerequisites.map((prerequisite) => [prerequisite.key, prerequisite]),
+    );
+
+    contract.evidence.forEach((evidence, evidenceIndex) => {
+      if (!officialSources.has(evidence.sourceUrl)) {
+        context.addIssue({
+          code: "custom",
+          message: "Evidence must cite an official source listed by the contract.",
+          path: ["evidence", evidenceIndex, "sourceUrl"],
+        });
+      }
+
+      if (new Date(evidence.checkedAt) > new Date(contract.verifiedAt)) {
+        context.addIssue({
+          code: "custom",
+          message: "Evidence cannot be checked after the contract verification time.",
+          path: ["evidence", evidenceIndex, "checkedAt"],
+        });
+      }
+    });
+
+    contract.accountPrerequisites.forEach((prerequisite, prerequisiteIndex) => {
+      addUniqueIssue(
+        prerequisite.evidenceIds,
+        ["accountPrerequisites", prerequisiteIndex, "evidenceIds"],
+        context,
+      );
+
+      const linkedEvidence = prerequisite.evidenceIds.map((id) => evidenceById.get(id));
+      if (linkedEvidence.some((evidence) => !evidence)) {
+        context.addIssue({
+          code: "custom",
+          message: "Account prerequisite cites unknown evidence.",
+          path: ["accountPrerequisites", prerequisiteIndex, "evidenceIds"],
+        });
+      }
+
+      if (prerequisite.verificationStatus === "verified") {
+        if (linkedEvidence.length === 0) {
+          context.addIssue({
+            code: "custom",
+            message: "A verified account prerequisite requires checked evidence.",
+            path: ["accountPrerequisites", prerequisiteIndex, "evidenceIds"],
+          });
+        } else if (
+          !linkedEvidence.some((evidence) => evidence?.kind === "controlled_account_check")
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "A verified account prerequisite requires controlled-account evidence.",
+            path: ["accountPrerequisites", prerequisiteIndex, "evidenceIds"],
+          });
+        }
+      }
+    });
+
+    contract.placements.forEach((placement, placementIndex) => {
+      addUniqueIssue(placement.evidenceIds, ["placements", placementIndex, "evidenceIds"], context);
+
+      const linkedEvidence = placement.evidenceIds.map((id) => evidenceById.get(id));
+      if (linkedEvidence.some((evidence) => !evidence)) {
+        context.addIssue({
+          code: "custom",
+          message: "Placement cites unknown evidence.",
+          path: ["placements", placementIndex, "evidenceIds"],
+        });
+      }
+
+      if (placement.verificationStatus === "verified") {
+        if (
+          linkedEvidence.length === 0 ||
+          !linkedEvidence.some((evidence) => evidence?.kind === "official_source")
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "A verified placement requires official-source evidence.",
+            path: ["placements", placementIndex, "evidenceIds"],
+          });
+        }
+
+        if (Object.values(placement.limits).some((limit) => limit === null)) {
+          context.addIssue({
+            code: "custom",
+            message: "A verified placement requires non-null provider contract limits.",
+            path: ["placements", placementIndex, "limits"],
+          });
+        }
+      }
+    });
 
     contract.actions.forEach((action, actionIndex) => {
+      addUniqueIssue(
+        action.sourceEvidenceIds,
+        ["actions", actionIndex, "sourceEvidenceIds"],
+        context,
+      );
+      addUniqueIssue(
+        action.controlledAccountEvidenceIds,
+        ["actions", actionIndex, "controlledAccountEvidenceIds"],
+        context,
+      );
+      addUniqueIssue(
+        action.requiredPrerequisiteKeys,
+        ["actions", actionIndex, "requiredPrerequisiteKeys"],
+        context,
+      );
+
+      const sourceEvidence = action.sourceEvidenceIds.map((id) => evidenceById.get(id));
+      if (
+        sourceEvidence.some((evidence) => !evidence) ||
+        !sourceEvidence.some((evidence) => evidence?.kind === "official_source")
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "A verified action requires official-source evidence.",
+          path: ["actions", actionIndex, "sourceEvidenceIds"],
+        });
+      }
+
+      const controlledEvidence = action.controlledAccountEvidenceIds.map((id) =>
+        evidenceById.get(id),
+      );
+      if (
+        controlledEvidence.some((evidence) => !evidence) ||
+        !controlledEvidence.some((evidence) => evidence?.kind === "controlled_account_check")
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "A verified action requires checked controlled-account evidence.",
+          path: ["actions", actionIndex, "controlledAccountEvidenceIds"],
+        });
+      }
+
+      action.requiredPrerequisiteKeys.forEach((key) => {
+        const prerequisite = prerequisitesByKey.get(key);
+        if (!prerequisite || prerequisite.verificationStatus !== "verified") {
+          context.addIssue({
+            code: "custom",
+            message: "An action requires every controlled-account prerequisite to be verified.",
+            path: ["actions", actionIndex, "requiredPrerequisiteKeys"],
+          });
+        }
+      });
+
       action.requiredScopes.forEach((scope) => {
         if (!exactScopes.has(scope)) {
           context.addIssue({
@@ -174,6 +376,39 @@ export const verifiedProviderContractSchema = z
           message: "A write action requires an unknown-outcome reconciliation lookup.",
           path: ["actions", actionIndex, "reconciliationLookup"],
         });
+      }
+
+      action.reconciliationLookup?.lookupInputs.forEach((lookupInput, lookupInputIndex) => {
+        if (!action.reconciliationLookup?.pathTemplate.includes(`{${lookupInput.key}}`)) {
+          context.addIssue({
+            code: "custom",
+            message: "Every reconciliation input must be used by the lookup path.",
+            path: [
+              "actions",
+              actionIndex,
+              "reconciliationLookup",
+              "lookupInputs",
+              lookupInputIndex,
+            ],
+          });
+        }
+      });
+
+      if (action.reconciliationLookup) {
+        const pathInputs = [
+          ...action.reconciliationLookup.pathTemplate.matchAll(/\{([a-z0-9._-]+)\}/g),
+        ].map((match) => match[1]);
+        const declaredInputs = new Set(
+          action.reconciliationLookup.lookupInputs.map(({ key }) => key),
+        );
+        if (pathInputs.some((key) => !declaredInputs.has(key))) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "Reconciliation path inputs must be known before send from preflight or request state.",
+            path: ["actions", actionIndex, "reconciliationLookup", "pathTemplate"],
+          });
+        }
       }
 
       if (action.idempotency.mode === "provider_key" && !action.idempotency.providerKeyField) {
@@ -215,6 +450,10 @@ export function parseVerifiedProviderContract(
 ): VerifiedProviderContract {
   const contract = verifiedProviderContractSchema.parse(input);
 
+  if (new Date(contract.verifiedAt) > now) {
+    throw new Error(`Provider contract verification is in the future: ${contract.providerKey}`);
+  }
+
   if (new Date(contract.expiresAt) <= now) {
     throw new Error(`Provider contract verification is expired: ${contract.providerKey}`);
   }
@@ -228,7 +467,7 @@ const META_INSTAGRAM_PUBLISHING_SOURCE =
 const META_PAGE_POSTS_SOURCE = "https://developers.facebook.com/docs/pages-api/posts/";
 const META_MARKETING_SOURCE = "https://developers.facebook.com/docs/marketing-api/get-started/";
 
-export const metaCampaignProviderContract = {
+const metaCampaignProviderContract = {
   schemaVersion: 1,
   providerKey: "meta_campaign",
   contractVersion: "meta_campaign_v1",
@@ -241,12 +480,61 @@ export const metaCampaignProviderContract = {
     META_PAGE_POSTS_SOURCE,
     META_MARKETING_SOURCE,
   ],
+  evidence: [
+    {
+      id: "meta.official.graph_versioning",
+      kind: "official_source",
+      sourceUrl: META_VERSIONING_SOURCE,
+      checkedAt: "2026-08-10T00:00:00.000Z",
+      detail: "The official versioning guide identifies Graph API v26.0 as current.",
+    },
+    {
+      id: "meta.official.instagram_publishing",
+      kind: "official_source",
+      sourceUrl: META_INSTAGRAM_PUBLISHING_SOURCE,
+      checkedAt: "2026-08-10T00:00:00.000Z",
+      detail: "The official guide documents Instagram publishing prerequisites and flow.",
+    },
+    {
+      id: "meta.official.page_posts",
+      kind: "official_source",
+      sourceUrl: META_PAGE_POSTS_SOURCE,
+      checkedAt: "2026-08-10T00:00:00.000Z",
+      detail: "The official guide documents Page post and photo publishing prerequisites.",
+    },
+    {
+      id: "meta.official.marketing_get_started",
+      kind: "official_source",
+      sourceUrl: META_MARKETING_SOURCE,
+      checkedAt: "2026-08-10T00:00:00.000Z",
+      detail: "The official guide documents active ad-account and billing prerequisites.",
+    },
+  ],
   accountPrerequisites: [
-    "A Meta developer app and Meta login flow are required.",
-    "Instagram publishing requires an eligible Instagram professional account and the documented Page relationship for Facebook Login.",
-    "Facebook Page publishing requires a Page access token and the documented Page tasks.",
-    "Advertising requires an active ad account with billing configured.",
-    "The controlled account, app review status, account mapping, credential health, and each requested capability must pass live verification before a grant can become available.",
+    {
+      key: "meta.controlled_app_and_login",
+      detail: "A controlled Meta developer app and applicable login flow must be verified.",
+      verificationStatus: "blocked",
+      evidenceIds: ["meta.official.instagram_publishing"],
+    },
+    {
+      key: "meta.controlled_instagram_account",
+      detail: "The controlled Instagram professional account and Page relationship must pass.",
+      verificationStatus: "blocked",
+      evidenceIds: ["meta.official.instagram_publishing"],
+    },
+    {
+      key: "meta.controlled_page",
+      detail: "The controlled Page access token and Page tasks must pass.",
+      verificationStatus: "blocked",
+      evidenceIds: ["meta.official.page_posts"],
+    },
+    {
+      key: "meta.controlled_ad_account",
+      detail: "The controlled ad account must be active with billing configured.",
+      verificationStatus: "blocked",
+      evidenceIds: ["meta.official.marketing_get_started"],
+    },
   ],
   exactScopes: [
     "instagram_basic",
@@ -262,31 +550,37 @@ export const metaCampaignProviderContract = {
     {
       key: "instagram.feed_image",
       verificationStatus: "blocked",
+      evidenceIds: ["meta.official.instagram_publishing"],
       limits: { maxPayloadBytes: null, maxCopyCharacters: null, maxHashtags: null },
     },
     {
       key: "instagram.image_story",
       verificationStatus: "blocked",
+      evidenceIds: ["meta.official.instagram_publishing"],
       limits: { maxPayloadBytes: null, maxCopyCharacters: null, maxHashtags: null },
     },
     {
       key: "facebook.feed_image",
       verificationStatus: "blocked",
+      evidenceIds: ["meta.official.page_posts"],
       limits: { maxPayloadBytes: null, maxCopyCharacters: null, maxHashtags: null },
     },
     {
       key: "facebook.image_story",
       verificationStatus: "blocked",
+      evidenceIds: ["meta.official.page_posts"],
       limits: { maxPayloadBytes: null, maxCopyCharacters: null, maxHashtags: null },
     },
     {
       key: "meta_ads.feed_image",
       verificationStatus: "blocked",
+      evidenceIds: ["meta.official.marketing_get_started"],
       limits: { maxPayloadBytes: null, maxCopyCharacters: null, maxHashtags: null },
     },
     {
       key: "meta_ads.image_story",
       verificationStatus: "blocked",
+      evidenceIds: ["meta.official.marketing_get_started"],
       limits: { maxPayloadBytes: null, maxCopyCharacters: null, maxHashtags: null },
     },
   ],
@@ -366,3 +660,7 @@ export const metaCampaignProviderContract = {
     },
   ],
 } satisfies VerifiedProviderContractInput;
+
+export function getMetaCampaignProviderContract(now: Date = new Date()): VerifiedProviderContract {
+  return parseVerifiedProviderContract(metaCampaignProviderContract, now);
+}
