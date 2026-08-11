@@ -2,10 +2,10 @@
 
 ## Status
 
-The design decisions were approved in collaborative review on 2026-08-11. This
-written consolidation awaits the final specification review before
-implementation planning. It does not claim that the described campaign,
-provider, or Decision Engine capabilities already exist.
+The design decisions and written consolidation were approved in collaborative
+review on 2026-08-11. Implementation planning is authorized. This document does
+not claim that the described campaign, provider, or Decision Engine
+capabilities already exist.
 
 ## Purpose
 
