@@ -55,6 +55,8 @@ All money is stored in integer minor units with an ISO currency code. Every comp
 
 A component definition carries a stable key, a display label, an owning scope (core, pack, or organization), an applicability rule by channel, a computation kind, and a default quality tier.
 
+**A definition is vocabulary; a rate is tenant data, and they are separate records.** "Commission" is the same concept for every marketplace restaurant, but this organization's Talabat commission is 28% from March and 30% from June. Folding both into one row would force a new definition on every rate change, and would make the shared catalog organization-scoped for no reason. Definitions therefore follow the registry pattern in `specs/015-metric-registry-and-normalized-metrics.md` section 5 — a null organization means core or pack vocabulary, a non-null one means a custom key — and effective dating in 4.5 lives on the rate, which is where a commission tier change actually belongs.
+
 Computation kinds:
 
 - `fixed_amount` — a flat amount per transaction.
@@ -84,7 +86,22 @@ A computed margin carries a grade derived from the tiers of its components and t
 
 **A margin graded `indicative` is never presented as a contribution margin figure.** It is presented as a bounded range with the missing components named. This is the rule that keeps the ledger honest against the reality that most small businesses do not know their true cost of goods, and it is enforced at the API boundary rather than in UI copy.
 
+The bound is one-sided and computable: a missing cost can only reduce margin, so revenue less the known components is an upper limit and there is no lower one. An `indicative` entry therefore reports **at most X**, never a point and never a symmetric range that would imply a precision nobody has.
+
 Nothing downstream may consume an `indicative` margin as a decision input. The Decision Engine treats it as `needs_data`.
+
+### 4.4.1 A margin reported rather than derived
+
+An operator's own export often states contribution margin outright while saying nothing about what makes it up. That number is measured; it is simply not decomposed, and 4.4 has no grade for it because every grade there describes a decomposition.
+
+An entry therefore records how its margin was arrived at:
+
+- `derived` — computed from components by the identity in 4.1, graded by 4.4.
+- `reported` — supplied whole by a system of record, carrying its own quality tier and no components.
+
+A reported margin is a usable decision input, because the figure is measured. What it cannot answer is the second question in section 7, "what is eating the margin", so the waterfall is offered only for derived entries and the operator view says plainly which kind it is looking at.
+
+Where an entry has both — components that derive a margin and a reported figure for the same period — the ledger keeps the derived value and raises the disagreement. A silent reconciliation would hide either a wrong rate or a wrong export, and both matter.
 
 ### 4.5 Effective dating
 
@@ -94,8 +111,9 @@ Component definitions and their values are effective-dated. A marketplace commis
 
 Core tables, industry-neutral:
 
-- `cost_component_definitions` — organization-scoped, seeded from a pack catalog, effective-dated, with the fields in 4.2.
-- `channel_economics_entries` — grain (`transaction` or `period`), channel, branch, period bounds, gross revenue, quantity, contribution margin, completeness grade, currency, source references.
+- `cost_component_definitions` — shared vocabulary seeded from a pack catalog, with the fields in 4.2. A null organization is core or pack vocabulary; a non-null one is a custom key, exactly as `metric_definitions` works.
+- `cost_component_rates` — organization-scoped and effective-dated, holding what this organization actually pays for a component on a channel, with its quality tier. This is where a commission tier change lands.
+- `channel_economics_entries` — grain (`transaction` or `period`), channel, branch, period bounds, gross revenue, quantity, contribution margin, margin source per 4.4.1, completeness grade, currency, source references.
 - `channel_economics_components` — per-entry component values with amount, quality tier, and the definition reference.
 - `channel_economics_snapshots` — materialized rollups by organization, branch, channel, and day, for the operator view and for firewall evaluation.
 

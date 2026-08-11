@@ -172,6 +172,105 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["integration_data_sources"]["Insert"]>;
         Relationships: [];
       };
+      cost_component_definitions: {
+        Row: {
+          id: string;
+          organization_id: string | null;
+          key: string;
+          label: string;
+          owner_scope: "core" | "pack" | "organization";
+          pack_slug: string | null;
+          computation_kind: "fixed_amount" | "rate_of_revenue" | "per_unit" | "sourced";
+          applies_to_channels: string[] | null;
+          default_quality_tier: "measured" | "derived" | "estimated" | "assumed";
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["cost_component_definitions"]["Row"],
+          "id" | "created_at" | "updated_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["cost_component_definitions"]["Insert"]>;
+        Relationships: [];
+      };
+      cost_component_rates: {
+        Row: {
+          id: string;
+          organization_id: string;
+          definition_id: string;
+          branch_id: string | null;
+          channel: string | null;
+          amount_minor: number | null;
+          rate_of_revenue: number | null;
+          currency: string | null;
+          quality_tier: "measured" | "derived" | "estimated" | "assumed";
+          source_reference: string | null;
+          effective_from: string;
+          effective_to: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["cost_component_rates"]["Row"],
+          "id" | "created_at" | "updated_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["cost_component_rates"]["Insert"]>;
+        Relationships: [];
+      };
+      channel_economics_entries: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string | null;
+          grain: "transaction" | "period";
+          channel: string | null;
+          period_start: string;
+          period_end: string;
+          period_timezone: string;
+          gross_revenue_minor: number;
+          transaction_count: number;
+          unit_count: number | null;
+          currency: string;
+          margin_source: "derived" | "reported";
+          completeness_grade: "complete" | "partial" | "indicative";
+          contribution_margin_minor: number | null;
+          at_most_minor: number | null;
+          reported_quality_tier: "measured" | "derived" | "estimated" | "assumed" | null;
+          source_reference: string | null;
+          computed_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["channel_economics_entries"]["Row"],
+          "id" | "created_at" | "updated_at" | "computed_at"
+        > &
+          Partial<
+            Pick<Database["public"]["Tables"]["channel_economics_entries"]["Row"], "computed_at">
+          >;
+        Update: Partial<Database["public"]["Tables"]["channel_economics_entries"]["Insert"]>;
+        Relationships: [];
+      };
+      channel_economics_components: {
+        Row: {
+          id: string;
+          organization_id: string;
+          entry_id: string;
+          definition_id: string;
+          rate_id: string | null;
+          amount_minor: number;
+          quality_tier: "measured" | "derived" | "estimated" | "assumed" | "missing";
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["channel_economics_components"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["channel_economics_components"]["Insert"]>;
+        Relationships: [];
+      };
       metric_definitions: {
         Row: {
           id: string;
