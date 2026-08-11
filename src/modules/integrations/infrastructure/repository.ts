@@ -270,6 +270,15 @@ export function createIntegrationWorkerRepository(
       }
       return result.run;
     },
+    async markDataSourceImported(input) {
+      // Scoped by organization as well as id: a worker never narrows a write to
+      // a primary key alone, so a mis-routed task cannot touch another tenant.
+      await dependencies.persistence.updateDataSource({
+        organizationId: input.organizationId,
+        dataSourceId: input.dataSourceId,
+        patch: { last_successful_import_at: input.importedAt },
+      });
+    },
     async resumeLeasedRun(input) {
       const result = await requiredRunTransitions(dependencies.transitions).resumeLeasedRun({
         ...input,

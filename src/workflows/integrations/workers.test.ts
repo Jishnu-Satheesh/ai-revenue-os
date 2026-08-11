@@ -106,6 +106,7 @@ function workerRepository(): IntegrationWorkerRepository & {
     assertExecutionLease: vi.fn(async () => undefined),
     cancelExecution: vi.fn(async () => runRow({ status: "cancelled" })),
     markRunRunning: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
+    markDataSourceImported: vi.fn(async () => undefined),
     resumeLeasedRun: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
     completeRun: vi.fn(async (input) => {
       completions.push(input);
@@ -191,8 +192,9 @@ function dependencies(
     },
     // `in` rather than `??`, so an explicit null means "no such source" instead
     // of coalescing back to the default fixture.
-    findDataSource: vi.fn(async (): Promise<IntegrationDataSourceRow | null> =>
-      "dataSource" in input ? (input.dataSource ?? null) : dataSource,
+    findDataSource: vi.fn(
+      async (): Promise<IntegrationDataSourceRow | null> =>
+        "dataSource" in input ? (input.dataSource ?? null) : dataSource,
     ),
     assertFeatureEnabled: vi.fn(),
     isCancelled: vi.fn(async () => input.cancelled ?? false),
@@ -395,6 +397,80 @@ describe("Integration Hub workers", () => {
     expect(deps.sink.accept).toHaveBeenCalledWith(
       expect.objectContaining({ idempotencyKey: connectionPayload.idempotencyKey }),
     );
+  });
+
+  it("stamps the source with the moment records last arrived", async () => {
+    const deps = dependencies();
+    await runImportDataSource(
+      {
+        taskName: "integration.import-data-source",
+        organizationId: ids.organizationId,
+        dataSourceId: ids.dataSourceId,
+        ingestionRunId: ids.ingestionRunId,
+        correlationId: ids.correlationId,
+        idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
+      },
+      deps,
+    );
+
+    expect(deps.worker.markDataSourceImported).toHaveBeenCalledWith({
+      organizationId: ids.organizationId,
+      dataSourceId: ids.dataSourceId,
+      importedAt: timestamp,
+    });
+  });
+
+  it("still stamps the source when some rows were rejected", async () => {
+    // The field answers "when did data last arrive", not "was the run clean".
+    // Withholding it over a few bad rows would leave a source that imports
+    // daily reading as though it never had.
+    const deps = dependencies({
+      sink: {
+        accept: vi.fn().mockResolvedValue({ accepted: 1, rejected: 3, rejectionReasons: [] }),
+      },
+    });
+
+    await runImportDataSource(
+      {
+        taskName: "integration.import-data-source",
+        organizationId: ids.organizationId,
+        dataSourceId: ids.dataSourceId,
+        ingestionRunId: ids.ingestionRunId,
+        correlationId: ids.correlationId,
+        idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
+      },
+      deps,
+    );
+
+    expect(deps.worker.markDataSourceImported).toHaveBeenCalledOnce();
+    expect(deps.worker.completions).toContainEqual(
+      expect.objectContaining({ status: "partially_succeeded" }),
+    );
+  });
+
+  it("leaves the source unstamped when nothing was accepted", async () => {
+    const deps = dependencies({
+      sink: {
+        accept: vi.fn().mockResolvedValue({ accepted: 0, rejected: 4, rejectionReasons: [] }),
+      },
+    });
+
+    await runImportDataSource(
+      {
+        taskName: "integration.import-data-source",
+        organizationId: ids.organizationId,
+        dataSourceId: ids.dataSourceId,
+        ingestionRunId: ids.ingestionRunId,
+        correlationId: ids.correlationId,
+        idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
+      },
+      deps,
+    );
+
+    expect(deps.worker.markDataSourceImported).not.toHaveBeenCalled();
   });
 
   it("records why preflight failed instead of dying in the error handler", async () => {

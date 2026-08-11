@@ -477,6 +477,18 @@ export type IntegrationWorkerRepository = {
     claimToken: string;
     startedAt: string;
   }): Promise<IntegrationIngestionRunRow>;
+  /**
+   * Stamps the data source with the moment records last arrived from it.
+   *
+   * Separate from the run row because it answers a different question. A run
+   * says what one attempt did; this says when the source last delivered, which
+   * is what an operator reads to tell a working import from a silent one.
+   */
+  markDataSourceImported(input: {
+    organizationId: string;
+    dataSourceId: string;
+    importedAt: string;
+  }): Promise<void>;
   resumeLeasedRun(input: {
     organizationId: string;
     ingestionRunId: string;

@@ -196,6 +196,21 @@ export async function runImportDataSource(
       recordsAccepted += result.accepted;
       recordsRejected += result.rejected;
     }
+    // Stamped before the run is finalised, while the lease is certainly still
+    // held and the records are already written. Any accepted record counts,
+    // including on a partial run: the field answers "when did data last arrive
+    // from this source", and withholding it because a few rows were rejected
+    // would leave a source that imports daily reading as though it never had.
+    // The run list carries the partial status separately.
+    if (recordsAccepted > 0) {
+      await assertActiveExecutionLease(payload, dependencies, begin.claimToken);
+      await dependencies.worker.markDataSourceImported({
+        organizationId: payload.organizationId,
+        dataSourceId: payload.dataSourceId,
+        importedAt: nowIso(dependencies),
+      });
+    }
+
     await complete(payload, dependencies, begin.claimToken, {
       status: recordsRejected ? "partially_succeeded" : "succeeded",
       recordsReceived,
