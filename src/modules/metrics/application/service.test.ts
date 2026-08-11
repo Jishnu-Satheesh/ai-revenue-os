@@ -36,6 +36,7 @@ function observation(
   return {
     periodStart: new Date(periodStart),
     periodTimezone: "Asia/Dubai",
+    channel: null,
     numerator,
     denominator: null,
     currency: "AED",

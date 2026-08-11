@@ -2,7 +2,12 @@ import { aggregateObservations } from "@/domain/metrics/aggregation";
 import { metricError } from "@/domain/metrics/errors";
 import { enumeratePeriodStarts } from "@/domain/metrics/periods";
 import type { MetricAggregateOutcome, MetricGapPolicy } from "@/domain/metrics/types";
-import type { MetricSeriesPort, MetricSeriesQuery } from "@/modules/metrics/application/ports";
+import type {
+  MetricDefinitionRecord,
+  MetricObservationRecord,
+  MetricSeriesPort,
+  MetricSeriesQuery,
+} from "@/modules/metrics/application/ports";
 
 export type ReadMetricSeriesOptions = {
   gapPolicy?: MetricGapPolicy;
@@ -15,6 +20,45 @@ export type MetricSeriesResult = {
   expectedPeriodCount: number;
   outcome: MetricAggregateOutcome;
 };
+
+export type MetricPointsResult = {
+  definition: MetricDefinitionRecord;
+  points: readonly MetricObservationRecord[];
+  expectedPeriodStarts: readonly Date[];
+};
+
+/**
+ * Reads a series without combining it.
+ *
+ * The economics ledger prices each period separately — a commission rate that
+ * changed in June must apply to June and not to May — so it needs the points,
+ * not a total. This still goes through the port rather than the tables, so
+ * revision resolution and the single-timezone rule are enforced exactly once.
+ */
+export async function readMetricPoints(
+  port: MetricSeriesPort,
+  query: MetricSeriesQuery,
+): Promise<MetricPointsResult> {
+  const definition = await port.loadDefinition(query.organizationId, query.metricKey);
+
+  if (!definition || !definition.isActive)
+    throw metricError("METRIC_DEFINITION_UNAVAILABLE", {
+      key: query.metricKey,
+      reason: definition ? "definition is inactive" : "no such metric key",
+    });
+
+  const expectedPeriodStarts = enumeratePeriodStarts(
+    query.grain,
+    query.rangeStart,
+    query.rangeEndExclusive,
+    query.timeZone,
+  );
+
+  const points = await port.loadObservations({ ...query, metricDefinitionId: definition.id });
+  assertSingleTimeZone(points, query.timeZone);
+
+  return { definition, points, expectedPeriodStarts };
+}
 
 /**
  * Reads a metric series and combines it under its own declared rules.

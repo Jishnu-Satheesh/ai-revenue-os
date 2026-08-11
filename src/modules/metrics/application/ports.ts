@@ -26,6 +26,8 @@ export type MetricDefinitionRecord = {
 export type MetricObservationRecord = {
   periodStart: Date;
   periodTimezone: string;
+  /** The channel this period covers, or null for an unchannelled series. */
+  channel: string | null;
   numerator: number;
   denominator: number | null;
   currency: string | null;

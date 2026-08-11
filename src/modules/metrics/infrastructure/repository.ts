@@ -47,7 +47,7 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
       let request = supabase
         .from("normalized_metrics")
         .select(
-          "period_start, period_timezone, value_numerator, value_denominator, currency, quality_tier",
+          "period_start, period_timezone, channel, value_numerator, value_denominator, currency, quality_tier",
         )
         .eq("organization_id", query.organizationId)
         .eq("metric_definition_id", query.metricDefinitionId)
@@ -275,6 +275,7 @@ function toDefinition(row: DefinitionRow): MetricDefinitionRecord {
 type ObservationRow = {
   period_start: string;
   period_timezone: string;
+  channel: string | null;
   value_numerator: number | string;
   value_denominator: number | string | null;
   currency: string | null;
@@ -285,6 +286,7 @@ function toObservation(row: ObservationRow): MetricObservationRecord {
   return {
     periodStart: new Date(row.period_start),
     periodTimezone: row.period_timezone,
+    channel: row.channel,
     numerator: toNumber(row.value_numerator),
     denominator: toNumberOrNull(row.value_denominator),
     currency: row.currency,
