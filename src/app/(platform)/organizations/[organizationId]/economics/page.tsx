@@ -70,7 +70,9 @@ export default async function ChannelEconomicsPage({ params, searchParams }: Pag
       <ChannelEconomicsPanel
         view={view}
         organizationName={organization.name}
-        costStructureHref={`/organizations/${context.organizationId}/onboarding`}
+        // Deep-links to the section that resolves these gaps, so the operator
+        // lands on the form rather than hunting for it in an eleven-section rail.
+        costStructureHref={`/organizations/${context.organizationId}/onboarding?section=cost_structure`}
       />
     </div>
   );

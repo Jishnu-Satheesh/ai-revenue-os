@@ -40,6 +40,15 @@ type Props = {
   organizationId: string;
   organization: OrganizationSummary;
   initialSnapshot: OnboardingSnapshot;
+  /**
+   * A section another surface asked to open, from `?section=`.
+   *
+   * Opens the workspace there for this visit only. The stored
+   * `current_section_key` is deliberately left alone: following a link from the
+   * economics view should not rewrite where the operator's own run of
+   * onboarding resumes.
+   */
+  requestedSection?: string;
 };
 
 const queryKey = (organizationId: string) =>
@@ -123,7 +132,12 @@ async function responseJson<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-export function OnboardingClient({ organizationId, organization, initialSnapshot }: Props) {
+export function OnboardingClient({
+  organizationId,
+  organization,
+  initialSnapshot,
+  requestedSection,
+}: Props) {
   const queryClient = useQueryClient();
   const onboardingQuery = useQuery({
     queryKey: queryKey(organizationId),
@@ -251,11 +265,19 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
     () => new Map(snapshot.sections.map((state) => [state.section_key, state])),
     [snapshot.sections],
   );
-  const initialSectionKey = onboardingSectionRegistry.some(
+  const resumeSectionKey = onboardingSectionRegistry.some(
     (section) => section.key === snapshot.session?.current_section_key,
   )
     ? (snapshot.session?.current_section_key as OnboardingSectionKey)
     : "business_identity";
+
+  // A requested section wins over the stored one, but only if it is real: an
+  // unknown value in the query string should land the operator where they left
+  // off rather than on a blank panel.
+  const initialSectionKey =
+    requestedSection && isOnboardingSectionKey(requestedSection)
+      ? requestedSection
+      : resumeSectionKey;
 
   function save(sectionKey: OnboardingSectionKey) {
     return (payload: Record<string, unknown>, status: "in_progress" | "complete") =>

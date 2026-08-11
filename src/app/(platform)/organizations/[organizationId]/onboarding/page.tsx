@@ -11,9 +11,12 @@ import { createEventPublisher } from "@/domain/events/publisher";
 import { createOnboardingService } from "@/modules/onboarding/application/service";
 import { createOnboardingRepository } from "@/modules/onboarding/infrastructure/repository";
 
-type PageProps = { params: Promise<{ organizationId: string }> };
+type PageProps = {
+  params: Promise<{ organizationId: string }>;
+  searchParams: Promise<{ section?: string }>;
+};
 
-export default async function OnboardingPage({ params }: PageProps) {
+export default async function OnboardingPage({ params, searchParams }: PageProps) {
   const context = await getOrganizationContext(params, ["owner", "admin", "operator"]);
   const organization = await getOrganization(context.supabase, context.organizationId);
   const service = createOnboardingService({
@@ -67,6 +70,7 @@ export default async function OnboardingPage({ params }: PageProps) {
           baseCurrency: organization.base_currency,
         }}
         initialSnapshot={snapshot}
+        requestedSection={(await searchParams).section}
       />
     </div>
   );

@@ -17,7 +17,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
   EconomicsView,
   EconomicsWindowPreset,
@@ -230,19 +230,21 @@ function PeriodControl({
       <p className="text-xs text-muted-foreground">
         {format(window.rangeStart)} – {format(lastDay)} · {window.timeZone}
       </p>
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        size="sm"
+      {/* Tabs rather than a button group, matching the Integration Hub. There
+          is no TabsContent: the window is a server concern, so selecting one
+          navigates and the page re-renders with different rows. */}
+      <Tabs
         value={window.preset}
         onValueChange={(value) => value && onWindowChange(value as EconomicsWindowPreset)}
       >
-        {PRESETS.map((preset) => (
-          <ToggleGroupItem key={preset.value} value={preset.value} aria-label={preset.label}>
-            {preset.label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+        <TabsList aria-label="Reporting period">
+          {PRESETS.map((preset) => (
+            <TabsTrigger key={preset.value} value={preset.value}>
+              {preset.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
     </div>
   );
 }
