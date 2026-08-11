@@ -114,6 +114,18 @@ A falsifiable statement linking an action to an expected measurable outcome.
 
 A validated sequence of actions generated from an opportunity and playbook.
 
+### Campaign
+
+A stable, organization-scoped campaign identity created from either a Decision Engine opportunity or a manual operator brief. It summarizes lifecycle only; executable intent lives in immutable bundle versions.
+
+### CampaignBundleVersion
+
+An immutable, normalized, cross-channel proposal containing strategy, evidence, creative directions, asset provenance and content hashes, copy and hashtags, channel actions, schedule, capability blockers, execution mode, spend ceiling, policy assertions, and a registered measurement plan. Its canonical digest plus exact version ID binds review, approval, execution, and evidence. Every material edit creates a new version.
+
+### CampaignChannelAction
+
+A provider-independent desired action owned by one Campaign Bundle Version, with placement, prerequisites, payload digest, schedule, required/optional state, spend limit where applicable, and independent lifecycle. It becomes executable only through a current organization capability grant and Tool Gateway claim.
+
 ### DecisionRecord
 
 The full reasoning artifact for one decision: inputs digest, evidence, the scored candidate set with component values exposed individually, the screening rejection histogram, the selected action or an explicit `no_action` or `needs_data`, assumptions, policy checks, propensity and exploration flag, the artifact version tuple, and model metadata.
@@ -121,6 +133,10 @@ The full reasoning artifact for one decision: inputs digest, evidence, the score
 ### ApprovalRequest
 
 A human decision requirement tied to a specific plan version and risk level.
+
+### CampaignApprovalEnvelope
+
+Append-only informed consent for one exact Campaign Bundle Version and digest. It binds the approver, action IDs, capability-grant and policy versions, audience and schedule boundaries, factual assertions, measurement prerequisites, attestations, expiry, and spend ceiling. A material edit cannot reuse it.
 
 ## Execution and learning
 
@@ -136,9 +152,23 @@ A durable run with trigger, status, correlation ID, organization scope, worker v
 
 A validated provider action with idempotency key, request summary, result, and audit metadata.
 
+### ProviderContract
+
+A checked-in, versioned, expiring external-truth boundary for one provider: official sources, account prerequisites, exact scopes, verified placements and actions, content limits, idempotency, webhook signature and replay rules, retry classification, unknown-outcome reconciliation, and stable restrictions. Registration does not grant an organization access.
+
+### ProviderReceipt
+
+Sanitized evidence of a provider request and state, including an external reference when available. Raw credentials and unnecessary provider payloads are excluded.
+
+### ExposureRecord
+
+Evidence that a person or aggregate audience could have received one approved campaign action, with source, time, scope, and confidence. Assignment without verified execution is not exposure.
+
 ### OutcomeMeasurement
 
 Measured business impact over a defined attribution window.
+
+Campaign outcome measurement binds the exact approved version, provider receipts, exposures, registered metric and baseline, attribution method, window, evidence quality, uncertainty, and economics. Its conclusion is one of `validated_outcome`, `inconclusive`, `guardrail_breach`, or `execution_only`.
 
 ### Experiment
 
@@ -151,3 +181,7 @@ A retrievable fact, event, decision, outcome, lesson, or document with scope, pr
 ### AuditEvent
 
 Immutable security and business audit record.
+
+### CampaignLearningProposal
+
+A campaign-scoped observation proposed for separate promotion into reusable memory, brand guidance, or a playbook. It carries supporting and contradicting evidence, affected scope, limitations, and review/expiry. It never changes live policy or another campaign directly.

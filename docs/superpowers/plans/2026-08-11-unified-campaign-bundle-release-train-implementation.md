@@ -29,6 +29,7 @@
 - Commit each task only after focused verification. Stop for review at every activation gate; do not combine tasks across a failed gate.
 - If implementation evidence conflicts with the approved design, provider reality, or a load-bearing plan assumption, stop and discuss the discrepancy with the user before changing direction.
 - Before any Campaign Studio UI code or UI test is written, use the `superdesign:superdesign` skill to create the proposed experience, present it to the user, and wait for explicit design approval. This user approval gate overrides continuous task execution for Task 12.
+- The concurrent `feat/business-memory` worktree owns the generic Decision Engine/opportunity implementation and the shared Trigger.dev 4.5.10 upgrade. This branch may execute Tasks 1–3, then must stop before Task 4 until that reviewed upstream work is committed and rebased here. After rebase, audit Tasks 4–6 against the upstream implementation and add only campaign-specific playbook/source/qualification gaps; do not create a competing generic Decision Engine.
 
 ## Activation Gates
 
