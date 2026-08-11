@@ -286,6 +286,13 @@ export type Database = {
           rating_min: number | null;
           rating_max: number | null;
           default_quality_tier: "measured" | "derived" | "estimated" | "assumed";
+          /** Which channel economics input this metric supplies, if any. */
+          economics_role:
+            | "gross_revenue"
+            | "transaction_count"
+            | "unit_count"
+            | "reported_margin"
+            | null;
           replaced_by_key: string | null;
           effective_from: string;
           effective_to: string | null;

@@ -1,5 +1,5 @@
 import { economicsError } from "@/domain/economics/errors";
-import type { CompletenessGrade } from "@/domain/economics/types";
+import type { CompletenessGrade, EconomicsMetricBinding } from "@/domain/economics/types";
 import { findMissingPeriodStarts, nextPeriodStart } from "@/domain/metrics/periods";
 import type { MetricPeriodGrain } from "@/domain/metrics/types";
 import {
@@ -26,20 +26,11 @@ import { readMetricPoints } from "@/modules/metrics/application/service";
  * `transactions.count` are core vocabulary, but a reported contribution margin
  * is registered by an industry pack — `margin.contribution` belongs to the
  * Restaurant Pack — and per ADR 0006 the core must not know that key exists.
- * The caller binds them; the core owns only the structure.
+ * The caller resolves the binding from the registry; the core owns only the
+ * structure.
  *
  * See `specs/012-channel-economics-ledger.md`.
  */
-
-/** Which registered metric supplies each input the ledger needs. */
-export type EconomicsMetricBinding = {
-  grossRevenue: string;
-  transactionCount?: string;
-  /** Units sold, which is not the transaction count: packaging is charged per item. */
-  unitCount?: string;
-  /** A margin the operator's own export states outright, where the pack registers one. */
-  reportedMargin?: string;
-};
 
 export type RecomputeChannelEconomicsInput = {
   organizationId: string;

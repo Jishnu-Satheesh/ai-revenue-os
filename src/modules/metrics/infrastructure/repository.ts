@@ -3,9 +3,11 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { metricError } from "@/domain/metrics/errors";
+import type { MetricPeriodGrain } from "@/domain/metrics/types";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
   MetricDefinitionRecord,
+  MetricIngestionWindowPort,
   MetricObservationRecord,
   MetricObservationWrite,
   MetricProjectionStore,
@@ -94,6 +96,57 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
         });
 
       return (data ?? []).map(toObservation);
+    },
+  };
+}
+
+/** How many observation rows a window query will read before it gives up. */
+const MAX_WINDOW_ROWS = 20_000;
+
+export function createMetricIngestionWindowRepository(
+  supabase: MetricsClient,
+): MetricIngestionWindowPort {
+  return {
+    async loadIngestionRunWindow({ organizationId, ingestionRunId }) {
+      // Only the shape columns, and only current revisions. A restatement that
+      // superseded a row does not widen the window the run originally wrote.
+      const { data, error } = await supabase
+        .from("normalized_metrics")
+        .select("period_start, period_grain, period_timezone, branch_id")
+        .eq("organization_id", organizationId)
+        .eq("source_ingestion_run_id", ingestionRunId)
+        .is("superseded_by_id", null)
+        .order("period_start", { ascending: true })
+        .limit(MAX_WINDOW_ROWS);
+
+      if (error) throw metricError("METRIC_QUERY_FAILED", { code: error.code ?? "unknown" });
+
+      const rows = data ?? [];
+      if (rows.length === 0) return null;
+
+      const grains = new Set(rows.map((row) => row.period_grain));
+      const zones = new Set(rows.map((row) => row.period_timezone));
+      const branches = new Set(rows.map((row) => row.branch_id));
+
+      // One run writing two grains, two zones or two branches does not describe
+      // one window. Repricing them as one would mix periods that are not
+      // comparable, which is the same rule readMetricSeries enforces on reads.
+      if (grains.size > 1 || zones.size > 1 || branches.size > 1)
+        throw metricError("METRIC_TIMEZONE_MIXED", {
+          reason: "one ingestion run wrote more than one window shape",
+          grains: [...grains].sort().join(","),
+          zones: [...zones].sort().join(","),
+          branches: branches.size,
+        });
+
+      return {
+        grain: rows[0].period_grain as MetricPeriodGrain,
+        branchId: rows[0].branch_id,
+        timeZone: rows[0].period_timezone,
+        rangeStart: new Date(rows[0].period_start),
+        lastPeriodStart: new Date(rows[rows.length - 1].period_start),
+        observationCount: rows.length,
+      };
     },
   };
 }

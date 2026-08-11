@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(14);
+select extensions.plan(18);
 
 insert into auth.users (id)
 values ('4b2f0c1f-1760-4b25-8b15-100000000001'::uuid);
@@ -250,6 +250,59 @@ select extensions.throws_ok(
   '42501',
   null,
   'an organization cannot record against another tenant custom definition'
+);
+
+-- Economics roles --------------------------------------------------------------
+
+-- The binding the channel economics ledger reads instead of naming pack
+-- vocabulary in core code. See specs/015 section 5 and specs/012 section 6.
+
+select extensions.is(
+  (
+    select key
+    from public.metric_definitions
+    where organization_id is null and economics_role = 'reported_margin'
+  ),
+  'margin.contribution',
+  'the pack declares which metric states a reported margin'
+);
+
+select extensions.throws_ok(
+  $$
+    insert into public.metric_definitions (key, label, owner_scope, value_kind, aggregation, economics_role)
+    values ('testing.other_revenue', 'Other revenue', 'core', 'money', 'sum', 'gross_revenue')
+  $$,
+  '23505',
+  null,
+  'two shared metrics cannot claim one economics role'
+);
+
+select extensions.lives_ok(
+  $$
+    insert into public.metric_definitions (
+      organization_id, key, label, owner_scope, value_kind, aggregation, economics_role
+    )
+    values (
+      '4b2f0c1f-1760-4b25-8b15-200000000001'::uuid,
+      'testing.net_margin', 'Net margin', 'organization', 'money', 'sum', 'reported_margin'
+    )
+  $$,
+  'an organization may point a role at its own key without touching shared vocabulary'
+);
+
+select extensions.throws_ok(
+  $$
+    insert into public.metric_definitions (
+      organization_id, key, label, owner_scope, value_kind, aggregation, economics_role
+    )
+    values (
+      '4b2f0c1f-1760-4b25-8b15-200000000001'::uuid,
+      'testing.other_margin', 'Other margin', 'organization', 'money', 'sum', 'reported_margin'
+    )
+  $$,
+  '23505',
+  null,
+  'but only once, or the ledger''s choice of input would be arbitrary'
 );
 
 select * from extensions.finish();

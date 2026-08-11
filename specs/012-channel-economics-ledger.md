@@ -134,6 +134,16 @@ The Restaurant Pack maps `Order` and `OrderLine` onto transaction-grain entries 
 
 Where a rate exists both as a provider-reported value and a client-stated fact, the provider value wins for `measured` tier and the divergence raises a `fact_proposal` through Business Memory rather than overwriting anything.
 
+**Which metric supplies which input is declared on the registry, not named in code.** The ledger reads the `economics_role` binding in `specs/015-metric-registry-and-normalized-metrics.md` section 5.1 — `gross_revenue`, `transaction_count`, `unit_count`, `reported_margin` — so the core never learns that a restaurant calls its reported margin `margin.contribution`. Only `gross_revenue` is required; an unbound role leaves its input absent, which grades the affected components honestly rather than failing the run.
+
+### 6.1 Recomputation
+
+Recomputation runs as its own background task, not inside the import that triggered it. An import that succeeded has succeeded: a margin that failed to recompute is a retryable problem of its own, and failing the import for it would put a good ingestion into the error list for a reason the operator cannot act on. The task is also the landing point for the other trigger — an operator correcting a rate — which has nothing to do with imports.
+
+The window is read from the observations the ingestion run wrote, together with the grain, branch and timezone they carry. That is exact, needs no plumbing through the ingestion workflow, and is correct for a partial import where some rows rejected. A run that wrote nothing is skipped rather than failed. A run that wrote more than one grain, timezone or branch is refused, because those do not describe a single window.
+
+Recomputes are serialized per organization. Two imports finishing together would otherwise interleave upserts over the same periods.
+
 ## 7. UX flow
 
 The operator view answers three questions in order:

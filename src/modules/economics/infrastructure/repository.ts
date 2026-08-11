@@ -4,7 +4,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { economicsError } from "@/domain/economics/errors";
 import type { StoredCostRate } from "@/domain/economics/rates";
-import type { CostComponentDefinition, EconomicsQualityTier } from "@/domain/economics/types";
+import type {
+  CostComponentDefinition,
+  EconomicsMetricBinding,
+  EconomicsQualityTier,
+  EconomicsRole,
+} from "@/domain/economics/types";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
   EconomicsCatalog,
@@ -60,6 +65,47 @@ export function createEconomicsCatalogRepository(supabase: EconomicsClient): Eco
           return key ? [toRate(row, key)] : [];
         }),
       } satisfies EconomicsCatalog;
+    },
+
+    async loadMetricBinding(organizationId) {
+      const { data, error } = await supabase
+        .from("metric_definitions")
+        .select("key, economics_role, organization_id")
+        .not("economics_role", "is", null)
+        .eq("is_active", true)
+        .or(`organization_id.is.null,organization_id.eq.${organizationId}`);
+
+      if (error) throw economicsError("ECONOMICS_CATALOG_UNAVAILABLE");
+
+      const keyByRole = new Map<string, string>();
+      for (const row of data ?? []) {
+        if (!row.economics_role) continue;
+        // An organization's own definition outranks shared vocabulary for the
+        // same role, exactly as it does for the same key. A tenant whose export
+        // names margin differently points the role at their key and the ledger
+        // needs no code change.
+        if (keyByRole.has(row.economics_role) && row.organization_id === null) continue;
+        keyByRole.set(row.economics_role, row.key);
+      }
+
+      const grossRevenue = keyByRole.get("gross_revenue");
+      // Revenue is the spine of every period, so an unbound revenue role leaves
+      // nothing to price. Every other role may be absent: `unit_count` has no
+      // metric behind it yet, which correctly leaves packaging unpriced rather
+      // than failing the run.
+      if (!grossRevenue) throw economicsError("ECONOMICS_REVENUE_ROLE_UNBOUND", { organizationId });
+
+      const optional = (role: EconomicsRole, into: keyof EconomicsMetricBinding) => {
+        const key = keyByRole.get(role);
+        return key ? { [into]: key } : {};
+      };
+
+      return {
+        grossRevenue,
+        ...optional("transaction_count", "transactionCount"),
+        ...optional("unit_count", "unitCount"),
+        ...optional("reported_margin", "reportedMargin"),
+      };
     },
   };
 }

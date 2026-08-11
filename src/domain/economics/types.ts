@@ -26,6 +26,37 @@ export type CompletenessGrade = "complete" | "partial" | "indicative";
 /** Whether a margin was computed from its parts or handed over whole. */
 export type MarginSource = "derived" | "reported";
 
+/**
+ * What a registered metric supplies to the ledger.
+ *
+ * The ledger needs a gross revenue series and, where one exists, a margin the
+ * operator's own export stated. The second is pack vocabulary — the Restaurant
+ * Pack calls it `margin.contribution` — so the binding is declared on the
+ * registry rather than named in core code, and a tenant whose export calls it
+ * something else can point the role at their own key.
+ */
+export type EconomicsRole =
+  | "gross_revenue"
+  | "transaction_count"
+  /** Items sold, which is not the transaction count: packaging is charged per item. */
+  | "unit_count"
+  | "reported_margin";
+
+/**
+ * The metric key resolved for each role.
+ *
+ * Only revenue is required. A role with nothing behind it is not a failure: no
+ * registered metric counts items sold yet, so `unitCount` is absent and
+ * packaging stays unpriced, which is the honest answer rather than a startup
+ * error.
+ */
+export type EconomicsMetricBinding = {
+  grossRevenue: string;
+  transactionCount?: string;
+  unitCount?: string;
+  reportedMargin?: string;
+};
+
 export type CostComponentDefinition = {
   key: string;
   label: string;

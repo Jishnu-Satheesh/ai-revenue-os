@@ -123,7 +123,10 @@ function stubDeps(
       return { written: entries.length };
     }),
   };
-  const catalogPort: EconomicsCatalogPort = { loadCatalog: async () => loaded };
+  const catalogPort: EconomicsCatalogPort = {
+    loadCatalog: async () => loaded,
+    loadMetricBinding: async () => ({ grossRevenue: "revenue.gross" }),
+  };
 
   return { deps: { metrics: stubMetrics(series), catalog: catalogPort, ledger }, recorded };
 }

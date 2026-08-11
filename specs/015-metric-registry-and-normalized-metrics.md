@@ -152,6 +152,14 @@ The observation carries a denormalized `value_kind` under a composite foreign ke
 
 Definitions and dimensions are effective-dated, matching the ledger's treatment of cost components.
 
+### 5.1 Economics roles
+
+A definition may declare an `economics_role`: `gross_revenue`, `transaction_count`, `unit_count`, or `reported_margin`. Most declare none.
+
+The role exists so that a consumer can ask for a *part* rather than a key. The Channel Economics Ledger needs the metric that states a reported contribution margin; for a restaurant that is `margin.contribution`, which is pack vocabulary, and per ADR 0006 core code must never name it. The alternative — a map from industry pack to metric keys held in code — would mean editing the core for every new vertical, and would leave an organization whose export names margin differently with no way to say so. Declaring the binding as data removes both problems, and a second vertical needs no code change at all.
+
+A role resolves most-specific-wins, exactly as a key does: shared vocabulary is unique per role, an organization's override is unique per role within that organization, and the organization's wins. **A role with no metric behind it is not an error.** No registered metric counts items sold today, so `unit_count` is unbound and the ledger correctly leaves per-unit components unpriced rather than failing to start. Only `gross_revenue` is required by the ledger, because a period with no revenue has nothing to take a margin of.
+
 ## 6. Inputs
 
 The sole write path is the `DataIngestionPort` handoff from `specs/003-integration-hub.md`, which delivers `IntegrationRecordEnvelope` records carrying `recordType`, `observedAt`, `fetchedAt`, and an opaque payload.

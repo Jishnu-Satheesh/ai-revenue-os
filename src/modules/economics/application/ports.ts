@@ -2,6 +2,7 @@ import type { StoredCostRate } from "@/domain/economics/rates";
 import type {
   CompletenessGrade,
   CostComponentDefinition,
+  EconomicsMetricBinding,
   EconomicsQualityTier,
   MarginSource,
 } from "@/domain/economics/types";
@@ -29,6 +30,14 @@ export type EconomicsCatalog = {
 export type EconomicsCatalogPort = {
   /** Shared vocabulary plus this organization's custom keys, with its own rates. */
   loadCatalog(organizationId: string): Promise<EconomicsCatalog>;
+
+  /**
+   * Which registered metric supplies each economics input for this tenant.
+   *
+   * Read from the registry rather than named in code, so the core never learns
+   * that `margin.contribution` is what a restaurant calls its reported margin.
+   */
+  loadMetricBinding(organizationId: string): Promise<EconomicsMetricBinding>;
 };
 
 export type EconomicsComponentWrite = {

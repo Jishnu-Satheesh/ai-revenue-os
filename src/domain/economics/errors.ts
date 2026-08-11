@@ -11,6 +11,7 @@ export type EconomicsErrorCode =
   | "ECONOMICS_CURRENCY_MISMATCH"
   | "ECONOMICS_DEFINITION_UNKNOWN"
   | "ECONOMICS_CATALOG_UNAVAILABLE"
+  | "ECONOMICS_REVENUE_ROLE_UNBOUND"
   | "ECONOMICS_WRITE_FAILED";
 
 export class EconomicsError extends Error {
@@ -38,6 +39,8 @@ const safeEconomicsErrorCopy: Readonly<Record<EconomicsErrorCode, string>> = {
   ECONOMICS_CURRENCY_MISMATCH: "This period mixes currencies, which the ledger never converts.",
   ECONOMICS_DEFINITION_UNKNOWN: "A cost component was priced against an unregistered definition.",
   ECONOMICS_CATALOG_UNAVAILABLE: "The cost component catalog could not be read.",
+  ECONOMICS_REVENUE_ROLE_UNBOUND:
+    "No registered metric supplies gross revenue, so there is nothing to price.",
   ECONOMICS_WRITE_FAILED: "These economics entries could not be recorded.",
 };
 

@@ -90,6 +90,39 @@ export type MetricSeriesPort = {
 };
 
 /**
+ * The span one ingestion run wrote, and the shape it wrote it in.
+ *
+ * A recompute needs to know which periods an import actually touched. Asking
+ * the observations is exact and needs no plumbing through the ingestion
+ * workflow, which counts rows and never learns what dates they carried. It is
+ * also correct for a partial import, where some rows rejected and the window is
+ * narrower than the file.
+ */
+export type MetricIngestionWindow = {
+  grain: MetricPeriodGrain;
+  branchId: string | null;
+  timeZone: string;
+  /** The first period the run wrote. */
+  rangeStart: Date;
+  /** The last period the run wrote; the caller extends it to that period's end. */
+  lastPeriodStart: Date;
+  observationCount: number;
+};
+
+export type MetricIngestionWindowPort = {
+  /**
+   * Null when the run wrote nothing, which is an ordinary outcome for an import
+   * whose rows all rejected. Throws when one run wrote more than one grain or
+   * more than one timezone, because those do not describe a single window and
+   * repricing them together would mix incomparable periods.
+   */
+  loadIngestionRunWindow(input: {
+    organizationId: string;
+    ingestionRunId: string;
+  }): Promise<MetricIngestionWindow | null>;
+};
+
+/**
  * Everything a CSV row needs that the row itself cannot carry. Grain, timezone
  * and currency are properties of the branch and the import, not of the file.
  */
