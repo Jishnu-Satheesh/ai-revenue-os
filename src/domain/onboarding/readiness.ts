@@ -73,6 +73,16 @@ const requirements: ReadinessReason[] = [
     critical: false,
   },
   {
+    id: "cost_structure_required",
+    label: "Variable costs are priced",
+    satisfied: false,
+    sectionKey: "cost_structure",
+    // Not critical. A margin with unpriced components grades `indicative` and
+    // names what is missing, which is a usable answer; blocking readiness on it
+    // would stall every client who does not know their cost of goods yet.
+    critical: false,
+  },
+  {
     id: "customer_consent_required",
     label: "Customer consent is confirmed",
     satisfied: false,

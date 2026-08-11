@@ -8,6 +8,7 @@ export const onboardingSectionKeys = [
   "products_services",
   "channels_presence",
   "historical_performance",
+  "cost_structure",
   "customers_consent",
   "brand_assets",
   "governance",

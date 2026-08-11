@@ -129,7 +129,7 @@ The Restaurant Pack maps `Order` and `OrderLine` onto transaction-grain entries 
 
 - Normalized metrics and ingestion runs from the Integration Hub.
 - Verified facts from the Digital Twin for rates the client confirmed, such as a commission percentage from a contract.
-- Manual and CSV import where no API exists, which is expected to be the primary path initially.
+- Manual and CSV import where no API exists, which is expected to be the primary path initially. Rates are captured in the **Cost structure** onboarding section (`specs/002-guided-onboarding.md`), which renders one row per registered component so the vocabulary stays the pack's. On completion the section promotes what was typed into `cost_component_rates` through a governed RPC, and the ledger reprices.
 - Pack-supplied item cost data where available.
 
 Where a rate exists both as a provider-reported value and a client-stated fact, the provider value wins for `measured` tier and the divergence raises a `fact_proposal` through Business Memory rather than overwriting anything.
@@ -143,6 +143,16 @@ Recomputation runs as its own background task, not inside the import that trigge
 The window is read from the observations the ingestion run wrote, together with the grain, branch and timezone they carry. That is exact, needs no plumbing through the ingestion workflow, and is correct for a partial import where some rows rejected. A run that wrote nothing is skipped rather than failed. A run that wrote more than one grain, timezone or branch is refused, because those do not describe a single window.
 
 Recomputes are serialized per organization. Two imports finishing together would otherwise interleave upserts over the same periods.
+
+Capturing rates triggers the same task with a whole-organization window instead of a run window: a corrected commission reprices every period it was in force for, and which periods those are is not knowable from any one ingestion run. Both trigger sites are fire and forget. The rates and the records are already saved and are the durable answer; a recompute that could not be queued means margins are stale for a while, not that the operator's work was lost.
+
+### 6.2 What the operator is asked for
+
+- **One row per registered component**, driven by `cost_component_definitions` rather than a list held in code. A `sourced` component is shown but not typeable, with the reason, so an empty box never reads as the operator's omission.
+- **A confidence per row**, in the operator's words rather than the ledger's. This is the input to 4.3, so a guess must be recordable as a guess; an unstated confidence is treated as `assumed`.
+- **Zero is an answer.** Dine-in commission genuinely is zero, and recording it is what turns an `indicative` margin into a real one. A blank is the opposite: it leaves the component `missing` and is named as such.
+- **One effective date for the capture.** An operator states their current cost structure at a point in time; a later tier change opens a new effective period from the operator surface rather than editing this one.
+- **Completion needs one priced cost and a date, not every component.** Most operators cannot state their cost of goods on the first day, and blocking the section would stall onboarding over exactly the gap this ledger exists to report honestly.
 
 ## 7. UX flow
 

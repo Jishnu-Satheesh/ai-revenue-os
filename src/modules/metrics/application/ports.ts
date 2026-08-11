@@ -120,6 +120,17 @@ export type MetricIngestionWindowPort = {
     organizationId: string;
     ingestionRunId: string;
   }): Promise<MetricIngestionWindow | null>;
+
+  /**
+   * Everything the organization has, for the case where the inputs changed
+   * rather than the data: a corrected commission rate reprices every period it
+   * was in force for, and which periods those are is not knowable from any one
+   * ingestion run.
+   */
+  loadOrganizationWindow(input: {
+    organizationId: string;
+    metricKey: string;
+  }): Promise<MetricIngestionWindow | null>;
 };
 
 /**

@@ -91,10 +91,10 @@ function stubDeps(
       )?.[1] ?? [],
   };
 
+  const resolveWindow = async () => (options.window === undefined ? dubaiDay : options.window);
   const windows: MetricIngestionWindowPort = {
-    loadIngestionRunWindow: vi.fn(async () =>
-      options.window === undefined ? dubaiDay : options.window,
-    ),
+    loadIngestionRunWindow: vi.fn(resolveWindow),
+    loadOrganizationWindow: vi.fn(resolveWindow),
   };
 
   const catalogPort: EconomicsCatalogPort = {

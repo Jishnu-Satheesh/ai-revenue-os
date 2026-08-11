@@ -7,6 +7,7 @@ import { BranchesOperationsSection } from "@/components/onboarding/sections/bran
 import { BrandAssetsSection } from "@/components/onboarding/sections/brand-assets-section";
 import { BusinessIdentitySection } from "@/components/onboarding/sections/business-identity-section";
 import { ChannelsPresenceSection } from "@/components/onboarding/sections/channels-presence-section";
+import { CostStructureSection } from "@/components/onboarding/sections/cost-structure-section";
 import { CustomersConsentSection } from "@/components/onboarding/sections/customers-consent-section";
 import { GovernanceSection } from "@/components/onboarding/sections/governance-section";
 import { HistoricalPerformanceSection } from "@/components/onboarding/sections/historical-performance-section";
@@ -31,6 +32,7 @@ import type {
 type OrganizationSummary = {
   name: string;
   industry: string;
+  baseCurrency: string;
 };
 
 type Props = {
@@ -49,6 +51,18 @@ const queryKey = (organizationId: string) =>
  */
 function sectionPayload(state: OnboardingSectionStateRecord | undefined): Record<string, unknown> {
   return state?.payload ?? {};
+}
+
+/**
+ * Channels the operator listed in Channels and presence.
+ *
+ * Cost structure offers these as scopes rather than a free-text box, so a
+ * channel-specific commission attaches to a channel the ledger will actually
+ * see in the data instead of a near-miss spelling of one.
+ */
+function channelsNamedEarlier(state: OnboardingSectionStateRecord | undefined): string[] {
+  const channels = sectionPayload(state).channels;
+  return Array.isArray(channels) ? channels.map(String) : [];
 }
 
 function mapReadiness(snapshot: OnboardingSnapshot): ReadinessResult | null {
@@ -232,7 +246,11 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
     return true;
   }
 
-  const contents = {
+  // Typed as the complete record rather than a partial one. The workspace
+  // accepts a partial and falls back to a placeholder, so a section added to
+  // the registry and forgotten here would render as an empty panel with no
+  // error anywhere. This turns that into a build failure.
+  const contents: Record<OnboardingSectionKey, React.ReactNode> = {
     business_identity: (
       <BusinessIdentitySection
         defaultValues={{
@@ -265,6 +283,18 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
       <HistoricalPerformanceSection
         defaultValues={sectionPayload(sectionStates.get("historical_performance"))}
         onSave={save("historical_performance")}
+      />
+    ),
+    cost_structure: (
+      <CostStructureSection
+        components={snapshot.costComponents}
+        // The channels the operator already named, so a commission that differs
+        // by marketplace is scoped to a channel they actually sell on rather
+        // than one they have to retype.
+        channels={channelsNamedEarlier(sectionStates.get("channels_presence"))}
+        currency={organization.baseCurrency}
+        defaultValues={sectionPayload(sectionStates.get("cost_structure"))}
+        onSave={save("cost_structure")}
       />
     ),
     customers_consent: (

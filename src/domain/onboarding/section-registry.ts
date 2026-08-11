@@ -3,6 +3,8 @@ import {
   baselineStatusSchema,
   consentStatusSchema,
   conversionTrackingSchema,
+  hasCostEffectiveFrom,
+  hasCostRate,
   hasEntries,
   hasMeasurementPeriod,
   hasOpeningHours,
@@ -48,6 +50,12 @@ export const onboardingSectionRegistry: readonly OnboardingSectionDefinition[] =
     phase: "commercial_context",
     label: "Historical performance",
     description: "Revenue, orders, margin, acquisition, and repeat activity.",
+  },
+  {
+    key: "cost_structure",
+    phase: "commercial_context",
+    label: "Cost structure",
+    description: "What an order costs before profit: commission, goods, packaging, and fees.",
   },
   {
     key: "customers_consent",
@@ -179,6 +187,19 @@ function requirementsFor(
           satisfied: hasMeasurementPeriod(payload.period),
         },
         { field: "currency", label: "Currency", satisfied: currency(payload, "currency") },
+      ];
+    case "cost_structure":
+      return [
+        {
+          field: "costRates",
+          label: "At least one priced cost",
+          satisfied: hasCostRate(payload.costRates),
+        },
+        {
+          field: "effectiveFrom",
+          label: "The date these costs start applying",
+          satisfied: hasCostEffectiveFrom(payload.effectiveFrom),
+        },
       ];
     case "customers_consent":
       return [

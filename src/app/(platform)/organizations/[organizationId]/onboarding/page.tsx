@@ -61,7 +61,11 @@ export default async function OnboardingPage({ params }: PageProps) {
 
       <OnboardingClient
         organizationId={context.organizationId}
-        organization={{ name: organization.name, industry: organization.industry }}
+        organization={{
+          name: organization.name,
+          industry: organization.industry,
+          baseCurrency: organization.base_currency,
+        }}
         initialSnapshot={snapshot}
       />
     </div>

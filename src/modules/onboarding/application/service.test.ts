@@ -111,6 +111,7 @@ function createFakeDependencies() {
         extractions: [],
         candidates: [],
         readiness: null,
+        costComponents: [],
       } satisfies OnboardingSnapshot;
     },
     async saveReadinessAssessment(input) {

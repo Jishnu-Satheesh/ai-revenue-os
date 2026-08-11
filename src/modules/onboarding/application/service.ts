@@ -27,6 +27,19 @@ export type OnboardingCandidateRecord =
 export type OnboardingReadinessRecord =
   Database["public"]["Tables"]["ai_readiness_assessments"]["Row"];
 
+/**
+ * A cost component the organization may price during onboarding.
+ *
+ * Registered vocabulary, not a fixed list: what a restaurant is asked to price
+ * and what a distributor is asked to price differ entirely, and neither belongs
+ * in the onboarding module.
+ */
+export type OnboardingCostComponent = {
+  key: string;
+  label: string;
+  computationKind: "fixed_amount" | "rate_of_revenue" | "per_unit" | "sourced";
+};
+
 export type OnboardingSnapshot = {
   session: OnboardingSessionRecord | null;
   sections: OnboardingSectionStateRecord[];
@@ -35,6 +48,7 @@ export type OnboardingSnapshot = {
   extractions: OnboardingExtractionRecord[];
   candidates: OnboardingCandidateRecord[];
   readiness: OnboardingReadinessRecord | null;
+  costComponents: OnboardingCostComponent[];
 };
 
 export type OnboardingRepository = {

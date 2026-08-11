@@ -768,6 +768,14 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["constraints"]["Row"];
       };
+      record_cost_component_rates: {
+        Args: {
+          target_organization_id: string;
+          /** Effective-dated rates, shaped by the onboarding promotion path. */
+          input_rates: unknown;
+        };
+        Returns: number;
+      };
       record_channel_economics_entries: {
         Args: {
           target_organization_id: string;

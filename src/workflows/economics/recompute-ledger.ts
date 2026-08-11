@@ -27,9 +27,18 @@ import type {
  * See `specs/012-channel-economics-ledger.md` section 3.1.
  */
 
+/**
+ * Two reasons to reprice, and they scope differently.
+ *
+ * New data touches the periods one ingestion run wrote. Changed inputs — an
+ * operator correcting a commission rate — touch every period that rate was in
+ * force for, which no single ingestion run knows about. Naming the reason in
+ * the payload keeps the window honest instead of guessing one.
+ */
 const payloadSchema = z.object({
   organizationId: z.string().uuid(),
-  ingestionRunId: z.string().uuid(),
+  ingestionRunId: z.string().uuid().optional(),
+  reason: z.enum(["ingestion", "rates_changed"]).default("ingestion"),
   /** Absolute minor units; a small gap on a tiny period is not a disagreement. */
   reconciliationToleranceMinor: z.number().int().nonnegative().optional(),
 });
@@ -56,17 +65,23 @@ export async function runRecomputeLedger(
   dependencies: RecomputeLedgerDependencies,
 ): Promise<RecomputeLedgerOutcome> {
   const payload = payloadSchema.parse(input);
-
-  const window = await dependencies.windows.loadIngestionRunWindow({
-    organizationId: payload.organizationId,
-    ingestionRunId: payload.ingestionRunId,
-  });
-
-  // An import whose rows all rejected wrote no observations, so there is
-  // nothing to reprice. That is an ordinary outcome, not a failure.
-  if (!window) return { status: "skipped", reason: "no_observations" };
-
   const metricKeys = await dependencies.catalog.loadMetricBinding(payload.organizationId);
+
+  const window =
+    payload.ingestionRunId && payload.reason === "ingestion"
+      ? await dependencies.windows.loadIngestionRunWindow({
+          organizationId: payload.organizationId,
+          ingestionRunId: payload.ingestionRunId,
+        })
+      : await dependencies.windows.loadOrganizationWindow({
+          organizationId: payload.organizationId,
+          metricKey: metricKeys.grossRevenue,
+        });
+
+  // An import whose rows all rejected wrote no observations, and a rate
+  // captured before any data arrived has nothing to reprice yet. Both are
+  // ordinary outcomes, not failures.
+  if (!window) return { status: "skipped", reason: "no_observations" };
 
   const result = await recomputeChannelEconomics(
     {
@@ -92,7 +107,8 @@ export async function runRecomputeLedger(
 
   dependencies.logger?.info("economics.ledger.recomputed", {
     organizationId: payload.organizationId,
-    ingestionRunId: payload.ingestionRunId,
+    reason: payload.reason,
+    ingestionRunId: payload.ingestionRunId ?? null,
     entriesWritten: result.entriesWritten,
     ...result.gradeCounts,
     reportedEntryCount: result.reportedEntryCount,
@@ -106,7 +122,7 @@ export async function runRecomputeLedger(
   if (result.disagreements.length > 0)
     dependencies.logger?.warn("economics.ledger.reported_margin_disagreement", {
       organizationId: payload.organizationId,
-      ingestionRunId: payload.ingestionRunId,
+      ingestionRunId: payload.ingestionRunId ?? null,
       periods: result.disagreements.length,
       largestDifferenceMinor: Math.max(
         ...result.disagreements.map((disagreement) => Math.abs(disagreement.differenceMinor)),

@@ -1,8 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { toCostRateRows } from "@/domain/onboarding/cost-rates";
 import type { Database } from "@/lib/supabase/database.types";
 import { DomainError } from "@/lib/errors";
 import type {
+  OnboardingCostComponent,
   OnboardingIdempotencyRecord,
   OnboardingRepository,
 } from "@/modules/onboarding/application/service";
@@ -50,6 +52,59 @@ export type OnboardingExtractionRepository = {
 
 function raise(message: string, cause?: unknown): never {
   throw new DomainError("DOMAIN_ERROR", message, cause);
+}
+
+/**
+ * Writes the costs an operator typed as effective-dated rates.
+ *
+ * The section stores what was said; this is what makes it count, because a rate
+ * here is what the channel economics ledger prices every margin against. The
+ * shaping lives in `toCostRateRows`; this is the I/O around it.
+ *
+ * Saving again on the same date updates the rate rather than colliding.
+ * Correcting a typo is not a commission tier change, and only a new date opens
+ * a new effective period.
+ */
+async function promoteCostRates(
+  supabase: OnboardingClient,
+  input: { organizationId: string; payload: Record<string, unknown> },
+): Promise<void> {
+  const [{ data: organization }, { data: definitions, error: definitionError }] = await Promise.all(
+    [
+      supabase
+        .from("organizations")
+        .select("base_currency")
+        .eq("id", input.organizationId)
+        .maybeSingle(),
+      supabase
+        .from("cost_component_definitions")
+        .select("id, key, organization_id")
+        .eq("is_active", true)
+        .or(`organization_id.is.null,organization_id.eq.${input.organizationId}`),
+    ],
+  );
+
+  if (definitionError) raise("Cost components could not be read.", definitionError);
+  if (!organization) raise("The organization could not be read.");
+
+  const definitionIdByKey = new Map<string, string>();
+  for (const row of definitions ?? []) {
+    // A custom definition outranks shared vocabulary for the same key.
+    if (definitionIdByKey.has(row.key) && row.organization_id === null) continue;
+    definitionIdByKey.set(row.key, row.id);
+  }
+
+  const rows = toCostRateRows(input.payload, {
+    definitionIdByKey,
+    baseCurrency: organization.base_currency,
+  });
+  if (rows.length === 0) return;
+
+  const { error } = await supabase.rpc("record_cost_component_rates", {
+    target_organization_id: input.organizationId,
+    input_rates: rows,
+  });
+  if (error) raise("Cost rates could not be recorded.", error);
 }
 
 export function createOnboardingRepository(supabase: OnboardingClient): OnboardingRepository {
@@ -157,47 +212,82 @@ export function createOnboardingRepository(supabase: OnboardingClient): Onboardi
     },
 
     async getSnapshot(organizationId) {
-      const [session, sections, requests, uploads, extractions, candidates, readiness] =
-        await Promise.all([
-          this.findSession(organizationId),
-          supabase
-            .from("onboarding_section_states")
-            .select("*")
-            .eq("organization_id", organizationId)
-            .order("updated_at", { ascending: false }),
-          supabase
-            .from("onboarding_requests")
-            .select("*")
-            .eq("organization_id", organizationId)
-            .order("updated_at", { ascending: false }),
-          supabase
-            .from("onboarding_uploads")
-            .select("*")
-            .eq("organization_id", organizationId)
-            .order("updated_at", { ascending: false }),
-          supabase
-            .from("onboarding_extractions")
-            .select("*")
-            .eq("organization_id", organizationId)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("onboarding_extraction_candidates")
-            .select("*")
-            .eq("organization_id", organizationId)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("ai_readiness_assessments")
-            .select("*")
-            .eq("organization_id", organizationId)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        ]);
+      const [
+        session,
+        sections,
+        requests,
+        uploads,
+        extractions,
+        candidates,
+        readiness,
+        costComponents,
+      ] = await Promise.all([
+        this.findSession(organizationId),
+        supabase
+          .from("onboarding_section_states")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("onboarding_requests")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("onboarding_uploads")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("onboarding_extractions")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("onboarding_extraction_candidates")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("ai_readiness_assessments")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        // Shared vocabulary plus this organization's own keys, the same
+        // resolution the ledger uses. Cost structure asks the operator to
+        // price whatever the pack registered, so the catalog travels with the
+        // workspace rather than being fetched by the section.
+        supabase
+          .from("cost_component_definitions")
+          .select("key, label, computation_kind, organization_id")
+          .eq("is_active", true)
+          .or(`organization_id.is.null,organization_id.eq.${organizationId}`)
+          .order("key", { ascending: true }),
+      ]);
 
-      const failed = [sections, requests, uploads, extractions, candidates, readiness].find(
-        (result) => result.error,
-      );
+      const failed = [
+        sections,
+        requests,
+        uploads,
+        extractions,
+        candidates,
+        readiness,
+        costComponents,
+      ].find((result) => result.error);
       if (failed?.error) raise("Onboarding workspace could not be loaded.", failed.error);
+
+      const componentsByKey = new Map<string, OnboardingCostComponent>();
+      for (const row of costComponents.data ?? []) {
+        // A custom definition outranks shared vocabulary for the same key.
+        if (componentsByKey.has(row.key) && row.organization_id === null) continue;
+        componentsByKey.set(row.key, {
+          key: row.key,
+          label: row.label,
+          computationKind: row.computation_kind,
+        });
+      }
 
       return {
         session,
@@ -207,6 +297,7 @@ export function createOnboardingRepository(supabase: OnboardingClient): Onboardi
         extractions: extractions.data ?? [],
         candidates: candidates.data ?? [],
         readiness: readiness.data,
+        costComponents: [...componentsByKey.values()],
       };
     },
 
@@ -220,6 +311,10 @@ export function createOnboardingRepository(supabase: OnboardingClient): Onboardi
       return data;
     },
     async persistCanonicalSection(input) {
+      if (input.sectionKey === "cost_structure") {
+        await promoteCostRates(supabase, input);
+        return;
+      }
       if (input.sectionKey !== "business_identity") return;
       const organizationPatch: Database["public"]["Tables"]["organizations"]["Update"] = {};
       if (typeof input.payload.name === "string" && input.payload.name.trim())

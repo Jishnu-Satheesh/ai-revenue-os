@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(16);
+select extensions.plan(20);
 
 insert into auth.users (id)
 values ('6c3a0c1f-1760-4b25-8b15-100000000001'::uuid);
@@ -331,6 +331,105 @@ select extensions.is(
   1::bigint,
   'components are replaced wholesale, so one that no longer applies stops subtracting'
 );
+
+-- Rate capture -----------------------------------------------------------------
+
+-- The write path behind the onboarding cost structure section. Run as the
+-- owner, because the function refuses anyone else.
+
+insert into public.organization_memberships (organization_id, user_id, role)
+values (
+  '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid,
+  '6c3a0c1f-1760-4b25-8b15-100000000001'::uuid,
+  'owner'
+)
+on conflict do nothing;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '6c3a0c1f-1760-4b25-8b15-100000000001';
+
+select extensions.lives_ok(
+  $$
+    select public.record_cost_component_rates(
+      '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid,
+      $json$[
+        {
+          "definition_id": "6c3a0c1f-1760-4b25-8b15-300000000002",
+          "channel": null,
+          "rate_of_revenue": 0.30,
+          "quality_tier": "estimated",
+          "effective_from": "2026-06-01"
+        }
+      ]$json$::jsonb
+    )
+  $$,
+  'an operator can record a typed cost as an effective-dated rate'
+);
+
+-- The same date again. Correcting a typo is not a commission tier change.
+select public.record_cost_component_rates(
+  '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid,
+  $json$[
+    {
+      "definition_id": "6c3a0c1f-1760-4b25-8b15-300000000002",
+      "channel": null,
+      "rate_of_revenue": 0.34,
+      "quality_tier": "measured",
+      "effective_from": "2026-06-01"
+    }
+  ]$json$::jsonb
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)
+    from public.cost_component_rates
+    where organization_id = '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid
+      and definition_id = '6c3a0c1f-1760-4b25-8b15-300000000002'::uuid
+  ),
+  1::bigint,
+  'saving the section again on the same date corrects the rate rather than duplicating it'
+);
+
+select extensions.is(
+  (
+    select quality_tier
+    from public.cost_component_rates
+    where organization_id = '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid
+      and definition_id = '6c3a0c1f-1760-4b25-8b15-300000000002'::uuid
+  ),
+  'measured',
+  'and carries the confidence the operator last chose'
+);
+
+insert into auth.users (id)
+values ('6c3a0c1f-1760-4b25-8b15-100000000002'::uuid);
+
+set local role authenticated;
+set local request.jwt.claim.sub = '6c3a0c1f-1760-4b25-8b15-100000000002';
+
+select extensions.throws_ok(
+  $$
+    select public.record_cost_component_rates(
+      '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid,
+      $json$[
+        {
+          "definition_id": "6c3a0c1f-1760-4b25-8b15-300000000001",
+          "rate_of_revenue": 0.10,
+          "quality_tier": "measured",
+          "effective_from": "2026-06-01"
+        }
+      ]$json$::jsonb
+    )
+  $$,
+  '42501',
+  null,
+  'a non-member cannot price another tenant cost structure'
+);
+
+reset role;
 
 select * from extensions.finish();
 

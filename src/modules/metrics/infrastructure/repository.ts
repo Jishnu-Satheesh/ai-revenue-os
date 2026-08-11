@@ -7,6 +7,7 @@ import type { MetricPeriodGrain } from "@/domain/metrics/types";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
   MetricDefinitionRecord,
+  MetricIngestionWindow,
   MetricIngestionWindowPort,
   MetricObservationRecord,
   MetricObservationWrite,
@@ -103,6 +104,45 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
 /** How many observation rows a window query will read before it gives up. */
 const MAX_WINDOW_ROWS = 20_000;
 
+type WindowRow = {
+  period_start: string;
+  period_grain: string;
+  period_timezone: string;
+  branch_id: string | null;
+};
+
+const WINDOW_COLUMNS = "period_start, period_grain, period_timezone, branch_id";
+
+/**
+ * One run writing two grains, two zones or two branches does not describe one
+ * window. Repricing them together would mix periods that are not comparable,
+ * which is the same rule `readMetricSeries` enforces on reads.
+ */
+function toWindow(rows: readonly WindowRow[], reason: string): MetricIngestionWindow | null {
+  if (rows.length === 0) return null;
+
+  const grains = new Set(rows.map((row) => row.period_grain));
+  const zones = new Set(rows.map((row) => row.period_timezone));
+  const branches = new Set(rows.map((row) => row.branch_id));
+
+  if (grains.size > 1 || zones.size > 1 || branches.size > 1)
+    throw metricError("METRIC_TIMEZONE_MIXED", {
+      reason,
+      grains: [...grains].sort().join(","),
+      zones: [...zones].sort().join(","),
+      branches: branches.size,
+    });
+
+  return {
+    grain: rows[0].period_grain as MetricPeriodGrain,
+    branchId: rows[0].branch_id,
+    timeZone: rows[0].period_timezone,
+    rangeStart: new Date(rows[0].period_start),
+    lastPeriodStart: new Date(rows[rows.length - 1].period_start),
+    observationCount: rows.length,
+  };
+}
+
 export function createMetricIngestionWindowRepository(
   supabase: MetricsClient,
 ): MetricIngestionWindowPort {
@@ -112,7 +152,7 @@ export function createMetricIngestionWindowRepository(
       // superseded a row does not widen the window the run originally wrote.
       const { data, error } = await supabase
         .from("normalized_metrics")
-        .select("period_start, period_grain, period_timezone, branch_id")
+        .select(WINDOW_COLUMNS)
         .eq("organization_id", organizationId)
         .eq("source_ingestion_run_id", ingestionRunId)
         .is("superseded_by_id", null)
@@ -121,32 +161,34 @@ export function createMetricIngestionWindowRepository(
 
       if (error) throw metricError("METRIC_QUERY_FAILED", { code: error.code ?? "unknown" });
 
-      const rows = data ?? [];
-      if (rows.length === 0) return null;
+      return toWindow(data ?? [], "one ingestion run wrote more than one window shape");
+    },
 
-      const grains = new Set(rows.map((row) => row.period_grain));
-      const zones = new Set(rows.map((row) => row.period_timezone));
-      const branches = new Set(rows.map((row) => row.branch_id));
+    async loadOrganizationWindow({ organizationId, metricKey }) {
+      // Scoped to the revenue series rather than every metric. Revenue is the
+      // spine of a period, so its span is the span worth repricing, and other
+      // series bucketed differently would otherwise trip the shape check.
+      const definition = await createMetricSeriesRepository(supabase).loadDefinition(
+        organizationId,
+        metricKey,
+      );
+      if (!definition) return null;
 
-      // One run writing two grains, two zones or two branches does not describe
-      // one window. Repricing them as one would mix periods that are not
-      // comparable, which is the same rule readMetricSeries enforces on reads.
-      if (grains.size > 1 || zones.size > 1 || branches.size > 1)
-        throw metricError("METRIC_TIMEZONE_MIXED", {
-          reason: "one ingestion run wrote more than one window shape",
-          grains: [...grains].sort().join(","),
-          zones: [...zones].sort().join(","),
-          branches: branches.size,
-        });
+      const { data, error } = await supabase
+        .from("normalized_metrics")
+        .select(WINDOW_COLUMNS)
+        .eq("organization_id", organizationId)
+        .eq("metric_definition_id", definition.id)
+        .is("superseded_by_id", null)
+        .order("period_start", { ascending: true })
+        .limit(MAX_WINDOW_ROWS);
 
-      return {
-        grain: rows[0].period_grain as MetricPeriodGrain,
-        branchId: rows[0].branch_id,
-        timeZone: rows[0].period_timezone,
-        rangeStart: new Date(rows[0].period_start),
-        lastPeriodStart: new Date(rows[rows.length - 1].period_start),
-        observationCount: rows.length,
-      };
+      if (error) throw metricError("METRIC_QUERY_FAILED", { code: error.code ?? "unknown" });
+
+      return toWindow(
+        data ?? [],
+        "this organization holds more than one window shape for that metric",
+      );
     },
   };
 }

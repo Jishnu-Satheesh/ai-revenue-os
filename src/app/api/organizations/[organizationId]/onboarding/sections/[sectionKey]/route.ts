@@ -21,6 +21,30 @@ const sectionRequestSchema = z.object({
   correlationId: z.string().uuid().optional(),
 });
 
+/**
+ * Reprices margins once the operator has stated what their costs are.
+ *
+ * Fire and forget. The rates are already saved and are the durable answer; a
+ * recompute that could not be queued means yesterday's margins are stale for a
+ * while, not that the operator's work was lost. Failing the save here would
+ * discard a completed section over a queue hiccup.
+ *
+ * Without this the operator types their commission, saves, and nothing they can
+ * see changes — which reads as the form not working.
+ */
+async function queueLedgerRecompute(organizationId: string): Promise<void> {
+  try {
+    const { tasks } = await import("@trigger.dev/sdk");
+    await tasks.trigger(
+      "economics.recompute-ledger",
+      { organizationId, reason: "rates_changed" },
+      { concurrencyKey: organizationId },
+    );
+  } catch {
+    // Swallowed on purpose; see above. The next import reprices anyway.
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ organizationId: string; sectionKey: string }> },
@@ -48,6 +72,10 @@ export async function PATCH(
       idempotencyKey: input.idempotencyKey,
       correlationId: input.correlationId,
     });
+
+    if (route.sectionKey === "cost_structure" && input.status === "complete")
+      await queueLedgerRecompute(context.organizationId);
+
     return NextResponse.json({ state });
   } catch (error) {
     return apiErrorResponse(error);

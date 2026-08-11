@@ -22,6 +22,7 @@ export function MoneyField({
   currency,
   placeholder,
   invalid,
+  ariaLabel,
   onChange,
   onBlur,
 }: {
@@ -30,6 +31,11 @@ export function MoneyField({
   currency: string;
   placeholder?: string;
   invalid?: boolean;
+  /**
+   * Needed only inside a grouped control, where the field's own label names the
+   * group rather than this input and every row would otherwise be unnamed.
+   */
+  ariaLabel?: string;
   onChange: (minorUnits: number | null) => void;
   onBlur?: () => void;
 }) {
@@ -44,6 +50,7 @@ export function MoneyField({
         value={draft ?? fromMinorUnits(storedMinor, currency)}
         placeholder={placeholder}
         aria-invalid={invalid}
+        aria-label={ariaLabel}
         aria-describedby={`${id}-currency`}
         onChange={(event) => {
           const next = event.target.value;
