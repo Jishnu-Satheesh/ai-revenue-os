@@ -41,6 +41,7 @@ const segmentLabels: Readonly<Record<string, string>> = {
   "digital-twin": "Digital Twin",
   integrations: "Integrations",
   memory: "Business Memory",
+  economics: "Channel economics",
 };
 
 export type RouteCrumb = {

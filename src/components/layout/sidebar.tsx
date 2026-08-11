@@ -10,6 +10,7 @@ import {
   BrainCircuit,
   Building2,
   Cable,
+  Coins,
   Compass,
   LayoutDashboard,
   Settings2,
@@ -69,6 +70,11 @@ function organizationNavigation(pathname: string) {
         label: "Business Memory",
         href: `/organizations/${organizationId}/memory`,
         icon: BrainCircuit,
+      },
+      {
+        label: "Channel economics",
+        href: `/organizations/${organizationId}/economics`,
+        icon: Coins,
       },
     ],
   };

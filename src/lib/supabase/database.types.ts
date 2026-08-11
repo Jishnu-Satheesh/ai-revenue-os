@@ -269,7 +269,25 @@ export type Database = {
           "id" | "created_at"
         >;
         Update: Partial<Database["public"]["Tables"]["channel_economics_components"]["Insert"]>;
-        Relationships: [];
+        // Declared so the operator view can embed components under their entry
+        // and resolve each component's registered label in one round trip.
+        // Without these, PostgREST embeds are untypable here.
+        Relationships: [
+          {
+            foreignKeyName: "channel_economics_components_entry_id_fkey";
+            columns: ["entry_id"];
+            isOneToOne: false;
+            referencedRelation: "channel_economics_entries";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "channel_economics_components_definition_id_fkey";
+            columns: ["definition_id"];
+            isOneToOne: false;
+            referencedRelation: "cost_component_definitions";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       metric_definitions: {
         Row: {
@@ -767,6 +785,17 @@ export type Database = {
           input_effective_from: string | null;
         };
         Returns: Database["public"]["Tables"]["constraints"]["Row"];
+      };
+      get_cost_component_coverage: {
+        Args: { target_organization_id: string };
+        /** Coverage and tier only; never what a component costs. */
+        Returns: {
+          key: string;
+          label: string;
+          computation_kind: string;
+          has_rate: boolean;
+          weakest_tier: string | null;
+        }[];
       };
       record_cost_component_rates: {
         Args: {

@@ -166,6 +166,31 @@ The third question is the retention mechanism. It converts a data-quality proble
 
 Follows `context/13-ui-ux-context.md` and the shadcn/ui requirement.
 
+### 7.1 How a window is combined
+
+The view reports over a window, and combining periods needs rules the sections above do not state:
+
+- **A window is only as trustworthy as its weakest period**, the same weakest-wins rule components already follow. Sixty complete days and ten indicative ones make an indicative window.
+- **An indicative window reports a ceiling and carries no scalar to read.** The upper bound is the sum of each period's own bound. The read model's type has no `contributionMarginMinor` field on that branch, which is how §12 is enforced rather than merely documented.
+- **Mixed margin sources are labelled, not blended.** A window holding both derived and reported periods says so and offers no waterfall: the components explain only the derived periods and would not add up to the figure on screen.
+- **Two currencies in one window are refused**, never converted.
+
+### 7.2 Order, and when it inverts
+
+The three questions run in order, except where no channel has a derived margin. There the task list leads: every row is a ceiling or a reported figure, and opening with a table the operator cannot act on wastes the one screen that could tell them what to do about it. §11 asks for this, and it is the state every client starts in.
+
+### 7.3 What may be read, and by whom
+
+Entries and components are readable by any member. Rates are not — §9 makes cost structure confidential, and the rate table is owner and admin only.
+
+That creates a trap the view has to avoid. Coverage cannot be read from the rate table, or an operator without admin rights sees every priced component reported as unpriced and is sent to re-enter figures that already exist. It cannot be derived from the entries' own components either, because a `reported` margin carries none — which is precisely the state a new client is in, and precisely when the task list matters most. Coverage therefore comes from a governed function returning **whether** each component is priced and at what tier, never what it costs. A percentage is commercially sensitive; "commission is priced, from a contract" is the readiness signal every member needs.
+
+An empty coverage read is reported as unchecked, never as an all-clear.
+
+### 7.4 A gap the operator cannot close is not a task
+
+The task list distinguishes a component the operator can price from one the platform cannot yet use. `packaging` needs a unit-count metric and `promotion_funding` needs a provider line-item path; no rate anyone could type would resolve either. Those rows are named and explained but carry no action, because offering a button nobody can complete is worse than offering none.
+
 ## 8. AI behavior
 
 Almost none, deliberately. The ledger is arithmetic.

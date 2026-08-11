@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { economicsError } from "@/domain/economics/errors";
 import type { StoredCostRate } from "@/domain/economics/rates";
+import type { LedgerEntry } from "@/domain/economics/rollup";
 import type {
   CostComponentDefinition,
   EconomicsMetricBinding,
@@ -18,8 +19,12 @@ import type {
   EconomicsLedgerStore,
   RegisteredCostComponent,
 } from "@/modules/economics/application/ports";
+import type { EconomicsCatalogEntry } from "@/modules/economics/application/read-model";
 
 type EconomicsClient = SupabaseClient<Database>;
+
+/** A ninety-day window at day grain across a handful of channels; bounds a bad query. */
+const MAX_LEDGER_ROWS = 2_000;
 
 export function createEconomicsCatalogRepository(supabase: EconomicsClient): EconomicsCatalogPort {
   return {
@@ -107,6 +112,129 @@ export function createEconomicsCatalogRepository(supabase: EconomicsClient): Eco
         ...optional("reported_margin", "reportedMargin"),
       };
     },
+  };
+}
+
+/**
+ * The read side of the ledger, for the operator view.
+ *
+ * Runs on the authenticated session client under the existing member policy —
+ * entries and components are readable by members, while rates stay admin-only
+ * and this view never needs them. Components ride along in one embed so a
+ * ninety-day window is a single round trip rather than one per entry.
+ */
+export async function loadLedgerEntries(
+  supabase: EconomicsClient,
+  query: {
+    organizationId: string;
+    branchId?: string | null;
+    rangeStart: Date;
+    rangeEndExclusive: Date;
+  },
+): Promise<LedgerEntry[]> {
+  let request = supabase
+    .from("channel_economics_entries")
+    .select(
+      `channel, period_start, gross_revenue_minor, transaction_count, currency,
+       margin_source, completeness_grade, contribution_margin_minor, at_most_minor,
+       channel_economics_components (amount_minor, quality_tier, cost_component_definitions (key, label))`,
+    )
+    .eq("organization_id", query.organizationId)
+    .eq("grain", "period")
+    .gte("period_start", query.rangeStart.toISOString())
+    .lt("period_start", query.rangeEndExclusive.toISOString())
+    .order("period_start", { ascending: true })
+    .limit(MAX_LEDGER_ROWS);
+
+  // A null filter and an absent filter mean different things: the first asks
+  // for organization-wide rows, the second for every branch.
+  if (query.branchId !== undefined)
+    request =
+      query.branchId === null
+        ? request.is("branch_id", null)
+        : request.eq("branch_id", query.branchId);
+
+  const { data, error } = await request;
+  if (error) throw economicsError("ECONOMICS_READ_FAILED", { code: error.code ?? "unknown" });
+
+  return (data ?? []).map(toLedgerEntry);
+}
+
+/**
+ * Which components exist for this tenant, and whether each is priced.
+ *
+ * Through an RPC rather than a table read, for two reasons that both produce a
+ * wrong answer otherwise. `cost_component_rates` is owner/admin only, so an
+ * operator reading it directly sees nothing and every priced component reports
+ * as unpriced. And deriving coverage from the entries' own components fails for
+ * a `reported` margin, which carries no components at all — precisely the state
+ * a new client is in, and precisely when the task list matters most.
+ *
+ * The RPC returns coverage and tier, never an amount. What a component costs
+ * stays confidential; whether it is known does not.
+ */
+export async function loadCatalogCoverage(
+  supabase: EconomicsClient,
+  organizationId: string,
+): Promise<EconomicsCatalogEntry[]> {
+  const { data, error } = await supabase.rpc("get_cost_component_coverage", {
+    target_organization_id: organizationId,
+  });
+
+  if (error) throw economicsError("ECONOMICS_READ_FAILED", { code: error.code ?? "unknown" });
+
+  return (data ?? []).map((row) => ({
+    key: row.key,
+    label: row.label,
+    computationKind: row.computation_kind as EconomicsCatalogEntry["computationKind"],
+    hasRate: row.has_rate,
+    weakestTier: row.weakest_tier as EconomicsCatalogEntry["weakestTier"],
+  }));
+}
+
+type LedgerEntryRow = {
+  channel: string | null;
+  period_start: string;
+  gross_revenue_minor: number | string;
+  transaction_count: number;
+  currency: string;
+  margin_source: string;
+  completeness_grade: string;
+  contribution_margin_minor: number | string | null;
+  at_most_minor: number | string | null;
+  channel_economics_components:
+    | {
+        amount_minor: number | string;
+        quality_tier: string;
+        cost_component_definitions: { key: string; label: string } | null;
+      }[]
+    | null;
+};
+
+function toLedgerEntry(row: LedgerEntryRow): LedgerEntry {
+  return {
+    channel: row.channel,
+    periodStart: new Date(row.period_start),
+    grossRevenueMinor: toNumber(row.gross_revenue_minor),
+    transactionCount: row.transaction_count,
+    currency: row.currency,
+    marginSource: row.margin_source as LedgerEntry["marginSource"],
+    completenessGrade: row.completeness_grade as LedgerEntry["completenessGrade"],
+    contributionMarginMinor:
+      row.contribution_margin_minor === null ? null : toNumber(row.contribution_margin_minor),
+    atMostMinor: row.at_most_minor === null ? null : toNumber(row.at_most_minor),
+    components: (row.channel_economics_components ?? []).flatMap((component) =>
+      component.cost_component_definitions
+        ? [
+            {
+              key: component.cost_component_definitions.key,
+              label: component.cost_component_definitions.label,
+              amountMinor: toNumber(component.amount_minor),
+              qualityTier: component.quality_tier as EconomicsQualityTier,
+            },
+          ]
+        : [],
+    ),
   };
 }
 

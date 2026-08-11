@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(20);
+select extensions.plan(22);
 
 insert into auth.users (id)
 values ('6c3a0c1f-1760-4b25-8b15-100000000001'::uuid);
@@ -427,6 +427,28 @@ select extensions.throws_ok(
   '42501',
   null,
   'a non-member cannot price another tenant cost structure'
+);
+
+-- Still acting as the non-member. The operator view reads these two tables
+-- directly under the member policy, so this is the isolation that protects it.
+select extensions.is(
+  (
+    select count(*)
+    from public.channel_economics_entries
+    where organization_id = '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid
+  ),
+  0::bigint,
+  'a non-member reads no economics entries at all'
+);
+
+select extensions.is(
+  (
+    select count(*)
+    from public.channel_economics_components
+    where organization_id = '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid
+  ),
+  0::bigint,
+  'nor the components behind them'
 );
 
 reset role;
