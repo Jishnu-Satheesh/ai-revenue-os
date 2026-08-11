@@ -10,22 +10,18 @@ function rate(overrides: Partial<StoredCostRate> & { id: string }): StoredCostRa
     qualityTier: "measured",
     channel: null,
     branchId: null,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    effectiveFrom: "2026-01-01",
     effectiveTo: null,
     ...overrides,
   };
 }
 
-const march = new Date("2026-03-15T00:00:00Z");
+const march = "2026-03-15";
 
 describe("resolveEffectiveRate", () => {
   it("ignores a rate that had not started or had already ended", () => {
-    const notYet = rate({ id: "future", effectiveFrom: new Date("2026-06-01T00:00:00Z") });
-    const ended = rate({
-      id: "past",
-      effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-      effectiveTo: new Date("2026-03-01T00:00:00Z"),
-    });
+    const notYet = rate({ id: "future", effectiveFrom: "2026-06-01" });
+    const ended = rate({ id: "past", effectiveFrom: "2026-01-01", effectiveTo: "2026-03-01" });
 
     expect(
       resolveEffectiveRate([notYet, ended], { on: march, channel: null, branchId: null }),
@@ -83,16 +79,8 @@ describe("resolveEffectiveRate", () => {
   });
 
   it("takes the later revision when two rates share a scope", () => {
-    const original = rate({
-      id: "march",
-      channel: "talabat",
-      effectiveFrom: new Date("2026-03-01T00:00:00Z"),
-    });
-    const raised = rate({
-      id: "june",
-      channel: "talabat",
-      effectiveFrom: new Date("2026-06-01T00:00:00Z"),
-    });
+    const original = rate({ id: "march", channel: "talabat", effectiveFrom: "2026-03-01" });
+    const raised = rate({ id: "june", channel: "talabat", effectiveFrom: "2026-06-01" });
 
     // In March the old tier still applies, which is the point of effective
     // dating: a June increase must not rewrite March's margin.
@@ -103,7 +91,7 @@ describe("resolveEffectiveRate", () => {
 
     expect(
       resolveEffectiveRate([original, raised], {
-        on: new Date("2026-07-01T00:00:00Z"),
+        on: "2026-07-01",
         channel: "talabat",
         branchId: null,
       })?.id,
@@ -112,8 +100,24 @@ describe("resolveEffectiveRate", () => {
 
   it("returns null rather than the nearest rate in time", () => {
     // Falling back would price a period with a number that was not in force.
-    const later = rate({ id: "later", effectiveFrom: new Date("2026-09-01T00:00:00Z") });
+    const later = rate({ id: "later", effectiveFrom: "2026-09-01" });
     expect(resolveEffectiveRate([later], { on: march, channel: null, branchId: null })).toBeNull();
+  });
+
+  it("orders dates across a year and month boundary", () => {
+    // Lexicographic comparison is only sound because the dates are
+    // zero-padded ISO. Pinning it so a future format change cannot pass quietly.
+    const rates = [
+      rate({ id: "2025", effectiveFrom: "2025-12-31" }),
+      rate({ id: "2026", effectiveFrom: "2026-01-09" }),
+    ];
+
+    expect(
+      resolveEffectiveRate(rates, { on: "2026-01-10", channel: null, branchId: null })?.id,
+    ).toBe("2026");
+    expect(
+      resolveEffectiveRate(rates, { on: "2026-01-08", channel: null, branchId: null })?.id,
+    ).toBe("2025");
   });
 });
 
@@ -122,11 +126,7 @@ describe("resolveRatesByKey", () => {
     const rates: StoredCostRate[] = [
       rate({ id: "c", definitionKey: "commission", channel: "talabat", rateOfRevenue: 0.28 }),
       rate({ id: "f", definitionKey: "food_cost", rateOfRevenue: 0.3 }),
-      rate({
-        id: "p",
-        definitionKey: "packaging",
-        effectiveFrom: new Date("2026-12-01T00:00:00Z"),
-      }),
+      rate({ id: "p", definitionKey: "packaging", effectiveFrom: "2026-12-01" }),
     ];
 
     const resolved = resolveRatesByKey(rates, { on: march, channel: "talabat", branchId: null });

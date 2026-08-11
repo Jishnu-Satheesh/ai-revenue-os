@@ -33,7 +33,11 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
         .limit(1)
         .maybeSingle();
 
-      if (error) throw metricError("METRIC_QUERY_FAILED", { key: metricKey });
+      // The code travels with the error. Without it a transient read failure
+      // and a malformed query are the same opaque message, three layers below
+      // the caller that has to decide whether retrying is worth anything.
+      if (error)
+        throw metricError("METRIC_QUERY_FAILED", { key: metricKey, code: error.code ?? "unknown" });
       if (!data) return null;
 
       return toDefinition(data);

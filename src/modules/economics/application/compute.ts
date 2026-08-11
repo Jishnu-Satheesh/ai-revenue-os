@@ -1,10 +1,16 @@
-import { computeDerivedMargin, reconcileReportedMargin } from "@/domain/economics/margin";
+import { economicsError } from "@/domain/economics/errors";
+import {
+  computeDerivedMargin,
+  selectEntryMargin,
+  type MarginDisagreement,
+} from "@/domain/economics/margin";
 import { resolveRatesByKey, type StoredCostRate } from "@/domain/economics/rates";
 import type {
   CostComponentDefinition,
-  DerivedMargin,
-  IndicativeMargin,
+  EconomicsQualityTier,
+  MarginOutcome,
 } from "@/domain/economics/types";
+import { toCalendarDate } from "@/domain/metrics/periods";
 import type { MetricObservationRecord } from "@/modules/metrics/application/ports";
 
 /**
@@ -31,6 +37,8 @@ export type EconomicsPeriodInput = {
   currency: string;
   /** A margin the source stated outright, if it supplied one. */
   reportedMarginMinor?: number;
+  /** The tier of that stated figure, which is the tier the entry inherits. */
+  reportedQualityTier?: Exclude<EconomicsQualityTier, "missing">;
 };
 
 export type ComputedEntry = {
@@ -38,9 +46,19 @@ export type ComputedEntry = {
   periodEnd: Date;
   periodTimezone: string;
   channel: string | null;
-  margin: DerivedMargin | IndicativeMargin;
-  /** Set only when the source also reported a margin and it disagrees. */
-  reportedDisagreement?: { reportedMinor: number; differenceMinor: number };
+  grossRevenueMinor: number;
+  transactionCount: number;
+  unitCount?: number;
+  currency: string;
+  margin: MarginOutcome;
+  /**
+   * Which stored rate priced each component, keyed by component. A component
+   * that ended up `missing` is absent here even where a rate existed, because
+   * no rate produced its amount.
+   */
+  rateIdByComponentKey: Readonly<Record<string, string>>;
+  /** Set only when a derived figure and a reported one both stand and disagree. */
+  reportedDisagreement?: MarginDisagreement;
 };
 
 export type ComputeEntriesInput = {
@@ -55,14 +73,15 @@ export type ComputeEntriesInput = {
 export function computeEntries(input: ComputeEntriesInput): ComputedEntry[] {
   return input.periods.map((period) => {
     const rates = resolveRatesByKey(input.rates, {
-      // The day the period began, so a mid-range rate change splits the range
-      // at the right boundary instead of repricing everything.
-      on: period.periodStart,
+      // The local day the period began, so a mid-range rate change splits the
+      // range at the right boundary instead of repricing everything — and at
+      // the operator's own boundary, not UTC's.
+      on: toCalendarDate(period.periodStart, period.periodTimezone),
       channel: period.channel,
       branchId: input.branchId,
     });
 
-    const margin = computeDerivedMargin({
+    const derived = computeDerivedMargin({
       basis: {
         grossRevenueMinor: period.grossRevenueMinor,
         transactionCount: period.transactionCount,
@@ -74,33 +93,46 @@ export function computeEntries(input: ComputeEntriesInput): ComputedEntry[] {
       rates: [...rates.values()],
     });
 
-    const entry: ComputedEntry = {
+    const selected = selectEntryMargin({
+      derived,
+      ...(period.reportedMarginMinor === undefined
+        ? {}
+        : {
+            reported: {
+              contributionMarginMinor: period.reportedMarginMinor,
+              // An untiered report is the operator's own statement about their
+              // business, which is what `assumed` means everywhere else.
+              qualityTier: period.reportedQualityTier ?? "assumed",
+            },
+          }),
+      ...(input.reconciliationToleranceMinor === undefined
+        ? {}
+        : { toleranceMinor: input.reconciliationToleranceMinor }),
+    });
+
+    // A reported margin carries no waterfall, so it attributes no rates either.
+    const rateIdByComponentKey: Record<string, string> = {};
+    if (selected.margin.marginSource === "derived") {
+      for (const component of selected.margin.components) {
+        const rateId = rates.get(component.key)?.id;
+        if (component.qualityTier !== "missing" && rateId)
+          rateIdByComponentKey[component.key] = rateId;
+      }
+    }
+
+    return {
       periodStart: period.periodStart,
       periodEnd: period.periodEnd,
       periodTimezone: period.periodTimezone,
       channel: period.channel,
-      margin,
+      grossRevenueMinor: period.grossRevenueMinor,
+      transactionCount: period.transactionCount,
+      ...(period.unitCount === undefined ? {} : { unitCount: period.unitCount }),
+      currency: period.currency,
+      margin: selected.margin,
+      rateIdByComponentKey,
+      ...(selected.disagreement ? { reportedDisagreement: selected.disagreement } : {}),
     };
-
-    if (period.reportedMarginMinor === undefined) return entry;
-
-    const reconciliation = reconcileReportedMargin({
-      derived: margin,
-      reportedMinor: period.reportedMarginMinor,
-      toleranceMinor: input.reconciliationToleranceMinor,
-    });
-
-    // Null means the derived side is indicative, so there is nothing to compare
-    // against. Silence there is correct: an unpriced period disagreeing with a
-    // reported figure says nothing about either.
-    if (reconciliation && !reconciliation.agrees) {
-      entry.reportedDisagreement = {
-        reportedMinor: period.reportedMarginMinor,
-        differenceMinor: reconciliation.differenceMinor,
-      };
-    }
-
-    return entry;
   });
 }
 
@@ -134,6 +166,24 @@ export function groupPeriods(input: {
     const unitRecord = units.get(key);
     const reportedRecord = reported.get(key);
 
+    // A money series always carries its currency, so an absent one means the
+    // series is not what the caller thinks it is. Substituting a default here
+    // would silently price a period in the wrong money.
+    if (record.currency === null)
+      throw economicsError("ECONOMICS_CURRENCY_MISSING", {
+        periodStart: record.periodStart.toISOString(),
+        channel: record.channel ?? "",
+      });
+
+    // Never converted, per specs/012 section 11: a reported margin in another
+    // currency is a different number, not the same one in other units.
+    if (reportedRecord && reportedRecord.currency !== record.currency)
+      throw economicsError("ECONOMICS_CURRENCY_MISMATCH", {
+        periodStart: record.periodStart.toISOString(),
+        revenue: record.currency,
+        reported: reportedRecord.currency ?? "",
+      });
+
     return {
       periodStart: record.periodStart,
       periodEnd: input.periodEndFor(record.periodStart),
@@ -142,8 +192,13 @@ export function groupPeriods(input: {
       grossRevenueMinor: record.numerator,
       transactionCount: transactions.get(key)?.numerator ?? 0,
       ...(unitRecord ? { unitCount: unitRecord.numerator } : {}),
-      currency: record.currency ?? "",
-      ...(reportedRecord ? { reportedMarginMinor: reportedRecord.numerator } : {}),
+      currency: record.currency,
+      ...(reportedRecord
+        ? {
+            reportedMarginMinor: reportedRecord.numerator,
+            reportedQualityTier: reportedRecord.qualityTier,
+          }
+        : {}),
     };
   });
 }

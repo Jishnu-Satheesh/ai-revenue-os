@@ -761,6 +761,14 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["constraints"]["Row"];
       };
+      record_channel_economics_entries: {
+        Args: {
+          target_organization_id: string;
+          /** Entries with their components nested, shaped by the ledger repository. */
+          input_entries: unknown;
+        };
+        Returns: number;
+      };
     };
     Enums: {
       organization_status: "draft_onboarding" | "active" | "archived";

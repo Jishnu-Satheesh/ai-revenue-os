@@ -103,9 +103,15 @@ A reported margin is a usable decision input, because the figure is measured. Wh
 
 Where an entry has both — components that derive a margin and a reported figure for the same period — the ledger keeps the derived value and raises the disagreement. A silent reconciliation would hide either a wrong rate or a wrong export, and both matter.
 
+Where the derivation is `indicative` and a reported figure exists, the entry records the **reported** margin. There is no derived value to keep in that case, and grading the period `indicative` would discard a measured number the operator already has and block it from decisions — leaving them worse informed than their own spreadsheet does. This is the common case at the start of an engagement rather than an edge: no rate has been captured yet, so nothing derives, while the marketplace export states a margin on every line. The reported figure answers "how much" and still declines to answer "what is eating it", which is exactly what section 7 needs it to do.
+
+The rule in one line: **the derived margin wins wherever it can be stated; a reported figure is the fallback, and where both stand the disagreement is raised.**
+
 ### 4.5 Effective dating
 
 Component definitions and their values are effective-dated. A marketplace commission tier change does not retroactively rewrite last month's margins; it creates a new effective period. Historical rows retain the rates in force when they occurred.
+
+Effective dates are **calendar days in the branch timezone**, not instants. An operator saying a tier rose on 1 June means their own 1 June, and a Dubai day begins at 20:00 UTC the evening before; comparing that date against a period's UTC instant applies every rate change a day late. A period is therefore priced against the rates in force on the local day it began. Where no rate covers a component on that day, resolution returns nothing rather than the nearest rate in time — falling back would price a period with a number that was never in force, which is the precise thing effective dating exists to prevent.
 
 ## 5. Data model
 
@@ -167,7 +173,8 @@ No model computes, adjusts, or explains a margin figure. A generated narrative o
 
 ## 11. Failure states
 
-- **No cost data at all.** The view renders gross revenue by channel with every margin `indicative`, and leads with the readiness task list. It does not render zeros or invent defaults.
+- **No cost data at all.** The view renders gross revenue by channel with every margin `indicative`, and leads with the readiness task list. It does not render zeros or invent defaults. Where the source reported a margin, section 4.4.1 applies instead and the entry is `reported`.
+- **A component that cannot yet be priced by any rate.** Two of the pack's six components are in this state today: `packaging` is `per_unit` and needs a registered unit-count metric, and `promotion_funding` is `sourced` and needs a provider line-item path. Neither is a missing rate an operator could supply, so the readiness task list must not ask them for one. Until both land, no derived margin in the Restaurant Pack can grade better than `indicative`, and the ledger's usable output for a marketplace tenant is the reported figure.
 - **Partial period coverage.** Entries are marked and excluded from period comparisons rather than extrapolated.
 - **Currency mismatch across sources.** Rejected at ingestion; no implicit conversion.
 - **Retroactive provider restatement.** Creates a correcting entry with a reference to the original; entries are never silently mutated.

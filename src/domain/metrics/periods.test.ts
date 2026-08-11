@@ -6,6 +6,7 @@ import {
   findMissingPeriodStarts,
   nextPeriodStart,
   startOfPeriod,
+  toCalendarDate,
 } from "@/domain/metrics/periods";
 
 describe("startOfPeriod", () => {
@@ -146,5 +147,25 @@ describe("findMissingPeriodStarts", () => {
     );
 
     expect(findMissingPeriodStarts(expected, expected)).toEqual([]);
+  });
+});
+
+describe("toCalendarDate", () => {
+  it("names the local day, which is not the UTC one", () => {
+    // 20:00 UTC on 31 May is already 1 June in Dubai. Anything effective-dated
+    // is stated in the operator's own days, so this is the day that decides
+    // which commission tier priced the period.
+    const dubaiMidnight = new Date("2026-05-31T20:00:00Z");
+
+    expect(toCalendarDate(dubaiMidnight, "Asia/Dubai")).toBe("2026-06-01");
+    expect(toCalendarDate(dubaiMidnight, "UTC")).toBe("2026-05-31");
+  });
+
+  it("zero-pads so dates sort lexicographically", () => {
+    expect(toCalendarDate(new Date("2026-01-09T12:00:00Z"), "UTC")).toBe("2026-01-09");
+  });
+
+  it("rejects a timezone nobody recognises", () => {
+    expect(() => toCalendarDate(new Date(), "Mars/Olympus")).toThrow(MetricError);
   });
 });

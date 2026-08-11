@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { EconomicsError } from "@/domain/economics/errors";
 import type { StoredCostRate } from "@/domain/economics/rates";
 import type { CostComponentDefinition } from "@/domain/economics/types";
 import { computeEntries, groupPeriods } from "@/modules/economics/application/compute";
@@ -26,7 +27,7 @@ function rate(overrides: Partial<StoredCostRate> & { id: string }): StoredCostRa
     qualityTier: "measured",
     channel: null,
     branchId: null,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+    effectiveFrom: "2026-01-01",
     effectiveTo: null,
     ...overrides,
   };
@@ -90,14 +91,38 @@ describe("groupPeriods", () => {
     expect(periods).toHaveLength(1);
   });
 
-  it("carries a reported margin through when the source supplied one", () => {
+  it("carries a reported margin and its tier through", () => {
     const periods = groupPeriods({
       revenue: [point("2026-05-31T20:00:00Z", 1_000_000)],
-      reportedMargin: [point("2026-05-31T20:00:00Z", 345_000)],
+      reportedMargin: [point("2026-05-31T20:00:00Z", 345_000, { qualityTier: "derived" })],
       periodEndFor: nextDay,
     });
 
-    expect(periods[0].reportedMarginMinor).toBe(345_000);
+    expect(periods[0]).toMatchObject({
+      reportedMarginMinor: 345_000,
+      reportedQualityTier: "derived",
+    });
+  });
+
+  it("refuses a revenue figure with no currency", () => {
+    // Substituting a default would price the period in the wrong money.
+    expect(() =>
+      groupPeriods({
+        revenue: [point("2026-05-31T20:00:00Z", 1_000_000, { currency: null })],
+        periodEndFor: nextDay,
+      }),
+    ).toThrow(EconomicsError);
+  });
+
+  it("refuses a reported margin denominated in another currency", () => {
+    // specs/012 section 11: no implicit conversion, ever.
+    expect(() =>
+      groupPeriods({
+        revenue: [point("2026-05-31T20:00:00Z", 1_000_000)],
+        reportedMargin: [point("2026-05-31T20:00:00Z", 345_000, { currency: "SAR" })],
+        periodEndFor: nextDay,
+      }),
+    ).toThrow(EconomicsError);
   });
 });
 
@@ -129,6 +154,8 @@ describe("computeEntries", () => {
       grade: "complete",
       contributionMarginMinor: 420_000,
     });
+    // The rate that produced each component, so the figure can be traced back.
+    expect(entries[0].rateIdByComponentKey).toEqual({ commission: "c", food_cost: "f" });
   });
 
   it("prices each period with the rate in force for it, not the latest one", () => {
@@ -146,13 +173,36 @@ describe("computeEntries", () => {
       branchId: null,
       definitions: [commission],
       rates: [
-        rate({ id: "old", rateOfRevenue: 0.28, effectiveFrom: new Date("2026-03-01T00:00:00Z") }),
-        rate({ id: "new", rateOfRevenue: 0.32, effectiveFrom: new Date("2026-06-15T00:00:00Z") }),
+        rate({ id: "old", rateOfRevenue: 0.28, effectiveFrom: "2026-03-01" }),
+        rate({ id: "new", rateOfRevenue: 0.32, effectiveFrom: "2026-06-15" }),
       ],
     });
 
     expect(entries[0].margin).toMatchObject({ contributionMarginMinor: 720_000 });
     expect(entries[1].margin).toMatchObject({ contributionMarginMinor: 680_000 });
+  });
+
+  it("applies a rate change on the operator's own day, not on UTC's", () => {
+    // The Dubai day of 1 June begins at 20:00 UTC on 31 May. Comparing the
+    // period's instant against the date would leave this day on the old tier
+    // and apply every rate change a day late.
+    const firstOfJune = {
+      ...periods[0],
+      periodStart: new Date("2026-05-31T20:00:00Z"),
+      periodEnd: new Date("2026-06-01T20:00:00Z"),
+    };
+
+    const entries = computeEntries({
+      periods: [firstOfJune],
+      branchId: null,
+      definitions: [commission],
+      rates: [
+        rate({ id: "old", rateOfRevenue: 0.28, effectiveFrom: "2026-03-01" }),
+        rate({ id: "new", rateOfRevenue: 0.32, effectiveFrom: "2026-06-01" }),
+      ],
+    });
+
+    expect(entries[0].rateIdByComponentKey.commission).toBe("new");
   });
 
   it("refuses a figure while any component is unpriced", () => {
@@ -167,11 +217,13 @@ describe("computeEntries", () => {
     if (entries[0].margin.grade !== "indicative") return;
     expect(entries[0].margin.atMostMinor).toBe(720_000);
     expect(entries[0].margin.missingComponentKeys).toEqual(["food_cost"]);
+    // A missing component was priced by no rate, so it attributes to none.
+    expect(entries[0].rateIdByComponentKey).toEqual({ commission: "c" });
   });
 
   it("raises a disagreement with a reported figure rather than reconciling it", () => {
     const entries = computeEntries({
-      periods: [{ ...periods[0], reportedMarginMinor: 400_000 }],
+      periods: [{ ...periods[0], reportedMarginMinor: 400_000, reportedQualityTier: "measured" }],
       branchId: null,
       definitions: [commission, foodCost],
       rates: [
@@ -181,6 +233,7 @@ describe("computeEntries", () => {
     });
 
     // Either a rate is wrong or the export is, and the operator needs to know.
+    expect(entries[0].margin).toMatchObject({ marginSource: "derived" });
     expect(entries[0].reportedDisagreement).toEqual({
       reportedMinor: 400_000,
       differenceMinor: 20_000,
@@ -189,7 +242,7 @@ describe("computeEntries", () => {
 
   it("stays silent when the difference is inside tolerance", () => {
     const entries = computeEntries({
-      periods: [{ ...periods[0], reportedMarginMinor: 419_990 }],
+      periods: [{ ...periods[0], reportedMarginMinor: 419_990, reportedQualityTier: "measured" }],
       branchId: null,
       definitions: [commission, foodCost],
       rates: [
@@ -202,16 +255,34 @@ describe("computeEntries", () => {
     expect(entries[0].reportedDisagreement).toBeUndefined();
   });
 
-  it("does not compare a reported figure against an unpriced period", () => {
-    // An indicative margin disagreeing with a report says nothing about either.
+  it("records the reported figure when nothing can be derived", () => {
+    // No rates at all, so there is no derived margin to keep. Grading this
+    // indicative would discard a measured number the operator already has.
     const entries = computeEntries({
-      periods: [{ ...periods[0], reportedMarginMinor: 400_000 }],
+      periods: [{ ...periods[0], reportedMarginMinor: 400_000, reportedQualityTier: "measured" }],
       branchId: null,
       definitions: [commission, foodCost],
       rates: [],
     });
 
-    expect(entries[0].margin.grade).toBe("indicative");
+    expect(entries[0].margin).toMatchObject({
+      marginSource: "reported",
+      grade: "complete",
+      contributionMarginMinor: 400_000,
+    });
+    // Nothing to reconcile, and no waterfall to offer.
     expect(entries[0].reportedDisagreement).toBeUndefined();
+    expect(entries[0].rateIdByComponentKey).toEqual({});
+  });
+
+  it("stays indicative when nothing can be derived and nothing was reported", () => {
+    const entries = computeEntries({
+      periods,
+      branchId: null,
+      definitions: [commission, foodCost],
+      rates: [],
+    });
+
+    expect(entries[0].margin).toMatchObject({ grade: "indicative", atMostMinor: 1_000_000 });
   });
 });

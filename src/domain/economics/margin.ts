@@ -161,7 +161,7 @@ export function computeDerivedMargin(input: ComputeMarginInput): DerivedMargin |
  * itself is measured; it simply cannot answer what ate the margin.
  */
 export function recordReportedMargin(input: {
-  basis: EconomicsBasis;
+  basis: Pick<EconomicsBasis, "grossRevenueMinor" | "currency">;
   contributionMarginMinor: number;
   qualityTier: ReportedMargin["qualityTier"];
 }): ReportedMargin {
@@ -198,4 +198,60 @@ export function reconcileReportedMargin(input: {
     agrees: Math.abs(differenceMinor) <= (input.toleranceMinor ?? 0),
     differenceMinor,
   };
+}
+
+export type MarginDisagreement = { reportedMinor: number; differenceMinor: number };
+
+export type SelectedMargin = {
+  margin: MarginOutcome;
+  /** Present only when a derived figure and a reported one both stand and differ. */
+  disagreement?: MarginDisagreement;
+};
+
+/**
+ * Which figure the entry actually records.
+ *
+ * The derived margin wins wherever it can be stated, and a reported figure
+ * beside it raises a disagreement rather than replacing it — that much is 4.4.1.
+ * The case 4.4.1 leaves open is the common one: the derivation is `indicative`
+ * because nobody has priced the components, and the operator's own export states
+ * a margin anyway. There is no derived figure to keep there, and grading the
+ * period `indicative` would discard a measured number and block it from
+ * decisions, leaving the operator worse informed than their own spreadsheet
+ * already leaves them. So a reported margin is the fallback, not a lesser input:
+ * it answers how much, and only ever declines to answer what ate it.
+ */
+export function selectEntryMargin(input: {
+  derived: DerivedMargin | IndicativeMargin;
+  reported?: { contributionMarginMinor: number; qualityTier: ReportedMargin["qualityTier"] };
+  toleranceMinor?: number;
+}): SelectedMargin {
+  const { derived, reported } = input;
+  if (!reported) return { margin: derived };
+
+  if (derived.grade === "indicative")
+    return {
+      margin: recordReportedMargin({
+        basis: { grossRevenueMinor: derived.grossRevenueMinor, currency: derived.currency },
+        contributionMarginMinor: reported.contributionMarginMinor,
+        qualityTier: reported.qualityTier,
+      }),
+    };
+
+  const reconciliation = reconcileReportedMargin({
+    derived,
+    reportedMinor: reported.contributionMarginMinor,
+    toleranceMinor: input.toleranceMinor,
+  });
+
+  if (reconciliation && !reconciliation.agrees)
+    return {
+      margin: derived,
+      disagreement: {
+        reportedMinor: reported.contributionMarginMinor,
+        differenceMinor: reconciliation.differenceMinor,
+      },
+    };
+
+  return { margin: derived };
 }

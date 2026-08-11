@@ -7,6 +7,7 @@ import {
   deriveCompletenessGrade,
   reconcileReportedMargin,
   recordReportedMargin,
+  selectEntryMargin,
 } from "@/domain/economics/margin";
 import { isPresentableMargin } from "@/domain/economics/types";
 import type {
@@ -272,5 +273,72 @@ describe("reconcileReportedMargin", () => {
     });
 
     expect(reconcileReportedMargin({ derived: indicative, reportedMinor: 1 })).toBeNull();
+  });
+});
+
+describe("selectEntryMargin", () => {
+  const complete = computeDerivedMargin({
+    basis,
+    channel: "talabat",
+    definitions: [commission, foodCost, packaging],
+    rates: [
+      measured({ key: "commission", rateOfRevenue: 0.28 }),
+      measured({ key: "food_cost", rateOfRevenue: 0.3 }),
+      measured({ key: "packaging", amountMinor: 150 }),
+    ],
+  });
+
+  const indicative = computeDerivedMargin({
+    basis,
+    channel: "talabat",
+    definitions: [commission, foodCost],
+    rates: [measured({ key: "commission", rateOfRevenue: 0.28 })],
+  });
+
+  it("keeps the derived figure where there is one, and raises the disagreement", () => {
+    const selected = selectEntryMargin({
+      derived: complete,
+      reported: { contributionMarginMinor: 300_000, qualityTier: "measured" },
+    });
+
+    expect(selected.margin).toMatchObject({ marginSource: "derived", grade: "complete" });
+    expect(selected.disagreement).toEqual({ reportedMinor: 300_000, differenceMinor: 45_000 });
+  });
+
+  it("falls back to the reported figure when nothing could be derived", () => {
+    // The operator's export states a margin the platform cannot decompose.
+    // Grading the period indicative would throw away a measured number and
+    // block it from decisions, which leaves them worse informed than their own
+    // spreadsheet already does.
+    const selected = selectEntryMargin({
+      derived: indicative,
+      reported: { contributionMarginMinor: 400_000, qualityTier: "measured" },
+    });
+
+    expect(selected.margin).toMatchObject({
+      marginSource: "reported",
+      grade: "complete",
+      contributionMarginMinor: 400_000,
+      grossRevenueMinor: 1_000_000,
+      currency: "AED",
+    });
+    expect(isPresentableMargin(selected.margin)).toBe(true);
+    // Measured, but never decomposed, so it answers how much and not what ate it.
+    expect(selected.margin).not.toHaveProperty("components");
+    expect(selected.disagreement).toBeUndefined();
+  });
+
+  it("leaves an unpriced period indicative when nothing was reported either", () => {
+    expect(selectEntryMargin({ derived: indicative }).margin).toBe(indicative);
+  });
+
+  it("carries the report's own tier onto the entry", () => {
+    // An operator's stated figure they never verified is not a measured one.
+    const selected = selectEntryMargin({
+      derived: indicative,
+      reported: { contributionMarginMinor: 400_000, qualityTier: "assumed" },
+    });
+
+    expect(selected.margin.grade).toBe("partial");
   });
 });

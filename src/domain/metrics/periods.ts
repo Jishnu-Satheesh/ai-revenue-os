@@ -4,6 +4,7 @@ import {
   addHours,
   addMonths,
   addWeeks,
+  format,
   startOfDay,
   startOfHour,
   startOfMonth,
@@ -57,6 +58,19 @@ export function startOfPeriod(instant: Date, grain: MetricPeriodGrain, timeZone:
     case "month":
       return new Date(startOfMonth(zoned).getTime());
   }
+}
+
+/**
+ * The local calendar date an instant falls on, as `YYYY-MM-DD`.
+ *
+ * Anything effective-dated is stated in calendar days — a commission tier rose
+ * "on 1 June", not at an instant — and comparing such a date against a UTC
+ * instant is wrong by a day at every boundary. A Dubai day begins at 20:00 UTC
+ * the evening before, so 1 June local starts before 1 June UTC does.
+ */
+export function toCalendarDate(instant: Date, timeZone: string): string {
+  assertValidTimeZone(timeZone);
+  return format(new TZDate(instant.getTime(), timeZone), "yyyy-MM-dd");
 }
 
 /**

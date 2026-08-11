@@ -8,7 +8,16 @@ import type { CostComponentRate } from "@/domain/economics/types";
  * most-specific-wins order the margin floor uses in
  * `specs/013-margin-firewall.md` section 4.1, so an operator learns one rule
  * rather than two.
+ *
+ * Dates here are calendar days, `YYYY-MM-DD`, never instants. An operator says
+ * a commission tier rose on 1 June, meaning their own 1 June; a Dubai day
+ * begins at 20:00 UTC the evening before, so comparing that date against a UTC
+ * instant applies every rate change a day late. ISO dates also sort
+ * lexicographically, which is why plain comparison is sound here.
  */
+
+/** A calendar day in the period's own timezone, as `YYYY-MM-DD`. */
+export type CalendarDate = string;
 
 export type StoredCostRate = CostComponentRate & {
   id: string;
@@ -17,20 +26,21 @@ export type StoredCostRate = CostComponentRate & {
   channel: string | null;
   /** `null` applies to every branch. */
   branchId: string | null;
-  effectiveFrom: Date;
+  effectiveFrom: CalendarDate;
   /** Exclusive. `null` means still in force. */
-  effectiveTo: Date | null;
+  effectiveTo: CalendarDate | null;
 };
 
 export type RateScope = {
-  on: Date;
+  /** The local day the period began on. */
+  on: CalendarDate;
   channel: string | null;
   branchId: string | null;
 };
 
-function isInForce(rate: StoredCostRate, on: Date): boolean {
-  if (rate.effectiveFrom.getTime() > on.getTime()) return false;
-  return rate.effectiveTo === null || on.getTime() < rate.effectiveTo.getTime();
+function isInForce(rate: StoredCostRate, on: CalendarDate): boolean {
+  if (rate.effectiveFrom > on) return false;
+  return rate.effectiveTo === null || on < rate.effectiveTo;
 }
 
 function matchesScope(rate: StoredCostRate, scope: RateScope): boolean {
@@ -67,7 +77,7 @@ export function resolveEffectiveRate(
 
     // Equal specificity means one scope, where the no-overlap index allows only
     // one rate per start date. The later start is the more recent revision.
-    return candidate.effectiveFrom.getTime() > best.effectiveFrom.getTime() ? candidate : best;
+    return candidate.effectiveFrom > best.effectiveFrom ? candidate : best;
   });
 }
 
