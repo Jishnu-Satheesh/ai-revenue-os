@@ -369,7 +369,20 @@ type IngestionSink = {
 
 `AdapterContext` includes the validated `organizationId`, `connectionId`, adapter version, correlation ID, and a server-only credential handle. It never exposes raw secrets to UI or domain objects.
 
-Every non-fixture capability declares `organization_entitled` plus its adapter-kind prerequisites. Live reads require current credentials and an account mapping; publish and advertise also require eligible controlled-account evidence; advertise requires tracking; webhook requires verified configuration; operator review requires a linked operator. Fixture definitions are an explicit read-only exception, but still require their declared mapping evidence. Provider characters exactly match the unique character set represented by their capabilities.
+Every non-fixture capability declares `organization_entitled` plus its adapter-kind prerequisites. Live reads require current credentials and an account mapping; publish and advertise also require eligible controlled-account evidence; advertise requires tracking; webhook requires verified configuration; operator review requires a linked operator. Fixture definitions are an explicit read-only exception, but still require their declared mapping evidence. Provider characters exactly match the unique character set represented by their grantable capabilities and their declared blocked capabilities.
+
+### Declared blocked capabilities
+
+A provider may publish capabilities it intends to support but cannot grant, through `declaredBlockedCapabilities`. This exists because "not built" and "built but unavailable to you" are different answers, and an operator deserves the first stated plainly rather than inferred from an absence.
+
+A declaration is documentation, not authorization:
+
+- It carries no maturity, no prerequisites, and no adapter, and the provider registry does not require an adapter for it.
+- Capability derivation never reads it, so it cannot become an organization grant by any path.
+- It must carry at least one stable restriction code from the checked-in provider contract; without a reason, "blocked" is indistinguishable from "absent".
+- Its key may not shadow a grantable capability key on the same provider, because the UI would otherwise have to choose which answer to show.
+
+A provider must declare at least one grantable or blocked capability; a provider with neither is an empty catalog row. Meta is registered this way: `rolloutState` is `disabled`, it declares no grantable capability, it ships no adapter, and each of Instagram publishing, Facebook publishing, Meta Ads, metrics read, and webhook intake appears blocked with the restriction codes recorded in `docs/provider-contracts/meta-campaign-v1.md`.
 
 The Data Ingestion module validates each envelope's `recordType` and `payload` against its own versioned schema. `payload: unknown` is an explicit boundary type, not permission to persist unvalidated JSON.
 

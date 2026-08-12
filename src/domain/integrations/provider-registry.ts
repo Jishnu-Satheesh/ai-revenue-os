@@ -64,6 +64,27 @@ export function createProviderRegistry(input: {
     if (definitionsByKey.has(definition.key)) {
       throw new DomainError("VALIDATION_ERROR", `Duplicate provider key: ${definition.key}`);
     }
+
+    const grantableKeys = new Set(definition.capabilities.map(({ key }) => key));
+    for (const declaration of definition.declaredBlockedCapabilities ?? []) {
+      // A key cannot be both grantable and declared-blocked: the UI would have
+      // to choose which answer to show, and either choice misleads.
+      if (grantableKeys.has(declaration.key)) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          `Blocked declaration ${declaration.key} shadows a grantable capability on ${definition.key}.`,
+        );
+      }
+      // Without a stable reason, "blocked" is indistinguishable from "absent",
+      // and an operator cannot tell whether to wait or to act.
+      if (declaration.restrictionCodes.length === 0) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          `Blocked declaration ${declaration.key} needs at least one restriction code.`,
+        );
+      }
+    }
+
     definitionsByKey.set(definition.key, freezeDefinition(definition));
   }
 

@@ -206,6 +206,31 @@ export function CatalogTab({
                           : "No provider scopes are required for these capabilities."}
                     </span>
                   </div>
+                  {definition.declaredBlockedCapabilities?.length ? (
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs text-muted-foreground uppercase">
+                        Not available yet
+                      </span>
+                      <ul className="flex flex-col gap-2">
+                        {definition.declaredBlockedCapabilities.map((declaration) => (
+                          <li key={declaration.key} className="flex flex-col gap-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <Badge variant="destructive">
+                                <CircleSlash aria-hidden="true" />
+                                Blocked
+                              </Badge>
+                              <span className="font-medium">{declaration.key}</span>
+                              <span className="text-muted-foreground">· {declaration.effect}</span>
+                            </span>
+                            <span className="text-muted-foreground">{declaration.summary}</span>
+                            <span className="text-xs text-muted-foreground">
+                              Restriction: {declaration.restrictionCodes.join(", ")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   <p className="text-xs text-muted-foreground">
                     {definition.characters.join(" · ")}
                     {definition.capabilities.some(({ adapterKind }) => adapterKind === "read")

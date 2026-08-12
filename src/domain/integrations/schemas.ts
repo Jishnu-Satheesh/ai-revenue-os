@@ -66,6 +66,22 @@ export const providerCapabilityDefinitionSchema = z
   })
   .strict();
 
+/**
+ * A capability the platform intends to support but cannot grant yet. It carries
+ * no maturity, prerequisites, or adapter, because none of those would be true.
+ */
+export const providerBlockedCapabilityDeclarationSchema = z
+  .object({
+    key: integrationKeySchema,
+    character: integrationCharacterSchema,
+    effect: capabilityEffectSchema,
+    adapterKind: providerAdapterKindSchema,
+    requiredScopes: z.array(z.string().trim().min(1)),
+    restrictionCodes: z.array(z.string().trim().min(1)).min(1),
+    summary: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+
 export const providerDefinitionSchema = z
   .object({
     key: integrationKeySchema,
@@ -74,7 +90,10 @@ export const providerDefinitionSchema = z
     contractVersion: z.string().trim().min(1).max(120),
     rolloutState: z.enum(["fixture", "available", "disabled"]),
     characters: z.array(integrationCharacterSchema).min(1),
-    capabilities: z.array(providerCapabilityDefinitionSchema).min(1),
+    // May be empty only when the provider instead declares blocked
+    // capabilities: a provider with neither is an empty catalog row.
+    capabilities: z.array(providerCapabilityDefinitionSchema),
+    declaredBlockedCapabilities: z.array(providerBlockedCapabilityDeclarationSchema).optional(),
     syncIntervalMinutes: z.number().int().positive(),
     staleAfterMinutes: z.number().int().positive(),
     operatorCopy: z.string().trim().min(1).max(1000).optional(),
@@ -83,6 +102,26 @@ export const providerDefinitionSchema = z
   .superRefine((definition, context) => {
     const characters = new Set(definition.characters);
     const capabilityKeys = new Set<string>();
+    const blockedDeclarations = definition.declaredBlockedCapabilities ?? [];
+
+    if (definition.capabilities.length === 0 && blockedDeclarations.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["capabilities"],
+        message: "A provider must declare at least one grantable or blocked capability.",
+      });
+    }
+
+    for (const [index, declaration] of blockedDeclarations.entries()) {
+      if (!characters.has(declaration.character)) {
+        context.addIssue({
+          code: "custom",
+          path: ["declaredBlockedCapabilities", index, "character"],
+          message: "Blocked capability character must be owned by the provider definition.",
+        });
+      }
+    }
+
     for (const [index, capability] of definition.capabilities.entries()) {
       if (!characters.has(capability.character)) {
         context.addIssue({
@@ -236,7 +275,13 @@ export const providerDefinitionSchema = z
         message: "Provider characters must be unique.",
       });
     }
-    const capabilityCharacters = new Set(definition.capabilities.map(({ character }) => character));
+    // A declared-blocked capability still backs its character: the provider is
+    // honestly claiming that role, it just cannot serve it yet. Excluding them
+    // would force a blocked-only provider to under-declare what it is for.
+    const capabilityCharacters = new Set([
+      ...definition.capabilities.map(({ character }) => character),
+      ...blockedDeclarations.map(({ character }) => character),
+    ]);
     if (
       capabilityCharacters.size !== definition.characters.length ||
       definition.characters.some((character) => !capabilityCharacters.has(character))

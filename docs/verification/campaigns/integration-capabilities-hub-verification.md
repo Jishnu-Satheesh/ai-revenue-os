@@ -53,3 +53,24 @@ here rather than fixed inside this task's scope.
    detail lives in a `Sheet` that opens only on tap, while the auto-selected connection row
    still reports `aria-pressed="true"` on first load. A screen-reader user on a phone is
    told the row is pressed while the panel it controls is closed.
+
+## Task 3 addendum — Meta declared-blocked catalog entry
+
+Verified with Chrome DevTools on 2026-08-12, same route and organization.
+
+| Check | Result |
+| ----- | ------ |
+| Catalog cards | Two: `Google Business Profile` and `Meta` |
+| Meta badges | 6 × `Blocked`, 0 × `Available` |
+| Meta connect control | None rendered, even for an `owner` |
+| Meta footer | "This provider is blocked by the V1 rollout policy." |
+| Meta operator copy | "Meta is not connectable yet. No action is proven against a controlled account." |
+| Capability keys shown | `publish_instagram`, `publish_facebook`, `advertise_meta_ads`, `read_meta_metrics`, `webhook_meta` |
+| Restriction codes shown | `meta.instagram_feed_image_blocked`, `meta.facebook_image_story_unproven`, `meta.ads_feed_image_blocked`, `meta.webhook_contract_unverified`, `meta.controlled_account_evidence_missing` |
+| Google Business Profile | Unchanged: `Available`, connect control present, no blocked section |
+| Console | No errors at 1440 px or 390 px |
+| Layout | No horizontal overflow at either width |
+
+A hydration-mismatch error on Radix-generated ids appeared once after a hot
+reload and did not reproduce on a cache-ignoring reload. It is a dev-server
+artifact, not a defect in this change.

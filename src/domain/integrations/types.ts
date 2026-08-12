@@ -22,6 +22,27 @@ export type ProviderCapabilityDefinition = {
   requiredWebhookEventKeys: readonly string[];
 };
 
+/**
+ * A capability the platform intends to support but cannot grant yet.
+ *
+ * This exists because "not built" and "built but unavailable to you" are
+ * different answers, and an operator deserves the first one stated plainly
+ * rather than inferred from an absence. A declaration is documentation: it
+ * carries no maturity, no prerequisites, and no adapter, and capability
+ * derivation never reads it, so it cannot become an organization grant.
+ */
+export type ProviderBlockedCapabilityDeclaration = {
+  key: string;
+  character: IntegrationCharacter;
+  effect: CapabilityEffect;
+  adapterKind: ProviderAdapterKind;
+  requiredScopes: readonly string[];
+  /** At least one stable code from the checked-in provider contract. */
+  restrictionCodes: readonly string[];
+  /** Exact operator copy explaining what is missing. */
+  summary: string;
+};
+
 export type ProviderDefinition = {
   key: string;
   displayName: string;
@@ -30,6 +51,10 @@ export type ProviderDefinition = {
   rolloutState: "fixture" | "available" | "disabled";
   characters: readonly IntegrationCharacter[];
   capabilities: readonly ProviderCapabilityDefinition[];
+  /**
+   * Declared-but-ungrantable capabilities. Never a source of authorization.
+   */
+  declaredBlockedCapabilities?: readonly ProviderBlockedCapabilityDeclaration[];
   syncIntervalMinutes: number;
   staleAfterMinutes: number;
   /** Exact operator copy; presentation never invents provider readiness. */
