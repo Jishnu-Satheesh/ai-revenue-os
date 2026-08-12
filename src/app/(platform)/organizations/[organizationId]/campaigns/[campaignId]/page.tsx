@@ -51,7 +51,7 @@ export default async function CampaignDetailPage({ params }: PageProps) {
         </AlertDescription>
       </Alert>
 
-      <CampaignStudio campaign={campaign} />
+      <CampaignStudio campaign={campaign} organizationName={organization.name} />
     </div>
   );
 }
