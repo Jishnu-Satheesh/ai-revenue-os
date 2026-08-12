@@ -105,7 +105,10 @@ export function OverviewEditor({ organizationId, snapshot }: Props) {
       await parseResponse(
         await fetch(`/api/organizations/${organizationId}`, { method: "DELETE" }),
       );
-      router.push("/overview");
+      // The archived draft now fails the resolver's non-archived filter, so the
+      // root sends them to their next organization, or to the create wizard when
+      // this was their only one.
+      router.push("/");
     } catch (archiveError) {
       setError(
         archiveError instanceof Error

@@ -4,7 +4,7 @@ import { z } from "zod";
 // A pure route helper with no React dependency. Importing it keeps one
 // definition of the Overview URL: duplicating the shape here is exactly how the
 // menu and the redirect would drift apart.
-import { overviewPath } from "@/components/layout/organization-route";
+import { overviewPath } from "@/lib/routes";
 import { logger } from "@/lib/logger";
 import type { Database } from "@/lib/supabase/database.types";
 

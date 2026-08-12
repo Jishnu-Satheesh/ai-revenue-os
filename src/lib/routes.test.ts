@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  isOrganizationPath,
-  organizationIdFromPathname,
-  overviewPath,
-} from "@/components/layout/organization-route";
+import { isOrganizationPath, organizationIdFromPathname, overviewPath } from "@/lib/routes";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 

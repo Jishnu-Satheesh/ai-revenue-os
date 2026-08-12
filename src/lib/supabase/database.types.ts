@@ -704,8 +704,8 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["organization_memberships"]["Insert"]>;
         Relationships: [];
       };
+      /** Per-user interface state, not tenant data: each row belongs to one user. */
       organization_last_access: {
-        /** Per-user interface state, not tenant data: each row belongs to one user. */
         Row: {
           user_id: string;
           organization_id: string;

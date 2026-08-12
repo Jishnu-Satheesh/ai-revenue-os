@@ -17,10 +17,7 @@ import {
   Waypoints,
 } from "lucide-react";
 
-import {
-  organizationIdFromPathname,
-  overviewPath,
-} from "@/components/layout/organization-route";
+import { organizationIdFromPathname, overviewPath } from "@/lib/routes";
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
 import {
   Sidebar as SidebarPrimitive,

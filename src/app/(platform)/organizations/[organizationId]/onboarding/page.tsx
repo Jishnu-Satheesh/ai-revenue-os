@@ -1,7 +1,7 @@
 import { ArrowLeft, Compass, BadgeInfo } from "lucide-react";
 import Link from "next/link";
 
-import { overviewPath } from "@/components/layout/organization-route";
+import { overviewPath } from "@/lib/routes";
 import { OnboardingClient } from "@/components/onboarding/onboarding-client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";

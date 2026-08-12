@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 
-import { overviewPath } from "@/components/layout/organization-route";
+import { overviewPath } from "@/lib/routes";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -30,14 +30,13 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
  * organization the reader actually opened instead of a hardcoded location.
  */
 const segmentLabels: Readonly<Record<string, string>> = {
-  overview: "Overview",
-  opportunities: "Opportunities",
-  agents: "Agents",
-  campaigns: "Campaigns",
-  executions: "Executions",
   organizations: "Organizations",
-  settings: "Settings",
   new: "New organization",
+  overview: "Overview",
+  // Organization-scoped destinations. Opportunities and Campaigns are named
+  // ahead of their routes so the trail reads correctly the day they land.
+  opportunities: "Opportunities",
+  campaigns: "Campaigns",
   onboarding: "Guided onboarding",
   integrations: "Integrations",
   memory: "Business Memory",
@@ -69,9 +68,11 @@ export function deriveRouteCrumbs(
   labels: Readonly<Record<string, string>> = {},
 ): RouteCrumb[] {
   const segments = pathname.split("/").filter(Boolean);
-  if (segments.length === 0) {
-    return [{ label: segmentLabels.overview, href: "/overview", current: true }];
-  }
+  // The empty path is `/`, which redirects on the server and never renders the
+  // shell. Naming a crumb here would name a route that no longer exists, and
+  // this synchronous client-side builder cannot run the landing resolver's
+  // authenticated read to find the real one.
+  if (segments.length === 0) return [];
 
   const crumbs: RouteCrumb[] = [];
   for (const [index, segment] of segments.entries()) {

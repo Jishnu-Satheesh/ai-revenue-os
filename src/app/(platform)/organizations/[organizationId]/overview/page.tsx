@@ -1,18 +1,8 @@
-import {
-  ArrowLeft,
-  CheckCircle2,
-  Clock3,
-  Database,
-  FileQuestion,
-  ShieldCheck,
-  Sparkles,
-} from "lucide-react";
-import Link from "next/link";
+import { CheckCircle2, Clock3, Database, FileQuestion, ShieldCheck, Sparkles } from "lucide-react";
 
 import { OverviewEditor } from "@/components/organizations/overview-editor";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Empty,
@@ -76,13 +66,9 @@ export default async function OverviewPage({ params }: PageProps) {
     <div className="flex flex-col gap-8">
       <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
         <div>
-          <Button asChild variant="link" className="h-auto p-0 text-muted-foreground">
-            <Link href="/overview">
-              <ArrowLeft data-icon="inline-start" />
-              Portfolio overview
-            </Link>
-          </Button>
-          <div className="mt-5 flex items-center gap-3">
+          {/* Nothing sits above an organization now: the sidebar and the
+              switcher are the way out. */}
+          <div className="flex items-center gap-3">
             <span className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
               <Database />
             </span>

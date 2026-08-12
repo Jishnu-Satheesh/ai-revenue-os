@@ -5,10 +5,7 @@ import { Building2, Check, ChevronsUpDown, Plus } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { z } from "zod";
 
-import {
-  organizationIdFromPathname,
-  overviewPath,
-} from "@/components/layout/organization-route";
+import { organizationIdFromPathname, overviewPath } from "@/lib/routes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,7 +49,9 @@ export function OrganizationSwitcher() {
   });
 
   const active = data?.find((organization) => organization.id === organizationId) ?? null;
-  const triggerLabel = isPending ? "Loading organizations" : (active?.name ?? "Select organization");
+  const triggerLabel = isPending
+    ? "Loading organizations"
+    : (active?.name ?? "Select organization");
 
   return (
     <SidebarMenu>

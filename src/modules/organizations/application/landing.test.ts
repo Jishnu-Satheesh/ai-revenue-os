@@ -10,7 +10,9 @@ const organizationId = "11111111-1111-4111-8111-111111111111";
 function fakeClient(user: { id: string } | null, rpcResult: { data?: unknown; error?: unknown }) {
   return {
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) },
-    rpc: vi.fn().mockResolvedValue({ data: rpcResult.data ?? null, error: rpcResult.error ?? null }),
+    rpc: vi
+      .fn()
+      .mockResolvedValue({ data: rpcResult.data ?? null, error: rpcResult.error ?? null }),
   };
 }
 
