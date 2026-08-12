@@ -704,6 +704,20 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["organization_memberships"]["Insert"]>;
         Relationships: [];
       };
+      organization_last_access: {
+        /** Per-user interface state, not tenant data: each row belongs to one user. */
+        Row: {
+          user_id: string;
+          organization_id: string;
+          last_accessed_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_last_access"]["Row"],
+          "last_accessed_at"
+        > & { last_accessed_at?: string };
+        Update: Partial<Database["public"]["Tables"]["organization_last_access"]["Insert"]>;
+        Relationships: [];
+      };
       profiles: {
         Row: {
           id: string;
@@ -758,6 +772,15 @@ export type Database = {
       archive_draft_organization: {
         Args: { target_organization_id: string };
         Returns: Database["public"]["Tables"]["organizations"]["Row"];
+      };
+      resolve_landing_organization: {
+        Args: Record<string, never>;
+        /** Null when the caller has no organization that is not archived. */
+        Returns: string | null;
+      };
+      touch_organization_access: {
+        Args: { target_organization_id: string };
+        Returns: undefined;
       };
       save_policy_version: {
         Args: {
