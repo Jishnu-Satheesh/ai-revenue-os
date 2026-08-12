@@ -13,6 +13,7 @@ import {
   Coins,
   Compass,
   LayoutDashboard,
+  Megaphone,
   Settings2,
   Sparkles,
   Waypoints,
@@ -75,6 +76,14 @@ function organizationNavigation(pathname: string) {
         label: "Channel economics",
         href: `/organizations/${organizationId}/economics`,
         icon: Coins,
+      },
+      // Campaigns are organization-scoped. The global `/campaigns` destination
+      // stays marked Soon, because a campaign without an organization has no
+      // brand, economics, or capabilities to be governed by.
+      {
+        label: "Campaigns",
+        href: `/organizations/${organizationId}/campaigns`,
+        icon: Megaphone,
       },
     ],
   };
