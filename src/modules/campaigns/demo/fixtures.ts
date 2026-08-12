@@ -131,6 +131,19 @@ export const demoCampaigns: readonly DemoCampaignSummary[] = Object.freeze([
     blockerCount: 2,
   },
   {
+    id: "c1000000-0000-4000-8000-000000000004",
+    title: "Early-week lunch trial",
+    objective: "Test whether an early-week offer lifts contribution without discounting peak trade",
+    lifecycle: "scheduled",
+    version: 2,
+    sourceKind: "decision_opportunity",
+    sourceLabel: "Decision Engine opportunity",
+    channels: ["Instagram"],
+    spendCeiling: { amountMinor: 200_000, currency: "AED" },
+    updatedAt: "2026-08-10T13:47:00.000Z",
+    blockerCount: 1,
+  },
+  {
     id: "c1000000-0000-4000-8000-000000000003",
     title: "Family bundle re-run",
     objective: "Repeat the strongest performing offer structure from July",
@@ -299,8 +312,147 @@ export const demoCampaignDetail: DemoCampaignDetail = Object.freeze({
   ]),
 });
 
+/**
+ * A campaign that has been approved and is mid-flight.
+ *
+ * The verdict is `execution_only`, which is one of the four honest conclusions
+ * the measurement design allows: provider activity is verified, but no
+ * qualified business outcome is available yet because the outcome window has
+ * not closed. That is the truthful state, and it demonstrates the thing worth
+ * demonstrating — the system saying what it cannot yet claim.
+ */
+export type DemoReceipt = {
+  id: string;
+  channel: string;
+  placement: string;
+  state: "published" | "provider_pending" | "reconciled" | "blocked";
+  externalReference: string | null;
+  publishedAt: string | null;
+  detail: string;
+};
+
+export type DemoSpendLine = { label: string; amountMinor: number; currency: string };
+
+export type DemoExecutionCampaign = {
+  id: string;
+  title: string;
+  version: number;
+  digest: string;
+  approvedAt: string;
+  approvedBy: string;
+  timeZone: string;
+  receipts: readonly DemoReceipt[];
+  spend: {
+    approved: DemoSpendLine;
+    reserved: DemoSpendLine;
+    providerReported: DemoSpendLine;
+    settled: DemoSpendLine | null;
+  };
+  exposures: { recorded: number; source: string };
+  measurement: {
+    primaryMetric: string;
+    method: string;
+    baselineSource: string;
+    windowDays: number;
+    windowClosesAt: string;
+    verdict: "execution_only";
+    verdictExplanation: string;
+    limitations: readonly string[];
+  };
+  guardrails: readonly { label: string; state: "holding" | "breached" }[];
+  learningProposal: {
+    observation: string;
+    limitation: string;
+    suggestedNextTest: string;
+    status: "campaign_scoped";
+  };
+};
+
+export const demoExecutionCampaign: DemoExecutionCampaign = Object.freeze({
+  id: "c1000000-0000-4000-8000-000000000004",
+  title: "Early-week lunch trial",
+  version: 2,
+  digest: "sha256:0b71ac93e2f5c8",
+  approvedAt: "2026-08-09T10:15:00.000Z",
+  approvedBy: "Agency operator",
+  timeZone: "Asia/Dubai",
+  receipts: Object.freeze([
+    Object.freeze({
+      id: "r-1",
+      channel: "Instagram",
+      placement: "Feed image",
+      state: "reconciled",
+      externalReference: "ig_media_17…4821",
+      publishedAt: "2026-08-10T13:45:00.000Z",
+      detail: "Provider confirmed the post and the reference was reconciled against the request.",
+    }),
+    Object.freeze({
+      id: "r-2",
+      channel: "Instagram",
+      placement: "Image story",
+      state: "published",
+      externalReference: "ig_media_17…4822",
+      publishedAt: "2026-08-10T13:47:00.000Z",
+      detail:
+        "Published. Awaiting the reconciliation sweep that confirms no duplicate was created.",
+    }),
+    Object.freeze({
+      id: "r-3",
+      channel: "Facebook",
+      placement: "Feed image",
+      state: "blocked",
+      externalReference: null,
+      publishedAt: null,
+      detail:
+        "Optional action, blocked at preflight. Execution mode is best effort, so the ready actions still ran.",
+    }),
+  ]),
+  spend: Object.freeze({
+    approved: { label: "Approved ceiling", amountMinor: 200_000, currency: "AED" },
+    reserved: { label: "Reserved at claim", amountMinor: 200_000, currency: "AED" },
+    providerReported: { label: "Provider reported", amountMinor: 138_400, currency: "AED" },
+    settled: null,
+  }),
+  exposures: Object.freeze({
+    recorded: 2,
+    source: "Provider receipts, one exposure record per confirmed action",
+  }),
+  measurement: Object.freeze({
+    primaryMetric: "Incremental gross profit",
+    method: "Reconciliation against a preregistered baseline",
+    baselineSource: "Channel economics ledger, four-week early-week median",
+    windowDays: 7,
+    windowClosesAt: "2026-08-17T13:45:00.000Z",
+    verdict: "execution_only",
+    verdictExplanation:
+      "Provider activity is verified, but the outcome window has not closed and settled spend has not arrived. No incremental result can be claimed yet.",
+    limitations: Object.freeze([
+      "Observational design: no randomised control is available for static brand creative.",
+      "Provider-reported spend is not final until the account settles.",
+      "One optional channel did not run, so reach is not comparable to the full approved plan.",
+    ]),
+  }),
+  guardrails: Object.freeze<DemoExecutionCampaign["guardrails"][number][]>([
+    { label: "Spend within approved ceiling", state: "holding" },
+    { label: "Margin floor not breached", state: "holding" },
+  ]),
+  learningProposal: Object.freeze({
+    observation:
+      "The evidence-led direction was the only one dispatched, so no comparison between directions is available from this run.",
+    limitation:
+      "A single campaign cannot separate the creative direction from the timing change made in the same version.",
+    suggestedNextTest:
+      "Hold the schedule fixed and vary only the direction, so the two effects are not confounded.",
+    status: "campaign_scoped",
+  }),
+});
+
 export function findDemoCampaign(campaignId: string): DemoCampaignDetail | null {
   return campaignId === demoCampaignDetail.id ? demoCampaignDetail : null;
+}
+
+export function findDemoExecution(campaignId: string): DemoExecutionCampaign | null {
+  return campaignId === demoExecutionCampaign.id ? demoExecutionCampaign : null;
 }
 
 export function formatMinor(money: { amountMinor: number; currency: string } | null): string {
