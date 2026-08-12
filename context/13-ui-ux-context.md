@@ -228,7 +228,13 @@ Complex configuration and bulk operations may be optimized for desktop and table
 
 ## 5.1 Agency-level navigation
 
-Use this order:
+**Deferred. No agency-level surface exists, and none is currently planned.** Every authenticated
+route is organization-scoped, and the account-wide overview page was removed rather than left
+standing on placeholder numbers. The root path resolves to an organization instead of to a portfolio
+view; see `adrs/0015-user-scoped-interface-state.md`.
+
+The order below is retained as intent for when a cross-organization surface is built. Do not treat it
+as describing the shipped product.
 
 1. **Portfolio**
 2. **Organizations**
@@ -253,21 +259,28 @@ Do not lead with decorative KPI cards that lack an associated decision.
 
 ## 5.2 Organization-level navigation
 
-Use this order:
+One flat **Workspace** group, rendered only when the pathname carries a valid organization
+identifier. The order leads with decision value rather than setup order:
 
-1. **Overview**
-2. **Digital Twin**
-3. **Goals**
-4. **Opportunities**
-5. **Approvals**
-6. **Experiments**
-7. **Customers / Audiences**
-8. **Integrations**
-9. **Memory**
-10. **Decision timeline**
-11. **Settings & governance**
+| #   | Entry                 | State                                                                     |
+| --- | --------------------- | ------------------------------------------------------------------------- |
+| 1   | **Overview**          | Shipped — the organization's landing surface, presenting the Digital Twin |
+| 2   | **Opportunities**     | Soon                                                                      |
+| 3   | **Campaigns**         | Soon                                                                      |
+| 4   | **Business Memory**   | Shipped                                                                   |
+| 5   | **Channel economics** | Shipped                                                                   |
+| 6   | **Integration Hub**   | Shipped                                                                   |
+| 7   | **Guided onboarding** | Shipped                                                                   |
+| 8   | **Agents**            | Soon                                                                      |
+| 9   | **Executions**        | Soon                                                                      |
 
-Industry Packs may insert domain modules after Experiments. The Restaurant Pack may add:
+**Settings** sits in the sidebar footer and is also Soon.
+
+An entry whose route does not exist yet renders as a disabled control with a `Soon` badge. It must
+never be an anchor and must never present an active state: a link to a route that does not exist is a
+404 dressed up as navigation. Give an entry its destination in the same change that ships its route.
+
+Industry Packs may insert domain modules after Campaigns. The Restaurant Pack may add:
 
 - Menu intelligence.
 - Delivery channels.
@@ -278,7 +291,11 @@ Industry Packs may insert domain modules after Experiments. The Restaurant Pack 
 
 - Use a persistent, collapsible left sidebar on desktop.
 - Use an off-canvas sidebar on mobile.
-- Keep the organization switcher at the top of the sidebar.
+- Keep the organization switcher at the top of the sidebar, directly above the Workspace group it
+  scopes. It carries the **Create organization** action, and it renders even on routes without an
+  organization in scope so `/organizations/new` is never a dead end.
+- Switching organizations navigates to the target's Overview, never to the equivalent page: the next
+  organization may hold no data for the current view and may not grant the same features.
 - Show an agency/organization scope label above the page title.
 - Use breadcrumbs for nested resources, not for primary navigation.
 - Preserve filters and table state in URL search parameters.
@@ -304,10 +321,10 @@ Industry Packs may insert domain modules after Experiments. The Restaurant Pack 
 SidebarProvider
 ├── AppSidebar
 │   ├── Product mark
-│   ├── Organization switcher
-│   ├── Primary navigation
+│   ├── Organization switcher   (always rendered; carries Create organization)
+│   ├── Workspace group         (only when the route is organization-scoped)
 │   ├── Status / usage section
-│   └── User menu
+│   └── User menu               (Settings entry is disabled until its route exists)
 └── SidebarInset
     ├── ContextTopbar
     │   ├── Breadcrumb
@@ -752,20 +769,20 @@ Do not use green to represent a recommendation before an outcome is measured.
 
 ## 11.2 Semantic palette reference
 
-| Role | Light reference | Dark reference | Usage |
-|---|---:|---:|---|
-| Canvas | `#F8FAFC` | `#0B1020` | App background |
-| Surface | `#FFFFFF` | `#111827` | Cards, tables, panels |
-| Foreground | `#111827` | `#F8FAFC` | Primary text |
-| Muted foreground | `#64748B` | `#94A3B8` | Secondary text |
-| Border | `#E2E8F0` | `rgba(255,255,255,.12)` | Dividers, outlines |
-| Primary | `#4F46E5` | `#818CF8` | Primary actions, selected navigation |
-| Primary hover | `#4338CA` | `#A5B4FC` | Hover/active |
-| AI | `#7C3AED` | `#A78BFA` | AI-assisted labels and provenance |
-| Success | `#047857` | `#34D399` | Measured positive result, healthy state |
-| Warning | `#B45309` | `#FBBF24` | Attention, stale, elevated risk |
-| Destructive | `#B91C1C` | `#F87171` | Failure, destructive action |
-| Info | `#0369A1` | `#38BDF8` | Informational state |
+| Role             | Light reference |          Dark reference | Usage                                   |
+| ---------------- | --------------: | ----------------------: | --------------------------------------- |
+| Canvas           |       `#F8FAFC` |               `#0B1020` | App background                          |
+| Surface          |       `#FFFFFF` |               `#111827` | Cards, tables, panels                   |
+| Foreground       |       `#111827` |               `#F8FAFC` | Primary text                            |
+| Muted foreground |       `#64748B` |               `#94A3B8` | Secondary text                          |
+| Border           |       `#E2E8F0` | `rgba(255,255,255,.12)` | Dividers, outlines                      |
+| Primary          |       `#4F46E5` |               `#818CF8` | Primary actions, selected navigation    |
+| Primary hover    |       `#4338CA` |               `#A5B4FC` | Hover/active                            |
+| AI               |       `#7C3AED` |               `#A78BFA` | AI-assisted labels and provenance       |
+| Success          |       `#047857` |               `#34D399` | Measured positive result, healthy state |
+| Warning          |       `#B45309` |               `#FBBF24` | Attention, stale, elevated risk         |
+| Destructive      |       `#B91C1C` |               `#F87171` | Failure, destructive action             |
+| Info             |       `#0369A1` |               `#38BDF8` | Informational state                     |
 
 These references are not direct component classes. Components must use semantic tokens.
 
@@ -807,12 +824,12 @@ Use CSS variables and semantic utilities. Do not hardcode palette values inside 
   --success: oklch(0.48 0.14 157);
   --success-foreground: oklch(0.985 0 0);
   --success-subtle: oklch(0.96 0.035 157);
-  --success-subtle-foreground: oklch(0.32 0.10 157);
+  --success-subtle-foreground: oklch(0.32 0.1 157);
 
   --warning: oklch(0.56 0.15 65);
   --warning-foreground: oklch(0.985 0 0);
   --warning-subtle: oklch(0.96 0.05 85);
-  --warning-subtle-foreground: oklch(0.34 0.10 55);
+  --warning-subtle-foreground: oklch(0.34 0.1 55);
 
   --info: oklch(0.49 0.14 238);
   --info-foreground: oklch(0.985 0 0);
@@ -873,10 +890,10 @@ Use CSS variables and semantic utilities. Do not hardcode palette values inside 
   --success-subtle: oklch(0.24 0.06 157);
   --success-subtle-foreground: oklch(0.87 0.08 157);
 
-  --warning: oklch(0.80 0.16 85);
-  --warning-foreground: oklch(0.20 0.05 70);
+  --warning: oklch(0.8 0.16 85);
+  --warning-foreground: oklch(0.2 0.05 70);
   --warning-subtle: oklch(0.27 0.06 70);
-  --warning-subtle-foreground: oklch(0.90 0.09 85);
+  --warning-subtle-foreground: oklch(0.9 0.09 85);
 
   --info: oklch(0.75 0.13 238);
   --info-foreground: oklch(0.16 0.04 238);
@@ -889,7 +906,7 @@ Use CSS variables and semantic utilities. Do not hardcode palette values inside 
   --ai-subtle-foreground: oklch(0.89 0.07 303);
 
   --chart-1: oklch(0.72 0.16 277);
-  --chart-2: oklch(0.70 0.14 160);
+  --chart-2: oklch(0.7 0.14 160);
   --chart-3: oklch(0.73 0.13 235);
   --chart-4: oklch(0.78 0.15 75);
   --chart-5: oklch(0.72 0.17 25);
@@ -945,17 +962,17 @@ Use `Noto Sans Arabic` when Arabic localization is enabled.
 
 ## 12.2 Type scale
 
-| Role | Size / line height | Weight | Usage |
-|---|---|---:|---|
-| App page title | `24/32` | 650 | Page title |
-| Large outcome | `28/34` | 650 | Revenue outcome, not general decoration |
-| Section title | `16/24` | 600 | Major section heading |
-| Card title | `14/20` | 600 | Dense cards and panels |
-| Body | `14/20` | 400 | Default product copy |
-| Compact body | `13/18` | 400 | Tables and dense metadata |
-| Label | `12/16` | 600 | Form labels and table headings |
-| Metadata | `12/16` | 400 | Timestamps, provenance, freshness |
-| Code/log | `12/18` | 400 | IDs, payloads, logs |
+| Role           | Size / line height | Weight | Usage                                   |
+| -------------- | ------------------ | -----: | --------------------------------------- |
+| App page title | `24/32`            |    650 | Page title                              |
+| Large outcome  | `28/34`            |    650 | Revenue outcome, not general decoration |
+| Section title  | `16/24`            |    600 | Major section heading                   |
+| Card title     | `14/20`            |    600 | Dense cards and panels                  |
+| Body           | `14/20`            |    400 | Default product copy                    |
+| Compact body   | `13/18`            |    400 | Tables and dense metadata               |
+| Label          | `12/16`            |    600 | Form labels and table headings          |
+| Metadata       | `12/16`            |    400 | Timestamps, provenance, freshness       |
+| Code/log       | `12/18`            |    400 | IDs, payloads, logs                     |
 
 ### Typography rules
 
@@ -1042,47 +1059,47 @@ Respect `prefers-reduced-motion`.
 
 Use the current shadcn/ui component implementation with **Radix UI primitives** unless a documented ADR changes the base.
 
-| Component | Use for | Do not use for |
-|---|---|---|
-| `Sidebar` | Primary app navigation, collapsible desktop shell, off-canvas mobile navigation | Page-specific filters |
-| `Command` / `CommandDialog` | Global search, quick navigation, organization switcher, command palette | Long forms or complex configuration |
-| `Breadcrumb` | Nested resource path | Replacing sidebar navigation |
-| `Card` | Bounded summary, opportunity, exception, compact metric group | Every section or every table row |
-| `Table` + TanStack Table v8 | Audit records, sortable/filterable lists, bulk operations | Small two-item summaries; do not adopt v9 while beta |
-| `Tabs` | Stable peer views within the same resource | Sequential onboarding steps |
-| `Sheet` | Contextual detail, quick edit, evidence panel, logs | Destructive confirmation or long multi-step setup |
-| `Drawer` | Mobile contextual detail or mobile filters | Desktop primary pattern when a sheet is appropriate |
-| `Dialog` | Focused bounded task | Full-page workflows |
-| `AlertDialog` | Irreversible, costly, external, or high-risk confirmation | Ordinary save confirmation |
-| `DropdownMenu` | Secondary row actions, user menu, compact overflow actions | Primary actions that must remain visible |
-| `ContextMenu` | Specialist desktop-only contextual actions when discoverability is not essential | Critical or primary actions |
-| `Popover` | Small interactive utility, date picker, compact filter | Long explanatory content |
-| `HoverCard` | Supplemental preview for known objects on pointer devices | Required information or mobile-only flows |
-| `Tooltip` | Icon labels and brief clarification | Long instructions, errors, or required evidence |
-| `Collapsible` | Optional advanced details, logs, assumptions | Hiding required approval information |
-| `Accordion` | FAQ-like or grouped configuration sections | Peer navigation better served by tabs |
-| `Form` + TanStack Form v1 + Zod | Complex validated forms and onboarding | Small forms or local search/filter controls that do not need library state |
-| `Input` | Short text and numeric values | Long-form content |
-| `Textarea` | Rejection reason, notes, prompt/template copy | Structured multi-value data |
-| `Select` | Small fixed option sets | Large searchable lists; use Combobox |
-| `Combobox` | Organization, branch, audience, integration, or large searchable option set | Tiny fixed choices |
-| `Checkbox` | Independent multi-selection | Mutually exclusive options |
-| `RadioGroup` | Small mutually exclusive options | Large searchable option sets |
-| `Switch` | Immediate binary preference with understandable consequence | One-time action or high-risk enablement without confirmation |
-| `Slider` | Bounded tuning with visible numeric value | Precise financial inputs; use numeric input |
-| `Calendar` / Date Picker | Date or date-range selection | Relative duration when presets are clearer |
-| `Badge` | Status, risk tier, data provenance, capability | Main CTA or long text |
-| `Alert` | Persistent page-level warning, blocker, degraded state | Ephemeral success feedback |
-| `Progress` | Known completion such as onboarding or measured run progress | Decorative readiness score alone |
-| `Skeleton` | Preserve layout during first load | Long-running execution progress |
-| `Sonner` | Ephemeral success, low-risk confirmation, background completion notice | Critical error, approval request, or information requiring action |
-| `Chart` | Trends, comparisons, experiment results | Data better read as exact table values |
-| `Pagination` | Server-paginated audit or large datasets | Small lists |
-| `ScrollArea` | Bounded logs, long menu, detail panel | Main page scrolling |
-| `Resizable` | Technical log/detail workspace when users benefit from adjustable panes | Standard product pages |
-| `Separator` | Subtle grouping | Replacing spacing hierarchy |
-| `Avatar` | Human identity or organization mark | AI agent identity; use role icon and label |
-| `Toggle` / `ToggleGroup` | Compact view mode or chart granularity | High-impact state changes |
+| Component                       | Use for                                                                          | Do not use for                                                             |
+| ------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `Sidebar`                       | Primary app navigation, collapsible desktop shell, off-canvas mobile navigation  | Page-specific filters                                                      |
+| `Command` / `CommandDialog`     | Global search, quick navigation, organization switcher, command palette          | Long forms or complex configuration                                        |
+| `Breadcrumb`                    | Nested resource path                                                             | Replacing sidebar navigation                                               |
+| `Card`                          | Bounded summary, opportunity, exception, compact metric group                    | Every section or every table row                                           |
+| `Table` + TanStack Table v8     | Audit records, sortable/filterable lists, bulk operations                        | Small two-item summaries; do not adopt v9 while beta                       |
+| `Tabs`                          | Stable peer views within the same resource                                       | Sequential onboarding steps                                                |
+| `Sheet`                         | Contextual detail, quick edit, evidence panel, logs                              | Destructive confirmation or long multi-step setup                          |
+| `Drawer`                        | Mobile contextual detail or mobile filters                                       | Desktop primary pattern when a sheet is appropriate                        |
+| `Dialog`                        | Focused bounded task                                                             | Full-page workflows                                                        |
+| `AlertDialog`                   | Irreversible, costly, external, or high-risk confirmation                        | Ordinary save confirmation                                                 |
+| `DropdownMenu`                  | Secondary row actions, user menu, compact overflow actions                       | Primary actions that must remain visible                                   |
+| `ContextMenu`                   | Specialist desktop-only contextual actions when discoverability is not essential | Critical or primary actions                                                |
+| `Popover`                       | Small interactive utility, date picker, compact filter                           | Long explanatory content                                                   |
+| `HoverCard`                     | Supplemental preview for known objects on pointer devices                        | Required information or mobile-only flows                                  |
+| `Tooltip`                       | Icon labels and brief clarification                                              | Long instructions, errors, or required evidence                            |
+| `Collapsible`                   | Optional advanced details, logs, assumptions                                     | Hiding required approval information                                       |
+| `Accordion`                     | FAQ-like or grouped configuration sections                                       | Peer navigation better served by tabs                                      |
+| `Form` + TanStack Form v1 + Zod | Complex validated forms and onboarding                                           | Small forms or local search/filter controls that do not need library state |
+| `Input`                         | Short text and numeric values                                                    | Long-form content                                                          |
+| `Textarea`                      | Rejection reason, notes, prompt/template copy                                    | Structured multi-value data                                                |
+| `Select`                        | Small fixed option sets                                                          | Large searchable lists; use Combobox                                       |
+| `Combobox`                      | Organization, branch, audience, integration, or large searchable option set      | Tiny fixed choices                                                         |
+| `Checkbox`                      | Independent multi-selection                                                      | Mutually exclusive options                                                 |
+| `RadioGroup`                    | Small mutually exclusive options                                                 | Large searchable option sets                                               |
+| `Switch`                        | Immediate binary preference with understandable consequence                      | One-time action or high-risk enablement without confirmation               |
+| `Slider`                        | Bounded tuning with visible numeric value                                        | Precise financial inputs; use numeric input                                |
+| `Calendar` / Date Picker        | Date or date-range selection                                                     | Relative duration when presets are clearer                                 |
+| `Badge`                         | Status, risk tier, data provenance, capability                                   | Main CTA or long text                                                      |
+| `Alert`                         | Persistent page-level warning, blocker, degraded state                           | Ephemeral success feedback                                                 |
+| `Progress`                      | Known completion such as onboarding or measured run progress                     | Decorative readiness score alone                                           |
+| `Skeleton`                      | Preserve layout during first load                                                | Long-running execution progress                                            |
+| `Sonner`                        | Ephemeral success, low-risk confirmation, background completion notice           | Critical error, approval request, or information requiring action          |
+| `Chart`                         | Trends, comparisons, experiment results                                          | Data better read as exact table values                                     |
+| `Pagination`                    | Server-paginated audit or large datasets                                         | Small lists                                                                |
+| `ScrollArea`                    | Bounded logs, long menu, detail panel                                            | Main page scrolling                                                        |
+| `Resizable`                     | Technical log/detail workspace when users benefit from adjustable panes          | Standard product pages                                                     |
+| `Separator`                     | Subtle grouping                                                                  | Replacing spacing hierarchy                                                |
+| `Avatar`                        | Human identity or organization mark                                              | AI agent identity; use role icon and label                                 |
+| `Toggle` / `ToggleGroup`        | Compact view mode or chart granularity                                           | High-impact state changes                                                  |
 
 ---
 
@@ -1650,13 +1667,13 @@ Place:
 Prefer:
 
 ```ts
-variant: "warning"
+variant: "warning";
 ```
 
 Avoid:
 
 ```ts
-variant: "yellow"
+variant: "yellow";
 ```
 
 ---

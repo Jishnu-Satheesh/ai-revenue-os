@@ -230,9 +230,20 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 
 ### Task 6: Expose the opportunity feed and campaign qualification boundary
 
+> **Amended 2026-08-12 by the organization navigation work.** There is no longer an account-wide
+> surface: `/overview` was deleted and every authenticated route is organization-scoped. Opportunities
+> is therefore `/organizations/[organizationId]/opportunities`, not the account-wide
+> `/opportunities` written below, and the "global page resolves the active organization explicitly"
+> instruction in Step 2 no longer applies — the route carries the organization.
+>
+> Step 4 also changes: the sidebar already renders an **Opportunities** entry, disabled with a `Soon`
+> badge. Enabling it means giving that existing entry a `path` in `workspaceEntries`, not adding a new
+> entry. Campaigns is in the same state, enabled the same way in Task 12. See
+> `docs/superpowers/specs/2026-08-09-organization-navigation-design.md`.
+
 **Files:**
 
-- Create: `src/app/(platform)/opportunities/page.tsx`
+- Create: `src/app/(platform)/organizations/[organizationId]/opportunities/page.tsx`
 - Create: `src/components/opportunities/{opportunity-feed,opportunity-card,query-options}.tsx` and tests
 - Create: `src/app/api/organizations/[organizationId]/opportunities/**/route.ts` and route tests
 - Create: `src/modules/campaigns/application/qualification.ts` and tests
