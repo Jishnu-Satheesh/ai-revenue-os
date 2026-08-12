@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
+import { isBefore, parseISO } from "date-fns";
 import { z } from "zod";
 
 /**
@@ -163,7 +164,10 @@ export function reconcileCallback(input: ReconcileCallbackInput): ReconcileCallb
     return { outcome: "rejected", resultCode: "oauth_session_already_used" };
   }
 
-  if (now.getTime() > Date.parse(session.expiresAt)) {
+  // A session is usable strictly before its expiry. The consuming RPC rejects
+  // on `expires_at <= now()`, so treating the exact boundary as still valid
+  // here would let this layer accept a handshake the database then refuses.
+  if (!isBefore(now, parseISO(session.expiresAt))) {
     return { outcome: "rejected", resultCode: "oauth_session_expired" };
   }
 

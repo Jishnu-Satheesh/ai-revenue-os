@@ -173,6 +173,30 @@ describe("callback reconciliation", () => {
     ).toEqual({ outcome: "rejected", resultCode: "oauth_session_expired" });
   });
 
+  it("treats the exact expiry instant as expired, matching the consuming RPC", () => {
+    // The database rejects on `expires_at <= now()`. If this layer accepted the
+    // boundary, it would approve a handshake the database then refuses.
+    expect(
+      reconcileCallback({
+        session,
+        presentedState: state,
+        actor: { organizationId, userId, hasCurrentRole: true },
+        providerKey: "fake_provider",
+        now: new Date(session.expiresAt),
+      }),
+    ).toEqual({ outcome: "rejected", resultCode: "oauth_session_expired" });
+
+    expect(
+      reconcileCallback({
+        session,
+        presentedState: state,
+        actor: { organizationId, userId, hasCurrentRole: true },
+        providerKey: "fake_provider",
+        now: new Date(Date.parse(session.expiresAt) - 1),
+      }),
+    ).toEqual({ outcome: "accepted" });
+  });
+
   it("rejects a mismatched state without revealing the expected value", () => {
     const result = reconcileCallback({
       session,
