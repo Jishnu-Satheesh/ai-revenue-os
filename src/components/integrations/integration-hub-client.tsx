@@ -23,6 +23,7 @@ import type { IntegrationHubSnapshot } from "@/modules/integrations/application/
 export type IntegrationHubClientProps = {
   organizationId: string;
   organizationName: string;
+  organizationTimeZone: string;
   role: OrganizationRole;
   initialSnapshot: IntegrationHubSnapshot;
   initialCatalog: readonly ProviderDefinition[];
@@ -45,6 +46,7 @@ const tabs = [
 export function IntegrationHubClient({
   organizationId,
   organizationName,
+  organizationTimeZone,
   role,
   initialSnapshot,
   initialCatalog,
@@ -119,6 +121,7 @@ export function IntegrationHubClient({
             snapshot={snapshot}
             catalog={catalog}
             role={role}
+            timeZone={organizationTimeZone}
           />
         </TabsContent>
         <TabsContent value="catalog" className="min-h-0">
@@ -135,10 +138,15 @@ export function IntegrationHubClient({
             snapshot={snapshot}
             metricTargets={metricTargets}
             role={role}
+            timeZone={organizationTimeZone}
           />
         </TabsContent>
         <TabsContent value="activity" className="min-h-0">
-          <ActivityTab activity={snapshot.recentActivity} isRefreshing={isRefreshing} />
+          <ActivityTab
+            activity={snapshot.recentActivity}
+            isRefreshing={isRefreshing}
+            timeZone={organizationTimeZone}
+          />
         </TabsContent>
       </Tabs>
     </div>

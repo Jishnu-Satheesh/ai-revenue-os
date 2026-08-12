@@ -34,28 +34,52 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import type { ProviderDefinition } from "@/domain/integrations/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import { hasIntegrationPermission } from "@/domain/integrations/permissions";
+import {
+  hasIntegrationPermission,
+  hasUsableIntegrationGrant,
+} from "@/domain/integrations/permissions";
 import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 
 type Connection = IntegrationHubSnapshot["connections"][number];
 
-const rolloutPresentation = {
-  fixture: {
-    label: "Fixture",
-    description: "Deterministic sample data. No provider request is made.",
-    variant: "secondary" as const,
-  },
-  available: {
-    label: "Available",
-    description: "Generally available for this organization.",
-    variant: "default" as const,
-  },
-  disabled: {
-    label: "Not available",
-    description: "Provider access has not been approved for V1.",
+function providerState(definition: ProviderDefinition, connections: readonly Connection[]) {
+  const matching = connections.filter(({ provider_key }) => provider_key === definition.key);
+  if (definition.rolloutState === "disabled") {
+    return {
+      label: "Blocked",
+      description: "No current organization grant proves a usable capability.",
+      variant: "destructive" as const,
+    };
+  }
+  if (
+    matching.some((connection) =>
+      connection.capabilities.some((grant) =>
+        hasUsableIntegrationGrant({
+          availability: grant.availability,
+          connectionStatus: connection.status,
+        }),
+      ),
+    )
+  ) {
+    return {
+      label: "Available",
+      description: "At least one capability is usable for this organization.",
+      variant: "default" as const,
+    };
+  }
+  if (matching.length > 0) {
+    return {
+      label: "Blocked",
+      description: "No current organization grant proves a usable capability.",
+      variant: "destructive" as const,
+    };
+  }
+  return {
+    label: "Setup required",
+    description: "Connect and verify this provider for the organization.",
     variant: "outline" as const,
-  },
-};
+  };
+}
 
 /**
  * The fixture connection is deterministic, so its external identity is a
@@ -91,8 +115,10 @@ export function CatalogTab({
           body: JSON.stringify({
             providerKey: definition.key,
             ...fixtureAccount,
-            grantedScopes: [...definition.requiredScopes],
-            idempotencyKey: `fixture:${definition.key}:${fixtureAccount.externalAccountId}`,
+            grantedScopes: [
+              ...new Set(definition.capabilities.flatMap(({ requiredScopes }) => requiredScopes)),
+            ],
+            idempotencyKey: `fixture:${definition.key}:${definition.contractVersion}:${crypto.randomUUID()}`,
           }),
         },
       ),
@@ -114,16 +140,16 @@ export function CatalogTab({
     <div className="flex flex-col gap-4">
       <Alert>
         <ShieldCheck />
-        <AlertTitle>V1 reads only</AlertTitle>
+        <AlertTitle>Capability-gated provider access</AlertTitle>
         <AlertDescription>
-          No provider in this catalog can write back or receive webhooks. Real Google OAuth stays
-          disabled until Google approves API access and the credential security review passes.
+          A provider action is usable only when its current organization grant, exact contract,
+          adapter, evidence, scopes, mapping, and policy all agree.
         </AlertDescription>
       </Alert>
 
       <ul aria-label="Provider catalog" className="grid gap-4 md:grid-cols-2">
         {catalog.map((definition) => {
-          const presentation = rolloutPresentation[definition.rolloutState];
+          const presentation = providerState(definition, connections);
           const connected = connections.some(
             (connection) => connection.provider_key === definition.key,
           );
@@ -134,7 +160,7 @@ export function CatalogTab({
                   <CardTitle className="flex flex-wrap items-center gap-2">
                     {definition.displayName}
                     <Badge variant={presentation.variant}>
-                      {definition.rolloutState === "disabled" ? (
+                      {presentation.label === "Blocked" ? (
                         <CircleSlash aria-hidden="true" />
                       ) : (
                         <PlugZap aria-hidden="true" />
@@ -155,9 +181,9 @@ export function CatalogTab({
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground uppercase">Capabilities</span>
                     <div className="flex flex-wrap gap-2">
-                      {definition.supportedCapabilities.map((capability) => (
-                        <Badge key={capability} variant="outline">
-                          {capability}
+                      {definition.capabilities.map((capability) => (
+                        <Badge key={capability.key} variant="outline">
+                          {capability.key} · {capability.effect}
                         </Badge>
                       ))}
                     </div>
@@ -165,15 +191,26 @@ export function CatalogTab({
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground uppercase">Required access</span>
                     <span className="text-muted-foreground">
-                      {definition.requiredScopes.length > 0
-                        ? definition.requiredScopes.join(", ")
-                        : "No provider scopes are requested in fixture mode."}
+                      {definition.capabilities.some(
+                        ({ requiredScopes }) => requiredScopes.length > 0,
+                      )
+                        ? [
+                            ...new Set(
+                              definition.capabilities.flatMap(
+                                ({ requiredScopes }) => requiredScopes,
+                              ),
+                            ),
+                          ].join(", ")
+                        : definition.rolloutState === "fixture"
+                          ? "No provider scopes are requested in fixture mode."
+                          : "No provider scopes are required for these capabilities."}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Read-only · no provider writes or webhooks · syncs every{" "}
-                    {definition.syncIntervalMinutes} minutes · stale after{" "}
-                    {definition.staleAfterMinutes} minutes
+                    {definition.characters.join(" · ")}
+                    {definition.capabilities.some(({ adapterKind }) => adapterKind === "read")
+                      ? ` · syncs every ${definition.syncIntervalMinutes} minutes · stale after ${definition.staleAfterMinutes} minutes`
+                      : ""}
                   </p>
                 </CardContent>
                 <CardFooter>

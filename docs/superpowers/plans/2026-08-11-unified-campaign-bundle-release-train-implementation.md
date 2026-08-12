@@ -176,7 +176,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - [ ] **Step 6: Verify.** Run `pnpm vitest run src/domain/integrations src/modules/integrations src/components/integrations`, `pnpm db:test`, `pnpm typecheck`, and `pnpm lint`.
 - [ ] **Step 7: Commit.** `git commit -m "feat(integrations): model governed action capabilities"`.
 
-### Task 3: Add the production credential and OAuth connection substrate
+### Task 3: Add the production credential and fail-closed OAuth substrate
 
 **Files:**
 
@@ -190,8 +190,8 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 
 - [ ] **Step 1: Write failing security tests.** Assert state is random, stored only as a digest, single-use, expires, is bound to organization/user/provider, rejects callback mismatch before token exchange, and never returns/logs OAuth codes, access/refresh tokens, app secret, credential handle, or decrypted Vault output.
 - [ ] **Step 2: Implement the server-only credential adapter.** The only public value is `CredentialHandle`; decrypted values expose `toJSON(): never`. Restrict Vault RPC execution to worker/server functions documented by the security review. Rotation and revoke are idempotent and preserve safe audit metadata.
-- [ ] **Step 3: Implement generic OAuth sessions.** Add server-only `META_APP_ID` and `META_APP_SECRET`; compute the callback from `NEXT_PUBLIC_APP_URL`. The organization route creates a persisted one-time session and provider authorization URL from the verified contract. The callback atomically consumes state, exchanges the code server-side, stores the credential, writes the connection/scopes/expiry, recomputes grants, and redirects with a safe opaque result code.
-- [ ] **Step 4: Add Meta as the first production connection definition.** Account discovery and mapping remain server-side. Register Instagram publishing, Facebook publishing, Meta Ads, metrics read, and webhook intake as distinct grants; one missing grant must not disable unrelated grants.
+- [ ] **Step 3: Implement generic OAuth sessions behind verified provider adapters.** Add optional paired server-only `META_APP_ID` and `META_APP_SECRET`; compute callbacks from `NEXT_PUBLIC_APP_URL`. Exercise one-time session creation/consumption, exchange, storage, connection finalization, and grant recomputation through a fake provider in tests. Until the checked-in Meta contract proves exact OAuth endpoints and controlled-account behavior, production Meta lookup fails before session creation and no authorization URL is invented.
+- [ ] **Step 4: Add Meta as a catalog-visible blocked declaration.** Show Instagram publishing, Facebook publishing, Meta Ads, metrics read, and webhook intake as distinct desired capabilities with exact checked-in restrictions. Do not register executable Meta adapters or create available grants until the later provider tasks supply current contract and controlled-account evidence.
 - [ ] **Step 5: Verify migrations and route behavior.** Include two-tenant pgTAP, replayed callback, expired state, revoked user, token exchange failure, credential-store failure, and safe error cases.
 - [ ] **Step 6: Run security review checkpoint.** Document least privilege, encryption/key ownership, rotation, revocation, backup/restore, incident response, and provider-app secret handling under `docs/verification/campaigns/credential-security-review.md`. Gate 4 cannot pass without sign-off.
 - [ ] **Step 7: Commit.** `git commit -m "feat(integrations): add governed OAuth credential boundary"`.

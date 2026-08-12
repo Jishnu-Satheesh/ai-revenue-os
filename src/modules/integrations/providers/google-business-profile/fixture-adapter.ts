@@ -94,6 +94,8 @@ export function createGoogleBusinessProfileFixtureAdapter(
   return {
     providerKey: googleBusinessProfileDefinition.key,
     adapterVersion: googleBusinessProfileDefinition.adapterVersion,
+    adapterKind: "read",
+    supportedCapabilityKeys: googleBusinessProfileDefinition.capabilities.map(({ key }) => key),
 
     async testConnection(input): Promise<ConnectionTestResult> {
       parseContext(input);

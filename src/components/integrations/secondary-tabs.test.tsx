@@ -25,13 +25,50 @@ const pendingProvider: ProviderDefinition = {
   key: "meta_business",
   displayName: "Meta Business",
   adapterVersion: "1",
+  contractVersion: "meta-v1",
   rolloutState: "disabled",
-  supportedCapabilities: ["read_reviews"],
-  requiredScopes: ["pages_read_engagement"],
+  characters: ["data_source"],
+  capabilities: [
+    {
+      key: "read_reviews",
+      character: "data_source",
+      direction: "inbound",
+      effect: "read",
+      maturity: "read-only",
+      requiredScopes: ["pages_read_engagement"],
+      restrictionCodes: [],
+      adapterKind: "read",
+      prerequisites: ["account_mapped", "credential_current"],
+      requiredWebhookEventKeys: [],
+    },
+  ],
   syncIntervalMinutes: 60,
   staleAfterMinutes: 130,
-  supportsWebhooks: false,
-  supportsWrites: false,
+};
+
+const operatorProvider: ProviderDefinition = {
+  key: "operator_provider",
+  displayName: "Operator Provider",
+  adapterVersion: "1",
+  contractVersion: "operator-v1",
+  rolloutState: "available",
+  characters: ["operator_review"],
+  capabilities: [
+    {
+      key: "review_operation",
+      character: "operator_review",
+      direction: "inbound",
+      effect: "operator_control",
+      maturity: "governed-write",
+      requiredScopes: [],
+      restrictionCodes: [],
+      adapterKind: "operator_review",
+      prerequisites: ["organization_entitled", "linked_operator"],
+      requiredWebhookEventKeys: [],
+    },
+  ],
+  syncIntervalMinutes: 999,
+  staleAfterMinutes: 999,
 };
 
 function source(overrides: Partial<IntegrationDataSourceRow> = {}): IntegrationDataSourceRow {
@@ -116,6 +153,7 @@ function renderSources(
       snapshot={options.snapshot ?? snapshot()}
       metricTargets={options.metricTargets ?? metricTargets}
       role={options.role ?? "operator"}
+      timeZone="Asia/Kolkata"
     />,
   );
 }
@@ -138,10 +176,10 @@ describe("CatalogTab", () => {
     expect(screen.getByText("Fixture mode — Google API access pending.")).toBeInTheDocument();
     expect(screen.getAllByText(/Fixture/).length).toBeGreaterThan(0);
     expect(screen.getByText("Meta Business")).toBeInTheDocument();
-    expect(screen.getByText(/Not available/i)).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
     expect(screen.getByText(/pages_read_engagement/)).toBeInTheDocument();
-    // V1 is read-only: no provider offers a write capability anywhere.
-    expect(screen.getAllByText(/Read-only · no provider writes or webhooks/i).length).toBe(2);
+    expect(screen.getAllByText(/data_source/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/V1 reads only/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Sign in with Google/i })).not.toBeInTheDocument();
   });
 
@@ -161,6 +199,12 @@ describe("CatalogTab", () => {
     expect(fetchSpy.mock.calls[0]?.[0]).toBe(
       `/api/organizations/${organizationId}/integrations/connections/fixture`,
     );
+    const request = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      idempotencyKey: expect.stringMatching(
+        /^fixture:google_business_profile:fixture-v1:[0-9a-f-]{36}$/,
+      ),
+    });
   });
 
   it("offers a viewer no connect control", () => {
@@ -168,6 +212,23 @@ describe("CatalogTab", () => {
 
     expect(screen.queryByRole("button", { name: /Connect fixture/i })).not.toBeInTheDocument();
     expect(screen.getByText("Google Business Profile")).toBeInTheDocument();
+  });
+
+  it("uses neutral zero-scope copy and does not invent sync behavior for a non-read provider", () => {
+    wrap(
+      <CatalogTab
+        organizationId={organizationId}
+        catalog={[operatorProvider]}
+        connections={[]}
+        role="operator"
+      />,
+    );
+
+    expect(
+      screen.getByText("No provider scopes are required for these capabilities."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/fixture mode/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/syncs every 999/i)).not.toBeInTheDocument();
   });
 });
 
@@ -353,6 +414,7 @@ describe("ActivityTab", () => {
           },
         ]}
         isRefreshing={false}
+        timeZone="Asia/Kolkata"
       />,
     );
 
@@ -366,12 +428,14 @@ describe("ActivityTab", () => {
   });
 
   it("shows an empty state and a background-refetch indicator", () => {
-    const { rerender } = wrap(<ActivityTab activity={[]} isRefreshing={false} />);
+    const { rerender } = wrap(
+      <ActivityTab activity={[]} isRefreshing={false} timeZone="Asia/Kolkata" />,
+    );
     expect(screen.getByText(/No integration activity yet/i)).toBeInTheDocument();
 
     rerender(
       <QueryClientProvider client={new QueryClient()}>
-        <ActivityTab activity={[]} isRefreshing />
+        <ActivityTab activity={[]} isRefreshing timeZone="Asia/Kolkata" />
       </QueryClientProvider>,
     );
     expect(screen.getByRole("status", { name: /refreshing activity/i })).toBeInTheDocument();

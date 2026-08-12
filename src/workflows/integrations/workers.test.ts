@@ -73,6 +73,8 @@ function fixtureAdapter(overrides: Partial<ProviderAdapter> = {}): ProviderAdapt
   return {
     providerKey: "google_business_profile",
     adapterVersion: "1",
+    adapterKind: "read",
+    supportedCapabilityKeys: ["read_google_business_profile", "read_reviews"],
     testConnection: vi.fn().mockResolvedValue({ outcome: "passed", safeDetail: "Fixture passed." }),
     listExternalResources: vi.fn().mockResolvedValue([]),
     sync: vi.fn().mockResolvedValue([

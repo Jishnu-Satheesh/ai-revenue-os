@@ -53,11 +53,13 @@ export function DataSourcesTab({
   snapshot,
   metricTargets,
   role,
+  timeZone,
 }: Readonly<{
   organizationId: string;
   snapshot: IntegrationHubSnapshot;
   metricTargets: readonly MetricTargetChoice[];
   role: OrganizationRole;
+  timeZone: string;
 }>) {
   const queryClient = useQueryClient();
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
@@ -249,14 +251,14 @@ export function DataSourcesTab({
                     </CardTitle>
                     <CardDescription>
                       {dataSource.original_filename ?? "No uploaded file"} · last successful import{" "}
-                      {formatInstant(dataSource.last_successful_import_at)}
+                      {formatInstant(dataSource.last_successful_import_at, timeZone)}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-3">
                     {latestRun && latestRun.kind === "ingestion_run" ? (
                       <p className="text-sm">
                         Latest run: {runStatusLabel(latestRun.status)} ·{" "}
-                        {formatInstant(latestRun.occurredAt)}
+                        {formatInstant(latestRun.occurredAt, timeZone)}
                       </p>
                     ) : null}
                     {archived ? (

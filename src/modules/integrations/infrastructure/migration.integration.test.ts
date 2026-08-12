@@ -26,6 +26,26 @@ const dataSourceOperationsMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260808033746_integration_data_source_operations.sql",
 );
+const actionCapabilitiesMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260812100000_integration_action_capabilities.sql",
+);
+const actionCapabilitiesRepairMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260812103000_integration_action_capabilities_repair.sql",
+);
+const fixtureGrantValidationRepairMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260812104500_integration_fixture_grant_validation_repair.sql",
+);
+const fixtureMappingHardeningMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20260812105000_integration_fixture_mapping_hardening.sql",
+);
+const actionCapabilitiesPgTapPath = resolve(
+  process.cwd(),
+  "supabase/tests/database/integration_action_capabilities_test.sql",
+);
 const integrationMigrationNames = readdirSync(migrationsDirectory)
   .filter((name) => /^\d{14}_integration_hub\.sql$/.test(name))
   .sort();
@@ -53,6 +73,22 @@ function readAuthenticatedOperationsMigration() {
 
 function readDataSourceOperationsMigration() {
   return readFileSync(dataSourceOperationsMigrationPath, "utf8");
+}
+
+function readActionCapabilitiesMigration() {
+  return readFileSync(actionCapabilitiesMigrationPath, "utf8");
+}
+
+function readActionCapabilitiesRepairMigration() {
+  return readFileSync(actionCapabilitiesRepairMigrationPath, "utf8");
+}
+
+function readFixtureGrantValidationRepairMigration() {
+  return readFileSync(fixtureGrantValidationRepairMigrationPath, "utf8");
+}
+
+function readFixtureMappingHardeningMigration() {
+  return readFileSync(fixtureMappingHardeningMigrationPath, "utf8");
 }
 
 function functionDefinition(sql: string, qualifiedName: string) {
@@ -104,6 +140,133 @@ const tenantTables = [
 ] as const;
 
 describe("Integration Hub migration contract", () => {
+  it("adds governed capability evidence while preserving strict fixture admission", () => {
+    const sql = readActionCapabilitiesMigration();
+    const connect = functionDefinition(sql, "public.connect_fixture_integration_with_grants");
+    const mappings = functionDefinition(sql, "public.replace_integration_mappings_with_grants");
+    const identity = functionDefinition(sql, "private.prevent_integration_identity_change");
+    const monotonic = functionDefinition(sql, "private.enforce_integration_grant_version");
+    const disable = functionDefinition(
+      sql,
+      "private.disable_integration_grants_for_inactive_connection",
+    );
+    const fixtureValidator = functionDefinition(sql, "private.assert_google_fixture_grants");
+
+    expect(sql).toContain("add column restriction_codes text[]");
+    expect(sql).toContain("add column derived_from_contract_version text");
+    expect(sql).toContain("add column grant_version bigint");
+    expect(sql).toContain("alter column restriction_codes set not null");
+    expect(sql).toContain("alter column derived_from_contract_version set not null");
+    expect(sql).toContain("alter column grant_version set not null");
+    expect(sql).toContain("check (grant_version > 0)");
+    expect(sql).toContain(
+      "alter table public.integration_capability_grants enable row level security",
+    );
+    expect(sql).toContain(
+      "alter table public.integration_capability_grants force row level security",
+    );
+    expect(sql).toContain(
+      "grant select on table public.integration_capability_grants to authenticated",
+    );
+    expect(sql).toContain(
+      "revoke all on table public.integration_capability_grants from public, anon, authenticated",
+    );
+    expect(identity).not.toContain("'derived_from_contract_version'");
+    expect(identity).not.toContain("'grant_version'");
+    expect(monotonic).toContain("old.grant_version + 1");
+    expect(disable).toContain("connection_revoked");
+    expect(disable).toContain("connection_disconnected");
+    expect(disable).not.toContain("grant_version =");
+
+    expect(connect).toContain("p_provider_key <> 'google_business_profile'");
+    expect(mappings).toContain("locked_connection.provider_key <> 'google_business_profile'");
+    expect(fixtureValidator).toContain("jsonb_array_length(p_grants) <> 2");
+    expect(fixtureValidator).toContain("jsonb_object_length(grant_payload) <> 7");
+    expect(fixtureValidator).toContain("read_google_business_profile");
+    expect(fixtureValidator).toContain("read_reviews");
+    expect(fixtureValidator).toContain("derived_from_contract_version");
+    expect(fixtureValidator).toContain("restriction_codes");
+    for (const operation of [connect, mappings]) {
+      expect(operation).toContain("assert_google_fixture_grants");
+      expect(operation).toContain("on conflict (organization_id, connection_id, capability_key)");
+      expect(operation).not.toContain("delete from public.integration_capability_grants");
+    }
+
+    const pgTap = readFileSync(actionCapabilitiesPgTapPath, "utf8");
+    expect(pgTap).toContain("set local role authenticated");
+    expect(pgTap).toContain("two-tenant");
+    expect(pgTap).toContain("viewer cannot update governed grants");
+    expect(pgTap).toContain("inactive connection disables grants");
+    expect(pgTap).toContain("composite ownership rejects a foreign connection");
+    expect(pgTap).toContain("direct RPC rejects a forged capability");
+    expect(pgTap).toContain("grant version increases monotonically");
+    expect(pgTap).toContain("no-op recompute preserves grant version");
+    expect(pgTap).toContain("caller-supplied grant version is rejected");
+    expect(pgTap).toContain("direct RPC rejects an extra grant key");
+  });
+
+  it("repairs the pushed fixture RPC forward without rewriting migration history", () => {
+    const sql = readActionCapabilitiesRepairMigration();
+
+    expect(sql).toContain("pg_get_functiondef(function_signature)");
+    expect(sql).toContain("'pg_catalog.coalesce'");
+    expect(sql).toContain("'coalesce'");
+    expect(sql).toContain("connect_fixture_integration_with_grants");
+    expect(sql).toContain("replace_integration_mappings_with_grants");
+    expect(sql).toContain("expected integration RPC repair target is unavailable");
+    expect(sql).toContain(
+      "grant execute on function public.connect_fixture_integration_with_grants",
+    );
+    expect(sql).toContain(
+      "grant execute on function public.replace_integration_mappings_with_grants",
+    );
+  });
+
+  it("repairs exact fixture grant key counting through a portable PostgreSQL primitive", () => {
+    const sql = readFixtureGrantValidationRepairMigration();
+
+    expect(sql).toContain("private.assert_google_fixture_grants(jsonb,text,text)");
+    expect(sql).toContain("pg_catalog.jsonb_object_length(grant_payload) <> 7");
+    expect(sql).toContain(
+      "(select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(grant_payload)) <> 7",
+    );
+    expect(sql).toContain("expected fixture grant validator repair target is unavailable");
+    expect(sql).toContain(
+      "revoke all on function private.assert_google_fixture_grants(jsonb, text, text) from public",
+    );
+  });
+
+  it("hardens mapping JSON and seeds exact fixture resources in a forward-only migration", () => {
+    const sql = readFixtureMappingHardeningMigration();
+    const mappingValidator = functionDefinition(sql, "private.assert_google_fixture_mappings");
+    const connect = functionDefinition(sql, "public.connect_fixture_integration_with_grants");
+    const mappings = functionDefinition(sql, "public.replace_integration_mappings_with_grants");
+
+    expect(mappingValidator).toContain("jsonb_typeof(p_mappings) <> 'array'");
+    expect(mappingValidator).toContain("jsonb_array_length(p_mappings) <> 2");
+    expect(mappingValidator).toContain("jsonb_object_keys(mapping_payload)");
+    expect(mappingValidator).toContain("external_resource_id");
+    expect(mappingValidator).toContain(
+      "count(distinct mapping_payload ->> 'external_resource_id')",
+    );
+    expect(mappingValidator).toContain("locations/fixture-harbor-house");
+    expect(mappingValidator).toContain("locations/fixture-river-market");
+    expect(mappings).toContain("perform private.assert_google_fixture_mappings(p_mappings)");
+    expect(connect).toContain("locations/fixture-harbor-house");
+    expect(connect).toContain("locations/fixture-river-market");
+    expect(connect).toContain(
+      "on conflict (organization_id, connection_id, external_resource_id) do nothing",
+    );
+    expect(connect).toContain("mapping_row.status = 'mapped'");
+    expect(connect).toContain("perform private.assert_google_fixture_grants");
+    expect(sql).toContain(
+      "grant execute on function public.connect_fixture_integration_with_grants",
+    );
+    expect(sql).toContain(
+      "grant execute on function public.replace_integration_mappings_with_grants",
+    );
+  });
+
   it("uses authenticated, tenant-checked atomic RPCs for connection operations", () => {
     const sql = readAuthenticatedOperationsMigration();
     const connect = functionDefinition(sql, "public.connect_fixture_integration_with_grants");

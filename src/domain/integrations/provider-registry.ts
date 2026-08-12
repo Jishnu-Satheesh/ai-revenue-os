@@ -1,60 +1,164 @@
 import { DomainError } from "@/lib/errors";
 
 import { IntegrationError } from "@/domain/integrations/errors";
-import type { ProviderAdapter, ProviderDefinition } from "@/domain/integrations/types";
+import { providerDefinitionSchema } from "@/domain/integrations/schemas";
+import type { ProviderAdapterKind } from "@/domain/integrations/schemas";
+import type {
+  CapabilityAdapter,
+  ProviderAdapterMaps,
+  ProviderDefinition,
+  ReadProviderAdapter,
+} from "@/domain/integrations/types";
+
+type RegisteredCapabilityAdapter =
+  | ReadProviderAdapter
+  | import("@/domain/integrations/types").CapabilityAdapter;
 
 export type ProviderRegistry = {
   listDefinitions(): readonly ProviderDefinition[];
   getDefinition(providerKey: string): ProviderDefinition;
-  getAdapter(providerKey: string, adapterVersion: string): ProviderAdapter;
+  getAdapter(providerKey: string, adapterVersion: string, adapterKind: "read"): ReadProviderAdapter;
+  getAdapter(
+    providerKey: string,
+    adapterVersion: string,
+    adapterKind: Exclude<ProviderAdapterKind, "read">,
+  ): CapabilityAdapter;
+  hasAdapter(
+    providerKey: string,
+    adapterVersion: string,
+    adapterKind: ProviderAdapterKind,
+  ): boolean;
 };
 
-export function createProviderRegistry(
-  definitions: readonly ProviderDefinition[],
-  adapters: readonly ProviderAdapter[],
-): ProviderRegistry {
-  const definitionsByKey = new Map<string, ProviderDefinition>();
-  const adaptersByProviderAndVersion = new Map<string, ProviderAdapter>();
+function adapterKey(providerKey: string, adapterVersion: string, adapterKind: ProviderAdapterKind) {
+  return `${providerKey}:${adapterVersion}:${adapterKind}`;
+}
 
-  for (const definition of definitions) {
+function freezeDefinition(definition: ProviderDefinition): ProviderDefinition {
+  return Object.freeze({
+    ...definition,
+    characters: Object.freeze([...definition.characters]),
+    capabilities: Object.freeze(
+      definition.capabilities.map((capability) =>
+        Object.freeze({
+          ...capability,
+          requiredScopes: Object.freeze([...capability.requiredScopes]),
+          restrictionCodes: Object.freeze([...capability.restrictionCodes]),
+          prerequisites: Object.freeze([...capability.prerequisites]),
+          requiredWebhookEventKeys: Object.freeze([...capability.requiredWebhookEventKeys]),
+        }),
+      ),
+    ),
+  });
+}
+
+export function createProviderRegistry(input: {
+  definitions: readonly ProviderDefinition[];
+  adapters: ProviderAdapterMaps;
+}): ProviderRegistry {
+  const definitionsByKey = new Map<string, ProviderDefinition>();
+  const adaptersByIdentity = new Map<string, RegisteredCapabilityAdapter>();
+
+  for (const unparsedDefinition of input.definitions) {
+    const definition = providerDefinitionSchema.parse(unparsedDefinition) as ProviderDefinition;
     if (definitionsByKey.has(definition.key)) {
       throw new DomainError("VALIDATION_ERROR", `Duplicate provider key: ${definition.key}`);
     }
-    if (definition.supportsWebhooks) {
-      throw new DomainError("FEATURE_NOT_AVAILABLE", "Provider webhooks are not supported in V1.");
-    }
-    if (definition.supportsWrites) {
-      throw new DomainError("FEATURE_NOT_AVAILABLE", "Provider writes are not supported in V1.");
-    }
-    definitionsByKey.set(
-      definition.key,
-      Object.freeze({
-        ...definition,
-        supportedCapabilities: Object.freeze([...definition.supportedCapabilities]),
-        requiredScopes: Object.freeze([...definition.requiredScopes]),
-      }),
-    );
+    definitionsByKey.set(definition.key, freezeDefinition(definition));
   }
 
-  for (const adapter of adapters) {
-    const definition = definitionsByKey.get(adapter.providerKey);
-    if (!definition) {
-      throw new DomainError(
-        "VALIDATION_ERROR",
-        `Provider is not registered: ${adapter.providerKey}`,
+  for (const adapterKind of [
+    "read",
+    "publish",
+    "advertise",
+    "webhook",
+    "operator_review",
+  ] as const) {
+    const adapters = input.adapters[adapterKind] ?? [];
+    for (const adapter of adapters as readonly RegisteredCapabilityAdapter[]) {
+      const definition = definitionsByKey.get(adapter.providerKey);
+      if (!definition) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          `Provider is not registered: ${adapter.providerKey}`,
+        );
+      }
+      if (adapter.adapterKind !== adapterKind) {
+        throw new DomainError("VALIDATION_ERROR", "Provider adapter is in the wrong adapter map.");
+      }
+      if (definition.adapterVersion !== adapter.adapterVersion) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "Provider adapter version does not match its definition.",
+        );
+      }
+      const key = adapterKey(adapter.providerKey, adapter.adapterVersion, adapterKind);
+      if (adaptersByIdentity.has(key)) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          `Duplicate ${adapterKind} provider adapter: ${key}`,
+        );
+      }
+      adaptersByIdentity.set(key, adapter);
+    }
+  }
+
+  for (const definition of definitionsByKey.values()) {
+    for (const adapterKind of [
+      "read",
+      "publish",
+      "advertise",
+      "webhook",
+      "operator_review",
+    ] as const) {
+      const expectedKeys = definition.capabilities
+        .filter((capability) => capability.adapterKind === adapterKind)
+        .map(({ key }) => key)
+        .sort();
+      const adapter = adaptersByIdentity.get(
+        adapterKey(definition.key, definition.adapterVersion, adapterKind),
+      );
+      if (expectedKeys.length === 0 && adapter) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          `Provider ${definition.key} does not declare a ${adapterKind} capability for this adapter.`,
+        );
+      }
+      if (expectedKeys.length === 0) continue;
+      if (!adapter) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          `Capability ${expectedKeys[0]} requires a registered ${adapterKind} adapter.`,
+        );
+      }
+      const claimedKeys = [...adapter.supportedCapabilityKeys].sort();
+      if (
+        claimedKeys.length !== new Set(claimedKeys).size ||
+        claimedKeys.length !== expectedKeys.length ||
+        claimedKeys.some((key, index) => key !== expectedKeys[index])
+      ) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          `${adapterKind} adapter must exactly claim its provider capability keys.`,
+        );
+      }
+    }
+  }
+
+  function getAdapter(
+    providerKey: string,
+    adapterVersion: string,
+    adapterKind: ProviderAdapterKind,
+  ): RegisteredCapabilityAdapter {
+    const adapter = adaptersByIdentity.get(adapterKey(providerKey, adapterVersion, adapterKind));
+    if (!adapter) {
+      throw new IntegrationError(
+        "NOT_FOUND",
+        `Provider ${adapterKind} adapter is not registered: ${providerKey}`,
+        false,
       );
     }
-    if (definition.adapterVersion !== adapter.adapterVersion) {
-      throw new DomainError(
-        "VALIDATION_ERROR",
-        "Provider adapter version does not match its definition.",
-      );
-    }
-    const adapterKey = `${adapter.providerKey}:${adapter.adapterVersion}`;
-    if (adaptersByProviderAndVersion.has(adapterKey)) {
-      throw new DomainError("VALIDATION_ERROR", `Duplicate provider adapter: ${adapterKey}`);
-    }
-    adaptersByProviderAndVersion.set(adapterKey, adapter);
+    return adapter;
   }
 
   return {
@@ -66,16 +170,9 @@ export function createProviderRegistry(
       }
       return definition;
     },
-    getAdapter(providerKey, adapterVersion) {
-      const adapter = adaptersByProviderAndVersion.get(`${providerKey}:${adapterVersion}`);
-      if (!adapter) {
-        throw new IntegrationError(
-          "NOT_FOUND",
-          `Provider adapter is not registered: ${providerKey}`,
-          false,
-        );
-      }
-      return adapter;
+    getAdapter: getAdapter as ProviderRegistry["getAdapter"],
+    hasAdapter(providerKey, adapterVersion, adapterKind) {
+      return adaptersByIdentity.has(adapterKey(providerKey, adapterVersion, adapterKind));
     },
   };
 }

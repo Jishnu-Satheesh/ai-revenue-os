@@ -42,7 +42,10 @@ export type IntegrationCapabilityGrantRow = {
     | "bounded-autonomous";
   availability: "available" | "blocked" | "disabled";
   reason_codes: string[];
+  restriction_codes: string[];
   derived_from_adapter_version: string;
+  derived_from_contract_version: string;
+  grant_version: number;
   created_at: string;
   updated_at: string;
 };
@@ -141,7 +144,7 @@ export type IntegrationIngestionRunInsert = Omit<
 export type IntegrationHealthCheckInsert = Omit<IntegrationHealthCheckRow, "id">;
 export type IntegrationCapabilityGrantInsert = Omit<
   IntegrationCapabilityGrantRow,
-  "id" | "organization_id" | "connection_id" | "created_at" | "updated_at"
+  "id" | "organization_id" | "connection_id" | "grant_version" | "created_at" | "updated_at"
 >;
 export type IntegrationAccountMappingInsert = Omit<
   IntegrationAccountMappingRow,

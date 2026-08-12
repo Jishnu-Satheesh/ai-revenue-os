@@ -1,4 +1,6 @@
 import { deriveConnectionHealth } from "@/domain/integrations/health";
+import { capabilityRecoveryActions } from "@/domain/integrations/capabilities";
+import type { CapabilityDefinitionSnapshot, ProviderDefinition } from "@/domain/integrations/types";
 import type {
   IntegrationAccountMappingRow,
   IntegrationAuditEvent,
@@ -10,10 +12,46 @@ import type {
   IntegrationIngestionRunRow,
 } from "@/modules/integrations/application/ports";
 
+export type IntegrationCapabilityReadModel = IntegrationCapabilityGrantRow & {
+  definition: CapabilityDefinitionSnapshot | null;
+  recoveryActions: string[];
+};
+
+export function applyCapabilityRuntimeGuards(
+  grant: IntegrationCapabilityReadModel,
+  input: {
+    connectionStatus: IntegrationConnectionRow["status"];
+    rolloutState: ProviderDefinition["rolloutState"] | undefined;
+  },
+): IntegrationCapabilityReadModel {
+  const terminalReason =
+    input.connectionStatus === "revoked"
+      ? "connection_revoked"
+      : input.connectionStatus === "disconnected"
+        ? "connection_disconnected"
+        : null;
+  const blockingReason =
+    input.connectionStatus === "pending"
+      ? "connection_not_ready"
+      : input.rolloutState === "disabled"
+        ? "provider_rollout_disabled"
+        : null;
+  if (!terminalReason && !blockingReason) return grant;
+  const reasonCodes = terminalReason
+    ? [terminalReason]
+    : [...new Set([...grant.reason_codes, blockingReason!])];
+  return {
+    ...grant,
+    availability: terminalReason ? "disabled" : "blocked",
+    reason_codes: reasonCodes,
+    recoveryActions: capabilityRecoveryActions(reasonCodes),
+  };
+}
+
 type SafeConnection = Omit<IntegrationConnectionRow, "credential_reference"> & {
   latestHealth: IntegrationHealthCheckRow | null;
   health: ReturnType<typeof deriveConnectionHealth>;
-  capabilities: IntegrationCapabilityGrantRow[];
+  capabilities: IntegrationCapabilityReadModel[];
   mappings: IntegrationAccountMappingRow[];
 };
 
@@ -68,6 +106,7 @@ export function buildIntegrationHubSnapshot(input: {
   healthChecks: readonly IntegrationHealthCheckRow[];
   runs: readonly IntegrationIngestionRunRow[];
   auditEvents: readonly IntegrationAuditEvent[];
+  catalog?: readonly ProviderDefinition[];
 }): IntegrationHubSnapshot {
   const sameOrganization = <T extends { organization_id: string }>(rows: readonly T[]) =>
     rows.filter((row) => row.organization_id === input.organizationId);
@@ -87,10 +126,41 @@ export function buildIntegrationHubSnapshot(input: {
       delete safeConnection.credential_reference;
       const connection: Omit<IntegrationConnectionRow, "credential_reference"> = safeConnection;
       const latestHealth = latestHealthByConnection.get(connection.id) ?? null;
+      const provider = input.catalog?.find(({ key }) => key === connection.provider_key);
       return {
         ...connection,
         capabilities: capabilityGrants
           .filter((grant) => grant.connection_id === connection.id)
+          .map((grant): IntegrationCapabilityReadModel => {
+            const capability = provider?.capabilities.find(
+              ({ key }) => key === grant.capability_key,
+            );
+            const definitionIsCurrent =
+              capability &&
+              provider?.adapterVersion === grant.derived_from_adapter_version &&
+              provider.contractVersion === grant.derived_from_contract_version;
+            const reasonCodes = definitionIsCurrent
+              ? grant.reason_codes
+              : [...grant.reason_codes, "provider_definition_unavailable"];
+            const currentGrant: IntegrationCapabilityReadModel = {
+              ...grant,
+              availability: definitionIsCurrent ? grant.availability : "blocked",
+              reason_codes: [...new Set(reasonCodes)],
+              definition: definitionIsCurrent
+                ? {
+                    character: capability.character,
+                    effect: capability.effect,
+                    maturity: grant.maturity,
+                    requiredScopes: [...capability.requiredScopes],
+                  }
+                : null,
+              recoveryActions: capabilityRecoveryActions(reasonCodes),
+            };
+            return applyCapabilityRuntimeGuards(currentGrant, {
+              connectionStatus: connection.status,
+              rolloutState: provider?.rolloutState,
+            });
+          })
           .sort((left, right) => left.capability_key.localeCompare(right.capability_key)),
         mappings: accountMappings
           .filter((mapping) => mapping.connection_id === connection.id)

@@ -27,14 +27,42 @@ describe("Google Business Profile fixture adapter", () => {
       key: "google_business_profile",
       displayName: "Google Business Profile",
       adapterVersion: "1",
+      contractVersion: "fixture-v1",
       rolloutState: "fixture",
-      supportedCapabilities: ["read_google_business_profile", "read_reviews"],
-      requiredScopes: [],
+      characters: ["data_source"],
+      capabilities: [
+        {
+          key: "read_google_business_profile",
+          character: "data_source",
+          direction: "inbound",
+          effect: "read",
+          maturity: "read-only",
+          requiredScopes: [],
+          restrictionCodes: [],
+          adapterKind: "read",
+          prerequisites: ["account_mapped"],
+          requiredWebhookEventKeys: [],
+        },
+        {
+          key: "read_reviews",
+          character: "data_source",
+          direction: "inbound",
+          effect: "read",
+          maturity: "read-only",
+          requiredScopes: [],
+          restrictionCodes: [],
+          adapterKind: "read",
+          prerequisites: ["account_mapped"],
+          requiredWebhookEventKeys: [],
+        },
+      ],
       syncIntervalMinutes: 30,
       staleAfterMinutes: 65,
-      supportsWebhooks: false,
-      supportsWrites: false,
       operatorCopy: "Fixture mode — Google API access pending.",
+    });
+    expect(createGoogleBusinessProfileFixtureAdapter()).toMatchObject({
+      adapterKind: "read",
+      supportedCapabilityKeys: ["read_google_business_profile", "read_reviews"],
     });
   });
 

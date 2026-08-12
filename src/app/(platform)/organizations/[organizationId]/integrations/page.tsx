@@ -52,6 +52,7 @@ export default async function IntegrationsPage({ params }: PageProps) {
       <IntegrationHubClient
         organizationId={context.organizationId}
         organizationName={organization.name}
+        organizationTimeZone={organization.default_timezone}
         role={authenticatedContext.role}
         initialSnapshot={snapshot}
         initialCatalog={catalog}

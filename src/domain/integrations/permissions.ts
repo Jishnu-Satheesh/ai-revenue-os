@@ -34,3 +34,19 @@ export function hasIntegrationPermission(
 ): boolean {
   return permissionsByRole[role].includes(permission);
 }
+
+/**
+ * Permission to operate the Hub never upgrades a derived provider grant. This
+ * helper is intentionally narrow until an action endpoint exists in Task 3.
+ */
+export function hasUsableIntegrationGrant(input: {
+  availability: "available" | "blocked" | "disabled";
+  connectionStatus: "pending" | "active" | "degraded" | "disconnected" | "revoked";
+}): boolean {
+  return (
+    input.availability === "available" &&
+    input.connectionStatus !== "pending" &&
+    input.connectionStatus !== "disconnected" &&
+    input.connectionStatus !== "revoked"
+  );
+}
