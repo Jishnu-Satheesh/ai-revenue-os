@@ -35,6 +35,10 @@ const UNTYPED_TABLES = new Set([
   "integration_ingestion_handoffs",
   "integration_ingestion_runs",
   "integration_mapping_operations",
+  // Reached only through the security-definer start/consume RPCs. No browser
+  // role holds a grant on it, so a generated row type would imply access that
+  // deliberately does not exist.
+  "integration_oauth_sessions",
   "integration_worker_execution_leases",
   "memory_embedding_batch_claims",
   "memory_embedding_leases",
