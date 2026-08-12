@@ -1,6 +1,7 @@
 import { ArrowLeft, Compass, BadgeInfo } from "lucide-react";
 import Link from "next/link";
 
+import { overviewPath } from "@/components/layout/organization-route";
 import { OnboardingClient } from "@/components/onboarding/onboarding-client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -38,9 +39,9 @@ export default async function OnboardingPage({ params, searchParams }: PageProps
       <div className="flex shrink-0 flex-col justify-between gap-5 lg:flex-row lg:items-end">
         <div>
           <Button asChild variant="link" className="h-auto p-0 text-muted-foreground">
-            <Link href={`/organizations/${context.organizationId}/digital-twin`}>
+            <Link href={overviewPath(context.organizationId)}>
               <ArrowLeft data-icon="inline-start" />
-              Digital Twin overview
+              Overview
             </Link>
           </Button>
           <div className="mt-4 flex items-start gap-3">

@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 
+import { overviewPath } from "@/components/layout/organization-route";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -38,7 +39,6 @@ const segmentLabels: Readonly<Record<string, string>> = {
   settings: "Settings",
   new: "New organization",
   onboarding: "Guided onboarding",
-  "digital-twin": "Digital Twin",
   integrations: "Integrations",
   memory: "Business Memory",
   economics: "Channel economics",
@@ -79,9 +79,9 @@ export function deriveRouteCrumbs(
     const isOrganization = uuidPattern.test(segment);
     crumbs.push({
       label: labelForSegment(segment, labels),
-      // Only link to routes that exist: the Digital Twin page is the
-      // organization's landing surface.
-      href: isOrganization ? `/organizations/${segment}/digital-twin` : undefined,
+      // Only link to routes that exist: Overview is the organization's landing
+      // surface.
+      href: isOrganization ? overviewPath(segment) : undefined,
       current: false,
     });
   }

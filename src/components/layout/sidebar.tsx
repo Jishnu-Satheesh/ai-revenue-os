@@ -56,8 +56,8 @@ function organizationNavigation(pathname: string) {
     organizationId,
     items: [
       {
-        label: "Digital Twin",
-        href: `/organizations/${organizationId}/digital-twin`,
+        label: "Overview",
+        href: `/organizations/${organizationId}/overview`,
         icon: Boxes,
       },
       {

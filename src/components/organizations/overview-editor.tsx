@@ -44,7 +44,7 @@ async function parseResponse(response: Response) {
   return payload;
 }
 
-export function DigitalTwinEditor({ organizationId, snapshot }: Props) {
+export function OverviewEditor({ organizationId, snapshot }: Props) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -253,6 +253,15 @@ describe("route-aware app chrome", () => {
     ).toEqual(["Fixture Bakery", "Guided onboarding"]);
   });
 
+  it("targets Overview from the organization crumb", () => {
+    expect(deriveRouteCrumbs(`/organizations/${organizationId}/economics`)[0]?.href).toBe(
+      `/organizations/${organizationId}/overview`,
+    );
+    expect(deriveRouteCrumbs(`/organizations/${organizationId}/overview`).at(-1)?.label).toBe(
+      "Overview",
+    );
+  });
+
   it("marks only the current location as the breadcrumb page", () => {
     render(<RouteBreadcrumb labels={{ [organizationId]: "Fixture Bakery" }} />);
 

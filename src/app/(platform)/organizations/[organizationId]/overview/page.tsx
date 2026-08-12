@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-import { DigitalTwinEditor } from "@/components/organizations/digital-twin-editor";
+import { OverviewEditor } from "@/components/organizations/overview-editor";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import { getOrganizationContext } from "@/lib/api/organization-context";
 
 type PageProps = { params: Promise<{ organizationId: string }> };
 
-export default async function DigitalTwinPage({ params }: PageProps) {
+export default async function OverviewPage({ params }: PageProps) {
   const context = await getOrganizationContext(params);
   const snapshot = await getDigitalTwin(context.supabase, context.organizationId);
   const physicalBranchRequired = snapshot.organization.industry.toLowerCase() === "restaurant";
@@ -151,7 +151,7 @@ export default async function DigitalTwinPage({ params }: PageProps) {
           visible instead of being guessed.
         </AlertDescription>
       </Alert>
-      <DigitalTwinEditor organizationId={context.organizationId} snapshot={snapshot} />
+      <OverviewEditor organizationId={context.organizationId} snapshot={snapshot} />
       <Card>
         <CardHeader className="flex-row items-start justify-between border-b">
           <div>
