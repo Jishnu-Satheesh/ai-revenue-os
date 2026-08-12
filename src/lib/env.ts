@@ -31,6 +31,8 @@ const serverEnvSchema = z.object({
   TRIGGER_SECRET_KEY: optionalNonEmptyString,
   TRIGGER_PROJECT_REF: optionalNonEmptyString,
   INTEGRATION_HUB_V1_ORGANIZATION_IDS: optionalNonEmptyString,
+  META_APP_ID: optionalNonEmptyString,
+  META_APP_SECRET: optionalNonEmptyString,
   SENTRY_DSN: optionalUrl,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
 });
@@ -57,6 +59,8 @@ const parsedEnv = serverEnvSchema.safeParse({
   TRIGGER_SECRET_KEY: process.env.TRIGGER_SECRET_KEY,
   TRIGGER_PROJECT_REF: process.env.TRIGGER_PROJECT_REF,
   INTEGRATION_HUB_V1_ORGANIZATION_IDS: process.env.INTEGRATION_HUB_V1_ORGANIZATION_IDS,
+  META_APP_ID: process.env.META_APP_ID,
+  META_APP_SECRET: process.env.META_APP_SECRET,
   SENTRY_DSN: process.env.SENTRY_DSN,
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
 });

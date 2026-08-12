@@ -28,7 +28,10 @@
 - The first measurement implementation must not use switchback analysis for static brand creative. A provider-supported randomized Meta experiment may be used only when the checked-in provider contract proves eligibility; otherwise report the pre-registered observational result with its limitations and allow `inconclusive`.
 - Commit each task only after focused verification. Stop for review at every activation gate; do not combine tasks across a failed gate.
 - If implementation evidence conflicts with the approved design, provider reality, or a load-bearing plan assumption, stop and discuss the discrepancy with the user before changing direction.
-- Before any Campaign Studio UI code or UI test is written, use the `superdesign:superdesign` skill to create the proposed experience, present it to the user, and wait for explicit design approval. This user approval gate overrides continuous task execution for Task 12.
+- Before any Campaign Studio UI code or UI test is written, use the `superdesign:superdesign` skill to design the complete Campaign flow, generate alternatives, and select one coherent direction. The user delegated that selection on 2026-08-12; share the live canvas and use the selected direction consistently across Campaign modules without a separate selection pause.
+- Every frontend task must be verified in a real Chrome session through Chrome DevTools at desktop and mobile widths. Inspect the rendered route, interactions, responsive layout, console, failed network requests, keyboard/focus behavior, and user-visible error states; component tests alone are insufficient.
+- For each additive migration, run `pnpm db:migrations:list`, `pnpm db:migrations:dry-run`, `pnpm db:migrations:push`, and the post-push list/pgTAP checks against the remote database. If a migration becomes destructive, first make and verify a local data dump, then apply the migration and the preserved data in explicit sequence.
+- The completed `feat/business-memory` branch was rebased into this worktree at `6f0810b`. It supplied the economics/metric prerequisites and Trigger SDK/build `4.5.10`, but not the generic Decision Engine or opportunity ledger; Tasks 4–6 therefore remain owned by this release train. Align the remaining `trigger.dev` CLI package to `4.5.10` before authoring the first Trigger task.
 
 ## Activation Gates
 
@@ -162,7 +165,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - Modify: `src/modules/integrations/application/{ports,read-model,service,api-schemas}.ts`
 - Modify: `src/modules/integrations/infrastructure/repository.ts`
 - Modify: `src/components/integrations/{catalog-tab,capability-list,connection-detail}.tsx`
-- Create: `supabase/migrations/20260811140000_integration_action_capabilities.sql`
+- Create: `supabase/migrations/20260812100000_integration_action_capabilities.sql`
 - Create: `supabase/tests/database/integration_action_capabilities_test.sql`
 
 - [ ] **Step 1: Write RED tests.** Cover read, publish, advertise, webhook, and operator-review definitions; unavailable adapters; missing scopes; account ineligibility; organization policy denial; unmapped resources; credential expiry; provider-contract expiry; revoked connection; restriction-code preservation; and prohibition on deriving a higher maturity than the definition allows.
@@ -173,7 +176,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - [ ] **Step 6: Verify.** Run `pnpm vitest run src/domain/integrations src/modules/integrations src/components/integrations`, `pnpm db:test`, `pnpm typecheck`, and `pnpm lint`.
 - [ ] **Step 7: Commit.** `git commit -m "feat(integrations): model governed action capabilities"`.
 
-### Task 3: Add the production credential and OAuth connection substrate
+### Task 3: Add the production credential and fail-closed OAuth substrate
 
 **Files:**
 
@@ -181,14 +184,14 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - Create: `src/modules/integrations/application/oauth-service.ts` and tests
 - Create: `src/app/api/organizations/[organizationId]/integrations/oauth/[providerKey]/route.ts`
 - Create: `src/app/api/integrations/oauth/[providerKey]/callback/route.ts`
-- Create: `supabase/migrations/20260811150000_integration_oauth_sessions.sql`
+- Create: `supabase/migrations/20260812110000_integration_oauth_sessions.sql`
 - Modify: `src/lib/env.ts`, `.env.example`, Integration Hub route/UI files
 - Modify: `adrs/0010-fixture-first-integration-credential-boundary.md`
 
 - [ ] **Step 1: Write failing security tests.** Assert state is random, stored only as a digest, single-use, expires, is bound to organization/user/provider, rejects callback mismatch before token exchange, and never returns/logs OAuth codes, access/refresh tokens, app secret, credential handle, or decrypted Vault output.
 - [ ] **Step 2: Implement the server-only credential adapter.** The only public value is `CredentialHandle`; decrypted values expose `toJSON(): never`. Restrict Vault RPC execution to worker/server functions documented by the security review. Rotation and revoke are idempotent and preserve safe audit metadata.
-- [ ] **Step 3: Implement generic OAuth sessions.** Add server-only `META_APP_ID` and `META_APP_SECRET`; compute the callback from `NEXT_PUBLIC_APP_URL`. The organization route creates a persisted one-time session and provider authorization URL from the verified contract. The callback atomically consumes state, exchanges the code server-side, stores the credential, writes the connection/scopes/expiry, recomputes grants, and redirects with a safe opaque result code.
-- [ ] **Step 4: Add Meta as the first production connection definition.** Account discovery and mapping remain server-side. Register Instagram publishing, Facebook publishing, Meta Ads, metrics read, and webhook intake as distinct grants; one missing grant must not disable unrelated grants.
+- [ ] **Step 3: Implement generic OAuth sessions behind verified provider adapters.** Add optional paired server-only `META_APP_ID` and `META_APP_SECRET`; compute callbacks from `NEXT_PUBLIC_APP_URL`. Exercise one-time session creation/consumption, exchange, storage, connection finalization, and grant recomputation through a fake provider in tests. Until the checked-in Meta contract proves exact OAuth endpoints and controlled-account behavior, production Meta lookup fails before session creation and no authorization URL is invented.
+- [ ] **Step 4: Add Meta as a catalog-visible blocked declaration.** Show Instagram publishing, Facebook publishing, Meta Ads, metrics read, and webhook intake as distinct desired capabilities with exact checked-in restrictions. Do not register executable Meta adapters or create available grants until the later provider tasks supply current contract and controlled-account evidence.
 - [ ] **Step 5: Verify migrations and route behavior.** Include two-tenant pgTAP, replayed callback, expired state, revoked user, token exchange failure, credential-store failure, and safe error cases.
 - [ ] **Step 6: Run security review checkpoint.** Document least privilege, encryption/key ownership, rotation, revocation, backup/restore, incident response, and provider-app secret handling under `docs/verification/campaigns/credential-security-review.md`. Gate 4 cannot pass without sign-off.
 - [ ] **Step 7: Commit.** `git commit -m "feat(integrations): add governed OAuth credential boundary"`.
@@ -200,7 +203,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - Create: `src/domain/decisions/{schemas,types,ranking,screening,digest,errors}.ts` and tests
 - Create: `src/modules/decisions/application/{ports,service,authorization}.ts` and tests
 - Create: `src/modules/decisions/infrastructure/repository.ts` and integration tests
-- Create: `supabase/migrations/20260811160000_decision_engine_and_opportunities.sql`
+- Create: `supabase/migrations/20260812120000_decision_engine_and_opportunities.sql`
 - Create: `supabase/tests/database/decision_engine_test.sql`
 - Modify: `src/domain/events/types.ts`
 
@@ -273,7 +276,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 
 **Files:**
 
-- Create: `supabase/migrations/20260811170000_campaign_bundle_control_plane.sql`
+- Create: `supabase/migrations/20260812130000_campaign_bundle_control_plane.sql`
 - Create: `supabase/tests/database/campaign_bundle_test.sql`
 - Create: `src/modules/campaigns/application/ports.ts`
 - Create: `src/modules/campaigns/infrastructure/repository.ts` and integration tests
@@ -348,9 +351,9 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - Create focused component tests
 - Modify: `src/components/layout/sidebar.tsx`
 
-- [ ] **Step 1: Design the Studio with Superdesign.** Use the `superdesign:superdesign` skill and the implemented read models/contracts to create desktop and mobile proposals for campaign entry, three-direction comparison, focused editing, prompt revision, diff review, capability blockers, measurement, attestation, and approval. Present the design to the user with its interaction notes.
+- [ ] **Step 1: Apply the selected Superdesign system.** Use the user-delegated selected direction and the implemented read models/contracts for desktop and mobile campaign entry, three-direction comparison, focused editing, prompt revision, diff review, capability blockers, measurement, attestation, approval, execution, and proof. Keep the canvas and interaction notes linked from the task report.
 
-**Mandatory UI approval checkpoint:** Stop here. Do not write or dispatch TSX, CSS, component tests, or route-page UI work until the user explicitly approves the Superdesign proposal.
+**Mandatory UI design checkpoint:** Do not write or dispatch TSX, CSS, component tests, or route-page UI work until the Superdesign alternatives exist and one direction has been selected and recorded. The user's 2026-08-12 instruction delegates that selection to the implementation agent.
 
 - [ ] **Step 2: Write UI RED tests after approval.** Manual/opportunity entry, three direction labels, profile switch warning, editable hooks/captions/hashtags/tags/CTA/timing/schedule, prompt target scope, version diff, blocked-capability reasons, spend/measurement summary, visual attestation, role-disabled approval, stale version refresh, and dry-run labeling.
 - [ ] **Step 3: Add Server Component initial reads and organization-scoped Query keys.** Interactive mutations are non-optimistic; invalidate only the campaign/list/version keys touched after the server confirms a new version.
@@ -367,7 +370,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - Create: `src/domain/tools/{schemas,types,policy,idempotency}.ts` and tests
 - Create: `src/modules/tool-gateway/application/{ports,service}.ts` and tests
 - Create: `src/modules/tool-gateway/infrastructure/repository.ts` and tests
-- Create: `supabase/migrations/20260811180000_campaign_tool_gateway.sql`
+- Create: `supabase/migrations/20260812140000_campaign_tool_gateway.sql`
 - Create: `supabase/tests/database/campaign_tool_gateway_test.sql`
 
 - [ ] **Step 1: Write RED preflight tests.** Re-evaluate membership/role, exact active approval/version/digest, expiry, visual attestation, schedule window, action inclusion, current policy versions, current capability grant/version/restrictions, credential/account mapping, provider-contract version, privacy/tracking assertions, execution mode, spend currency/ceiling, cancellation, and previous unknown outcome.
@@ -381,7 +384,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 
 **Files:**
 
-- Create: `supabase/migrations/20260811190000_telegram_operator_review.sql`
+- Create: `supabase/migrations/20260812150000_telegram_operator_review.sql`
 - Create: `supabase/tests/database/telegram_operator_review_test.sql`
 - Create: `src/modules/integrations/providers/telegram-operator-review/{definition,adapter,webhook-verifier}.ts` and tests
 - Create: `src/modules/campaigns/application/telegram-review-service.ts` and tests
@@ -406,7 +409,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 
 - Create: `src/modules/integrations/providers/meta/{definition,client,organic-adapter,webhook-verifier,reconciler}.ts` and tests
 - Create: `src/app/api/integrations/meta/webhook/route.ts` and tests
-- Create: `supabase/migrations/20260811200000_integration_webhook_receipts.sql`
+- Create: `supabase/migrations/20260812160000_integration_webhook_receipts.sql`
 - Create: `supabase/tests/database/integration_webhook_receipts_test.sql`
 
 - [ ] **Step 1: Write MSW contract tests from Task 1 fixtures.** Cover Instagram/Facebook image posts and supported image Stories, account eligibility, scope loss, media processing, rate limits, permanent errors, timeout before/after send, idempotency semantics, normalized external IDs/permalinks/status, and reconciliation lookup.
@@ -457,7 +460,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - Create: `src/modules/campaigns/application/outcome-service.ts` and tests
 - Create: `src/workflows/campaigns/{collect-metrics,settle-outcome}.ts` and tests
 - Modify: `src/trigger/campaigns.ts`
-- Create: `supabase/migrations/20260811210000_campaign_measurement.sql`
+- Create: `supabase/migrations/20260812170000_campaign_measurement.sql`
 - Create: `supabase/tests/database/campaign_measurement_test.sql`
 - Create outcome UI components/tests
 
@@ -474,7 +477,7 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 
 - Create: `src/modules/campaigns/application/learning-service.ts` and tests
 - Create: `src/workflows/campaigns/propose-learning.ts` and tests
-- Create: `supabase/migrations/20260811220000_campaign_learning_proposals.sql`
+- Create: `supabase/migrations/20260812180000_campaign_learning_proposals.sql`
 - Create: `supabase/tests/database/campaign_learning_test.sql`
 - Create learning proposal API/UI and tests
 

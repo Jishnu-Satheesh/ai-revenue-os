@@ -95,6 +95,7 @@ function renderClient(options: { fetchNeverResolves?: boolean } = {}) {
       <IntegrationHubClient
         organizationId={organizationId}
         organizationName="Fixture Bakery"
+        organizationTimeZone="Asia/Kolkata"
         role="operator"
         initialSnapshot={snapshot()}
         initialCatalog={[]}
@@ -126,7 +127,11 @@ beforeEach(() => {
       }),
     },
   });
-  mocks.getOrganization.mockResolvedValue({ id: organizationId, name: "Fixture Bakery" });
+  mocks.getOrganization.mockResolvedValue({
+    id: organizationId,
+    name: "Fixture Bakery",
+    default_timezone: "Asia/Kolkata",
+  });
   mocks.createIntegrationHubService.mockReturnValue(mocks.service);
   mocks.service.getSnapshot.mockResolvedValue(snapshot());
   mocks.service.getCatalog.mockResolvedValue([]);

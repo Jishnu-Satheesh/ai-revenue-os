@@ -59,7 +59,12 @@ function describe(entry: IntegrationActivity): Presentation {
 export function ActivityTab({
   activity,
   isRefreshing,
-}: Readonly<{ activity: readonly IntegrationActivity[]; isRefreshing: boolean }>) {
+  timeZone,
+}: Readonly<{
+  activity: readonly IntegrationActivity[];
+  isRefreshing: boolean;
+  timeZone: string;
+}>) {
   return (
     <Card>
       <CardHeader>
@@ -104,7 +109,7 @@ export function ActivityTab({
                   <div className="flex min-w-0 flex-col">
                     <span className="text-sm font-medium">{title}</span>
                     <span className="truncate text-xs text-muted-foreground">
-                      {formatInstant(entry.occurredAt)} · {detail} · correlation{" "}
+                      {formatInstant(entry.occurredAt, timeZone)} · {detail} · correlation{" "}
                       {entry.correlationId}
                     </span>
                   </div>

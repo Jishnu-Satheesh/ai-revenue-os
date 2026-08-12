@@ -27,7 +27,10 @@ import type { ProviderDefinition } from "@/domain/integrations/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { hasIntegrationPermission } from "@/domain/integrations/permissions";
-import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
+import {
+  applyCapabilityRuntimeGuards,
+  type IntegrationHubSnapshot,
+} from "@/modules/integrations/application/read-model";
 
 type QueuedOperation = { runId: string; status: string };
 
@@ -36,11 +39,13 @@ export function ConnectionsTab({
   snapshot,
   catalog,
   role,
+  timeZone,
 }: Readonly<{
   organizationId: string;
   snapshot: IntegrationHubSnapshot;
   catalog: readonly ProviderDefinition[];
   role: OrganizationRole;
+  timeZone: string;
 }>) {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
@@ -58,10 +63,21 @@ export function ConnectionsTab({
     () => Object.fromEntries(catalog.map((definition) => [definition.key, definition.displayName])),
     [catalog],
   );
-  const selected =
+  const selectedSource =
     snapshot.connections.find((connection) => connection.id === selectedId) ??
     snapshot.connections[0] ??
     null;
+  const selected = selectedSource
+    ? {
+        ...selectedSource,
+        capabilities: selectedSource.capabilities.map((grant) =>
+          applyCapabilityRuntimeGuards(grant, {
+            connectionStatus: selectedSource.status,
+            rolloutState: definitionsByKey[selectedSource.provider_key]?.rolloutState,
+          }),
+        ),
+      }
+    : null;
 
   /**
    * Only the scopes a mutation actually touches are invalidated, and nothing is
@@ -183,6 +199,7 @@ export function ConnectionsTab({
       pendingAction={pendingAction}
       lastAcknowledgement={acknowledgement}
       failureMessage={failure}
+      timeZone={timeZone}
       onTest={() => testConnection.mutate(selected.id)}
       onSync={() => syncConnection.mutate(selected.id)}
       onReplaceMappings={async (mappings) => {
@@ -196,13 +213,18 @@ export function ConnectionsTab({
 
   return (
     <div className="flex min-h-0 flex-col gap-4">
-      <HealthSummary connections={snapshot.connections} summary={snapshot.summary} />
+      <HealthSummary
+        connections={snapshot.connections}
+        summary={snapshot.summary}
+        timeZone={timeZone}
+      />
 
       <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">
         <ConnectionList
           connections={snapshot.connections}
           selectedConnectionId={selected?.id ?? null}
           providerNames={providerNames}
+          timeZone={timeZone}
           onSelect={(connectionId) => {
             setSelectedId(connectionId);
             setAcknowledgement(null);

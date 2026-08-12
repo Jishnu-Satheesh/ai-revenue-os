@@ -14,6 +14,7 @@ const toastMocks = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast: toastMocks, Toaster: () => null }));
 
 import { ConnectionsTab } from "@/components/integrations/connections-tab";
+import { formatInstant } from "@/components/integrations/health-status";
 import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
 import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 import type { OrganizationRole } from "@/domain/organizations/types";
@@ -51,7 +52,17 @@ function connection(overrides: Partial<Connection> = {}): Connection {
         maturity: "read-only",
         availability: "available",
         reason_codes: [],
+        restriction_codes: ["fixture.read_only"],
         derived_from_adapter_version: "1",
+        derived_from_contract_version: "fixture-v1",
+        grant_version: 1,
+        definition: {
+          character: "data_source",
+          effect: "read",
+          maturity: "read-only",
+          requiredScopes: [],
+        },
+        recoveryActions: ["Review the provider restriction."],
         created_at: "2026-08-01T09:00:00.000Z",
         updated_at: "2026-08-08T09:00:00.000Z",
       },
@@ -117,6 +128,7 @@ function renderTab(
         snapshot={options.snapshot ?? snapshot()}
         catalog={[googleBusinessProfileDefinition]}
         role={options.role ?? "operator"}
+        timeZone="Asia/Kolkata"
       />
     </QueryClientProvider>,
   );
@@ -138,6 +150,11 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("ConnectionsTab health-first surface", () => {
+  it("formats instants deterministically in the organization timezone", () => {
+    expect(formatInstant("2026-08-08T18:23:00.000Z", "Asia/Kolkata")).toBe("8 Aug 2026, 23:53");
+    expect(formatInstant("not-an-instant", "Asia/Kolkata")).toBe("—");
+  });
+
   it("leads with operational health, action required, and freshness", () => {
     renderTab({
       snapshot: snapshot([
@@ -205,6 +222,53 @@ describe("ConnectionsTab health-first surface", () => {
     expect(screen.getAllByText("Fixture mode — Google API access pending.").length).toBeGreaterThan(
       0,
     );
+  });
+
+  it("shows exact restrictions and recovery even when a grant is available", () => {
+    renderTab();
+
+    expect(screen.getByText("fixture.read_only")).toBeInTheDocument();
+    expect(screen.getByText(/Review the provider restriction/i)).toBeInTheDocument();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+  });
+
+  it("renders capability reasons inside the standalone Integration Hub", () => {
+    const blocked = connection();
+    blocked.capabilities = blocked.capabilities.map((grant) => ({
+      ...grant,
+      availability: "blocked" as const,
+      reason_codes: ["account_unmapped"],
+      recoveryActions: ["Map the provider resource to an organization branch."],
+    }));
+
+    renderTab({ snapshot: snapshot([blocked]) });
+
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Why?" })).toBeInTheDocument();
+  });
+
+  it("blocks a persisted usable grant when the provider rollout is disabled", () => {
+    const disabledProvider = {
+      ...googleBusinessProfileDefinition,
+      rolloutState: "disabled" as const,
+    };
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ConnectionsTab
+          organizationId={organizationId}
+          snapshot={snapshot()}
+          catalog={[disabledProvider]}
+          role="operator"
+          timeZone="Asia/Kolkata"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(screen.getByText(/provider rollout gate/i)).toBeInTheDocument();
   });
 
   it("reports queued work instead of claiming success", async () => {

@@ -77,10 +77,22 @@ export function runStatusLabel(status: string): string {
   return runStatusLabels[status] ?? status;
 }
 
-/** Renders an ISO instant in the reader's locale, or a plain dash when absent. */
-export function formatInstant(value: string | null | undefined): string {
+/** Renders an ISO instant deterministically in the organization's timezone. */
+export function formatInstant(value: string | null | undefined, timeZone = "UTC"): string {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone,
+    }).format(parsed);
+  } catch {
+    return "—";
+  }
 }

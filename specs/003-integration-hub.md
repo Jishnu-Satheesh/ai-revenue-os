@@ -50,11 +50,11 @@ The slice must prove the Integration Hub control plane and its handoff to the Da
 - Governed disconnect with immediate capability disablement and asynchronous credential revocation/cleanup.
 - Feature rollout restricted by a server-only organization allowlist.
 
-### 3.2 Explicitly excluded from V1
+### 3.2 Explicitly excluded from the fixture runtime
 
-- Provider write operations, including draft-write, governed-write, and bounded-autonomous execution.
+- Google Business Profile fixture write operations, including draft-write, governed-write, and bounded-autonomous execution.
 - Publishing Google Business Profile posts or review responses.
-- Provider webhooks or webhook health. V1 uses scheduled and operator-triggered reads only.
+- Google Business Profile webhooks or webhook health. The fixture uses scheduled and operator-triggered reads only.
 - A production Google OAuth flow before Google approves API access.
 - n8n connector execution.
 - AI-selected credentials, scopes, accounts, mappings, or recovery actions.
@@ -77,15 +77,15 @@ The slice must prove the Integration Hub control plane and its handoff to the Da
 
 Application services must evaluate permissions in addition to relying on RLS.
 
-| Action | Allowed organization roles |
-| --- | --- |
-| View catalog, connections, data sources, health, and activity | owner, admin, operator, viewer |
-| Create a fixture connection | owner, admin, operator |
-| Test or synchronize a connection | owner, admin, operator |
-| Create, map, retry, or archive a data source | owner, admin, operator |
-| Change branch/account mappings | owner, admin, operator |
-| Disconnect a connection | owner, admin, operator, with explicit confirmation |
-| Write health checks and ingestion results | validated background worker only |
+| Action                                                        | Allowed organization roles                         |
+| ------------------------------------------------------------- | -------------------------------------------------- |
+| View catalog, connections, data sources, health, and activity | owner, admin, operator, viewer                     |
+| Create a fixture connection                                   | owner, admin, operator                             |
+| Test or synchronize a connection                              | owner, admin, operator                             |
+| Create, map, retry, or archive a data source                  | owner, admin, operator                             |
+| Change branch/account mappings                                | owner, admin, operator                             |
+| Disconnect a connection                                       | owner, admin, operator, with explicit confirmation |
+| Write health checks and ingestion results                     | validated background worker only                   |
 
 Required permission names are `integration.read`, `integration.connect`, `integration.test`, `integration.sync`, `integration.map`, `integration.import`, and `integration.disconnect`. The V1 role mapping above implements those permissions; services must consume permission checks rather than scattering role comparisons through UI code.
 
@@ -102,7 +102,7 @@ The only allowed maturity values are:
 5. `governed-write` — an approved action can be executed.
 6. `bounded-autonomous` — allowlisted actions can run within deterministic policy.
 
-V1 can create only `manual`, `imported`, and `read-only` availability. Higher levels may be displayed as unavailable when useful, but must not be granted.
+The Google Business Profile fixture can create only `manual`, `imported`, and `read-only` availability. A campaign provider may grant a higher maturity only for a typed capability with an installed exact adapter, a current verified provider contract, fresh capability-specific organization evidence, exact scopes and mapping, and a permitting organization policy. A derived grant must never exceed its definition.
 
 ### 6.2 Connection status
 
@@ -173,14 +173,18 @@ Required fields:
 - `maturity`
 - `availability`: `available`, `blocked`, or `disabled`
 - `reason_codes` text array
+- `restriction_codes` text array
 - `derived_from_adapter_version`
+- `derived_from_contract_version`
+- `grant_version`: server-managed monotonic authorization version
 - `created_at` and `updated_at`
 
 Rules:
 
 - `(organization_id, connection_id, capability_key)` is unique.
-- Grants are recomputed after connect, scope change, account mapping, policy change, and disconnect.
+- Task 2 invokes grant recomputation after fixture connect/reconnect, account-mapping replacement, and disconnect. Scope, contract, organization-entitlement, evidence, and policy changes must invoke the same deterministic derivation when their production mutation paths are introduced; declaring those inputs does not by itself recompute persisted rows.
 - Adapter definitions and deterministic policy are the source of truth; a model cannot create or elevate a grant.
+- `grant_version` is forced to `1` on insert, increments once for a material authorization change, and stays stable for a no-op recomputation. Callers cannot supply or win a version race.
 
 ### 7.3 `IntegrationAccountMapping`
 
@@ -307,16 +311,32 @@ type ProviderDefinition = {
   key: string;
   displayName: string;
   adapterVersion: string;
+  contractVersion: string;
   rolloutState: "fixture" | "available" | "disabled";
-  supportedCapabilities: readonly string[];
-  requiredScopes: readonly string[];
+  characters: readonly IntegrationCharacter[];
+  capabilities: readonly ProviderCapabilityDefinition[];
   syncIntervalMinutes: number;
   staleAfterMinutes: number;
-  supportsWebhooks: boolean;
-  supportsWrites: boolean;
 };
 
-type ProviderAdapter = {
+type ProviderCapabilityDefinition = {
+  key: string;
+  character: IntegrationCharacter;
+  direction: "inbound" | "outbound";
+  effect: "read" | "public_write" | "money_moving" | "operator_control";
+  maturity: ConnectionMaturity;
+  requiredScopes: readonly string[];
+  restrictionCodes: readonly string[];
+  adapterKind: "read" | "publish" | "advertise" | "webhook" | "operator_review";
+  prerequisites: readonly CapabilityPrerequisite[];
+  requiredWebhookEventKeys: readonly string[];
+};
+
+type ReadProviderAdapter = {
+  providerKey: string;
+  adapterVersion: string;
+  adapterKind: "read";
+  supportedCapabilityKeys: readonly string[];
   testConnection(input: AdapterContext): Promise<ConnectionTestResult>;
   listExternalResources(input: AdapterContext): Promise<ExternalResource[]>;
   sync(input: AdapterSyncContext): Promise<IntegrationRecordEnvelope[]>;
@@ -349,6 +369,21 @@ type IngestionSink = {
 
 `AdapterContext` includes the validated `organizationId`, `connectionId`, adapter version, correlation ID, and a server-only credential handle. It never exposes raw secrets to UI or domain objects.
 
+Every non-fixture capability declares `organization_entitled` plus its adapter-kind prerequisites. Live reads require current credentials and an account mapping; publish and advertise also require eligible controlled-account evidence; advertise requires tracking; webhook requires verified configuration; operator review requires a linked operator. Fixture definitions are an explicit read-only exception, but still require their declared mapping evidence. Provider characters exactly match the unique character set represented by their grantable capabilities and their declared blocked capabilities.
+
+### Declared blocked capabilities
+
+A provider may publish capabilities it intends to support but cannot grant, through `declaredBlockedCapabilities`. This exists because "not built" and "built but unavailable to you" are different answers, and an operator deserves the first stated plainly rather than inferred from an absence.
+
+A declaration is documentation, not authorization:
+
+- It carries no maturity, no prerequisites, and no adapter, and the provider registry does not require an adapter for it.
+- Capability derivation never reads it, so it cannot become an organization grant by any path.
+- It must carry at least one stable restriction code from the checked-in provider contract; without a reason, "blocked" is indistinguishable from "absent".
+- Its key may not shadow a grantable capability key on the same provider, because the UI would otherwise have to choose which answer to show.
+
+A provider must declare at least one grantable or blocked capability; a provider with neither is an empty catalog row. Meta is registered this way: `rolloutState` is `disabled`, it declares no grantable capability, it ships no adapter, and each of Instagram publishing, Facebook publishing, Meta Ads, metrics read, and webhook intake appears blocked with the restriction codes recorded in `docs/provider-contracts/meta-campaign-v1.md`.
+
 The Data Ingestion module validates each envelope's `recordType` and `payload` against its own versioned schema. `payload: unknown` is an explicit boundary type, not permission to persist unvalidated JSON.
 
 All adapter results and provider responses cross Zod schemas before persistence or ingestion. Provider errors normalize to:
@@ -367,6 +402,7 @@ Each normalized error includes `retryable`, safe operator copy, and an internal 
 
 - Provider key: `google_business_profile`.
 - V1 rollout state: `fixture`.
+- The fixture connect transaction seeds exactly `locations/fixture-harbor-house` and `locations/fixture-river-market` as unmapped resources. Reconnect preserves existing tenant-scoped mapping state; only those exact resource IDs and labels can be submitted to the fixture mapping RPC.
 - V1 capabilities: `read_google_business_profile` and `read_reviews`, both `read-only`.
 - Fixture data is deterministic, organization-neutral, and contains multiple external locations so mapping behavior can be tested.
 - The UI copy is: **“Fixture mode — Google API access pending.”**
@@ -463,18 +499,18 @@ Every task requires organization ID, source ID, correlation ID, idempotency key,
 
 All inputs and responses have colocated Zod schemas and typed public errors.
 
-| Method and route | Purpose |
-| --- | --- |
-| `GET /api/organizations/:organizationId/integrations` | Health summary, connections, data sources, and recent activity |
-| `GET /api/organizations/:organizationId/integrations/catalog` | Provider definitions and deterministic availability |
-| `POST /api/organizations/:organizationId/integrations/connections/fixture` | Upsert the Google fixture connection |
-| `POST /api/organizations/:organizationId/integrations/connections/:connectionId/test` | Enqueue an idempotent test |
-| `POST /api/organizations/:organizationId/integrations/connections/:connectionId/sync` | Enqueue an idempotent sync |
-| `PUT /api/organizations/:organizationId/integrations/connections/:connectionId/mappings` | Replace validated branch mappings transactionally |
-| `DELETE /api/organizations/:organizationId/integrations/connections/:connectionId` | Governed disconnect |
-| `POST /api/organizations/:organizationId/integrations/data-sources` | Register manual or CSV source |
-| `POST /api/organizations/:organizationId/integrations/data-sources/:dataSourceId/import` | Enqueue a validated import |
-| `PATCH /api/organizations/:organizationId/integrations/data-sources/:dataSourceId` | Rename or archive a source |
+| Method and route                                                                         | Purpose                                                        |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `GET /api/organizations/:organizationId/integrations`                                    | Health summary, connections, data sources, and recent activity |
+| `GET /api/organizations/:organizationId/integrations/catalog`                            | Provider definitions and deterministic availability            |
+| `POST /api/organizations/:organizationId/integrations/connections/fixture`               | Upsert the Google fixture connection                           |
+| `POST /api/organizations/:organizationId/integrations/connections/:connectionId/test`    | Enqueue an idempotent test                                     |
+| `POST /api/organizations/:organizationId/integrations/connections/:connectionId/sync`    | Enqueue an idempotent sync                                     |
+| `PUT /api/organizations/:organizationId/integrations/connections/:connectionId/mappings` | Replace validated branch mappings transactionally              |
+| `DELETE /api/organizations/:organizationId/integrations/connections/:connectionId`       | Governed disconnect                                            |
+| `POST /api/organizations/:organizationId/integrations/data-sources`                      | Register manual or CSV source                                  |
+| `POST /api/organizations/:organizationId/integrations/data-sources/:dataSourceId/import` | Enqueue a validated import                                     |
+| `PATCH /api/organizations/:organizationId/integrations/data-sources/:dataSourceId`       | Rename or archive a source                                     |
 
 Mutation requests include `idempotencyKey`. Accepted background work returns `202` with a run identifier and status; it never returns a false success result.
 
@@ -576,17 +612,17 @@ Status must never rely on color alone. Focus moves to the relevant heading or er
 
 Use domain-specific errors and typed public codes. Provider internals remain server-only.
 
-| Condition | Public behavior |
-| --- | --- |
-| Authorization or tenant mismatch | Return `AUTHORIZATION_ERROR` or `TENANT_SCOPE_ERROR`; perform no work |
-| Duplicate connect request | Return the existing connection; do not duplicate grants or events |
-| Rate limit | Mark retryable, retain current data, show next retry |
-| Expired/revoked credential | Disable affected grants and show reconnect action |
-| Invalid provider response | Reject the boundary payload, preserve previous good data, record degraded health |
-| Partial ingestion | Show accepted/rejected counts and safe reasons; do not claim complete success |
-| Stale source | Keep historical data visible with a stale warning and safe retry |
-| Disconnect cleanup failure | Keep all grants disabled, retain history, and expose retry/escalation |
-| CSV validation failure | Preserve source and upload status; show actionable encoding/header/size error |
+| Condition                        | Public behavior                                                                  |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| Authorization or tenant mismatch | Return `AUTHORIZATION_ERROR` or `TENANT_SCOPE_ERROR`; perform no work            |
+| Duplicate connect request        | Return the existing connection; do not duplicate grants or events                |
+| Rate limit                       | Mark retryable, retain current data, show next retry                             |
+| Expired/revoked credential       | Disable affected grants and show reconnect action                                |
+| Invalid provider response        | Reject the boundary payload, preserve previous good data, record degraded health |
+| Partial ingestion                | Show accepted/rejected counts and safe reasons; do not claim complete success    |
+| Stale source                     | Keep historical data visible with a stale warning and safe retry                 |
+| Disconnect cleanup failure       | Keep all grants disabled, retain history, and expose retry/escalation            |
+| CSV validation failure           | Preserve source and upload status; show actionable encoding/header/size error    |
 
 No error path may silently discard an event, mark uncertain data verified, or imply an external change occurred when it did not.
 
@@ -693,7 +729,7 @@ Also run Supabase migration reset/tests when Docker/Postgres is available, remot
 2. A viewer can inspect health, capabilities, mappings, data sources, and activity but cannot mutate them through UI or API.
 3. An operator can create the deterministic Google Business Profile fixture connection and sees **“Fixture mode — Google API access pending.”**
 4. The fixture exposes only `read_google_business_profile` and `read_reviews` at `read-only` maturity.
-5. The system represents all six maturity levels but grants only the three V1-safe levels.
+5. The system represents all six maturity levels. The Google fixture grants only the three fixture-safe levels; capability-gated campaign providers may derive higher grants only when the exact adapter, contract, organization evidence, scopes, mapping, and policy prove them usable.
 6. Test and sync actions return queued/running states and update health only after worker results.
 7. Health deterministically distinguishes pending, healthy, degraded, stale, and revoked.
 8. External accounts/locations can be mapped only to branches in the same organization.
@@ -704,7 +740,7 @@ Also run Supabase migration reset/tests when Docker/Postgres is available, remot
 13. No credential, token fragment, Vault reference, raw provider response, or unnecessary PII appears in client responses, logs, analytics, or audit payloads.
 14. All new tenant tables and storage objects pass two-tenant RLS tests, explicit-grant checks, and foreign-key-index checks.
 15. Every UI control uses shadcn/ui composition; loading, empty, stale, degraded, background-refetch, and error states are accessible.
-16. Webhooks and provider writes are absent from the V1 runtime.
+16. Google fixture webhooks and provider writes remain absent. Campaign-provider webhooks and actions are unavailable unless a typed current grant satisfies ADR 0016; the checked-in Meta and Telegram contracts currently verify no usable actions.
 17. Chrome DevTools verification confirms the health-first UI works at desktop and narrow viewport sizes with no critical console, network, accessibility, or interaction failure.
 
 ## 23. Definition of done

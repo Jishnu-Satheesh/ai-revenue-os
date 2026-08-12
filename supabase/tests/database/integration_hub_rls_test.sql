@@ -823,23 +823,16 @@ select extensions.throws_ok(
   null,
   'database guard rejects privileged provenance reassignment'
 );
-select extensions.throws_ok(
-  $$
-    insert into public.integration_capability_grants (
-      organization_id, connection_id, capability_key, maturity, availability,
-      derived_from_adapter_version
-    ) values (
-      '23000000-0000-4000-8000-000000000001',
-      '43000000-0000-4000-8000-000000000001',
-      'publish_google_business_post',
-      'governed-write',
-      'available',
-      '1.0.0'
-    )
-  $$,
-  '23514',
-  null,
-  'available capability maturity is limited to V1-safe levels'
+select extensions.ok(
+  not exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.integration_capability_grants'::regclass
+      and constraint_row.contype = 'c'
+      and pg_catalog.pg_get_constraintdef(constraint_row.oid) like '%availability%'
+      and pg_catalog.pg_get_constraintdef(constraint_row.oid) like '%read-only%'
+  ),
+  'the database no longer blanket-rejects governed capability maturity'
 );
 insert into public.integration_connections (
   id,

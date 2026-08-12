@@ -21,11 +21,13 @@ export function ConnectionList({
   selectedConnectionId,
   onSelect,
   providerNames,
+  timeZone,
 }: Readonly<{
   connections: readonly Connection[];
   selectedConnectionId: string | null;
   onSelect: (connectionId: string) => void;
   providerNames: Readonly<Record<string, string>>;
+  timeZone: string;
 }>) {
   if (connections.length === 0) {
     return (
@@ -74,7 +76,7 @@ export function ConnectionList({
                 <CardDescription>
                   {providerNames[connection.provider_key] ?? connection.provider_key} ·{" "}
                   {connection.connection_mode === "fixture" ? "Fixture" : "OAuth"} · last sync{" "}
-                  {formatInstant(connection.last_successful_sync_at)}
+                  {formatInstant(connection.last_successful_sync_at, timeZone)}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-2">

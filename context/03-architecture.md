@@ -101,6 +101,21 @@ Supabase Postgres is the system of record. It provides relational integrity, JSO
 9. Outcomes are measured after an appropriate delay.
 10. Learning records update playbook evidence.
 
+## Campaign Bundle path
+
+Campaigns use one immutable, cross-channel contract rather than separate scheduler, Studio, Telegram, and provider records:
+
+1. A Decision Engine opportunity or manual brief enters the same deterministic qualification service.
+2. Postgres stores an immutable Campaign Bundle Version containing the complete strategy, creative, channel-action, policy, spend, and measurement proposal.
+3. Trigger.dev `schemaTask` workflows run bounded generation and lifecycle stages. Vercel AI SDK calls may generate only typed proposal artifacts that pass Zod and policy validation.
+4. Studio and Telegram Mini App review the same exact version and digest. A material edit creates a new version and invalidates approval.
+5. Approval binds the exact version, action set, capability and policy versions, schedule, audience boundaries, attestations, expiry, and spend ceiling.
+6. A deterministic Tool Gateway atomically checks current authorization, approval, policy, budget, idempotency, credentials, capability, and readiness before one provider call.
+7. Provider receipts and reconciliation evidence are stored before exposure and outcome measurement.
+8. A registered measurement plan produces an evidence-qualified conclusion, and any reusable learning remains a separately governed proposal.
+
+Postgres remains authoritative throughout. Trigger.dev run state, Telegram sessions, and provider objects never substitute for campaign, approval, budget, execution, or evidence records. See ADRs 0015 through 0019.
+
 ## Deployment topology
 
 - Vercel: Next.js control plane and API endpoints.
@@ -116,6 +131,9 @@ Supabase Postgres is the system of record. It provides relational integrity, JSO
 - Execution runs never infer tenant scope from user-controlled text.
 - Service-role database access is limited to server and worker code with explicit organization filters.
 - Provider webhooks are verified, normalized, deduplicated, and stored before downstream processing.
+- A provider definition or visible connection never grants an action. Campaign actions require a non-expired verified provider contract and an organization-scoped capability grant with current account eligibility.
+- Models never approve a Campaign Bundle, select credentials, reserve spend, publish, or retry an unknown provider outcome.
+- Telegram is an operator-review identity surface only; it is not a customer campaign channel.
 
 ## Frontend data and state policy
 

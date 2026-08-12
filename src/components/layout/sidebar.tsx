@@ -12,6 +12,7 @@ import {
   Compass,
   LayoutDashboard,
   type LucideIcon,
+  Megaphone,
   Settings2,
   Sparkles,
   Waypoints,

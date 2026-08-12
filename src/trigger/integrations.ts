@@ -114,10 +114,10 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
     supabase,
     runTransitions: createSupabaseIntegrationRunTransitionPort(supabase),
   });
-  const providers = createProviderRegistry(
-    [googleBusinessProfileDefinition],
-    [createGoogleBusinessProfileFixtureAdapter()],
-  );
+  const providers = createProviderRegistry({
+    definitions: [googleBusinessProfileDefinition],
+    adapters: { read: [createGoogleBusinessProfileFixtureAdapter()] },
+  });
   const memoryRepository = createMemoryRepository(createSupabaseMemoryPersistence(supabase));
   const validatedSink = createValidatedIngestionSink({
     // One handoff, several consumers. Routing by record type keeps their

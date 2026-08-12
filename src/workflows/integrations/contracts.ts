@@ -168,6 +168,7 @@ export async function loadValidatedConnection(
   const adapter = dependencies.providers.getAdapter(
     connection.provider_key,
     payload.adapterVersion,
+    "read",
   );
   if (
     adapter.providerKey !== connection.provider_key ||

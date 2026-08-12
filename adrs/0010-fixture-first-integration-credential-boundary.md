@@ -31,6 +31,30 @@ Supabase Vault can store authenticated encrypted secrets and return opaque UUID 
 - Disconnect must disable local capabilities before asynchronous credential cleanup.
 - Provider payload normalization remains a separate Data Ingestion responsibility.
 
+## Amendment 2026-08-12: the Vault implementation now exists
+
+The `CredentialStore` port described above is no longer target-only. Migration
+`20260812110000_integration_oauth_sessions.sql` supplies the Supabase Vault
+implementation together with a generic OAuth session substrate, and ADR 0016
+already replaced this ADR's blanket write/webhook exclusion for capability-gated
+providers.
+
+What this amendment does **not** change:
+
+- No provider is registered as connectable. `productionOAuthApplications` is
+  empty, so every connect attempt fails closed before a session row is written.
+  Google Business Profile remains a read-only fixture, and Meta remains absent.
+- The security review this ADR requires is still unsigned. It now exists as
+  `docs/verification/campaigns/credential-security-review.md`, and Gate 4 stays
+  closed until a named reviewer signs it.
+- Real OAuth behaviour is still unvalidated against any live provider. Holding
+  `META_APP_ID` and `META_APP_SECRET` is an application identity, not an
+  entitlement.
+
+The port itself gained correlation and idempotency metadata on every operation,
+so a retried connect or rotation cannot leave a second live secret behind and
+every credential action is auditable without recording the secret.
+
 ## References
 
 - `specs/003-integration-hub.md`
