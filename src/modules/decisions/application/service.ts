@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { decisionRecordSchema, type DecisionRecord } from "@/domain/decisions/record";
-import type { DomainEvent, EventPublisher } from "@/domain/events/types";
-import type { DecisionWorkerStore } from "@/modules/decisions/application/ports";
+import type { DecisionDomainEvent, EventPublisher } from "@/domain/events/types";
+import {
+  decisionAggregateSchema,
+  type DecisionAggregate,
+  type DecisionWorkerStore,
+} from "@/modules/decisions/application/ports";
 
 export type DecisionServiceDependencies = {
   workerStore: DecisionWorkerStore;
@@ -19,16 +22,22 @@ export function createDecisionService(dependencies: DecisionServiceDependencies)
   const now = dependencies.now ?? (() => new Date());
 
   return {
-    async record(input: DecisionRecord): Promise<void> {
-      const record = decisionRecordSchema.parse(input);
-      await dependencies.workerStore.persist(record);
+    async record(input: DecisionAggregate): Promise<void> {
+      const aggregate = decisionAggregateSchema.parse(input);
+      const { record } = aggregate;
+      await dependencies.workerStore.persist(aggregate);
 
       await dependencies.events.publish(toEvent(record, now()));
     },
   };
 }
 
-function toEvent(record: DecisionRecord, occurredAt: Date): DomainEvent<Record<string, string>> {
+function toEvent(
+  record: DecisionAggregate["record"],
+  occurredAt: Date,
+): DecisionDomainEvent<
+  "decision.recorded" | "decision.needs_data_identified" | "opportunity.proposed"
+> {
   const base = {
     eventId: randomUUID(),
     occurredAt: occurredAt.toISOString(),

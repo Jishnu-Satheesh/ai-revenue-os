@@ -1,23 +1,30 @@
+import { decisionFeedbackInputSchema } from "@/modules/decisions/application/ports";
 import type {
   DecisionFeedbackInput,
   DecisionFeedbackPort,
   DecisionReadPort,
   DecisionWorkerStore,
+  DecisionAggregate,
   OpportunityFeedItem,
 } from "@/modules/decisions/application/ports";
-import type { DecisionRecord } from "@/domain/decisions/record";
 
 type RpcResult<T> = { data: T | null; error: { code?: string } | null };
 
 export type DecisionPersistence = {
   from(table: "opportunities"): {
     select(columns: string): {
-      order(column: string, options: { ascending: boolean }): {
+      order(
+        column: string,
+        options: { ascending: boolean },
+      ): {
         eq(column: string, value: string): Promise<RpcResult<readonly OpportunityRow[]>>;
       };
     };
   };
-  rpc(name: "append_decision_feedback" | "persist_decision_record", args: Record<string, unknown>): Promise<RpcResult<string | null>>;
+  rpc(
+    name: "append_decision_feedback" | "persist_decision_aggregate",
+    args: Record<string, unknown>,
+  ): Promise<RpcResult<string | null>>;
 };
 
 type OpportunityRow = {
@@ -85,21 +92,22 @@ export function createDecisionRepository(
       return (data ?? []).map(toFeedItem);
     },
     async appendFeedback(input) {
+      const validated = decisionFeedbackInputSchema.parse(input);
       const { data, error } = await persistence.rpc("append_decision_feedback", {
-        target_organization_id: input.organizationId,
-        target_opportunity_id: input.opportunityId,
-        input_feedback_kind: input.feedbackKind,
-        input_reason: input.reason,
-        input_edit_diff: input.editDiff,
-        input_correlation_id: input.correlationId,
+        target_organization_id: validated.organizationId,
+        target_opportunity_id: validated.opportunityId,
+        input_feedback_kind: validated.feedbackKind,
+        input_reason: validated.reason,
+        input_edit_diff: validated.editDiff,
+        input_correlation_id: validated.correlationId,
       });
       if (error || !data) decisionDatabaseError();
       return data;
     },
-    async persist(record: DecisionRecord) {
-      const { error } = await persistence.rpc("persist_decision_record", {
-        target_organization_id: record.organizationId,
-        input_record: record,
+    async persist(aggregate: DecisionAggregate) {
+      const { error } = await persistence.rpc("persist_decision_aggregate", {
+        target_organization_id: aggregate.record.organizationId,
+        input_aggregate: aggregate,
       });
       if (error) decisionDatabaseError();
     },

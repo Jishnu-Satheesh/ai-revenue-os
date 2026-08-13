@@ -14,7 +14,12 @@ const base = {
   screenedCount: 10,
   scoredCount: 3,
   inputsDigest: "b".repeat(64),
-  artifactVersions: { confidence_calibration: "seed-v1" },
+  versionTuple: {
+    policyVersionId: "55555555-5555-4555-8555-555555555555",
+    playbookVersionId: "66666666-6666-4666-8666-666666666666",
+    confidenceCalibrationId: "77777777-7777-4777-8777-777777777777",
+    rankingWeightsId: "88888888-8888-4888-8888-888888888888",
+  },
   propensity: 1,
   isExploration: false,
 };
@@ -32,12 +37,18 @@ describe("decision record", () => {
     expect(() => decisionRecordSchema.parse(withoutPropensity)).toThrow();
   });
 
-  it("requires a complete version tuple with no null artifact reference", () => {
-    expect(() => decisionRecordSchema.parse({ ...base, artifactVersions: {} })).toThrow();
+  it("requires the explicit version tuple with no null, unknown, or free-text artifact reference", () => {
+    expect(() => decisionRecordSchema.parse({ ...base, versionTuple: {} })).toThrow();
     expect(() =>
       decisionRecordSchema.parse({
         ...base,
-        artifactVersions: { confidence_calibration: null },
+        versionTuple: { ...base.versionTuple, confidenceCalibrationId: null },
+      }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({
+        ...base,
+        versionTuple: { ...base.versionTuple, extra: "nope" },
       }),
     ).toThrow();
   });
