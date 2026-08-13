@@ -23,3 +23,10 @@ export class DecisionError extends Error {
     super(message);
   }
 }
+
+export class DecisionConfigurationError extends Error {
+  constructor(readonly failureCode: string) {
+    super(failureCode);
+    this.name = "DecisionConfigurationError";
+  }
+}

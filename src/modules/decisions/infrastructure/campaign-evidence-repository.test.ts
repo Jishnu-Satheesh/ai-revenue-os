@@ -67,4 +67,27 @@ describe("production Campaign evidence mapping", () => {
     expect(mapped.brandAssetsUsable).toBe(false);
     expect(mapped.impactEvidence).toBeNull();
   });
+
+  it("preserves a missing authoritative observation timestamp as missing", () => {
+    const mapped = mapCampaignEvidence(
+      {
+        organizationProfileCurrent: false,
+        brandConstraintsVerified: false,
+        brandAssetsUsable: false,
+        syntheticAssetsAllowed: false,
+        economics: null,
+        activeGoalMetricKeys: [],
+        metaAccountMapped: false,
+        grantedCapabilityKeys: [],
+        trackingReady: false,
+        measurementPlanRegistered: false,
+        marginFirewallResult: "unknown",
+        inputsObservedAt: null,
+        observedVolume: 0,
+      },
+      null,
+    );
+
+    expect(mapped.inputsObservedAt).toBeNull();
+  });
 });

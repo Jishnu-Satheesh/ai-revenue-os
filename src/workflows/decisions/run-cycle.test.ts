@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DecisionCycleContext } from "@/modules/decisions/application/ports";
+import { createDecisionCycleRepository } from "@/modules/decisions/infrastructure/cycle-repository";
 import { createCampaignOpportunitySource } from "@/modules/decisions/sources/campaign-opportunity-source";
 import { DecisionConfigurationError } from "@/workflows/decisions/contracts";
 import { runCampaignDecisionCycle } from "@/workflows/decisions/run-cycle";
@@ -91,6 +92,47 @@ describe("runCampaignDecisionCycle", () => {
     expect(fixture.fail).toHaveBeenCalledWith(
       expect.objectContaining({ failureCode: "decision_access_policy_missing", claimToken }),
     );
+  });
+
+  it("terminally fails a production access-policy error mapped by the repository", async () => {
+    const fixture = setup({ claimStatus: "acquired", impact: false });
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          status: "acquired",
+          decision_cycle_id: decisionCycleId,
+          claim_token: claimToken,
+          lease_expires_at: "2026-08-13T12:05:00.000Z",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { lease_expires_at: "2026-08-13T12:05:00.000Z" },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: null,
+        error: { code: "22023", message: "campaign_decision_access_policy_invalid" },
+      })
+      .mockResolvedValueOnce({ data: { status: "failed" }, error: null });
+
+    const result = await runCampaignDecisionCycle(payload, {
+      ...fixture.dependencies,
+      cycles: createDecisionCycleRepository({ rpc }),
+    });
+
+    expect(result).toEqual({
+      status: "failed",
+      decisionCycleId,
+      failureCode: "decision_access_policy_invalid",
+    });
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      "claim_campaign_decision_cycle",
+      "renew_campaign_decision_cycle_claim",
+      "load_campaign_decision_context",
+      "fail_campaign_decision_cycle",
+    ]);
   });
 
   it("records slot-budget exhaustion before source generation", async () => {
@@ -213,6 +255,34 @@ describe("runCampaignDecisionCycle", () => {
         confidence: 0.75,
         riskTier: 3,
         approvalPath: "human_approval",
+        guardrails: [
+          {
+            key: "spend.total",
+            comparator: "less_than_or_equal",
+            threshold: { amountMinor: 450_000, currency: "AED" },
+          },
+          { key: "contribution.margin_rate", comparator: "equals", threshold: "pass" },
+        ],
+        assertions: [
+          { key: "inputs.fresh_until", expectedOutcome: "2026-08-14T06:00:00.000Z" },
+          { key: "impact.fresh_until", expectedOutcome: "2026-08-14T06:00:00.000Z" },
+          { key: "policy.access.active", expectedOutcome: context().accessPolicy.id },
+          { key: "policy.spend.active", expectedOutcome: context().spendPolicy!.id },
+          { key: "policy.spend.ceiling", expectedOutcome: "450000:AED" },
+          { key: "capability.publish_instagram.granted", expectedOutcome: "true" },
+          { key: "capability.publish_facebook.granted", expectedOutcome: "true" },
+          { key: "capability.advertise_meta_ads.granted", expectedOutcome: "true" },
+          { key: "capacity.max_active_recommendations", expectedOutcome: "3" },
+          { key: "margin.firewall.pass", expectedOutcome: "pass" },
+          { key: "measurement.tracking_ready", expectedOutcome: "true" },
+          { key: "measurement.plan_registered", expectedOutcome: "true" },
+        ],
+        evaluationPlan: {
+          primaryMetricKey: "contribution.incremental_gross_profit",
+          measurementWindowDays: 7,
+          measurementMethod: "reconciliation",
+        },
+        expiresAt: "2026-08-14T06:00:00.000Z",
       }),
     );
     const proposed = fixture.publish.mock.calls.at(-1)?.[0];
@@ -226,6 +296,22 @@ describe("runCampaignDecisionCycle", () => {
       }),
     );
     expect(JSON.stringify(proposed)).not.toContain("impact-revision-1");
+  });
+
+  it("samples one cycle timestamp for freshness, confidence, expiry, and events", async () => {
+    const fixture = setup({ claimStatus: "acquired", impact: true });
+    const clock = vi.fn().mockReturnValue(now);
+
+    await runCampaignDecisionCycle(payload, { ...fixture.dependencies, now: clock });
+
+    expect(clock).toHaveBeenCalledTimes(1);
+    expect(fixture.complete.mock.calls[0]?.[0].aggregate.opportunity?.expiresAt).toBe(
+      "2026-08-14T06:00:00.000Z",
+    );
+    expect(fixture.publish.mock.calls.map(([event]) => event.occurredAt)).toEqual([
+      now.toISOString(),
+      now.toISOString(),
+    ]);
   });
 
   it("cancels before authoritative reads and again before persistence", async () => {

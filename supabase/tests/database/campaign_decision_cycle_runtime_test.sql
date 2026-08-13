@@ -40,6 +40,99 @@ create temporary table campaign_cycle_state (
 );
 grant select, insert, update on campaign_cycle_state to service_role;
 
+create function pg_temp.campaign_selected_completion(
+  claim jsonb,
+  decision_context jsonb,
+  operation_key text,
+  digest text,
+  correlation_id uuid,
+  opportunity_id uuid,
+  fingerprint text
+)
+returns jsonb
+language sql
+immutable
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'organization_id', 'd5c50000-0000-4000-8000-000000000101',
+    'idempotency_key', operation_key,
+    'request_digest', digest,
+    'claim_token', claim ->> 'claim_token',
+    'decision_cycle_id', claim ->> 'decision_cycle_id',
+    'aggregate', pg_catalog.jsonb_build_object(
+      'record', pg_catalog.jsonb_build_object(
+        'decisionCycleId', claim ->> 'decision_cycle_id',
+        'organizationId', 'd5c50000-0000-4000-8000-000000000101',
+        'correlationId', correlation_id,
+        'outcome', 'action_selected',
+        'reason', null,
+        'needsDataKeys', pg_catalog.jsonb_build_array(),
+        'selectedCandidateFingerprint', fingerprint,
+        'opportunityId', opportunity_id,
+        'rejectionHistogram', '{}'::jsonb,
+        'screenedCount', 1,
+        'scoredCount', 1,
+        'inputsDigest', repeat('9', 64),
+        'versionTuple', pg_catalog.jsonb_build_object(
+          'policyVersionId', decision_context #>> '{access_policy,id}',
+          'playbookVersionId', decision_context #>> '{playbook,version_id}',
+          'rankingWeightsId', decision_context #>> '{ranking_artifact,id}',
+          'confidenceCalibrationId', decision_context #>> '{confidence_artifact,id}'
+        ),
+        'propensity', 1,
+        'isExploration', false
+      ),
+      'candidates', pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'playbookVersionId', decision_context #>> '{playbook,version_id}',
+        'candidateFingerprint', fingerprint,
+        'subjectKind', 'organization',
+        'subjectRef', 'd5c50000-0000-4000-8000-000000000101',
+        'parameterDigest', repeat('8', 64),
+        'impactLowMinor', 600000,
+        'impactHighMinor', 900000,
+        'confidence', 0.75,
+        'executionCostMinor', 450000,
+        'expectedContributionMinor', 112500,
+        'currency', 'AED',
+        'evidenceTier', 'computed',
+        'eligibilityResult', '{"eligible":true}'::jsonb,
+        'policyResult', '{"admitted":true}'::jsonb,
+        'rejectionReason', null,
+        'rank', 1
+      )),
+      'opportunity', pg_catalog.jsonb_build_object(
+        'id', opportunity_id,
+        'playbookVersionId', decision_context #>> '{playbook,version_id}',
+        'candidateFingerprint', fingerprint,
+        'title', 'Controlled campaign recommendation',
+        'summary', 'A bounded recommendation used to test final admission.',
+        'hypothesis', 'A governed recommendation can improve incremental profit.',
+        'subjectKind', 'organization',
+        'subjectRef', 'd5c50000-0000-4000-8000-000000000101',
+        'evidenceBundle', '{"sourceRevisionIds":["test-revision"]}'::jsonb,
+        'assumptions', '["Evidence remains current through review."]'::jsonb,
+        'impactLowMinor', 600000,
+        'impactHighMinor', 900000,
+        'confidence', 0.75,
+        'confidenceRationale', 'Controlled deterministic calibration',
+        'evidenceTier', 'computed',
+        'executionCostMinor', 450000,
+        'expectedContributionMinor', 112500,
+        'currency', 'AED',
+        'timeToImpactDays', 7,
+        'riskTier', 3,
+        'approvalPath', 'human_approval',
+        'guardrails', '[{"key":"spend.total","threshold":450000}]'::jsonb,
+        'assertions', '[{"key":"policy.access.active","expectedOutcome":"true"}]'::jsonb,
+        'evaluationPlan', '{"primaryMetricKey":"contribution.incremental_gross_profit"}'::jsonb,
+        'expiresAt', '2027-01-01T00:00:00.000Z',
+        'status', 'proposed'
+      )
+    )
+  )
+$$;
+
 select extensions.has_table(
   'private', 'decision_cycle_operations',
   'the claim ledger is private'
@@ -86,6 +179,11 @@ select extensions.has_index(
   'decision_cycle_operations_result_opportunity_idx',
   'operation result-opportunity foreign keys have a covering index'
 );
+select extensions.has_index(
+  'public', 'opportunities',
+  'opportunities_active_candidate_fingerprint_idx',
+  'active campaign recommendations have a database uniqueness backstop'
+);
 
 select extensions.has_column(
   'public', 'artifact_versions', 'implementation_key',
@@ -117,6 +215,10 @@ select extensions.function_privs_are(
 select extensions.function_privs_are(
   'public', 'load_campaign_decision_context', array['uuid', 'jsonb'], 'service_role',
   array['EXECUTE'], 'service role may load context through the fenced RPC'
+);
+select extensions.function_privs_are(
+  'private', 'load_campaign_decision_context', array['uuid', 'jsonb'], 'service_role',
+  array[]::text[], 'service role cannot bypass the truthful context wrapper'
 );
 select extensions.function_privs_are(
   'public', 'complete_campaign_decision_cycle', array['uuid', 'jsonb'], 'service_role',
@@ -225,6 +327,29 @@ select extensions.throws_ok(
   $$,
   '23514', null,
   'a ranking artifact cannot omit its registered implementation'
+);
+
+delete from public.business_profiles
+where organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid;
+
+insert into public.business_profiles (organization_id, updated_by, updated_at)
+values (
+  'd5c50000-0000-4000-8000-000000000101'::uuid,
+  'd5c50000-0000-4000-8000-000000000001'::uuid,
+  '2026-08-10T06:00:00.000Z'::timestamptz
+);
+
+insert into public.channel_economics_entries (
+  id, organization_id, grain, period_start, period_end, period_timezone,
+  gross_revenue_minor, transaction_count, currency, margin_source,
+  completeness_grade, contribution_margin_minor, computed_at
+)
+values (
+  'd5c50000-0000-4000-8000-000000000203'::uuid,
+  'd5c50000-0000-4000-8000-000000000101'::uuid,
+  'period', '2026-08-12T00:00:00.000Z', '2026-08-13T00:00:00.000Z', 'Asia/Dubai',
+  1000000, 10, 'AED', 'derived', 'complete', 600000,
+  '2026-08-13T06:00:00.000Z'
 );
 
 set local role service_role;
@@ -338,6 +463,18 @@ select extensions.ok(
   (select not (value #> '{evidence}') ? 'impact_evidence'
    from campaign_cycle_state where key = 'context'),
   'production context does not invent controlled impact evidence'
+);
+select extensions.is(
+  (select value #>> '{evidence,inputs_observed_at}'
+   from campaign_cycle_state where key = 'context'),
+  '2026-08-10T06:00:00+00:00'::text,
+  'context freshness uses the oldest required input rather than the newest one'
+);
+select extensions.is(
+  (select (value #>> '{evidence,measurement_plan_registered}')::boolean
+   from campaign_cycle_state where key = 'context'),
+  false,
+  'an active playbook is not reported as a governed measurement plan'
 );
 
 insert into campaign_cycle_state (key, value)
@@ -516,6 +653,167 @@ select extensions.is(
   ),
   array['impact.range', 'capability.advertise_meta_ads']::text[],
   'claim-aware completion persists the exact bounded readiness keys'
+);
+
+update public.policies
+set configuration = '{"max_active_recommendations":1}'::jsonb
+where id = 'd5c50000-0000-4000-8000-000000000201'::uuid;
+
+set local role service_role;
+
+insert into campaign_cycle_state (key, value)
+select state_key, public.claim_campaign_decision_cycle(
+  'd5c50000-0000-4000-8000-000000000101'::uuid,
+  pg_catalog.jsonb_build_object(
+    'organization_id', 'd5c50000-0000-4000-8000-000000000101',
+    'correlation_id', correlation_id,
+    'idempotency_key', operation_key,
+    'request_digest', digest,
+    'trigger_type', 'scheduled'
+  )
+)
+from (values
+  ('capacity_claim_a', 'd5c50000-0000-4000-8000-000000000311'::uuid,
+    'campaign-cycle-capacity-a', repeat('3', 64)),
+  ('capacity_claim_b', 'd5c50000-0000-4000-8000-000000000312'::uuid,
+    'campaign-cycle-capacity-b', repeat('4', 64))
+) input(state_key, correlation_id, operation_key, digest);
+
+select extensions.lives_ok(
+  $$
+    select public.complete_campaign_decision_cycle(
+      'd5c50000-0000-4000-8000-000000000101'::uuid,
+      pg_temp.campaign_selected_completion(
+        claim.value,
+        context.value,
+        'campaign-cycle-capacity-a',
+        repeat('3', 64),
+        'd5c50000-0000-4000-8000-000000000311'::uuid,
+        'd5c50000-0000-4000-8000-000000000411'::uuid,
+        repeat('3', 64)
+      )
+    )
+    from campaign_cycle_state claim
+    cross join campaign_cycle_state context
+    where claim.key = 'capacity_claim_a' and context.key = 'context'
+  $$,
+  'the first claimant may consume the final active recommendation slot'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.complete_campaign_decision_cycle(
+      'd5c50000-0000-4000-8000-000000000101'::uuid,
+      pg_temp.campaign_selected_completion(
+        claim.value,
+        context.value,
+        'campaign-cycle-capacity-b',
+        repeat('4', 64),
+        'd5c50000-0000-4000-8000-000000000312'::uuid,
+        'd5c50000-0000-4000-8000-000000000412'::uuid,
+        repeat('4', 64)
+      )
+    )
+    from campaign_cycle_state claim
+    cross join campaign_cycle_state context
+    where claim.key = 'capacity_claim_b' and context.key = 'context'
+  $$,
+  '40001', 'campaign_decision_capacity_exhausted',
+  'completion rechecks capacity after overlapping claims observed the final slot'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select pg_catalog.count(*)::bigint
+    from public.opportunities
+    where organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid
+      and status in ('proposed', 'awaiting_approval', 'approved')
+  ),
+  1::bigint,
+  'capacity contention leaves exactly one active recommendation'
+);
+
+update public.policies
+set configuration = '{"max_active_recommendations":3}'::jsonb
+where id = 'd5c50000-0000-4000-8000-000000000201'::uuid;
+
+set local role service_role;
+
+insert into campaign_cycle_state (key, value)
+select state_key, public.claim_campaign_decision_cycle(
+  'd5c50000-0000-4000-8000-000000000101'::uuid,
+  pg_catalog.jsonb_build_object(
+    'organization_id', 'd5c50000-0000-4000-8000-000000000101',
+    'correlation_id', correlation_id,
+    'idempotency_key', operation_key,
+    'request_digest', digest,
+    'trigger_type', 'scheduled'
+  )
+)
+from (values
+  ('duplicate_claim_a', 'd5c50000-0000-4000-8000-000000000313'::uuid,
+    'campaign-cycle-duplicate-a', repeat('5', 64)),
+  ('duplicate_claim_b', 'd5c50000-0000-4000-8000-000000000314'::uuid,
+    'campaign-cycle-duplicate-b', repeat('6', 64))
+) input(state_key, correlation_id, operation_key, digest);
+
+select extensions.lives_ok(
+  $$
+    select public.complete_campaign_decision_cycle(
+      'd5c50000-0000-4000-8000-000000000101'::uuid,
+      pg_temp.campaign_selected_completion(
+        claim.value,
+        context.value,
+        'campaign-cycle-duplicate-a',
+        repeat('5', 64),
+        'd5c50000-0000-4000-8000-000000000313'::uuid,
+        'd5c50000-0000-4000-8000-000000000413'::uuid,
+        repeat('5', 64)
+      )
+    )
+    from campaign_cycle_state claim
+    cross join campaign_cycle_state context
+    where claim.key = 'duplicate_claim_a' and context.key = 'context'
+  $$,
+  'the first claimant may persist a new active candidate fingerprint'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.complete_campaign_decision_cycle(
+      'd5c50000-0000-4000-8000-000000000101'::uuid,
+      pg_temp.campaign_selected_completion(
+        claim.value,
+        context.value,
+        'campaign-cycle-duplicate-b',
+        repeat('6', 64),
+        'd5c50000-0000-4000-8000-000000000314'::uuid,
+        'd5c50000-0000-4000-8000-000000000414'::uuid,
+        repeat('5', 64)
+      )
+    )
+    from campaign_cycle_state claim
+    cross join campaign_cycle_state context
+    where claim.key = 'duplicate_claim_b' and context.key = 'context'
+  $$,
+  '23505', 'campaign_decision_active_duplicate',
+  'completion rejects an active duplicate after overlapping claims'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select pg_catalog.count(*)::bigint
+    from public.opportunities
+    where organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid
+      and candidate_fingerprint = repeat('5', 64)
+      and status in ('proposed', 'awaiting_approval', 'approved')
+  ),
+  1::bigint,
+  'duplicate contention leaves exactly one active recommendation per fingerprint'
 );
 
 set local role service_role;

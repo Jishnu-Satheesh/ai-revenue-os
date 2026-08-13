@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+export { DecisionConfigurationError } from "@/domain/decisions/errors";
+
 export const campaignDecisionCyclePayloadSchema = z.strictObject({
   organizationId: z.string().uuid(),
   correlationId: z.string().uuid(),
@@ -29,11 +31,4 @@ export function decisionCycleRequestDigest(payload: CampaignDecisionCyclePayload
       "utf8",
     )
     .digest("hex");
-}
-
-export class DecisionConfigurationError extends Error {
-  constructor(readonly failureCode: string) {
-    super(failureCode);
-    this.name = "DecisionConfigurationError";
-  }
 }

@@ -7,7 +7,8 @@ export function mapCampaignEvidence(
 ): CampaignEvidence {
   return {
     ...evidence,
-    inputsObservedAt: new Date(evidence.inputsObservedAt),
+    inputsObservedAt:
+      evidence.inputsObservedAt === null ? null : new Date(evidence.inputsObservedAt),
     spendPolicy,
     accessPolicyActive: true,
     // Governed impact arithmetic/comparable-intervention evidence does not yet

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { DecisionConfigurationError } from "@/domain/decisions/errors";
 import {
   decisionClaimResultSchema,
   decisionCycleContextSchema,
@@ -82,12 +83,28 @@ const contextRowSchema = z.strictObject({
     tracking_ready: z.boolean(),
     measurement_plan_registered: z.boolean(),
     margin_firewall_result: z.string(),
-    inputs_observed_at: z.string(),
+    inputs_observed_at: z.string().nullable(),
     observed_volume: z.number(),
   }),
 });
 
-function databaseError(): never {
+const deterministicFailureCodes = new Map<string, string>([
+  ["22023:campaign_decision_access_policy_invalid", "decision_access_policy_invalid"],
+  [
+    "22023:campaign_decision_ranking_implementation_invalid",
+    "decision_ranking_implementation_invalid",
+  ],
+  [
+    "22023:campaign_decision_confidence_implementation_invalid",
+    "decision_confidence_implementation_invalid",
+  ],
+  ["40001:campaign_decision_capacity_exhausted", "decision_capacity_exhausted"],
+  ["23505:campaign_decision_active_duplicate", "decision_active_opportunity_duplicate"],
+]);
+
+function databaseError(error?: { message?: string; code?: string }): never {
+  const failureCode = deterministicFailureCodes.get(`${error?.code ?? ""}:${error?.message ?? ""}`);
+  if (failureCode !== undefined) throw new DecisionConfigurationError(failureCode);
   throw new Error("Campaign decision cycle could not be loaded or saved.");
 }
 
@@ -189,7 +206,8 @@ export function createDecisionCycleRepository(
     args: Record<string, unknown>,
   ) {
     const result = await persistence.rpc(name, args);
-    if (result.error || result.data === null) databaseError();
+    if (result.error) databaseError(result.error);
+    if (result.data === null) databaseError();
     return result.data;
   }
 

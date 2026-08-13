@@ -163,6 +163,17 @@ describe("decision worker controls", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts a missing aggregate input timestamp so readiness can fail closed", () => {
+    const context = contextFixture();
+
+    expect(
+      decisionCycleContextSchema.parse({
+        ...context,
+        evidence: { ...context.evidence, inputsObservedAt: null },
+      }).evidence.inputsObservedAt,
+    ).toBeNull();
+  });
   it("accepts a bounded artifact promotion and rejects unknown or null input", () => {
     const input = {
       organizationId,

@@ -138,7 +138,7 @@ export const decisionEvidenceContextSchema = z.strictObject({
   trackingReady: z.boolean(),
   measurementPlanRegistered: z.boolean(),
   marginFirewallResult: z.enum(["pass", "breach", "unknown"]),
-  inputsObservedAt: utcTimestampSchema,
+  inputsObservedAt: utcTimestampSchema.nullable(),
   observedVolume: z.number().int().nonnegative(),
 });
 

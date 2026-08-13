@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createDecisionCycleRepository } from "@/modules/decisions/infrastructure/cycle-repository";
+import { DecisionConfigurationError } from "@/workflows/decisions/contracts";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const decisionCycleId = "22222222-2222-4222-8222-222222222222";
@@ -105,6 +106,19 @@ describe("DecisionCycleRepository", () => {
     await expect(repository.claim(operation)).rejects.toThrow(
       /^Campaign decision cycle could not be loaded or saved\.$/,
     );
+  });
+
+  it("maps only allowlisted deterministic database failures to configuration errors", async () => {
+    const repository = createDecisionCycleRepository({
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: "22023", message: "campaign_decision_access_policy_invalid" },
+      }),
+    });
+
+    const result = repository.loadContext(claim);
+    await expect(result).rejects.toBeInstanceOf(DecisionConfigurationError);
+    await expect(result).rejects.toMatchObject({ failureCode: "decision_access_policy_invalid" });
   });
 });
 

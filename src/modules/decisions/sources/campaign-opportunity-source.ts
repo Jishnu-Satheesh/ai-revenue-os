@@ -40,7 +40,7 @@ export type CampaignEvidence = {
     timeToImpactDays: number | null;
     completenessGrade: CompletenessGrade;
   } | null;
-  inputsObservedAt: Date;
+  inputsObservedAt: Date | null;
   observedVolume: number;
 };
 
@@ -153,8 +153,13 @@ export function createCampaignOpportunitySource() {
         missingEvidenceKeys.push("impact.approved_source");
       }
 
-      const ageMinutes = (input.now.getTime() - evidence.inputsObservedAt.getTime()) / (60 * 1000);
-      if (ageMinutes > playbook.freshnessBoundMinutes) missingEvidenceKeys.push("inputs_fresh");
+      if (evidence.inputsObservedAt === null) {
+        missingEvidenceKeys.push("inputs_fresh");
+      } else {
+        const ageMinutes =
+          (input.now.getTime() - evidence.inputsObservedAt.getTime()) / (60 * 1000);
+        if (ageMinutes > playbook.freshnessBoundMinutes) missingEvidenceKeys.push("inputs_fresh");
+      }
 
       // A candidate whose components span currencies is a defect, not a
       // conversion, so it is refused before it can be scored.

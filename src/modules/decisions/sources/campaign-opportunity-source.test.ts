@@ -202,6 +202,14 @@ describe("campaign opportunity source", () => {
     expect(result.missingEvidenceKeys).toContain("inputs_fresh");
   });
 
+  it("yields needs_data when no complete authoritative input timestamp exists", () => {
+    const result = generate({ inputsObservedAt: null });
+
+    expect(result.outcome).toBe("needs_data");
+    if (result.outcome !== "needs_data") return;
+    expect(result.missingEvidenceKeys).toContain("inputs_fresh");
+  });
+
   it("reports every missing input at once, so the operator gets one list", () => {
     const result = generate({ trackingReady: false, metaAccountMapped: false });
 

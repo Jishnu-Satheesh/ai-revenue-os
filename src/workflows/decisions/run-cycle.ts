@@ -8,6 +8,7 @@ import { parameterDigest } from "@/domain/decisions/digest";
 import { applyPolicyGate } from "@/domain/decisions/policy";
 import { computeSlotBudget, screenCandidates } from "@/domain/decisions/screening";
 import { expectedContributionMinor } from "@/domain/decisions/value";
+import { DecisionConfigurationError } from "@/domain/decisions/errors";
 import type { DecisionDomainEvent, EventPublisher } from "@/domain/events/types";
 import type {
   DecisionAggregate,
@@ -21,7 +22,6 @@ import type {
   CampaignOpportunitySource,
 } from "@/modules/decisions/sources/campaign-opportunity-source";
 import {
-  DecisionConfigurationError,
   decisionCycleRequestDigest,
   parseCampaignDecisionCyclePayload,
 } from "@/workflows/decisions/contracts";
@@ -161,6 +161,8 @@ export async function runCampaignDecisionCycle(
   if (claimed.status === "completed") return claimed;
   if (claimed.status === "in_progress" || claimed.status === "cancelled") return claimed;
 
+  const cycleTimestamp = now();
+
   const claim: DecisionLiveClaim = {
     ...operation,
     decisionCycleId: claimed.decisionCycleId,
@@ -168,7 +170,7 @@ export async function runCampaignDecisionCycle(
     leaseExpiresAt: claimed.leaseExpiresAt,
   };
   if (claimed.status === "acquired") {
-    await dependencies.events.publish(startEvent(claim, now(), newId()));
+    await dependencies.events.publish(startEvent(claim, cycleTimestamp, newId()));
   }
 
   const cancelledBeforeRead = await cancelIfAborted(operation, claim, dependencies);
@@ -212,7 +214,7 @@ export async function runCampaignDecisionCycle(
         organizationId: payload.organizationId,
         playbookVersionId: context.playbook.versionId,
         evidence,
-        now: now(),
+        now: cycleTimestamp,
       });
 
       if (generated.outcome === "needs_data") {
@@ -250,7 +252,7 @@ export async function runCampaignDecisionCycle(
             },
           ],
           {
-            now: now(),
+            now: cycleTimestamp,
             grantedCapabilityKeys: new Set(evidence.grantedCapabilityKeys),
             activeGoalMetricKeys: new Set(evidence.activeGoalMetricKeys),
             goalAlignmentActive: evidence.activeGoalMetricKeys.length > 0,
@@ -289,7 +291,7 @@ export async function runCampaignDecisionCycle(
             throw new DecisionConfigurationError("decision_artifact_implementation_unknown");
           }
           const impact = candidate.impactEvidence;
-          const ageMinutes = (now().getTime() - impact.observedAt.getTime()) / 60_000;
+          const ageMinutes = (cycleTimestamp.getTime() - impact.observedAt.getTime()) / 60_000;
           const confidence = confidenceImplementation.compute({
             evidenceTier: impact.evidenceTier,
             completenessGrade: impact.completenessGrade,
@@ -368,6 +370,32 @@ export async function runCampaignDecisionCycle(
                 candidates: [candidateRow],
               });
             } else {
+              if (evidence.inputsObservedAt === null) {
+                throw new DecisionConfigurationError("decision_input_freshness_missing");
+              }
+              const inputFreshUntil = new Date(
+                evidence.inputsObservedAt.getTime() +
+                  context.playbook.freshnessBoundMinutes * 60_000,
+              );
+              const impactFreshUntil = new Date(
+                impact.observedAt.getTime() + context.playbook.freshnessBoundMinutes * 60_000,
+              );
+              const expiresAt = new Date(
+                Math.min(inputFreshUntil.getTime(), impactFreshUntil.getTime()),
+              );
+              const guardrails = context.playbook.guardrailMetricKeys.map((key) => {
+                if (key === "spend.total") {
+                  return {
+                    key,
+                    comparator: "less_than_or_equal",
+                    threshold: { amountMinor: executionCostMinor, currency: impact.currency },
+                  };
+                }
+                if (key === "contribution.margin_rate") {
+                  return { key, comparator: "equals", threshold: "pass" };
+                }
+                throw new DecisionConfigurationError("decision_guardrail_metric_unknown");
+              });
               const opportunityId = newId();
               aggregate = {
                 record: {
@@ -405,23 +433,43 @@ export async function runCampaignDecisionCycle(
                   timeToImpactDays: impact.timeToImpactDays,
                   riskTier: context.playbook.riskClass as 0 | 1 | 2 | 3,
                   approvalPath: "human_approval",
-                  guardrails: context.playbook.guardrailMetricKeys.map((key) => ({ key })),
+                  guardrails,
                   assertions: [
+                    {
+                      key: "inputs.fresh_until",
+                      expectedOutcome: inputFreshUntil.toISOString(),
+                    },
+                    {
+                      key: "impact.fresh_until",
+                      expectedOutcome: impactFreshUntil.toISOString(),
+                    },
                     { key: "policy.access.active", expectedOutcome: context.accessPolicy.id },
                     {
                       key: "policy.spend.active",
                       expectedOutcome: context.spendPolicy?.id ?? "missing",
                     },
+                    {
+                      key: "policy.spend.ceiling",
+                      expectedOutcome: `${executionCostMinor}:${impact.currency}`,
+                    },
+                    ...context.playbook.requiredCapabilityKeys.map((key) => ({
+                      key: `capability.${key}.granted`,
+                      expectedOutcome: "true",
+                    })),
+                    {
+                      key: "capacity.max_active_recommendations",
+                      expectedOutcome: String(context.accessPolicy.maxActiveRecommendations),
+                    },
                     { key: "margin.firewall.pass", expectedOutcome: "pass" },
                     { key: "measurement.tracking_ready", expectedOutcome: "true" },
+                    { key: "measurement.plan_registered", expectedOutcome: "true" },
                   ],
                   evaluationPlan: {
                     primaryMetricKey: context.playbook.primaryMetricKey,
                     measurementWindowDays: context.playbook.measurementWindowDays,
+                    measurementMethod: candidate.parameters.measurementMethod,
                   },
-                  expiresAt: new Date(
-                    now().getTime() + context.playbook.freshnessBoundMinutes * 60_000,
-                  ).toISOString(),
+                  expiresAt: expiresAt.toISOString(),
                   status: "proposed",
                 },
               };
@@ -437,7 +485,7 @@ export async function runCampaignDecisionCycle(
     const service = createDecisionService({
       aggregateStore: dependencies.cycles,
       events: dependencies.events,
-      now,
+      now: () => cycleTimestamp,
     });
     const completion = await service.record(claim, aggregate);
     return { status: "completed", decisionCycleId: claim.decisionCycleId, ...completion };
