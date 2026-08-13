@@ -28,6 +28,12 @@ const SERVICE_CLIENT = "@/lib/supabase/service";
 const restrict = (patterns) => ["error", { patterns }];
 
 const config = [
+  // Generated bundles, coverage output, and sibling worktrees are not source
+  // for this checkout. Linting them reports vendored errors and can multiply
+  // one repository scan into several full scans.
+  {
+    ignores: [".trigger/**", ".worktrees/**", "coverage/**", "test-results/**"],
+  },
   ...nextVitals,
   ...nextTypescript,
 

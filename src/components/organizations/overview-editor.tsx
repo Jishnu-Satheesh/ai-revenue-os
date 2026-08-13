@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Archive, CheckCircle2, Plus, Save, ShieldCheck, Sparkles } from "lucide-react";
+import { Archive, CheckCircle2, Plus, Save, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -32,11 +32,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StatusBadge } from "@/components/ui/status-badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import type { DigitalTwinSnapshot } from "@/modules/organizations/infrastructure/repository";
 
-type Props = { organizationId: string; snapshot: DigitalTwinSnapshot };
+type Props = {
+  organizationId: string;
+  snapshot: DigitalTwinSnapshot;
+  canManagePolicies: boolean;
+  canManageLifecycle: boolean;
+};
 
 async function parseResponse(response: Response) {
   const payload = await response.json().catch(() => null);
@@ -44,7 +49,12 @@ async function parseResponse(response: Response) {
   return payload;
 }
 
-export function OverviewEditor({ organizationId, snapshot }: Props) {
+export function OverviewEditor({
+  organizationId,
+  snapshot,
+  canManagePolicies,
+  canManageLifecycle,
+}: Props) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,160 +141,101 @@ export function OverviewEditor({ organizationId, snapshot }: Props) {
           <AlertDescription>{error ?? message}</AlertDescription>
         </Alert>
       )}
-      <CurrentData snapshot={snapshot} />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ProfileForm
-          profile={profile}
-          busy={busy}
-          onSubmit={(body) => submit("profile", body, "PATCH")}
-        />
-        <BranchForm busy={busy} onSubmit={(body) => submit("branches", body)} />
-        <FactForm busy={busy} onSubmit={(body) => submit("facts", body)} />
-        <GoalForm
-          branches={snapshot.branches}
-          busy={busy}
-          onSubmit={(body) => submit("goals", body)}
-        />
-        <ConstraintForm busy={busy} onSubmit={(body) => submit("constraints", body)} />
-        <PolicyForm
-          organizationCurrency={snapshot.organization.base_currency}
-          busy={busy}
-          onSubmit={(body) => submit("policies", body)}
-        />
-      </div>
-      <UiCard>
-        <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="text-accent" />
-              <h3 className="font-semibold">Lifecycle controls</h3>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Activation checks the access policy and physical branch rule. Draft deletion is a soft
-              archive.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              disabled={busy || snapshot.organization.status !== "draft_onboarding"}
-              onClick={() => setArchiveOpen(true)}
-              type="button"
-              variant="outline"
-            >
-              <Archive data-icon="inline-start" />
-              Archive draft
-            </Button>
-            <Button
-              disabled={busy || snapshot.organization.status !== "draft_onboarding"}
-              onClick={() => void activate()}
-              type="button"
-            >
-              <CheckCircle2 data-icon="inline-start" />
-              Activate
-            </Button>
-          </div>
-        </CardContent>
-      </UiCard>
-      <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive this draft organization?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This is a soft archive and is reversible only through a documented recovery process.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void archive()}>Archive draft</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
-
-function CurrentData({ snapshot }: { snapshot: DigitalTwinSnapshot }) {
-  const toneForFact = (status: string) =>
-    status === "verified"
-      ? ("success" as const)
-      : status === "stale"
-        ? ("warning" as const)
-        : ("neutral" as const);
-
-  return (
-    <UiCard>
-      <CardHeader className="flex-row items-start justify-between">
-        <div>
-          <CardTitle>Current Digital Twin data</CardTitle>
-          <CardDescription className="mt-1">
-            Structured context with provenance and freshness visible at a glance.
-          </CardDescription>
+      <Tabs defaultValue="profile">
+        <div className="overflow-x-auto pb-1">
+          <TabsList aria-label="Organization management sections">
+            <TabsTrigger value="profile">Business profile</TabsTrigger>
+            <TabsTrigger value="branches">Branches</TabsTrigger>
+            <TabsTrigger value="facts">Facts</TabsTrigger>
+            <TabsTrigger value="goals">Goals</TabsTrigger>
+            <TabsTrigger value="constraints">Constraints</TabsTrigger>
+            {canManagePolicies ? <TabsTrigger value="policies">Policies</TabsTrigger> : null}
+          </TabsList>
         </div>
-        <Sparkles className="text-accent" />
-      </CardHeader>
-      <CardContent className="grid gap-6 lg:grid-cols-3">
-        <DataColumn title="Branches">
-          {snapshot.branches.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {snapshot.organization.branchless_confirmed
-                ? "Branchless operation confirmed."
-                : "Missing — add a branch or confirm branchless operation."}
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {snapshot.branches.map((branch) => (
-                <li key={branch.id} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="truncate">{branch.name}</span>
-                  <StatusBadge label={branch.kind} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </DataColumn>
-        <DataColumn title="Facts">
-          {snapshot.facts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Missing — no source-aware facts yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {snapshot.facts.slice(0, 6).map((fact) => (
-                <li key={fact.id} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="truncate">{fact.fact_key}</span>
-                  <StatusBadge label={fact.status} tone={toneForFact(fact.status)} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </DataColumn>
-        <DataColumn title="Goals and constraints">
-          {snapshot.goals.length === 0 && snapshot.constraints.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Missing — define an outcome and the limits around it.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-2 text-sm">
-              {snapshot.goals.slice(0, 3).map((goal) => (
-                <li key={goal.id} className="truncate">
-                  Goal: {goal.name}
-                </li>
-              ))}
-              {snapshot.constraints.slice(0, 3).map((constraint) => (
-                <li key={constraint.id} className="truncate">
-                  Constraint: {constraint.name}
-                </li>
-              ))}
-            </ul>
-          )}
-        </DataColumn>
-      </CardContent>
-    </UiCard>
-  );
-}
-
-function DataColumn({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
-      {children}
+        <TabsContent value="profile">
+          <ProfileForm
+            profile={profile}
+            busy={busy}
+            onSubmit={(body) => submit("profile", body, "PATCH")}
+          />
+        </TabsContent>
+        <TabsContent value="branches">
+          <BranchForm busy={busy} onSubmit={(body) => submit("branches", body)} />
+        </TabsContent>
+        <TabsContent value="facts">
+          <FactForm busy={busy} onSubmit={(body) => submit("facts", body)} />
+        </TabsContent>
+        <TabsContent value="goals">
+          <GoalForm
+            branches={snapshot.branches}
+            busy={busy}
+            onSubmit={(body) => submit("goals", body)}
+          />
+        </TabsContent>
+        <TabsContent value="constraints">
+          <ConstraintForm busy={busy} onSubmit={(body) => submit("constraints", body)} />
+        </TabsContent>
+        {canManagePolicies ? (
+          <TabsContent value="policies">
+            <PolicyForm
+              organizationCurrency={snapshot.organization.base_currency}
+              busy={busy}
+              onSubmit={(body) => submit("policies", body)}
+            />
+          </TabsContent>
+        ) : null}
+      </Tabs>
+      {canManageLifecycle ? (
+        <UiCard>
+          <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="text-accent" />
+                <h3 className="font-semibold">Lifecycle controls</h3>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Activation checks the access policy and physical branch rule. Draft deletion is a
+                soft archive.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                disabled={busy || snapshot.organization.status !== "draft_onboarding"}
+                onClick={() => setArchiveOpen(true)}
+                type="button"
+                variant="outline"
+              >
+                <Archive data-icon="inline-start" />
+                Archive draft
+              </Button>
+              <Button
+                disabled={busy || snapshot.organization.status !== "draft_onboarding"}
+                onClick={() => void activate()}
+                type="button"
+              >
+                <CheckCircle2 data-icon="inline-start" />
+                Activate
+              </Button>
+            </div>
+          </CardContent>
+        </UiCard>
+      ) : null}
+      {canManageLifecycle ? (
+        <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Archive this draft organization?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This is a soft archive and is reversible only through a documented recovery process.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void archive()}>Archive draft</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </div>
   );
 }
