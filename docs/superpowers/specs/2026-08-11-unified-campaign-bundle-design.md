@@ -299,6 +299,128 @@ diff. The application service must validate and persist every accepted patch as
 a new Campaign Bundle version. The Telegram Mini App uses the same revision
 service or revision task rather than a separate agent state.
 
+### Decision-cycle runtime amendment
+
+Task 5 preflight on 2026-08-13 found two control-plane prerequisites that the
+original release plan assumed but the implemented Decision ledger did not yet
+provide: a retry-safe cycle claim and an executable reference for each
+deterministic scoring artifact. The following design is part of the approved
+Campaign runtime, not a separate optimization or execution system.
+
+#### Database-authoritative cycle claims
+
+Trigger.dev delivery idempotency complements the database boundary; it does not
+replace it. A private, organization-scoped Decision-cycle operation ledger owns
+the business idempotency key, normalized request digest, cycle ID, status,
+claim token, lease expiry, attempt count, cancellation state, and bounded result
+references. It contains no source payload, evidence bundle, credential, or
+customer data.
+
+The worker contract is:
+
+1. Validate the `schemaTask` payload before constructing a service-role client.
+   The payload carries an organization ID, correlation ID, bounded business
+   idempotency key, and an enumerated trigger type; it never carries trusted
+   tenant scope as free text.
+2. Atomically claim or reclaim the operation through a security-definer RPC.
+   The first claim creates the cycle. A matching completed request returns its
+   stored result; an active duplicate reports `in_progress`; an expired lease
+   may be reclaimed with a new token; reuse of a key with a different request
+   digest fails closed.
+3. Check the task cancellation signal and the live database claim before
+   expensive reads and again before persistence. Renewal extends only the
+   matching active token. Cancellation and lease takeover fence the old worker.
+4. Persist the one-playbook Campaign decision and complete its cycle through a
+   claim-aware RPC in one transaction. The RPC rechecks organization, request,
+   token, lease, and cancellation state before writing the Decision aggregate
+   and bounded completion result. Direct service-role execution of the
+   unfenced cycle-start and aggregate-write RPCs is revoked.
+5. Emit `decision.cycle_started` only for a newly acquired cycle. The existing
+   Decision service emits the Task-4-owned result transition after persistence:
+   `decision.recorded`, `decision.needs_data_identified`, or
+   `opportunity.proposed`. Replayed completed operations do not emit a second
+   transition. Event payloads remain identifier-only.
+
+The first Campaign playbook produces at most one scored candidate, so its cycle
+persists exactly one Decision aggregate. This amendment does not generalize the
+worker into a multi-playbook scheduler or add an optimizer.
+
+#### Versioned deterministic implementations
+
+An artifact identifier is not enough if the code cannot determine which
+behavior that version represents. Deterministic artifact versions therefore
+carry a constrained implementation key resolved through an in-process registry.
+The first registered keys identify the existing evidence-tier/value/time
+ranking order and the first human-authored confidence calibration. Unknown keys
+fail closed. No stored JSON, prompt, or model output is evaluated as policy.
+
+The confidence implementation consumes only declared evidence tier,
+completeness grade, input age relative to the playbook freshness bound, and the
+sample size where an observed-history estimate is used. It returns a bounded
+rule-derived value plus a rationale code. It does not invent impact. Ranking
+continues to use evidence tier first, then expected contribution, then time to
+impact, with the candidate fingerprint as the stable final key. Each record
+pins the exact current artifact identifiers; persistence already rejects a
+historical or unpromoted tuple.
+
+Baseline implementation parameters are explicit and deliberately conservative:
+
+- computed evidence starts at `0.75` for a complete economics grade and `0.55`
+  for a partial grade;
+- freshness applies no adjustment through half of the declared freshness
+  window and subtracts `0.10` after that point; inputs beyond the bound are
+  screened out rather than scored;
+- observed evidence requires a declared comparable-intervention sample and is
+  not enabled by the Campaign source until that source exists; and
+- prior evidence requires a human-authored prior on the active playbook version
+  and is not synthesized from missing economics.
+
+These values live behind the versioned implementation key. Changing them means
+creating and promoting a new artifact version; it is never an unrecorded code
+constant change.
+
+#### Honest Campaign evidence boundary
+
+The production evidence loader reads only authoritative, organization-scoped
+records: current organization profile and verified Business Memory facts,
+brand constraints and asset readiness, active registered goal metrics, channel
+economics, active policy, current playbook/artifact versions, Integration Hub
+mapping and governed capability grants, tracking readiness, suppressions, and
+active opportunity count. Missing or stale evidence is named and produces
+`needs_data`; the loader does not manufacture a candidate-shaped default.
+
+A selected Campaign action additionally requires a defensible impact range
+with currency, source revision IDs, observation time, and either arithmetic
+basis or comparable-intervention attribution. Contribution margin alone does
+not establish campaign lift. Until such impact evidence and the required Meta
+action grants exist, the live `campaign.meta_bundle_v1` path must record
+`needs_data`. Selected-action tests use an explicitly labelled controlled
+evidence fixture to prove the deterministic funnel and persistence contract;
+fixture evidence is never available to the production loader.
+
+The worker runs the existing pure boundaries in order: slot-budget calculation,
+source generation, set-based screening, versioned confidence, expected
+contribution, evidence-tier ranking, policy/margin/budget gates, and aggregate
+persistence. A slot budget of zero records `no_action` without screening. A
+missing active policy halts and releases the lease as a safe operational
+failure; it never defaults to permissive.
+
+#### Verification and rollback
+
+Task 5 must prove payload validation precedes service-client construction;
+matching replay, conflicting duplicate, active duplicate, expired-lease
+takeover, stale-token fencing, and cancellation; `needs_data`, `no_action`, and
+selected action; current-version resolution; cross-organization payload and
+reference rejection; and identifier-only event publication. Database tests run
+with representative service-role and API roles and show that no direct table
+grant bypasses the claim-aware RPCs.
+
+The migration is forward-only after use. Rollback disables new Task dispatch,
+cancels or lets active claims expire, and leaves completed cycles and Decision
+records intact for audit. The private operation ledger may be retired only
+after its retention window; historical decisions and artifact versions are not
+rewritten.
+
 ## Proposed logical records
 
 These are conceptual boundaries for implementation planning, not claims about
