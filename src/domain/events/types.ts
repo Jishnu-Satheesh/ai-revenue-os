@@ -90,6 +90,37 @@ export type IntegrationDomainEvent<TName extends IntegrationEventName> = DomainE
   eventName: TName;
 };
 
+export const decisionEventNames = [
+  "decision.cycle_started",
+  "decision.recorded",
+  "decision.needs_data_identified",
+  "opportunity.proposed",
+  "opportunity.approved",
+  "opportunity.rejected",
+  "opportunity.snoozed",
+  "opportunity.expired",
+  "decision.feedback_captured",
+] as const;
+
+export type DecisionEventName = (typeof decisionEventNames)[number];
+
+/** Decision events are identifiers and bounded state only; never evidence, PII, or provider data. */
+export type DecisionEventPayloads = {
+  "decision.cycle_started": { decisionCycleId: string };
+  "decision.recorded": { decisionCycleId: string; decisionRecordId?: string };
+  "decision.needs_data_identified": { decisionCycleId: string; decisionRecordId?: string };
+  "opportunity.proposed": { opportunityId: string; decisionCycleId: string };
+  "opportunity.approved": { opportunityId: string; feedbackId?: string };
+  "opportunity.rejected": { opportunityId: string; feedbackId?: string };
+  "opportunity.snoozed": { opportunityId: string; feedbackId?: string };
+  "opportunity.expired": { opportunityId: string };
+  "decision.feedback_captured": { opportunityId: string; feedbackId: string };
+};
+
+export type DecisionDomainEvent<TName extends DecisionEventName> = DomainEvent<
+  DecisionEventPayloads[TName]
+> & { eventName: TName };
+
 export const memoryEventNames = [
   "memory.item_created",
   "memory.item_verified",
