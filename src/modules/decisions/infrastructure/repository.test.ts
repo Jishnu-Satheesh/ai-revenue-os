@@ -60,30 +60,11 @@ describe("DecisionRepository", () => {
     });
   });
 
-  it("maps a bounded cycle input to the existing snake-case worker contract", async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: "cycle-id", error: null });
+  it("does not expose the unfenced cycle-start or aggregate-write paths", () => {
+    const rpc = vi.fn();
     const repository = createDecisionRepository({ from: vi.fn(), rpc });
 
-    const result = await repository.startCycle({
-      id: "44444444-4444-4444-8444-444444444444",
-      organizationId: "11111111-1111-4111-8111-111111111111",
-      triggerName: "  scheduled evaluation  ",
-      correlationId: "55555555-5555-4555-8555-555555555555",
-      slotBudget: 10,
-      maxScoredCandidates: 500,
-    });
-
-    expect(result).toBe("cycle-id");
-    expect(rpc).toHaveBeenCalledWith("start_decision_cycle", {
-      target_organization_id: "11111111-1111-4111-8111-111111111111",
-      input_cycle: {
-        id: "44444444-4444-4444-8444-444444444444",
-        organization_id: "11111111-1111-4111-8111-111111111111",
-        trigger_name: "scheduled evaluation",
-        correlation_id: "55555555-5555-4555-8555-555555555555",
-        slot_budget: 10,
-        max_scored_candidates: 500,
-      },
-    });
+    expect("startCycle" in repository).toBe(false);
+    expect("persist" in repository).toBe(false);
   });
 });

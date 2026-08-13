@@ -11,6 +11,7 @@ export const decisionOutcomeSchema = z.enum(["action_selected", "no_action", "ne
 export type DecisionOutcome = z.infer<typeof decisionOutcomeSchema>;
 
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
+const registeredKeySchema = z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/);
 export const decisionVersionTupleSchema = z
   .strictObject({
     policyVersionId: z.string().uuid(),
@@ -47,6 +48,7 @@ export const decisionRecordSchema = z
     screenedCount: z.number().int().nonnegative(),
     scoredCount: z.number().int().nonnegative(),
     inputsDigest: sha256HexSchema,
+    needsDataKeys: z.array(registeredKeySchema).max(50),
     // A version tuple with nulls is indistinguishable from an unknown, and the
     // ledger depends on that distinction.
     versionTuple: decisionVersionTupleSchema,
@@ -56,6 +58,24 @@ export const decisionRecordSchema = z
     isExploration: z.literal(false),
   })
   .superRefine((record, context) => {
+    if (new Set(record.needsDataKeys).size !== record.needsDataKeys.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["needsDataKeys"],
+        message: "Missing-data keys must be unique.",
+      });
+    }
+    if (
+      (record.outcome === "needs_data" && record.needsDataKeys.length === 0) ||
+      (record.outcome !== "needs_data" && record.needsDataKeys.length !== 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["needsDataKeys"],
+        message: "Only needs_data records carry a non-empty missing-data list.",
+      });
+    }
+
     if (record.scoredCount > record.screenedCount) {
       context.addIssue({
         code: "custom",

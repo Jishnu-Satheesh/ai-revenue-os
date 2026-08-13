@@ -90,28 +90,32 @@ values
   );
 
 insert into public.artifact_versions (
-  id, organization_id, artifact_key, version, basis, authored_by
+  id, organization_id, artifact_key, version, basis, authored_by, implementation_key
 )
 values
   (
     'db4b0000-0000-4000-8000-000000000301'::uuid,
     'db4b0000-0000-4000-8000-000000000101'::uuid,
-    'ranking_weights', 'behavior-v1', 'Behavioral test fixture', 'test'
+    'ranking_weights', 'behavior-v1', 'Behavioral test fixture', 'test',
+    'decision.ranking.evidence_value_time_v1'
   ),
   (
     'db4b0000-0000-4000-8000-000000000302'::uuid,
     'db4b0000-0000-4000-8000-000000000101'::uuid,
-    'confidence_calibration', 'behavior-v1', 'Behavioral test fixture', 'test'
+    'confidence_calibration', 'behavior-v1', 'Behavioral test fixture', 'test',
+    'decision.confidence.computed_baseline_v1'
   ),
   (
     'db4b0000-0000-4000-8000-000000000303'::uuid,
     'db4b0000-0000-4000-8000-000000000102'::uuid,
-    'ranking_weights', 'behavior-v1', 'Behavioral test fixture', 'test'
+    'ranking_weights', 'behavior-v1', 'Behavioral test fixture', 'test',
+    'decision.ranking.evidence_value_time_v1'
   ),
   (
     'db4b0000-0000-4000-8000-000000000304'::uuid,
     'db4b0000-0000-4000-8000-000000000102'::uuid,
-    'confidence_calibration', 'behavior-v1', 'Behavioral test fixture', 'test'
+    'confidence_calibration', 'behavior-v1', 'Behavioral test fixture', 'test',
+    'decision.confidence.computed_baseline_v1'
   );
 
 insert into public.artifact_promotions (
@@ -277,21 +281,21 @@ grant select on decision_behavior_fixtures to service_role;
 
 -- Worker aggregate behavior --------------------------------------------------
 
-set local role service_role;
+reset role;
 
 select extensions.lives_ok(
   $$
     select public.persist_decision_aggregate(organization_id, payload)
     from decision_behavior_fixtures where kind = 'tenant_one_selected'
   $$,
-  'service role persists tenant one selected aggregate'
+  'the aggregate contract persists tenant one selected aggregate'
 );
 select extensions.lives_ok(
   $$
     select public.persist_decision_aggregate(organization_id, payload)
     from decision_behavior_fixtures where kind = 'tenant_two_selected'
   $$,
-  'service role persists tenant two selected aggregate'
+  'the aggregate contract persists tenant two selected aggregate'
 );
 select extensions.lives_ok(
   $$
@@ -316,7 +320,7 @@ select extensions.lives_ok(
     )
     from decision_behavior_fixtures where kind = 'tenant_one_selected'
   $$,
-  'service role persists no_action without an opportunity'
+  'the aggregate contract persists no_action without an opportunity'
 );
 select extensions.lives_ok(
   $$
@@ -341,7 +345,7 @@ select extensions.lives_ok(
     )
     from decision_behavior_fixtures where kind = 'tenant_one_selected'
   $$,
-  'service role persists needs_data without an opportunity'
+  'the aggregate contract persists needs_data without an opportunity'
 );
 
 reset role;
@@ -390,7 +394,7 @@ select extensions.is(
   'tenant two receives exactly one opportunity'
 );
 
-set local role service_role;
+reset role;
 
 select extensions.throws_ok(
   $$
@@ -404,7 +408,7 @@ select extensions.throws_ok(
     )
   $$,
   '42501', null,
-  'service role rejects an artifact id with the wrong semantic key'
+  'the aggregate contract rejects an artifact id with the wrong semantic key'
 );
 select extensions.throws_ok(
   $$
@@ -414,7 +418,7 @@ select extensions.throws_ok(
     )
   $$,
   '22023', null,
-  'service role rejects a target and payload organization mismatch'
+  'the aggregate contract rejects a target and payload organization mismatch'
 );
 
 reset role;
@@ -795,11 +799,11 @@ select extensions.is(
 
 select extensions.function_privs_are(
   'public', 'persist_decision_aggregate', array['uuid', 'jsonb'], 'service_role',
-  array['EXECUTE'], 'service role can execute aggregate persistence'
+  array[]::text[], 'service role cannot execute unfenced aggregate persistence'
 );
 select extensions.function_privs_are(
   'public', 'start_decision_cycle', array['uuid', 'jsonb'], 'service_role',
-  array['EXECUTE'], 'service role can start decision cycles'
+  array[]::text[], 'service role cannot execute unfenced cycle creation'
 );
 select extensions.function_privs_are(
   'public', 'persist_decision_record', array['uuid', 'jsonb'], 'service_role',

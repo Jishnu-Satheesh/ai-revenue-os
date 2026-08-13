@@ -8,22 +8,29 @@ const opportunityId = "33333333-3333-4333-8333-333333333333";
 
 describe("DecisionService", () => {
   it("persists an action selection and emits only safe identifier events", async () => {
-    const persist = vi.fn().mockResolvedValue(undefined);
+    const complete = vi.fn().mockResolvedValue({
+      decisionRecordId: "99999999-9999-4999-8999-999999999999",
+      opportunityId,
+    });
     const publish = vi.fn().mockResolvedValue(undefined);
     const service = createDecisionService({
-      workerStore: { persist, promoteArtifact: vi.fn(), startCycle: vi.fn() },
+      aggregateStore: { complete },
       events: { publish },
     });
 
-    await service.record({
+    await service.record(liveClaim(), {
       record: selectedRecord(),
       candidates: [selectedCandidate()],
       opportunity: selectedOpportunity(),
     });
 
-    expect(persist).toHaveBeenCalledWith(
+    expect(complete).toHaveBeenCalledWith(
       expect.objectContaining({
-        record: expect.objectContaining({ organizationId, opportunityId }),
+        organizationId,
+        claimToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        aggregate: expect.objectContaining({
+          record: expect.objectContaining({ organizationId, opportunityId }),
+        }),
       }),
     );
     expect(publish).toHaveBeenCalledWith(
@@ -36,14 +43,17 @@ describe("DecisionService", () => {
   });
 
   it("records needs_data without an opportunity and routes it to readiness", async () => {
-    const persist = vi.fn().mockResolvedValue(undefined);
+    const complete = vi.fn().mockResolvedValue({
+      decisionRecordId: "99999999-9999-4999-8999-999999999999",
+      opportunityId: null,
+    });
     const publish = vi.fn().mockResolvedValue(undefined);
     const service = createDecisionService({
-      workerStore: { persist, promoteArtifact: vi.fn(), startCycle: vi.fn() },
+      aggregateStore: { complete },
       events: { publish },
     });
 
-    await service.record({
+    await service.record(liveClaim(), {
       record: {
         decisionCycleId,
         organizationId,
@@ -56,6 +66,7 @@ describe("DecisionService", () => {
         screenedCount: 0,
         scoredCount: 0,
         inputsDigest: "b".repeat(64),
+        needsDataKeys: ["economics.configured"],
         versionTuple: tuple(),
         propensity: 1,
         isExploration: false,
@@ -64,12 +75,33 @@ describe("DecisionService", () => {
       opportunity: null,
     });
 
-    expect(persist).toHaveBeenCalledWith(
-      expect.objectContaining({ record: expect.objectContaining({ opportunityId: null }) }),
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: expect.objectContaining({
+          record: expect.objectContaining({ opportunityId: null }),
+        }),
+      }),
     );
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({ eventName: "decision.needs_data_identified" }),
     );
+  });
+
+  it("publishes nothing when claim-aware persistence does not commit", async () => {
+    const publish = vi.fn();
+    const service = createDecisionService({
+      aggregateStore: { complete: vi.fn().mockRejectedValue(new Error("decision_claim_fenced")) },
+      events: { publish },
+    });
+
+    await expect(
+      service.record(liveClaim(), {
+        record: selectedRecord(),
+        candidates: [selectedCandidate()],
+        opportunity: selectedOpportunity(),
+      }),
+    ).rejects.toThrow(/decision_claim_fenced/);
+    expect(publish).not.toHaveBeenCalled();
   });
 });
 
@@ -95,9 +127,23 @@ function selectedRecord() {
     screenedCount: 4,
     scoredCount: 1,
     inputsDigest: "b".repeat(64),
+    needsDataKeys: [],
     versionTuple: tuple(),
     propensity: 1 as const,
     isExploration: false as const,
+  };
+}
+
+function liveClaim() {
+  return {
+    organizationId,
+    correlationId: "44444444-4444-4444-8444-444444444444",
+    idempotencyKey: "campaign-cycle-test",
+    requestDigest: "d".repeat(64),
+    triggerType: "manual" as const,
+    decisionCycleId,
+    claimToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    leaseExpiresAt: "2026-08-13T12:05:00.000Z",
   };
 }
 

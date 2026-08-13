@@ -74,28 +74,31 @@ values
   );
 
 insert into public.artifact_versions (
-  id, organization_id, artifact_key, version, basis, authored_by
+  id, organization_id, artifact_key, version, basis, authored_by, implementation_key
 )
 values
   (
     'dc4c0000-0000-4000-8000-000000000301'::uuid,
     'dc4c0000-0000-4000-8000-000000000101'::uuid,
-    'ranking_weights', 'controls-ranking-v1', 'Worker controls fixture', 'test'
+    'ranking_weights', 'controls-ranking-v1', 'Worker controls fixture', 'test',
+    'decision.ranking.evidence_value_time_v1'
   ),
   (
     'dc4c0000-0000-4000-8000-000000000302'::uuid,
     'dc4c0000-0000-4000-8000-000000000101'::uuid,
-    'confidence_calibration', 'controls-confidence-v1', 'Worker controls fixture', 'test'
+    'confidence_calibration', 'controls-confidence-v1', 'Worker controls fixture', 'test',
+    'decision.confidence.computed_baseline_v1'
   ),
   (
     'dc4c0000-0000-4000-8000-000000000303'::uuid,
     'dc4c0000-0000-4000-8000-000000000101'::uuid,
-    'prompt', 'controls-prompt-v1', 'Worker controls fixture', 'test'
+    'prompt', 'controls-prompt-v1', 'Worker controls fixture', 'test', null
   ),
   (
     'dc4c0000-0000-4000-8000-000000000321'::uuid,
     'dc4c0000-0000-4000-8000-000000000102'::uuid,
-    'ranking_weights', 'controls-ranking-v1', 'Other tenant fixture', 'test'
+    'ranking_weights', 'controls-ranking-v1', 'Other tenant fixture', 'test',
+    'decision.ranking.evidence_value_time_v1'
   );
 
 create temporary table decision_control_state (
@@ -320,10 +323,10 @@ select extensions.throws_ok(
 
 select extensions.function_privs_are(
   'public', 'start_decision_cycle', array['uuid', 'jsonb'], 'service_role',
-  array['EXECUTE'], 'service role retains cycle-start execution'
+  array[]::text[], 'service role cannot execute unfenced cycle creation'
 );
 
-set local role service_role;
+reset role;
 
 select extensions.lives_ok(
   $$select public.start_decision_cycle(
@@ -337,7 +340,7 @@ select extensions.lives_ok(
       "max_scored_candidates":500
     }'::jsonb
   )$$,
-  'service role starts a strictly shaped bounded cycle'
+  'the legacy cycle contract still validates a strictly shaped bounded cycle'
 );
 
 reset role;
@@ -357,7 +360,7 @@ select extensions.is(
   'cycle input maps to the intended columns'
 );
 
-set local role service_role;
+reset role;
 
 select extensions.throws_ok(
   $$select public.start_decision_cycle(
@@ -487,7 +490,7 @@ where ranking.artifact_key = 'ranking_weights'
 
 grant select on decision_control_aggregates to service_role;
 
-set local role service_role;
+reset role;
 
 select extensions.lives_ok(
   $$select public.persist_decision_aggregate(
@@ -565,6 +568,9 @@ select extensions.lives_ok(
   $$,
   'a reviewed ranking artifact can be promoted again after rollback'
 );
+
+reset role;
+
 select extensions.lives_ok(
   $$select public.persist_decision_aggregate(
     'dc4c0000-0000-4000-8000-000000000101'::uuid,

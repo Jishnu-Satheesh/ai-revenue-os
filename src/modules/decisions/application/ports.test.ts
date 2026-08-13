@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   artifactPromotionInputSchema,
+  decisionClaimResultSchema,
+  decisionCycleContextSchema,
   decisionAggregateSchema,
   decisionCycleInputSchema,
 } from "@/modules/decisions/application/ports";
@@ -81,8 +83,9 @@ describe("decision aggregate", () => {
 
   it("allows pre-playbook needs_data only when no candidate was scored", () => {
     const aggregate = selectedAggregate();
-    const { playbookVersionId: _playbookVersionId, ...prePlaybookTuple } =
-      aggregate.record.versionTuple;
+    const prePlaybookTuple = Object.fromEntries(
+      Object.entries(aggregate.record.versionTuple).filter(([key]) => key !== "playbookVersionId"),
+    );
     const record = {
       ...aggregate.record,
       outcome: "needs_data" as const,
@@ -92,6 +95,7 @@ describe("decision aggregate", () => {
       screenedCount: 0,
       scoredCount: 0,
       versionTuple: prePlaybookTuple,
+      needsDataKeys: ["economics.configured"],
     };
 
     expect(
@@ -108,6 +112,57 @@ describe("decision aggregate", () => {
 });
 
 describe("decision worker controls", () => {
+  it("parses every claim result variant and refuses an incomplete live claim", () => {
+    expect(
+      decisionClaimResultSchema.parse({
+        status: "acquired",
+        decisionCycleId,
+        claimToken: "99999999-9999-4999-8999-999999999999",
+        leaseExpiresAt: "2026-08-13T12:05:00.000Z",
+      }).status,
+    ).toBe("acquired");
+    expect(
+      decisionClaimResultSchema.parse({
+        status: "reclaimed",
+        decisionCycleId,
+        claimToken: "99999999-9999-4999-8999-999999999999",
+        leaseExpiresAt: "2026-08-13T12:05:00.000Z",
+      }).status,
+    ).toBe("reclaimed");
+    expect(
+      decisionClaimResultSchema.parse({
+        status: "in_progress",
+        decisionCycleId,
+        leaseExpiresAt: "2026-08-13T12:05:00.000Z",
+      }).status,
+    ).toBe("in_progress");
+    expect(
+      decisionClaimResultSchema.parse({
+        status: "completed",
+        decisionCycleId,
+        decisionRecordId: "99999999-9999-4999-8999-999999999999",
+        opportunityId: null,
+      }).status,
+    ).toBe("completed");
+    expect(decisionClaimResultSchema.parse({ status: "cancelled", decisionCycleId }).status).toBe(
+      "cancelled",
+    );
+    expect(() =>
+      decisionClaimResultSchema.parse({ status: "acquired", decisionCycleId }),
+    ).toThrow();
+  });
+
+  it("parses only a bounded authoritative campaign context", () => {
+    const context = contextFixture();
+    expect(decisionCycleContextSchema.parse(context).accessPolicy.maxActiveRecommendations).toBe(3);
+    expect(() => decisionCycleContextSchema.parse({ ...context, providerPayload: {} })).toThrow();
+    expect(() =>
+      decisionCycleContextSchema.parse({
+        ...context,
+        accessPolicy: { ...context.accessPolicy, maxActiveRecommendations: 101 },
+      }),
+    ).toThrow();
+  });
   it("accepts a bounded artifact promotion and rejects unknown or null input", () => {
     const input = {
       organizationId,
@@ -174,6 +229,7 @@ function selectedAggregate() {
       screenedCount: 1,
       scoredCount: 1,
       inputsDigest: "c".repeat(64),
+      needsDataKeys: [],
       versionTuple: {
         policyVersionId,
         playbookVersionId,
@@ -211,6 +267,53 @@ function selectedAggregate() {
       evaluationPlan: { primaryMetricKey: "contribution.gross_profit" },
       expiresAt: "2026-09-01T00:00:00.000Z",
       status: "proposed" as const,
+    },
+  };
+}
+
+function contextFixture() {
+  return {
+    organizationId,
+    organizationCurrency: "AED",
+    accessPolicy: { id: policyVersionId, maxActiveRecommendations: 3 },
+    activeOpportunityCount: 1,
+    spendPolicy: { id: opportunityId, monthlyBudgetMinor: 450_000, currency: "AED" },
+    playbook: {
+      definitionId: decisionCycleId,
+      versionId: playbookVersionId,
+      semanticVersion: "1.0.0",
+      actionKey: "campaign.meta_bundle_v1",
+      requiredCapabilityKeys: ["advertise_meta_ads"],
+      requiredEvidenceKeys: ["impact.range"],
+      riskClass: 3,
+      primaryMetricKey: "contribution.incremental_gross_profit",
+      guardrailMetricKeys: ["spend.total"],
+      freshnessBoundMinutes: 1_440,
+      measurementWindowDays: 7,
+    },
+    rankingArtifact: {
+      id: rankingWeightsId,
+      implementationKey: "decision.ranking.evidence_value_time_v1",
+    },
+    confidenceArtifact: {
+      id: confidenceCalibrationId,
+      implementationKey: "decision.confidence.computed_baseline_v1",
+    },
+    suppressions: [],
+    evidence: {
+      organizationProfileCurrent: true,
+      brandConstraintsVerified: false,
+      brandAssetsUsable: false,
+      syntheticAssetsAllowed: false,
+      economics: null,
+      activeGoalMetricKeys: [],
+      metaAccountMapped: false,
+      grantedCapabilityKeys: [],
+      trackingReady: false,
+      measurementPlanRegistered: true,
+      marginFirewallResult: "unknown",
+      inputsObservedAt: "2026-08-13T12:00:00.000Z",
+      observedVolume: 0,
     },
   };
 }

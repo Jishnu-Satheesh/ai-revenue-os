@@ -4,11 +4,13 @@ import type { DecisionDomainEvent, EventPublisher } from "@/domain/events/types"
 import {
   decisionAggregateSchema,
   type DecisionAggregate,
-  type DecisionWorkerStore,
+  decisionLiveClaimSchema,
+  type DecisionCyclePort,
+  type DecisionLiveClaim,
 } from "@/modules/decisions/application/ports";
 
 export type DecisionServiceDependencies = {
-  workerStore: DecisionWorkerStore;
+  aggregateStore: Pick<DecisionCyclePort, "complete">;
   events: EventPublisher;
   now?: () => Date;
 };
@@ -22,12 +24,24 @@ export function createDecisionService(dependencies: DecisionServiceDependencies)
   const now = dependencies.now ?? (() => new Date());
 
   return {
-    async record(input: DecisionAggregate): Promise<void> {
+    async record(
+      claimInput: DecisionLiveClaim,
+      input: DecisionAggregate,
+    ): Promise<{ decisionRecordId: string; opportunityId: string | null }> {
+      const claim = decisionLiveClaimSchema.parse(claimInput);
       const aggregate = decisionAggregateSchema.parse(input);
       const { record } = aggregate;
-      await dependencies.workerStore.persist(aggregate);
+      if (
+        record.organizationId !== claim.organizationId ||
+        record.correlationId !== claim.correlationId ||
+        record.decisionCycleId !== claim.decisionCycleId
+      ) {
+        throw new Error("decision_claim_aggregate_mismatch");
+      }
+      const completion = await dependencies.aggregateStore.complete({ ...claim, aggregate });
 
       await dependencies.events.publish(toEvent(record, now()));
+      return completion;
     },
   };
 }

@@ -8,7 +8,7 @@ vi.mock("@/lib/env", () => ({
   env: { NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co" },
 }));
 
-import { assertServiceRoleKey } from "@/lib/supabase/service";
+import { assertServiceRoleKey, createDecisionWorkerServiceClient } from "@/lib/supabase/service";
 
 function jwt(role: string): string {
   const payload = Buffer.from(JSON.stringify({ role, iss: "supabase" }), "utf8").toString(
@@ -50,5 +50,9 @@ describe("assertServiceRoleKey", () => {
     expect(() =>
       assertServiceRoleKey("eyJhbGciOiJIUzI1NiJ9.!!!not-base64!!!.sig", "Workers"),
     ).toThrow(/could not be read|placeholder/);
+  });
+
+  it("keeps the Decision client worker-only behind the same service-role guard", () => {
+    expect(() => createDecisionWorkerServiceClient()).toThrow(/^Decision workers/);
   });
 });

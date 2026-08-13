@@ -47,18 +47,20 @@ values (
 );
 
 insert into public.artifact_versions (
-  id, organization_id, artifact_key, version, basis, authored_by
+  id, organization_id, artifact_key, version, basis, authored_by, implementation_key
 )
 values
   (
     'da4a0000-0000-4000-8000-000000000006'::uuid,
     'da4a0000-0000-4000-8000-000000000002'::uuid,
-    'ranking_weights', 'test-v1', 'Focused pgTAP fixture', 'test'
+    'ranking_weights', 'test-v1', 'Focused pgTAP fixture', 'test',
+    'decision.ranking.evidence_value_time_v1'
   ),
   (
     'da4a0000-0000-4000-8000-000000000007'::uuid,
     'da4a0000-0000-4000-8000-000000000002'::uuid,
-    'confidence_calibration', 'test-v1', 'Focused pgTAP fixture', 'test'
+    'confidence_calibration', 'test-v1', 'Focused pgTAP fixture', 'test',
+    'decision.confidence.computed_baseline_v1'
   );
 
 insert into public.artifact_promotions (

@@ -14,6 +14,7 @@ const base = {
   screenedCount: 10,
   scoredCount: 3,
   inputsDigest: "b".repeat(64),
+  needsDataKeys: [],
   versionTuple: {
     policyVersionId: "55555555-5555-4555-8555-555555555555",
     playbookVersionId: "66666666-6666-4666-8666-666666666666",
@@ -33,7 +34,9 @@ describe("decision record", () => {
     expect(() => decisionRecordSchema.parse({ ...base, propensity: 0.5 })).toThrow();
     expect(() => decisionRecordSchema.parse({ ...base, isExploration: true })).toThrow();
 
-    const { propensity: _p, ...withoutPropensity } = base;
+    const withoutPropensity = Object.fromEntries(
+      Object.entries(base).filter(([key]) => key !== "propensity"),
+    );
     expect(() => decisionRecordSchema.parse(withoutPropensity)).toThrow();
   });
 
@@ -65,6 +68,7 @@ describe("decision record", () => {
       ...base,
       outcome: "needs_data" as const,
       reason: "economics_ledger_indicative",
+      needsDataKeys: ["economics.configured"],
       selectedCandidateFingerprint: null,
       opportunityId: null,
     };
@@ -72,6 +76,35 @@ describe("decision record", () => {
     expect(decisionRecordSchema.parse(needsData).opportunityId).toBeNull();
     expect(() =>
       decisionRecordSchema.parse({ ...needsData, opportunityId: base.opportunityId }),
+    ).toThrow();
+  });
+
+  it("requires bounded unique registered keys only for needs_data", () => {
+    const needsData = {
+      ...base,
+      outcome: "needs_data" as const,
+      reason: "campaign_evidence_missing",
+      selectedCandidateFingerprint: null,
+      opportunityId: null,
+      needsDataKeys: ["impact.range", "capability.advertise_meta_ads"],
+    };
+
+    expect(decisionRecordSchema.parse(needsData).needsDataKeys).toEqual(needsData.needsDataKeys);
+    expect(() => decisionRecordSchema.parse({ ...needsData, needsDataKeys: [] })).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({
+        ...needsData,
+        needsDataKeys: ["impact.range", "impact.range"],
+      }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({ ...needsData, needsDataKeys: ["Raw provider payload"] }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({ ...needsData, needsDataKeys: Array(51).fill("impact.range") }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({ ...base, needsDataKeys: ["impact.range"] }),
     ).toThrow();
   });
 

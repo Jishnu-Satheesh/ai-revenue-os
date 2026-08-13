@@ -63,6 +63,13 @@ const UNTYPED_TABLES = new Set([
   "memory_write_operations",
 ]);
 
+/**
+ * Private tables are deliberately absent from generated public Supabase row
+ * types. Workers reach these ledgers only through security-definer RPCs; adding
+ * one to the public type surface would falsely imply direct table access.
+ */
+const PRIVATE_RPC_ONLY_TABLES = new Set(["decision_cycle_operations", "integration_credentials"]);
+
 const TABLE_LEVEL_KEYWORDS = new Set([
   "check",
   "constraint",
@@ -126,8 +133,22 @@ function readTypedSchema(): Map<string, Set<string>> {
   return typedTables;
 }
 
+function readPrivateTables(): Set<string> {
+  const tables = new Set<string>();
+  for (const file of readdirSync(MIGRATIONS_DIRECTORY)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()) {
+    const sql = readFileSync(join(MIGRATIONS_DIRECTORY, file), "utf8");
+    for (const [, table] of sql.matchAll(/create table private\.([a-z_]+)\s*\(/g)) {
+      tables.add(table);
+    }
+  }
+  return tables;
+}
+
 const migrationSchema = readMigrationSchema();
 const typedSchema = readTypedSchema();
+const privateTables = readPrivateTables();
 
 describe("database.types.ts reflects the migrations", () => {
   it("parses both sides, so a silent parser failure cannot pass the suite", () => {
@@ -165,5 +186,10 @@ describe("database.types.ts reflects the migrations", () => {
   it("keeps the untyped list honest by dropping entries that no longer exist", () => {
     const stale = [...UNTYPED_TABLES].filter((table) => !migrationSchema.has(table)).sort();
     expect(stale).toEqual([]);
+  });
+
+  it("records every private table as an RPC-only surface", () => {
+    expect([...privateTables].sort()).toEqual([...PRIVATE_RPC_ONLY_TABLES].sort());
+    expect(typedSchema.has("decision_cycle_operations")).toBe(false);
   });
 });

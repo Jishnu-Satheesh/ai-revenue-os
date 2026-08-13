@@ -27,6 +27,19 @@ export type CampaignEvidence = {
   grantedCapabilityKeys: readonly string[];
   spendPolicy: { monthlyBudgetMinor: number; currency: string } | null;
   trackingReady: boolean;
+  measurementPlanRegistered: boolean;
+  accessPolicyActive: boolean;
+  marginFirewallResult: "pass" | "breach" | "unknown";
+  impactEvidence: {
+    evidenceTier: "computed" | "observed" | "prior";
+    impactLowMinor: number | null;
+    impactHighMinor: number | null;
+    currency: string | null;
+    sourceRevisionIds: readonly string[];
+    observedAt: Date | null;
+    timeToImpactDays: number | null;
+    completenessGrade: CompletenessGrade;
+  } | null;
   inputsObservedAt: Date;
   observedVolume: number;
 };
@@ -36,6 +49,16 @@ export type CampaignCandidate = {
   playbookVersionId: string;
   subject: SubjectRef;
   parameters: CampaignActionParameters;
+  impactEvidence: {
+    evidenceTier: "computed";
+    impactLowMinor: number;
+    impactHighMinor: number;
+    currency: string;
+    sourceRevisionIds: readonly string[];
+    observedAt: Date;
+    timeToImpactDays: number;
+    completenessGrade: "complete" | "partial";
+  };
 };
 
 export type CampaignSourceResult =
@@ -44,7 +67,8 @@ export type CampaignSourceResult =
       outcome: "needs_data";
       missingEvidenceKeys: readonly string[];
       missingCapabilityKeys: readonly string[];
-    };
+    }
+  | { outcome: "rejected"; rejectionReason: "margin_firewall_breach" };
 
 export type CampaignSourceInput = {
   organizationId: string;
@@ -95,8 +119,39 @@ export function createCampaignOpportunitySource() {
       }
 
       // An unbounded cost is `needs_data`, not a zero.
-      if (evidence.spendPolicy === null) missingEvidenceKeys.push("spend_policy_configured");
+      if (evidence.spendPolicy === null) {
+        missingEvidenceKeys.push("spend_policy_configured", "policy.spend.active");
+      }
       if (!evidence.trackingReady) missingEvidenceKeys.push("tracking_ready");
+      if (!evidence.trackingReady) missingEvidenceKeys.push("measurement.tracking_ready");
+      if (!evidence.measurementPlanRegistered) {
+        missingEvidenceKeys.push("measurement.plan_registered");
+      }
+      if (!evidence.accessPolicyActive) missingEvidenceKeys.push("policy.access.active");
+      if (evidence.marginFirewallResult === "unknown") {
+        missingEvidenceKeys.push("margin.firewall.pass");
+      }
+
+      const impact = evidence.impactEvidence;
+      if (impact === null || impact.impactLowMinor === null || impact.impactHighMinor === null) {
+        missingEvidenceKeys.push("impact.range");
+      }
+      if (impact === null || impact.currency === null) missingEvidenceKeys.push("impact.currency");
+      if (impact === null || impact.sourceRevisionIds.length === 0) {
+        missingEvidenceKeys.push("impact.source_revisions");
+      }
+      if (impact === null || impact.observedAt === null) {
+        missingEvidenceKeys.push("impact.observed_at");
+      }
+      if (impact === null || impact.timeToImpactDays === null) {
+        missingEvidenceKeys.push("impact.time_to_impact");
+      }
+      if (impact !== null && impact.evidenceTier !== "computed") {
+        missingEvidenceKeys.push("impact.approved_source");
+      }
+      if (impact !== null && impact.completenessGrade === "indicative") {
+        missingEvidenceKeys.push("impact.approved_source");
+      }
 
       const ageMinutes = (input.now.getTime() - evidence.inputsObservedAt.getTime()) / (60 * 1000);
       if (ageMinutes > playbook.freshnessBoundMinutes) missingEvidenceKeys.push("inputs_fresh");
@@ -110,6 +165,18 @@ export function createCampaignOpportunitySource() {
       ) {
         missingEvidenceKeys.push("currency_agreement");
       }
+      if (
+        impact?.currency !== null &&
+        impact?.currency !== undefined &&
+        evidence.spendPolicy !== null &&
+        impact.currency !== evidence.spendPolicy.currency
+      ) {
+        missingEvidenceKeys.push("currency_agreement");
+      }
+
+      if (evidence.marginFirewallResult === "breach") {
+        return { outcome: "rejected", rejectionReason: "margin_firewall_breach" };
+      }
 
       if (missingEvidenceKeys.length > 0) {
         return { outcome: "needs_data", missingEvidenceKeys, missingCapabilityKeys };
@@ -118,6 +185,7 @@ export function createCampaignOpportunitySource() {
       // Narrowing for TypeScript; both are proven present by the checks above.
       const economics = evidence.economics!;
       const spendPolicy = evidence.spendPolicy!;
+      const controlledImpact = evidence.impactEvidence! as CampaignCandidate["impactEvidence"];
 
       const subject: SubjectRef = {
         subjectKind: "organization",
@@ -151,6 +219,7 @@ export function createCampaignOpportunitySource() {
             playbookVersionId: input.playbookVersionId,
             subject,
             parameters,
+            impactEvidence: controlledImpact,
           },
         ],
       };

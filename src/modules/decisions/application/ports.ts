@@ -79,6 +79,119 @@ export const artifactPromotionInputSchema = z.strictObject({
 });
 export type ArtifactPromotionInput = z.infer<typeof artifactPromotionInputSchema>;
 
+const registeredKeySchema = z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/);
+const utcTimestampSchema = z.string().datetime({ offset: true });
+
+export const decisionOperationInputSchema = z.strictObject({
+  organizationId: z.string().uuid(),
+  correlationId: z.string().uuid(),
+  idempotencyKey: z
+    .string()
+    .trim()
+    .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,159}$/),
+  requestDigest: sha256HexSchema,
+  triggerType: z.enum(["manual", "scheduled", "integration_sync_completed"]),
+});
+export type DecisionOperationInput = z.infer<typeof decisionOperationInputSchema>;
+
+const liveClaimShape = {
+  decisionCycleId: z.string().uuid(),
+  claimToken: z.string().uuid(),
+  leaseExpiresAt: utcTimestampSchema,
+};
+
+export const decisionClaimResultSchema = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("acquired"), ...liveClaimShape }),
+  z.strictObject({ status: z.literal("reclaimed"), ...liveClaimShape }),
+  z.strictObject({
+    status: z.literal("in_progress"),
+    decisionCycleId: z.string().uuid(),
+    leaseExpiresAt: utcTimestampSchema,
+  }),
+  z.strictObject({
+    status: z.literal("completed"),
+    decisionCycleId: z.string().uuid(),
+    decisionRecordId: z.string().uuid(),
+    opportunityId: z.string().uuid().nullable(),
+  }),
+  z.strictObject({ status: z.literal("cancelled"), decisionCycleId: z.string().uuid() }),
+]);
+export type DecisionClaimResult = z.infer<typeof decisionClaimResultSchema>;
+
+export const decisionLiveClaimSchema = decisionOperationInputSchema.extend(liveClaimShape);
+export type DecisionLiveClaim = z.infer<typeof decisionLiveClaimSchema>;
+
+export const decisionEvidenceContextSchema = z.strictObject({
+  organizationProfileCurrent: z.boolean(),
+  brandConstraintsVerified: z.boolean(),
+  brandAssetsUsable: z.boolean(),
+  syntheticAssetsAllowed: z.boolean(),
+  economics: z
+    .strictObject({
+      currency: z.string().regex(/^[A-Z]{3}$/),
+      completenessGrade: z.enum(["complete", "partial", "indicative"]),
+    })
+    .nullable(),
+  activeGoalMetricKeys: z.array(registeredKeySchema).max(100),
+  metaAccountMapped: z.boolean(),
+  grantedCapabilityKeys: z.array(registeredKeySchema).max(100),
+  trackingReady: z.boolean(),
+  measurementPlanRegistered: z.boolean(),
+  marginFirewallResult: z.enum(["pass", "breach", "unknown"]),
+  inputsObservedAt: utcTimestampSchema,
+  observedVolume: z.number().int().nonnegative(),
+});
+
+export const decisionCycleContextSchema = z.strictObject({
+  organizationId: z.string().uuid(),
+  organizationCurrency: z.string().regex(/^[A-Z]{3}$/),
+  accessPolicy: z.strictObject({
+    id: z.string().uuid(),
+    maxActiveRecommendations: z.number().int().min(0).max(100),
+  }),
+  activeOpportunityCount: z.number().int().nonnegative(),
+  spendPolicy: z
+    .strictObject({
+      id: z.string().uuid(),
+      monthlyBudgetMinor: z.number().int().nonnegative(),
+      currency: z.string().regex(/^[A-Z]{3}$/),
+    })
+    .nullable(),
+  playbook: z
+    .strictObject({
+      definitionId: z.string().uuid(),
+      versionId: z.string().uuid(),
+      semanticVersion: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
+      actionKey: z.literal("campaign.meta_bundle_v1"),
+      requiredCapabilityKeys: z.array(registeredKeySchema).max(50),
+      requiredEvidenceKeys: z.array(registeredKeySchema).max(50),
+      riskClass: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+      primaryMetricKey: registeredKeySchema,
+      guardrailMetricKeys: z.array(registeredKeySchema).max(50),
+      freshnessBoundMinutes: z.number().int().positive().max(525_600),
+      measurementWindowDays: z.number().int().positive().max(730),
+    })
+    .nullable(),
+  rankingArtifact: z.strictObject({
+    id: z.string().uuid(),
+    implementationKey: registeredKeySchema,
+  }),
+  confidenceArtifact: z.strictObject({
+    id: z.string().uuid(),
+    implementationKey: registeredKeySchema,
+  }),
+  suppressions: z
+    .array(
+      z.strictObject({
+        candidateFingerprint: sha256HexSchema,
+        suppressedUntil: utcTimestampSchema.nullable(),
+      }),
+    )
+    .max(500),
+  evidence: decisionEvidenceContextSchema,
+});
+export type DecisionCycleContext = z.infer<typeof decisionCycleContextSchema>;
+
 /**
  * One cycle is deliberately bounded below the aggregate's 500-candidate cap:
  * at most 100 feed slots and at most 500 candidates may reach scoring.
@@ -281,7 +394,16 @@ export type DecisionFeedbackPort = {
 
 /** Worker-only boundary. Browser repositories never expose this capability. */
 export type DecisionWorkerStore = {
-  persist(aggregate: DecisionAggregate): Promise<void>;
   promoteArtifact(input: ArtifactPromotionInput): Promise<string>;
-  startCycle(input: DecisionCycleInput): Promise<string>;
+};
+
+export type DecisionCyclePort = {
+  claim(input: DecisionOperationInput): Promise<DecisionClaimResult>;
+  renew(input: DecisionLiveClaim): Promise<{ leaseExpiresAt: string }>;
+  loadContext(input: DecisionLiveClaim): Promise<DecisionCycleContext>;
+  complete(
+    input: DecisionLiveClaim & { aggregate: DecisionAggregate },
+  ): Promise<{ decisionRecordId: string; opportunityId: string | null }>;
+  fail(input: DecisionLiveClaim & { failureCode: string }): Promise<void>;
+  cancel(input: DecisionOperationInput): Promise<void>;
 };
