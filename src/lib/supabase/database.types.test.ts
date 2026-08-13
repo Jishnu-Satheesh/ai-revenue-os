@@ -26,6 +26,19 @@ const TYPES_FILE = resolve(process.cwd(), "src/lib/supabase/database.types.ts");
  * leaving one untyped becomes a decision rather than an oversight.
  */
 const UNTYPED_TABLES = new Set([
+  // Decision persistence uses a deliberately narrow repository contract. The
+  // browser can read only the opportunity feed projection, while the remaining
+  // ledger tables are worker-only and reached through constrained RPCs.
+  "artifact_promotions",
+  "artifact_versions",
+  "candidate_suppressions",
+  "decision_candidates",
+  "decision_cycles",
+  "decision_feedback",
+  "decision_records",
+  "opportunities",
+  "playbook_definitions",
+  "playbook_versions",
   "integration_account_mappings",
   "integration_capability_grants",
   "integration_connections",
@@ -101,7 +114,9 @@ function readTypedSchema(): Map<string, Set<string>> {
   const tablesBlock = types.slice(types.indexOf("    Tables: {"), types.indexOf("    Views:"));
 
   const typedTables = new Map<string, Set<string>>();
-  const entries = tablesBlock.matchAll(/^ {6}([a-z_]+): \{\n {8}Row: \{\n([\s\S]*?)\n {8}\};/gm);
+  const entries = tablesBlock.matchAll(
+    /^ {6}([a-z_]+): \{\n(?: {8}\/\*\*[\s\S]*?\*\/\n)? {8}Row: \{\n([\s\S]*?)\n {8}\};/gm,
+  );
   for (const [, table, rowBody] of entries) {
     const fields = new Set<string>();
     for (const [, field] of rowBody.matchAll(/^ {10}([a-z_][a-z0-9_]*)[?]?:/gm)) fields.add(field);

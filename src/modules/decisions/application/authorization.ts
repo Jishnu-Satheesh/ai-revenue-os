@@ -10,6 +10,9 @@ const permissionsByRole: Readonly<Record<OrganizationRole, readonly DecisionPerm
   viewer: ["decision.read"],
 };
 
-export function hasDecisionPermission(role: OrganizationRole, permission: DecisionPermission): boolean {
+export function hasDecisionPermission(
+  role: OrganizationRole,
+  permission: DecisionPermission,
+): boolean {
   return permissionsByRole[role].includes(permission);
 }
