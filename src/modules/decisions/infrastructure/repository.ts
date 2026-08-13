@@ -1,6 +1,9 @@
-import { decisionFeedbackInputSchema } from "@/modules/decisions/application/ports";
+import {
+  artifactPromotionInputSchema,
+  decisionCycleInputSchema,
+  decisionFeedbackInputSchema,
+} from "@/modules/decisions/application/ports";
 import type {
-  DecisionFeedbackInput,
   DecisionFeedbackPort,
   DecisionReadPort,
   DecisionWorkerStore,
@@ -22,7 +25,11 @@ export type DecisionPersistence = {
     };
   };
   rpc(
-    name: "append_decision_feedback" | "persist_decision_aggregate",
+    name:
+      | "append_decision_feedback"
+      | "persist_decision_aggregate"
+      | "promote_decision_artifact"
+      | "start_decision_cycle",
     args: Record<string, unknown>,
   ): Promise<RpcResult<string | null>>;
 };
@@ -110,6 +117,38 @@ export function createDecisionRepository(
         input_aggregate: aggregate,
       });
       if (error) decisionDatabaseError();
+    },
+    async promoteArtifact(input) {
+      const validated = artifactPromotionInputSchema.parse(input);
+      const { data, error } = await persistence.rpc("promote_decision_artifact", {
+        target_organization_id: validated.organizationId,
+        input_promotion: {
+          organization_id: validated.organizationId,
+          artifact_key: validated.artifactKey,
+          artifact_version_id: validated.artifactVersionId,
+          expected_current_artifact_version_id: validated.expectedCurrentArtifactVersionId,
+          promoted_by: validated.promotedBy,
+        },
+      });
+      if (error || !data) decisionDatabaseError();
+      return data;
+    },
+    async startCycle(input) {
+      const validated = decisionCycleInputSchema.parse(input);
+      const inputCycle = {
+        ...(validated.id === undefined ? {} : { id: validated.id }),
+        organization_id: validated.organizationId,
+        trigger_name: validated.triggerName,
+        correlation_id: validated.correlationId,
+        slot_budget: validated.slotBudget,
+        max_scored_candidates: validated.maxScoredCandidates,
+      };
+      const { data, error } = await persistence.rpc("start_decision_cycle", {
+        target_organization_id: validated.organizationId,
+        input_cycle: inputCycle,
+      });
+      if (error || !data) decisionDatabaseError();
+      return data;
     },
   };
 }

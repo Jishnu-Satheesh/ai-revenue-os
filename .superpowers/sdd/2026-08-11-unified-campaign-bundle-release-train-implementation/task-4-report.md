@@ -126,3 +126,33 @@
 - Initial full `pnpm test` passed 1012/1013 and exposed a static database-type-accounting gap for the Decision tables plus a parser miss on the already-typed documented `organization_last_access` row. The accounting test now explicitly records the Decision module's narrow repository/RPC boundary and parses a row doc comment; its focused rerun passed 32/32. Final full `pnpm test` passed 1014/1014 across 106 files.
 - `pnpm typecheck` passed; `pnpm lint` passed with zero errors and six pre-existing unused-variable warnings; `pnpm format:check` passed after mechanically formatting the Task 4 authorization signature.
 - Task 4 event emission remains unchanged: only `decision.recorded`, `decision.needs_data_identified`, and `opportunity.proposed`, through the typed `DecisionDomainEvent` boundary. No Campaign demo UI path was touched.
+
+## Fix round 2 — operational worker controls and current-version enforcement
+
+### Forward-only correction and application boundary
+
+- Before mutation, `pnpm db:migrations:list` showed local and hosted staging aligned through `20260813132757`, and `pnpm db:migrations:dry-run` reported no pending migration. After RED evidence, the CLI-generated forward migration `20260813134341_harden_decision_worker_controls.sql` was the only pending migration, was pushed, and the final list/dry-run shows local and remote aligned through `20260813134341` with no pending migration.
+- Added strict `ArtifactPromotionInput` and `DecisionCycleInput` Zod contracts plus worker repository methods. Both reject unknown keys and JSON-null substitutes before RPC mapping. Cycle input maps camelCase to the existing exact snake_case RPC contract and omits `id` when absent.
+- The cycle limits are a documented conservative operational assumption because the product docs specify no maxima: `slotBudget` is `0..100`, while `maxScoredCandidates` is `0..500`, matching the aggregate candidate cap. Trigger names are trimmed and bounded to 160 characters.
+- Added `promote_decision_artifact`, executable only by `service_role`. It validates an exact bounded payload, target/payload organization equality, semantic artifact ownership, and an expected-current compare-and-swap. It uses the existing organization/key advisory lock and appends a ledger row; successor promotion and rollback never mutate history, and each new row points `rollback_artifact_version_id` to the version that was current immediately before it.
+- Replaced `start_decision_cycle` forward-only with an exact shape/type/range validator. It rejects unknown or null fields, negative/oversized limits, malformed UUIDs, and target-organization mismatch before inserting. Anonymous and authenticated roles have no execution grant; Decision ledger tables remain unavailable for direct service-role writes.
+- Added a `BEFORE INSERT` decision-record guard requiring a supplied playbook to be active and every supplied semantic artifact tuple member to equal the current append-only promotion for its organization/key. Ranking and confidence remain mandatory; prompt/model/judge retain their approved optionality, but any supplied value must be current. Policy active validation and the approved `needs_data`/playbook optionality remain unchanged.
+- The immutable applied `20260813123000` migration remains byte-for-byte unchanged; its final SHA-256 is `184883a32e486a8b5523b33e8934745e156a5eb4a5edca89e71d6effe272f360`.
+
+### RED to GREEN evidence
+
+- Runtime RED: focused ports/repository Vitest had four expected failures because the strict schemas and `promoteArtifact`/`startCycle` repository methods did not exist. Runtime GREEN passed 11/11 for those contracts; after the full-gate test-double correction, the current focused ports/service/repository suite passed 13/13. Full Decision-focused Vitest passed 79/79 across eight files.
+- Database RED: `decision_worker_controls_test.sql` passed only 15/47 assertions against the pre-migration database. Failures demonstrated the absent promotion RPC, permissive start-cycle JSON, and acceptance of inactive/unpromoted tuple references.
+- Pre-push transactional GREEN: applying `20260813134341` and the new pgTAP in one hosted transaction passed 47/47, then rolled back. Post-push focused hosted pgTAP passed aggregate 18/18, behavioral trust-boundary 60/60, and worker controls 47/47 (125 assertions total).
+- Existing aggregate/behavioral fixtures were updated to append explicit current promotions for their custom test artifact versions. This was necessary because the new production guard correctly rejects historical/unpromoted artifacts; the fixture change does not relax production behavior.
+- Worker-controls pgTAP proves service-role promotion and rollback append history, stale-current serialization failure, semantic/cross-tenant rejection, authenticated/anonymous denial, and no-op mutation/deletion rejection. It also proves strict start-cycle validation and zero partial rows, plus inactive playbook and historical/unpromoted aggregate rejection, current promoted acceptance, and atomic zero aggregate writes on failure.
+
+### Full verification and hosted advisors
+
+- `pnpm db:test`: all discovered hosted pgTAP suites passed. Focused Decision database suites passed 125/125 assertions.
+- `pnpm test`: 1018/1018 tests passed across 106 files.
+- `pnpm typecheck`: passed. Its first run identified two Decision service test doubles missing the newly required worker methods; the test doubles were completed and the rerun passed.
+- `pnpm lint`: passed with zero errors and five existing unused-variable warnings. `pnpm format:check`: passed after formatting `ports.ts`. `git diff --check`: passed.
+- Supabase security advisor: 38 notices — 20 `INFO`, 18 `WARN`, no critical/error. Task 4's no-policy `INFO` entries describe intentionally fail-closed ledger tables, and its authenticated security-definer warning is the intended, member/actor-bound `append_decision_feedback` RPC already covered by behavioral pgTAP. The new worker RPCs produced no anonymous/authenticated execution warning and no new Task 4 critical/important issue.
+- Supabase performance advisor: 62 `INFO` notices — 34 unindexed foreign keys and 28 unused indexes. The known Decision foreign-key indexing debt remains a deferred minor; this fix did not broaden into unrelated indexing or optimizer work.
+- The approved event boundary remains exactly `decision.recorded`, `decision.needs_data_identified`, and `opportunity.proposed`, typed as `DecisionDomainEvent`. No Campaign demo UI path was changed.

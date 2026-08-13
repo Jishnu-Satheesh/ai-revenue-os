@@ -114,6 +114,32 @@ values
     'confidence_calibration', 'behavior-v1', 'Behavioral test fixture', 'test'
   );
 
+insert into public.artifact_promotions (
+  organization_id, artifact_key, active_artifact_version_id,
+  rollback_artifact_version_id, promoted_by
+)
+select
+  promotion.organization_id,
+  promotion.artifact_key,
+  case
+    when promotion.organization_id = 'db4b0000-0000-4000-8000-000000000101'::uuid
+      and promotion.artifact_key = 'ranking_weights'
+      then 'db4b0000-0000-4000-8000-000000000301'::uuid
+    when promotion.organization_id = 'db4b0000-0000-4000-8000-000000000101'::uuid
+      then 'db4b0000-0000-4000-8000-000000000302'::uuid
+    when promotion.artifact_key = 'ranking_weights'
+      then 'db4b0000-0000-4000-8000-000000000303'::uuid
+    else 'db4b0000-0000-4000-8000-000000000304'::uuid
+  end,
+  promotion.active_artifact_version_id,
+  'behavior-test'
+from private.current_artifact_promotions promotion
+where promotion.organization_id in (
+    'db4b0000-0000-4000-8000-000000000101'::uuid,
+    'db4b0000-0000-4000-8000-000000000102'::uuid
+  )
+  and promotion.artifact_key in ('ranking_weights', 'confidence_calibration');
+
 insert into public.decision_cycles (
   id, organization_id, trigger_name, correlation_id, slot_budget, max_scored_candidates
 )

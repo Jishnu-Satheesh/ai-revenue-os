@@ -10,7 +10,10 @@ describe("DecisionService", () => {
   it("persists an action selection and emits only safe identifier events", async () => {
     const persist = vi.fn().mockResolvedValue(undefined);
     const publish = vi.fn().mockResolvedValue(undefined);
-    const service = createDecisionService({ workerStore: { persist }, events: { publish } });
+    const service = createDecisionService({
+      workerStore: { persist, promoteArtifact: vi.fn(), startCycle: vi.fn() },
+      events: { publish },
+    });
 
     await service.record({
       record: selectedRecord(),
@@ -35,7 +38,10 @@ describe("DecisionService", () => {
   it("records needs_data without an opportunity and routes it to readiness", async () => {
     const persist = vi.fn().mockResolvedValue(undefined);
     const publish = vi.fn().mockResolvedValue(undefined);
-    const service = createDecisionService({ workerStore: { persist }, events: { publish } });
+    const service = createDecisionService({
+      workerStore: { persist, promoteArtifact: vi.fn(), startCycle: vi.fn() },
+      events: { publish },
+    });
 
     await service.record({
       record: {

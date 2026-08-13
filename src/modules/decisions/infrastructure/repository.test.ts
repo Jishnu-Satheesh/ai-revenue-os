@@ -34,4 +34,56 @@ describe("DecisionRepository", () => {
       expect.objectContaining({ target_organization_id: "11111111-1111-4111-8111-111111111111" }),
     );
   });
+
+  it("maps manual artifact promotion to the strict worker RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: "promotion-id", error: null });
+    const repository = createDecisionRepository({ from: vi.fn(), rpc });
+
+    const result = await repository.promoteArtifact({
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      artifactKey: "ranking_weights",
+      artifactVersionId: "22222222-2222-4222-8222-222222222222",
+      expectedCurrentArtifactVersionId: "33333333-3333-4333-8333-333333333333",
+      promotedBy: "manual-review",
+    });
+
+    expect(result).toBe("promotion-id");
+    expect(rpc).toHaveBeenCalledWith("promote_decision_artifact", {
+      target_organization_id: "11111111-1111-4111-8111-111111111111",
+      input_promotion: {
+        organization_id: "11111111-1111-4111-8111-111111111111",
+        artifact_key: "ranking_weights",
+        artifact_version_id: "22222222-2222-4222-8222-222222222222",
+        expected_current_artifact_version_id: "33333333-3333-4333-8333-333333333333",
+        promoted_by: "manual-review",
+      },
+    });
+  });
+
+  it("maps a bounded cycle input to the existing snake-case worker contract", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: "cycle-id", error: null });
+    const repository = createDecisionRepository({ from: vi.fn(), rpc });
+
+    const result = await repository.startCycle({
+      id: "44444444-4444-4444-8444-444444444444",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      triggerName: "  scheduled evaluation  ",
+      correlationId: "55555555-5555-4555-8555-555555555555",
+      slotBudget: 10,
+      maxScoredCandidates: 500,
+    });
+
+    expect(result).toBe("cycle-id");
+    expect(rpc).toHaveBeenCalledWith("start_decision_cycle", {
+      target_organization_id: "11111111-1111-4111-8111-111111111111",
+      input_cycle: {
+        id: "44444444-4444-4444-8444-444444444444",
+        organization_id: "11111111-1111-4111-8111-111111111111",
+        trigger_name: "scheduled evaluation",
+        correlation_id: "55555555-5555-4555-8555-555555555555",
+        slot_budget: 10,
+        max_scored_candidates: 500,
+      },
+    });
+  });
 });

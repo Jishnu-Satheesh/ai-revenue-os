@@ -61,18 +61,32 @@ values
     'confidence_calibration', 'test-v1', 'Focused pgTAP fixture', 'test'
   );
 
+insert into public.artifact_promotions (
+  organization_id, artifact_key, active_artifact_version_id,
+  rollback_artifact_version_id, promoted_by
+)
+select
+  'da4a0000-0000-4000-8000-000000000002'::uuid,
+  promotion.artifact_key,
+  'da4a0000-0000-4000-8000-000000000007'::uuid,
+  promotion.active_artifact_version_id,
+  'focused-test'
+from private.current_artifact_promotions promotion
+where promotion.organization_id = 'da4a0000-0000-4000-8000-000000000002'::uuid
+  and promotion.artifact_key = 'confidence_calibration';
+
 select extensions.lives_ok(
   $$
-    insert into public.artifact_promotions (
-      organization_id, artifact_key, active_artifact_version_id,
-      rollback_artifact_version_id, promoted_by
-    )
-    select
+    select public.promote_decision_artifact(
       'da4a0000-0000-4000-8000-000000000002'::uuid,
-      'ranking_weights',
-      'da4a0000-0000-4000-8000-000000000006'::uuid,
-      promotion.active_artifact_version_id,
-      'focused-test'
+      jsonb_build_object(
+        'organization_id', 'da4a0000-0000-4000-8000-000000000002',
+        'artifact_key', 'ranking_weights',
+        'artifact_version_id', 'da4a0000-0000-4000-8000-000000000006',
+        'expected_current_artifact_version_id', promotion.active_artifact_version_id,
+        'promoted_by', 'focused-test'
+      )
+    )
     from private.current_artifact_promotions promotion
     where promotion.organization_id = 'da4a0000-0000-4000-8000-000000000002'::uuid
       and promotion.artifact_key = 'ranking_weights'

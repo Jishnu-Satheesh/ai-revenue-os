@@ -70,6 +70,29 @@ export const decisionFeedbackInputSchema = z
   });
 export type DecisionFeedbackInput = z.infer<typeof decisionFeedbackInputSchema>;
 
+export const artifactPromotionInputSchema = z.strictObject({
+  organizationId: z.string().uuid(),
+  artifactKey: z.enum(["confidence_calibration", "ranking_weights", "prompt", "model", "judge"]),
+  artifactVersionId: z.string().uuid(),
+  expectedCurrentArtifactVersionId: z.string().uuid(),
+  promotedBy: z.string().trim().min(1).max(160),
+});
+export type ArtifactPromotionInput = z.infer<typeof artifactPromotionInputSchema>;
+
+/**
+ * One cycle is deliberately bounded below the aggregate's 500-candidate cap:
+ * at most 100 feed slots and at most 500 candidates may reach scoring.
+ */
+export const decisionCycleInputSchema = z.strictObject({
+  id: z.string().uuid().optional(),
+  organizationId: z.string().uuid(),
+  triggerName: z.string().trim().min(1).max(160),
+  correlationId: z.string().uuid(),
+  slotBudget: z.number().int().min(0).max(100),
+  maxScoredCandidates: z.number().int().min(0).max(500),
+});
+export type DecisionCycleInput = z.infer<typeof decisionCycleInputSchema>;
+
 export const decisionCandidateSchema = z
   .strictObject({
     playbookVersionId: z.string().uuid(),
@@ -259,4 +282,6 @@ export type DecisionFeedbackPort = {
 /** Worker-only boundary. Browser repositories never expose this capability. */
 export type DecisionWorkerStore = {
   persist(aggregate: DecisionAggregate): Promise<void>;
+  promoteArtifact(input: ArtifactPromotionInput): Promise<string>;
+  startCycle(input: DecisionCycleInput): Promise<string>;
 };

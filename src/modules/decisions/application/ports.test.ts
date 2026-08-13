@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { decisionAggregateSchema } from "@/modules/decisions/application/ports";
+import {
+  artifactPromotionInputSchema,
+  decisionAggregateSchema,
+  decisionCycleInputSchema,
+} from "@/modules/decisions/application/ports";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const decisionCycleId = "22222222-2222-4222-8222-222222222222";
@@ -100,6 +104,40 @@ describe("decision aggregate", () => {
         opportunity: null,
       }),
     ).toThrow();
+  });
+});
+
+describe("decision worker controls", () => {
+  it("accepts a bounded artifact promotion and rejects unknown or null input", () => {
+    const input = {
+      organizationId,
+      artifactKey: "ranking_weights" as const,
+      artifactVersionId: rankingWeightsId,
+      expectedCurrentArtifactVersionId: confidenceCalibrationId,
+      promotedBy: "manual-review",
+    };
+
+    expect(artifactPromotionInputSchema.parse(input)).toEqual(input);
+    expect(() => artifactPromotionInputSchema.parse({ ...input, optimizerScore: 0.9 })).toThrow();
+    expect(() =>
+      artifactPromotionInputSchema.parse({ ...input, expectedCurrentArtifactVersionId: null }),
+    ).toThrow();
+  });
+
+  it("normalizes a strict bounded cycle input and rejects null or operationally unsafe values", () => {
+    const input = {
+      organizationId,
+      triggerName: "  scheduled evaluation  ",
+      correlationId: "99999999-9999-4999-8999-999999999999",
+      slotBudget: 10,
+      maxScoredCandidates: 500,
+    };
+
+    expect(decisionCycleInputSchema.parse(input).triggerName).toBe("scheduled evaluation");
+    expect(() => decisionCycleInputSchema.parse({ ...input, id: null })).toThrow();
+    expect(() => decisionCycleInputSchema.parse({ ...input, unexpected: true })).toThrow();
+    expect(() => decisionCycleInputSchema.parse({ ...input, slotBudget: 101 })).toThrow();
+    expect(() => decisionCycleInputSchema.parse({ ...input, maxScoredCandidates: 501 })).toThrow();
   });
 });
 
