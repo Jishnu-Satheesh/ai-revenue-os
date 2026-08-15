@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import sharp from "sharp";
+import type { Sharp } from "sharp";
 
 /**
  * Turning an uploaded file into something a campaign may use.
@@ -175,7 +176,7 @@ export async function ingestCampaignImage(input: {
   }
 }
 
-function encode(pipeline: sharp.Sharp, format: AssetIntakeFormat): Promise<Buffer> {
+function encode(pipeline: Sharp, format: AssetIntakeFormat): Promise<Buffer> {
   switch (format) {
     case "image/jpeg":
       return pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
