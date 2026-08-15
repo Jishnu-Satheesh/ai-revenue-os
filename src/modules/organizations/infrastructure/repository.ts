@@ -66,11 +66,18 @@ export async function getOrganization(supabase: OrganizationClient, organization
   return data;
 }
 
+/**
+ * The organizations a user can actually work in. Archived organizations are
+ * abandoned drafts, so excluding them here keeps the switcher's list identical
+ * to the candidate set `resolve_landing_organization` chooses from -- otherwise
+ * the menu could offer a destination the landing would refuse to resolve.
+ */
 export async function listOrganizations(supabase: OrganizationClient) {
   const { data, error } = await supabase
     .from("organizations")
     .select("*")
-    .order("created_at", { ascending: false });
+    .neq("status", "archived")
+    .order("name", { ascending: true });
   if (error) raise("Organizations could not be loaded.", error);
   return data;
 }

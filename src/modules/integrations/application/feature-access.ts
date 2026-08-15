@@ -33,10 +33,17 @@ export function assertIntegrationHubEnabled(
   organizationId: string,
   enabledOrganizationIds = parseIntegrationOrganizationIds(env.INTEGRATION_HUB_V1_ORGANIZATION_IDS),
 ): void {
-  if (!enabledOrganizationIds.has(organizationId.toLowerCase())) {
+  if (!isIntegrationHubEnabled(organizationId, enabledOrganizationIds)) {
     throw new DomainError(
       "FEATURE_NOT_AVAILABLE",
       "Integration Hub is not available for this organization.",
     );
   }
+}
+
+export function isIntegrationHubEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(env.INTEGRATION_HUB_V1_ORGANIZATION_IDS),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
 }

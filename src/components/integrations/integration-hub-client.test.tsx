@@ -245,7 +245,9 @@ describe("Integration Hub server boundary", () => {
 
 describe("route-aware app chrome", () => {
   it("derives the location from the pathname instead of a hardcoded Overview label", () => {
-    expect(deriveRouteCrumbs("/overview").at(-1)?.label).toBe("Overview");
+    // The root redirects on the server and never renders the shell, so it has
+    // no trail of its own to draw.
+    expect(deriveRouteCrumbs("/")).toEqual([]);
     expect(
       deriveRouteCrumbs(`/organizations/${organizationId}/integrations`).map(
         (crumb) => crumb.label,
@@ -256,6 +258,15 @@ describe("route-aware app chrome", () => {
         [organizationId]: "Fixture Bakery",
       }).map((crumb) => crumb.label),
     ).toEqual(["Fixture Bakery", "Guided onboarding"]);
+  });
+
+  it("targets Overview from the organization crumb", () => {
+    expect(deriveRouteCrumbs(`/organizations/${organizationId}/economics`)[0]?.href).toBe(
+      `/organizations/${organizationId}/overview`,
+    );
+    expect(deriveRouteCrumbs(`/organizations/${organizationId}/overview`).at(-1)?.label).toBe(
+      "Overview",
+    );
   });
 
   it("marks only the current location as the breadcrumb page", () => {

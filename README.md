@@ -61,7 +61,9 @@ This repository now contains the initial Next.js control-plane foundation and Su
 
 ## Organization + Digital Twin slice
 
-The onboarding flow is available at `/organizations/new` after authentication. It creates the organization, owner membership, default access/spend policies, an initial business profile, and an optional first branch in one database transaction. The Digital Twin workspace at `/organizations/:organizationId/digital-twin` records profile context, branches, source-aware facts, goals, constraints, policies, readiness, and audit history.
+The onboarding flow is available at `/organizations/new` after authentication. It creates the organization, owner membership, default access/spend policies, an initial business profile, and an optional first branch in one database transaction. The Overview workspace at `/organizations/:organizationId/overview` records profile context, branches, source-aware facts, goals, constraints, policies, readiness, and audit history. Overview is the route and the menu label; the Digital Twin remains the domain it presents, and keeps its schema, repository, and type names.
+
+Every authenticated route is organization-scoped — there is no account-wide page. The root path resolves per user: the most recently accessed organization that is not archived, or the alphabetically first when none has been visited, or `/organizations/new` when the user has no workable organization. `/auth/callback` and the archive action both redirect to `/` so they inherit the same resolution. See `adrs/0015-user-scoped-interface-state.md`.
 
 Draft organizations are soft-archived through the lifecycle control rather than hard-deleted. Restaurant organizations require an active physical branch and an access policy before activation. Verified facts cannot be downgraded by later inferred or imported writes.
 
@@ -91,10 +93,10 @@ pnpm build
 
 Use one fixed **development organization** for workflow testing, so results stay comparable between sessions and nobody has to rebuild a fixture to reproduce a bug:
 
-| | |
-| --- | --- |
-| Organization | `2dda45b8-82db-4f5f-b17d-611b9bbb7846` — Al Noor Kitchen |
-| Industry pack | `restaurant`, AED, `Asia/Dubai`, 3 branches |
+|               |                                                          |
+| ------------- | -------------------------------------------------------- |
+| Organization  | `2dda45b8-82db-4f5f-b17d-611b9bbb7846` — Al Noor Kitchen |
+| Industry pack | `restaurant`, AED, `Asia/Dubai`, 3 branches              |
 
 ```bash
 pnpm db:migrations:list      # what staging has applied
