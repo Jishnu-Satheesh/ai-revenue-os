@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { DemoDirectionKind } from "@/modules/campaigns/demo/fixtures";
+import type { CreativeDirectionKind } from "@/domain/campaigns/schemas";
 
 /**
  * A channel-accurate preview of the proposed post.
@@ -140,7 +140,7 @@ function ExperimentalArt() {
   );
 }
 
-const ART: Readonly<Record<DemoDirectionKind, () => React.JSX.Element>> = {
+const ART: Readonly<Record<CreativeDirectionKind, () => React.JSX.Element>> = {
   control: ControlArt,
   evidence_led: EvidenceLedArt,
   experimental: ExperimentalArt,
@@ -156,7 +156,7 @@ export function CreativePreview({
   imageAlt,
   syntheticContent,
 }: Readonly<{
-  kind: DemoDirectionKind;
+  kind: CreativeDirectionKind;
   organizationName: string;
   placementLabel: string;
   caption: string;
