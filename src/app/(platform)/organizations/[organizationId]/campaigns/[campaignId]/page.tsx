@@ -59,6 +59,7 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
 
       <CampaignStudio
         view={view}
+        organizationId={context.organizationId}
         organizationName={organization.name}
         timeZone={organization.default_timezone}
       />

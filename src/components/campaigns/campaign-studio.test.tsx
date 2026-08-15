@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
@@ -23,10 +26,11 @@ beforeAll(() => {
 });
 
 const NOW = "2026-08-15T12:00:00.000Z";
+const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 
 const campaign: CampaignSummary = {
   id: manifestIds.campaign,
-  organizationId: "11111111-1111-4111-8111-111111111111",
+  organizationId: ORGANIZATION_ID,
   title: "Weekday evening demand lift",
   sourceKind: "decision_opportunity",
   briefId: null,
@@ -77,7 +81,12 @@ function approvalFor(overrides: Partial<CampaignApproval> = {}): CampaignApprova
 
 function renderStudio(view: StudioView = studioView()) {
   return render(
-    <CampaignStudio view={view} organizationName="Al Noor Kitchen" timeZone="Asia/Dubai" />,
+    <CampaignStudio
+      view={view}
+      organizationId={ORGANIZATION_ID}
+      organizationName="Al Noor Kitchen"
+      timeZone="Asia/Dubai"
+    />,
   );
 }
 
@@ -193,5 +202,47 @@ describe("the studio states the version rules it enforces", () => {
     renderStudio();
 
     expect(screen.getByText("Showing")).toBeInTheDocument();
+  });
+});
+
+describe("editing goes through a revision, never an in-place change", () => {
+  it("offers both edit entries as live actions rather than disabled buttons", () => {
+    renderStudio();
+
+    expect(screen.getByRole("button", { name: /edit content/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /revise with a prompt/i })).toBeEnabled();
+  });
+
+  it("says the current version is left untouched by a revision", () => {
+    renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: /revise with a prompt/i }));
+
+    expect(screen.getByText(/this creates a new version/i)).toBeInTheDocument();
+    expect(screen.getByText(/stays exactly as it is/i)).toBeInTheDocument();
+  });
+
+  it("makes the operator choose how much may change instead of inferring it", () => {
+    renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: /revise with a prompt/i }));
+
+    expect(screen.getByRole("radio", { name: /caption and hook/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /this whole direction/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /the whole proposal/i })).toBeInTheDocument();
+  });
+
+  it("will not queue an empty revision", () => {
+    renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: /revise with a prompt/i }));
+
+    expect(screen.getByRole("button", { name: /queue revision/i })).toBeDisabled();
+  });
+});
+
+describe("the approval window is an explicit choice", () => {
+  it("shows the window the approval will be bound to", () => {
+    renderStudio();
+
+    expect(screen.getByLabelText(/approval valid for/i)).toBeInTheDocument();
+    expect(screen.getByText("24 hours")).toBeInTheDocument();
   });
 });

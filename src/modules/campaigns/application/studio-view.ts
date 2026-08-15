@@ -94,7 +94,8 @@ export type StudioView = {
   rationale: string;
   generationProfile: CampaignBundleManifest["generationProfile"];
   executionMode: CampaignBundleManifest["executionMode"];
-  /** The digest an attestation and approval are bound to. */
+  /** The version an attestation and approval are bound to, with its digest. */
+  versionId: string;
   digest: string;
   versionNumber: number;
   versions: readonly StudioVersionEntry[];
@@ -222,6 +223,7 @@ export function toStudioView(input: StudioViewInput): StudioView {
     rationale: manifest.rationale,
     generationProfile: manifest.generationProfile,
     executionMode: manifest.executionMode,
+    versionId: version.id,
     digest: version.digest,
     versionNumber: version.version,
     versions: [...versions]

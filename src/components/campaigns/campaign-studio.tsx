@@ -1,15 +1,28 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Clock, FlaskConical, Info, Pencil, Scale, Target, Wand2 } from "lucide-react";
 
+import { attestAndApprove } from "@/components/campaigns/campaign-actions";
 import { CreativePreview } from "@/components/campaigns/creative-preview";
+import { RevisionDialog } from "@/components/campaigns/revision-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { CampaignGenerationProfile } from "@/domain/campaigns/schemas";
 import type {
@@ -119,7 +132,18 @@ function scheduleWindow(view: StudioView, timeZone: string): string | null {
 function DirectionPanel({
   direction,
   organizationName,
-}: Readonly<{ direction: StudioDirection; organizationName: string }>) {
+  organizationId,
+  campaignId,
+  versionId,
+  digest,
+}: Readonly<{
+  direction: StudioDirection;
+  organizationName: string;
+  organizationId: string;
+  campaignId: string;
+  versionId: string;
+  digest: string;
+}>) {
   // A direction carries copy per channel and placement. The preview shows one
   // of them rather than merging several, because a merged post is not a post
   // anyone would actually publish.
@@ -195,15 +219,35 @@ function DirectionPanel({
           </div>
         ) : null}
 
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" disabled>
-            <Pencil data-icon="inline-start" aria-hidden="true" />
-            Edit content
-          </Button>
-          <Button variant="outline" size="sm" disabled>
-            <Wand2 data-icon="inline-start" aria-hidden="true" />
-            Revise with a prompt
-          </Button>
+        <div className="flex flex-wrap gap-2">
+          <RevisionDialog
+            organizationId={organizationId}
+            campaignId={campaignId}
+            baseVersionId={versionId}
+            baseDigest={digest}
+            directionId={direction.id}
+            defaultScope="copy"
+            trigger={
+              <Button variant="outline" size="sm">
+                <Pencil data-icon="inline-start" aria-hidden="true" />
+                Edit content
+              </Button>
+            }
+          />
+          <RevisionDialog
+            organizationId={organizationId}
+            campaignId={campaignId}
+            baseVersionId={versionId}
+            baseDigest={digest}
+            directionId={direction.id}
+            defaultScope="direction"
+            trigger={
+              <Button variant="outline" size="sm">
+                <Wand2 data-icon="inline-start" aria-hidden="true" />
+                Revise with a prompt
+              </Button>
+            }
+          />
         </div>
         <p className="text-xs text-muted-foreground">
           Any change creates a new immutable version and invalidates the current approval.
@@ -213,16 +257,67 @@ function DirectionPanel({
   );
 }
 
+/** Approval windows an operator may bind, in hours. */
+const ATTESTATION_STATEMENT =
+  "I have reviewed every proposed asset and confirm none of them depicts or implies a real-world fact the evidence does not support.";
+
+const APPROVAL_WINDOWS = [
+  { value: "24", label: "24 hours" },
+  { value: "72", label: "3 days" },
+  { value: "168", label: "7 days" },
+] as const;
+
 export function CampaignStudio({
   view,
+  organizationId,
   organizationName,
   timeZone,
-}: Readonly<{ view: StudioView; organizationName: string; timeZone: string }>) {
+}: Readonly<{
+  view: StudioView;
+  organizationId: string;
+  organizationName: string;
+  timeZone: string;
+}>) {
+  const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
   const [directionId, setDirectionId] = useState(evidenceLed?.id ?? view.directions[0]?.id ?? "");
   const [attested, setAttested] = useState(false);
+  const [windowHours, setWindowHours] = useState<string>("24");
+  const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const window = useMemo(() => scheduleWindow(view, timeZone), [view, timeZone]);
+
+  async function approve() {
+    setApproving(true);
+    setApprovalError(null);
+
+    const expiresAt = new Date(Date.now() + Number(windowHours) * 3_600_000)
+      .toISOString()
+      .replace("Z", "");
+
+    const result = await attestAndApprove({
+      organizationId,
+      campaignId: view.campaignId,
+      bundleVersionId: view.versionId,
+      // The digest the operator's screen showed. The server recomputes it from
+      // the stored manifest and refuses if they disagree.
+      bundleDigest: view.digest,
+      statement: ATTESTATION_STATEMENT,
+      expiresAt,
+      actionKeys: view.actions.map((action) => action.id),
+    });
+
+    setApproving(false);
+
+    if (!result.ok) {
+      setApprovalError(result.message);
+      return;
+    }
+
+    toast.success("Approved", { description: "This exact version is now authorized to execute." });
+    router.refresh();
+  }
   const approval = approvalCopy(view.approval);
   const paidActions = view.actions.filter((action) => action.spendCeiling !== null);
 
@@ -262,7 +357,14 @@ export function CampaignStudio({
 
                 {view.directions.map((direction) => (
                   <TabsContent key={direction.id} value={direction.id} className="min-h-0">
-                    <DirectionPanel direction={direction} organizationName={organizationName} />
+                    <DirectionPanel
+                      direction={direction}
+                      organizationName={organizationName}
+                      organizationId={organizationId}
+                      campaignId={view.campaignId}
+                      versionId={view.versionId}
+                      digest={view.digest}
+                    />
                   </TabsContent>
                 ))}
               </Tabs>
@@ -422,7 +524,38 @@ export function CampaignStudio({
                 </span>
               </label>
 
-              <Button disabled={!attested} className="w-full">
+              <div className="flex flex-col gap-2">
+                <Label
+                  htmlFor="approval-window"
+                  className="text-xs text-muted-foreground uppercase"
+                >
+                  Approval valid for
+                </Label>
+                {/* An explicit operator choice. Picking a window silently in
+                    code would hide a policy decision inside a button. */}
+                <Select value={windowHours} onValueChange={setWindowHours}>
+                  <SelectTrigger id="approval-window">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {APPROVAL_WINDOWS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {approvalError ? (
+                <Alert variant="destructive">
+                  <AlertTitle>Not approved</AlertTitle>
+                  <AlertDescription>{approvalError}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              <Button disabled={!attested || approving} onClick={approve} className="w-full">
+                {approving ? <Spinner data-icon="inline-start" /> : null}
                 Approve execution + proof
               </Button>
               {attested ? null : (
