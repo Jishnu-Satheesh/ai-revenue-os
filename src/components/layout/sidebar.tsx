@@ -61,6 +61,16 @@ function organizationNavigation(pathname: string) {
         href: `/organizations/${organizationId}/digital-twin`,
         icon: Boxes,
       },
+      // An opportunity only means something against one organization's
+      // economics, capabilities, and goals, so the feed lives here rather than
+      // account-wide. NOTE for the pending `feat/business-memory` merge: that
+      // branch replaces this function with `workspaceEntries`, where enabling
+      // Opportunities means giving its existing entry a `path` instead.
+      {
+        label: "Opportunities",
+        href: `/organizations/${organizationId}/opportunities`,
+        icon: Sparkles,
+      },
       {
         label: "Guided onboarding",
         href: `/organizations/${organizationId}/onboarding`,
