@@ -78,14 +78,14 @@ values
     'db4b0000-0000-4000-8000-000000000501'::uuid,
     'db4b0000-0000-4000-8000-000000000101'::uuid,
     'db4b0000-0000-4000-8000-000000000401'::uuid,
-    E'1\\x0\\x0', 'Tenant one hypothesis', '{"action":"tenant_one"}'::jsonb,
+    '1.0.0', 'Tenant one hypothesis', '{"action":"tenant_one"}'::jsonb,
     1, 'testing.metric', 7, true
   ),
   (
     'db4b0000-0000-4000-8000-000000000502'::uuid,
     'db4b0000-0000-4000-8000-000000000102'::uuid,
     'db4b0000-0000-4000-8000-000000000402'::uuid,
-    E'1\\x0\\x0', 'Tenant two hypothesis', '{"action":"tenant_two"}'::jsonb,
+    '1.0.0', 'Tenant two hypothesis', '{"action":"tenant_two"}'::jsonb,
     1, 'testing.metric', 7, true
   );
 

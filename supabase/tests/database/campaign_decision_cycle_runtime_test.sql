@@ -301,6 +301,40 @@ select extensions.is(
   'campaign.meta_bundle_v1'::text,
   'future organizations receive the inert Campaign action definition'
 );
+select extensions.is(
+  (
+    select version.semantic_version
+    from public.playbook_versions version
+    join public.playbook_definitions definition
+      on definition.organization_id = version.organization_id
+     and definition.id = version.playbook_definition_id
+    where definition.organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid
+      and definition.key = 'campaign.meta_bundle'
+      and version.is_active
+  ),
+  '1.0.0'::text,
+  'the stored playbook version is a real semantic version, not an encoding of one'
+);
+select extensions.throws_ok(
+  $$
+    insert into public.playbook_versions (
+      organization_id, playbook_definition_id, semantic_version,
+      hypothesis_template, action_definition, risk_class, primary_metric_key,
+      measurement_window_days
+    )
+    select
+      'd5c50000-0000-4000-8000-000000000101'::uuid,
+      definition.id,
+      E'9\\x9\\x9',
+      'Rejected version encoding', '{"action_key":"rejected"}'::jsonb,
+      1, 'orders_count', 14
+    from public.playbook_definitions definition
+    where definition.organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid
+      and definition.key = 'campaign.meta_bundle'
+  $$,
+  '23514', null,
+  'the repaired constraint rejects the old backslash encoding'
+);
 select extensions.ok(
   (
     select version.prior is null
@@ -949,12 +983,7 @@ values (
   'd5c50000-0000-4000-8000-000000000602'::uuid,
   'd5c50000-0000-4000-8000-000000000101'::uuid,
   'd5c50000-0000-4000-8000-000000000601'::uuid,
-  -- FIXME(semantic-version-regex): `playbook_versions_semantic_version_check`
-  -- was written with a doubled backslash, so it matches a literal backslash
-  -- instead of a dot and rejects a real semantic version. The seed encodes
-  -- `1.0.0` this way and the read path replaces `\x` with `.`. This probe
-  -- matches current reality; the constraint repair is tracked separately.
-  E'1\\x0\\x0', 'Generic probe hypothesis',
+  '1.0.0', 'Generic probe hypothesis',
   '{"action_key":"generic.admission_probe_v1"}'::jsonb,
   1, 'orders_count', 14, true, now()
 );

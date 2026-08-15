@@ -42,7 +42,7 @@ values (
   'da4a0000-0000-4000-8000-000000000005'::uuid,
   'da4a0000-0000-4000-8000-000000000002'::uuid,
   'da4a0000-0000-4000-8000-000000000004'::uuid,
-  E'1\\x0\\x0', 'A test action improves the registered metric.', '{"action":"testing"}'::jsonb,
+  '1.0.0', 'A test action improves the registered metric.', '{"action":"testing"}'::jsonb,
   1, 'testing.metric', 7, true
 );
 

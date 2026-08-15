@@ -55,21 +55,21 @@ values
     'dc4c0000-0000-4000-8000-000000000501'::uuid,
     'dc4c0000-0000-4000-8000-000000000101'::uuid,
     'dc4c0000-0000-4000-8000-000000000401'::uuid,
-    E'1\\x0\\x0', 'Active test hypothesis', '{"action":"active"}'::jsonb,
+    '1.0.0', 'Active test hypothesis', '{"action":"active"}'::jsonb,
     1, 'testing.metric', 7, true
   ),
   (
     'dc4c0000-0000-4000-8000-000000000511'::uuid,
     'dc4c0000-0000-4000-8000-000000000101'::uuid,
     'dc4c0000-0000-4000-8000-000000000401'::uuid,
-    E'2\\x0\\x0', 'Inactive test hypothesis', '{"action":"inactive"}'::jsonb,
+    '2.0.0', 'Inactive test hypothesis', '{"action":"inactive"}'::jsonb,
     1, 'testing.metric', 7, false
   ),
   (
     'dc4c0000-0000-4000-8000-000000000502'::uuid,
     'dc4c0000-0000-4000-8000-000000000102'::uuid,
     'dc4c0000-0000-4000-8000-000000000402'::uuid,
-    E'1\\x0\\x0', 'Other tenant hypothesis', '{"action":"other"}'::jsonb,
+    '1.0.0', 'Other tenant hypothesis', '{"action":"other"}'::jsonb,
     1, 'testing.metric', 7, true
   );
 
