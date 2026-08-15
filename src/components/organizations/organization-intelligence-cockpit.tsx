@@ -124,7 +124,7 @@ export function OrganizationIntelligenceCockpit({
         </div>
         {permissions.canManageCore ? (
           <Button variant="outline">
-            <Settings2 data-icon="inline-start"/>
+            <Settings2 data-icon="inline-start" />
             <Link href="#organization-management">Manage organization</Link>
           </Button>
         ) : null}
@@ -239,8 +239,8 @@ function StrategicBriefing({ briefing }: { briefing: readonly StrategicBriefingI
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2">
-            <Sparkles className="text-primary"/>
-          <CardTitle className="font-semibold text-xl">Strategic Briefing</CardTitle>
+            <Sparkles className="text-primary" />
+            <CardTitle className="font-semibold text-xl">Strategic Briefing</CardTitle>
           </div>
           <CardDescription>
             What the current evidence supports—and what it does not.
