@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CircleSlash, FileText, Plus, Sparkles } from "lucide-react";
+import { FileText, Plus, Sparkles } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,14 +13,23 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  formatMinor,
-  type CampaignLifecycle,
-  type DemoCampaignSummary,
-} from "@/modules/campaigns/demo/fixtures";
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import type { CampaignState } from "@/domain/campaigns/state-machine";
+import type { CampaignListItem, Money } from "@/modules/campaigns/application/studio-view";
 
-const LIFECYCLE: Readonly<
+/**
+ * Every campaign state gets its own label, including the ones an operator will
+ * rarely see. A state missing from this map would render as raw database text
+ * in front of a client.
+ */
+const STATE: Readonly<
   Record<
-    CampaignLifecycle,
+    CampaignState,
     { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
   >
 > = {
@@ -29,8 +38,24 @@ const LIFECYCLE: Readonly<
   ready_for_review: { label: "Ready for review", variant: "default" },
   approved: { label: "Approved", variant: "default" },
   scheduled: { label: "Scheduled", variant: "default" },
+  executing: { label: "Executing", variant: "default" },
+  measuring: { label: "Measuring", variant: "secondary" },
+  completed: { label: "Completed", variant: "secondary" },
+  partially_completed: { label: "Partially completed", variant: "secondary" },
   blocked: { label: "Blocked", variant: "destructive" },
+  cancelled: { label: "Cancelled", variant: "outline" },
+  failed: { label: "Failed", variant: "destructive" },
 };
+
+function formatMoney(money: Money | null): string {
+  // A null ceiling means the bundle carries no paid action at all. Rendering
+  // it as "0.00" would read as a budget of nothing, which is a different claim.
+  if (!money) return "No paid spend";
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: money.currency,
+  }).format(money.amountMinor / 100);
+}
 
 function updatedLabel(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", {
@@ -48,7 +73,7 @@ export function CampaignPortfolio({
   timeZone,
 }: Readonly<{
   organizationId: string;
-  campaigns: readonly DemoCampaignSummary[];
+  campaigns: readonly CampaignListItem[];
   timeZone: string;
 }>) {
   return (
@@ -63,79 +88,99 @@ export function CampaignPortfolio({
       </Alert>
 
       <div className="flex flex-wrap gap-2">
-        <Button disabled>
-          <Plus aria-hidden="true" />
-          New campaign brief
+        <Button asChild>
+          <Link href={`/organizations/${organizationId}/campaigns/new`}>
+            <Plus data-icon="inline-start" aria-hidden="true" />
+            New campaign brief
+          </Link>
         </Button>
         <Button variant="outline" asChild>
-          <Link href="/opportunities">
-            <FileText aria-hidden="true" />
+          <Link href={`/organizations/${organizationId}/opportunities`}>
+            <FileText data-icon="inline-start" aria-hidden="true" />
             Start from an opportunity
           </Link>
         </Button>
       </div>
 
-      <ul aria-label="Campaigns" className="grid gap-4 lg:grid-cols-2">
-        {campaigns.map((campaign) => {
-          const lifecycle = LIFECYCLE[campaign.lifecycle];
-          return (
-            <li key={campaign.id} className="flex">
-              <Card className="flex w-full flex-col">
-                <CardHeader>
-                  <CardTitle className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/organizations/${organizationId}/campaigns/${campaign.id}`}
-                      className="underline-offset-4 hover:underline"
+      {campaigns.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Sparkles />
+            </EmptyMedia>
+            <EmptyTitle>No campaigns yet</EmptyTitle>
+            <EmptyDescription>
+              Start from a Decision Engine opportunity, or write a brief yourself. Both arrive here
+              as a proposal to review before anything is published.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <ul aria-label="Campaigns" className="grid gap-4 lg:grid-cols-2">
+          {campaigns.map((campaign) => {
+            const state = STATE[campaign.state];
+            const href = `/organizations/${organizationId}/campaigns/${campaign.id}`;
+            return (
+              <li key={campaign.id} className="flex">
+                <Card className="flex w-full flex-col">
+                  <CardHeader>
+                    <CardTitle className="flex flex-wrap items-center gap-2">
+                      <Link href={href} className="underline-offset-4 hover:underline">
+                        {campaign.title}
+                      </Link>
+                      <Badge variant={state.variant}>{state.label}</Badge>
+                      {campaign.version === null ? null : (
+                        <Badge variant="outline">v{campaign.version}</Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription>
+                      {/* The objective lives in a bundle version. Until one
+                          exists there is nothing truthful to put here. */}
+                      {campaign.objective ?? "Waiting for the first proposal to be generated."}
+                    </CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="flex flex-1 flex-col gap-3 text-sm">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground uppercase">Source</span>
+                      <span>{campaign.sourceLabel}</span>
+                    </div>
+
+                    {campaign.awaitingFirstVersion ? null : (
+                      <div className="flex flex-wrap gap-4">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-muted-foreground uppercase">Channels</span>
+                          <span>{campaign.channels.join(" · ")}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-muted-foreground uppercase">
+                            Spend ceiling
+                          </span>
+                          <span>{formatMoney(campaign.spendCeiling)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+
+                  <CardFooter className="justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Updated {updatedLabel(campaign.updatedAt, timeZone)}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      disabled={campaign.awaitingFirstVersion}
                     >
-                      {campaign.title}
-                    </Link>
-                    <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
-                    <Badge variant="outline">v{campaign.version}</Badge>
-                  </CardTitle>
-                  <CardDescription>{campaign.objective}</CardDescription>
-                </CardHeader>
-
-                <CardContent className="flex flex-1 flex-col gap-3 text-sm">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-muted-foreground uppercase">Source</span>
-                    <span>{campaign.sourceLabel}</span>
-                  </div>
-
-                  <div className="flex flex-wrap gap-4">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-muted-foreground uppercase">Channels</span>
-                      <span>{campaign.channels.join(" · ")}</span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-muted-foreground uppercase">Spend ceiling</span>
-                      <span>{formatMinor(campaign.spendCeiling)}</span>
-                    </div>
-                  </div>
-
-                  {campaign.blockerCount > 0 ? (
-                    <p className="flex items-center gap-2 text-muted-foreground">
-                      <CircleSlash aria-hidden="true" className="size-4" />
-                      {campaign.blockerCount} channel action
-                      {campaign.blockerCount === 1 ? "" : "s"} blocked
-                    </p>
-                  ) : null}
-                </CardContent>
-
-                <CardFooter className="justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    Updated {updatedLabel(campaign.updatedAt, timeZone)}
-                  </span>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={`/organizations/${organizationId}/campaigns/${campaign.id}`}>
-                      Review
-                    </Link>
-                  </Button>
-                </CardFooter>
-              </Card>
-            </li>
-          );
-        })}
-      </ul>
+                      <Link href={href}>Review</Link>
+                    </Button>
+                  </CardFooter>
+                </Card>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

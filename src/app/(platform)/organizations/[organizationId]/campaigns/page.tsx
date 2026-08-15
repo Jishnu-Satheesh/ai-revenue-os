@@ -2,16 +2,24 @@ import { Megaphone } from "lucide-react";
 
 import { CampaignPortfolio } from "@/components/campaigns/campaign-portfolio";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
-import { demoCampaigns } from "@/modules/campaigns/demo/fixtures";
+import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
+import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
+import { readCampaignList } from "@/modules/campaigns/infrastructure/studio-reader";
 
 type PageProps = { params: Promise<{ organizationId: string }> };
 
 export default async function CampaignsPage({ params }: PageProps) {
   const context = await getOrganizationContext(params);
   const organization = await getOrganization(context.supabase, context.organizationId);
+
+  // The session's own client, so RLS decides what this member may list. There
+  // is no service-role read anywhere in this path.
+  const campaigns = await readCampaignList(
+    createCampaignReadRepository(context.supabase as unknown as CampaignPersistence),
+    context.organizationId,
+  );
 
   return (
     <div className="flex min-h-0 flex-col gap-6">
@@ -28,19 +36,9 @@ export default async function CampaignsPage({ params }: PageProps) {
         </div>
       </div>
 
-      {/* Stated once, at the top, so nothing further down has to carry the
-          caveat and nobody mistakes a proposal for something already running. */}
-      <Alert>
-        <AlertTitle>Preview with sample campaigns</AlertTitle>
-        <AlertDescription>
-          These campaigns are illustrative. No provider is connected, nothing has been published,
-          and no business result is shown, because none has been measured.
-        </AlertDescription>
-      </Alert>
-
       <CampaignPortfolio
         organizationId={context.organizationId}
-        campaigns={demoCampaigns}
+        campaigns={campaigns}
         timeZone={organization.default_timezone}
       />
     </div>
