@@ -182,7 +182,7 @@ select extensions.has_index(
 select extensions.has_index(
   'public', 'opportunities',
   'opportunities_active_candidate_fingerprint_idx',
-  'active campaign recommendations have a database uniqueness backstop'
+  'active fingerprint checks have a covering lookup index'
 );
 
 select extensions.has_column(
@@ -924,6 +924,177 @@ select extensions.ok(
       )
   ),
   'operation audit rows contain identifiers and normalized state only'
+);
+
+-- The Campaign admission lock is Campaign-scoped by design. A generic playbook
+-- keeps the Decision Engine V1 contract, where an already-active fingerprint is
+-- removed by Stage A screening and suppression rather than by a database-wide
+-- uniqueness rule that raises an unmapped constraint violation.
+insert into public.playbook_definitions (
+  id, organization_id, key, name, owner_scope, business_objective
+)
+values (
+  'd5c50000-0000-4000-8000-000000000601'::uuid,
+  'd5c50000-0000-4000-8000-000000000101'::uuid,
+  'generic.admission_probe', 'Generic admission probe', 'core',
+  'Prove non-Campaign playbooks keep the generic admission contract'
+);
+
+insert into public.playbook_versions (
+  id, organization_id, playbook_definition_id, semantic_version,
+  hypothesis_template, action_definition, risk_class, primary_metric_key,
+  measurement_window_days, is_active, activated_at
+)
+values (
+  'd5c50000-0000-4000-8000-000000000602'::uuid,
+  'd5c50000-0000-4000-8000-000000000101'::uuid,
+  'd5c50000-0000-4000-8000-000000000601'::uuid,
+  -- FIXME(semantic-version-regex): `playbook_versions_semantic_version_check`
+  -- was written with a doubled backslash, so it matches a literal backslash
+  -- instead of a dot and rejects a real semantic version. The seed encodes
+  -- `1.0.0` this way and the read path replaces `\x` with `.`. This probe
+  -- matches current reality; the constraint repair is tracked separately.
+  E'1\\x0\\x0', 'Generic probe hypothesis',
+  '{"action_key":"generic.admission_probe_v1"}'::jsonb,
+  1, 'orders_count', 14, true, now()
+);
+
+insert into public.decision_cycles (
+  id, organization_id, trigger_name, correlation_id, slot_budget,
+  max_scored_candidates, screened_count, scored_count
+)
+values
+  (
+    'd5c50000-0000-4000-8000-000000000603'::uuid,
+    'd5c50000-0000-4000-8000-000000000101'::uuid,
+    'generic-probe-a', 'd5c50000-0000-4000-8000-000000000605'::uuid, 3, 3, 1, 1
+  ),
+  (
+    'd5c50000-0000-4000-8000-000000000604'::uuid,
+    'd5c50000-0000-4000-8000-000000000101'::uuid,
+    'generic-probe-b', 'd5c50000-0000-4000-8000-000000000606'::uuid, 3, 3, 1, 1
+  );
+
+insert into public.decision_records (
+  id, organization_id, decision_cycle_id, correlation_id, outcome,
+  selected_candidate_fingerprint, opportunity_id, screened_count, scored_count,
+  inputs_digest, artifact_version_tuple, policy_version_id, playbook_version_id,
+  ranking_weights_id, confidence_calibration_id
+)
+select
+  seed.record_id,
+  'd5c50000-0000-4000-8000-000000000101'::uuid,
+  seed.cycle_id,
+  seed.correlation_id,
+  'action_selected',
+  repeat('7', 64),
+  seed.opportunity_id,
+  1,
+  1,
+  repeat('8', 64),
+  jsonb_build_object(
+    'ranking_weights', ranking.active_artifact_version_id,
+    'confidence_calibration', confidence.active_artifact_version_id
+  ),
+  'd5c50000-0000-4000-8000-000000000201'::uuid,
+  'd5c50000-0000-4000-8000-000000000602'::uuid,
+  ranking.active_artifact_version_id,
+  confidence.active_artifact_version_id
+from (
+  values
+    (
+      'd5c50000-0000-4000-8000-000000000607'::uuid,
+      'd5c50000-0000-4000-8000-000000000603'::uuid,
+      'd5c50000-0000-4000-8000-000000000605'::uuid,
+      'd5c50000-0000-4000-8000-000000000609'::uuid
+    ),
+    (
+      'd5c50000-0000-4000-8000-000000000608'::uuid,
+      'd5c50000-0000-4000-8000-000000000604'::uuid,
+      'd5c50000-0000-4000-8000-000000000606'::uuid,
+      'd5c50000-0000-4000-8000-000000000610'::uuid
+    )
+) as seed (record_id, cycle_id, correlation_id, opportunity_id)
+cross join private.current_artifact_promotions ranking
+cross join private.current_artifact_promotions confidence
+where ranking.organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid
+  and ranking.artifact_key = 'ranking_weights'
+  and confidence.organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid
+  and confidence.artifact_key = 'confidence_calibration';
+
+select extensions.lives_ok(
+  $$
+    insert into public.opportunities (
+      id, organization_id, decision_record_id, playbook_version_id,
+      candidate_fingerprint, title, summary, hypothesis, subject_kind,
+      subject_ref, evidence_bundle, impact_low_minor, impact_high_minor,
+      confidence, confidence_rationale, evidence_tier, execution_cost_minor,
+      expected_contribution_minor, currency, time_to_impact_days, risk_tier,
+      approval_path, assertions, evaluation_plan, expires_at, status
+    )
+    select
+      seed.opportunity_id,
+      'd5c50000-0000-4000-8000-000000000101'::uuid,
+      seed.record_id,
+      'd5c50000-0000-4000-8000-000000000602'::uuid,
+      repeat('7', 64),
+      'Generic admission probe',
+      'Two active generic proposals share one fingerprint',
+      'The generic contract screens duplicates rather than failing the write',
+      'organization',
+      'd5c50000-0000-4000-8000-000000000101',
+      '{}'::jsonb,
+      1000, 2000, 0.5000, 'Fixed probe confidence', 'observed',
+      100, 900, 'AED', 7, 1, 'human_approval',
+      '[{"key":"probe","value":"fixed"}]'::jsonb,
+      '{"method":"observational"}'::jsonb,
+      now() + interval '7 days',
+      'proposed'
+    from (
+      values
+        (
+          'd5c50000-0000-4000-8000-000000000609'::uuid,
+          'd5c50000-0000-4000-8000-000000000607'::uuid
+        ),
+        (
+          'd5c50000-0000-4000-8000-000000000610'::uuid,
+          'd5c50000-0000-4000-8000-000000000608'::uuid
+        )
+    ) as seed (opportunity_id, record_id)
+  $$,
+  'a non-Campaign playbook may keep two active proposals on one fingerprint'
+);
+
+select extensions.is(
+  (
+    select pg_catalog.count(*)::bigint
+    from public.opportunities
+    where organization_id = 'd5c50000-0000-4000-8000-000000000101'::uuid
+      and candidate_fingerprint = repeat('7', 64)
+      and status in ('proposed', 'awaiting_approval', 'approved')
+  ),
+  2::bigint,
+  'the generic admission contract is unchanged by the Campaign lock'
+);
+
+select extensions.ok(
+  not exists (
+    select 1
+    from pg_catalog.pg_index candidate
+    join pg_catalog.pg_class relation on relation.oid = candidate.indrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = 'opportunities'
+      and candidate.indisunique
+      and (
+        select array_agg(attribute.attname::text order by attribute.attname)
+        from pg_catalog.unnest(candidate.indkey) as key(attnum)
+        join pg_catalog.pg_attribute attribute
+          on attribute.attrelid = candidate.indrelid
+         and attribute.attnum = key.attnum
+      ) = array['candidate_fingerprint', 'organization_id']
+  ),
+  'no database-wide uniqueness rule stands in for Campaign admission'
 );
 
 select * from extensions.finish();
