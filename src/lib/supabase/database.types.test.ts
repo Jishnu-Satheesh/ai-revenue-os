@@ -61,6 +61,23 @@ const UNTYPED_TABLES = new Set([
   "memory_proposal_rejection_operations",
   "memory_retrieval_log",
   "memory_write_operations",
+  // Campaign persistence follows the same narrow-contract rule as decisions.
+  // Members read safe projections through the repository; every write that
+  // creates a version, records an attestation, or grants an approval goes
+  // through a security-definer RPC, so a generated row type would imply a
+  // direct write path that deliberately does not exist.
+  "campaign_approvals",
+  "campaign_assets",
+  "campaign_briefs",
+  "campaign_bundle_versions",
+  "campaign_channel_actions",
+  "campaign_creative_directions",
+  "campaign_measurement_plans",
+  "campaign_source_snapshots",
+  "campaign_visual_attestations",
+  "campaigns",
+  "organization_brand_asset_versions",
+  "organization_brand_assets",
 ]);
 
 /**
