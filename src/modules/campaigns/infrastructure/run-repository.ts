@@ -67,6 +67,13 @@ export type EnqueueRunInput = {
   correlationId: string;
   baseVersionId?: string | null;
   baseDigest?: string | null;
+  /**
+   * Revisions only. Stored on the run rather than sent through the queue: a
+   * payload is kept in logs and shown in a dashboard, and an operator's
+   * instruction is business content.
+   */
+  operatorPrompt?: string | null;
+  patchScope?: string | null;
 };
 
 /**
@@ -101,6 +108,8 @@ export function createCampaignRunDispatcher(persistence: CampaignRunPersistence)
           correlation_id: input.correlationId,
           base_version_id: input.baseVersionId ?? null,
           base_digest: input.baseDigest ?? null,
+          operator_prompt: input.operatorPrompt ?? null,
+          patch_scope: input.patchScope ?? null,
         },
       });
 

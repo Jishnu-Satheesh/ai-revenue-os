@@ -59,7 +59,7 @@ function campaignDatabaseError(): never {
 const CAMPAIGN_COLUMNS =
   "id,organization_id,title,source_kind,brief_id,opportunity_id,state,created_at,updated_at";
 const VERSION_SUMMARY_COLUMNS =
-  "id,campaign_id,version,parent_version_id,digest,generation_profile,execution_mode,created_at";
+  "id,campaign_id,version,parent_version_id,source_snapshot_id,digest,generation_profile,execution_mode,created_at";
 const VERSION_DETAIL_COLUMNS = `${VERSION_SUMMARY_COLUMNS},manifest`;
 const APPROVAL_COLUMNS =
   "id,campaign_id,bundle_version_id,bundle_digest,approved_by,approved_at,expires_at,action_keys,revoked_at,revoked_reason";
@@ -84,6 +84,7 @@ function toVersionSummary(row: Record<string, unknown>): BundleVersionSummary {
     campaignId: row.campaign_id,
     version: Number(row.version),
     parentVersionId: row.parent_version_id ?? null,
+    sourceSnapshotId: row.source_snapshot_id,
     digest: row.digest,
     generationProfile: row.generation_profile,
     executionMode: row.execution_mode,

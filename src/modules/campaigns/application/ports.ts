@@ -34,6 +34,7 @@ export const bundleVersionSummarySchema = z.strictObject({
   campaignId: uuidSchema,
   version: z.number().int().positive(),
   parentVersionId: uuidSchema.nullable(),
+  sourceSnapshotId: uuidSchema,
   digest: sha256HexSchema,
   generationProfile: z.enum(["brand_restricted", "brand_guided", "full_visual_freedom"]),
   executionMode: z.enum(["best_effort", "all_channels_required"]),
