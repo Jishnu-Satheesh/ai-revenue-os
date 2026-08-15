@@ -13,6 +13,8 @@ import {
   Megaphone,
   ShieldAlert,
   Sparkles,
+  Building2,
+  Settings2,
 } from "lucide-react";
 
 import { ChannelEconomicsOverview } from "@/components/organizations/channel-economics-overview";
@@ -101,7 +103,7 @@ export function OrganizationIntelligenceCockpit({
       <header className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div className="flex items-start gap-3">
           <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-            <Database aria-hidden="true" />
+            <Building2 aria-hidden="true" />
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -121,13 +123,14 @@ export function OrganizationIntelligenceCockpit({
           </div>
         </div>
         {permissions.canManageCore ? (
-          <Button asChild variant="outline">
+          <Button variant="outline">
+            <Settings2 data-icon="inline-start"/>
             <Link href="#organization-management">Manage organization</Link>
           </Button>
         ) : null}
       </header>
 
-      <ReadinessStrip readiness={readiness} canManage={permissions.canManageCore} />
+      {/* <ReadinessStrip readiness={readiness} canManage={permissions.canManageCore} /> */}
 
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-12 lg:items-start">
         <div className="order-1 min-w-0 lg:col-span-4 lg:col-start-9 lg:row-start-1">
@@ -235,7 +238,10 @@ function StrategicBriefing({ briefing }: { briefing: readonly StrategicBriefingI
     <Card>
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
-          <CardTitle>Strategic Briefing</CardTitle>
+          <div className="flex items-center gap-2">
+            <Sparkles className="text-primary"/>
+          <CardTitle className="font-semibold text-xl">Strategic Briefing</CardTitle>
+          </div>
           <CardDescription>
             What the current evidence supports—and what it does not.
           </CardDescription>
