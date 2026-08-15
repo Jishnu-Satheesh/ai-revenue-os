@@ -497,7 +497,13 @@ describe("reviseCampaignBundle", () => {
   it("reads the operator's words from storage, never from the payload", async () => {
     await reviseCampaignBundle(revisePayload, reviseDeps(), new AbortController().signal);
 
-    expect(readPrompt).toHaveBeenCalledWith({ organizationId: ORGANIZATION_ID, runId: RUN_ID });
+    expect(readPrompt).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      runId: RUN_ID,
+      // The token proves the worker still holds the run, so a lapsed claim
+      // cannot read the operator's instruction.
+      claimToken: "token-1",
+    });
     expect(JSON.stringify(revisePayload)).not.toContain("Shorten the hook");
   });
 

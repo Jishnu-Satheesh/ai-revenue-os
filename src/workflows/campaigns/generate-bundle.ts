@@ -70,7 +70,16 @@ export type GenerationRunStore = {
 };
 
 export type GenerationSnapshotReader = {
-  read(input: { organizationId: string; campaignId: string; sourceSnapshotId: string }): Promise<{
+  read(input: {
+    organizationId: string;
+    campaignId: string;
+    sourceSnapshotId: string;
+    /**
+     * Proves this worker still holds the run. Reading without it would let any
+     * service-role caller pull another run's pinned evidence.
+     */
+    claimToken: string;
+  }): Promise<{
     snapshot: Record<string, unknown>;
     generationProfile: "brand_restricted" | "brand_guided" | "full_visual_freedom";
     brandAssetVersionIds: readonly string[];
@@ -191,6 +200,7 @@ export async function generateCampaignBundle(
       organizationId: payload.organizationId,
       campaignId: claim.campaignId,
       sourceSnapshotId: claim.sourceSnapshotId,
+      claimToken,
     });
     if (!pinned) {
       return failWith(

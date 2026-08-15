@@ -24,7 +24,7 @@ import type {
  */
 
 export type RevisionSourceReader = {
-  read(input: { organizationId: string; bundleVersionId: string }): Promise<{
+  read(input: { organizationId: string; bundleVersionId: string; claimToken: string }): Promise<{
     campaignId: string;
     sourceSnapshotId: string;
     digest: string;
@@ -55,6 +55,7 @@ export type RevisionPromptReader = {
   read(input: {
     organizationId: string;
     runId: string;
+    claimToken: string;
   }): Promise<{ prompt: string; scope: PatchScopeKind } | null>;
 };
 
@@ -136,6 +137,7 @@ export async function reviseCampaignBundle(
     const base = await dependencies.source.read({
       organizationId: payload.organizationId,
       bundleVersionId: payload.baseVersionId,
+      claimToken,
     });
     if (!base) return failWith("base_version_missing");
 
@@ -156,6 +158,7 @@ export async function reviseCampaignBundle(
     const instruction = await dependencies.prompts.read({
       organizationId: payload.organizationId,
       runId: payload.runId,
+      claimToken,
     });
     if (!instruction) return failWith("revision_prompt_missing");
 
