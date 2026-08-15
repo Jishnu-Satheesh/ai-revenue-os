@@ -78,6 +78,10 @@ const UNTYPED_TABLES = new Set([
   "campaigns",
   "organization_brand_asset_versions",
   "organization_brand_assets",
+  // The generation run ledger. Members read a safe projection through the
+  // repository; every lifecycle write is worker-only through a security-definer
+  // RPC, so a generated row type would imply a write path that does not exist.
+  "campaign_generation_runs",
 ]);
 
 /**

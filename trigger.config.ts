@@ -14,4 +14,9 @@ export default defineConfig({
     },
   },
   maxDuration: 900,
+  build: {
+    // `sharp` ships prebuilt native binaries. Bundling it produces a worker
+    // that fails at runtime on the first image, so it has to stay external.
+    external: ["sharp"],
+  },
 });
