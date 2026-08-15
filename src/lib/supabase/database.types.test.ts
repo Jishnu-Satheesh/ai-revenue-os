@@ -82,6 +82,14 @@ const UNTYPED_TABLES = new Set([
   // repository; every lifecycle write is worker-only through a security-definer
   // RPC, so a generated row type would imply a write path that does not exist.
   "campaign_generation_runs",
+  // The execution ledger. Members read safe projections through the repository;
+  // every claim, invocation, receipt, and reservation is written only by a
+  // worker through a security-definer RPC, so a generated row type would imply
+  // a direct write path that deliberately does not exist.
+  "campaign_action_runs",
+  "campaign_budget_reservations",
+  "provider_receipts",
+  "tool_invocations",
 ]);
 
 /**
@@ -89,7 +97,11 @@ const UNTYPED_TABLES = new Set([
  * types. Workers reach these ledgers only through security-definer RPCs; adding
  * one to the public type surface would falsely imply direct table access.
  */
-const PRIVATE_RPC_ONLY_TABLES = new Set(["decision_cycle_operations", "integration_credentials"]);
+const PRIVATE_RPC_ONLY_TABLES = new Set([
+  "decision_cycle_operations",
+  "integration_credentials",
+  "tool_gateway_operations",
+]);
 
 const TABLE_LEVEL_KEYWORDS = new Set([
   "check",
