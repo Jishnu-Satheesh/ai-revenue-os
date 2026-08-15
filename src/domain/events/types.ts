@@ -121,6 +121,44 @@ export type DecisionDomainEvent<TName extends DecisionEventName> = DomainEvent<
   DecisionEventPayloads[TName]
 > & { eventName: TName };
 
+export const campaignEventNames = [
+  "campaign.created",
+  "campaign.version_published",
+  "campaign.attested",
+  "campaign.approved",
+  "campaign.approval_invalidated",
+  "campaign.scheduled",
+  "campaign.cancelled",
+] as const;
+
+export type CampaignEventName = (typeof campaignEventNames)[number];
+
+/**
+ * Campaign events carry identifiers and bounded state only.
+ *
+ * No manifest, digest, objective, caption, asset reference, spend amount, or
+ * operator statement appears here. An event stream is read by more systems and
+ * kept longer than the record it describes, so the campaign's contents stay in
+ * the campaign and the event says only that something happened to it.
+ */
+export type CampaignEventPayloads = {
+  "campaign.created": { campaignId: string; sourceKind: "manual_brief" | "decision_opportunity" };
+  "campaign.version_published": { campaignId: string; bundleVersionId: string; version: number };
+  "campaign.attested": { campaignId: string; bundleVersionId: string };
+  "campaign.approved": { campaignId: string; bundleVersionId: string; approvalId: string };
+  "campaign.approval_invalidated": {
+    campaignId: string;
+    bundleVersionId: string;
+    reason: "superseded_by_new_version" | "operator_revoked" | "capability_lost";
+  };
+  "campaign.scheduled": { campaignId: string; bundleVersionId: string; actionCount: number };
+  "campaign.cancelled": { campaignId: string };
+};
+
+export type CampaignDomainEvent<TName extends CampaignEventName> = DomainEvent<
+  CampaignEventPayloads[TName]
+> & { eventName: TName };
+
 export const memoryEventNames = [
   "memory.item_created",
   "memory.item_verified",
