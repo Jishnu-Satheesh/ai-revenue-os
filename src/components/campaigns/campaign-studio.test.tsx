@@ -123,8 +123,15 @@ describe("the studio never implies a result it has not measured", () => {
   it("does not present channel actions as ready before the gateway has checked them", () => {
     renderStudio();
 
-    expect(screen.getByText(/capability is checked at approval/i)).toBeInTheDocument();
+    expect(screen.getByText(/blockers & readiness/i)).toBeInTheDocument();
+    expect(screen.getByText(/decided by the Tool Gateway/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Ready$/)).not.toBeInTheDocument();
+  });
+
+  it("says the readiness panel is unavailable rather than showing an empty one", () => {
+    renderStudio();
+
+    expect(screen.getAllByText(/not yet available/i).length).toBeGreaterThan(0);
   });
 
   it("reports no paid spend rather than a ceiling of zero", () => {
@@ -198,10 +205,11 @@ describe("the studio states the version rules it enforces", () => {
     ).toBeInTheDocument();
   });
 
-  it("marks which version is currently being shown", () => {
+  it("explains there is nothing to diff against while only one version exists", () => {
     renderStudio();
 
-    expect(screen.getByText("Showing")).toBeInTheDocument();
+    expect(screen.getByText(/version change summary/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing to compare it against/i)).toBeInTheDocument();
   });
 });
 
@@ -210,12 +218,12 @@ describe("editing goes through a revision, never an in-place change", () => {
     renderStudio();
 
     expect(screen.getByRole("button", { name: /edit content/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /revise with a prompt/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /revise prompt/i })).toBeEnabled();
   });
 
   it("says the current version is left untouched by a revision", () => {
     renderStudio();
-    fireEvent.click(screen.getByRole("button", { name: /revise with a prompt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /revise prompt/i }));
 
     expect(screen.getByText(/this creates a new version/i)).toBeInTheDocument();
     expect(screen.getByText(/stays exactly as it is/i)).toBeInTheDocument();
@@ -223,7 +231,7 @@ describe("editing goes through a revision, never an in-place change", () => {
 
   it("makes the operator choose how much may change instead of inferring it", () => {
     renderStudio();
-    fireEvent.click(screen.getByRole("button", { name: /revise with a prompt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /revise prompt/i }));
 
     expect(screen.getByRole("radio", { name: /caption and hook/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /this whole direction/i })).toBeInTheDocument();
@@ -232,7 +240,7 @@ describe("editing goes through a revision, never an in-place change", () => {
 
   it("will not queue an empty revision", () => {
     renderStudio();
-    fireEvent.click(screen.getByRole("button", { name: /revise with a prompt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /revise prompt/i }));
 
     expect(screen.getByRole("button", { name: /queue revision/i })).toBeDisabled();
   });
@@ -244,5 +252,64 @@ describe("the approval window is an explicit choice", () => {
 
     expect(screen.getByLabelText(/approval valid for/i)).toBeInTheDocument();
     expect(screen.getByText("24 hours")).toBeInTheDocument();
+  });
+});
+
+describe("the cockpit shows what an operator is being asked to authorise", () => {
+  it("makes all three directions comparable in one filmstrip", () => {
+    renderStudio();
+    const strip = within(screen.getByRole("tablist", { name: /creative direction/i }));
+
+    // Each direction carries its own name and profile, so the alternative is
+    // visible rather than something to click through and remember.
+    expect(strip.getAllByRole("tab")).toHaveLength(3);
+    // Each tab carries its own profile label, so the strip shows three.
+    expect(strip.getAllByText(/brand guided|brand restricted|full visual freedom/i)).toHaveLength(
+      3,
+    );
+  });
+
+  it("gathers the envelope being approved into one place", () => {
+    renderStudio();
+
+    expect(screen.getByText(/approval envelope/i)).toBeInTheDocument();
+    expect(screen.getByText(/organic volume/i)).toBeInTheDocument();
+    expect(screen.getByText(/spend ceiling/i)).toBeInTheDocument();
+    expect(screen.getByText(/generation profile/i)).toBeInTheDocument();
+  });
+
+  it("counts the organic volume rather than describing it vaguely", () => {
+    renderStudio();
+
+    // The fixture's actions are all organic feed images.
+    expect(screen.getByText(/\d+ posts?/i)).toBeInTheDocument();
+  });
+
+  it("keeps internal tags visibly apart from publishable hashtags", () => {
+    renderStudio();
+
+    expect(screen.getByText(/internal tags \(never published\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/hashtags/i)).toBeInTheDocument();
+  });
+
+  it("shows the timing rationale, not just the schedule", () => {
+    renderStudio();
+
+    expect(screen.getByText(/timing rationale/i)).toBeInTheDocument();
+    expect(screen.getByText(/schedule window/i)).toBeInTheDocument();
+    expect(screen.getByText(/execution mode/i)).toBeInTheDocument();
+  });
+
+  it("names the channels this direction's artwork must adapt to", () => {
+    renderStudio();
+
+    expect(screen.getByText(/channel adaptation/i)).toBeInTheDocument();
+  });
+
+  it("keeps the digest beside the approval action it binds", () => {
+    renderStudio();
+
+    expect(screen.getByText(/version digest/i)).toBeInTheDocument();
+    expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
   });
 });
