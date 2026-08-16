@@ -69,6 +69,35 @@ export function requestRevision(input: {
   return post(`/api/organizations/${organizationId}/campaigns/${campaignId}/revisions`, body);
 }
 
+/**
+ * Saves an operator's own words directly, with no model involved.
+ *
+ * Separate from `requestRevision` because the outcomes differ: this returns a
+ * version that now exists, while a revision returns a run that may produce one.
+ */
+export function saveOperatorEdit(input: {
+  organizationId: string;
+  campaignId: string;
+  baseVersionId: string;
+  baseDigest: string;
+  edit: {
+    directionId: string;
+    copyIndex: number;
+    hook: string;
+    caption: string;
+    callToAction: string;
+    timingRationale: string;
+    hashtagSetIndex: number | null;
+    tags: readonly string[] | null;
+  };
+}): Promise<ActionResult<{ bundleVersionId: string; version: number; digest: string }>> {
+  const { organizationId, campaignId, edit, ...rest } = input;
+  return post(`/api/organizations/${organizationId}/campaigns/${campaignId}/edits`, {
+    ...rest,
+    edit: { ...edit, tags: edit.tags === null ? null : [...edit.tags] },
+  });
+}
+
 export function attestVersion(input: {
   organizationId: string;
   campaignId: string;

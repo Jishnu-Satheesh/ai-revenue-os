@@ -98,6 +98,18 @@ export async function readStudioView(
       })
     : {};
 
+  // The version this one came from, so the change summary compares the two
+  // documents rather than trusting a summary written when the version was made.
+  const parentId =
+    versions.find((entry) => entry.id === version.id)?.parentVersionId ??
+    version.parentVersionId ??
+    null;
+  const parent = parentId ? await read.getVersion(organizationId, parentId) : null;
+  const previousVersion =
+    parent && parent.campaignId === campaignId
+      ? { version: parent.version, manifest: parent.manifest }
+      : null;
+
   const readiness = options.readiness
     ? await readChannelReadiness(options.readiness, {
         organizationId,
@@ -113,5 +125,6 @@ export async function readStudioView(
     now: (options.clock ?? systemClock)(),
     previewUrls,
     readiness,
+    previousVersion,
   });
 }

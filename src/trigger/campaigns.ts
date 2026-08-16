@@ -27,8 +27,8 @@ import {
 import { createGeminiCampaignGenerationProvider } from "@/modules/campaigns/infrastructure/gemini-campaign-generation-provider";
 import { createConsoleCampaignGenerationSink } from "@/ai/campaign-generation-provider";
 import { createCampaignVersionWriter } from "@/modules/campaigns/infrastructure/repository";
+import { verifiedChannelLimits } from "@/modules/campaigns/application/verified-limits";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
-import { getMetaCampaignProviderContract } from "@/modules/integrations/providers/meta/contract";
 
 /**
  * Campaign generation as durable work.
@@ -201,25 +201,3 @@ function campaignRouter() {
   });
 }
 
-/**
- * Hashtag and copy limits as the *verified* provider contract states them.
- *
- * Where the contract proves no limit, the channel is absent here and content
- * policy blocks it rather than checking against a guess. Today the checked-in
- * Meta contract proves none, so both channels block — which is the honest
- * state until controlled-account evidence lands in Tasks 15-17.
- */
-function verifiedChannelLimits() {
-  const limits: Record<string, { maxHashtags: number | null; maxCopyCharacters: number | null }> =
-    {};
-  for (const placement of getMetaCampaignProviderContract().placements) {
-    if (placement.verificationStatus !== "verified") continue;
-    const channel = placement.key.split(".")[0];
-    if (channel !== "instagram" && channel !== "facebook") continue;
-    limits[channel] = {
-      maxHashtags: placement.limits.maxHashtags,
-      maxCopyCharacters: placement.limits.maxCopyCharacters,
-    };
-  }
-  return limits;
-}

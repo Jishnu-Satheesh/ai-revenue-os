@@ -55,6 +55,28 @@ export type SignedUrlSource = {
  * because a thumbnail could not be signed is worse than one that shows the
  * artwork is unavailable.
  */
+/**
+ * Where each asset's bytes live, keyed by the manifest's asset id.
+ *
+ * A version created by editing copy carries exactly the images the version it
+ * was edited from carried, and those paths come from the database rather than
+ * from whoever made the request.
+ */
+export async function readAssetStoragePaths(
+  database: AssetPathReader,
+  input: { organizationId: string; bundleVersionId: string },
+): Promise<Record<string, string>> {
+  const { data, error } = await database
+    .from("campaign_assets")
+    .select("asset_key,storage_path")
+    .eq("organization_id", input.organizationId)
+    .eq("bundle_version_id", input.bundleVersionId);
+
+  if (error || !data) return {};
+
+  return Object.fromEntries(data.map((row) => [row.asset_key, row.storage_path]));
+}
+
 export async function readAssetPreviewUrls(
   database: AssetPathReader,
   storage: SignedUrlSource,

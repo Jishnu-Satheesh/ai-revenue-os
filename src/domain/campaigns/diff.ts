@@ -32,10 +32,20 @@ export type CampaignDiff = {
   invalidatesApproval: boolean;
 };
 
-export function diffManifests(
+/**
+ * What changed, without computing either digest.
+ *
+ * Split out so the revise screen can show a diff as the operator types. The
+ * digests come from `bundleDigest`, which hashes through `node:crypto` and
+ * therefore cannot run in a browser; the change list itself is a pure
+ * comparison and can. The screen shows this, and the server recomputes the
+ * whole diff with its digests when the version is actually written — the
+ * preview is a courtesy, and the stored diff is the record.
+ */
+export function diffManifestChanges(
   before: CampaignBundleManifest,
   after: CampaignBundleManifest,
-): CampaignDiff {
+): readonly CampaignDiffChange[] {
   if (before.campaignId !== after.campaignId) {
     throw new CampaignError(
       "CAMPAIGN_VERSION_NOT_COMPARABLE",
@@ -45,6 +55,14 @@ export function diffManifests(
 
   const changes: CampaignDiffChange[] = [];
   collect(normalizeManifest(before), normalizeManifest(after), "", changes);
+  return changes;
+}
+
+export function diffManifests(
+  before: CampaignBundleManifest,
+  after: CampaignBundleManifest,
+): CampaignDiff {
+  const changes = diffManifestChanges(before, after);
 
   return {
     fromVersion: before.version,

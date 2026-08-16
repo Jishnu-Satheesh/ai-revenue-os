@@ -27,6 +27,7 @@ beforeAll(() => {
 
 const NOW = "2026-08-15T12:00:00.000Z";
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
+const VERSION_ID = "d1000000-0000-4000-8000-000000000001";
 
 const campaign: CampaignSummary = {
   id: manifestIds.campaign,
@@ -43,7 +44,7 @@ const campaign: CampaignSummary = {
 function detail(): BundleVersionDetail {
   const manifest = validManifest();
   return {
-    id: "d1000000-0000-4000-8000-000000000001",
+    id: VERSION_ID,
     campaignId: manifestIds.campaign,
     version: 3,
     parentVersionId: null,
@@ -120,11 +121,13 @@ describe("the studio never implies a result it has not measured", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not present channel actions as ready before the gateway has checked them", () => {
+  it("does not present channel actions as ready when readiness is unknown", () => {
     renderStudio();
 
+    // The fixture supplies no readiness, which is "not known" rather than
+    // "nothing blocking". A tick here would be a promise nobody checked.
     expect(screen.getByText(/blockers & readiness/i)).toBeInTheDocument();
-    expect(screen.getByText(/decided by the Tool Gateway/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not be read/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Ready$/)).not.toBeInTheDocument();
   });
 
@@ -213,36 +216,34 @@ describe("the studio states the version rules it enforces", () => {
   });
 });
 
-describe("editing goes through a revision, never an in-place change", () => {
-  it("offers both edit entries as live actions rather than disabled buttons", () => {
+describe("editing opens a workspace at its own address", () => {
+  it("offers both edit entries as real links rather than disabled buttons", () => {
     renderStudio();
 
-    expect(screen.getByRole("button", { name: /edit content/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /revise prompt/i })).toBeEnabled();
+    expect(screen.getByRole("link", { name: /edit content/i })).toBeEnabled();
+    expect(screen.getByRole("link", { name: /revise prompt/i })).toBeEnabled();
   });
 
-  it("says the current version is left untouched by a revision", () => {
+  it("carries the exact version and direction on screen into the workspace", () => {
     renderStudio();
-    fireEvent.click(screen.getByRole("button", { name: /revise prompt/i }));
+    const href = screen.getByRole("link", { name: /edit content/i }).getAttribute("href") ?? "";
 
-    expect(screen.getByText(/this creates a new version/i)).toBeInTheDocument();
-    expect(screen.getByText(/stays exactly as it is/i)).toBeInTheDocument();
+    // Without these the workspace would edit whatever is newest, which is not
+    // necessarily what the operator was reading.
+    expect(href).toContain("/revise?");
+    expect(href).toContain(`version=${VERSION_ID}`);
+    expect(href).toContain("direction=");
   });
 
-  it("makes the operator choose how much may change instead of inferring it", () => {
+  it("distinguishes the two entry points so each opens on its own section", () => {
     renderStudio();
-    fireEvent.click(screen.getByRole("button", { name: /revise prompt/i }));
 
-    expect(screen.getByRole("radio", { name: /caption and hook/i })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /this whole direction/i })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /the whole proposal/i })).toBeInTheDocument();
-  });
-
-  it("will not queue an empty revision", () => {
-    renderStudio();
-    fireEvent.click(screen.getByRole("button", { name: /revise prompt/i }));
-
-    expect(screen.getByRole("button", { name: /queue revision/i })).toBeDisabled();
+    expect(screen.getByRole("link", { name: /edit content/i }).getAttribute("href")).toContain(
+      "intent=edit",
+    );
+    expect(screen.getByRole("link", { name: /revise prompt/i }).getAttribute("href")).toContain(
+      "intent=revise",
+    );
   });
 });
 

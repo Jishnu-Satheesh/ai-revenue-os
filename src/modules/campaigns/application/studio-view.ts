@@ -6,6 +6,7 @@ import type {
   CampaignHashtagSet,
 } from "@/domain/campaigns/schemas";
 import { explainReadinessCode } from "@/domain/campaigns/channel-capabilities";
+import { diffManifestChanges } from "@/domain/campaigns/diff";
 import { approvalStatus, type CampaignState } from "@/domain/campaigns/state-machine";
 import type { ChannelReadiness } from "@/modules/campaigns/infrastructure/readiness-reader";
 import type {
@@ -91,6 +92,8 @@ export type StudioViewInput = {
   previewUrls?: Readonly<Record<string, string>>;
   /** Per-channel execution readiness. `null` when it could not be determined. */
   readiness?: readonly ChannelReadiness[] | null;
+  /** The version this one was derived from, when there is one to compare with. */
+  previousVersion?: { version: number; manifest: CampaignBundleManifest } | null;
 };
 
 export type StudioView = {
@@ -118,6 +121,22 @@ export type StudioView = {
    * same as everything being fine and must never be rendered as if it were.
    */
   readiness: readonly StudioChannelReadiness[] | null;
+  /** `null` when this is the first version and there is nothing to compare. */
+  changeSummary: StudioChangeSummary | null;
+};
+
+/**
+ * What this version changed relative to the one before it.
+ *
+ * `null` when there is no earlier version, which is a different statement from
+ * an empty change list. Nothing to compare against is not the same as compared
+ * and found identical — and the second cannot happen anyway, since a version
+ * that changed nothing is refused at the point it would have been created.
+ */
+export type StudioChangeSummary = {
+  fromVersion: number;
+  toVersion: number;
+  changes: readonly { path: string; label: string; before: string | null; after: string | null }[];
 };
 
 /** A channel verdict with the sentences the panel shows, resolved once here. */
@@ -279,7 +298,42 @@ export function toStudioView(input: StudioViewInput): StudioView {
     measurement: manifest.measurementPlan,
     approval: toApproval(approval, version, now),
     readiness: toReadiness(input.readiness),
+    changeSummary: toChangeSummary(input.previousVersion, version.version, manifest),
   };
+}
+
+/**
+ * The material differences between this version and the one before it.
+ *
+ * Computed from the two manifests rather than from a stored summary, because a
+ * summary written at creation time could drift from the documents it claims to
+ * describe, and this is the panel an operator reads before deciding whether an
+ * approval still means anything.
+ */
+function toChangeSummary(
+  previous: StudioViewInput["previousVersion"],
+  toVersion: number,
+  manifest: CampaignBundleManifest,
+): StudioChangeSummary | null {
+  if (!previous) return null;
+
+  return {
+    fromVersion: previous.version,
+    toVersion,
+    changes: diffManifestChanges(previous.manifest, manifest).map((change) => ({
+      path: change.path,
+      label: readableChangePath(change.path),
+      before: change.before,
+      after: change.after,
+    })),
+  };
+}
+
+/** `directions[0].copy[0].hook` reads as "Hook" to a person reading a diff. */
+function readableChangePath(path: string): string {
+  const leaf = path.split(".").at(-1)?.replace(/\[\d+\]/g, "") ?? path;
+  const spaced = leaf.replace(/([A-Z])/g, " $1").toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /**

@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 
 import { attestAndApprove } from "@/components/campaigns/campaign-actions";
-import { RevisionDialog } from "@/components/campaigns/revision-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,11 +47,12 @@ import type {
  * everything an operator is being asked to authorise into one column ending in
  * the approval itself.
  *
- * Two panels are stubs, and they say so rather than showing a plausible
- * placeholder. Channel readiness needs the Tool Gateway's verdict, and a
- * version diff needs a second version to compare against. A cockpit that
- * invents either is worse than one that admits the gap, because both are
- * things an operator would otherwise act on.
+ * Both of the panels that were once stubs now carry real answers: channel
+ * readiness comes from the Tool Gateway's own refusal codes, and the change
+ * summary is computed from the two manifests it compares. Each still falls back
+ * to saying nothing when there is genuinely nothing to say — no readiness
+ * verdict, or no earlier version — because a cockpit that invents either is
+ * worse than one that admits the gap.
  */
 
 const PROFILE_LABEL: Readonly<Record<CampaignGenerationProfile, string>> = {
@@ -252,6 +252,65 @@ function BlockersAndReadiness({
   );
 }
 
+/**
+ * What this version changed from the one before it, in the same before/after
+ * shape the revise screen uses.
+ *
+ * Every manifest change is material by construction, so there is no "minor
+ * changes" bucket to hide anything in: if it is listed here, it invalidated the
+ * previous approval.
+ */
+function VersionChangeSummary({
+  summary,
+  nextVersion,
+}: Readonly<{ summary: StudioView["changeSummary"]; nextVersion: number }>) {
+  if (!summary) {
+    return (
+      <NotYet title="Version change summary">
+        This campaign has one version, so there is nothing to compare it against. An edit or a
+        prompt revision creates version {nextVersion} and the material differences appear here.
+      </NotYet>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <RailHeading>Version change summary</RailHeading>
+        <span className="text-[10px] font-bold text-muted-foreground">
+          v{summary.fromVersion} → v{summary.toVersion}
+        </span>
+      </div>
+
+      <ul className="flex flex-col gap-2.5">
+        {summary.changes.slice(0, 8).map((change) => (
+          <li key={change.path} className="flex flex-col gap-1">
+            <span className="text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+              {change.label}
+            </span>
+            <span className="text-[11px] break-words line-through opacity-50">
+              {change.before ?? "—"}
+            </span>
+            <span className="text-[11px] font-medium break-words">{change.after ?? "—"}</span>
+          </li>
+        ))}
+      </ul>
+
+      {summary.changes.length > 8 ? (
+        <p className="text-[10px] text-muted-foreground">
+          and {summary.changes.length - 8} more change
+          {summary.changes.length - 8 === 1 ? "" : "s"}.
+        </p>
+      ) : null}
+
+      <p className="text-[10px] leading-tight text-muted-foreground">
+        Every one of these invalidated the approval on version {summary.fromVersion}. Nothing in a
+        manifest is cosmetic.
+      </p>
+    </section>
+  );
+}
+
 function approvalCopy(approval: StudioApproval): { label: string; detail: string } {
   switch (approval.status) {
     case "live":
@@ -338,13 +397,11 @@ function SelectedCreative({
   ];
   const window = scheduleWindow(view, timeZone);
 
-  const revision = {
-    organizationId,
-    campaignId: view.campaignId,
-    baseVersionId: view.versionId,
-    baseDigest: view.digest,
-    directionId: direction.id,
-  };
+  // The exact version and direction the operator is looking at, carried into
+  // the workspace so it edits what is on screen rather than whatever is newest.
+  const reviseHref =
+    `/organizations/${organizationId}/campaigns/${view.campaignId}/revise` +
+    `?version=${view.versionId}&direction=${direction.id}`;
 
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -414,26 +471,21 @@ function SelectedCreative({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Post content control</h2>
           <div className="flex flex-wrap gap-2">
-            <RevisionDialog
-              {...revision}
-              defaultScope="copy"
-              trigger={
-                <Button variant="outline" size="sm">
-                  <Pencil data-icon="inline-start" aria-hidden="true" />
-                  Edit content
-                </Button>
-              }
-            />
-            <RevisionDialog
-              {...revision}
-              defaultScope="direction"
-              trigger={
-                <Button variant="outline" size="sm">
-                  <Wand2 data-icon="inline-start" aria-hidden="true" />
-                  Revise prompt
-                </Button>
-              }
-            />
+            {/* Both open the same full-screen workspace, differing only in
+                which part of it takes focus. They are links rather than dialogs
+                so the back button, a refresh and a shared URL all work. */}
+            <Button asChild variant="outline" size="sm">
+              <Link href={`${reviseHref}&intent=edit`}>
+                <Pencil data-icon="inline-start" aria-hidden="true" />
+                Edit content
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href={`${reviseHref}&intent=revise`}>
+                <Wand2 data-icon="inline-start" aria-hidden="true" />
+                Revise prompt
+              </Link>
+            </Button>
           </div>
         </div>
 
@@ -702,15 +754,12 @@ export function CampaignStudio({
             </div>
           </section>
 
-          {/* Stub. A material diff needs a version to compare against, and this
-              campaign has only one. */}
-          {view.versions.length < 2 ? (
-            <NotYet title="Version change summary">
-              This campaign has one version, so there is nothing to compare it against. A prompt
-              revision creates version {view.versionNumber + 1} and the material differences appear
-              here.
-            </NotYet>
-          ) : (
+          <VersionChangeSummary
+            summary={view.changeSummary}
+            nextVersion={view.versionNumber + 1}
+          />
+
+          {view.versions.length < 2 ? null : (
             <section className="flex flex-col gap-2 rounded-lg border p-3">
               <RailHeading>Version history</RailHeading>
               <ol className="flex flex-col gap-1.5">
