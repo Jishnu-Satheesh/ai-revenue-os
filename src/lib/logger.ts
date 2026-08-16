@@ -4,6 +4,7 @@ type LogContext = {
   correlationId?: string;
   decisionId?: string;
   opportunityId?: string;
+  campaignId?: string;
   connectionId?: string;
   dataSourceId?: string;
   runId?: string;

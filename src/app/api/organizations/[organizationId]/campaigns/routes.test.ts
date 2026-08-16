@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// The routes now hand each enqueued run to a worker, which pulls in env
+// (server-only) and the Trigger SDK. Both are stubbed so these stay route
+// tests; the dispatch itself is covered in generation-dispatch.test.ts.
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/env", () => ({ env: { CAMPAIGN_GENERATION_COST_CEILING_MINOR: undefined } }));
+vi.mock("@trigger.dev/sdk", () => ({
+  tasks: { trigger: vi.fn(async () => ({ id: "run_worker_1" })) },
+}));
+
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_ORGANIZATION_ID = "99999999-9999-4999-8999-999999999999";
 const CAMPAIGN_ID = "c0000000-0000-4000-8000-000000000001";

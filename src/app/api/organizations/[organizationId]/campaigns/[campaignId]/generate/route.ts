@@ -12,6 +12,7 @@ import {
 import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 import { createCampaignRunDispatcher } from "@/modules/campaigns/infrastructure/run-repository";
+import { createTriggerGenerationDispatcher } from "@/modules/campaigns/infrastructure/generation-dispatch";
 import type { CampaignRunPersistence } from "@/modules/campaigns/infrastructure/run-repository";
 
 /**
@@ -38,15 +39,16 @@ export async function POST(
     if (!campaign) return apiErrorResponse(new Error("This campaign is not available."));
 
     const snapshotId = await latestSnapshotId(context, campaignId);
-    const dispatcher = createCampaignRunDispatcher(
-      context.supabase as unknown as CampaignRunPersistence,
-    );
 
-    const { runId, replayed } = await dispatcher.enqueue({
+    // Enqueues the run *and* hands it to the worker. Recording intent without
+    // dispatching is the failure this route exists to recover from, so it must
+    // not be the failure this route creates.
+    const { runId, replayed } = await createTriggerGenerationDispatcher(
+      createCampaignRunDispatcher(context.supabase as unknown as CampaignRunPersistence),
+    ).enqueueGeneration({
       organizationId: context.organizationId,
       campaignId,
       sourceSnapshotId: snapshotId,
-      kind: "generate",
       idempotencyKey: body.idempotencyKey,
       correlationId: randomUUID(),
     });

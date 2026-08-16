@@ -11,6 +11,7 @@ import {
 } from "@/modules/campaigns/application/route-context";
 import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
+import { enqueueAndDispatchRevision } from "@/modules/campaigns/infrastructure/generation-dispatch";
 import { createCampaignRunDispatcher } from "@/modules/campaigns/infrastructure/run-repository";
 import type { CampaignRunPersistence } from "@/modules/campaigns/infrastructure/run-repository";
 
@@ -44,21 +45,22 @@ export async function POST(
       );
     }
 
-    const { runId, replayed } = await createCampaignRunDispatcher(
-      context.supabase as unknown as CampaignRunPersistence,
-    ).enqueue({
-      organizationId: context.organizationId,
-      campaignId,
-      // The revision inherits the evidence the base version was built on.
-      sourceSnapshotId: base.sourceSnapshotId,
-      kind: "revise",
-      idempotencyKey: body.idempotencyKey,
-      correlationId: randomUUID(),
-      baseVersionId: body.baseVersionId,
-      baseDigest: body.baseDigest,
-      operatorPrompt: body.prompt,
-      patchScope: body.scope.kind,
-    });
+    const { runId, replayed } = await enqueueAndDispatchRevision(
+      createCampaignRunDispatcher(context.supabase as unknown as CampaignRunPersistence),
+      {
+        organizationId: context.organizationId,
+        campaignId,
+        // The revision inherits the evidence the base version was built on.
+        sourceSnapshotId: base.sourceSnapshotId,
+        kind: "revise",
+        idempotencyKey: body.idempotencyKey,
+        correlationId: randomUUID(),
+        baseVersionId: body.baseVersionId,
+        baseDigest: body.baseDigest,
+        operatorPrompt: body.prompt,
+        patchScope: body.scope.kind,
+      },
+    );
 
     return NextResponse.json({ runId, replayed }, { status: replayed ? 200 : 202 });
   } catch (error) {

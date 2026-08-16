@@ -64,7 +64,7 @@ export type GenerationDispatcher = {
     sourceSnapshotId: string;
     idempotencyKey: string;
     correlationId: string;
-  }): Promise<{ runId: string }>;
+  }): Promise<{ runId: string; replayed?: boolean }>;
 };
 
 export type OrganizationFactsReader = {

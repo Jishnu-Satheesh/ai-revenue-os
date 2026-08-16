@@ -8,10 +8,10 @@ import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 import {
   createCampaignCreationStore,
-  createGenerationDispatcher,
   createOrganizationFactsReader,
   type CampaignCreationPersistence,
 } from "@/modules/campaigns/infrastructure/creation-repository";
+import { createTriggerGenerationDispatcher } from "@/modules/campaigns/infrastructure/generation-dispatch";
 import { createCampaignRunDispatcher } from "@/modules/campaigns/infrastructure/run-repository";
 import type { CampaignRunPersistence } from "@/modules/campaigns/infrastructure/run-repository";
 import { createEventPublisher } from "@/domain/events/publisher";
@@ -58,7 +58,7 @@ export async function POST(
         assertions: [],
       }),
       facts,
-      generation: createGenerationDispatcher(
+      generation: createTriggerGenerationDispatcher(
         createCampaignRunDispatcher(context.supabase as unknown as CampaignRunPersistence),
       ),
       events: createEventPublisher(),
