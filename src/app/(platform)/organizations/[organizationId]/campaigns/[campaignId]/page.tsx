@@ -25,7 +25,15 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
     createCampaignReadRepository(context.supabase as unknown as CampaignPersistence),
     context.organizationId,
     resolved.campaignId,
-    { versionId: version },
+    {
+      versionId: version,
+      // Signed against the caller's own session, so the private bucket is
+      // reached with the member's permissions rather than around them.
+      previews: {
+        database: context.supabase as never,
+        storage: context.supabase as never,
+      },
+    },
   );
 
   // The same answer for "no such campaign", "not yours", and "no version yet".

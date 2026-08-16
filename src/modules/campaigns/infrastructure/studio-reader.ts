@@ -1,5 +1,10 @@
 import type { CampaignReadPort } from "@/modules/campaigns/application/ports";
 import {
+  readAssetPreviewUrls,
+  type AssetPathReader,
+  type SignedUrlSource,
+} from "@/modules/campaigns/infrastructure/asset-preview";
+import {
   toCampaignListItem,
   toStudioView,
   type CampaignListItem,
@@ -59,7 +64,12 @@ export async function readStudioView(
   read: CampaignReadPort,
   organizationId: string,
   campaignId: string,
-  options: { versionId?: string; clock?: StudioClock } = {},
+  options: {
+    versionId?: string;
+    clock?: StudioClock;
+    /** Supplied by the page. Omitted in tests that do not care about artwork. */
+    previews?: { database: AssetPathReader; storage: SignedUrlSource };
+  } = {},
 ): Promise<StudioView | null> {
   const campaign = await read.getCampaign(organizationId, campaignId);
   if (!campaign) return null;
@@ -75,11 +85,19 @@ export async function readStudioView(
 
   const approval = await read.getLiveApproval(organizationId, campaignId);
 
+  const previewUrls = options.previews
+    ? await readAssetPreviewUrls(options.previews.database, options.previews.storage, {
+        organizationId,
+        bundleVersionId: version.id,
+      })
+    : {};
+
   return toStudioView({
     campaign,
     versions,
     version,
     approval,
     now: (options.clock ?? systemClock)(),
+    previewUrls,
   });
 }

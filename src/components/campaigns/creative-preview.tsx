@@ -155,6 +155,7 @@ export function CreativePreview({
   callToAction,
   imageAlt,
   syntheticContent,
+  previewUrl = null,
 }: Readonly<{
   kind: CreativeDirectionKind;
   organizationName: string;
@@ -164,6 +165,8 @@ export function CreativePreview({
   callToAction: string;
   imageAlt: string;
   syntheticContent: boolean;
+  /** Signed link to the real artwork. Null before one exists, or if signing failed. */
+  previewUrl?: string | null;
 }>) {
   const Art = ART[kind];
   const initials = organizationName
@@ -185,19 +188,38 @@ export function CreativePreview({
       </div>
 
       <div className="relative">
-        <svg
-          viewBox="0 0 400 500"
-          className="block aspect-4/5 w-full"
-          role="img"
-          aria-label={imageAlt}
-        >
-          <Art />
-        </svg>
+        {previewUrl ? (
+          // The generated artwork itself. The alt text is the description the
+          // image was drawn from, so the picture and its description cannot
+          // drift apart.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewUrl}
+            alt={imageAlt}
+            className="block aspect-4/5 w-full bg-muted object-cover"
+          />
+        ) : (
+          <svg
+            viewBox="0 0 400 500"
+            className="block aspect-4/5 w-full"
+            role="img"
+            aria-label={imageAlt}
+          >
+            <Art />
+          </svg>
+        )}
         {syntheticContent ? (
           <Badge variant="secondary" className="absolute top-2 right-2">
             Synthetic
           </Badge>
         ) : null}
+        {previewUrl ? null : (
+          // Said out loud rather than left as a stylised drawing an operator
+          // might mistake for the proposed image and attest to.
+          <Badge variant="outline" className="absolute bottom-2 left-2 bg-card">
+            Artwork unavailable
+          </Badge>
+        )}
       </div>
 
       <figcaption className="flex flex-col gap-2 px-3 py-3">

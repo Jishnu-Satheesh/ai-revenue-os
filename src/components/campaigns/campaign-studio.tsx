@@ -167,6 +167,7 @@ function DirectionPanel({
           callToAction={copy.callToAction}
           imageAlt={asset.altText}
           syntheticContent={asset.truthClass === "synthetic_generated"}
+          previewUrl={asset.previewUrl}
         />
       ) : null}
 

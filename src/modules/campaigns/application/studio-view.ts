@@ -52,6 +52,9 @@ export type StudioApproval =
   | { status: "digest_mismatch" }
   | { status: "revoked"; revokedReason: CampaignApproval["revokedReason"] };
 
+/** A manifest asset plus the short-lived link that lets an operator see it. */
+export type StudioAsset = CampaignAsset & { previewUrl: string | null };
+
 export type StudioDirection = {
   id: string;
   kind: CampaignCreativeDirection["kind"];
@@ -59,7 +62,7 @@ export type StudioDirection = {
   rationale: string;
   generationProfile: CampaignBundleManifest["generationProfile"];
   assetIds: readonly string[];
-  assets: readonly CampaignAsset[];
+  assets: readonly StudioAsset[];
   copy: readonly CampaignCopy[];
   hashtagSets: readonly CampaignHashtagSet[];
   internalContentTags: readonly CampaignCreativeDirection["internalContentTags"][number][];
@@ -82,6 +85,8 @@ export type StudioViewInput = {
   approval: CampaignApproval | null;
   /** ISO instant, passed in so the view is deterministic under test. */
   now: string;
+  /** Signed preview links keyed by manifest asset id. Empty when unavailable. */
+  previewUrls?: Readonly<Record<string, string>>;
 };
 
 export type StudioView = {
@@ -201,16 +206,20 @@ function toApproval(
 function directionAssets(
   direction: CampaignCreativeDirection,
   manifest: CampaignBundleManifest,
-): readonly CampaignAsset[] {
+  previewUrls: Readonly<Record<string, string>>,
+): readonly StudioAsset[] {
   const byId = new Map(manifest.assets.map((asset) => [asset.id, asset]));
   return direction.assetIds.flatMap((id: string) => {
     const asset = byId.get(id);
-    return asset ? [asset] : [];
+    // Null rather than absent: "we could not sign a link for this image" is a
+    // state the preview has to render, not one to hide behind a missing key.
+    return asset ? [{ ...asset, previewUrl: previewUrls[asset.id] ?? null }] : [];
   });
 }
 
 export function toStudioView(input: StudioViewInput): StudioView {
   const { campaign, version, versions, approval, now } = input;
+  const previewUrls = input.previewUrls ?? {};
   const manifest = version.manifest;
 
   return {
@@ -242,7 +251,7 @@ export function toStudioView(input: StudioViewInput): StudioView {
       rationale: direction.rationale,
       generationProfile: direction.generationProfileOverride ?? manifest.generationProfile,
       assetIds: direction.assetIds,
-      assets: directionAssets(direction, manifest),
+      assets: directionAssets(direction, manifest, previewUrls),
       copy: direction.copy,
       hashtagSets: direction.hashtagSets,
       internalContentTags: direction.internalContentTags,
