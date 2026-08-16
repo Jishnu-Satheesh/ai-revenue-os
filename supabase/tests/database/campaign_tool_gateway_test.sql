@@ -87,6 +87,26 @@ insert into public.campaign_channel_actions (
   'instagram', 'feed_image', pg_catalog.now() - interval '1 hour', 'required', 100000, 'AED'
 );
 
+-- Two more paid actions, used to exercise the failure and reconciliation paths.
+-- Their ceilings fit inside the approved total alongside the first action, so a
+-- refusal in those sections means what it says rather than an exhausted budget.
+insert into public.campaign_channel_actions (
+  organization_id, bundle_version_id, action_key, direction_key, channel, placement,
+  scheduled_for, requirement, spend_ceiling_minor, spend_currency
+) values (
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  '7a000000-0000-4000-8000-000000000501'::uuid,
+  '7a000000-0000-4000-8000-000000000702'::uuid,
+  '7a000000-0000-4000-8000-000000000601'::uuid,
+  'instagram', 'feed_image', pg_catalog.now() - interval '1 hour', 'optional', 20000, 'AED'
+), (
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  '7a000000-0000-4000-8000-000000000501'::uuid,
+  '7a000000-0000-4000-8000-000000000703'::uuid,
+  '7a000000-0000-4000-8000-000000000601'::uuid,
+  'instagram', 'image_story', pg_catalog.now() - interval '1 hour', 'optional', 20000, 'AED'
+);
+
 insert into public.campaign_visual_attestations (
   id, organization_id, campaign_id, bundle_version_id, bundle_digest, attested_by, statement
 ) values (
@@ -112,7 +132,11 @@ insert into public.campaign_approvals (
   '7a000000-0000-4000-8000-000000000001'::uuid,
   pg_catalog.now() + interval '7 days',
   '{}'::jsonb,
-  array['7a000000-0000-4000-8000-000000000701'::uuid],
+  array[
+    '7a000000-0000-4000-8000-000000000701'::uuid,
+    '7a000000-0000-4000-8000-000000000702'::uuid,
+    '7a000000-0000-4000-8000-000000000703'::uuid
+  ],
   150000, 'AED'
 );
 
@@ -124,6 +148,20 @@ insert into public.campaign_action_runs (
   '7a000000-0000-4000-8000-000000000301'::uuid,
   '7a000000-0000-4000-8000-000000000501'::uuid,
   '7a000000-0000-4000-8000-000000000701'::uuid,
+  pg_catalog.now() - interval '1 hour'
+), (
+  '7a000000-0000-4000-8000-000000000a02'::uuid,
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  '7a000000-0000-4000-8000-000000000301'::uuid,
+  '7a000000-0000-4000-8000-000000000501'::uuid,
+  '7a000000-0000-4000-8000-000000000702'::uuid,
+  pg_catalog.now() - interval '1 hour'
+), (
+  '7a000000-0000-4000-8000-000000000a03'::uuid,
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  '7a000000-0000-4000-8000-000000000301'::uuid,
+  '7a000000-0000-4000-8000-000000000501'::uuid,
+  '7a000000-0000-4000-8000-000000000703'::uuid,
   pg_catalog.now() - interval '1 hour'
 );
 
@@ -424,6 +462,198 @@ select extensions.is(
   ),
   'already_completed'::text,
   'a completed action replays its receipt instead of running again'
+);
+
+-- ---------------------------------------------------------------------------
+-- Ambiguity and reconciliation
+--
+-- These paths run only when something has already gone wrong, so they are the
+-- least likely to be exercised by accident and the most expensive to get wrong.
+-- plpgsql resolves record fields at execution time, which means a reference to
+-- a column that does not exist installs cleanly and fails on the first real
+-- call — during an incident, which is the worst possible moment to find out.
+-- ---------------------------------------------------------------------------
+
+insert into gateway_state (key, value)
+select 'unknown_claim', public.claim_campaign_action(
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', '7a000000-0000-4000-8000-000000000101',
+    'action_run_id', '7a000000-0000-4000-8000-000000000a02',
+    'capability_key', 'publish_instagram',
+    'asserted_facts', jsonb_build_object(
+      'credential_healthy', true, 'tracking_ready', true, 'consent_withdrawn', false
+    )
+  )
+);
+
+insert into gateway_state (key, value)
+select 'unknown_invocation', jsonb_build_object(
+  'id',
+  public.record_tool_invocation(
+    '7a000000-0000-4000-8000-000000000101'::uuid,
+    jsonb_build_object(
+      'action_run_id', '7a000000-0000-4000-8000-000000000a02',
+      'claim_token', (select value ->> 'claim_token' from gateway_state where key = 'unknown_claim'),
+      'tool_key', 'meta.publish_image',
+      'idempotency_key', 'invocation-key-2',
+      'request_digest', repeat('d', 64)
+    )
+  )
+);
+
+select public.fail_tool_invocation(
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'action_run_id', '7a000000-0000-4000-8000-000000000a02',
+    'claim_token', (select value ->> 'claim_token' from gateway_state where key = 'unknown_claim'),
+    'invocation_id', (select value ->> 'id' from gateway_state where key = 'unknown_invocation'),
+    'failure_code', 'adapter_threw',
+    'outcome_unknown', true
+  )
+);
+
+select extensions.is(
+  (select status from public.campaign_action_runs
+   where id = '7a000000-0000-4000-8000-000000000a02'::uuid),
+  'provider_outcome_unknown'::text,
+  'a call that may have gone through is left ambiguous rather than called failed'
+);
+
+-- The money stays committed. Releasing it here is how a campaign overspends:
+-- the post may already be live, and a retry would buy the same placement twice.
+select extensions.is(
+  (select state from public.campaign_budget_reservations
+   where action_run_id = '7a000000-0000-4000-8000-000000000a02'::uuid),
+  'reserved'::text,
+  'an unknown outcome keeps its reservation'
+);
+
+-- Nothing may move until a person or a reconciler has looked at the provider.
+select extensions.is(
+  (
+    public.claim_campaign_action(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', '7a000000-0000-4000-8000-000000000101',
+        'action_run_id', '7a000000-0000-4000-8000-000000000a02',
+        'capability_key', 'publish_instagram',
+        'asserted_facts', '{}'::jsonb
+      )
+    ) ->> 'outcome'
+  ),
+  'provider_outcome_unknown'::text,
+  'an ambiguous action blocks every later claim until it is reconciled'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.reconcile_tool_invocation(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'action_run_id', '7a000000-0000-4000-8000-000000000a02',
+        'invocation_id', '7a000000-0000-4000-8000-000000000fff',
+        'finding', 'probably_fine'
+      )
+    )
+  $$,
+  '22023', 'tool_gateway_reconciliation_finding_invalid',
+  'reconciliation refuses a finding that is not a finding'
+);
+
+select public.reconcile_tool_invocation(
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'action_run_id', '7a000000-0000-4000-8000-000000000a02',
+    'invocation_id', (select value ->> 'id' from gateway_state where key = 'unknown_invocation'),
+    'finding', 'confirmed',
+    'external_reference', 'ig_media_2',
+    'provider_status', 'PUBLISHED',
+    'payload_digest', repeat('e', 64)
+  )
+);
+
+select extensions.is(
+  (select status from public.campaign_action_runs
+   where id = '7a000000-0000-4000-8000-000000000a02'::uuid),
+  'reconciled'::text,
+  'a confirmed finding resolves the ambiguity'
+);
+
+select extensions.is(
+  (
+    select count(*)::bigint from public.provider_receipts
+    where invocation_id = (
+      select (value ->> 'id')::uuid from gateway_state where key = 'unknown_invocation'
+    )
+  ),
+  1::bigint,
+  'reconciliation records the receipt that was missing'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.reconcile_tool_invocation(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'action_run_id', '7a000000-0000-4000-8000-000000000a02',
+        'invocation_id', '7a000000-0000-4000-8000-000000000fff',
+        'finding', 'confirmed'
+      )
+    )
+  $$,
+  '22023', 'tool_gateway_nothing_to_reconcile',
+  'an action that is not ambiguous cannot be reconciled twice'
+);
+
+-- An unambiguous failure is the opposite case: nothing reached the provider, so
+-- the money must go back or the campaign loses budget it never spent.
+insert into gateway_state (key, value)
+select 'failed_claim', public.claim_campaign_action(
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', '7a000000-0000-4000-8000-000000000101',
+    'action_run_id', '7a000000-0000-4000-8000-000000000a03',
+    'capability_key', 'publish_instagram',
+    'asserted_facts', jsonb_build_object(
+      'credential_healthy', true, 'tracking_ready', true, 'consent_withdrawn', false
+    )
+  )
+);
+
+select public.fail_tool_invocation(
+  '7a000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'action_run_id', '7a000000-0000-4000-8000-000000000a03',
+    'claim_token', (select value ->> 'claim_token' from gateway_state where key = 'failed_claim'),
+    'invocation_id',
+    public.record_tool_invocation(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'action_run_id', '7a000000-0000-4000-8000-000000000a03',
+        'claim_token', (select value ->> 'claim_token' from gateway_state where key = 'failed_claim'),
+        'tool_key', 'meta.publish_image',
+        'idempotency_key', 'invocation-key-3',
+        'request_digest', repeat('f', 64)
+      )
+    ),
+    'failure_code', 'provider_rejected',
+    'outcome_unknown', false
+  )
+);
+
+select extensions.is(
+  (select status from public.campaign_action_runs
+   where id = '7a000000-0000-4000-8000-000000000a03'::uuid),
+  'failed'::text,
+  'a refused call is recorded as failed rather than ambiguous'
+);
+
+select extensions.is(
+  (select state from public.campaign_budget_reservations
+   where action_run_id = '7a000000-0000-4000-8000-000000000a03'::uuid),
+  'released'::text,
+  'a clean failure gives the money back'
 );
 
 -- ---------------------------------------------------------------------------
