@@ -255,6 +255,48 @@ select extensions.is(
   'a refused claim reserves no money'
 );
 
+-- ---------------------------------------------------------------------------
+-- Read-only readiness, as the Studio asks it
+--
+-- The screen has to answer "can this channel run?" before anything is claimed,
+-- and it must reach the same verdict as the gateway or it is lying to whoever
+-- is about to approve.
+-- ---------------------------------------------------------------------------
+
+select extensions.is(
+  (
+    public.campaign_version_channel_readiness(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      '7a000000-0000-4000-8000-000000000501'::uuid,
+      jsonb_build_object('instagram', 'publish_instagram')
+    ) -> 0 ->> 'verdict'
+  ),
+  'blocked'::text,
+  'readiness blocks a channel whose capability was never granted'
+);
+
+select extensions.ok(
+  (
+    public.campaign_version_channel_readiness(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      '7a000000-0000-4000-8000-000000000501'::uuid,
+      jsonb_build_object('instagram', 'publish_instagram')
+    ) -> 0 -> 'codes' @> '["capability_not_granted"]'::jsonb
+  ),
+  'and names the same refusal code the gateway would have returned'
+);
+
+-- The check must not have cost anything. A readiness call that claimed, leased
+-- or reserved would make simply opening the page change what can run.
+select extensions.is(
+  (
+    select count(*)::bigint from public.campaign_budget_reservations
+    where organization_id = '7a000000-0000-4000-8000-000000000101'::uuid
+  ),
+  0::bigint,
+  'asking whether a channel is ready reserves nothing'
+);
+
 -- Grant the capability so the rest of the decision can be exercised.
 insert into public.integration_connections (
   id, organization_id, provider_key, adapter_version, connection_mode, status,
@@ -273,6 +315,34 @@ insert into public.integration_capability_grants (
   '7a000000-0000-4000-8000-000000000101'::uuid,
   '7a000000-0000-4000-8000-000000000b01'::uuid,
   'publish_instagram', 'read-only', 'available', 'v1', 'v1', 1
+);
+
+-- A granted capability with no account chosen is still not ready. The panel has
+-- to say which one it is: "reconnect Meta" and "pick which page to post to" are
+-- different jobs for different people.
+select extensions.ok(
+  (
+    public.campaign_version_channel_readiness(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      '7a000000-0000-4000-8000-000000000501'::uuid,
+      jsonb_build_object('instagram', 'publish_instagram')
+    ) -> 0 -> 'codes' @> '["account_not_mapped"]'::jsonb
+  ),
+  'a granted capability with no mapped account is blocked on the account, not the grant'
+);
+
+-- A channel the deployment has no capability key for at all is its own case.
+-- Reporting it as "not granted" would send someone to look for a permission
+-- that was never part of this platform.
+select extensions.ok(
+  (
+    public.campaign_version_channel_readiness(
+      '7a000000-0000-4000-8000-000000000101'::uuid,
+      '7a000000-0000-4000-8000-000000000501'::uuid,
+      '{}'::jsonb
+    ) -> 0 -> 'codes' @> '["capability_not_registered"]'::jsonb
+  ),
+  'a channel with no registered capability key says so rather than blaming the grant'
 );
 
 insert into gateway_state (key, value)
@@ -673,6 +743,25 @@ select extensions.throws_ok(
   '42501', 'tool_gateway_organization_mismatch',
   'a body cannot redirect a claim to another tenant'
 );
+
+-- Readiness runs as the caller, so another tenant's session must see an empty
+-- answer rather than a blocked one. "Blocked" would still confirm the version
+-- exists, which is the whole thing a tenant boundary is for.
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"7a000000-0000-4000-8000-000000000002"}';
+
+select extensions.is(
+  public.campaign_version_channel_readiness(
+    '7a000000-0000-4000-8000-000000000101'::uuid,
+    '7a000000-0000-4000-8000-000000000501'::uuid,
+    jsonb_build_object('instagram', 'publish_instagram')
+  ),
+  '[]'::jsonb,
+  'a non-member learns nothing at all about another tenant''s channels'
+);
+
+reset role;
+reset request.jwt.claims;
 
 select extensions.ok(
   not exists (

@@ -5,6 +5,10 @@ import {
   type SignedUrlSource,
 } from "@/modules/campaigns/infrastructure/asset-preview";
 import {
+  readChannelReadiness,
+  type ReadinessRpcSource,
+} from "@/modules/campaigns/infrastructure/readiness-reader";
+import {
   toCampaignListItem,
   toStudioView,
   type CampaignListItem,
@@ -69,6 +73,8 @@ export async function readStudioView(
     clock?: StudioClock;
     /** Supplied by the page. Omitted in tests that do not care about artwork. */
     previews?: { database: AssetPathReader; storage: SignedUrlSource };
+    /** Supplied by the page. Omitted leaves readiness unknown, never green. */
+    readiness?: ReadinessRpcSource;
   } = {},
 ): Promise<StudioView | null> {
   const campaign = await read.getCampaign(organizationId, campaignId);
@@ -92,6 +98,13 @@ export async function readStudioView(
       })
     : {};
 
+  const readiness = options.readiness
+    ? await readChannelReadiness(options.readiness, {
+        organizationId,
+        bundleVersionId: version.id,
+      })
+    : null;
+
   return toStudioView({
     campaign,
     versions,
@@ -99,5 +112,6 @@ export async function readStudioView(
     approval,
     now: (options.clock ?? systemClock)(),
     previewUrls,
+    readiness,
   });
 }

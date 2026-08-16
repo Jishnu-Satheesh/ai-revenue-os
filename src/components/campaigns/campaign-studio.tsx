@@ -1,9 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CircleSlash, Info, Pencil, ShieldCheck, Wand2 } from "lucide-react";
+import {
+  CheckCircle2,
+  CircleSlash,
+  Info,
+  Pencil,
+  ShieldAlert,
+  ShieldCheck,
+  Wand2,
+} from "lucide-react";
 
 import { attestAndApprove } from "@/components/campaigns/campaign-actions";
 import { RevisionDialog } from "@/components/campaigns/revision-dialog";
@@ -136,6 +145,109 @@ function NotYet({ title, children }: Readonly<{ title: string; children: React.R
         </Badge>
       </div>
       <p className="text-xs text-muted-foreground">{children}</p>
+    </section>
+  );
+}
+
+const CHANNEL_LABEL: Readonly<Record<string, string>> = {
+  instagram: "Instagram",
+  facebook: "Facebook",
+};
+
+/**
+ * Whether each channel can actually run, as the Tool Gateway would decide it.
+ *
+ * A blocked channel is drawn as blocked and never as something an operator
+ * could talk themselves past: the stable code is on screen next to the reason,
+ * because "AUTH_403_SCOPE" is what a support conversation needs and "something
+ * went wrong" is not.
+ */
+function BlockersAndReadiness({
+  readiness,
+  organizationId,
+}: Readonly<{
+  readiness: StudioView["readiness"];
+  organizationId: string;
+}>) {
+  if (readiness === null) {
+    return (
+      <NotYet title="Blockers &amp; readiness">
+        Channel readiness could not be read just now. Nothing is shown rather than a guess, because
+        a green &ldquo;ready&rdquo; here would be a promise the system cannot keep.
+      </NotYet>
+    );
+  }
+
+  if (readiness.length === 0) {
+    return (
+      <NotYet title="Blockers &amp; readiness">
+        This version publishes to no channel, so there is nothing to be ready for.
+      </NotYet>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border p-3">
+      <RailHeading>Blockers &amp; readiness</RailHeading>
+      <div className="flex flex-col gap-2">
+        {readiness.map((channel) =>
+          channel.verdict === "blocked" ? (
+            <div
+              key={channel.channel}
+              className="flex flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-tight text-destructive uppercase">
+                  <ShieldAlert className="size-3.5 shrink-0" aria-hidden />
+                  {CHANNEL_LABEL[channel.channel] ?? channel.channel}
+                </span>
+                <span className="text-[9px] font-black tracking-widest text-destructive uppercase">
+                  Blocked
+                </span>
+              </div>
+
+              {channel.blockers.map((blocker) => (
+                <p key={blocker.code} className="text-[10px] leading-tight text-muted-foreground">
+                  Restriction code: <code className="font-mono">{blocker.code}</code>.{" "}
+                  {blocker.reason}
+                </p>
+              ))}
+
+              {/* One recovery action, for the first blocker. Stacking a button
+                  per code would offer three doors to a room with one lock. */}
+              {channel.blockers[0]?.code === "capability_not_registered" ? null : (
+                <Button asChild size="sm" variant="destructive" className="h-7 w-full text-[10px]">
+                  <Link href={`/organizations/${organizationId}/integrations`}>
+                    {channel.blockers[0]?.recovery ?? "Review the connection"}
+                  </Link>
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div
+              key={channel.channel}
+              className="flex items-center justify-between gap-2 rounded-md border border-emerald-600/30 bg-emerald-600/5 p-2.5"
+            >
+              <span className="flex items-center gap-2 text-[11px] font-medium">
+                <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" aria-hidden />
+                {CHANNEL_LABEL[channel.channel] ?? channel.channel}
+                {channel.accountLabel ? (
+                  <span className="text-muted-foreground">· {channel.accountLabel}</span>
+                ) : null}
+              </span>
+              <span className="text-[9px] font-bold text-emerald-600 uppercase">Ready</span>
+            </div>
+          ),
+        )}
+      </div>
+
+      {/* Said plainly rather than implied. This panel checks the permission and
+          the connection; whether tracking is live and consent still stands is
+          re-checked at send time from state this screen cannot see. */}
+      <p className="text-[10px] leading-tight text-muted-foreground">
+        Covers the permission, the connection and the chosen account. Tracking and consent are
+        re-checked when each post is sent.
+      </p>
     </section>
   );
 }
@@ -555,14 +667,7 @@ export function CampaignStudio({
         </Tabs>
 
         <aside className="flex min-w-0 flex-col gap-4" aria-label="Review rail">
-          {/* Stub. Wired to real capability verdicts as part of Task 13, which
-              is where the Tool Gateway decides whether a channel may run. */}
-          <NotYet title="Blockers & readiness">
-            Whether each channel can actually run is decided by the Tool Gateway against the
-            provider grants in force at approval. Until that check exists, this shows nothing rather
-            than a guess: a green &ldquo;ready&rdquo; here would be a promise the system cannot yet
-            keep.
-          </NotYet>
+          <BlockersAndReadiness readiness={view.readiness} organizationId={organizationId} />
 
           <section className="flex flex-col gap-3 rounded-lg border p-3">
             <RailHeading>Approval envelope</RailHeading>

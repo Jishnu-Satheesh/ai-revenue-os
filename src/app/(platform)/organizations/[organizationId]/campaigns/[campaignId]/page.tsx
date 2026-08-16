@@ -33,6 +33,9 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
         database: context.supabase as never,
         storage: context.supabase as never,
       },
+      // Also the caller's session. The readiness function runs as the invoker,
+      // so the member's own row level security decides what it can see.
+      readiness: context.supabase as never,
     },
   );
 

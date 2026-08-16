@@ -278,3 +278,68 @@ describe("the studio exposes the digest the operator would be approving", () => 
     expect(view.versions.map((entry) => entry.version)).toEqual([2, 1]);
   });
 });
+
+describe("channel readiness on the view", () => {
+  it("keeps 'not known' distinct from 'nothing blocking'", () => {
+    // The panel renders these two completely differently, and collapsing them
+    // would put a green tick on a channel nobody actually checked.
+    expect(toStudioView(studioInput()).readiness).toBeNull();
+    expect(toStudioView(studioInput({ readiness: null })).readiness).toBeNull();
+    expect(toStudioView(studioInput({ readiness: [] })).readiness).toEqual([]);
+  });
+
+  it("attaches a reason and a recovery to every refusal code", () => {
+    const view = toStudioView(
+      studioInput({
+        readiness: [
+          {
+            channel: "instagram",
+            capabilityKey: "publish_instagram",
+            actionCount: 3,
+            anyRequired: true,
+            firstScheduledFor: "2026-09-01T14:00:00+00:00",
+            accountLabel: null,
+            restrictionCodes: [],
+            verdict: "blocked",
+            codes: ["capability_not_granted", "account_not_mapped"],
+          },
+        ],
+      }),
+    );
+
+    expect(view.readiness?.[0]?.blockers).toEqual([
+      {
+        code: "capability_not_granted",
+        reason: expect.stringContaining("allowed to publish"),
+        recovery: "Connect the channel",
+      },
+      {
+        code: "account_not_mapped",
+        reason: expect.stringContaining("no page or profile"),
+        recovery: "Choose an account",
+      },
+    ]);
+  });
+
+  it("renders an unrecognized code as itself rather than as a blank card", () => {
+    const view = toStudioView(
+      studioInput({
+        readiness: [
+          {
+            channel: "facebook",
+            capabilityKey: "publish_facebook",
+            actionCount: 1,
+            anyRequired: false,
+            firstScheduledFor: null,
+            accountLabel: null,
+            restrictionCodes: [],
+            verdict: "blocked",
+            codes: ["something_new_we_have_not_seen"],
+          },
+        ],
+      }),
+    );
+
+    expect(view.readiness?.[0]?.blockers[0]?.reason).toContain("something_new_we_have_not_seen");
+  });
+});

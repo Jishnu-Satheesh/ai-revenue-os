@@ -5,7 +5,9 @@ import type {
   CampaignCreativeDirection,
   CampaignHashtagSet,
 } from "@/domain/campaigns/schemas";
+import { explainReadinessCode } from "@/domain/campaigns/channel-capabilities";
 import { approvalStatus, type CampaignState } from "@/domain/campaigns/state-machine";
+import type { ChannelReadiness } from "@/modules/campaigns/infrastructure/readiness-reader";
 import type {
   BundleVersionDetail,
   BundleVersionSummary,
@@ -87,6 +89,8 @@ export type StudioViewInput = {
   now: string;
   /** Signed preview links keyed by manifest asset id. Empty when unavailable. */
   previewUrls?: Readonly<Record<string, string>>;
+  /** Per-channel execution readiness. `null` when it could not be determined. */
+  readiness?: readonly ChannelReadiness[] | null;
 };
 
 export type StudioView = {
@@ -109,6 +113,16 @@ export type StudioView = {
   totalSpendCeiling: Money | null;
   measurement: CampaignBundleManifest["measurementPlan"];
   approval: StudioApproval;
+  /**
+   * `null` means the platform could not determine readiness, which is not the
+   * same as everything being fine and must never be rendered as if it were.
+   */
+  readiness: readonly StudioChannelReadiness[] | null;
+};
+
+/** A channel verdict with the sentences the panel shows, resolved once here. */
+export type StudioChannelReadiness = ChannelReadiness & {
+  blockers: readonly { code: string; reason: string; recovery: string }[];
 };
 
 const SOURCE_LABEL: Readonly<Record<CampaignSummary["sourceKind"], string>> = {
@@ -264,5 +278,24 @@ export function toStudioView(input: StudioViewInput): StudioView {
     // invite a component to render an outcome for a campaign that has not run.
     measurement: manifest.measurementPlan,
     approval: toApproval(approval, version, now),
+    readiness: toReadiness(input.readiness),
   };
+}
+
+/**
+ * Attaches the sentence for each refusal code, keeping `null` as `null`.
+ *
+ * Distinguishing "no verdict" from "no blockers" is the entire point of the
+ * panel. Collapsing them here would put a green tick on a channel nobody
+ * checked, which is the failure the placeholder was there to prevent.
+ */
+function toReadiness(
+  readiness: readonly ChannelReadiness[] | null | undefined,
+): readonly StudioChannelReadiness[] | null {
+  if (readiness === null || readiness === undefined) return null;
+
+  return readiness.map((entry) => ({
+    ...entry,
+    blockers: entry.codes.map((code) => ({ code, ...explainReadinessCode(code) })),
+  }));
 }
