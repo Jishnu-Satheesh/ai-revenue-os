@@ -29,7 +29,14 @@ import type {
  * model for one task carries its prompt adjustments with it.
  */
 
+/**
+ * Text and images do not take the same amount of time, so they do not get the
+ * same budget. An image model composing a 1024px frame routinely runs past a
+ * minute under load, and cutting it off at the text timeout turns a slow
+ * success into a failed run that has already been paid for.
+ */
 const TIMEOUT_MS = 90_000;
+const IMAGE_TIMEOUT_MS = 300_000;
 
 /**
  * Never let a provider message escape.
@@ -52,6 +59,12 @@ function providerFailure(cause?: unknown): never {
     "INTEGRATION_ERROR",
     "The generation provider could not complete this request.",
   );
+}
+
+/** The three types a campaign asset may carry. Anything else is not usable. */
+function imageMimeType(value: string | undefined): GeneratedImage["mimeType"] {
+  if (value === "image/png" || value === "image/jpeg" || value === "image/webp") return value;
+  providerFailure(new Error("UnsupportedImageType"));
 }
 
 function usageFrom(usage: { inputTokens?: number; outputTokens?: number } | undefined) {
@@ -158,29 +171,78 @@ export function createGeminiCampaignGenerationProvider(
     async generateImage(input: CampaignImageGenerationInput) {
       const route = router.resolve("image");
 
+      // One retry, and only for a call that never answered. By the time images
+      // are being drawn the plan has already been generated and paid for, so
+      // discarding the whole run because one request hung is the expensive
+      // choice. A refusal or a bad image type is not retried: those are
+      // answers, and asking again would just buy the same answer twice.
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          return await drawOnce(route, input);
+        } catch (error) {
+          const timedOut =
+            error instanceof Error &&
+            (error.name === "TimeoutError" || error.name === "AbortError");
+          if (!timedOut || attempt === 2) throw error;
+          logger.warn("campaign.image_retry_after_timeout", { errorCode: error.name });
+        }
+      }
+    },
+  };
+
+  async function drawOnce(
+    route: { modelId: string },
+    input: CampaignImageGenerationInput,
+  ): Promise<{ image: GeneratedImage; usage: ReturnType<typeof usageFrom> }> {
+    {
       try {
-        const result = await generateImage({
-          model: google.image(route.modelId),
-          prompt: input.prompt,
-          size: `${input.widthPx}x${input.heightPx}` as `${number}x${number}`,
-          abortSignal: AbortSignal.timeout(TIMEOUT_MS),
+        // Gemini's image models return the picture as a file part of an
+        // ordinary generation, not through the Imagen predict endpoint that
+        // `google.image()` targets. Pointing the wrong API at the model fails
+        // for a reason that has nothing to do with the prompt.
+        const result = await generateText({
+          model: google(route.modelId),
+          prompt: [
+            input.prompt,
+            "",
+            `Compose for a ${input.widthPx}x${input.heightPx} pixel frame.`,
+          ].join("\n"),
+          providerOptions: { google: { responseModalities: ["TEXT", "IMAGE"] } },
+          abortSignal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
         });
 
+        const file = result.files.find((candidate) => candidate.mediaType?.startsWith("image/"));
+        if (!file) {
+          // A text-only answer means the model declined or explained itself.
+          // Treating that as a provider fault keeps the caller's handling the
+          // same, and the reason stays out of the message either way.
+          providerFailure(new Error("NoImageReturned"));
+        }
+
         const image: GeneratedImage = {
-          bytes: result.image.uint8Array,
-          mimeType: "image/png",
+          bytes: file.uint8Array,
+          // What the model actually returned, narrowed to the three types the
+          // bundle may carry. Intake re-encodes and re-measures regardless, so
+          // an unexpected type is a rejection rather than something to coerce.
+          mimeType: imageMimeType(file.mediaType),
           widthPx: input.widthPx,
           heightPx: input.heightPx,
           modelId: route.modelId,
         };
 
-        return { image, usage: usageFrom(undefined) };
+        return { image, usage: usageFrom(result.usage) };
       } catch (error) {
         if (error instanceof DomainError) throw error;
-        providerFailure();
+        if (
+          error instanceof Error &&
+          (error.name === "TimeoutError" || error.name === "AbortError")
+        ) {
+          throw error;
+        }
+        providerFailure(error);
       }
-    },
-  };
+    }
+  }
 }
 
 /**

@@ -5,6 +5,8 @@ vi.mock("@/lib/env", () => ({ env: {} }));
 
 import { normalizeManifestIds } from "@/modules/campaigns/infrastructure/campaign-planner";
 
+const AUTH = { campaignId: "c0000000-0000-4000-8000-000000000001" };
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function candidate() {
@@ -22,8 +24,21 @@ function candidate() {
 }
 
 describe("model identifiers become real UUIDs", () => {
+  it("overwrites the campaign id with the real one rather than trusting the model", () => {
+    const input = {
+      campaignId: "whatever-the-model-said",
+      directions: [],
+      assets: [],
+      actions: [],
+    };
+
+    const result = normalizeManifestIds(input, AUTH) as typeof input;
+
+    expect(result.campaignId).toBe(AUTH.campaignId);
+  });
+
   it("rewrites every declared id into a v4 UUID", () => {
-    const result = normalizeManifestIds(candidate()) as ReturnType<typeof candidate>;
+    const result = normalizeManifestIds(candidate(), AUTH) as ReturnType<typeof candidate>;
 
     for (const row of [...result.directions, ...result.assets, ...result.actions]) {
       expect(row.id).toMatch(UUID);
@@ -31,7 +46,7 @@ describe("model identifiers become real UUIDs", () => {
   });
 
   it("keeps references pointing at the same things they did before", () => {
-    const result = normalizeManifestIds(candidate()) as ReturnType<typeof candidate>;
+    const result = normalizeManifestIds(candidate(), AUTH) as ReturnType<typeof candidate>;
 
     const controlId = result.directions[0]!.id;
     const evidenceId = result.directions[1]!.id;
@@ -42,7 +57,7 @@ describe("model identifiers become real UUIDs", () => {
   });
 
   it("gives two different handles two different UUIDs", () => {
-    const result = normalizeManifestIds(candidate()) as ReturnType<typeof candidate>;
+    const result = normalizeManifestIds(candidate(), AUTH) as ReturnType<typeof candidate>;
     const ids = [...result.directions, ...result.assets, ...result.actions].map((row) => row.id);
 
     expect(new Set(ids).size).toBe(ids.length);
@@ -56,7 +71,7 @@ describe("model identifiers become real UUIDs", () => {
       actions: [],
     };
 
-    const result = normalizeManifestIds(input) as typeof input;
+    const result = normalizeManifestIds(input, AUTH) as typeof input;
 
     expect(result.directions[0]!.id).toBe(existing);
   });
@@ -68,7 +83,7 @@ describe("model identifiers become real UUIDs", () => {
       actions: [{ id: "act-1", directionId: "dir-missing" }],
     };
 
-    const result = normalizeManifestIds(input) as typeof input;
+    const result = normalizeManifestIds(input, AUTH) as typeof input;
 
     // Left untouched, so the dangling reference is still rejected downstream.
     // Repairing the format must never repair a broken proposal.
@@ -84,7 +99,7 @@ describe("model identifiers become real UUIDs", () => {
       actions: [],
     };
 
-    const result = normalizeManifestIds(input) as typeof input;
+    const result = normalizeManifestIds(input, AUTH) as typeof input;
 
     expect(result.objective).toBe("Raise weekday margin");
     expect(result.directions[0]!.kind).toBe("control");
@@ -92,7 +107,7 @@ describe("model identifiers become real UUIDs", () => {
   });
 
   it("passes through anything that is not an object", () => {
-    expect(normalizeManifestIds(null)).toBeNull();
-    expect(normalizeManifestIds("not json")).toBe("not json");
+    expect(normalizeManifestIds(null, AUTH)).toBeNull();
+    expect(normalizeManifestIds("not json", AUTH)).toBe("not json");
   });
 });

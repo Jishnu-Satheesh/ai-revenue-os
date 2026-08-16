@@ -195,7 +195,13 @@ describe("gemini campaign generation provider", () => {
   });
 
   it("returns image bytes with the model that produced them", async () => {
-    generateImageCall.mockResolvedValue({ image: { uint8Array: new Uint8Array([1, 2, 3]) } });
+    // Gemini returns the picture as a file part of an ordinary generation,
+    // which is why this goes through generateText rather than the Imagen call.
+    generateText.mockResolvedValue({
+      text: "",
+      files: [{ mediaType: "image/png", uint8Array: new Uint8Array([1, 2, 3]) }],
+      usage: {},
+    });
     const provider = createGeminiCampaignGenerationProvider();
 
     const result = await provider.generateImage({
@@ -206,7 +212,40 @@ describe("gemini campaign generation provider", () => {
     });
 
     expect(result.image.bytes).toEqual(new Uint8Array([1, 2, 3]));
+    expect(result.image.mimeType).toBe("image/png");
     expect(result.image.modelId).toBe("imagen-1");
+  });
+
+  it("refuses a text-only answer rather than publishing an empty asset", async () => {
+    generateText.mockResolvedValue({ text: "I cannot draw that.", files: [], usage: {} });
+    const provider = createGeminiCampaignGenerationProvider();
+
+    await expect(
+      provider.generateImage({
+        context: CONTEXT,
+        prompt: "A plated dish.",
+        widthPx: 1024,
+        heightPx: 1024,
+      }),
+    ).rejects.toThrow("The generation provider could not complete this request.");
+  });
+
+  it("refuses an image type a bundle may not carry", async () => {
+    generateText.mockResolvedValue({
+      text: "",
+      files: [{ mediaType: "image/gif", uint8Array: new Uint8Array([1]) }],
+      usage: {},
+    });
+    const provider = createGeminiCampaignGenerationProvider();
+
+    await expect(
+      provider.generateImage({
+        context: CONTEXT,
+        prompt: "A plated dish.",
+        widthPx: 1024,
+        heightPx: 1024,
+      }),
+    ).rejects.toThrow("The generation provider could not complete this request.");
   });
 
   it("keeps a provider image failure opaque too", async () => {

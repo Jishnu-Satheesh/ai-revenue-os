@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import {
   approvalInputSchema,
   attestationInputSchema,
@@ -23,7 +24,7 @@ import {
  * exactly the tables and RPCs campaigns touch, so a future call to something
  * else does not typecheck and has to be added here on purpose.
  */
-type QueryResult<T> = { data: T | null; error: { code?: string } | null };
+type QueryResult<T> = { data: T | null; error: { code?: string; message?: string } | null };
 
 type Filterable<TRow> = {
   eq(column: string, value: string): Filterable<TRow> & PromiseLike<QueryResult<readonly TRow[]>>;
@@ -52,7 +53,34 @@ export type CampaignPersistence = {
  * and telling the two apart across a tenant boundary would confirm that another
  * organization's campaign exists.
  */
-function campaignDatabaseError(): never {
+/**
+ * The constraint a write tripped, and nothing else from the message.
+ *
+ * Postgres names the constraint in its error text and then quotes the offending
+ * row, which is tenant data. The name alone says which rule was broken, which
+ * is the part worth keeping.
+ */
+function constraintName(message: string | undefined): string | undefined {
+  return /constraint "([a-z0-9_]+)"/i.exec(message ?? "")?.[1];
+}
+
+function campaignDatabaseError(context?: {
+  operation: string;
+  code?: string;
+  organizationId?: string;
+  campaignId?: string;
+}): never {
+  // The caller still gets one indistinguishable message. The SQLSTATE and the
+  // operation are this system's own metadata rather than tenant data, and
+  // without them a policy refusal and a constraint violation are the same
+  // event in the log — which is no event at all.
+  if (context) {
+    logger.error("campaign.storage_failed", {
+      organizationId: context.organizationId,
+      campaignId: context.campaignId,
+      errorCode: `${context.operation}:${context.code ?? "unknown"}`,
+    });
+  }
   throw new Error("Campaign data could not be loaded or saved.");
 }
 
@@ -247,7 +275,11 @@ export function createCampaignVersionWriter(
         manifestAssetIds.size !== pathAssetIds.size ||
         [...manifestAssetIds].some((assetId) => !pathAssetIds.has(assetId))
       ) {
-        campaignDatabaseError();
+        campaignDatabaseError({
+          operation: "create_version.asset_paths",
+          organizationId: validated.organizationId,
+          campaignId: validated.campaignId,
+        });
       }
 
       const { data, error } = await persistence.rpc("create_campaign_bundle_version", {
@@ -268,7 +300,14 @@ export function createCampaignVersionWriter(
           measurement_plan: validated.manifest.measurementPlan,
         },
       });
-      if (error || !data) campaignDatabaseError();
+      if (error || !data) {
+        campaignDatabaseError({
+          operation: "create_version.rpc",
+          code: [error?.code, constraintName(error?.message)].filter(Boolean).join("/"),
+          organizationId: validated.organizationId,
+          campaignId: validated.campaignId,
+        });
+      }
 
       const result = data as Record<string, unknown>;
       return createBundleVersionResultSchema.parse({

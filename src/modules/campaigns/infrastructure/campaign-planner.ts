@@ -49,7 +49,7 @@ const OUTPUT_CONTRACT = [
   "assetIds must exactly match ids you used in directions[] and assets[].",
   "",
   "schemaVersion: 1",
-  "campaignId: the campaign UUID given to you",
+  "campaignId: any UUID; it is overwritten with the real campaign id",
   "version: 1",
   'source: { "kind": "manual_brief" | "decision_opportunity", "sourceId": UUID }',
   "objective: string (<=600 chars)",
@@ -70,10 +70,15 @@ const OUTPUT_CONTRACT = [
   "      hook: string(<=200), caption: string(<=2200), callToAction: string(<=120),",
   "      timingRationale: string(<=600) }",
   "  hashtagSets: ARRAY of objects, at least one, each:",
-  '    { channel: "instagram"|"facebook", tags: array of strings each starting "#"',
-  "      with no spaces, rationale: string(<=400) }",
+  '    { channel: "instagram"|"facebook", tags: [], rationale: string(<=400) }',
+  "    tags MUST be an empty array. No verified provider contract states a",
+  "    hashtag limit for these channels yet, so proposing hashtags would be",
+  "    proposing something nobody can check. Say so in the rationale.",
   "  internalContentTags: array of strings that must NOT start with #",
-  "  softConventionDepartures: array of strings (<=200 each)",
+  "  softConventionDepartures: array of strings (<=200 each). MUST be empty on",
+  "    the control and evidence_led directions. On the experimental direction,",
+  "    each departure must be named in that direction's experiment.stretchedConvention",
+  "    verbatim, so review shows exactly what the bundle stretches.",
   "  experiment: null on control and evidence_led. On experimental ONLY, an object:",
   "    { challengedAssumption: string(<=600), differenceFromControl: string(<=600),",
   "      whyItCouldWin: string(<=600), stretchedConvention: string(<=300),",
@@ -129,9 +134,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
  * rejected downstream. Fixing the format must not repair a broken reference,
  * because a dangling reference means the proposal does not hang together.
  */
-export function normalizeManifestIds(candidate: unknown): unknown {
+export function normalizeManifestIds(
+  candidate: unknown,
+  authoritative: { campaignId: string },
+): unknown {
   if (typeof candidate !== "object" || candidate === null) return candidate;
   const manifest = candidate as Record<string, unknown>;
+
+  // Which campaign this is is a fact, not a proposal. The database checks the
+  // manifest's campaignId against the row it is being written to, so a model
+  // that guessed one fails the write after every image has been paid for.
+  manifest.campaignId = authoritative.campaignId;
 
   const declared = new Map<string, string>();
   const declare = (value: unknown) => {
@@ -254,7 +267,7 @@ export function createCampaignPlanner(
         });
 
         return {
-          candidate: normalizeManifestIds(result.output),
+          candidate: normalizeManifestIds(result.output, { campaignId: context.campaignId }),
           costMinor: result.usage.estimatedCostMinor,
         };
       } catch (error) {

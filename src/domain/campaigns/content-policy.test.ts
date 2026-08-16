@@ -142,6 +142,22 @@ describe("hashtags", () => {
     expect(codes(result)).toContain("hashtag_limits_unverified");
   });
 
+  it("has nothing to check when a set proposes no tags at all", () => {
+    const manifest = validManifest();
+    // Every direction declines to suggest hashtags, which is the truthful
+    // bundle for a channel whose limit nobody has proven yet.
+    for (const direction of manifest.directions) {
+      for (const set of direction.hashtagSets) set.tags = [];
+    }
+
+    const result = evaluate({
+      manifest,
+      limitsByChannel: { instagram: { maxHashtags: null, maxCopyCharacters: null } },
+    });
+
+    expect(codes(result)).not.toContain("hashtag_limits_unverified");
+  });
+
   it("blocks a channel the verified contract does not cover at all", () => {
     expect(codes(evaluate({ limitsByChannel: {} }))).toContain("hashtag_limits_unverified");
   });

@@ -95,15 +95,19 @@ beforeEach(() => {
 });
 
 describe("campaign planner", () => {
-  it("returns the model's answer untouched, for the caller to parse", async () => {
+  it("leaves the model's content for the caller to parse, and fixes only identity", async () => {
     const result = await planner().plan({
       context: generationContext(),
       prompt: "evidence",
       signal: new AbortController().signal,
     });
 
-    const candidate: unknown = result.candidate;
-    expect(candidate).toEqual({ anything: true });
+    // Everything the model said about the campaign survives verbatim. Which
+    // campaign it belongs to is not something the model gets to decide: the
+    // database checks it against the row being written, so it is set here.
+    const candidate = result.candidate as Record<string, unknown>;
+    expect(candidate.anything).toBe(true);
+    expect(candidate.campaignId).toBe("c0000000-0000-4000-8000-000000000001");
   });
 
   it("names the failures verbatim on a repair pass", async () => {

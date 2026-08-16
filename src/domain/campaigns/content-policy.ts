@@ -195,6 +195,13 @@ function checkHashtags(
 
   const limits = context.limits;
   if (!limits || limits.maxHashtags === null) {
+    // A set that proposes no tags has nothing to check against a limit, known
+    // or unknown. Treating it as unverifiable conflated "you proposed tags I
+    // cannot check" with "you proposed none", and blocked every bundle for a
+    // channel whose contract is not yet proven — including the truthful bundle
+    // that declines to suggest hashtags precisely because it cannot verify them.
+    if (seen.size === 0) return violations;
+
     violations.push({
       code: "hashtag_limits_unverified",
       path: context.path,

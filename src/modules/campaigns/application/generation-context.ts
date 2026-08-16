@@ -192,6 +192,16 @@ export function renderGenerationPrompt(context: GenerationContext): string {
     `<generation_profile>${context.generationProfile}</generation_profile>`,
     `<currency>${context.currency}</currency>`,
     "",
+    // Both are compared for exact equality when the plan is evaluated. Leaving
+    // them out of the prompt asked the model to guess a registered value and
+    // then rejected it for guessing wrong.
+    "<registered_measurement>",
+    `primaryMetricKey: ${context.primaryMetricKey}`,
+    `baselineSource: ${context.baselineSource}`,
+    "</registered_measurement>",
+    "Copy both of those strings into measurementPlan character for character.",
+    "They are registered values, not suggestions, and any other value is rejected.",
+    "",
     "Only state a fact that appears in <verified_facts>, and cite its source key.",
     "Never invent an offer, a price, a metric, a result, or a permission.",
   ].join("\n");
