@@ -64,12 +64,27 @@ export const generationContextSchema = z.strictObject({
   syntheticAssetsAllowed: z.boolean(),
   primaryMetricKey: z.string().trim().min(1).max(160),
   baselineSource: z.string().trim().min(1).max(240),
+  /** The instant generation ran, so a proposal can be read against its own date. */
+  generatedAt: z.string().datetime({ offset: false }),
+  /** No action may be scheduled before this. See DEFAULT_SCHEDULE_LEAD_MINUTES. */
+  earliestScheduledFor: z.string().datetime({ offset: false }),
 });
 export type GenerationContext = z.infer<typeof generationContextSchema>;
 
 export type GenerationReadiness =
   | { outcome: "ready"; context: GenerationContext }
   | { outcome: "needs_data"; missing: readonly RequiredEvidenceKey[] };
+
+/**
+ * How far ahead of now the earliest action may be scheduled.
+ *
+ * A proposal is not the same thing as a decision. Between generation and the
+ * first send there has to be room for a person to read the bundle, attest to
+ * the artwork and approve it, and an action scheduled for eleven minutes from
+ * now quietly removes that room. An hour is the smallest gap that still leaves
+ * a real review possible.
+ */
+export const DEFAULT_SCHEDULE_LEAD_MINUTES = 60;
 
 export type GenerationContextInput = {
   organizationId: string;
@@ -79,6 +94,9 @@ export type GenerationContextInput = {
   snapshot: Record<string, unknown>;
   brandAssetVersionIds: readonly string[];
   syntheticAssetsAllowed: boolean;
+  /** Injected rather than read from the clock, so generation is reproducible. */
+  now: Date;
+  scheduleLeadMinutes?: number;
 };
 
 /**
@@ -137,6 +155,10 @@ export function buildGenerationContext(input: GenerationContextInput): Generatio
     syntheticAssetsAllowed: input.syntheticAssetsAllowed,
     primaryMetricKey,
     baselineSource,
+    generatedAt: input.now.toISOString(),
+    earliestScheduledFor: new Date(
+      input.now.getTime() + (input.scheduleLeadMinutes ?? DEFAULT_SCHEDULE_LEAD_MINUTES) * 60_000,
+    ).toISOString(),
   });
 
   if (!parsed.success) {
@@ -202,9 +224,49 @@ export function renderGenerationPrompt(context: GenerationContext): string {
     "Copy both of those strings into measurementPlan character for character.",
     "They are registered values, not suggestions, and any other value is rejected.",
     "",
+    // Without these the model has no idea what day it is, and a schedule is not
+    // a guess it can make from the objective. Asked for send times against a
+    // blank calendar it picked dates in the past, which read as a planning
+    // error and were really a missing input.
+    "<scheduling_window>",
+    `now: ${context.generatedAt}`,
+    `organization_timezone: ${context.timeZone}`,
+    `local_date_now: ${localDate(context.generatedAt, context.timeZone)}`,
+    `earliest_scheduled_for: ${context.earliestScheduledFor}`,
+    "</scheduling_window>",
+    "Every actions[].scheduledFor must be at or after earliest_scheduled_for.",
+    "A time before it is rejected: it would leave no room to review and approve",
+    "the bundle before the campaign starts sending.",
+    "",
     "Only state a fact that appears in <verified_facts>, and cite its source key.",
     "Never invent an offer, a price, a metric, a result, or a permission.",
   ].join("\n");
+}
+
+/**
+ * The calendar date in the organization's own timezone.
+ *
+ * An operator in Dubai reading "2026-08-16T21:00:00Z" has to do arithmetic to
+ * know it is already tomorrow for them. The model has the same problem, so it
+ * gets the local date spelled out rather than inferred.
+ */
+function localDate(instant: string, timeZone: string): string {
+  try {
+    // Weekday and ISO date together. The weekday matters because scheduling
+    // advice is usually shaped like "weekday lunch", and the ISO date matters
+    // because "August 17" alone is ambiguous about the year.
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      weekday: "long",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(instant));
+  } catch {
+    // An unrecognized timezone must not stop generation. The UTC instant above
+    // is still correct and is the value the schedule is actually checked against.
+    return `${instant.slice(0, 10)} (UTC; timezone ${timeZone} not recognized)`;
+  }
 }
 
 function readString(source: Record<string, unknown>, key: string): string | undefined {

@@ -71,6 +71,8 @@ function generationContext() {
     syntheticAssetsAllowed: true,
     primaryMetricKey: "contribution.incremental_gross_profit",
     baselineSource: "ledger",
+    generatedAt: "2026-08-16T09:00:00.000Z",
+    earliestScheduledFor: "2026-08-16T10:00:00.000Z",
   };
 }
 

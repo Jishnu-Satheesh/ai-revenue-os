@@ -27,7 +27,8 @@ export type EvaluationFailure = {
     | "cross_tenant_asset"
     | "currency_mismatch"
     | "content_policy"
-    | "too_many_assets";
+    | "too_many_assets"
+    | "action_scheduled_in_past";
   detail: string;
   path?: readonly (string | number)[];
 };
@@ -66,6 +67,7 @@ export function evaluateGeneratedBundle(input: EvaluationInput): EvaluationResul
   failures.push(...checkTenantAssets(manifest, input.producedAssetIds));
   failures.push(...checkAssetCount(manifest, input.maxAssets ?? DEFAULT_MAX_ASSETS));
   failures.push(...checkCurrency(manifest, input.context));
+  failures.push(...checkSchedule(manifest, input.context));
   failures.push(...checkClaims(manifest, input.context));
 
   const policy = evaluateContentPolicy({
@@ -123,6 +125,35 @@ function checkCurrency(
       path: ["totalSpendCeiling", "currency"],
     },
   ];
+}
+
+/**
+ * Nothing may be scheduled before there is time to approve it.
+ *
+ * Checked here rather than in `campaignBundleSchema` on purpose. The schema is
+ * also how stored bundles are read back, and a rule about "now" would make last
+ * month's approved campaign fail to parse today — turning immutable evidence
+ * into something that expires. This is a rule about what may be *accepted*, so
+ * it belongs at acceptance.
+ */
+function checkSchedule(
+  manifest: CampaignBundleManifest,
+  context: GenerationContext,
+): EvaluationFailure[] {
+  const earliest = Date.parse(context.earliestScheduledFor);
+  if (!Number.isFinite(earliest)) return [];
+
+  return manifest.actions.flatMap((action, index) => {
+    const scheduled = Date.parse(action.scheduledFor);
+    if (!Number.isFinite(scheduled) || scheduled >= earliest) return [];
+    return [
+      {
+        code: "action_scheduled_in_past" as const,
+        detail: `An action is scheduled for ${action.scheduledFor}, before the earliest permitted time of ${context.earliestScheduledFor}.`,
+        path: ["actions", index, "scheduledFor"],
+      },
+    ];
+  });
 }
 
 /**
@@ -244,6 +275,7 @@ export function safeFailureSummary(failures: readonly EvaluationFailure[]): stri
     currency_mismatch: "its spend ceiling was in the wrong currency",
     content_policy: "it broke a brand or platform rule",
     too_many_assets: "it produced more images than a bundle may carry",
+    action_scheduled_in_past: "it scheduled a post before there was time to approve it",
   };
   return `Generation was rejected because ${codes.map((code) => explanations[code]).join(", and ")}.`;
 }

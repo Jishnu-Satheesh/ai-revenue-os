@@ -130,6 +130,9 @@ export type GenerateBundleDependencies = {
   /** True once the operator cancelled or the platform fenced this run. */
   isCancelled: () => boolean;
   leaseSeconds?: number;
+  /** Injected so a test can generate against a fixed date. */
+  clock?: () => Date;
+  scheduleLeadMinutes?: number;
 };
 
 export type GenerateBundleResult =
@@ -218,6 +221,8 @@ export async function generateCampaignBundle(
       snapshot: pinned.snapshot,
       brandAssetVersionIds: pinned.brandAssetVersionIds,
       syntheticAssetsAllowed: pinned.syntheticAssetsAllowed,
+      now: (dependencies.clock ?? (() => new Date()))(),
+      scheduleLeadMinutes: dependencies.scheduleLeadMinutes,
     });
 
     // A readiness gap is an ordinary outcome, not a failure of the run. It is

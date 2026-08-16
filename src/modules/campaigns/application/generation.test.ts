@@ -61,6 +61,9 @@ function contextFor(overrides: Record<string, unknown> = {}): GenerationContext 
     snapshot: completeSnapshot(overrides),
     brandAssetVersionIds: ["a0000000-0000-4000-8000-000000000009"],
     syntheticAssetsAllowed: false,
+    // Fixed, and well before the fixture manifest's September actions, so the
+    // schedule check only fires for the test that deliberately moves a date.
+    now: new Date("2026-08-16T09:00:00.000Z"),
   });
   if (readiness.outcome !== "ready") throw new Error(`expected ready: ${readiness.missing}`);
   return readiness.context;
@@ -96,6 +99,7 @@ describe("generation readiness", () => {
         snapshot: completeSnapshot(),
         brandAssetVersionIds: ["a0000000-0000-4000-8000-000000000009"],
         syntheticAssetsAllowed: false,
+        now: new Date("2026-08-16T09:00:00.000Z"),
       }).outcome,
     ).toBe("ready");
   });
@@ -109,6 +113,7 @@ describe("generation readiness", () => {
       snapshot: { objective: "Sell more lunch" },
       brandAssetVersionIds: [],
       syntheticAssetsAllowed: true,
+      now: new Date("2026-08-16T09:00:00.000Z"),
     });
 
     if (readiness.outcome !== "needs_data") throw new Error("expected needs_data");
@@ -127,6 +132,7 @@ describe("generation readiness", () => {
       snapshot: completeSnapshot(),
       brandAssetVersionIds: [],
       syntheticAssetsAllowed: false,
+      now: new Date("2026-08-16T09:00:00.000Z"),
     });
 
     expect(readiness.outcome).toBe("needs_data");
@@ -152,6 +158,7 @@ describe("generation readiness", () => {
       snapshot: completeSnapshot({ currency: "dirhams" }),
       brandAssetVersionIds: ["a0000000-0000-4000-8000-000000000009"],
       syntheticAssetsAllowed: false,
+      now: new Date("2026-08-16T09:00:00.000Z"),
     });
 
     if (readiness.outcome !== "needs_data") throw new Error("expected needs_data");
@@ -190,6 +197,34 @@ describe("prompt construction", () => {
   it("tells the model it may only state facts it can cite", () => {
     expect(renderGenerationPrompt(contextFor())).toContain("Never invent an offer");
   });
+
+  it("tells the model what day it is and how early it may schedule", () => {
+    const prompt = renderGenerationPrompt(contextFor());
+
+    expect(prompt).toContain("<scheduling_window>");
+    expect(prompt).toContain("now: 2026-08-16T09:00:00.000Z");
+    // One hour of lead time, so there is room to review before anything sends.
+    expect(prompt).toContain("earliest_scheduled_for: 2026-08-16T10:00:00.000Z");
+    expect(prompt).toContain("organization_timezone: Asia/Dubai");
+  });
+
+  it("gives the date in the organization's timezone, not only in UTC", () => {
+    // 21:00 UTC is already the next day in Dubai, and an operator should not
+    // have to work that out.
+    const context = { ...contextFor(), generatedAt: "2026-08-16T21:00:00.000Z" };
+    const line = renderGenerationPrompt(context)
+      .split("\n")
+      .find((entry) => entry.startsWith("local_date_now:"));
+
+    expect(line).toContain("2026-08-17");
+    expect(line).toContain("Monday");
+  });
+
+  it("still renders when the organization's timezone is not recognized", () => {
+    const context = { ...contextFor(), timeZone: "Mars/Olympus" };
+
+    expect(renderGenerationPrompt(context)).toContain("not recognized");
+  });
 });
 
 describe("evaluating generated bundles", () => {
@@ -202,6 +237,31 @@ describe("evaluating generated bundles", () => {
 
     if (result.outcome !== "invalid") throw new Error("expected invalid");
     expect(result.failures[0]?.code).toBe("malformed_manifest");
+  });
+
+  it("rejects a bundle that schedules a post before there is time to approve it", () => {
+    const manifest = alignedManifest();
+    manifest.actions[0]!.scheduledFor = "2025-03-04T14:00:00.000Z";
+
+    const result = evaluate(manifest);
+
+    if (result.outcome !== "invalid") throw new Error("expected invalid");
+    expect(result.failures.map((failure) => failure.code)).toContain("action_scheduled_in_past");
+    expect(result.failures[0]?.path).toEqual(["actions", 0, "scheduledFor"]);
+  });
+
+  it("accepts a post scheduled exactly at the earliest permitted time", () => {
+    const context = contextFor();
+    const manifest = alignedManifest();
+    for (const action of manifest.actions) action.scheduledFor = context.earliestScheduledFor;
+
+    expect(evaluate(manifest, context).outcome).toBe("valid");
+  });
+
+  it("explains a past schedule without echoing the model's own words", () => {
+    expect(safeFailureSummary([{ code: "action_scheduled_in_past", detail: "whatever" }])).toContain(
+      "before there was time to approve it",
+    );
   });
 
   it("rejects an extra field rather than ignoring it", () => {
