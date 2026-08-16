@@ -1,4 +1,5 @@
 import { bundleDigest } from "@/domain/campaigns/digest";
+import { logger } from "@/lib/logger";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
 import type { ChannelContentLimits } from "@/domain/campaigns/content-policy";
 import type { CampaignChannel } from "@/domain/campaigns/schemas";
@@ -281,6 +282,21 @@ export async function generateCampaignBundle(
         break;
       }
       if (decision.action === "fail") {
+        // The operator-facing summary is deliberately vague, because the
+        // detail comes from model output. The codes and paths do not: they are
+        // this system's own vocabulary, and without them in the log a rejected
+        // generation is unexplainable after the fact.
+        logger.warn("campaign.generation_rejected", {
+          organizationId: payload.organizationId,
+          campaignId: claim.campaignId,
+          runId: payload.runId,
+          correlationId: payload.correlationId,
+          errorCode: decision.failures.map((failure) => failure.code).join(","),
+          failurePaths: decision.failures
+            .map((failure) => (failure.path ?? []).join("."))
+            .filter((path) => path.length > 0)
+            .join(" | "),
+        });
         return failWith("validation_failed", safeFailureSummary(decision.failures));
       }
       failures = decision.failures;

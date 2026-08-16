@@ -11,6 +11,7 @@ type LogContext = {
   workerId?: string;
   durationMs?: number;
   errorCode?: string;
+  failurePaths?: string;
   httpStatus?: number;
 };
 

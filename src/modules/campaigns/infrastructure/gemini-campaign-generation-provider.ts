@@ -4,6 +4,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { experimental_generateImage as generateImage, generateText } from "ai";
 
 import { DomainError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import { createModelRouter, refinePrompt, type ModelRouter } from "@/ai/model-router";
 import type {
@@ -37,7 +38,16 @@ const TIMEOUT_MS = 90_000;
  * business context and sometimes customer-written text. The caller gets a
  * stable message; the detail stays in the provider's own logs.
  */
-function providerFailure(): never {
+function providerFailure(cause?: unknown): never {
+  // The message is withheld; the class and HTTP status are not. Those are the
+  // provider's own metadata rather than an echo of the prompt, and without
+  // them a failed generation is unexplainable after the fact — which is how a
+  // rate limit and a malformed request end up looking identical.
+  const status = (cause as { statusCode?: number; status?: number } | undefined) ?? {};
+  logger.error("campaign.generation_provider_failed", {
+    errorCode: cause instanceof Error ? cause.name : "unknown",
+    httpStatus: status.statusCode ?? status.status,
+  });
   throw new DomainError(
     "INTEGRATION_ERROR",
     "The generation provider could not complete this request.",
@@ -111,7 +121,7 @@ export function createGeminiCampaignGenerationProvider(
       return { output, modelId: route.modelId, usage: usageFrom(result.usage) };
     } catch (error) {
       if (error instanceof DomainError) throw error;
-      providerFailure();
+      providerFailure(error);
     }
   }
 
