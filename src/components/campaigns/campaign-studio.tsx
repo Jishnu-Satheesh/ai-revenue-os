@@ -358,7 +358,11 @@ function SelectedCreative({
               yet, so a set could not be checked before publishing.
             </p>
           )}
-          {hashtags ? <p className="text-xs text-muted-foreground">{hashtags.rationale}</p> : null}
+          {/* Only when there are tags to explain. With none, the rationale says
+              the same thing the empty state already said. */}
+          {hashtags && hashtags.tags.length > 0 ? (
+            <p className="text-xs text-muted-foreground">{hashtags.rationale}</p>
+          ) : null}
         </FieldBlock>
 
         {/* Kept visibly apart from hashtags. Merging the two lists once would
@@ -438,9 +442,10 @@ export function CampaignStudio({
     setApproving(true);
     setApprovalError(null);
 
-    const expiresAt = new Date(Date.now() + Number(windowHours) * 3_600_000)
-      .toISOString()
-      .replace("Z", "");
+    // A UTC instant, Z and all. The approval schema requires it, and an
+    // expiry with no timezone is not an instant — it is a reading that means
+    // something different in every organization that opens it.
+    const expiresAt = new Date(Date.now() + Number(windowHours) * 3_600_000).toISOString();
 
     const result = await attestAndApprove({
       organizationId,
@@ -496,13 +501,16 @@ export function CampaignStudio({
               artwork, so the alternative is visible rather than imagined. */}
           <TabsList
             aria-label="Creative direction"
-            className="grid h-auto w-full grid-cols-3 gap-2 bg-transparent p-0"
+            // The filmstrip is a card strip, not a compact tab bar. The list
+            // pins its height through a `group-data-horizontal` variant, which
+            // a plain `h-auto` cannot outrank, so the override matches it.
+            className="grid w-full grid-cols-3 gap-2 bg-transparent p-0 group-data-horizontal/tabs:h-auto"
           >
             {view.directions.map((entry) => (
               <TabsTrigger
                 key={entry.id}
                 value={entry.id}
-                className="flex h-auto flex-col items-stretch gap-2 rounded-lg border p-2 data-[state=active]:border-primary data-[state=active]:bg-accent"
+                className="flex h-auto flex-col items-stretch gap-2 rounded-lg border p-2 whitespace-normal data-[state=active]:border-primary data-[state=active]:bg-accent"
               >
                 <span className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold">{DIRECTION_LABEL[entry.kind]}</span>
@@ -518,10 +526,10 @@ export function CampaignStudio({
                     <img
                       src={entry.assets[0].previewUrl}
                       alt=""
-                      className="block aspect-4/5 w-full object-cover"
+                      className="block h-32 w-full object-cover"
                     />
                   ) : (
-                    <span className="block aspect-4/5 w-full" />
+                    <span className="block h-32 w-full" />
                   )}
                 </span>
                 <span className="flex flex-col gap-0.5 text-left">

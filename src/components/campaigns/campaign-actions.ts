@@ -116,8 +116,26 @@ export async function attestAndApprove(input: {
   expiresAt: string;
   actionKeys: readonly string[];
 }): Promise<ActionResult<{ approvalId: string }>> {
-  const attestation = await attestVersion(input);
+  // Each request carries only its own fields. Both endpoints validate against
+  // a strict schema, so forwarding this whole object would send `expiresAt`
+  // and `actionKeys` to the attestation endpoint and be refused for unknown
+  // keys — a rejection that reads like a digest problem and is not one.
+  const attestation = await attestVersion({
+    organizationId: input.organizationId,
+    campaignId: input.campaignId,
+    bundleVersionId: input.bundleVersionId,
+    bundleDigest: input.bundleDigest,
+    statement: input.statement,
+  });
   if (!attestation.ok) return attestation;
 
-  return approveVersion({ ...input, attestationId: attestation.data.attestationId });
+  return approveVersion({
+    organizationId: input.organizationId,
+    campaignId: input.campaignId,
+    bundleVersionId: input.bundleVersionId,
+    bundleDigest: input.bundleDigest,
+    attestationId: attestation.data.attestationId,
+    expiresAt: input.expiresAt,
+    actionKeys: input.actionKeys,
+  });
 }

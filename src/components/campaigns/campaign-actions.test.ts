@@ -143,3 +143,40 @@ describe("approval always follows an attestation", () => {
     }
   });
 });
+
+describe("each request carries only the fields its endpoint accepts", () => {
+  // Both endpoints validate against a strict schema. Sending a field the other
+  // call needs is rejected as an unknown key, and the refusal reads like a
+  // digest problem rather than the wiring mistake it is.
+  it("does not send approval fields to the attestation endpoint", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ attestationId: "att-1" }, 201))
+      .mockResolvedValueOnce(jsonResponse({ approvalId: "app-1" }, 201));
+
+    await attestAndApprove(approvalInput());
+
+    const attestBody = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(Object.keys(attestBody).sort()).toEqual([
+      "bundleDigest",
+      "bundleVersionId",
+      "statement",
+    ]);
+  });
+
+  it("does not send the attestation statement to the approval endpoint", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ attestationId: "att-1" }, 201))
+      .mockResolvedValueOnce(jsonResponse({ approvalId: "app-1" }, 201));
+
+    await attestAndApprove(approvalInput());
+
+    const approveBody = JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string);
+    expect(Object.keys(approveBody).sort()).toEqual([
+      "actionKeys",
+      "attestationId",
+      "bundleDigest",
+      "bundleVersionId",
+      "expiresAt",
+    ]);
+  });
+});
