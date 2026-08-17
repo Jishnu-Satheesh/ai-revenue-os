@@ -48,7 +48,7 @@
     "drizzle-orm": "1.0.0-rc.4",
     "framer-motion": "13.0.0",
     "lucide-react": "0.468.0",
-    "next": "16.0.0",
+    "next": "16.0.10",
     "next-themes": "^0.4.6",
     "postgres": "^3.4.9",
     "pure-rand": "^8.4.2",
