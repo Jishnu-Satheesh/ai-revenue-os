@@ -6,7 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
-  CircleDashed,
+  // CircleDashed,
   Database,
   FileQuestion,
   Lightbulb,
@@ -50,7 +50,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Progress } from "@/components/ui/progress";
+// import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   findDemoCampaign,
@@ -77,7 +77,7 @@ type IntegrationResult =
 
 export function OrganizationIntelligenceCockpit({
   snapshot,
-  readiness,
+  // readiness,
   permissions,
   reportingWindow,
   economics,
@@ -178,60 +178,60 @@ export function OrganizationIntelligenceCockpit({
   );
 }
 
-function ReadinessStrip({
-  readiness,
-  canManage,
-}: {
-  readiness: DigitalTwinReadiness;
-  canManage: boolean;
-}) {
-  return (
-    <Card className="bg-primary/[0.03]">
-      <CardContent className="grid gap-5 px-5 lg:grid-cols-[14rem_1fr_auto] lg:items-center">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-end gap-2">
-            <span className="text-4xl font-semibold tabular-nums">{readiness.percentage}%</span>
-            <span className="pb-1 text-sm font-medium text-muted-foreground">
-              Digital Twin readiness
-            </span>
-          </div>
-          <Progress
-            value={readiness.percentage}
-            aria-label={`Digital Twin readiness: ${readiness.percentage}%, ${readiness.groundedCount} of ${readiness.totalCount} sections grounded`}
-          />
-          <p className="text-xs text-muted-foreground">
-            {readiness.groundedCount} of {readiness.totalCount} sections grounded
-          </p>
-        </div>
-        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {readiness.sections.map((section) => (
-            <li
-              key={section.key}
-              className="flex min-w-0 items-center gap-2 rounded-lg bg-background px-3 py-2 ring-1 ring-foreground/10"
-            >
-              {section.complete ? (
-                <CheckCircle2 className="shrink-0 text-success" aria-hidden="true" />
-              ) : (
-                <CircleDashed className="shrink-0 text-warning" aria-hidden="true" />
-              )}
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{section.label}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {section.complete ? "Grounded" : "Needs input"}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <Button asChild variant="outline" size="sm">
-          <Link href={canManage ? "#organization-management" : "#digital-twin-data"}>
-            {canManage ? "Manage" : "View"} data foundation
-          </Link>
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
+// function ReadinessStrip({
+//   readiness,
+//   canManage,
+// }: {
+//   readiness: DigitalTwinReadiness;
+//   canManage: boolean;
+// }) {
+//   return (
+//     <Card className="bg-primary/[0.03]">
+//       <CardContent className="grid gap-5 px-5 lg:grid-cols-[14rem_1fr_auto] lg:items-center">
+//         <div className="flex flex-col gap-2">
+//           <div className="flex items-end gap-2">
+//             <span className="text-4xl font-semibold tabular-nums">{readiness.percentage}%</span>
+//             <span className="pb-1 text-sm font-medium text-muted-foreground">
+//               Digital Twin readiness
+//             </span>
+//           </div>
+//           <Progress
+//             value={readiness.percentage}
+//             aria-label={`Digital Twin readiness: ${readiness.percentage}%, ${readiness.groundedCount} of ${readiness.totalCount} sections grounded`}
+//           />
+//           <p className="text-xs text-muted-foreground">
+//             {readiness.groundedCount} of {readiness.totalCount} sections grounded
+//           </p>
+//         </div>
+//         <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+//           {readiness.sections.map((section) => (
+//             <li
+//               key={section.key}
+//               className="flex min-w-0 items-center gap-2 rounded-lg bg-background px-3 py-2 ring-1 ring-foreground/10"
+//             >
+//               {section.complete ? (
+//                 <CheckCircle2 className="shrink-0 text-success" aria-hidden="true" />
+//               ) : (
+//                 <CircleDashed className="shrink-0 text-warning" aria-hidden="true" />
+//               )}
+//               <span className="min-w-0">
+//                 <span className="block truncate text-sm font-medium">{section.label}</span>
+//                 <span className="block truncate text-xs text-muted-foreground">
+//                   {section.complete ? "Grounded" : "Needs input"}
+//                 </span>
+//               </span>
+//             </li>
+//           ))}
+//         </ul>
+//         <Button asChild variant="outline" size="sm">
+//           <Link href={canManage ? "#organization-management" : "#digital-twin-data"}>
+//             {canManage ? "Manage" : "View"} data foundation
+//           </Link>
+//         </Button>
+//       </CardContent>
+//     </Card>
+//   );
+// }
 
 function StrategicBriefing({ briefing }: { briefing: readonly StrategicBriefingItem[] }) {
   return (

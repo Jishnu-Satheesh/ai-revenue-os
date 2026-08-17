@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AlertCircle, ArrowLeft, ArrowRight, Info } from "lucide-react";
 
-import { idempotencyKey, requestRevision, saveOperatorEdit } from "@/components/campaigns/campaign-actions";
+import {
+  idempotencyKey,
+  requestRevision,
+  saveOperatorEdit,
+} from "@/components/campaigns/campaign-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -269,9 +273,7 @@ export function ReviseWorkspace({
               <div className="relative">
                 <div className="pointer-events-none absolute top-3 right-3 flex items-center gap-1.5 opacity-50">
                   <Info className="size-3" aria-hidden />
-                  <span className="text-[9px] font-bold uppercase">
-                    Scoped to {direction.name}
-                  </span>
+                  <span className="text-[9px] font-bold uppercase">Scoped to {direction.name}</span>
                 </div>
                 <Textarea
                   autoFocus={intent === "revise"}
@@ -344,7 +346,10 @@ export function ReviseWorkspace({
                 </p>
               ) : (
                 changes.map((change) => (
-                  <div key={change.path} className="flex flex-col gap-2 border-b pb-3 last:border-0">
+                  <div
+                    key={change.path}
+                    className="flex flex-col gap-2 border-b pb-3 last:border-0"
+                  >
                     <span className="block text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
                       {readablePath(change.path)}
                     </span>
@@ -400,7 +405,6 @@ export function ReviseWorkspace({
   );
 }
 
-
 /**
  * "lunch #dubai" becomes ["#lunch", "#dubai"].
  *
@@ -437,7 +441,11 @@ function Field({ label, children }: Readonly<{ label: string; children: React.Re
 
 /** `directions[0].copy[0].hook` reads as "Hook" to someone editing a hook. */
 function readablePath(path: string): string {
-  const leaf = path.split(".").at(-1)?.replace(/\[\d+\]/g, "") ?? path;
+  const leaf =
+    path
+      .split(".")
+      .at(-1)
+      ?.replace(/\[\d+\]/g, "") ?? path;
   const spaced = leaf.replace(/([A-Z])/g, " $1").toLowerCase();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }

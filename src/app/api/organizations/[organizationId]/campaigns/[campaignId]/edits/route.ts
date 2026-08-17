@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { apiErrorResponse } from "@/lib/api/organization-context";
-import { applyOperatorEdit, operatorEditSchema } from "@/modules/campaigns/application/operator-edit";
+import {
+  applyOperatorEdit,
+  operatorEditSchema,
+} from "@/modules/campaigns/application/operator-edit";
 import {
   campaignRouteContext,
   parseCampaignId,

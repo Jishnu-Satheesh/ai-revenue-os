@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { validManifest } from "@/domain/campaigns/test-manifest";
-import { applyOperatorEdit, type OperatorEdit } from "@/modules/campaigns/application/operator-edit";
+import {
+  applyOperatorEdit,
+  type OperatorEdit,
+} from "@/modules/campaigns/application/operator-edit";
 
 function baseManifest() {
   return validManifest();
