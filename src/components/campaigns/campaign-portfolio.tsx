@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileText, Plus, Sparkles } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Plus, Sparkles } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,54 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { CampaignState } from "@/domain/campaigns/state-machine";
-import type { CampaignListItem, Money } from "@/modules/campaigns/application/studio-view";
+import type {
+  CampaignGeneration,
+  CampaignListItem,
+  Money,
+} from "@/modules/campaigns/application/studio-view";
+
+/**
+ * What is happening to a campaign that has no proposal yet.
+ *
+ * Rendered only in that window, and deliberately never as a bare spinner. A
+ * spinner asserts that work is in progress, and the one state an operator most
+ * needs to see is the one where it is not: a worker that died mid-run leaves
+ * its row claimed forever, and spinning at that row would wait for something
+ * nobody is doing.
+ */
+function GenerationNotice({ generation }: Readonly<{ generation: CampaignGeneration }>) {
+  if (generation.status === "settled") return null;
+
+  if (generation.status === "generating") {
+    return (
+      <div
+        className="flex items-center gap-2 rounded-md border border-dashed p-2 text-xs"
+        role="status"
+      >
+        <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+        <span>{generation.detail}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-start gap-2 rounded-md border border-dashed p-2 text-xs"
+      role="status"
+    >
+      <AlertTriangle
+        className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <span className="flex flex-col gap-1">
+        <span className="font-medium">
+          {generation.status === "failed" ? "Generation failed" : "Generation did not finish"}
+        </span>
+        <span className="text-muted-foreground">{generation.detail}</span>
+      </span>
+    </div>
+  );
+}
 
 /**
  * Every campaign state gets its own label, including the ones an operator will
@@ -125,9 +172,16 @@ export function CampaignPortfolio({
                 <Card className="flex w-full flex-col">
                   <CardHeader>
                     <CardTitle className="flex flex-wrap items-center gap-2">
-                      <Link href={href} className="underline-offset-4 hover:underline">
-                        {campaign.title}
-                      </Link>
+                      {campaign.openable ? (
+                        <Link href={href} className="underline-offset-4 hover:underline">
+                          {campaign.title}
+                        </Link>
+                      ) : (
+                        // Not a link, rather than a link that 404s. There is no
+                        // proposal behind this campaign yet, so the route it
+                        // would open has nothing to render.
+                        <span>{campaign.title}</span>
+                      )}
                       <Badge variant={state.variant}>{state.label}</Badge>
                       {campaign.version === null ? null : (
                         <Badge variant="outline">v{campaign.version}</Badge>
@@ -145,6 +199,8 @@ export function CampaignPortfolio({
                       <span className="text-xs text-muted-foreground uppercase">Source</span>
                       <span>{campaign.sourceLabel}</span>
                     </div>
+
+                    <GenerationNotice generation={campaign.generation} />
 
                     {campaign.awaitingFirstVersion ? null : (
                       <div className="flex flex-wrap gap-4">
@@ -166,14 +222,18 @@ export function CampaignPortfolio({
                     <span className="text-xs text-muted-foreground">
                       Updated {updatedLabel(campaign.updatedAt, timeZone)}
                     </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      asChild
-                      disabled={campaign.awaitingFirstVersion}
-                    >
-                      <Link href={href}>Review</Link>
-                    </Button>
+                    {campaign.openable ? (
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={href}>Review</Link>
+                      </Button>
+                    ) : (
+                      // `disabled` on a Button with `asChild` renders an anchor,
+                      // and an anchor ignores it — which is how a campaign with
+                      // no version stayed clickable all the way to a 404.
+                      <Button variant="outline" size="sm" disabled>
+                        Review
+                      </Button>
+                    )}
                   </CardFooter>
                 </Card>
               </li>

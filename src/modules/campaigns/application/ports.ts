@@ -3,6 +3,18 @@ import { z } from "zod";
 import { campaignBundleManifestSchema } from "@/domain/campaigns/schemas";
 
 /**
+ * The parts of a generation run the read side needs.
+ *
+ * `leaseExpiresAt` is the load-bearing one: it is the only field that separates
+ * a run a worker is still doing from one whose worker died without saying so.
+ */
+export type GenerationRunSnapshot = {
+  status: string;
+  failureCode: string | null;
+  leaseExpiresAt: string | null;
+};
+
+/**
  * The boundary between campaign services and storage.
  *
  * The split that matters is read versus write. A member's session may read
@@ -121,6 +133,15 @@ export type CampaignReadPort = {
     campaignId: string,
   ): Promise<readonly BundleVersionSummary[]>;
   getVersion(organizationId: string, versionId: string): Promise<BundleVersionDetail | null>;
+  /**
+   * The newest generation run for a campaign, or `null` if none was started.
+   * Read so the list can tell work in progress from work abandoned, which the
+   * campaign row alone cannot express.
+   */
+  latestGenerationRun(
+    organizationId: string,
+    campaignId: string,
+  ): Promise<GenerationRunSnapshot | null>;
   getLiveApproval(organizationId: string, campaignId: string): Promise<CampaignApproval | null>;
 };
 

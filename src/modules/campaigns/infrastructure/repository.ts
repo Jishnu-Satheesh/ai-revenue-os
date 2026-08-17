@@ -34,7 +34,13 @@ type Filterable<TRow> = {
 };
 
 export type CampaignPersistence = {
-  from(table: "campaigns" | "campaign_bundle_versions" | "campaign_approvals"): {
+  from(
+    table:
+      | "campaigns"
+      | "campaign_bundle_versions"
+      | "campaign_approvals"
+      | "campaign_generation_runs",
+  ): {
     select(columns: string): Filterable<Record<string, unknown>>;
   };
   rpc(
@@ -162,6 +168,30 @@ export function createCampaignReadRepository(
         .eq("organization_id", organizationId);
       if (error) campaignDatabaseError();
       return (data ?? []).map(toCampaign);
+    },
+
+    async latestGenerationRun(organizationId, campaignId) {
+      if (!organizationId || !campaignId) campaignDatabaseError();
+      const { data, error } = await persistence
+        .from("campaign_generation_runs")
+        .select("status, failure_code, lease_expires_at")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .eq("organization_id", organizationId)
+        .eq("campaign_id", campaignId);
+      if (error) campaignDatabaseError();
+      const [row] = (data ?? []) as {
+        status: string;
+        failure_code: string | null;
+        lease_expires_at: string | null;
+      }[];
+      return row
+        ? {
+            status: row.status,
+            failureCode: row.failure_code,
+            leaseExpiresAt: row.lease_expires_at,
+          }
+        : null;
     },
 
     async getCampaign(organizationId, campaignId) {

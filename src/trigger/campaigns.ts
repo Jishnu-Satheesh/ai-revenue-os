@@ -9,6 +9,10 @@ import {
   parseCampaignGenerationPayload,
   parseCampaignRevisionPayload,
 } from "@/workflows/campaigns/contracts";
+import {
+  GENERATE_BUNDLE_MAX_DURATION_SECONDS,
+  REVISE_BUNDLE_MAX_DURATION_SECONDS,
+} from "@/workflows/campaigns/durations";
 import { generateCampaignBundle } from "@/workflows/campaigns/generate-bundle";
 import { reviseCampaignBundle } from "@/workflows/campaigns/revise-bundle";
 import {
@@ -79,7 +83,7 @@ export const generateCampaignBundleTask = schemaTask({
   schema: campaignGenerationPayloadSchema,
   queue: campaignGenerationQueue,
   retry,
-  maxDuration: 600,
+  maxDuration: GENERATE_BUNDLE_MAX_DURATION_SECONDS,
   run: async (payload, { signal }) => {
     // Re-parsed rather than trusted. `schemaTask` already validated it; this
     // proves the worker's own contract before a tenant-bypassing client exists.
@@ -145,7 +149,7 @@ export const reviseCampaignBundleTask = schemaTask({
   schema: campaignRevisionPayloadSchema,
   queue: campaignGenerationQueue,
   retry,
-  maxDuration: 300,
+  maxDuration: REVISE_BUNDLE_MAX_DURATION_SECONDS,
   run: async (payload, { signal }) => {
     const parsed = parseCampaignRevisionPayload(payload);
     const supabase = createCampaignWorkerServiceClient();
@@ -200,4 +204,3 @@ function campaignRouter() {
     imageModel: env.CAMPAIGN_IMAGE_MODEL,
   });
 }
-

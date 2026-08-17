@@ -14,7 +14,10 @@ import type {
   BundleVersionSummary,
   CampaignApproval,
   CampaignSummary,
+  GenerationRunSnapshot,
 } from "@/modules/campaigns/application/ports";
+
+export type { GenerationRunSnapshot };
 
 /**
  * Turning stored campaign records into what the Studio renders.
@@ -32,6 +35,24 @@ import type {
 
 export type Money = { amountMinor: number; currency: string };
 
+/**
+ * A generation run as an operator needs to understand it.
+ *
+ * `stalled` is the one that matters and the one a naive design omits. A worker
+ * killed mid-run — by a timeout, a crash, a lost machine — never gets to write
+ * that it failed, so its row stays `claimed` forever. Reading that as "still
+ * generating" produces a spinner that never stops, which is a worse lie than
+ * the 404 it replaced. An expired lease is the proof that nobody is working,
+ * and it earns its own state.
+ */
+export type CampaignGenerationStatus = "generating" | "stalled" | "failed" | "settled";
+
+export type CampaignGeneration = {
+  status: CampaignGenerationStatus;
+  /** Safe, code-derived wording. Never a provider or model message. */
+  detail: string | null;
+};
+
 export type CampaignListItem = {
   id: string;
   title: string;
@@ -41,11 +62,85 @@ export type CampaignListItem = {
   updatedAt: string;
   /** Absent until a bundle version has been generated. */
   awaitingFirstVersion: boolean;
+  /**
+   * Whether this campaign can be opened at all. A campaign with no version has
+   * no proposal to review, and its detail route has nothing to render — so the
+   * list must not offer a way in rather than relying on the page to refuse.
+   */
+  openable: boolean;
+  generation: CampaignGeneration;
   version: number | null;
   objective: string | null;
   channels: readonly string[];
   spendCeiling: Money | null;
 };
+
+/**
+ * What the newest generation run means for a campaign with no version yet.
+ *
+ * Only the lease can distinguish work in progress from work abandoned. A run
+ * claimed with a live lease has a worker behind it; the same row with a lapsed
+ * lease has nobody, whatever its status column still says.
+ */
+export function toGeneration(
+  run: GenerationRunSnapshot | null,
+  hasVersion: boolean,
+  now: string,
+): CampaignGeneration {
+  if (hasVersion) return { status: "settled", detail: null };
+
+  if (!run) {
+    return {
+      status: "stalled",
+      detail: "No generation has been started for this campaign yet.",
+    };
+  }
+
+  if (run.status === "failed" || run.status === "cancelled") {
+    return {
+      status: "failed",
+      detail: failureDetail(run.failureCode),
+    };
+  }
+
+  if (run.status === "claimed" || run.status === "queued") {
+    const leaseLive =
+      run.leaseExpiresAt !== null && new Date(run.leaseExpiresAt).getTime() > Date.parse(now);
+    // A queued run has no lease yet and is legitimately waiting for a worker.
+    if (leaseLive || run.status === "queued") {
+      return { status: "generating", detail: "Building the first proposal." };
+    }
+    return {
+      status: "stalled",
+      detail: "Generation stopped responding and did not finish. It can be started again.",
+    };
+  }
+
+  // `succeeded` with no version is a contradiction, not a success. Saying so is
+  // better than showing a spinner for a run that will never produce anything.
+  return {
+    status: "stalled",
+    detail: "Generation reported success but produced no proposal. It can be started again.",
+  };
+}
+
+/**
+ * Turns a stored failure code into wording an operator can act on.
+ *
+ * `needs_data:` codes carry the missing keys, which are the useful part: the
+ * operator can go and supply them. Everything else stays generic, because a
+ * failure code is not written for a customer to read.
+ */
+function failureDetail(failureCode: string | null): string {
+  if (!failureCode) return "Generation failed. It can be started again.";
+  if (failureCode.startsWith("needs_data:")) {
+    const missing = failureCode.slice("needs_data:".length).split(",").filter(Boolean);
+    return missing.length > 0
+      ? `Generation needs more information first: ${missing.join(", ")}.`
+      : "Generation needs more information before it can run.";
+  }
+  return "Generation failed. It can be started again.";
+}
 
 export type StudioApproval =
   | { status: "none" }
@@ -163,7 +258,10 @@ function channelsOf(manifest: CampaignBundleManifest): readonly string[] {
 export function toCampaignListItem(
   campaign: CampaignSummary,
   latest: BundleVersionDetail | null,
+  run: GenerationRunSnapshot | null = null,
+  now: string = new Date().toISOString(),
 ): CampaignListItem {
+  const generation = toGeneration(run, latest !== null, now);
   const shared = {
     id: campaign.id,
     title: campaign.title,
@@ -177,6 +275,9 @@ export function toCampaignListItem(
     return {
       ...shared,
       awaitingFirstVersion: true,
+      // No version means no proposal, so there is nothing to open.
+      openable: false,
+      generation,
       version: null,
       objective: null,
       channels: [],
@@ -187,6 +288,8 @@ export function toCampaignListItem(
   return {
     ...shared,
     awaitingFirstVersion: false,
+    openable: true,
+    generation,
     version: latest.version,
     objective: latest.manifest.objective,
     channels: channelsOf(latest.manifest),

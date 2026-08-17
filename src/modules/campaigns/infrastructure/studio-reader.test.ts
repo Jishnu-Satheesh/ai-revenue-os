@@ -58,6 +58,7 @@ function readPort(overrides: Partial<CampaignReadPort> = {}): CampaignReadPort {
     listVersions: vi.fn(async () => [summaryOf(detail)]),
     getVersion: vi.fn(async () => detail),
     getLiveApproval: vi.fn(async () => null),
+    latestGenerationRun: vi.fn(async () => null),
     ...overrides,
   };
 }
@@ -78,6 +79,66 @@ describe("reading the portfolio", () => {
     expect(row).toMatchObject({ awaitingFirstVersion: true, objective: null });
     // No version means nothing to fetch; asking anyway would be a wasted read.
     expect(read.getVersion).not.toHaveBeenCalled();
+  });
+
+  it("reads a claimed run with a live lease as still generating", async () => {
+    const read = readPort({
+      listVersions: vi.fn(async () => []),
+      latestGenerationRun: vi.fn(async () => ({
+        status: "claimed",
+        failureCode: null,
+        leaseExpiresAt: "2026-08-17T12:00:00.000Z",
+      })),
+    });
+
+    const [row] = await readCampaignList(read, ORGANIZATION_ID, () => "2026-08-17T11:00:00.000Z");
+
+    expect(row?.generation.status).toBe("generating");
+    expect(row?.openable).toBe(false);
+  });
+
+  it("reads a claimed run whose lease has lapsed as stalled, not generating", async () => {
+    // The failure this covers actually happened: a worker killed by a timeout
+    // never wrote that it failed, so the row stayed `claimed` forever. Reading
+    // that as "generating" is a spinner that never stops.
+    const read = readPort({
+      listVersions: vi.fn(async () => []),
+      latestGenerationRun: vi.fn(async () => ({
+        status: "claimed",
+        failureCode: null,
+        leaseExpiresAt: "2026-08-17T10:00:00.000Z",
+      })),
+    });
+
+    const [row] = await readCampaignList(read, ORGANIZATION_ID, () => "2026-08-17T11:00:00.000Z");
+
+    expect(row?.generation.status).toBe("stalled");
+  });
+
+  it("names the missing evidence when generation failed for want of data", async () => {
+    const read = readPort({
+      listVersions: vi.fn(async () => []),
+      latestGenerationRun: vi.fn(async () => ({
+        status: "failed",
+        failureCode: "needs_data:brand_voice,objective",
+        leaseExpiresAt: null,
+      })),
+    });
+
+    const [row] = await readCampaignList(read, ORGANIZATION_ID, () => "2026-08-17T11:00:00.000Z");
+
+    expect(row?.generation.status).toBe("failed");
+    expect(row?.generation.detail).toContain("brand_voice");
+  });
+
+  it("does not read a generation run for a campaign that already has a version", async () => {
+    const read = readPort();
+
+    const [row] = await readCampaignList(read, ORGANIZATION_ID);
+
+    expect(row?.generation.status).toBe("settled");
+    expect(row?.openable).toBe(true);
+    expect(read.latestGenerationRun).not.toHaveBeenCalled();
   });
 
   it("returns an empty portfolio rather than failing when there are no campaigns", async () => {

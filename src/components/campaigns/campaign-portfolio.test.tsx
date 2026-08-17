@@ -18,6 +18,8 @@ function item(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     sourceLabel: "Decision Engine opportunity",
     updatedAt: "2026-08-15T09:30:00.000Z",
     awaitingFirstVersion: false,
+    openable: true,
+    generation: { status: "settled", detail: null },
     version: 2,
     objective: "Raise incremental gross profit on weekday evenings",
     channels: ["instagram", "meta_ads"],
@@ -73,6 +75,8 @@ describe("the portfolio states only what the campaign has produced", () => {
     renderPortfolio([
       item({
         awaitingFirstVersion: true,
+        openable: false,
+        generation: { status: "generating", detail: "Building the first proposal." },
         version: null,
         objective: null,
         channels: [],
@@ -121,5 +125,79 @@ describe("an empty portfolio explains itself", () => {
     expect(screen.getByText(/no campaigns yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Campaigns" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /new campaign brief/i })).toBeInTheDocument();
+  });
+});
+
+describe("a campaign with no proposal cannot be opened", () => {
+  function pending(generation: CampaignListItem["generation"]): CampaignListItem {
+    return item({
+      awaitingFirstVersion: true,
+      openable: false,
+      generation,
+      version: null,
+      objective: null,
+      channels: [],
+      spendCeiling: null,
+    });
+  }
+
+  it("offers no link at all, rather than a link that 404s", () => {
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+    const card = within(screen.getByRole("listitem"));
+
+    // Neither the title nor the review control may navigate. The detail route
+    // has no version to render, and `disabled` does not stop an anchor.
+    expect(card.queryByRole("link")).not.toBeInTheDocument();
+    expect(card.getByRole("button", { name: /review/i })).toBeDisabled();
+  });
+
+  it("keeps the title readable even though it is no longer a link", () => {
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+
+    expect(screen.getByText("Weekday evening demand lift")).toBeInTheDocument();
+  });
+
+  it("shows a spinner only while a worker is actually running", () => {
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+    const card = within(screen.getByRole("listitem"));
+
+    expect(card.getByText(/building the first proposal/i)).toBeInTheDocument();
+    expect(card.queryByText(/did not finish/i)).not.toBeInTheDocument();
+  });
+
+  it("says generation stopped instead of spinning forever", () => {
+    // A worker killed by a timeout never writes that it failed, so its row
+    // stays claimed. Spinning here would wait on something nobody is doing.
+    renderPortfolio([
+      pending({
+        status: "stalled",
+        detail: "Generation stopped responding and did not finish. It can be started again.",
+      }),
+    ]);
+    const card = within(screen.getByRole("listitem"));
+
+    expect(card.getByText(/generation did not finish/i)).toBeInTheDocument();
+    expect(card.getByText(/stopped responding/i)).toBeInTheDocument();
+  });
+
+  it("names what generation still needs when it failed for want of evidence", () => {
+    renderPortfolio([
+      pending({
+        status: "failed",
+        detail: "Generation needs more information first: brand_voice, objective.",
+      }),
+    ]);
+    const card = within(screen.getByRole("listitem"));
+
+    expect(card.getByText(/generation failed/i)).toBeInTheDocument();
+    expect(card.getByText(/brand_voice/)).toBeInTheDocument();
+  });
+
+  it("says nothing about generation once a proposal exists", () => {
+    renderPortfolio([item()]);
+    const card = within(screen.getByRole("listitem"));
+
+    expect(card.queryByRole("status")).not.toBeInTheDocument();
+    expect(card.getAllByRole("link").length).toBeGreaterThan(0);
   });
 });

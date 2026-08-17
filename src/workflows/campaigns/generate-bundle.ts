@@ -15,6 +15,7 @@ import {
   type GenerationContext,
 } from "@/modules/campaigns/application/generation-context";
 import type { CreateBundleVersionResult } from "@/modules/campaigns/application/ports";
+import { GENERATE_BUNDLE_LEASE_SECONDS } from "@/workflows/campaigns/durations";
 
 /**
  * One generation run, from claim to published version.
@@ -143,7 +144,7 @@ export type GenerateBundleResult =
   | { status: "failed"; failureCode: string; summary: string }
   | { status: "cancelled" };
 
-const DEFAULT_LEASE_SECONDS = 300;
+const DEFAULT_LEASE_SECONDS = GENERATE_BUNDLE_LEASE_SECONDS;
 
 export async function generateCampaignBundle(
   payload: {

@@ -37,7 +37,14 @@ const approve = vi.fn();
 
 function service(now = new Date("2026-08-15T10:00:00.000Z")) {
   return createCampaignService({
-    read: { listCampaigns: vi.fn(), getCampaign, listVersions, getVersion, getLiveApproval },
+    read: {
+      listCampaigns: vi.fn(),
+      getCampaign,
+      listVersions,
+      getVersion,
+      getLiveApproval,
+      latestGenerationRun: vi.fn(async () => null),
+    },
     review: { recordAttestation, approve },
     store: { createBrief, createCampaign, createSourceSnapshot },
     facts: { readVerifiedFacts, findOpportunity },

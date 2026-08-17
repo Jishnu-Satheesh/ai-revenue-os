@@ -42,8 +42,10 @@ const systemClock: StudioClock = () => new Date().toISOString();
 export async function readCampaignList(
   read: CampaignReadPort,
   organizationId: string,
+  clock: StudioClock = systemClock,
 ): Promise<readonly CampaignListItem[]> {
   const campaigns = await read.listCampaigns(organizationId);
+  const now = clock();
 
   return Promise.all(
     campaigns.map(async (campaign) => {
@@ -52,7 +54,10 @@ export async function readCampaignList(
       // A campaign with no version yet is normal, not an error: generation is a
       // background run that may still be in flight.
       const latest = newest ? await read.getVersion(organizationId, newest.id) : null;
-      return toCampaignListItem(campaign, latest);
+      // Only read the run when there is no version to explain the campaign. A
+      // settled campaign's generation history is not what this list is for.
+      const run = latest ? null : await read.latestGenerationRun(organizationId, campaign.id);
+      return toCampaignListItem(campaign, latest, run, now);
     }),
   );
 }

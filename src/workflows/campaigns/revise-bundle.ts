@@ -8,6 +8,7 @@ import type {
   BundleVersionPublisher,
   GenerationRunStore,
 } from "@/workflows/campaigns/generate-bundle";
+import { REVISE_BUNDLE_LEASE_SECONDS } from "@/workflows/campaigns/durations";
 
 /**
  * One revision run.
@@ -78,7 +79,7 @@ export type ReviseBundleResult =
   | { status: "failed"; failureCode: string }
   | { status: "cancelled" };
 
-const DEFAULT_LEASE_SECONDS = 180;
+const DEFAULT_LEASE_SECONDS = REVISE_BUNDLE_LEASE_SECONDS;
 
 export async function reviseCampaignBundle(
   payload: {
