@@ -114,6 +114,12 @@ export type StudioView = {
   directions: readonly StudioDirection[];
   actions: CampaignBundleManifest["actions"];
   totalSpendCeiling: Money | null;
+  /**
+   * The bound an approval authorizes: how much creative may follow, until when,
+   * and what it may never change. Surfaced beside the ceiling because it is the
+   * same kind of limit — one caps money, the other caps output.
+   */
+  generationPolicy: CampaignBundleManifest["generationPolicy"];
   measurement: CampaignBundleManifest["measurementPlan"];
   approval: StudioApproval;
   /**
@@ -293,6 +299,7 @@ export function toStudioView(input: StudioViewInput): StudioView {
     })),
     actions: manifest.actions,
     totalSpendCeiling: manifest.totalSpendCeiling,
+    generationPolicy: manifest.generationPolicy,
     // The preregistered plan, and only the plan. A verdict field here would
     // invite a component to render an outcome for a campaign that has not run.
     measurement: manifest.measurementPlan,
@@ -331,7 +338,11 @@ function toChangeSummary(
 
 /** `directions[0].copy[0].hook` reads as "Hook" to a person reading a diff. */
 function readableChangePath(path: string): string {
-  const leaf = path.split(".").at(-1)?.replace(/\[\d+\]/g, "") ?? path;
+  const leaf =
+    path
+      .split(".")
+      .at(-1)
+      ?.replace(/\[\d+\]/g, "") ?? path;
   const spaced = leaf.replace(/([A-Z])/g, " $1").toLowerCase();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }

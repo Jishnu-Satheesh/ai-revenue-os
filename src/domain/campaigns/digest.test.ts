@@ -95,6 +95,36 @@ describe("bundleDigest", () => {
     expect(bundleDigest(manifest)).not.toBe(bundleDigest(validManifest()));
   });
 
+  it("changes when the variant cap changes", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.maxVariantsPerDirection = 3;
+
+    expect(bundleDigest(manifest)).not.toBe(bundleDigest(validManifest()));
+  });
+
+  it("changes when the policy expiry changes", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.policyExpiresAt = "2026-10-31T14:00:00.000Z";
+
+    expect(bundleDigest(manifest)).not.toBe(bundleDigest(validManifest()));
+  });
+
+  it("changes when the locked offer changes", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.lockedOfferRef = "dinner-set-menu-2026-09";
+
+    expect(bundleDigest(manifest)).not.toBe(bundleDigest(validManifest()));
+  });
+
+  it("ignores the order the locked assertion keys happened to be listed in", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.lockedAssertionKeys = [
+      ...manifest.generationPolicy.lockedAssertionKeys,
+    ].reverse();
+
+    expect(bundleDigest(manifest)).toBe(bundleDigest(validManifest()));
+  });
+
   it("refuses a value a digest cannot represent rather than coercing it", () => {
     const manifest = validManifest() as unknown as Record<string, unknown>;
     manifest.objective = Number.NaN;
@@ -183,6 +213,34 @@ describe("diffManifests", () => {
     expect(diff.invalidatesApproval).toBe(true);
     expect(diff.changes.map((change) => change.path)).toContain("directions[0].copy[0].caption");
     expect(diff.changes.every((change) => change.materiality === "material")).toBe(true);
+  });
+
+  it("classifies a widened variant cap as material and invalidating", () => {
+    // Raising the cap authorizes creative the operator never agreed to, so it
+    // is exactly as material as changing the copy itself.
+    const after = validManifest();
+    after.version = 2;
+    after.generationPolicy.maxVariantsPerDirection = 6;
+    after.generationPolicy.maxVariantsTotal = 18;
+
+    const diff = diffManifests(validManifest(), after);
+
+    expect(diff.invalidatesApproval).toBe(true);
+    expect(diff.changes.map((change) => change.path)).toContain(
+      "generationPolicy.maxVariantsPerDirection",
+    );
+    expect(diff.changes.every((change) => change.materiality === "material")).toBe(true);
+  });
+
+  it("classifies an extended policy expiry as material and invalidating", () => {
+    const after = validManifest();
+    after.version = 2;
+    after.generationPolicy.policyExpiresAt = "2026-12-31T14:00:00.000Z";
+
+    const diff = diffManifests(validManifest(), after);
+
+    expect(diff.invalidatesApproval).toBe(true);
+    expect(diff.changes.map((change) => change.path)).toContain("generationPolicy.policyExpiresAt");
   });
 
   it("reports the spend ceiling change with both values", () => {

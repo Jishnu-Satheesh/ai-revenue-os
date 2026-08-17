@@ -198,19 +198,49 @@ export const campaignMeasurementPlanSchema = z.strictObject({
   insufficientEvidenceConclusion: z.literal("inconclusive"),
 });
 
+/**
+ * The bound an approval actually authorizes.
+ *
+ * Approving a campaign is approving a promise: an offer, a set of claims, and a
+ * limit. Approving an image is approving a pitch: how that promise is phrased
+ * and shown. Separating the two is what lets one human decision authorize many
+ * creative variants without any of them saying something nobody agreed to.
+ *
+ * The policy lives inside the manifest, so it is inside the digest and inside
+ * the approval binding. Widening it is therefore a material change like any
+ * other: it creates a new version and invalidates the old approval.
+ */
+export const campaignGenerationPolicySchema = z.strictObject({
+  maxVariantsPerDirection: z.number().int().positive().max(50),
+  maxVariantsTotal: z.number().int().positive().max(300),
+  /**
+   * When the licence to generate ends. Deliberately *not* validated as a future
+   * instant: whether the window is still open is a question with a clock, asked
+   * at generation time. A schema that refused a lapsed policy would make an
+   * approved campaign unparseable the moment it ended, destroying the record of
+   * what was approved along with it.
+   */
+  policyExpiresAt: isoTimestampSchema,
+  /** The offer every variant must sell. Null for a campaign that sells none. */
+  lockedOfferRef: z.string().trim().min(1).max(240).nullable(),
+  /** Claims a variant may repeat and may never add to. Order is incidental. */
+  lockedAssertionKeys: z.array(z.string().trim().min(1).max(160)).max(120),
+});
+
 export const campaignSourceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("manual_brief"), sourceId: uuidSchema }),
   z.strictObject({ kind: z.literal("decision_opportunity"), sourceId: uuidSchema }),
 ]);
 
 export const campaignBundleManifestSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   campaignId: uuidSchema,
   version: z.number().int().positive(),
   source: campaignSourceSchema,
   objective: z.string().trim().min(1).max(600),
   rationale: z.string().trim().min(1).max(4_000),
   generationProfile: campaignGenerationProfileSchema,
+  generationPolicy: campaignGenerationPolicySchema,
   directions: z.array(creativeDirectionSchema).min(3).max(6),
   actions: z.array(campaignChannelActionSchema).min(1).max(40),
   assets: z.array(campaignAssetSchema).min(1).max(60),
@@ -235,6 +265,30 @@ function checkStructure(manifest: ManifestShape, context: z.RefinementCtx): void
   checkAssetGraph(manifest, context);
   checkActionCoverage(manifest, context);
   checkSpend(manifest, context);
+  checkGenerationPolicy(manifest, context);
+}
+
+/**
+ * The total cap may never be able to starve a direction.
+ *
+ * With five per direction and three directions, a total of twelve looks like a
+ * reasonable budget and is really a race: whichever directions generate first
+ * consume it. The loser is usually the experimental direction, which is the one
+ * whose data the campaign most needs. Requiring the total to cover every
+ * direction at its own cap makes the per-direction number the operative limit
+ * and leaves the total as an honest backstop.
+ */
+function checkGenerationPolicy(manifest: ManifestShape, context: z.RefinementCtx): void {
+  const policy = manifest.generationPolicy;
+  const required = policy.maxVariantsPerDirection * manifest.directions.length;
+
+  if (policy.maxVariantsTotal < required) {
+    context.addIssue({
+      code: "custom",
+      path: ["generationPolicy", "maxVariantsTotal"],
+      message: `A total cap of ${policy.maxVariantsTotal} cannot cover ${manifest.directions.length} directions at ${policy.maxVariantsPerDirection} each; it needs at least ${required}.`,
+    });
+  }
 }
 
 function checkDirections(manifest: ManifestShape, context: z.RefinementCtx): void {

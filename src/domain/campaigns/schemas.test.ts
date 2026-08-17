@@ -185,3 +185,84 @@ describe("campaignBundleSchema", () => {
     ]);
   });
 });
+
+describe("generationPolicy", () => {
+  it("is required, because an approval with no bound is not an approval", () => {
+    const manifest = validManifest() as Record<string, unknown>;
+    delete manifest.generationPolicy;
+
+    const result = campaignBundleSchema.safeParse(manifest);
+
+    expect(result.success).toBe(false);
+    expect(issuePaths(result)).toContain("generationPolicy");
+  });
+
+  it("declares itself version 2, because version 1 has no policy to read", () => {
+    const manifest = { ...validManifest(), schemaVersion: 1 };
+
+    expect(campaignBundleSchema.safeParse(manifest).success).toBe(false);
+  });
+
+  it("refuses a total cap that could starve a direction", () => {
+    const manifest = validManifest();
+    // Three directions at five each needs fifteen. Twelve means the first two
+    // directions to generate can consume the budget and the experimental
+    // direction — the one whose data matters most — gets whatever is left.
+    manifest.generationPolicy.maxVariantsPerDirection = 5;
+    manifest.generationPolicy.maxVariantsTotal = 12;
+
+    const result = campaignBundleSchema.safeParse(manifest);
+
+    expect(result.success).toBe(false);
+    expect(issuePaths(result)).toContain("generationPolicy.maxVariantsTotal");
+  });
+
+  it("accepts a total cap exactly large enough for every direction", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.maxVariantsPerDirection = 5;
+    manifest.generationPolicy.maxVariantsTotal = 15;
+
+    expect(campaignBundleSchema.safeParse(manifest).success).toBe(true);
+  });
+
+  it("refuses a per-direction cap of zero rather than reading it as unlimited", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.maxVariantsPerDirection = 0;
+
+    expect(campaignBundleSchema.safeParse(manifest).success).toBe(false);
+  });
+
+  it("refuses an expiry that is not a UTC instant", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.policyExpiresAt = "2026-09-30T12:00:00+04:00";
+
+    const result = campaignBundleSchema.safeParse(manifest);
+
+    expect(result.success).toBe(false);
+    expect(issuePaths(result)).toContain("generationPolicy.policyExpiresAt");
+  });
+
+  it("accepts a past expiry, so a settled campaign stays readable", () => {
+    // Whether the window is still open is an evaluation question with a clock.
+    // A schema that refused a lapsed policy would make an approved campaign
+    // unparseable the moment it ended, destroying its own audit trail.
+    const manifest = validManifest();
+    manifest.generationPolicy.policyExpiresAt = "2020-01-01T00:00:00.000Z";
+
+    expect(campaignBundleSchema.safeParse(manifest).success).toBe(true);
+  });
+
+  it("allows a campaign with no offer to lock nothing", () => {
+    const manifest = validManifest();
+    manifest.generationPolicy.lockedOfferRef = null;
+
+    expect(campaignBundleSchema.safeParse(manifest).success).toBe(true);
+  });
+
+  it("rejects an unknown policy field rather than ignoring it", () => {
+    const manifest = validManifest();
+    (manifest.generationPolicy as Record<string, unknown>).allowClaimEdits = true;
+
+    expect(campaignBundleSchema.safeParse(manifest).success).toBe(false);
+  });
+});

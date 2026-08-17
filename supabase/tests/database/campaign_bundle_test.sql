@@ -125,7 +125,14 @@ select extensions.ok(
 create function pg_temp.campaign_manifest(campaign_id uuid, objective text)
 returns jsonb language sql immutable set search_path = '' as $$
   select pg_catalog.jsonb_build_object(
-    'schemaVersion', 1,
+    'schemaVersion', 2,
+    'generationPolicy', pg_catalog.jsonb_build_object(
+      'maxVariantsPerDirection', 4,
+      'maxVariantsTotal', 12,
+      'policyExpiresAt', '2026-12-01T00:00:00.000Z',
+      'lockedOfferRef', null,
+      'lockedAssertionKeys', '[]'::jsonb
+    ),
     'campaignId', campaign_id,
     'version', 1,
     'source', pg_catalog.jsonb_build_object('kind', 'manual_brief', 'sourceId', campaign_id),

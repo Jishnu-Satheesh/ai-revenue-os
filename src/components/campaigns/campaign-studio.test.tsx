@@ -279,6 +279,26 @@ describe("the cockpit shows what an operator is being asked to authorise", () =>
     expect(screen.getByText(/generation profile/i)).toBeInTheDocument();
   });
 
+  it("states how much creative the approval authorizes, and until when", () => {
+    renderStudio();
+
+    // Approving authorizes creative that does not exist yet. The bound has to
+    // be legible before the button is pressed, not discoverable afterwards.
+    const rail = within(screen.getByRole("complementary", { name: /review rail/i }));
+    expect(rail.getByText("Creative variants")).toBeInTheDocument();
+    expect(rail.getByText(/up to 4 per direction \(12 total\)/i)).toBeInTheDocument();
+    expect(rail.getByText("Generation window")).toBeInTheDocument();
+  });
+
+  it("names what a variant may never change, so the promise reads as fixed", () => {
+    renderStudio();
+
+    const rail = within(screen.getByRole("complementary", { name: /review rail/i }));
+    expect(
+      rail.getByText(/none may change the offer, the claims, the audience/i),
+    ).toBeInTheDocument();
+  });
+
   it("counts the organic volume rather than describing it vaguely", () => {
     renderStudio();
 
@@ -290,7 +310,10 @@ describe("the cockpit shows what an operator is being asked to authorise", () =>
     renderStudio();
 
     expect(screen.getByText(/internal tags \(never published\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/hashtags/i)).toBeInTheDocument();
+    // Pinned to the direction panel's own field label: the rail's envelope copy
+    // now mentions hashtags too, and this assertion is about the two lists
+    // sitting visibly apart inside a direction.
+    expect(screen.getByText("Hashtags")).toBeInTheDocument();
   });
 
   it("shows the timing rationale, not just the schedule", () => {

@@ -48,8 +48,11 @@ const OUTPUT_CONTRACT = [
   "Ids must be internally consistent: an action's directionId and a direction's",
   "assetIds must exactly match ids you used in directions[] and assets[].",
   "",
-  "schemaVersion: 1",
+  "schemaVersion: 2",
   "campaignId: any UUID; it is overwritten with the real campaign id",
+  "generationPolicy: OMIT this field entirely. It bounds how many variants may",
+  "  later be generated and until when, so it is derived from your schedule and",
+  "  the pinned evidence rather than proposed. Anything you supply is replaced.",
   "version: 1",
   'source: { "kind": "manual_brief" | "decision_opportunity", "sourceId": UUID }',
   "objective: string (<=600 chars)",
@@ -137,7 +140,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
  */
 export function normalizeManifestIds(
   candidate: unknown,
-  authoritative: { campaignId: string },
+  authoritative: { campaignId: string; policy: AuthoritativePolicyInput },
 ): unknown {
   if (typeof candidate !== "object" || candidate === null) return candidate;
   const manifest = candidate as Record<string, unknown>;
@@ -146,6 +149,12 @@ export function normalizeManifestIds(
   // manifest's campaignId against the row it is being written to, so a model
   // that guessed one fails the write after every image has been paid for.
   manifest.campaignId = authoritative.campaignId;
+
+  // The policy is the bound on this model's own future authority: how many
+  // variants it may produce and until when. Asking it to propose that would be
+  // asking it how much rope it would like. It is derived here instead, from
+  // the pinned evidence and the schedule the bundle already declares.
+  manifest.generationPolicy = derivePolicy(manifest, authoritative.policy);
 
   const declared = new Map<string, string>();
   const declare = (value: unknown) => {
@@ -179,6 +188,60 @@ export function normalizeManifestIds(
   }
 
   return manifest;
+}
+
+/**
+ * How many variants one direction may produce under a single approval.
+ *
+ * Four is enough for the delivery system to tell creatives apart and small
+ * enough that an operator can still scan the fleet. It stays a constant until
+ * an operator has a reason to change it, because a default nobody chose is
+ * safer than a number a model picked.
+ */
+export const DEFAULT_MAX_VARIANTS_PER_DIRECTION = 4;
+
+export type AuthoritativePolicyInput = {
+  /** The offer the campaign actually recorded. Null when it sells none. */
+  offer: string | null;
+  /** Keys of the pinned evidence. A variant may repeat these and add none. */
+  factKeys: readonly string[];
+  maxVariantsPerDirection?: number;
+};
+
+/**
+ * The licence to generate ends when the campaign's last send does.
+ *
+ * Derived from the schedule rather than configured, because new creative after
+ * the final action has nothing left to run on. Taking the latest action keeps
+ * the window exactly as long as the bundle an operator is about to read.
+ */
+function derivePolicy(
+  manifest: Record<string, unknown>,
+  input: AuthoritativePolicyInput,
+): Record<string, unknown> {
+  const perDirection = input.maxVariantsPerDirection ?? DEFAULT_MAX_VARIANTS_PER_DIRECTION;
+  const directionCount = Array.isArray(manifest.directions) ? manifest.directions.length : 0;
+
+  const scheduled = (Array.isArray(manifest.actions) ? manifest.actions : [])
+    .map((action) =>
+      typeof action === "object" && action !== null
+        ? (action as Record<string, unknown>).scheduledFor
+        : undefined,
+    )
+    .filter((value): value is string => typeof value === "string")
+    .sort();
+  const latest = scheduled.at(-1);
+
+  return {
+    maxVariantsPerDirection: perDirection,
+    // Never able to starve a direction; see checkGenerationPolicy.
+    maxVariantsTotal: perDirection * Math.max(directionCount, 1),
+    // A malformed or absent schedule leaves the field as the model's problem to
+    // fail on, rather than inventing a window the bundle does not support.
+    policyExpiresAt: latest ?? "",
+    lockedOfferRef: input.offer,
+    lockedAssertionKeys: [...input.factKeys],
+  };
 }
 
 const PLACEMENT_SIZES = {
@@ -268,7 +331,13 @@ export function createCampaignPlanner(
         });
 
         return {
-          candidate: normalizeManifestIds(result.output, { campaignId: context.campaignId }),
+          candidate: normalizeManifestIds(result.output, {
+            campaignId: context.campaignId,
+            policy: {
+              offer: input.context.offer,
+              factKeys: input.context.facts.map((fact) => fact.key),
+            },
+          }),
           costMinor: result.usage.estimatedCostMinor,
         };
       } catch (error) {

@@ -56,7 +56,7 @@ function copy(hook: string) {
 
 export function validManifest(): CampaignBundleManifest {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     campaignId: ID.campaign,
     version: 1,
     source: { kind: "manual_brief", sourceId: ID.brief },
@@ -64,6 +64,13 @@ export function validManifest(): CampaignBundleManifest {
     rationale:
       "Weekday lunch has the widest gap between capacity and covers, and the contribution margin is already measured.",
     generationProfile: "brand_guided",
+    generationPolicy: {
+      maxVariantsPerDirection: 4,
+      maxVariantsTotal: 12,
+      policyExpiresAt: "2026-09-30T14:00:00.000Z",
+      lockedOfferRef: "lunch-set-menu-2026-09",
+      lockedAssertionKeys: ["offer.lunch_set_price", "hours.weekday_lunch"],
+    },
     directions: [
       {
         id: ID.control,

@@ -30,6 +30,11 @@ export function normalizeManifest(manifest: CampaignBundleManifest): CampaignBun
       .map((direction) => normalizeDirection(direction)),
     actions: [...manifest.actions].sort(compareActions),
     assets: [...manifest.assets].sort((left, right) => left.id.localeCompare(right.id)),
+    generationPolicy: {
+      ...manifest.generationPolicy,
+      // A set of claims a variant may repeat, not a sequence anyone reads.
+      lockedAssertionKeys: sortedUnique(manifest.generationPolicy.lockedAssertionKeys),
+    },
     measurementPlan: {
       ...manifest.measurementPlan,
       // A set of guardrails, not a sequence: nothing reads them in order.

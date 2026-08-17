@@ -59,6 +59,14 @@ insert into public.campaign_bundle_versions (
   1,
   '7a000000-0000-4000-8000-000000000401'::uuid,
   jsonb_build_object(
+    'schemaVersion', 2,
+    'generationPolicy', jsonb_build_object(
+      'maxVariantsPerDirection', 4,
+      'maxVariantsTotal', 12,
+      'policyExpiresAt', '2026-12-01T00:00:00.000Z',
+      'lockedOfferRef', null,
+      'lockedAssertionKeys', '[]'::jsonb
+    ),
     'version', 1,
     'campaignId', '7a000000-0000-4000-8000-000000000301',
     'generationProfile', 'brand_guided',

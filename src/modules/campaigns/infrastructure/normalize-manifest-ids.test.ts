@@ -5,7 +5,10 @@ vi.mock("@/lib/env", () => ({ env: {} }));
 
 import { normalizeManifestIds } from "@/modules/campaigns/infrastructure/campaign-planner";
 
-const AUTH = { campaignId: "c0000000-0000-4000-8000-000000000001" };
+const AUTH = {
+  campaignId: "c0000000-0000-4000-8000-000000000001",
+  policy: { offer: "lunch-set-menu-2026-09", factKeys: ["lunch_covers_gap"] },
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -109,5 +112,69 @@ describe("model identifiers become real UUIDs", () => {
   it("passes through anything that is not an object", () => {
     expect(normalizeManifestIds(null, AUTH)).toBeNull();
     expect(normalizeManifestIds("not json", AUTH)).toBe("not json");
+  });
+});
+
+describe("the generation policy is derived, never proposed", () => {
+  function scheduled() {
+    return {
+      directions: [
+        { id: "d1", kind: "control", assetIds: [] },
+        { id: "d2", kind: "evidence_led", assetIds: [] },
+        { id: "d3", kind: "experimental", assetIds: [] },
+      ],
+      assets: [],
+      actions: [
+        { id: "a1", directionId: "d1", scheduledFor: "2026-09-01T14:00:00.000Z" },
+        { id: "a2", directionId: "d3", scheduledFor: "2026-09-05T14:00:00.000Z" },
+        { id: "a3", directionId: "d2", scheduledFor: "2026-09-03T14:00:00.000Z" },
+      ],
+    };
+  }
+
+  it("replaces a policy the model tried to grant itself", () => {
+    const input = {
+      ...scheduled(),
+      generationPolicy: {
+        maxVariantsPerDirection: 500,
+        maxVariantsTotal: 5_000,
+        policyExpiresAt: "2099-01-01T00:00:00.000Z",
+        lockedOfferRef: null,
+        lockedAssertionKeys: ["award.best_lunch_2026"],
+      },
+    };
+
+    const policy = (normalizeManifestIds(input, AUTH) as Record<string, unknown>)
+      .generationPolicy as Record<string, unknown>;
+
+    expect(policy.maxVariantsPerDirection).toBe(4);
+    expect(policy.policyExpiresAt).toBe("2026-09-05T14:00:00.000Z");
+    expect(policy.lockedAssertionKeys).toEqual(["lunch_covers_gap"]);
+  });
+
+  it("ends the window at the last scheduled action, whatever order they arrived in", () => {
+    const policy = (normalizeManifestIds(scheduled(), AUTH) as Record<string, unknown>)
+      .generationPolicy as Record<string, unknown>;
+
+    expect(policy.policyExpiresAt).toBe("2026-09-05T14:00:00.000Z");
+  });
+
+  it("sizes the total so no direction can be starved by another", () => {
+    const policy = (normalizeManifestIds(scheduled(), AUTH) as Record<string, unknown>)
+      .generationPolicy as Record<string, unknown>;
+
+    expect(policy.maxVariantsTotal).toBe(12);
+  });
+
+  it("locks only the offer the campaign actually recorded", () => {
+    const policy = (
+      normalizeManifestIds(scheduled(), {
+        ...AUTH,
+        policy: { offer: null, factKeys: [] },
+      }) as Record<string, unknown>
+    ).generationPolicy as Record<string, unknown>;
+
+    expect(policy.lockedOfferRef).toBeNull();
+    expect(policy.lockedAssertionKeys).toEqual([]);
   });
 });

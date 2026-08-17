@@ -85,6 +85,10 @@ function alignedManifest() {
   const context = contextFor();
   manifest.measurementPlan.primaryMetricKey = context.primaryMetricKey;
   manifest.measurementPlan.baselineSource = context.baselineSource;
+  // The policy is pinned evidence like any other: it may only lock claims this
+  // context actually carries, and may only name an offer this context records.
+  manifest.generationPolicy.lockedAssertionKeys = context.facts.map((fact) => fact.key);
+  manifest.generationPolicy.lockedOfferRef = context.offer;
   return manifest;
 }
 
@@ -259,9 +263,9 @@ describe("evaluating generated bundles", () => {
   });
 
   it("explains a past schedule without echoing the model's own words", () => {
-    expect(safeFailureSummary([{ code: "action_scheduled_in_past", detail: "whatever" }])).toContain(
-      "before there was time to approve it",
-    );
+    expect(
+      safeFailureSummary([{ code: "action_scheduled_in_past", detail: "whatever" }]),
+    ).toContain("before there was time to approve it");
   });
 
   it("rejects an extra field rather than ignoring it", () => {
@@ -330,6 +334,36 @@ describe("evaluating generated bundles", () => {
 
     if (result.outcome !== "invalid") throw new Error("expected invalid");
     expect(result.failures.map((failure) => failure.code)).toContain("invented_offer");
+  });
+
+  it("rejects a policy that has already expired when it is generated", () => {
+    const manifest = alignedManifest();
+    manifest.generationPolicy.policyExpiresAt = "2026-08-16T09:00:00.000Z";
+
+    const result = evaluate(manifest);
+
+    if (result.outcome !== "invalid") throw new Error("expected invalid");
+    expect(result.failures.map((failure) => failure.code)).toContain("policy_expired");
+  });
+
+  it("rejects a policy locking a claim the pinned evidence does not carry", () => {
+    const manifest = alignedManifest();
+    manifest.generationPolicy.lockedAssertionKeys = ["award.best_lunch_2026"];
+
+    const result = evaluate(manifest);
+
+    if (result.outcome !== "invalid") throw new Error("expected invalid");
+    expect(result.failures.map((failure) => failure.code)).toContain("unsourced_locked_assertion");
+  });
+
+  it("rejects a policy naming an offer the campaign does not record", () => {
+    const manifest = alignedManifest();
+    manifest.generationPolicy.lockedOfferRef = "half-price-everything";
+
+    const result = evaluate(manifest, contextFor({ offer: undefined }));
+
+    if (result.outcome !== "invalid") throw new Error("expected invalid");
+    expect(result.failures.map((failure) => failure.code)).toContain("locked_offer_without_offer");
   });
 
   it("carries a content policy breach through as a failure", () => {

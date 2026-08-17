@@ -99,6 +99,23 @@ function formatMoney(money: Money | null): string {
   }).format(money.amountMinor / 100);
 }
 
+/**
+ * The generation window, as a date an operator can hold in their head.
+ *
+ * Rendered in the reader's locale from a UTC instant. An unparseable value
+ * shows itself rather than a fallback date, because a wrong-looking window is
+ * recoverable and a plausible-looking wrong one is not.
+ */
+function formatWindow(instant: string): string {
+  const parsed = new Date(instant);
+  if (Number.isNaN(parsed.getTime())) return instant;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(parsed);
+}
+
 /** A rail heading. Small and quiet, so the values carry the page. */
 function RailHeading({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -727,6 +744,30 @@ export function CampaignStudio({
             <Row label="Organic volume" value={volume} />
             <Row label="Spend ceiling" value={formatMoney(view.totalSpendCeiling)} />
             <Row label="Actions covered" value={view.actions.length} />
+            <Row
+              label="Creative variants"
+              value={`Up to ${view.generationPolicy.maxVariantsPerDirection} per direction (${view.generationPolicy.maxVariantsTotal} total)`}
+            />
+            <Row
+              label="Generation window"
+              value={`Until ${formatWindow(view.generationPolicy.policyExpiresAt)}`}
+            />
+            {/*
+              Approving this bundle authorizes creative that does not exist yet,
+              so the bound has to be readable before the button is pressed. An
+              operator who cannot say what they are agreeing to has not agreed
+              to it, whatever the approval row records.
+            */}
+            <p className="text-xs text-muted-foreground">
+              Approving authorizes up to {view.generationPolicy.maxVariantsTotal} creative variants
+              until {formatWindow(view.generationPolicy.policyExpiresAt)}. Each one may vary the
+              image, hook, caption, hashtags and call to action.{" "}
+              <span className="font-medium text-foreground">
+                None may change the offer, the claims, the audience, the placement, the schedule or
+                the spend
+              </span>{" "}
+              — those are fixed by this approval, and changing any of them needs a new one.
+            </p>
           </section>
 
           <section className="flex flex-col gap-3 rounded-lg border p-3">
@@ -754,10 +795,7 @@ export function CampaignStudio({
             </div>
           </section>
 
-          <VersionChangeSummary
-            summary={view.changeSummary}
-            nextVersion={view.versionNumber + 1}
-          />
+          <VersionChangeSummary summary={view.changeSummary} nextVersion={view.versionNumber + 1} />
 
           {view.versions.length < 2 ? null : (
             <section className="flex flex-col gap-2 rounded-lg border p-3">

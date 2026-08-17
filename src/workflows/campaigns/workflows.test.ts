@@ -38,7 +38,12 @@ const LIMITS = {
   facebook: { maxHashtags: 30, maxCopyCharacters: 2_200 },
 };
 
-/** A snapshot whose registered metric and baseline match the fixture manifest. */
+/**
+ * A snapshot pinning exactly what the fixture manifest claims: its registered
+ * metric, its baseline, the offer its policy locks, and every assertion key
+ * that policy names. A snapshot that carried less would fail generation for
+ * missing evidence rather than for whatever the test is actually about.
+ */
 function pinnedSnapshot() {
   const manifest = validManifest();
   return {
@@ -50,11 +55,16 @@ function pinnedSnapshot() {
       restrictedTerms: [],
       objective: manifest.objective,
       audience: "Nearby office workers",
+      offer: manifest.generationPolicy.lockedOfferRef,
       currency: "AED",
       timeZone: "Asia/Dubai",
       primaryMetricKey: manifest.measurementPlan.primaryMetricKey,
       baselineSource: manifest.measurementPlan.baselineSource,
-      facts: [{ key: "gap", value: "Lunch runs at 41%.", sourceRef: "economics:2026-07" }],
+      facts: manifest.generationPolicy.lockedAssertionKeys.map((key) => ({
+        key,
+        value: "Lunch runs at 41% of capacity.",
+        sourceRef: "economics:2026-07",
+      })),
     },
     generationProfile: "brand_guided" as const,
     brandAssetVersionIds: ["a0000000-0000-4000-8000-000000000009"],

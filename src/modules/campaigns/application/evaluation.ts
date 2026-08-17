@@ -28,7 +28,10 @@ export type EvaluationFailure = {
     | "currency_mismatch"
     | "content_policy"
     | "too_many_assets"
-    | "action_scheduled_in_past";
+    | "action_scheduled_in_past"
+    | "policy_expired"
+    | "unsourced_locked_assertion"
+    | "locked_offer_without_offer";
   detail: string;
   path?: readonly (string | number)[];
 };
@@ -68,6 +71,7 @@ export function evaluateGeneratedBundle(input: EvaluationInput): EvaluationResul
   failures.push(...checkAssetCount(manifest, input.maxAssets ?? DEFAULT_MAX_ASSETS));
   failures.push(...checkCurrency(manifest, input.context));
   failures.push(...checkSchedule(manifest, input.context));
+  failures.push(...checkGenerationPolicy(manifest, input.context));
   failures.push(...checkClaims(manifest, input.context));
 
   const policy = evaluateContentPolicy({
@@ -154,6 +158,59 @@ function checkSchedule(
       },
     ];
   });
+}
+
+/**
+ * The licence to generate has to be worth something when it is granted.
+ *
+ * Like `checkSchedule`, this is deliberately not a schema rule. Whether a
+ * policy window is still open is a question with a clock in it, and asking it
+ * at parse time would make an approved campaign unreadable the moment its
+ * window closed — losing the record of what was approved along with it.
+ *
+ * The locked assertions get the same treatment as any other claim: a variant
+ * may repeat what the organization actually recorded, so a policy that locks a
+ * claim nobody has evidence for is authorizing an invention in advance.
+ */
+function checkGenerationPolicy(
+  manifest: CampaignBundleManifest,
+  context: GenerationContext,
+): EvaluationFailure[] {
+  const failures: EvaluationFailure[] = [];
+  const policy = manifest.generationPolicy;
+
+  const expiresAt = Date.parse(policy.policyExpiresAt);
+  const generatedAt = Date.parse(context.generatedAt);
+  if (Number.isFinite(expiresAt) && Number.isFinite(generatedAt) && expiresAt <= generatedAt) {
+    failures.push({
+      code: "policy_expired",
+      detail: `The policy expires at ${policy.policyExpiresAt}, at or before the ${context.generatedAt} it was generated at, so it authorizes nothing.`,
+      path: ["generationPolicy", "policyExpiresAt"],
+    });
+  }
+
+  const factKeys = new Set(context.facts.map((fact) => fact.key));
+  for (const [index, key] of policy.lockedAssertionKeys.entries()) {
+    if (!factKeys.has(key)) {
+      failures.push({
+        code: "unsourced_locked_assertion",
+        detail: `The policy locks assertion "${key}", which is not in the pinned evidence this campaign may draw from.`,
+        path: ["generationPolicy", "lockedAssertionKeys", index],
+      });
+    }
+  }
+
+  // A policy naming an offer for a campaign that records none would let every
+  // variant sell something the organization never agreed to sell.
+  if (policy.lockedOfferRef !== null && context.offer === null) {
+    failures.push({
+      code: "locked_offer_without_offer",
+      detail: `The policy locks offer "${policy.lockedOfferRef}" but this campaign has no recorded offer.`,
+      path: ["generationPolicy", "lockedOfferRef"],
+    });
+  }
+
+  return failures;
 }
 
 /**
@@ -276,6 +333,9 @@ export function safeFailureSummary(failures: readonly EvaluationFailure[]): stri
     content_policy: "it broke a brand or platform rule",
     too_many_assets: "it produced more images than a bundle may carry",
     action_scheduled_in_past: "it scheduled a post before there was time to approve it",
+    policy_expired: "its licence to generate had already run out",
+    unsourced_locked_assertion: "it locked a claim the evidence does not support",
+    locked_offer_without_offer: "it locked an offer this campaign does not have",
   };
   return `Generation was rejected because ${codes.map((code) => explanations[code]).join(", and ")}.`;
 }
