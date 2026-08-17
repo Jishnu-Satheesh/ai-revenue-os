@@ -56,6 +56,22 @@ export function idempotencyKey(): string {
   return globalThis.crypto.randomUUID();
 }
 
+/**
+ * Starts generation for a campaign that has none.
+ *
+ * A fresh idempotency key each time, because this is only ever offered after a
+ * run stopped or failed: the point is to do the work again, not to replay the
+ * outcome of the attempt that did not finish.
+ */
+export function startGeneration(input: {
+  organizationId: string;
+  campaignId: string;
+  idempotencyKey: string;
+}): Promise<ActionResult<{ runId: string; replayed: boolean }>> {
+  const { organizationId, campaignId, ...body } = input;
+  return post(`/api/organizations/${organizationId}/campaigns/${campaignId}/generate`, body);
+}
+
 export function requestRevision(input: {
   organizationId: string;
   campaignId: string;

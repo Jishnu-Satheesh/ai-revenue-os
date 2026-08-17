@@ -4,6 +4,7 @@ import { AlertTriangle, FileText, Loader2, Plus, Sparkles } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { GenerateAgainButton } from "@/components/campaigns/generate-again-button";
 import {
   Card,
   CardContent,
@@ -226,13 +227,20 @@ export function CampaignPortfolio({
                       <Button variant="outline" size="sm" asChild>
                         <Link href={href}>Review</Link>
                       </Button>
-                    ) : (
+                    ) : campaign.generation.status === "generating" ? (
                       // `disabled` on a Button with `asChild` renders an anchor,
                       // and an anchor ignores it — which is how a campaign with
                       // no version stayed clickable all the way to a 404.
                       <Button variant="outline" size="sm" disabled>
                         Review
                       </Button>
+                    ) : (
+                      // Stopped or failed. The notice above says it can be
+                      // started again, so here is the way to do it.
+                      <GenerateAgainButton
+                        organizationId={organizationId}
+                        campaignId={campaign.id}
+                      />
                     )}
                   </CardFooter>
                 </Card>

@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CampaignPortfolio } from "@/components/campaigns/campaign-portfolio";
 import type { CampaignListItem } from "@/modules/campaigns/application/studio-view";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 afterEach(cleanup);
 
@@ -191,6 +194,28 @@ describe("a campaign with no proposal cannot be opened", () => {
 
     expect(card.getByText(/generation failed/i)).toBeInTheDocument();
     expect(card.getByText(/brand_voice/)).toBeInTheDocument();
+  });
+
+  it("offers the restart it promises when generation stopped", () => {
+    // The notice says the run can be started again. A sentence describing an
+    // action nobody can take is worse than saying nothing at all.
+    renderPortfolio([
+      pending({
+        status: "stalled",
+        detail: "Generation stopped responding and did not finish. It can be started again.",
+      }),
+    ]);
+    const card = within(screen.getByRole("listitem"));
+
+    expect(card.getByRole("button", { name: /generate again/i })).toBeEnabled();
+  });
+
+  it("does not offer a restart while a worker still holds the run", () => {
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+    const card = within(screen.getByRole("listitem"));
+
+    expect(card.queryByRole("button", { name: /generate again/i })).not.toBeInTheDocument();
+    expect(card.getByRole("button", { name: /review/i })).toBeDisabled();
   });
 
   it("says nothing about generation once a proposal exists", () => {
