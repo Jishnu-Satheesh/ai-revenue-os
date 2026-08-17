@@ -17,6 +17,14 @@
 - `adrs/0012-business-memory-cache-boundary.md`
 - `adrs/0013-gated-artifact-learning.md`
 - `adrs/0014-decision-value-and-evidence-tiers.md`
+- `adrs/0015-campaign-bundle-system-of-record.md`
+- `adrs/0015-user-scoped-interface-state.md`
+- `adrs/0016-integration-action-capabilities.md`
+- `adrs/0017-campaign-runtime-and-approval.md`
+- `adrs/0018-telegram-operator-review.md`
+- `adrs/0019-campaign-measurement-and-learning.md`
+- `adrs/0020-bounded-creative-family-approval.md`
+- `adrs/0021-two-speed-campaign-optimization.md`
 - `context/00-vision.md`
 - `context/01-project-overview.md`
 - `context/02-product-principles.md`
@@ -62,3 +70,4 @@
 - `specs/013-margin-firewall.md`
 - `specs/014-switchback-experiments.md`
 - `specs/015-metric-registry-and-normalized-metrics.md`
+- `specs/016-campaign-feedback-loop.md`
