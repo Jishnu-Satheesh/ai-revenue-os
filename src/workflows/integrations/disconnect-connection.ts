@@ -35,7 +35,7 @@ export async function runDisconnectConnection(
       organizationId: payload.organizationId,
       connectionId: payload.connectionId,
       ingestionRunId: payload.ingestionRunId,
-      idempotencyKey: payload.idempotencyKey,
+      idempotencyKey: payload.runIdempotencyKey,
       claimToken: begin.claimToken,
       nextScheduledSyncAt: null,
     });
@@ -53,7 +53,7 @@ export async function runDisconnectConnection(
       organizationId: payload.organizationId,
       connectionId: payload.connectionId,
       ingestionRunId: payload.ingestionRunId,
-      idempotencyKey: payload.idempotencyKey,
+      idempotencyKey: payload.runIdempotencyKey,
       claimToken: begin.claimToken,
       status: "revoked",
     });

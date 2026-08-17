@@ -11,9 +11,15 @@ import { onboardingSectionRegistry } from "@/domain/onboarding/section-registry"
 import { canCompleteSection } from "@/domain/onboarding/section-registry";
 
 describe("onboarding domain vocabulary", () => {
-  it("registers all ten onboarding sections across six phases", () => {
-    expect(onboardingSectionKeys).toHaveLength(10);
+  it("registers every onboarding section across six phases", () => {
+    expect(onboardingSectionKeys).toHaveLength(11);
     expect(new Set(onboardingSectionRegistry.map((section) => section.phase)).size).toBe(6);
+    // The registry and the key list are two lists of the same thing, and a
+    // section present in one but not the other renders nothing or crashes the
+    // rail depending on which way round the omission goes.
+    expect(onboardingSectionRegistry.map((section) => section.key)).toEqual([
+      ...onboardingSectionKeys,
+    ]);
   });
 
   it("allows an incomplete section to be saved", () => {

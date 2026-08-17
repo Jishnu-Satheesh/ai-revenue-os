@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 
+import { overviewPath } from "@/lib/routes";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -29,17 +30,17 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
  * organization the reader actually opened instead of a hardcoded location.
  */
 const segmentLabels: Readonly<Record<string, string>> = {
-  overview: "Overview",
-  opportunities: "Opportunities",
-  agents: "Agents",
-  campaigns: "Campaigns",
-  executions: "Executions",
   organizations: "Organizations",
-  settings: "Settings",
   new: "New organization",
+  overview: "Overview",
+  // Organization-scoped destinations. Opportunities and Campaigns are named
+  // ahead of their routes so the trail reads correctly the day they land.
+  opportunities: "Opportunities",
+  campaigns: "Campaigns",
   onboarding: "Guided onboarding",
-  "digital-twin": "Digital Twin",
   integrations: "Integrations",
+  memory: "Business Memory",
+  economics: "Channel economics",
 };
 
 export type RouteCrumb = {
@@ -67,9 +68,11 @@ export function deriveRouteCrumbs(
   labels: Readonly<Record<string, string>> = {},
 ): RouteCrumb[] {
   const segments = pathname.split("/").filter(Boolean);
-  if (segments.length === 0) {
-    return [{ label: segmentLabels.overview, href: "/overview", current: true }];
-  }
+  // The empty path is `/`, which redirects on the server and never renders the
+  // shell. Naming a crumb here would name a route that no longer exists, and
+  // this synchronous client-side builder cannot run the landing resolver's
+  // authenticated read to find the real one.
+  if (segments.length === 0) return [];
 
   const crumbs: RouteCrumb[] = [];
   for (const [index, segment] of segments.entries()) {
@@ -77,9 +80,9 @@ export function deriveRouteCrumbs(
     const isOrganization = uuidPattern.test(segment);
     crumbs.push({
       label: labelForSegment(segment, labels),
-      // Only link to routes that exist: the Digital Twin page is the
-      // organization's landing surface.
-      href: isOrganization ? `/organizations/${segment}/digital-twin` : undefined,
+      // Only link to routes that exist: Overview is the organization's landing
+      // surface.
+      href: isOrganization ? overviewPath(segment) : undefined,
       current: false,
     });
   }

@@ -97,4 +97,85 @@ describe("section completion requirements", () => {
       canCompleteSection("historical_performance", { ...base, period: { start: "2026-01" } }),
     ).toBe(false);
   });
+
+  it("completes cost structure on one priced cost, not on all of them", () => {
+    // Most operators cannot state their food cost on the first day. Requiring
+    // every component would stall onboarding over exactly the gap the ledger
+    // exists to report honestly.
+    const priced = {
+      componentKey: "commission",
+      channel: null,
+      percent: 28,
+      amountMinor: null,
+      confidence: "measured",
+    };
+
+    expect(
+      canCompleteSection("cost_structure", {
+        costRates: [priced],
+        effectiveFrom: "2026-06-01",
+      }),
+    ).toBe(true);
+
+    expect(canCompleteSection("cost_structure", { costRates: [priced] })).toBe(false);
+    expect(canCompleteSection("cost_structure", { effectiveFrom: "2026-06-01" })).toBe(false);
+  });
+
+  it("treats a zero cost as answered and an opened but unfilled row as not", () => {
+    const base = { effectiveFrom: "2026-06-01" };
+    const row = { componentKey: "commission", channel: null, confidence: "assumed" };
+
+    // Dine-in commission genuinely is zero, and saying so is what turns a
+    // bounded margin into a real one.
+    expect(
+      canCompleteSection("cost_structure", {
+        ...base,
+        costRates: [{ ...row, percent: 0, amountMinor: null }],
+      }),
+    ).toBe(true);
+
+    // A row the operator opened and left blank says nothing yet.
+    expect(
+      canCompleteSection("cost_structure", {
+        ...base,
+        costRates: [{ ...row, percent: null, amountMinor: null }],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a cost that claims to be both a share and an amount", () => {
+    expect(
+      canCompleteSection("cost_structure", {
+        effectiveFrom: "2026-06-01",
+        costRates: [
+          {
+            componentKey: "commission",
+            channel: null,
+            percent: 28,
+            amountMinor: 500,
+            confidence: "measured",
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("requires a real calendar date for the effective day", () => {
+    const costRates = [
+      {
+        componentKey: "commission",
+        channel: null,
+        percent: 28,
+        amountMinor: null,
+        confidence: "measured",
+      },
+    ];
+
+    expect(canCompleteSection("cost_structure", { costRates, effectiveFrom: "June 2026" })).toBe(
+      false,
+    );
+    expect(canCompleteSection("cost_structure", { costRates, effectiveFrom: "2026-13-01" })).toBe(
+      false,
+    );
+  });
 });

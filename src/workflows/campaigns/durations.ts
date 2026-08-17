@@ -1,0 +1,45 @@
+/**
+ * How long campaign generation may run, and how long its claim stays held.
+ *
+ * These two numbers are a pair, and getting the relationship wrong is what
+ * broke the first real generation run. The lease is what stops a second worker
+ * picking up work already in progress; the task duration is how long the first
+ * worker is allowed to take. If the lease is the shorter of the two, a healthy
+ * run loses its claim while still working, and the next dispatch reclaims it —
+ * two workers, two provider bills, two versions racing to publish.
+ *
+ * So the rule is simply: **the lease always outlives the task.** `durations.test.ts`
+ * asserts it for every task here, so the pair cannot drift apart again.
+ *
+ * The absolute numbers are deliberately generous. Image generation is the slow
+ * step and its latency depends on a provider nobody here controls; a ceiling
+ * that merely looks sufficient is a ceiling that fails on a bad afternoon.
+ */
+
+/** Image generation dominates. Forty minutes is headroom, not an estimate. */
+export const GENERATE_BUNDLE_MAX_DURATION_SECONDS = 2_400;
+
+/** Five minutes of slack past the task ceiling, so a slow finish still fences. */
+export const GENERATE_BUNDLE_LEASE_SECONDS = 2_700;
+
+/** A revision patches an existing bundle and redraws fewer images. */
+export const REVISE_BUNDLE_MAX_DURATION_SECONDS = 1_200;
+
+export const REVISE_BUNDLE_LEASE_SECONDS = 1_500;
+
+/**
+ * Every task ceiling paired with the lease that must outlast it. Exported so
+ * the invariant is testable rather than a comment nobody re-reads.
+ */
+export const CAMPAIGN_DURATION_PAIRS = [
+  {
+    taskId: "campaign.generate-bundle",
+    maxDurationSeconds: GENERATE_BUNDLE_MAX_DURATION_SECONDS,
+    leaseSeconds: GENERATE_BUNDLE_LEASE_SECONDS,
+  },
+  {
+    taskId: "campaign.revise-bundle",
+    maxDurationSeconds: REVISE_BUNDLE_MAX_DURATION_SECONDS,
+    leaseSeconds: REVISE_BUNDLE_LEASE_SECONDS,
+  },
+] as const;

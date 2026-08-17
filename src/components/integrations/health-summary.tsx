@@ -28,9 +28,11 @@ function latest(values: readonly (string | null)[]): string | null {
 export function HealthSummary({
   connections,
   summary,
+  timeZone,
 }: Readonly<{
   connections: readonly Connection[];
   summary: IntegrationHubSnapshot["summary"];
+  timeZone: string;
 }>) {
   const needsAttention = connections.filter((connection) =>
     isActionRequired(connection.health.state),
@@ -67,14 +69,14 @@ export function HealthSummary({
               <Timer aria-hidden="true" className="size-3.5" />
               Freshest successful sync
             </dt>
-            <dd className="text-sm font-medium">{formatInstant(freshestSync)}</dd>
+            <dd className="text-sm font-medium">{formatInstant(freshestSync, timeZone)}</dd>
           </div>
           <div className="flex flex-col gap-1">
             <dt className="flex items-center gap-2 text-xs text-muted-foreground uppercase">
               <CalendarClock aria-hidden="true" className="size-3.5" />
               Next scheduled sync
             </dt>
-            <dd className="text-sm font-medium">{formatInstant(nextSync)}</dd>
+            <dd className="text-sm font-medium">{formatInstant(nextSync, timeZone)}</dd>
           </div>
         </dl>
 

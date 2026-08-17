@@ -392,12 +392,36 @@ select extensions.is(
   1::bigint,
   'viewer cannot update integration imports'
 );
-delete from storage.objects where bucket_id = 'integration-imports';
-select extensions.is(
-  (select count(*) from storage.objects where bucket_id = 'integration-imports'),
-  1::bigint,
-  'viewer cannot delete integration imports'
-);
+-- Hosted Supabase blocks direct deletes on `storage.objects` at the platform
+-- level, and that block aborts the statement before RLS is ever consulted,
+-- taking the whole suite with it. This project has no local database, so a
+-- developer run goes against the hosted project while CI runs against a
+-- throwaway local stack. The probe below keeps both honest: where a direct
+-- delete is possible the RLS behaviour is asserted, and where the platform
+-- forbids it the assertion is skipped rather than quietly passing.
+create temporary table storage_delete_probe (platform_blocked boolean not null) on commit drop;
+
+do $$
+begin
+  delete from storage.objects where bucket_id = 'integration-imports';
+  insert into storage_delete_probe values (false);
+exception
+  when others then
+    insert into storage_delete_probe values (true);
+end;
+$$;
+
+select case
+  when (select platform_blocked from storage_delete_probe)
+    then extensions.skip(
+      'hosted Supabase forbids direct storage deletes; viewer delete RLS is asserted in CI against a local database'
+    )
+  else extensions.is(
+    (select count(*) from storage.objects where bucket_id = 'integration-imports'),
+    1::bigint,
+    'viewer cannot delete integration imports'
+  )
+end;
 
 set local request.jwt.claim.sub = '13000000-0000-4000-8000-000000000001';
 
@@ -651,14 +675,21 @@ select extensions.lives_ok(
   $$,
   'operator updates an own-tenant import path'
 );
-select extensions.lives_ok(
-  $$
-    delete from storage.objects
-    where bucket_id = 'integration-imports'
-      and name like '%/operator-renamed.csv'
-  $$,
-  'operator deletes an own-tenant import object'
-);
+-- Same platform restriction as the viewer delete above; see the note there.
+select case
+  when (select platform_blocked from storage_delete_probe)
+    then extensions.skip(
+      'hosted Supabase forbids direct storage deletes; operator delete RLS is asserted in CI against a local database'
+    )
+  else extensions.lives_ok(
+    $$
+      delete from storage.objects
+      where bucket_id = 'integration-imports'
+        and name like '%/operator-renamed.csv'
+    $$,
+    'operator deletes an own-tenant import object'
+  )
+end;
 select extensions.throws_ok(
   $$
     update public.integration_data_sources
@@ -792,23 +823,16 @@ select extensions.throws_ok(
   null,
   'database guard rejects privileged provenance reassignment'
 );
-select extensions.throws_ok(
-  $$
-    insert into public.integration_capability_grants (
-      organization_id, connection_id, capability_key, maturity, availability,
-      derived_from_adapter_version
-    ) values (
-      '23000000-0000-4000-8000-000000000001',
-      '43000000-0000-4000-8000-000000000001',
-      'publish_google_business_post',
-      'governed-write',
-      'available',
-      '1.0.0'
-    )
-  $$,
-  '23514',
-  null,
-  'available capability maturity is limited to V1-safe levels'
+select extensions.ok(
+  not exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.integration_capability_grants'::regclass
+      and constraint_row.contype = 'c'
+      and pg_catalog.pg_get_constraintdef(constraint_row.oid) like '%availability%'
+      and pg_catalog.pg_get_constraintdef(constraint_row.oid) like '%read-only%'
+  ),
+  'the database no longer blanket-rejects governed capability maturity'
 );
 insert into public.integration_connections (
   id,

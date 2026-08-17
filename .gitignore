@@ -6,9 +6,12 @@ dist
 .env.local
 .env.*.local
 !.env.example
+# Holds a Trigger.dev personal access token inline. Keep it out of history.
+.mcp.json
 playwright-report
 test-results
 coverage
 .trigger
 .superpowers/
 .superdesign/tmp/
+.worktrees/

@@ -9,6 +9,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   assertIntegrationHubEnabled,
+  isIntegrationHubEnabled,
   parseIntegrationOrganizationIds,
 } from "@/modules/integrations/application/feature-access";
 
@@ -40,6 +41,11 @@ describe("Integration Hub rollout access", () => {
     expect(() =>
       assertIntegrationHubEnabled(organizationA.toUpperCase(), new Set([organizationA])),
     ).not.toThrow();
+  });
+
+  it("reports rollout membership without throwing for composed read surfaces", () => {
+    expect(isIntegrationHubEnabled(organizationA, new Set([organizationA]))).toBe(true);
+    expect(isIntegrationHubEnabled(organizationB, new Set([organizationA]))).toBe(false);
   });
 
   it("blocks organizations outside the enabled rollout", () => {

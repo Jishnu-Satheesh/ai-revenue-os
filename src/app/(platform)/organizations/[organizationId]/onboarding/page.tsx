@@ -1,6 +1,7 @@
 import { ArrowLeft, Compass, BadgeInfo } from "lucide-react";
 import Link from "next/link";
 
+import { overviewPath } from "@/lib/routes";
 import { OnboardingClient } from "@/components/onboarding/onboarding-client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,9 +12,12 @@ import { createEventPublisher } from "@/domain/events/publisher";
 import { createOnboardingService } from "@/modules/onboarding/application/service";
 import { createOnboardingRepository } from "@/modules/onboarding/infrastructure/repository";
 
-type PageProps = { params: Promise<{ organizationId: string }> };
+type PageProps = {
+  params: Promise<{ organizationId: string }>;
+  searchParams: Promise<{ section?: string }>;
+};
 
-export default async function OnboardingPage({ params }: PageProps) {
+export default async function OnboardingPage({ params, searchParams }: PageProps) {
   const context = await getOrganizationContext(params, ["owner", "admin", "operator"]);
   const organization = await getOrganization(context.supabase, context.organizationId);
   const service = createOnboardingService({
@@ -35,9 +39,9 @@ export default async function OnboardingPage({ params }: PageProps) {
       <div className="flex shrink-0 flex-col justify-between gap-5 lg:flex-row lg:items-end">
         <div>
           <Button asChild variant="link" className="h-auto p-0 text-muted-foreground">
-            <Link href={`/organizations/${context.organizationId}/digital-twin`}>
+            <Link href={overviewPath(context.organizationId)}>
               <ArrowLeft data-icon="inline-start" />
-              Digital Twin overview
+              Overview
             </Link>
           </Button>
           <div className="mt-4 flex items-start gap-3">
@@ -61,8 +65,13 @@ export default async function OnboardingPage({ params }: PageProps) {
 
       <OnboardingClient
         organizationId={context.organizationId}
-        organization={{ name: organization.name, industry: organization.industry }}
+        organization={{
+          name: organization.name,
+          industry: organization.industry,
+          baseCurrency: organization.base_currency,
+        }}
         initialSnapshot={snapshot}
+        requestedSection={(await searchParams).section}
       />
     </div>
   );

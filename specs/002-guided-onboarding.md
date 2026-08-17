@@ -15,11 +15,14 @@ Remotely collect the minimum trustworthy information needed to identify and exec
 3. Products or services; restaurant menu for the pilot.
 4. Channels and digital presence.
 5. Historical performance.
-6. Customers and consent.
-7. Brand assets and communication style.
-8. Goals, budget, constraints, and approvals.
-9. Integrations and data uploads.
-10. Review and readiness.
+6. Cost structure.
+7. Customers and consent.
+8. Brand assets and communication style.
+9. Goals, budget, constraints, and approvals.
+10. Integrations and data uploads.
+11. Review and readiness.
+
+Cost structure sits directly after historical performance, where the operator has just stated revenue and margin, so "and what does an order cost you" is the next question rather than a new subject. It is the capture path for `specs/012-channel-economics-ledger.md` section 6, and it is the only section that promotes into a table the operator cannot otherwise write to, through a governed owner-or-admin RPC. Its readiness requirement is non-critical: a margin with unpriced components grades `indicative` and names what is missing, which is a usable answer, and blocking readiness on it would stall every client who does not yet know their cost of goods.
 
 ## UX requirements
 

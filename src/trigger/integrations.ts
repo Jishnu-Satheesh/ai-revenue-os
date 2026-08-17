@@ -1,4 +1,4 @@
-import { task, tasks } from "@trigger.dev/sdk";
+import { logger, task, tasks } from "@trigger.dev/sdk";
 
 import { createProviderRegistry } from "@/domain/integrations/provider-registry";
 import { createIntegrationWorkerServiceClient } from "@/lib/supabase/service";
@@ -7,14 +7,26 @@ import {
   createSupabaseIntegrationRunTransitionPort,
 } from "@/modules/integrations/infrastructure/repository";
 import {
-  createAcknowledgingDataIngestionPort,
   createDurableIngestionSink,
   createValidatedIngestionSink,
 } from "@/modules/integrations/infrastructure/ingestion-sink";
 import type { DurableIngestionHandoffLedger } from "@/modules/integrations/infrastructure/ingestion-sink";
+import {
+  createMemoryProjectionPort,
+  MEMORY_PROJECTION_RECORD_TYPES,
+} from "@/modules/memory/infrastructure/memory-projection-port";
+import { createRecordTypeRouter } from "@/modules/integrations/infrastructure/record-type-router";
+import {
+  createMetricProjectionPort,
+  METRIC_PROJECTION_RECORD_TYPES,
+} from "@/modules/metrics/infrastructure/metric-projection-port";
+import { createMetricProjectionStore } from "@/modules/metrics/infrastructure/repository";
+import { createSupabaseMemoryPersistence } from "@/modules/memory/infrastructure/persistence";
+import { createMemoryRepository } from "@/modules/memory/infrastructure/repository";
 import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
 import { createGoogleBusinessProfileFixtureAdapter } from "@/modules/integrations/providers/google-business-profile/fixture-adapter";
 import { assertIntegrationHubEnabled } from "@/modules/integrations/application/feature-access";
+import type { economicsRecomputeLedgerTask } from "@/trigger/economics";
 import { runCheckFreshness } from "@/workflows/integrations/check-freshness";
 import { runDisconnectConnection } from "@/workflows/integrations/disconnect-connection";
 import { runImportDataSource } from "@/workflows/integrations/import-data-source";
@@ -102,12 +114,25 @@ function createWorkerDependencies(): IntegrationWorkerDependencies {
     supabase,
     runTransitions: createSupabaseIntegrationRunTransitionPort(supabase),
   });
-  const providers = createProviderRegistry(
-    [googleBusinessProfileDefinition],
-    [createGoogleBusinessProfileFixtureAdapter()],
-  );
+  const providers = createProviderRegistry({
+    definitions: [googleBusinessProfileDefinition],
+    adapters: { read: [createGoogleBusinessProfileFixtureAdapter()] },
+  });
+  const memoryRepository = createMemoryRepository(createSupabaseMemoryPersistence(supabase));
   const validatedSink = createValidatedIngestionSink({
-    handoff: createAcknowledgingDataIngestionPort(),
+    // One handoff, several consumers. Routing by record type keeps their
+    // accepted and rejected counts disjoint, which the ingestion run's own
+    // check constraint depends on.
+    handoff: createRecordTypeRouter([
+      {
+        recordTypes: MEMORY_PROJECTION_RECORD_TYPES,
+        port: createMemoryProjectionPort({ store: memoryRepository }),
+      },
+      {
+        recordTypes: METRIC_PROJECTION_RECORD_TYPES,
+        port: createMetricProjectionPort({ store: createMetricProjectionStore(supabase) }),
+      },
+    ]),
     sourceResolver: {
       async resolve({ organizationId, ingestionRunId }) {
         const run = await repository.findRun({ organizationId, ingestionRunId });
@@ -233,11 +258,47 @@ export const integrationSyncConnectionTask = task({
   run: async (payload: unknown) => runSyncConnection(payload, createWorkerDependencies()),
 });
 
+/**
+ * Reprices the periods this import touched.
+ *
+ * Fire and forget, deliberately. The import has already succeeded and its
+ * records are written; a ledger recompute that could not be queued is a stale
+ * margin, not a failed import, and failing the run here would roll a good
+ * import back into the error list for a reason the operator cannot act on.
+ *
+ * The recompute is keyed on the ingestion run and skips when that run wrote no
+ * observations, so triggering it unconditionally after a successful import
+ * costs nothing on a run whose rows all rejected.
+ */
+async function queueLedgerRecompute(payload: unknown): Promise<void> {
+  const parsed = parseDataSourceTaskPayload(payload);
+  try {
+    await tasks.trigger<typeof economicsRecomputeLedgerTask>(
+      "economics.recompute-ledger",
+      {
+        organizationId: parsed.organizationId,
+        ingestionRunId: parsed.ingestionRunId,
+      },
+      { concurrencyKey: parsed.organizationId },
+    );
+  } catch (error) {
+    logger.warn("economics.ledger.recompute_not_queued", {
+      organizationId: parsed.organizationId,
+      ingestionRunId: parsed.ingestionRunId,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+  }
+}
+
 export const integrationImportDataSourceTask = task({
   id: "integration.import-data-source",
   retry,
   maxDuration: 900,
-  run: async (payload: unknown) => runImportDataSource(payload, createWorkerDependencies()),
+  run: async (payload: unknown) => {
+    const result = await runImportDataSource(payload, createWorkerDependencies());
+    await queueLedgerRecompute(payload);
+    return result;
+  },
 });
 
 export const integrationDisconnectConnectionTask = task({

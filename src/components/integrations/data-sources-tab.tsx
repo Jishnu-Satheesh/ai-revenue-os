@@ -10,6 +10,7 @@ import {
   type CsvSourceSubmission,
   type ManualSourceSubmission,
 } from "@/components/integrations/data-source-form";
+import type { MetricTargetChoice } from "@/components/integrations/csv-mapping-form";
 import { formatInstant, runStatusLabel } from "@/components/integrations/health-status";
 import {
   integrationQueryKeys,
@@ -50,11 +51,15 @@ function operationKey(prefix: string): string {
 export function DataSourcesTab({
   organizationId,
   snapshot,
+  metricTargets,
   role,
+  timeZone,
 }: Readonly<{
   organizationId: string;
   snapshot: IntegrationHubSnapshot;
+  metricTargets: readonly MetricTargetChoice[];
   role: OrganizationRole;
+  timeZone: string;
 }>) {
   const queryClient = useQueryClient();
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
@@ -179,6 +184,7 @@ export function DataSourcesTab({
           <CardContent>
             <DataSourceForm
               branches={snapshot.branches}
+              metricTargets={metricTargets}
               isSubmitting={registerManual.isPending || uploadCsv.isPending}
               onRegisterManual={async (input) => {
                 try {
@@ -195,6 +201,10 @@ export function DataSourcesTab({
                 }
               }}
             />
+            <p className="mt-3 text-sm text-muted-foreground">
+              Rows validated. Business Memory V1 stores Google Business Profile records only; CSV
+              storage arrives with Data Ingestion.
+            </p>
           </CardContent>
         </Card>
       ) : null}
@@ -241,14 +251,14 @@ export function DataSourcesTab({
                     </CardTitle>
                     <CardDescription>
                       {dataSource.original_filename ?? "No uploaded file"} · last successful import{" "}
-                      {formatInstant(dataSource.last_successful_import_at)}
+                      {formatInstant(dataSource.last_successful_import_at, timeZone)}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-3">
                     {latestRun && latestRun.kind === "ingestion_run" ? (
                       <p className="text-sm">
                         Latest run: {runStatusLabel(latestRun.status)} ·{" "}
-                        {formatInstant(latestRun.occurredAt)}
+                        {formatInstant(latestRun.occurredAt, timeZone)}
                       </p>
                     ) : null}
                     {archived ? (

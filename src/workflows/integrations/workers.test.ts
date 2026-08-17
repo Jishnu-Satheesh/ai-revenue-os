@@ -73,6 +73,8 @@ function fixtureAdapter(overrides: Partial<ProviderAdapter> = {}): ProviderAdapt
   return {
     providerKey: "google_business_profile",
     adapterVersion: "1",
+    adapterKind: "read",
+    supportedCapabilityKeys: ["read_google_business_profile", "read_reviews"],
     testConnection: vi.fn().mockResolvedValue({ outcome: "passed", safeDetail: "Fixture passed." }),
     listExternalResources: vi.fn().mockResolvedValue([]),
     sync: vi.fn().mockResolvedValue([
@@ -106,6 +108,7 @@ function workerRepository(): IntegrationWorkerRepository & {
     assertExecutionLease: vi.fn(async () => undefined),
     cancelExecution: vi.fn(async () => runRow({ status: "cancelled" })),
     markRunRunning: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
+    markDataSourceImported: vi.fn(async () => undefined),
     resumeLeasedRun: vi.fn(async () => runRow({ status: "running", started_at: timestamp })),
     completeRun: vi.fn(async (input) => {
       completions.push(input);
@@ -189,7 +192,12 @@ function dependencies(
       getAdapter: vi.fn(() => adapter),
       getDefinition: vi.fn(() => googleBusinessProfileDefinition),
     },
-    findDataSource: vi.fn(async () => input.dataSource ?? dataSource),
+    // `in` rather than `??`, so an explicit null means "no such source" instead
+    // of coalescing back to the default fixture.
+    findDataSource: vi.fn(
+      async (): Promise<IntegrationDataSourceRow | null> =>
+        "dataSource" in input ? (input.dataSource ?? null) : dataSource,
+    ),
     assertFeatureEnabled: vi.fn(),
     isCancelled: vi.fn(async () => input.cancelled ?? false),
     now: () => new Date(timestamp),
@@ -212,6 +220,9 @@ const connectionPayload = {
   ingestionRunId: ids.ingestionRunId,
   correlationId: ids.correlationId,
   idempotencyKey: "dispatch:integration:11111111-1111-4111-8111-111111111111",
+  // Deliberately different from the dispatch key. The lease is checked against
+  // the run row, and conflating the two made every lease request conflict.
+  runIdempotencyKey: "integration.test-connection:client-22222222-2222-4222-8222-222222222222",
   adapterVersion: "1",
 };
 
@@ -354,6 +365,7 @@ describe("Integration Hub workers", () => {
         ingestionRunId: ids.ingestionRunId,
         correlationId: ids.correlationId,
         idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
       },
       deps,
     );
@@ -361,6 +373,135 @@ describe("Integration Hub workers", () => {
     expect(deps.sink.accept).toHaveBeenCalledOnce();
     expect(worker.completeRun).not.toHaveBeenCalled();
     expect(worker.requeueRun).not.toHaveBeenCalled();
+  });
+
+  it("leases against the run key and hands off with the dispatch key", async () => {
+    // These are two different keys for two different jobs. The lease RPC
+    // compares its argument to integration_ingestion_runs.idempotency_key, so
+    // passing the dispatch key -- which is derived from the run id and can
+    // never equal it -- made every lease conflict. Worse, the failure was
+    // silent: persistPreflightFailure needs its own lease to record why
+    // preflight failed, so the original error never reached the run row.
+    const deps = dependencies();
+    await runSyncConnection(
+      { ...connectionPayload, taskName: "integration.sync-connection" },
+      deps,
+    );
+
+    expect(deps.worker.acquireExecutionLease).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.runIdempotencyKey }),
+    );
+    expect(deps.worker.assertExecutionLease).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.runIdempotencyKey }),
+    );
+
+    // The handoff is a different concern and keeps the dispatch key.
+    expect(deps.sink.accept).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.idempotencyKey }),
+    );
+  });
+
+  it("stamps the source with the moment records last arrived", async () => {
+    const deps = dependencies();
+    await runImportDataSource(
+      {
+        taskName: "integration.import-data-source",
+        organizationId: ids.organizationId,
+        dataSourceId: ids.dataSourceId,
+        ingestionRunId: ids.ingestionRunId,
+        correlationId: ids.correlationId,
+        idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
+      },
+      deps,
+    );
+
+    expect(deps.worker.markDataSourceImported).toHaveBeenCalledWith({
+      organizationId: ids.organizationId,
+      dataSourceId: ids.dataSourceId,
+      importedAt: timestamp,
+    });
+  });
+
+  it("still stamps the source when some rows were rejected", async () => {
+    // The field answers "when did data last arrive", not "was the run clean".
+    // Withholding it over a few bad rows would leave a source that imports
+    // daily reading as though it never had.
+    const deps = dependencies({
+      sink: {
+        accept: vi.fn().mockResolvedValue({ accepted: 1, rejected: 3, rejectionReasons: [] }),
+      },
+    });
+
+    await runImportDataSource(
+      {
+        taskName: "integration.import-data-source",
+        organizationId: ids.organizationId,
+        dataSourceId: ids.dataSourceId,
+        ingestionRunId: ids.ingestionRunId,
+        correlationId: ids.correlationId,
+        idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
+      },
+      deps,
+    );
+
+    expect(deps.worker.markDataSourceImported).toHaveBeenCalledOnce();
+    expect(deps.worker.completions).toContainEqual(
+      expect.objectContaining({ status: "partially_succeeded" }),
+    );
+  });
+
+  it("leaves the source unstamped when nothing was accepted", async () => {
+    const deps = dependencies({
+      sink: {
+        accept: vi.fn().mockResolvedValue({ accepted: 0, rejected: 4, rejectionReasons: [] }),
+      },
+    });
+
+    await runImportDataSource(
+      {
+        taskName: "integration.import-data-source",
+        organizationId: ids.organizationId,
+        dataSourceId: ids.dataSourceId,
+        ingestionRunId: ids.ingestionRunId,
+        correlationId: ids.correlationId,
+        idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
+      },
+      deps,
+    );
+
+    expect(deps.worker.markDataSourceImported).not.toHaveBeenCalled();
+  });
+
+  it("records why preflight failed instead of dying in the error handler", async () => {
+    // The lease bug surfaced as "lease could not be acquired" thrown from the
+    // failure path, which discarded the real cause. A missing data source must
+    // reach the run row.
+    const deps = dependencies({ dataSource: null });
+
+    await expect(
+      runImportDataSource(
+        {
+          taskName: "integration.import-data-source",
+          organizationId: ids.organizationId,
+          dataSourceId: ids.dataSourceId,
+          ingestionRunId: ids.ingestionRunId,
+          correlationId: ids.correlationId,
+          idempotencyKey: connectionPayload.idempotencyKey,
+          runIdempotencyKey: connectionPayload.runIdempotencyKey,
+        },
+        deps,
+      ),
+    ).rejects.toThrow();
+
+    expect(deps.worker.acquireExecutionLease).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: connectionPayload.runIdempotencyKey }),
+    );
+    expect(deps.worker.completions).toContainEqual(
+      expect.objectContaining({ status: "failed", normalizedErrorCode: "TENANT_SCOPE_ERROR" }),
+    );
   });
 
   it("reuses the persisted idempotency key and sends a valid sync handoff once", async () => {
@@ -375,6 +516,35 @@ describe("Integration Hub workers", () => {
     );
     expect(deps.worker.completions).toContainEqual(
       expect.objectContaining({ status: "succeeded", recordsReceived: 1, recordsAccepted: 1 }),
+    );
+  });
+
+  it("invalidates memory once only after a successful sync is terminal, swallowing cache failure", async () => {
+    const sequence: string[] = [];
+    const worker = workerRepository();
+    vi.mocked(worker.completeRun).mockImplementationOnce(async (input) => {
+      sequence.push("complete");
+      return runRow({ status: input.status, completed_at: input.completedAt });
+    });
+    const deps = {
+      ...dependencies({ worker }),
+      memoryCache: {
+        invalidateOrganization: async () => {
+          sequence.push("invalidate");
+          throw new Error("cache unavailable");
+        },
+      },
+      logger: { warn: vi.fn() },
+    };
+
+    await expect(
+      runSyncConnection({ ...connectionPayload, taskName: "integration.sync-connection" }, deps),
+    ).resolves.toBeUndefined();
+
+    expect(sequence).toEqual(["complete", "invalidate"]);
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      "memory.cache_invalidation_failed",
+      expect.objectContaining({ organizationId: ids.organizationId, runId: ids.ingestionRunId }),
     );
   });
 
@@ -496,6 +666,7 @@ describe("Integration Hub workers", () => {
         ingestionRunId: ids.ingestionRunId,
         correlationId: ids.correlationId,
         idempotencyKey: connectionPayload.idempotencyKey,
+        runIdempotencyKey: connectionPayload.runIdempotencyKey,
       },
       deps,
     ).catch((error: IntegrationError) => {
@@ -582,6 +753,7 @@ describe("Integration Hub workers", () => {
           ingestionRunId: ids.ingestionRunId,
           correlationId: ids.correlationId,
           idempotencyKey: connectionPayload.idempotencyKey,
+          runIdempotencyKey: connectionPayload.runIdempotencyKey,
         },
         deps,
       ),

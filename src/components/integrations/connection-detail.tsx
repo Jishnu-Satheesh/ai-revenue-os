@@ -36,6 +36,7 @@ export function ConnectionDetail({
   pendingAction,
   lastAcknowledgement,
   failureMessage,
+  timeZone,
   onTest,
   onSync,
   onReplaceMappings,
@@ -49,6 +50,7 @@ export function ConnectionDetail({
   pendingAction: ConnectionAction | null;
   lastAcknowledgement: string | null;
   failureMessage: string | null;
+  timeZone: string;
   onTest: () => void;
   onSync: () => void;
   onReplaceMappings: (mappings: MappingFormValue[]) => Promise<void>;
@@ -69,6 +71,7 @@ export function ConnectionDetail({
         <CardDescription>
           {providerName} · account {connection.external_account_id} · adapter v
           {connection.adapter_version}
+          {definition ? ` · ${definition.characters.join(" · ")}` : ""}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
@@ -88,15 +91,15 @@ export function ConnectionDetail({
             <dl className="mt-2 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
               <div className="flex gap-2">
                 <dt className="text-muted-foreground">Last tested</dt>
-                <dd>{formatInstant(connection.last_tested_at)}</dd>
+                <dd>{formatInstant(connection.last_tested_at, timeZone)}</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="text-muted-foreground">Last successful sync</dt>
-                <dd>{formatInstant(connection.last_successful_sync_at)}</dd>
+                <dd>{formatInstant(connection.last_successful_sync_at, timeZone)}</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="text-muted-foreground">Next scheduled sync</dt>
-                <dd>{formatInstant(connection.next_scheduled_sync_at)}</dd>
+                <dd>{formatInstant(connection.next_scheduled_sync_at, timeZone)}</dd>
               </div>
             </dl>
           </AlertDescription>
@@ -134,7 +137,8 @@ export function ConnectionDetail({
           ) : null}
           {latestRun && latestRun.kind === "ingestion_run" ? (
             <p>
-              Latest run: {runStatusLabel(latestRun.status)} · {formatInstant(latestRun.occurredAt)}
+              Latest run: {runStatusLabel(latestRun.status)} ·{" "}
+              {formatInstant(latestRun.occurredAt, timeZone)}
             </p>
           ) : null}
         </div>

@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
-  createAcknowledgingDataIngestionPort,
   createDurableIngestionSink,
   createValidatedIngestionSink,
   type DataIngestionPort,
@@ -33,19 +32,6 @@ function createHandoff() {
 }
 
 describe("validated integration ingestion sink", () => {
-  it("provides an explicit temporary Data Ingestion acknowledgement port", async () => {
-    const handoff = createAcknowledgingDataIngestionPort();
-
-    await expect(
-      handoff.ingest({
-        organizationId,
-        ingestionRunId: "run-a",
-        idempotencyKey: "sync-a",
-        records: [baseRecord],
-      }),
-    ).resolves.toEqual({ accepted: 1, rejected: 0, rejectionReasons: [] });
-  });
-
   it("passes matching Zod-validated envelopes to the Data Ingestion port", async () => {
     const handoff = createHandoff();
     const sink = createValidatedIngestionSink({

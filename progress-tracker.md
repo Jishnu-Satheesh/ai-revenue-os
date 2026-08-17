@@ -4,13 +4,14 @@
 
 ## Current state
 
-- Date: 2026-08-08
+- Date: 2026-08-09
 - Package manager: **pnpm** (`pnpm@11.20.0`); Node 22 is required.
 - Product stage: foundation, Organization + Digital Twin vertical slice, and the Integration Hub V1 runtime.
-- Current active work: all fourteen Integration Hub plan tasks are implemented and committed. Remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
+- Current active work: Business Memory V1, on branch `feat/business-memory`. Plan tasks 1-7 and 10-12 of 17 are implemented, reviewed, verified, and committed; tasks 8-9 and 13-17 (Redis cache, cached retrieval, rebuild cron, API routes, workspace UI, E2E) are not started. The Integration Hub now projects Google Business Profile fixture records into Business Memory and honestly rejects CSV rows pending the Data Ingestion slice. All fourteen Integration Hub plan tasks are implemented and committed, and their remaining work is environment-gated, not code-gated: the staging migration, pgTAP, live type generation, and authenticated browser/E2E verification are blocked on credentials and a database runtime this workspace does not have.
 - Primary user: agency operator.
 - Approved UI direction: section rail with an animated focused work panel.
-- Current implementation plan: `docs/superpowers/plans/2026-08-08-integration-hub-implementation.md`.
+- Current implementation plan: `docs/superpowers/plans/2026-08-09-business-memory-implementation.md`.
+- Previous Integration Hub plan: `docs/superpowers/plans/2026-08-08-integration-hub-implementation.md`.
 - Previous onboarding plan: `docs/superpowers/plans/2026-08-08-guided-onboarding-implementation.md`.
 
 ## Completed
@@ -41,6 +42,24 @@
 - Integration UI must compose shadcn/ui and use RSC initial reads, TanStack Query for interactive server state, and TanStack Form for mapping forms.
 - Approved Superdesign: `https://p.superdesign.dev/draft/035fe2fe-c036-4158-afb8-972e4222c075`.
 
+## Approved Business Memory decisions
+
+- `public.business_facts` stays the single writable source of truth. Business Memory owns episodic, semantic, decision, outcome, lesson, and fact-proposal items and never copies facts.
+- `structured_fact` is a virtual retrieval type produced by read-through projection over `business_facts`, so one API returns both stores ranked together with provenance.
+- Ordering is lexicographic: a derived trust rank sorts first and blended relevance only breaks ties inside a rank, so no weight change can rank an inference above a verified fact.
+- Retrieval is hybrid Postgres full-text search plus pgvector, shipped enabled with **no** organization allowlist and no feature flag. The bounded 1500 ms embedding call with a lexical-only degrade path replaces the kill switch.
+- Embedding is asynchronous; an item is lexically retrievable before its vector exists. The column is fixed at 1536 dimensions and every row stores its `embedding_model`.
+- The Integration Hub's `createAcknowledgingDataIngestionPort` stub is deleted and replaced by a real projector for `google_business_profile.location.v1` and `.review.v1`.
+- The projector never writes `business_facts`; a divergence becomes a `fact_proposal` that a human confirms through the digital-twin service inside one transaction.
+- `csv_import.row` has no destination in this slice and is rejected with `UNSUPPORTED_RECORD_TYPE`. CSV imports will report zero accepted rows with honest operator copy until the Data Ingestion slice lands.
+- The workspace at `/organizations/[organizationId]/memory` is Hub-scale with Search, Timeline, Lessons, and Review tabs.
+- Redis caches the **ranking, never the content**. Entries hold result identifiers, scores, aggregates, and query vectors; rows are always hydrated from Postgres under the caller's RLS context, so the cache cannot answer a question the database would have refused.
+- Every cache key carries the organization ID, a version stamp, and the effective sensitivity ceiling. Omitting the ceiling would serve an admin's ranking to an operator.
+- Invalidation bumps a per-organization version stamp holding epoch milliseconds. `KEYS`, unbounded `SCAN`, and `INCR` counters are prohibited; an `INCR` counter resets to 1 after eviction and can collide with live keys, while a timestamp always misses.
+- `REDIS_URL` is server-only and optional. Absent, unreachable, or flushed must change latency and nothing else; the suite runs identically in all three states.
+- `memory.rebuild-organization-cache` runs daily after `memory.expire-items` to warm snapshot aggregates and recurring-purpose embeddings. It is a warm-and-repair pass, **not** the invalidation mechanism, and nothing may depend on it having run.
+- Recorded in `specs/004-business-memory.md`, `adrs/0011-business-memory-read-through-facts.md`, and `adrs/0012-business-memory-cache-boundary.md`.
+
 ## Approved onboarding decisions
 
 - Agency operator owns the flow; missing information can be assigned to client contacts.
@@ -58,7 +77,7 @@
 
 ## Canonical documents
 
-- Product requirements: `specs/002-guided-onboarding.md`, `specs/003-integration-hub.md`, `specs/008-ai-readiness-score.md`.
+- Product requirements: `specs/002-guided-onboarding.md`, `specs/003-integration-hub.md`, `specs/004-business-memory.md`, `specs/008-ai-readiness-score.md`.
 - Approved designs: `docs/superpowers/specs/2026-08-08-guided-onboarding-design.md`, `docs/superpowers/specs/2026-08-08-integration-hub-design.md`.
 - UI language: `context/13-ui-ux-context.md`, `.superdesign/design-system.md`.
 - Architecture: `context/03-architecture.md`, `context/04-domain-model.md`, `context/05-module-map.md`.
@@ -99,8 +118,18 @@
 
 ## Next implementation sequence
 
-Integration Hub code is complete. Everything below is a release gate that needs credentials or a
-database runtime, not further implementation.
+Active implementation work is Business Memory V1. Resume at **Task 8** of
+`docs/superpowers/plans/2026-08-09-business-memory-implementation.md` and read
+`specs/004-business-memory.md`, `adrs/0011-business-memory-read-through-facts.md`, and
+`adrs/0012-business-memory-cache-boundary.md` first. The plan has seventeen tasks.
+Tasks 8, 9, and 13 need a Redis instance, and all three must also pass with `REDIS_URL` unset.
+
+Task 12 embedding and expiry workers are complete and committed. Their migrations remain staging-gated
+until the database password/security gates are cleared; local pgTAP execution is unavailable without a
+container runtime.
+
+Everything below is an Integration Hub release gate that needs credentials or a database runtime,
+not further implementation. Gates 1 and 2 also block the Business Memory migrations.
 
 1. Rotate the staging database password and enable leaked-password protection in Supabase Auth.
    Both need dashboard authority no agent in this workspace has.
@@ -120,6 +149,80 @@ database runtime, not further implementation.
    import, disconnect, keyboard/focus, 200% zoom, reduced motion, and background refetch.
 
 ## Verification record
+
+### Business Memory retrieval verification against a seeded corpus (2026-08-09)
+
+Seeded 1430 realistic memory items plus 14 business facts into **Al Noor Kitchen**
+(`2dda45b8-82db-4f5f-b17d-611b9bbb7846`) with `node scripts/seed-business-memory.mjs --reset`.
+Content is grounded in `industry-packs/restaurant/dubai-pilot.md` and `playbooks.md`, not filler:
+Google reviews, marketplace listing snapshots, daypart observations, agency lessons, decisions,
+measured outcomes with baseline and attribution window, client notes, brand documents, and fact
+proposals. Distribution: 647 customer-content, 121 proposed, 6 superseded, 30 expired. Two extra
+branches (Al Barsha, Deira) were added alongside the existing Jumeirah branch.
+
+**Two retrieval defects were found that an empty table cannot reveal, and both are fixed:**
+
+1. **Filtered HNSW recall was 5%.** A normal operator query returned 1 of the 20 true nearest
+   neighbours. An HNSW scan walks roughly `hnsw.ef_search` (default 40) globally nearest
+   candidates and applies the WHERE clause afterwards; Business Memory's filter removes
+   customer content the caller cannot read, proposed, superseded, and expired items, which is
+   close to half a realistic corpus, so almost nothing survived. Fixed in
+   `20260809065550_memory_search_hnsw_recall.sql` with pgvector 0.8 iterative scans
+   (`hnsw.iterative_scan = relaxed_order`, `hnsw.ef_search = 200`) attached to the function.
+   Candidate-pool recall is now 20/20.
+2. **The lexical half was effectively dead.** `websearch_to_tsquery` joins terms with AND, so
+   "biryani margin discount talabat" matched 1 row where OR matches 202, and
+   "packaging leaked delivery" matched 1 where OR matches 15. Fixed in
+   `20260809065808_memory_search_lexical_recall.sql` by rebuilding the query as OR'd lexemes;
+   precision comes from `ts_rank_cd` ordering rather than from the filter. Lexical signal now
+   appears on 12-20 of 20 results instead of about 1.
+
+**A trap worth remembering:** `CREATE OR REPLACE FUNCTION` replaces the function's configuration
+too, so the second migration had to restate all three `SET` clauses. Omitting them would have
+silently reverted HNSW recall to 5%. `pg_proc.proconfig` is asserted after the change.
+
+Verified after both fixes: all four pgTAP suites pass, `pnpm test` 329 tests, typecheck, lint, and
+format clean. The plan uses `memory_items_embedding_idx` (HNSW) and `memory_items_search_idx`
+(GIN); the organization predicate is applied inside the scan, and no other tenant's rows are
+reachable.
+
+**Not verified:** semantic relevance quality. No embedding API key is configured
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and the Google key are all empty), so the seed wrote
+deterministic hashed bag-of-words vectors labelled `embedding_model = 'local-hashed-bow-v1'`.
+Those exercise the index and the hybrid merge but say nothing about semantic quality. Re-run the
+seed with a real key to replace them.
+
+### Business Memory tasks 1-7 (2026-08-09)
+
+- Applied to the remote database and verified there: `20260809053839_business_memory`,
+  `20260809054943_memory_search_function`, `20260809060450_memory_write_operations`, and
+  `20260809060647_fix_memory_supersede_digest_schema`. Local and remote histories match.
+- pgTAP against the remote database: `business_memory_rls_test` 42 assertions,
+  `business_memory_search_test` 8, `business_memory_write_test` 11 - all passing. The
+  pre-existing `organization_audit_trigger_test` still passes after the shared audit function
+  was extended.
+- `pnpm test` passes with **329 tests in 48 files**, up from 249 before this work.
+  `pnpm typecheck`, `pnpm lint`, and `pnpm format:check` are clean.
+- Remote `supabase db lint` reports no schema errors for `public` and `private`. All three new
+  memory trigger functions carry an empty `search_path`.
+- Acceptance criterion 2 is proved twice: as a 200-corpus property test over the comparator, and
+  in SQL against the real database, where an inference that scores strictly higher on both
+  lexical and semantic similarity still ranks below a verified item.
+- Not yet verified, because it needs a seeded corpus: that the retrieval query plan uses the GIN
+  and HNSW indexes. Against an empty table Postgres sequential-scans regardless, so this is
+  deferred to Task 17 step 4 as planned.
+- `supabase test db`, `supabase db reset`, and `supabase gen types` cannot run here - no
+  container runtime. `pnpm db:test <file>` runs a pgTAP file against the configured database
+  instead.
+- Three bugs were caught by tests rather than by review, and are described in their commits: a
+  pgcrypto function qualified as `pg_catalog.digest` that would have failed on first call, a
+  pgTAP assertion that called a function inside a `WHERE` clause and so passed vacuously against
+  an empty table, and a fixture that set `verification_state = 'verified'` with no verifying
+  actor, which the schema correctly rejected.
+- **Correction to an earlier tracker entry:** the four Integration Hub migrations listed as a
+  pending staging gate were already applied remotely. `pnpm db:migrations:list` shows all
+  thirteen prior versions present on the remote. That gate is closed; the password rotation and
+  leaked-password-protection gates remain open.
 
 ### Integration Hub V1 (2026-08-08)
 
@@ -170,6 +273,17 @@ database runtime, not further implementation.
 - Never report a connection as healthy, a sync or import as succeeded, a capability as available, or
   a disconnect as complete from an accepted request alone. Only refetched persisted worker state may
   say so; the UI shows queued or running until then.
+- For Business Memory work, never write `business_facts` from the projector or from a model. Memory
+  proposes; a human confirms; the digital-twin service performs the write. Never add a rollout flag
+  or organization allowlist to Business Memory — the lexical degrade path is the deliberate
+  replacement for one, and it must be tested as a first-class behavior rather than an edge case.
+- Business Memory retrieval must filter by `organization_id` in SQL before any similarity
+  computation. A query plan that filters tenants after the vector operation is a cross-tenant leak,
+  not a performance problem.
+- Never put memory content in Redis, and never let a cache hit skip RLS hydration. The cache holds
+  identifiers and scores; Postgres returns the rows. Both the sensitivity ceiling and the version
+  stamp belong in every ranking key. If a change makes the cache faster by removing the hydration
+  read, it has removed the only thing making the cache safe.
 - The client may read the role-to-permission mapping from `src/domain/integrations/permissions.ts`,
   but enforcement lives only in the service, the routes, and RLS. Do not import
   `src/domain/integrations/errors.ts` from a Client Component: it is server-only and will break the

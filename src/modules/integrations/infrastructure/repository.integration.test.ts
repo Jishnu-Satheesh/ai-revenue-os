@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildIntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
+import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
 
 describe("Integration repository read-model boundary", () => {
   it("keeps cross-organization rows out of a snapshot even when a persistence adapter returns them", () => {
@@ -60,4 +61,69 @@ describe("Integration repository read-model boundary", () => {
     expect(JSON.stringify(snapshot)).not.toContain("never-public");
     expect(JSON.stringify(snapshot)).not.toContain("other-tenant-secret");
   });
+
+  it.each([
+    ["pending", "fixture", "connection_not_ready"],
+    ["active", "disabled", "provider_rollout_disabled"],
+  ] as const)(
+    "masks a persisted available grant for a %s connection with %s rollout",
+    (status, rolloutState, expectedReason) => {
+      const organizationId = "7e4402e6-283f-45a6-97e2-bde93fdf1bc9";
+      const connectionId = "12d32f7e-283f-45a6-97e2-bde93fdf1bc9";
+      const definition = { ...googleBusinessProfileDefinition, rolloutState };
+      const snapshot = buildIntegrationHubSnapshot({
+        organizationId,
+        now: new Date("2026-08-08T12:00:00.000Z"),
+        connections: [
+          {
+            id: connectionId,
+            organization_id: organizationId,
+            provider_key: definition.key,
+            adapter_version: definition.adapterVersion,
+            connection_mode: "fixture",
+            status,
+            external_account_id: "account-a",
+            external_account_label: "Fixture A",
+            credential_reference: null,
+            granted_scopes: [],
+            token_expires_at: null,
+            last_tested_at: null,
+            last_successful_sync_at: null,
+            next_scheduled_sync_at: null,
+            created_by: "b2ac5c0d-ae53-4e82-9f30-8c7c1de4d56f",
+            created_at: "2026-08-08T10:00:00.000Z",
+            updated_at: "2026-08-08T10:00:00.000Z",
+          },
+        ],
+        capabilityGrants: [
+          {
+            id: "grant-a",
+            organization_id: organizationId,
+            connection_id: connectionId,
+            capability_key: "read_google_business_profile",
+            maturity: "read-only",
+            availability: "available",
+            reason_codes: [],
+            restriction_codes: [],
+            derived_from_adapter_version: definition.adapterVersion,
+            derived_from_contract_version: definition.contractVersion,
+            grant_version: 1,
+            created_at: "2026-08-08T10:00:00.000Z",
+            updated_at: "2026-08-08T10:00:00.000Z",
+          },
+        ],
+        dataSources: [],
+        healthChecks: [],
+        runs: [],
+        auditEvents: [],
+        catalog: [definition],
+      });
+
+      expect(snapshot.connections[0]?.capabilities[0]).toMatchObject({
+        availability: "blocked",
+        reason_codes: [expectedReason],
+        definition: expect.objectContaining({ effect: "read" }),
+      });
+    },
+  );
 });

@@ -1,30 +1,67 @@
 import type {
+  CapabilityDirection,
+  CapabilityEffect,
+  CapabilityPrerequisite,
   ConnectionMaturity,
   ConnectionStatus,
+  IntegrationCharacter,
   IntegrationRecordEnvelope,
+  ProviderAdapterKind,
 } from "@/domain/integrations/schemas";
+
+export type ProviderCapabilityDefinition = {
+  key: string;
+  character: IntegrationCharacter;
+  direction: CapabilityDirection;
+  effect: CapabilityEffect;
+  maturity: ConnectionMaturity;
+  requiredScopes: readonly string[];
+  restrictionCodes: readonly string[];
+  adapterKind: ProviderAdapterKind;
+  prerequisites: readonly CapabilityPrerequisite[];
+  requiredWebhookEventKeys: readonly string[];
+};
+
+/**
+ * A capability the platform intends to support but cannot grant yet.
+ *
+ * This exists because "not built" and "built but unavailable to you" are
+ * different answers, and an operator deserves the first one stated plainly
+ * rather than inferred from an absence. A declaration is documentation: it
+ * carries no maturity, no prerequisites, and no adapter, and capability
+ * derivation never reads it, so it cannot become an organization grant.
+ */
+export type ProviderBlockedCapabilityDeclaration = {
+  key: string;
+  character: IntegrationCharacter;
+  effect: CapabilityEffect;
+  adapterKind: ProviderAdapterKind;
+  requiredScopes: readonly string[];
+  /** At least one stable code from the checked-in provider contract. */
+  restrictionCodes: readonly string[];
+  /** Exact operator copy explaining what is missing. */
+  summary: string;
+};
 
 export type ProviderDefinition = {
   key: string;
   displayName: string;
   adapterVersion: string;
+  contractVersion: string;
   rolloutState: "fixture" | "available" | "disabled";
-  supportedCapabilities: readonly string[];
-  requiredScopes: readonly string[];
+  characters: readonly IntegrationCharacter[];
+  capabilities: readonly ProviderCapabilityDefinition[];
+  /**
+   * Declared-but-ungrantable capabilities. Never a source of authorization.
+   */
+  declaredBlockedCapabilities?: readonly ProviderBlockedCapabilityDeclaration[];
   syncIntervalMinutes: number;
   staleAfterMinutes: number;
-  supportsWebhooks: boolean;
-  supportsWrites: boolean;
-  /**
-   * Exact operator-facing sentence for a provider whose access is not general,
-   * owned by the definition so the UI never invents its own wording.
-   */
+  /** Exact operator copy; presentation never invents provider readiness. */
   operatorCopy?: string;
 };
 
-export type CredentialHandle = {
-  readonly reference: string;
-};
+export type CredentialHandle = { readonly reference: string };
 
 export type AdapterContext = {
   organizationId: string;
@@ -45,18 +82,30 @@ export type ConnectionTestResult = {
   safeDetail?: string;
 };
 
-export type ExternalResource = {
-  id: string;
-  label: string;
-  type: string;
-};
+export type ExternalResource = { id: string; label: string; type: string };
 
-export type ProviderAdapter = {
+export type CapabilityAdapter<TKind extends ProviderAdapterKind = ProviderAdapterKind> = {
   providerKey: string;
   adapterVersion: string;
+  adapterKind: TKind;
+  supportedCapabilityKeys: readonly string[];
+};
+
+export type ReadProviderAdapter = CapabilityAdapter<"read"> & {
   testConnection(input: AdapterContext): Promise<ConnectionTestResult>;
   listExternalResources(input: AdapterContext): Promise<ExternalResource[]>;
   sync(input: AdapterSyncContext): Promise<IntegrationRecordEnvelope[]>;
+};
+
+/** Existing ingestion workers use the read adapter contract. */
+export type ProviderAdapter = ReadProviderAdapter;
+
+export type ProviderAdapterMaps = {
+  readonly read?: readonly ReadProviderAdapter[];
+  readonly publish?: readonly CapabilityAdapter<"publish">[];
+  readonly advertise?: readonly CapabilityAdapter<"advertise">[];
+  readonly webhook?: readonly CapabilityAdapter<"webhook">[];
+  readonly operator_review?: readonly CapabilityAdapter<"operator_review">[];
 };
 
 export type IngestionSink = {
@@ -72,17 +121,82 @@ export type IngestionSink = {
   }>;
 };
 
+export type CapabilityDefinitionSnapshot = {
+  character: IntegrationCharacter;
+  effect: CapabilityEffect;
+  maturity: ConnectionMaturity;
+  requiredScopes: readonly string[];
+};
+
 export type CapabilityGrant = {
   capabilityKey: string;
-  maturity: ConnectionMaturity;
+  definition: CapabilityDefinitionSnapshot | null;
   availability: "available" | "blocked" | "disabled";
   reasonCodes: readonly string[];
+  restrictionCodes: readonly string[];
+  derivedFromContractVersion: string;
 };
+
+export type CapabilityEvidence = {
+  evidence: {
+    reference: string;
+    checkedAt: string;
+    validUntil: string;
+  } | null;
+  capabilityHealth: "usable" | "degraded" | "unusable";
+  organizationEntitlement: "entitled" | "not_entitled" | "unknown";
+  accountEligibility: "eligible" | "ineligible" | "unknown";
+  accountMapping: "mapped" | "unmapped" | "ignored";
+  credentialStatus: "not_required" | "current" | "missing" | "expired" | "revoked";
+  controlledAccountEvidence: "verified" | "missing";
+  tracking: "ready" | "missing";
+  linkedOperator: "verified" | "missing" | "revoked";
+  webhookConfiguration: "verified" | "missing" | "revoked";
+  verifiedProviderPrerequisiteKeys: readonly string[];
+};
+
+export type VerifiedContractActionProjection = {
+  key: string;
+  effect: CapabilityEffect;
+  requiredScopes: readonly string[];
+  controlledAccountEvidenceVerified: boolean;
+  requiredPrerequisiteKeys: readonly string[];
+  placementVerification: "verified" | "unverified" | "not_required";
+  reconciliationVerification: "verified" | "unverified" | "not_required";
+};
+
+export type ProviderContractProjection =
+  | {
+      verification: "fixture";
+      providerKey: string;
+      version: string;
+      expiresAt: null;
+    }
+  | {
+      verification: "verified_live";
+      providerKey: string;
+      version: string;
+      expiresAt: string | null;
+      actions: readonly VerifiedContractActionProjection[];
+      webhook: {
+        capabilityKey: string;
+        eventKeys: readonly string[];
+        signatureVerification: "verified" | "unverified";
+        replayProtection: "verified" | "unverified";
+      } | null;
+    };
 
 export type CapabilityDerivationInput = {
   definition: ProviderDefinition;
   connection: { status: ConnectionStatus; grantedScopes: readonly string[] };
-  accountMapping: { status: "unmapped" | "mapped" | "ignored" };
-  platformPolicy: { allowsIntegrationReads: boolean };
+  capabilityEvidence: Readonly<Record<string, CapabilityEvidence>>;
+  providerContract: ProviderContractProjection;
+  installedAdapterKinds: readonly ProviderAdapterKind[];
+  platformPolicy: {
+    permittedEffects: readonly CapabilityEffect[];
+    publicWriteMode: "disabled" | "approval_required" | "bounded_autonomous";
+    spendMode: "disabled" | "approval_required" | "bounded_autonomous";
+  };
   requestedCapabilities?: readonly string[];
+  now?: Date;
 };

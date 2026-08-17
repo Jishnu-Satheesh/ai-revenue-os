@@ -93,6 +93,7 @@ export function createIntegrationRepository(
         healthChecks,
         runs,
         auditEvents,
+        catalog: dependencies.catalog ?? [],
       });
     },
 
@@ -269,6 +270,15 @@ export function createIntegrationWorkerRepository(
         );
       }
       return result.run;
+    },
+    async markDataSourceImported(input) {
+      // Scoped by organization as well as id: a worker never narrows a write to
+      // a primary key alone, so a mis-routed task cannot touch another tenant.
+      await dependencies.persistence.updateDataSource({
+        organizationId: input.organizationId,
+        dataSourceId: input.dataSourceId,
+        patch: { last_successful_import_at: input.importedAt },
+      });
     },
     async resumeLeasedRun(input) {
       const result = await requiredRunTransitions(dependencies.transitions).resumeLeasedRun({
@@ -566,7 +576,7 @@ const runColumns =
 const healthColumns =
   "id,organization_id,connection_id,ingestion_run_id,check_type,outcome,latency_ms,normalized_error_code,safe_detail,checked_at,correlation_id";
 const capabilityGrantColumns =
-  "id,organization_id,connection_id,capability_key,maturity,availability,reason_codes,derived_from_adapter_version,created_at,updated_at";
+  "id,organization_id,connection_id,capability_key,maturity,availability,reason_codes,restriction_codes,derived_from_adapter_version,derived_from_contract_version,grant_version,created_at,updated_at";
 const accountMappingColumns =
   "id,organization_id,connection_id,external_resource_id,external_resource_label,branch_id,status,created_by,created_at,updated_at";
 /** The mapping form only needs branch identity, never operational branch data. */

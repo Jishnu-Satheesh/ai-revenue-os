@@ -19,6 +19,8 @@ import {
 } from "@/modules/integrations/application/service";
 import { createAuthenticatedIntegrationRepository } from "@/modules/integrations/infrastructure/repository";
 import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
+import { metaDefinition } from "@/modules/integrations/providers/meta/definition";
+import { createGoogleBusinessProfileFixtureAdapter } from "@/modules/integrations/providers/google-business-profile/fixture-adapter";
 
 export const organizationRouteParamsSchema = z.object({
   organizationId: z.string().uuid(),
@@ -113,11 +115,14 @@ export function createIntegrationHubService(input: {
 }) {
   const { repository } = createAuthenticatedIntegrationRepository({
     supabase: input.supabase,
-    catalog: [googleBusinessProfileDefinition],
+    catalog: [googleBusinessProfileDefinition, metaDefinition],
   });
   return createIntegrationService({
     repository,
-    providers: createProviderRegistry([googleBusinessProfileDefinition], []),
+    providers: createProviderRegistry({
+      definitions: [googleBusinessProfileDefinition, metaDefinition],
+      adapters: { read: [createGoogleBusinessProfileFixtureAdapter()] },
+    }),
     dispatcher: createTriggerDispatcher(),
     publisher: createEventPublisher(),
     branchLookup: {

@@ -12,6 +12,23 @@ import {
   type IntegrationWorkerDependencies,
 } from "@/workflows/integrations/contracts";
 import type { ProviderAdapter } from "@/domain/integrations/types";
+import { logger } from "@/lib/logger";
+
+async function invalidateMemoryCacheAfterTerminalRun(
+  organizationId: string,
+  ingestionRunId: string,
+  dependencies: IntegrationWorkerDependencies,
+): Promise<void> {
+  if (!dependencies.memoryCache) return;
+  try {
+    await dependencies.memoryCache.invalidateOrganization(organizationId);
+  } catch {
+    (dependencies.logger ?? logger).warn("memory.cache_invalidation_failed", {
+      organizationId,
+      runId: ingestionRunId,
+    });
+  }
+}
 
 /** Runs one bounded provider sync and hands validated envelopes to Data Ingestion exactly once. */
 export async function runSyncConnection(
@@ -66,6 +83,13 @@ export async function runSyncConnection(
       recordsAccepted: handoff.accepted,
       recordsRejected: handoff.rejected,
     });
+    if (handoff.accepted > 0) {
+      await invalidateMemoryCacheAfterTerminalRun(
+        payload.organizationId,
+        payload.ingestionRunId,
+        dependencies,
+      );
+    }
   } catch (error) {
     const normalized = normalizedError(error);
     if (normalized.metadata.staleLease || normalized.metadata.handoffInProgress) return;

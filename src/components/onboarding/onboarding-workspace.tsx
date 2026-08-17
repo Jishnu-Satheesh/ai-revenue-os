@@ -17,6 +17,8 @@ const emptyContents: Partial<Record<OnboardingSectionKey, React.ReactNode>> = {}
 
 type OnboardingWorkspaceControls = {
   goToNextSection: () => void;
+  /** Jump straight to a section, so a task can link to where it is completed. */
+  goToSection: (sectionKey: OnboardingSectionKey) => void;
 };
 
 const OnboardingWorkspaceContext = createContext<OnboardingWorkspaceControls | null>(null);
@@ -66,7 +68,7 @@ export function OnboardingWorkspace({
   if (!activeSection) return null;
 
   return (
-    <OnboardingWorkspaceContext.Provider value={{ goToNextSection }}>
+    <OnboardingWorkspaceContext.Provider value={{ goToNextSection, goToSection: selectSection }}>
       {/* Both panes are height-bounded by the grid row, so each one scrolls its
           own body while its header, and the editor's actions, stay in place. */}
       <div className="flex min-h-0 flex-1 flex-col gap-6 lg:grid lg:grid-cols-[minmax(17rem,23rem)_minmax(0,1fr)]">

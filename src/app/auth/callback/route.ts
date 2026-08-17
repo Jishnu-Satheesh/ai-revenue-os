@@ -8,5 +8,7 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     await supabase.auth.exchangeCodeForSession(code);
   }
-  return NextResponse.redirect(new URL("/overview", request.url));
+  // The root resolves where this user belongs: their last organization, or the
+  // create wizard when they have none yet.
+  return NextResponse.redirect(new URL("/", request.url));
 }

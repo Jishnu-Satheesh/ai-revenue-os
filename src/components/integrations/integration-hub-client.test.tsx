@@ -95,11 +95,13 @@ function renderClient(options: { fetchNeverResolves?: boolean } = {}) {
       <IntegrationHubClient
         organizationId={organizationId}
         organizationName="Fixture Bakery"
+        organizationTimeZone="Asia/Kolkata"
         role="operator"
         initialSnapshot={snapshot()}
         initialCatalog={[]}
         // A zero timestamp marks the server payload as stale so the client
         // performs the background refetch this test observes.
+        metricTargets={[]}
         initialDataUpdatedAt={options.fetchNeverResolves ? 0 : Date.now()}
       />
     </QueryClientProvider>,
@@ -115,9 +117,21 @@ beforeEach(() => {
     organizationId,
     user: { id: "user-1" },
     membership: { role: "operator" },
-    supabase: {},
+    // The page also reads the metric registry for CSV mapping targets, which
+    // goes straight to the client rather than through the hub service.
+    supabase: {
+      from: () => ({
+        select: () => ({
+          eq: () => ({ or: () => ({ order: async () => ({ data: [], error: null }) }) }),
+        }),
+      }),
+    },
   });
-  mocks.getOrganization.mockResolvedValue({ id: organizationId, name: "Fixture Bakery" });
+  mocks.getOrganization.mockResolvedValue({
+    id: organizationId,
+    name: "Fixture Bakery",
+    default_timezone: "Asia/Kolkata",
+  });
   mocks.createIntegrationHubService.mockReturnValue(mocks.service);
   mocks.service.getSnapshot.mockResolvedValue(snapshot());
   mocks.service.getCatalog.mockResolvedValue([]);
@@ -231,7 +245,9 @@ describe("Integration Hub server boundary", () => {
 
 describe("route-aware app chrome", () => {
   it("derives the location from the pathname instead of a hardcoded Overview label", () => {
-    expect(deriveRouteCrumbs("/overview").at(-1)?.label).toBe("Overview");
+    // The root redirects on the server and never renders the shell, so it has
+    // no trail of its own to draw.
+    expect(deriveRouteCrumbs("/")).toEqual([]);
     expect(
       deriveRouteCrumbs(`/organizations/${organizationId}/integrations`).map(
         (crumb) => crumb.label,
@@ -242,6 +258,15 @@ describe("route-aware app chrome", () => {
         [organizationId]: "Fixture Bakery",
       }).map((crumb) => crumb.label),
     ).toEqual(["Fixture Bakery", "Guided onboarding"]);
+  });
+
+  it("targets Overview from the organization crumb", () => {
+    expect(deriveRouteCrumbs(`/organizations/${organizationId}/economics`)[0]?.href).toBe(
+      `/organizations/${organizationId}/overview`,
+    );
+    expect(deriveRouteCrumbs(`/organizations/${organizationId}/overview`).at(-1)?.label).toBe(
+      "Overview",
+    );
   });
 
   it("marks only the current location as the breadcrumb page", () => {

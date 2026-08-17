@@ -39,7 +39,10 @@ export type IntegrationTaskPayload = {
   dataSourceId?: string;
   ingestionRunId?: string;
   correlationId: string;
+  /** Deduplicates the dispatch. Derived from the run id, so never equal to the run's own key. */
   idempotencyKey: string;
+  /** The key persisted on the run row, which the execution lease is checked against. */
+  runIdempotencyKey: string;
   adapterVersion?: string;
 };
 
@@ -148,8 +151,15 @@ function notFound(entity: string): never {
   throw new IntegrationError("NOT_FOUND", `${entity} was not found for this organization.`, false);
 }
 
+function boundedPersistedKey(prefix: string, idempotencyKey: string): string {
+  const candidate = `${prefix}${idempotencyKey}`;
+  if (candidate.length <= 200) return candidate;
+  const digest = createHash("sha256").update(idempotencyKey, "utf8").digest("hex");
+  return `${prefix}${idempotencyKey.slice(0, 200 - prefix.length - digest.length - 1)}:${digest}`;
+}
+
 function taskIdempotencyKey(operation: string, idempotencyKey: string): string {
-  return `${operation}:${idempotencyKey}`;
+  return boundedPersistedKey(`${operation}:`, idempotencyKey);
 }
 
 function dispatchIdempotencyKey(
@@ -170,21 +180,59 @@ function capabilityRows(input: {
   connection: Pick<IntegrationConnectionRow, "status" | "granted_scopes" | "adapter_version">;
   mappingStatus: "unmapped" | "mapped" | "ignored";
 }) {
+  const capabilityEvidence = Object.fromEntries(
+    input.definition.capabilities.map(({ key }) => [
+      key,
+      {
+        evidence: null,
+        capabilityHealth: "usable" as const,
+        organizationEntitlement: "entitled" as const,
+        accountEligibility: "eligible" as const,
+        accountMapping: input.mappingStatus,
+        credentialStatus: "not_required" as const,
+        controlledAccountEvidence: "verified" as const,
+        tracking: "ready" as const,
+        linkedOperator: "verified" as const,
+        webhookConfiguration: "verified" as const,
+        verifiedProviderPrerequisiteKeys: [],
+      },
+    ]),
+  );
   return deriveCapabilityGrants({
     definition: input.definition,
     connection: {
       status: input.connection.status,
       grantedScopes: input.connection.granted_scopes,
     },
-    accountMapping: { status: input.mappingStatus },
-    platformPolicy: { allowsIntegrationReads: true },
+    capabilityEvidence,
+    providerContract: {
+      verification: "fixture",
+      providerKey: input.definition.key,
+      version: input.definition.contractVersion,
+      expiresAt: null,
+    },
+    installedAdapterKinds: ["read"],
+    platformPolicy: {
+      permittedEffects: ["read"],
+      publicWriteMode: "disabled",
+      spendMode: "disabled",
+    },
   }).map((grant) => ({
     capability_key: grant.capabilityKey,
-    maturity: grant.maturity,
+    maturity: grant.definition?.maturity ?? "manual",
     availability: grant.availability,
     reason_codes: [...grant.reasonCodes],
+    restriction_codes: [...grant.restrictionCodes],
     derived_from_adapter_version: input.connection.adapter_version,
+    derived_from_contract_version: grant.derivedFromContractVersion,
   }));
+}
+
+function fixtureGrantOperationKey(
+  key: string,
+  definition: Pick<ProviderDefinition, "contractVersion">,
+): string {
+  return boundedPersistedKey(`capability-grants-v2:${definition.contractVersion}:`, key);
 }
 
 export function createIntegrationService({
@@ -292,6 +340,17 @@ export function createIntegrationService({
       granted_scopes: parsed.grantedScopes,
       adapter_version: definition.adapterVersion,
     };
+    const existingSnapshot = await repository.getSnapshot({ organizationId: input.organizationId });
+    const existingConnection = existingSnapshot.connections.find(
+      (connection) =>
+        connection.provider_key === definition.key &&
+        connection.external_account_id === parsed.externalAccountId,
+    );
+    const mappingStatus = existingConnection?.mappings.some(
+      (mapping) => mapping.status === "mapped" && mapping.branch_id !== null,
+    )
+      ? "mapped"
+      : "unmapped";
     const committed = await repository.connectFixtureWithGrants({
       organizationId: input.organizationId,
       actorId: input.actorId,
@@ -300,12 +359,12 @@ export function createIntegrationService({
       externalAccountId: parsed.externalAccountId,
       externalAccountLabel: parsed.externalAccountLabel,
       grantedScopes: parsed.grantedScopes,
-      idempotencyKey: parsed.idempotencyKey,
+      idempotencyKey: fixtureGrantOperationKey(parsed.idempotencyKey, definition),
       correlationId: input.correlationId,
       grants: capabilityRows({
         definition,
         connection: projectedConnection,
-        mappingStatus: "unmapped",
+        mappingStatus,
       }),
     });
     if (!committed.deduplicated) {
@@ -361,7 +420,10 @@ export function createIntegrationService({
       organizationId: input.organizationId,
       connectionId: connection.id,
       actorId: input.actorId,
-      idempotencyKey: idempotencyKeySchema.parse(input.idempotencyKey),
+      idempotencyKey: fixtureGrantOperationKey(
+        idempotencyKeySchema.parse(input.idempotencyKey),
+        definition,
+      ),
       mappings: mappingRows,
       grants: capabilityRows({
         definition,
@@ -550,6 +612,9 @@ export function createIntegrationService({
         ingestionRunId: run.id,
         correlationId: input.context.correlationId,
         idempotencyKey: dispatchKey,
+        // The worker leases against the run row, so it needs the key that row
+        // actually holds rather than the dispatch key derived from its id.
+        runIdempotencyKey: persistedIdempotencyKey,
         ...(input.source.connection
           ? { adapterVersion: input.source.connection.adapter_version }
           : {}),

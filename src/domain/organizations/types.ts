@@ -117,14 +117,45 @@ export const goalInputSchema = z
   });
 export type GoalInput = z.infer<typeof goalInputSchema>;
 
-export const constraintInputSchema = z.object({
-  name: z.string().trim().min(2).max(160),
-  constraintType: z.string().trim().min(2).max(80),
-  value: z.unknown(),
-  severity: z.enum(["soft", "hard"]).default("hard"),
-  source: z.string().trim().min(1).max(120).default("user"),
-  isActive: z.boolean().default(true),
-});
+/**
+ * `constraintKey` is the stable identity a constraint's versions hang off.
+ * `name` is user-facing and mutable, so it cannot serve that purpose. Saving a
+ * key that is already in force at the same scope supersedes the incumbent
+ * rather than creating a second active row; see
+ * `specs/013-margin-firewall.md` section 4.1.
+ */
+export const constraintInputSchema = z
+  .object({
+    constraintKey: z
+      .string()
+      .trim()
+      .regex(/^[a-z][a-z0-9_.-]{1,120}$/, "Constraint key must be a lower-case slug."),
+    name: z.string().trim().min(2).max(160),
+    constraintType: z.string().trim().min(2).max(80),
+    value: z.unknown().refine((value) => value !== undefined, "Constraint value is required."),
+    severity: z.enum(["soft", "hard"]).default("hard"),
+    source: z.string().trim().min(1).max(120).default("user"),
+    scopeKind: z.enum(["organization", "branch", "channel"]).default("organization"),
+    scopeRef: z.string().trim().min(1).max(200).nullish(),
+    effectiveFrom: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Effective date must be an ISO date.")
+      .nullish(),
+  })
+  .superRefine((constraint, context) => {
+    if (constraint.scopeKind === "organization" && constraint.scopeRef)
+      context.addIssue({
+        code: "custom",
+        path: ["scopeRef"],
+        message: "Organization-scoped constraints cannot name a subject.",
+      });
+    if (constraint.scopeKind !== "organization" && !constraint.scopeRef)
+      context.addIssue({
+        code: "custom",
+        path: ["scopeRef"],
+        message: "Branch and channel constraints must name a subject.",
+      });
+  });
 export type ConstraintInput = z.infer<typeof constraintInputSchema>;
 
 export const policyInputSchema = z.object({

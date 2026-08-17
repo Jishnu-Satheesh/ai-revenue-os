@@ -94,10 +94,34 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-* { box-sizing: border-box; }
-body { margin: 0; }
-a { color: inherit; text-decoration: none; }
-button, a { -webkit-tap-highlight-color: transparent; }
+/*
+ * Layered on purpose.
+ *
+ * These were unlayered, and unlayered CSS beats anything inside a layer. Since
+ * Tailwind v4 emits utilities into `@layer utilities`, `a { color: inherit }`
+ * silently overrode every text colour on an anchor — so any `<Button asChild>`
+ * wrapping a `<Link>` lost its own colour and inherited its parent's. It showed
+ * up as grey text on a green primary button inside a muted alert.
+ *
+ * Inside `@layer base` these still reset the defaults they are meant to, and a
+ * utility class now wins as it should.
+ */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
 
 .dark {
   --sidebar: oklch(0.205 0 0);

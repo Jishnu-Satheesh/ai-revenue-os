@@ -149,22 +149,6 @@ export function createDurableIngestionSink(input: {
   };
 }
 
-/**
- * Temporary downstream boundary until the Data Ingestion module owns typed
- * record schemas. It deliberately acknowledges only the current bounded batch.
- */
-export function createAcknowledgingDataIngestionPort(): DataIngestionPort {
-  return {
-    async ingest(input) {
-      return {
-        accepted: input.records.length,
-        rejected: 0,
-        rejectionReasons: [],
-      };
-    },
-  };
-}
-
 type ValidatedIngestionSinkDependencies = {
   handoff: DataIngestionPort;
   sourceResolver: IngestionSourceResolver;

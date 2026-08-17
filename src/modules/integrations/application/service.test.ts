@@ -30,13 +30,25 @@ const definition: ProviderDefinition = {
   key: "google_business_profile",
   displayName: "Google Business Profile",
   adapterVersion: "1",
+  contractVersion: "fixture-v1",
   rolloutState: "fixture",
-  supportedCapabilities: ["read_google_business_profile"],
-  requiredScopes: ["business.manage"],
+  characters: ["data_source"],
+  capabilities: [
+    {
+      key: "read_google_business_profile",
+      character: "data_source",
+      direction: "inbound",
+      effect: "read",
+      maturity: "read-only",
+      requiredScopes: ["business.manage"],
+      restrictionCodes: [],
+      adapterKind: "read",
+      prerequisites: ["account_mapped"],
+      requiredWebhookEventKeys: [],
+    },
+  ],
   syncIntervalMinutes: 30,
   staleAfterMinutes: 65,
-  supportsWebhooks: false,
-  supportsWrites: false,
 };
 
 function connection(overrides: Partial<IntegrationConnectionRow> = {}): IntegrationConnectionRow {
@@ -112,6 +124,7 @@ function createDependencies(
     connectionStatus?: IntegrationConnectionRow["status"];
     atomicConnectFails?: boolean;
     atomicMappingFails?: boolean;
+    existingMappings?: IntegrationAccountMappingRow[];
   } = {},
 ) {
   const connections = [
@@ -122,6 +135,7 @@ function createDependencies(
   const published: Array<{ eventName: string; payload: Record<string, unknown> }> = [];
   const dispatches: Array<Record<string, unknown>> = [];
   const disabled: string[] = [];
+  const existingMappings = options.existingMappings ?? [];
   const repository: IntegrationRepository = {
     async getSnapshot() {
       return {
@@ -131,7 +145,18 @@ function createDependencies(
           actionRequiredConnections: 0,
           dataSources: 0,
         },
-        connections: [],
+        connections: connections.map((item) => ({
+          ...item,
+          capabilities: [],
+          mappings: existingMappings.filter((mapping) => mapping.connection_id === item.id),
+          latestHealth: null,
+          health: {
+            state: "pending" as const,
+            reasonCode: "connection_pending",
+            explanation: "Pending.",
+            evaluatedAt: "2026-08-08T00:00:00.000Z",
+          },
+        })),
         dataSources: [],
         branches: [],
         recentActivity: [],
@@ -302,6 +327,7 @@ function createDependencies(
         getAdapter: () => {
           throw new Error("not used");
         },
+        hasAdapter: () => true,
       },
       dispatcher: {
         async dispatch(input) {
@@ -434,6 +460,99 @@ describe("Integration application service", () => {
     });
   });
 
+  it("versions fixture connect and mapping operation keys across the grant schema boundary", async () => {
+    const { service, repository } = createDependencies();
+    const connect = vi.spyOn(repository, "connectFixtureWithGrants");
+    const replaceMappings = vi.spyOn(repository, "replaceMappingsWithGrants");
+    await service.connectFixture({
+      ...operator,
+      providerKey: definition.key,
+      externalAccountId: "account-schema-v2",
+      externalAccountLabel: "Schema boundary fixture",
+      grantedScopes: ["business.manage"],
+      idempotencyKey: "legacy-permanent-key",
+    });
+    await service.replaceMappings({
+      ...operator,
+      connectionId,
+      idempotencyKey: "legacy-mapping-key",
+      mappings: [],
+    });
+
+    expect(connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "capability-grants-v2:fixture-v1:legacy-permanent-key",
+      }),
+    );
+    expect(replaceMappings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "capability-grants-v2:fixture-v1:legacy-mapping-key",
+      }),
+    );
+  });
+
+  it("bounds persisted fixture grant operation keys when the caller key is 200 characters", async () => {
+    const { service, repository } = createDependencies();
+    const connect = vi.spyOn(repository, "connectFixtureWithGrants");
+    const replaceMappings = vi.spyOn(repository, "replaceMappingsWithGrants");
+    const callerKey = "k".repeat(200);
+
+    await service.connectFixture({
+      ...operator,
+      providerKey: definition.key,
+      externalAccountId: "bounded-account",
+      externalAccountLabel: "Bounded key fixture",
+      grantedScopes: ["business.manage"],
+      idempotencyKey: callerKey,
+    });
+    await service.replaceMappings({
+      ...operator,
+      connectionId,
+      idempotencyKey: callerKey,
+      mappings: [],
+    });
+
+    const connectKey = connect.mock.calls.at(-1)?.[0].idempotencyKey;
+    const mappingKey = replaceMappings.mock.calls.at(-1)?.[0].idempotencyKey;
+    expect(connectKey).toHaveLength(200);
+    expect(mappingKey).toHaveLength(200);
+    expect(connectKey).toMatch(/^capability-grants-v2:fixture-v1:/);
+    expect(mappingKey).toBe(connectKey);
+  });
+
+  it("preserves mapping-derived availability when reconnecting a mapped fixture account", async () => {
+    const { service, repository } = createDependencies({
+      existingMappings: [
+        {
+          id: "mapping-existing",
+          organization_id: organizationA,
+          connection_id: connectionId,
+          external_resource_id: "locations/fixture-harbor-house",
+          external_resource_label: "Harbor House",
+          branch_id: branchId,
+          status: "mapped",
+          created_by: actorId,
+          created_at: "2026-08-08T00:00:00.000Z",
+          updated_at: "2026-08-08T00:00:00.000Z",
+        },
+      ],
+    });
+    const connect = vi.spyOn(repository, "connectFixtureWithGrants");
+
+    await service.connectFixture({
+      ...operator,
+      providerKey: definition.key,
+      externalAccountId: "account-1",
+      externalAccountLabel: "A label that must stay private",
+      grantedScopes: ["business.manage"],
+      idempotencyKey: "reconnect-mapped",
+    });
+
+    expect(connect.mock.calls.at(-1)?.[0].grants).toEqual([
+      expect.objectContaining({ availability: "available", reason_codes: [] }),
+    ]);
+  });
+
   it("reports whether the atomic fixture upsert inserted the connection", async () => {
     const { service } = createDependencies();
     const first = await service.connectFixture({
@@ -496,6 +615,37 @@ describe("Integration application service", () => {
       taskName: "integration.sync-connection",
       idempotencyKey: `integration.sync:${organizationA}:${connectionId}:${first.runId}`,
     });
+  });
+
+  it("bounds every prefixed queued-operation key while preserving operation identity", async () => {
+    const callerKey = "q".repeat(200);
+    const testDeps = createDependencies();
+    const syncDeps = createDependencies();
+    const disconnectDeps = createDependencies();
+
+    await testDeps.service.requestConnectionTest({
+      ...operator,
+      connectionId,
+      idempotencyKey: callerKey,
+    });
+    await syncDeps.service.requestSync({ ...operator, connectionId, idempotencyKey: callerKey });
+    await disconnectDeps.service.disconnectConnection({
+      ...operator,
+      connectionId,
+      idempotencyKey: callerKey,
+      confirmation: "A label that must stay private",
+    });
+
+    const keys = [
+      testDeps.runs[0]?.idempotency_key,
+      syncDeps.runs[0]?.idempotency_key,
+      disconnectDeps.runs[0]?.idempotency_key,
+    ];
+    expect(keys.every((key) => key?.length === 200)).toBe(true);
+    expect(new Set(keys).size).toBe(3);
+    expect(keys[0]).toMatch(/^integration\.test:/);
+    expect(keys[1]).toMatch(/^integration\.sync:/);
+    expect(keys[2]).toMatch(/^integration\.disconnect:/);
   });
 
   it("rejects account mappings that name a branch from another organization", async () => {

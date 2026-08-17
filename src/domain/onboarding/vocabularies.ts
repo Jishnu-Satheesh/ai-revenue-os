@@ -289,6 +289,81 @@ export const productCategoryOptions = [
   { value: "add_ons", label: "Add-ons" },
 ] as const;
 
+/**
+ * How well the operator knows a cost they just typed.
+ *
+ * This is not a formality. The tier decides whether the resulting margin is
+ * presented as `complete` or `partial` in the channel economics ledger, so a
+ * guess must be recordable as a guess. The labels are deliberately in the
+ * operator's words rather than the ledger's: nobody types "derived".
+ */
+export const costConfidenceSchema = z.enum(["measured", "estimated", "assumed"]);
+export const costConfidenceOptions = [
+  { value: "measured", label: "From a contract or statement" },
+  { value: "estimated", label: "A worked estimate" },
+  { value: "assumed", label: "A rough guess" },
+] as const;
+
+/**
+ * One typed cost, scoped and dated.
+ *
+ * `percent` and `amountMinor` are alternatives, never both: a component is
+ * either a share of revenue or an absolute amount, and the ledger's rate table
+ * rejects a row that claims to be both. Both may be null, which is a row the
+ * operator has opened but not yet filled — a real state in a form, and one the
+ * schema has to admit or the control cannot show the row it just added.
+ * `channel` is null for a rate that applies everywhere, which is how most costs
+ * behave.
+ */
+export const costRateEntrySchema = z
+  .object({
+    componentKey: z.string().trim().min(1).max(60),
+    channel: z.string().trim().min(1).max(60).nullable().default(null),
+    percent: z.number().min(0).max(100).nullable().default(null),
+    amountMinor: z.number().int().min(0).nullable().default(null),
+    confidence: costConfidenceSchema,
+  })
+  .refine((entry) => entry.percent === null || entry.amountMinor === null, {
+    message: "A cost is either a share of revenue or an absolute amount, not both.",
+  });
+export type CostRateEntry = z.infer<typeof costRateEntrySchema>;
+
+export const costRateEntriesSchema = z.array(costRateEntrySchema);
+
+/** True when the operator actually stated a number, zero included. */
+export function isPricedCostRate(entry: CostRateEntry): boolean {
+  return entry.percent !== null || entry.amountMinor !== null;
+}
+
+/**
+ * True once at least one cost is priced.
+ *
+ * Deliberately not "every component". Most operators cannot state their food
+ * cost on the first day, and blocking the section would stall onboarding over
+ * exactly the gap the ledger exists to report honestly — an unpriced component
+ * grades the margin `indicative` and names itself in the readiness task list,
+ * which is a better outcome than an abandoned form.
+ */
+export function hasCostRate(value: unknown): boolean {
+  const parsed = costRateEntriesSchema.safeParse(value);
+  return parsed.success && parsed.data.some(isPricedCostRate);
+}
+
+const isoDatePattern = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/**
+ * The day a captured cost structure starts applying, as a calendar date.
+ *
+ * A calendar day rather than an instant, because that is what effective dating
+ * means to an operator and what the ledger compares against: "commission rose
+ * on 1 June" is their 1 June, not 1 June UTC.
+ */
+export const costEffectiveFromSchema = z.string().regex(isoDatePattern);
+
+export function hasCostEffectiveFrom(value: unknown): boolean {
+  return costEffectiveFromSchema.safeParse(value).success;
+}
+
 /** True when a payload key holds a non-empty array of values. */
 export function hasEntries(payload: Record<string, unknown>, key: string) {
   const value = payload[key];

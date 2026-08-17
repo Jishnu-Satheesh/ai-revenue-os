@@ -4,18 +4,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
-  BarChart3,
   Bot,
-  Boxes,
-  Building2,
+  BrainCircuit,
   Cable,
+  Coins,
   Compass,
   LayoutDashboard,
+  type LucideIcon,
+  Megaphone,
   Settings2,
   Sparkles,
   Waypoints,
 } from "lucide-react";
 
+import { organizationIdFromPathname, overviewPath } from "@/lib/routes";
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
 import {
   Sidebar as SidebarPrimitive,
@@ -33,44 +35,48 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 
-const navigation = [
-  { label: "Overview", href: "/overview", icon: LayoutDashboard },
-  { label: "Opportunities", href: "/opportunities", icon: Sparkles },
-  { label: "Agents", href: "/agents", icon: Bot, upcoming: true },
-  { label: "Campaigns", href: "/campaigns", icon: BarChart3, upcoming: true },
-  { label: "Executions", href: "/executions", icon: Activity, upcoming: true },
-  { label: "Organizations", href: "/organizations", icon: Building2, upcoming: true },
+type WorkspaceEntry = {
+  label: string;
+  icon: LucideIcon;
+  /** Absent while the destination does not exist yet. */
+  path?: (organizationId: string) => string;
+};
+
+/**
+ * Every destination is organization-scoped: there is no account-wide surface.
+ * The order leads with decision value rather than setup order, so the entries
+ * that will carry revenue sit above the ones that configure it.
+ */
+const workspaceEntries: readonly WorkspaceEntry[] = [
+  { label: "Overview", icon: LayoutDashboard, path: overviewPath },
+  {
+    label: "Opportunities",
+    icon: Sparkles,
+    path: (id) => `/organizations/${id}/opportunities`,
+  },
+  { label: "Campaigns", icon: Megaphone, path: (id) => `/organizations/${id}/campaigns` },
+  { label: "Business Memory", icon: BrainCircuit, path: (id) => `/organizations/${id}/memory` },
+  { label: "Channel economics", icon: Coins, path: (id) => `/organizations/${id}/economics` },
+  { label: "Integration Hub", icon: Cable, path: (id) => `/organizations/${id}/integrations` },
+  { label: "Guided onboarding", icon: Compass, path: (id) => `/organizations/${id}/onboarding` },
+  { label: "Agents", icon: Bot },
+  { label: "Executions", icon: Activity },
 ];
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** The organization group only exists while the reader is inside one. */
-function organizationNavigation(pathname: string) {
-  const segments = pathname.split("/").filter(Boolean);
-  const organizationId =
-    segments[0] === "organizations" && uuidPattern.test(segments[1] ?? "") ? segments[1] : null;
-  if (!organizationId) return null;
-  return {
-    organizationId,
-    items: [
-      {
-        label: "Digital Twin",
-        href: `/organizations/${organizationId}/digital-twin`,
-        icon: Boxes,
-      },
-      {
-        label: "Guided onboarding",
-        href: `/organizations/${organizationId}/onboarding`,
-        icon: Compass,
-      },
-      { label: "Integrations", href: `/organizations/${organizationId}/integrations`, icon: Cable },
-    ],
-  };
+function UpcomingBadge() {
+  return (
+    <Badge
+      variant="secondary"
+      className="ml-auto text-[10px] uppercase group-data-[collapsible=icon]:hidden"
+    >
+      Soon
+    </Badge>
+  );
 }
 
 export function Sidebar() {
   const pathname = usePathname() ?? "/";
-  const organization = organizationNavigation(pathname);
+  const organizationId = organizationIdFromPathname(pathname);
 
   return (
     <SidebarPrimitive variant="floating" collapsible="icon">
@@ -78,7 +84,7 @@ export function Sidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip="AI Revenue OS">
-              <Link href="/overview">
+              <Link href="/">
                 <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
                   <Waypoints />
                 </span>
@@ -92,57 +98,48 @@ export function Sidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        {/* Rendered even without scope so the create page is never a dead end. */}
         <OrganizationSwitcher />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navigation.map(({ label, href, icon: Icon, upcoming }) => (
-                <SidebarMenuItem key={label}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname === href || pathname.startsWith(`${href}/`)}
-                    tooltip={label}
-                  >
-                    <Link href={href}>
-                      <Icon />
-                      <span>{label}</span>
-                      {upcoming && (
-                        <Badge
-                          variant="secondary"
-                          className="ml-auto text-[10px] uppercase group-data-[collapsible=icon]:hidden"
-                        >
-                          Soon
-                        </Badge>
-                      )}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        {organization ? (
+        {organizationId ? (
           <SidebarGroup>
-            <SidebarGroupLabel>Organization</SidebarGroupLabel>
+            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {organization.items.map(({ label, href, icon: Icon }) => (
-                  <SidebarMenuItem key={label}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={pathname === href || pathname.startsWith(`${href}/`)}
-                      tooltip={label}
-                    >
-                      <Link href={href}>
-                        <Icon />
-                        <span>{label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {workspaceEntries.map(({ label, icon: Icon, path }) => {
+                  const href = path?.(organizationId);
+                  return (
+                    <SidebarMenuItem key={label}>
+                      {href ? (
+                        <SidebarMenuButton
+                          asChild
+                          data-testid="workspace-entry"
+                          isActive={pathname === href || pathname.startsWith(`${href}/`)}
+                          tooltip={label}
+                        >
+                          <Link href={href}>
+                            <Icon />
+                            <span>{label}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      ) : (
+                        // Never an anchor: a link to a route that does not exist
+                        // is a 404 dressed up as navigation.
+                        <SidebarMenuButton
+                          data-testid="workspace-entry"
+                          disabled
+                          tooltip={`${label} — not available yet`}
+                          className="cursor-default"
+                        >
+                          <Icon />
+                          <span>{label}</span>
+                          <UpcomingBadge />
+                        </SidebarMenuButton>
+                      )}
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -153,14 +150,13 @@ export function Sidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              asChild
-              isActive={pathname.startsWith("/settings")}
-              tooltip="Settings"
+              disabled
+              tooltip="Settings — not available yet"
+              className="cursor-default"
             >
-              <Link href="/settings">
-                <Settings2 />
-                <span>Settings</span>
-              </Link>
+              <Settings2 />
+              <span>Settings</span>
+              <UpcomingBadge />
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

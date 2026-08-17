@@ -61,7 +61,9 @@ This repository now contains the initial Next.js control-plane foundation and Su
 
 ## Organization + Digital Twin slice
 
-The onboarding flow is available at `/organizations/new` after authentication. It creates the organization, owner membership, default access/spend policies, an initial business profile, and an optional first branch in one database transaction. The Digital Twin workspace at `/organizations/:organizationId/digital-twin` records profile context, branches, source-aware facts, goals, constraints, policies, readiness, and audit history.
+The onboarding flow is available at `/organizations/new` after authentication. It creates the organization, owner membership, default access/spend policies, an initial business profile, and an optional first branch in one database transaction. The Overview workspace at `/organizations/:organizationId/overview` records profile context, branches, source-aware facts, goals, constraints, policies, readiness, and audit history. Overview is the route and the menu label; the Digital Twin remains the domain it presents, and keeps its schema, repository, and type names.
+
+Every authenticated route is organization-scoped — there is no account-wide page. The root path resolves per user: the most recently accessed organization that is not archived, or the alphabetically first when none has been visited, or `/organizations/new` when the user has no workable organization. `/auth/callback` and the archive action both redirect to `/` so they inherit the same resolution. See `adrs/0015-user-scoped-interface-state.md`.
 
 Draft organizations are soft-archived through the lifecycle control rather than hard-deleted. Restaurant organizations require an active physical branch and an access policy before activation. Verified facts cannot be downgraded by later inferred or imported writes.
 
@@ -72,10 +74,9 @@ All user-facing controls and surface primitives must use shadcn/ui components or
 ## Local setup
 
 1. Install Node.js 22+ and pnpm, then copy `.env.example` to `.env.local`.
-2. Fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+2. Fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, plus `DATABASE_URL` for the shared staging project.
 3. Install dependencies with `pnpm install`.
-4. Apply migrations with `pnpm supabase:start` and `pnpm supabase:reset` for a local Supabase instance.
-5. Run `pnpm dev` and open `http://localhost:3000`.
+4. Run `pnpm dev` and open `http://localhost:3000`.
 
 Quality checks:
 
@@ -85,6 +86,32 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+## Database workflow
+
+**There is no local or development database.** Development and testing both run against the shared hosted **staging** Supabase project, and every command below acts on it. Production is served from a separate database, so staging data is safe to work with.
+
+Use one fixed **development organization** for workflow testing, so results stay comparable between sessions and nobody has to rebuild a fixture to reproduce a bug:
+
+|               |                                                          |
+| ------------- | -------------------------------------------------------- |
+| Organization  | `2dda45b8-82db-4f5f-b17d-611b9bbb7846` — Al Noor Kitchen |
+| Industry pack | `restaurant`, AED, `Asia/Dubai`, 3 branches              |
+
+```bash
+pnpm db:migrations:list      # what staging has applied
+pnpm db:migrations:dry-run   # what a push would apply
+pnpm db:migrations:push      # apply pending migrations to staging
+pnpm db:test                 # pgTAP suites against DATABASE_URL
+```
+
+Three consequences follow from having no local stack, and they explain choices that otherwise look odd:
+
+- **pgTAP suites run against a hosted project**, which restricts operations a local Postgres allows. Direct deletes on `storage.objects` are blocked by the platform, so those assertions detect the restriction and report `SKIP` rather than failing or silently passing. The same suites run against a throwaway local stack in CI, where the assertions execute for real.
+- **`pnpm db:types` cannot be run here.** `supabase gen types` needs Docker for both `--local` and `--db-url`. CI generates the file and publishes it as a build artifact; `src/lib/supabase/database.types.ts` is maintained by hand until it is adopted.
+- **Migrations are only ever applied incrementally**, since staging is never rebuilt from scratch. CI is the only place migrations are proven to apply to an empty database, which is why the `supabase start` step there is worth keeping.
+
+Because staging is shared, a destructive migration affects everyone. Prefer additive changes and corrective follow-up migrations over editing one that has already been applied.
 
 ## Integration Hub
 

@@ -7,6 +7,7 @@ import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { createIntegrationHubService } from "@/modules/integrations/application/api-schemas";
 import { assertIntegrationHubEnabled } from "@/modules/integrations/application/feature-access";
+import { listMetricTargets } from "@/modules/metrics/infrastructure/repository";
 
 type PageProps = { params: Promise<{ organizationId: string }> };
 
@@ -23,10 +24,14 @@ export default async function IntegrationsPage({ params }: PageProps) {
     correlationId: crypto.randomUUID(),
   };
   const service = createIntegrationHubService({ supabase: context.supabase });
-  const [organization, snapshot, catalog] = await Promise.all([
+  // Read directly rather than through the Integration Hub service: the metric
+  // registry is a separate module, and folding its vocabulary into the hub's
+  // snapshot would couple two read models that have no other reason to meet.
+  const [organization, snapshot, catalog, metricTargets] = await Promise.all([
     getOrganization(context.supabase, context.organizationId),
     service.getSnapshot(authenticatedContext),
     service.getCatalog(authenticatedContext),
+    listMetricTargets(context.supabase, context.organizationId),
   ]);
 
   return (
@@ -47,9 +52,11 @@ export default async function IntegrationsPage({ params }: PageProps) {
       <IntegrationHubClient
         organizationId={context.organizationId}
         organizationName={organization.name}
+        organizationTimeZone={organization.default_timezone}
         role={authenticatedContext.role}
         initialSnapshot={snapshot}
         initialCatalog={catalog}
+        metricTargets={metricTargets}
       />
     </div>
   );

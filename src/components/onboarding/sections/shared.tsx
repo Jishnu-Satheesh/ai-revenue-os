@@ -9,6 +9,10 @@ import {
   MultiSelectField,
   type FieldOption,
 } from "@/components/onboarding/fields/combobox-field";
+import {
+  CostRateField,
+  type CostComponentOption,
+} from "@/components/onboarding/fields/cost-rate-field";
 import { MoneyField, minorUnitsHint } from "@/components/onboarding/fields/money-field";
 import { MonthRangeField } from "@/components/onboarding/fields/month-range-field";
 import { TagListField } from "@/components/onboarding/fields/tag-list-field";
@@ -35,7 +39,7 @@ import { toSectionPayload } from "@/domain/onboarding/payload";
 import type { OnboardingSectionKey } from "@/domain/onboarding/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-export type { FieldOption };
+export type { CostComponentOption, FieldOption };
 
 type FieldBase = {
   name: string;
@@ -66,7 +70,15 @@ export type SectionField = FieldBase &
     | { control: "switch"; switchLabel: string }
     | { control: "weeklyHours" }
     | { control: "monthRange" }
+    | { control: "date" }
     | { control: "money"; currencyField: string }
+    | {
+        control: "costRates";
+        components: readonly CostComponentOption[];
+        channels: readonly string[];
+        /** The organization's own currency; a cost is not priced in a chosen one. */
+        currency: string;
+      }
   );
 
 export type SectionSaveStatus = "in_progress" | "complete";
@@ -90,6 +102,9 @@ function initialValues(fields: readonly SectionField[], payload: Record<string, 
         break;
       case "money":
         values[field.name] = typeof stored === "number" ? stored : null;
+        break;
+      case "costRates":
+        values[field.name] = Array.isArray(stored) ? stored : [];
         break;
       case "weeklyHours":
         values[field.name] = Array.isArray(stored) && stored.length ? stored : emptyWeeklyHours();
@@ -191,7 +206,10 @@ export function SectionForm({
                     // Group controls are not labelable elements, so they are named
                     // through aria-labelledby instead of a `for` association.
                     const grouped =
-                      control === "weeklyHours" || control === "monthRange" || control === "radio";
+                      control === "weeklyHours" ||
+                      control === "monthRange" ||
+                      control === "costRates" ||
+                      control === "radio";
 
                     return (
                       <Field>
@@ -448,6 +466,35 @@ function SectionControl({
       return <WeeklyHoursField id={controlId} value={value} onChange={change} onBlur={onBlur} />;
     case "monthRange":
       return <MonthRangeField id={controlId} value={value} onChange={change} onBlur={onBlur} />;
+    case "costRates": {
+      const costs = config as {
+        components: readonly CostComponentOption[];
+        channels: readonly string[];
+        currency: string;
+      };
+      return (
+        <CostRateField
+          id={controlId}
+          value={value}
+          components={costs.components}
+          channels={costs.channels}
+          currency={costs.currency}
+          onChange={change}
+          onBlur={onBlur}
+        />
+      );
+    }
+    case "date":
+      return (
+        <Input
+          id={controlId}
+          type="date"
+          className="w-52"
+          value={String(value ?? "")}
+          onBlur={onBlur}
+          onChange={(event) => change(event.target.value)}
+        />
+      );
     default:
       return (
         <Input

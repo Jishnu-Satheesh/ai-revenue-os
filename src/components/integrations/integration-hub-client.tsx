@@ -7,6 +7,7 @@ import { ActivityTab } from "@/components/integrations/activity-tab";
 import { CatalogTab } from "@/components/integrations/catalog-tab";
 import { ConnectionsTab } from "@/components/integrations/connections-tab";
 import { DataSourcesTab } from "@/components/integrations/data-sources-tab";
+import type { MetricTargetChoice } from "@/components/integrations/csv-mapping-form";
 import {
   integrationCatalogQueryOptions,
   integrationSnapshotQueryOptions,
@@ -22,6 +23,7 @@ import type { IntegrationHubSnapshot } from "@/modules/integrations/application/
 export type IntegrationHubClientProps = {
   organizationId: string;
   organizationName: string;
+  organizationTimeZone: string;
   role: OrganizationRole;
   initialSnapshot: IntegrationHubSnapshot;
   initialCatalog: readonly ProviderDefinition[];
@@ -30,6 +32,8 @@ export type IntegrationHubClientProps = {
    * decide whether the first client render should refetch.
    */
   initialDataUpdatedAt?: number;
+  /** Registered metric keys this organization can map a CSV column onto. */
+  metricTargets: readonly MetricTargetChoice[];
 };
 
 const tabs = [
@@ -42,10 +46,12 @@ const tabs = [
 export function IntegrationHubClient({
   organizationId,
   organizationName,
+  organizationTimeZone,
   role,
   initialSnapshot,
   initialCatalog,
   initialDataUpdatedAt,
+  metricTargets,
 }: IntegrationHubClientProps) {
   const snapshotQuery = useQuery(
     integrationSnapshotQueryOptions({
@@ -115,6 +121,7 @@ export function IntegrationHubClient({
             snapshot={snapshot}
             catalog={catalog}
             role={role}
+            timeZone={organizationTimeZone}
           />
         </TabsContent>
         <TabsContent value="catalog" className="min-h-0">
@@ -126,10 +133,20 @@ export function IntegrationHubClient({
           />
         </TabsContent>
         <TabsContent value="data-sources" className="min-h-0">
-          <DataSourcesTab organizationId={organizationId} snapshot={snapshot} role={role} />
+          <DataSourcesTab
+            organizationId={organizationId}
+            snapshot={snapshot}
+            metricTargets={metricTargets}
+            role={role}
+            timeZone={organizationTimeZone}
+          />
         </TabsContent>
         <TabsContent value="activity" className="min-h-0">
-          <ActivityTab activity={snapshot.recentActivity} isRefreshing={isRefreshing} />
+          <ActivityTab
+            activity={snapshot.recentActivity}
+            isRefreshing={isRefreshing}
+            timeZone={organizationTimeZone}
+          />
         </TabsContent>
       </Tabs>
     </div>

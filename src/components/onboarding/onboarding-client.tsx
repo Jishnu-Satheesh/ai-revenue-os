@@ -7,6 +7,7 @@ import { BranchesOperationsSection } from "@/components/onboarding/sections/bran
 import { BrandAssetsSection } from "@/components/onboarding/sections/brand-assets-section";
 import { BusinessIdentitySection } from "@/components/onboarding/sections/business-identity-section";
 import { ChannelsPresenceSection } from "@/components/onboarding/sections/channels-presence-section";
+import { CostStructureSection } from "@/components/onboarding/sections/cost-structure-section";
 import { CustomersConsentSection } from "@/components/onboarding/sections/customers-consent-section";
 import { GovernanceSection } from "@/components/onboarding/sections/governance-section";
 import { HistoricalPerformanceSection } from "@/components/onboarding/sections/historical-performance-section";
@@ -21,6 +22,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
 import { onboardingSectionRegistry } from "@/domain/onboarding/section-registry";
 import { normalizeIndustry } from "@/domain/organizations/industries";
+import { findReadinessRequirement, isOnboardingSectionKey } from "@/domain/onboarding/readiness";
 import type { ReadinessResult } from "@/domain/onboarding/readiness";
 import type { OnboardingSectionKey } from "@/domain/onboarding/types";
 import type {
@@ -31,12 +33,22 @@ import type {
 type OrganizationSummary = {
   name: string;
   industry: string;
+  baseCurrency: string;
 };
 
 type Props = {
   organizationId: string;
   organization: OrganizationSummary;
   initialSnapshot: OnboardingSnapshot;
+  /**
+   * A section another surface asked to open, from `?section=`.
+   *
+   * Opens the workspace there for this visit only. The stored
+   * `current_section_key` is deliberately left alone: following a link from the
+   * economics view should not rewrite where the operator's own run of
+   * onboarding resumes.
+   */
+  requestedSection?: string;
 };
 
 const queryKey = (organizationId: string) =>
@@ -49,6 +61,18 @@ const queryKey = (organizationId: string) =>
  */
 function sectionPayload(state: OnboardingSectionStateRecord | undefined): Record<string, unknown> {
   return state?.payload ?? {};
+}
+
+/**
+ * Channels the operator listed in Channels and presence.
+ *
+ * Cost structure offers these as scopes rather than a free-text box, so a
+ * channel-specific commission attaches to a channel the ledger will actually
+ * see in the data instead of a near-miss spelling of one.
+ */
+function channelsNamedEarlier(state: OnboardingSectionStateRecord | undefined): string[] {
+  const channels = sectionPayload(state).channels;
+  return Array.isArray(channels) ? channels.map(String) : [];
 }
 
 function mapReadiness(snapshot: OnboardingSnapshot): ReadinessResult | null {
@@ -71,9 +95,20 @@ function mapReadiness(snapshot: OnboardingSnapshot): ReadinessResult | null {
       if (!action || typeof action !== "object") return [];
       const value = action as Record<string, unknown>;
       if (typeof value.reasonId !== "string") return [];
+
+      // An assessment stored before labels were carried through holds only the
+      // id. Recovering the rest from the registry keeps those rows readable
+      // instead of showing a key or dropping the task entirely.
+      const requirement = findReadinessRequirement(value.reasonId);
+      if (!requirement) return [];
+
       return [
         {
           reasonId: value.reasonId,
+          label: typeof value.label === "string" ? value.label : requirement.label,
+          sectionKey: isOnboardingSectionKey(String(value.sectionKey))
+            ? (value.sectionKey as OnboardingSectionKey)
+            : requirement.sectionKey,
           owner:
             value.owner === "client_contact"
               ? ("client_contact" as const)
@@ -84,6 +119,7 @@ function mapReadiness(snapshot: OnboardingSnapshot): ReadinessResult | null {
               : value.effort === "medium"
                 ? ("medium" as const)
                 : ("small" as const),
+          critical: typeof value.critical === "boolean" ? value.critical : requirement.critical,
         },
       ];
     }),
@@ -96,7 +132,12 @@ async function responseJson<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-export function OnboardingClient({ organizationId, organization, initialSnapshot }: Props) {
+export function OnboardingClient({
+  organizationId,
+  organization,
+  initialSnapshot,
+  requestedSection,
+}: Props) {
   const queryClient = useQueryClient();
   const onboardingQuery = useQuery({
     queryKey: queryKey(organizationId),
@@ -194,6 +235,21 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKey(organizationId) }),
   });
 
+  const readiness = mapReadiness(snapshot);
+
+  // Which sections hold an unsatisfied critical requirement, so the rail can
+  // say what is blocking confirmation rather than only how much is left.
+  const blockingSections = useMemo(
+    () =>
+      new Set(
+        (readiness?.criticalBlockers ?? []).flatMap((reasonId) => {
+          const requirement = findReadinessRequirement(reasonId);
+          return requirement ? [requirement.sectionKey] : [];
+        }),
+      ),
+    [readiness],
+  );
+
   const sections = useMemo<readonly RailSection[]>(
     () =>
       onboardingSectionRegistry.map((definition) => ({
@@ -201,19 +257,27 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
         status:
           snapshot.sections.find((state) => state.section_key === definition.key)?.status ??
           "not_started",
+        blocking: blockingSections.has(definition.key),
       })),
-    [snapshot.sections],
+    [snapshot.sections, blockingSections],
   );
   const sectionStates = useMemo(
     () => new Map(snapshot.sections.map((state) => [state.section_key, state])),
     [snapshot.sections],
   );
-  const initialSectionKey = onboardingSectionRegistry.some(
+  const resumeSectionKey = onboardingSectionRegistry.some(
     (section) => section.key === snapshot.session?.current_section_key,
   )
     ? (snapshot.session?.current_section_key as OnboardingSectionKey)
     : "business_identity";
-  const readiness = mapReadiness(snapshot);
+
+  // A requested section wins over the stored one, but only if it is real: an
+  // unknown value in the query string should land the operator where they left
+  // off rather than on a blank panel.
+  const initialSectionKey =
+    requestedSection && isOnboardingSectionKey(requestedSection)
+      ? requestedSection
+      : resumeSectionKey;
 
   function save(sectionKey: OnboardingSectionKey) {
     return (payload: Record<string, unknown>, status: "in_progress" | "complete") =>
@@ -232,7 +296,11 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
     return true;
   }
 
-  const contents = {
+  // Typed as the complete record rather than a partial one. The workspace
+  // accepts a partial and falls back to a placeholder, so a section added to
+  // the registry and forgotten here would render as an empty panel with no
+  // error anywhere. This turns that into a build failure.
+  const contents: Record<OnboardingSectionKey, React.ReactNode> = {
     business_identity: (
       <BusinessIdentitySection
         defaultValues={{
@@ -265,6 +333,18 @@ export function OnboardingClient({ organizationId, organization, initialSnapshot
       <HistoricalPerformanceSection
         defaultValues={sectionPayload(sectionStates.get("historical_performance"))}
         onSave={save("historical_performance")}
+      />
+    ),
+    cost_structure: (
+      <CostStructureSection
+        components={snapshot.costComponents}
+        // The channels the operator already named, so a commission that differs
+        // by marketplace is scoped to a channel they actually sell on rather
+        // than one they have to retype.
+        channels={channelsNamedEarlier(sectionStates.get("channels_presence"))}
+        currency={organization.baseCurrency}
+        defaultValues={sectionPayload(sectionStates.get("cost_structure"))}
+        onSave={save("cost_structure")}
       />
     ),
     customers_consent: (
