@@ -49,7 +49,11 @@ type WorkspaceEntry = {
  */
 const workspaceEntries: readonly WorkspaceEntry[] = [
   { label: "Overview", icon: LayoutDashboard, path: overviewPath },
-  { label: "Opportunities", icon: Sparkles },
+  {
+    label: "Opportunities",
+    icon: Sparkles,
+    path: (id) => `/organizations/${id}/opportunities`,
+  },
   { label: "Campaigns", icon: Megaphone, path: (id) => `/organizations/${id}/campaigns` },
   { label: "Business Memory", icon: BrainCircuit, path: (id) => `/organizations/${id}/memory` },
   { label: "Channel economics", icon: Coins, path: (id) => `/organizations/${id}/economics` },

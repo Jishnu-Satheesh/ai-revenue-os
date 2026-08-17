@@ -75,3 +75,24 @@ export function createMemoryWorkerServiceClient(): SupabaseClient<Database> {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 }
+
+/** Decision-cycle worker client, constructed only after strict payload parsing. */
+export function createDecisionWorkerServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Decision workers");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
+
+/**
+ * Campaign generation worker client, constructed only after strict payload
+ * parsing. Generation publishes immutable versions and spends model budget, so
+ * a client built before validation would hand a tenant-bypassing credential to
+ * a request nobody checked.
+ */
+export function createCampaignWorkerServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Campaign workers");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}

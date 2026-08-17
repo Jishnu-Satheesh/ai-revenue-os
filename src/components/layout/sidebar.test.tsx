@@ -62,15 +62,20 @@ describe("Sidebar", () => {
       "href",
       `/organizations/${organizationId}/campaigns`,
     );
+    // Opportunities is built now, so it is a real organization-scoped link.
+    expect(screen.getByRole("link", { name: /Opportunities/ })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/opportunities`,
+    );
     // An unbuilt destination must not be an anchor: the previous sidebar linked
     // these to routes that do not exist, so every click was a 404.
-    for (const label of ["Opportunities", "Agents", "Executions", "Settings"]) {
+    for (const label of ["Agents", "Executions", "Settings"]) {
       const entry = screen.getByText(label).closest("a, button");
       expect(entry?.tagName).toBe("BUTTON");
       expect(entry).toBeDisabled();
       expect(entry).not.toHaveAttribute("data-active", "true");
     }
-    expect(screen.getAllByText("Soon")).toHaveLength(4);
+    expect(screen.getAllByText("Soon")).toHaveLength(3);
   });
 
   it("hides the workspace group but keeps the switcher off an organization route", () => {

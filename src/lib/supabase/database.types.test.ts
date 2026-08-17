@@ -26,6 +26,19 @@ const TYPES_FILE = resolve(process.cwd(), "src/lib/supabase/database.types.ts");
  * leaving one untyped becomes a decision rather than an oversight.
  */
 const UNTYPED_TABLES = new Set([
+  // Decision persistence uses a deliberately narrow repository contract. The
+  // browser can read only the opportunity feed projection, while the remaining
+  // ledger tables are worker-only and reached through constrained RPCs.
+  "artifact_promotions",
+  "artifact_versions",
+  "candidate_suppressions",
+  "decision_candidates",
+  "decision_cycles",
+  "decision_feedback",
+  "decision_records",
+  "opportunities",
+  "playbook_definitions",
+  "playbook_versions",
   "integration_account_mappings",
   "integration_capability_grants",
   "integration_connections",
@@ -48,6 +61,46 @@ const UNTYPED_TABLES = new Set([
   "memory_proposal_rejection_operations",
   "memory_retrieval_log",
   "memory_write_operations",
+  // Campaign persistence follows the same narrow-contract rule as decisions.
+  // Members read safe projections through the repository; every write that
+  // creates a version, records an attestation, or grants an approval goes
+  // through a security-definer RPC, so a generated row type would imply a
+  // direct write path that deliberately does not exist.
+  "campaign_approvals",
+  "campaign_assets",
+  "campaign_briefs",
+  "campaign_bundle_versions",
+  "campaign_channel_actions",
+  "campaign_creative_directions",
+  "campaign_measurement_plans",
+  "campaign_source_snapshots",
+  "campaign_visual_attestations",
+  "campaigns",
+  "organization_brand_asset_versions",
+  "organization_brand_assets",
+  // The generation run ledger. Members read a safe projection through the
+  // repository; every lifecycle write is worker-only through a security-definer
+  // RPC, so a generated row type would imply a write path that does not exist.
+  "campaign_generation_runs",
+  // The execution ledger. Members read safe projections through the repository;
+  // every claim, invocation, receipt, and reservation is written only by a
+  // worker through a security-definer RPC, so a generated row type would imply
+  // a direct write path that deliberately does not exist.
+  "campaign_action_runs",
+  "campaign_budget_reservations",
+  "provider_receipts",
+  "tool_invocations",
+]);
+
+/**
+ * Private tables are deliberately absent from generated public Supabase row
+ * types. Workers reach these ledgers only through security-definer RPCs; adding
+ * one to the public type surface would falsely imply direct table access.
+ */
+const PRIVATE_RPC_ONLY_TABLES = new Set([
+  "decision_cycle_operations",
+  "integration_credentials",
+  "tool_gateway_operations",
 ]);
 
 const TABLE_LEVEL_KEYWORDS = new Set([
@@ -101,7 +154,9 @@ function readTypedSchema(): Map<string, Set<string>> {
   const tablesBlock = types.slice(types.indexOf("    Tables: {"), types.indexOf("    Views:"));
 
   const typedTables = new Map<string, Set<string>>();
-  const entries = tablesBlock.matchAll(/^ {6}([a-z_]+): \{\n {8}Row: \{\n([\s\S]*?)\n {8}\};/gm);
+  const entries = tablesBlock.matchAll(
+    /^ {6}([a-z_]+): \{\n(?: {8}\/\*\*[\s\S]*?\*\/\n)? {8}Row: \{\n([\s\S]*?)\n {8}\};/gm,
+  );
   for (const [, table, rowBody] of entries) {
     const fields = new Set<string>();
     for (const [, field] of rowBody.matchAll(/^ {10}([a-z_][a-z0-9_]*)[?]?:/gm)) fields.add(field);
@@ -111,8 +166,22 @@ function readTypedSchema(): Map<string, Set<string>> {
   return typedTables;
 }
 
+function readPrivateTables(): Set<string> {
+  const tables = new Set<string>();
+  for (const file of readdirSync(MIGRATIONS_DIRECTORY)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()) {
+    const sql = readFileSync(join(MIGRATIONS_DIRECTORY, file), "utf8");
+    for (const [, table] of sql.matchAll(/create table private\.([a-z_]+)\s*\(/g)) {
+      tables.add(table);
+    }
+  }
+  return tables;
+}
+
 const migrationSchema = readMigrationSchema();
 const typedSchema = readTypedSchema();
+const privateTables = readPrivateTables();
 
 describe("database.types.ts reflects the migrations", () => {
   it("parses both sides, so a silent parser failure cannot pass the suite", () => {
@@ -150,5 +219,10 @@ describe("database.types.ts reflects the migrations", () => {
   it("keeps the untyped list honest by dropping entries that no longer exist", () => {
     const stale = [...UNTYPED_TABLES].filter((table) => !migrationSchema.has(table)).sort();
     expect(stale).toEqual([]);
+  });
+
+  it("records every private table as an RPC-only surface", () => {
+    expect([...privateTables].sort()).toEqual([...PRIVATE_RPC_ONLY_TABLES].sort());
+    expect(typedSchema.has("decision_cycle_operations")).toBe(false);
   });
 });

@@ -1,0 +1,114 @@
+/**
+ * The boundary a model sits behind when it writes campaign creative.
+ *
+ * Two rules shape this port. Structured output is typed `unknown`, so no caller
+ * can use a model's answer without parsing it first — a provider that returned
+ * a convenient shape would let an unvalidated object reach the manifest. And
+ * the port has no knowledge of campaigns beyond what it is handed: it cannot
+ * read a database, resolve a capability, or decide what is allowed. It turns
+ * text and constraints into candidate content, and nothing else.
+ */
+
+export type CampaignGenerationKind = "plan" | "image" | "patch";
+
+export type CampaignGenerationCallContext = {
+  organizationId: string;
+  campaignId: string;
+  correlationId: string;
+};
+
+export type CampaignGenerationInput = {
+  context: CampaignGenerationCallContext;
+  /** The system framing. Policy lives in code; this only shapes the writing. */
+  system: string;
+  /** Already-assembled evidence and constraints. The provider adds nothing. */
+  prompt: string;
+  /** The JSON shape the model is asked to produce, as a description. */
+  outputContract: string;
+};
+
+export type CampaignImageGenerationInput = {
+  context: CampaignGenerationCallContext;
+  prompt: string;
+  /** Pixel dimensions the placement requires. */
+  widthPx: number;
+  heightPx: number;
+};
+
+export type CampaignPatchInput = {
+  context: CampaignGenerationCallContext;
+  /** The operator's instruction, treated as data and never as an instruction to obey. */
+  operatorPrompt: string;
+  /** The paths a patch may touch. Anything else is rejected by the caller. */
+  allowedPaths: readonly string[];
+  /** A redacted view of the current version, enough to write a patch against. */
+  currentSummary: string;
+};
+
+export type GeneratedImage = {
+  bytes: Uint8Array;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  widthPx: number;
+  heightPx: number;
+  /** What produced it, recorded so an asset can be defended after it is public. */
+  modelId: string;
+};
+
+export type CampaignGenerationUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  estimatedCostMinor: number | null;
+};
+
+export type CampaignGenerationResult = {
+  /** Deliberately unknown. The application boundary must parse it. */
+  output: unknown;
+  modelId: string;
+  usage: CampaignGenerationUsage;
+};
+
+export type CampaignGenerationProvider = {
+  generatePlan(input: CampaignGenerationInput): Promise<CampaignGenerationResult>;
+  generateImage(
+    input: CampaignImageGenerationInput,
+  ): Promise<{ image: GeneratedImage; usage: CampaignGenerationUsage }>;
+  generatePatch(input: CampaignPatchInput): Promise<CampaignGenerationResult>;
+};
+
+/**
+ * What one generation attempt cost and whether its output survived validation.
+ *
+ * `validationOutcome` is separate from `outcome` on purpose: a call that
+ * returned successfully and then failed validation is the interesting case, and
+ * collapsing the two would hide it.
+ */
+export type CampaignGenerationRecord = {
+  kind: CampaignGenerationKind;
+  organizationId: string;
+  campaignId: string;
+  correlationId: string;
+  modelId: string;
+  outcome: "succeeded" | "failed";
+  validationOutcome: "valid" | "invalid" | "not_applicable";
+  attempt: number;
+  durationMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  estimatedCostMinor: number | null;
+  imageCount: number;
+  /** A stable code, never a provider message, which can echo prompt content. */
+  failureCode?: string;
+};
+
+export type CampaignGenerationTelemetrySink = {
+  record(record: CampaignGenerationRecord): void;
+};
+
+/** Structured logging sink. No prompt, no output, no asset bytes. */
+export function createConsoleCampaignGenerationSink(): CampaignGenerationTelemetrySink {
+  return {
+    record(record) {
+      console.info("campaign.generation_call", record);
+    },
+  };
+}

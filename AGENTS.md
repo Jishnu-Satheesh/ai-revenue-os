@@ -20,6 +20,33 @@ Before changing code, read only the context needed for the task, starting with:
 
 Do not read every document automatically. Load context deliberately to reduce noise and stale assumptions.
 
+## Critical rules — read before touching the database
+
+**There is no local database, and there will not be one.** Do not run `supabase start`,
+`supabase db reset`, or anything that expects a Docker Postgres. Do not try to stand one up.
+Time spent on this is wasted; it has been tried.
+
+The only database is the **hosted staging project**, reached through the connection string
+and `DATABASE_URL` in `.env.local`. Everything below follows from that:
+
+- `pnpm db:migrations:list`, `:dry-run`, and `:push` all target **staging**. A pushed
+  migration is live for everyone immediately. There is no local rehearsal — get it right
+  by reading the existing schema first.
+- `pnpm db:test` runs the pgTAP suites against that same shared staging database. The
+  suites do execute and do report real results, but they are **not hermetic**: they wrap in
+  `begin`/`rollback` yet still share the database with live staging data and any other
+  session. Treat them as staging integration checks, not as an isolated unit-test layer,
+  and do not invest effort in making them isolated.
+- `pnpm db:types` shells out to `supabase gen types --local` and therefore **cannot run**.
+  `src/lib/supabase/database.types.ts` is maintained by hand. A new table must be either
+  typed there or listed in `UNTYPED_TABLES` in `src/lib/supabase/database.types.test.ts`,
+  which fails if a table is neither.
+- A new `plpgsql` function that reads a table it did not create **must be called once
+  against staging before it is considered done**. plpgsql resolves record fields only at
+  execution time, so a function referencing a column that does not exist applies cleanly
+  and fails on its first real call. This has already happened twice.
+- `git push` is the user's step. There are no push credentials and no `gh` CLI here.
+
 ## 2. Non-negotiable product rules
 
 - Optimize for measurable incremental gross profit and customer acquisition, not automation volume.
@@ -140,6 +167,6 @@ When implementation contradicts documentation, stop and resolve the contradictio
 <!-- TRIGGER.DEV SKILLS START -->
 ## Trigger.dev agent skills
 
-This project has Trigger.dev agent skills installed in `.claude/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`, `trigger-getting-started`, `trigger-realtime-and-frontend`.
+This project has Trigger.dev agent skills installed in `.agents/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`, `trigger-getting-started`, `trigger-realtime-and-frontend`.
 <!-- TRIGGER.DEV SKILLS END -->
 

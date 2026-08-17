@@ -14,7 +14,13 @@ const base = {
   screenedCount: 10,
   scoredCount: 3,
   inputsDigest: "b".repeat(64),
-  artifactVersions: { confidence_calibration: "seed-v1" },
+  needsDataKeys: [],
+  versionTuple: {
+    policyVersionId: "55555555-5555-4555-8555-555555555555",
+    playbookVersionId: "66666666-6666-4666-8666-666666666666",
+    confidenceCalibrationId: "77777777-7777-4777-8777-777777777777",
+    rankingWeightsId: "88888888-8888-4888-8888-888888888888",
+  },
   propensity: 1,
   isExploration: false,
 };
@@ -28,16 +34,24 @@ describe("decision record", () => {
     expect(() => decisionRecordSchema.parse({ ...base, propensity: 0.5 })).toThrow();
     expect(() => decisionRecordSchema.parse({ ...base, isExploration: true })).toThrow();
 
-    const { propensity: _p, ...withoutPropensity } = base;
+    const withoutPropensity = Object.fromEntries(
+      Object.entries(base).filter(([key]) => key !== "propensity"),
+    );
     expect(() => decisionRecordSchema.parse(withoutPropensity)).toThrow();
   });
 
-  it("requires a complete version tuple with no null artifact reference", () => {
-    expect(() => decisionRecordSchema.parse({ ...base, artifactVersions: {} })).toThrow();
+  it("requires the explicit version tuple with no null, unknown, or free-text artifact reference", () => {
+    expect(() => decisionRecordSchema.parse({ ...base, versionTuple: {} })).toThrow();
     expect(() =>
       decisionRecordSchema.parse({
         ...base,
-        artifactVersions: { confidence_calibration: null },
+        versionTuple: { ...base.versionTuple, confidenceCalibrationId: null },
+      }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({
+        ...base,
+        versionTuple: { ...base.versionTuple, extra: "nope" },
       }),
     ).toThrow();
   });
@@ -54,6 +68,7 @@ describe("decision record", () => {
       ...base,
       outcome: "needs_data" as const,
       reason: "economics_ledger_indicative",
+      needsDataKeys: ["economics.configured"],
       selectedCandidateFingerprint: null,
       opportunityId: null,
     };
@@ -61,6 +76,35 @@ describe("decision record", () => {
     expect(decisionRecordSchema.parse(needsData).opportunityId).toBeNull();
     expect(() =>
       decisionRecordSchema.parse({ ...needsData, opportunityId: base.opportunityId }),
+    ).toThrow();
+  });
+
+  it("requires bounded unique registered keys only for needs_data", () => {
+    const needsData = {
+      ...base,
+      outcome: "needs_data" as const,
+      reason: "campaign_evidence_missing",
+      selectedCandidateFingerprint: null,
+      opportunityId: null,
+      needsDataKeys: ["impact.range", "capability.advertise_meta_ads"],
+    };
+
+    expect(decisionRecordSchema.parse(needsData).needsDataKeys).toEqual(needsData.needsDataKeys);
+    expect(() => decisionRecordSchema.parse({ ...needsData, needsDataKeys: [] })).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({
+        ...needsData,
+        needsDataKeys: ["impact.range", "impact.range"],
+      }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({ ...needsData, needsDataKeys: ["Raw provider payload"] }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({ ...needsData, needsDataKeys: Array(51).fill("impact.range") }),
+    ).toThrow();
+    expect(() =>
+      decisionRecordSchema.parse({ ...base, needsDataKeys: ["impact.range"] }),
     ).toThrow();
   });
 

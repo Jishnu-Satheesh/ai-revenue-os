@@ -11,6 +11,25 @@ export const decisionOutcomeSchema = z.enum(["action_selected", "no_action", "ne
 export type DecisionOutcome = z.infer<typeof decisionOutcomeSchema>;
 
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
+const registeredKeySchema = z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/);
+export const decisionVersionTupleSchema = z
+  .strictObject({
+    policyVersionId: z.string().uuid(),
+    playbookVersionId: z.string().uuid().optional(),
+    promptVersionId: z.string().uuid().optional(),
+    rankingWeightsId: z.string().uuid(),
+    modelId: z.string().uuid().optional(),
+    judgeVersionId: z.string().uuid().optional(),
+    confidenceCalibrationId: z.string().uuid(),
+  })
+  .superRefine((tuple, context) => {
+    if ((tuple.promptVersionId === undefined) !== (tuple.modelId === undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: "Prompt and model versions are recorded together.",
+      });
+    }
+  });
 
 /**
  * `strict` matters here. The decision path is where a model output would do the
@@ -29,20 +48,31 @@ export const decisionRecordSchema = z
     screenedCount: z.number().int().nonnegative(),
     scoredCount: z.number().int().nonnegative(),
     inputsDigest: sha256HexSchema,
+    needsDataKeys: z.array(registeredKeySchema).max(50),
     // A version tuple with nulls is indistinguishable from an unknown, and the
     // ledger depends on that distinction.
-    artifactVersions: z.record(z.string(), z.string().min(1)),
+    versionTuple: decisionVersionTupleSchema,
     // Selection is deterministic in V1. Both are recorded rather than omitted,
     // so later causal work reads an observed value instead of an assumption.
     propensity: z.literal(1),
     isExploration: z.literal(false),
   })
   .superRefine((record, context) => {
-    if (Object.keys(record.artifactVersions).length === 0) {
+    if (new Set(record.needsDataKeys).size !== record.needsDataKeys.length) {
       context.addIssue({
         code: "custom",
-        path: ["artifactVersions"],
-        message: "A decision record needs a complete version tuple.",
+        path: ["needsDataKeys"],
+        message: "Missing-data keys must be unique.",
+      });
+    }
+    if (
+      (record.outcome === "needs_data" && record.needsDataKeys.length === 0) ||
+      (record.outcome !== "needs_data" && record.needsDataKeys.length !== 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["needsDataKeys"],
+        message: "Only needs_data records carry a non-empty missing-data list.",
       });
     }
 
@@ -55,6 +85,13 @@ export const decisionRecordSchema = z
     }
 
     if (record.outcome === "action_selected") {
+      if (record.versionTuple.playbookVersionId === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["versionTuple", "playbookVersionId"],
+          message: "A selected action needs its playbook version.",
+        });
+      }
       if (record.selectedCandidateFingerprint === null) {
         context.addIssue({
           code: "custom",
@@ -77,6 +114,20 @@ export const decisionRecordSchema = z
         code: "custom",
         path: ["reason"],
         message: "A no_action or needs_data decision must record why.",
+      });
+    }
+
+    const allowsNoPlaybook =
+      record.outcome === "no_action" && record.reason === "no_active_playbook";
+    if (
+      record.versionTuple.playbookVersionId === undefined &&
+      !allowsNoPlaybook &&
+      record.outcome !== "needs_data"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["versionTuple", "playbookVersionId"],
+        message: "Only no_active_playbook may omit a playbook version.",
       });
     }
 

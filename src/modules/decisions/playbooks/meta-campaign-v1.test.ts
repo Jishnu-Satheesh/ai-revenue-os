@@ -38,7 +38,9 @@ describe("meta campaign playbook", () => {
   });
 
   it("requires a spend ceiling, because an unbounded cost is needs_data not zero", () => {
-    const { spendCeiling: _omitted, ...withoutCeiling } = parameters;
+    const withoutCeiling = Object.fromEntries(
+      Object.entries(parameters).filter(([key]) => key !== "spendCeiling"),
+    );
 
     expect(() => campaignActionParametersSchema.parse(withoutCeiling)).toThrow();
     expect(() =>
@@ -90,6 +92,23 @@ describe("meta campaign playbook", () => {
     expect(metaCampaignPlaybookV1.requiredCapabilityKeys).toContain("publish_instagram");
     expect(metaCampaignPlaybookV1.requiredEvidenceKeys.length).toBeGreaterThan(0);
     expect(metaCampaignPlaybookV1.riskClass).toBe(3);
+    expect(metaCampaignPlaybookV1.requiredImpactEvidenceKeys).toEqual([
+      "impact.range",
+      "impact.currency",
+      "impact.source_revisions",
+      "impact.observed_at",
+      "impact.time_to_impact",
+    ]);
+    expect(metaCampaignPlaybookV1.requiredPolicyKeys).toEqual([
+      "policy.access.active",
+      "policy.spend.active",
+    ]);
+    expect(metaCampaignPlaybookV1.requiredMarginKeys).toEqual(["margin.firewall.pass"]);
+    expect(metaCampaignPlaybookV1.requiredMeasurementKeys).toEqual([
+      "measurement.tracking_ready",
+      "measurement.plan_registered",
+    ]);
+    expect(metaCampaignPlaybookV1.prior).toBeNull();
   });
 
   it("declares a resurface condition as a named signal with a threshold", () => {

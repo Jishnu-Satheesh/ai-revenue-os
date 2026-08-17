@@ -49,10 +49,15 @@ export type CampaignPlaybookVersion = {
   guardrailMetricKeys: readonly string[];
   requiredCapabilityKeys: readonly string[];
   requiredEvidenceKeys: readonly string[];
+  requiredImpactEvidenceKeys: readonly string[];
+  requiredPolicyKeys: readonly string[];
+  requiredMarginKeys: readonly string[];
+  requiredMeasurementKeys: readonly string[];
   /** Tier 3 under `specs/010`: public organic publishing plus paid media. */
   riskClass: 0 | 1 | 2 | 3 | 4;
   freshnessBoundMinutes: number;
   measurementWindowDays: number;
+  prior: null;
   resurfaceCondition: { signalKey: string; threshold: number };
 };
 
@@ -80,10 +85,35 @@ export const metaCampaignPlaybookV1: CampaignPlaybookVersion = Object.freeze({
     "spend_policy_configured",
     "tracking_ready",
     "inputs_fresh",
+    "impact.range",
+    "impact.currency",
+    "impact.source_revisions",
+    "impact.observed_at",
+    "impact.time_to_impact",
+    "policy.access.active",
+    "policy.spend.active",
+    "margin.firewall.pass",
+    "measurement.tracking_ready",
+    "measurement.plan_registered",
+  ]),
+  requiredImpactEvidenceKeys: Object.freeze([
+    "impact.range",
+    "impact.currency",
+    "impact.source_revisions",
+    "impact.observed_at",
+    "impact.time_to_impact",
+  ]),
+  requiredPolicyKeys: Object.freeze(["policy.access.active", "policy.spend.active"]),
+  requiredMarginKeys: Object.freeze(["margin.firewall.pass"]),
+  requiredMeasurementKeys: Object.freeze([
+    "measurement.tracking_ready",
+    "measurement.plan_registered",
   ]),
   riskClass: 3,
   freshnessBoundMinutes: 24 * 60,
   measurementWindowDays: 7,
+  // No synthetic prior: absent governed impact evidence remains needs_data.
+  prior: null,
   // A named signal with a threshold, declared here rather than inferred at
   // runtime, so resurfacing stays a checkable predicate.
   resurfaceCondition: Object.freeze({

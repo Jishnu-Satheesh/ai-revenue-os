@@ -216,20 +216,94 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 
 ### Task 5: Run a campaign playbook through the deterministic Decision Engine
 
-**Files:**
+**Approved scope:**
 
-- Create: `src/modules/decisions/sources/campaign-opportunity-source.ts` and tests
-- Create: `src/modules/decisions/playbooks/meta-campaign-v1.ts` and tests
-- Create: `src/workflows/decisions/{contracts,run-cycle}.ts` and worker tests
-- Create: `src/trigger/decisions.ts` and tests
-- Modify: `src/lib/supabase/service.ts`, `trigger.config.ts`
+- Implement the Decision-cycle runtime amendment approved in the Campaign design on 2026-08-13.
+- Keep this slice recommendation-only: it may create one proposed opportunity but may not generate a Campaign Bundle, call Meta, reserve spend, publish content, or move money.
+- Keep the production path honest: current repository data can produce `needs_data` or `no_action`; `action_selected` requires controlled impact evidence that is unavailable to the production loader until a later governed source exists.
 
-- [ ] **Step 1: Write the campaign source tests.** Required evidence includes a current organization profile, verified brand constraints/claims, usable brand assets or an explicit synthetic-asset allowance, configured economics/currency, an active goal/metric, Meta account mapping, action capabilities, spend policy, tracking readiness, and data freshness. Missing required evidence yields named `needs_data`; it never invents a candidate.
-- [ ] **Step 2: Define one industry-neutral action.** Register `campaign.meta_bundle_v1` as one action whose parameters describe the downstream bundle objective, eligible Meta channels, placements, spend ceiling, measurement method, and constraints. The three creative directions are downstream alternatives inside this selected action, not extra Decision Engine candidates.
-- [ ] **Step 3: Implement pure screening/scoring/ranking.** Use the economics ledger and metric registry; never let a model emit confidence, value, risk, capability, or approval path. Pin every artifact/input version into the decision record and opportunity assertions.
-- [ ] **Step 4: Implement the Trigger `schemaTask`.** Parse UUIDs and trigger type, create the decision-worker client only after parsing, atomically claim a cycle, persist all outcomes, and publish safe events. Retries reuse the business idempotency key.
-- [ ] **Step 5: Test cancellation, duplicate dispatch, stale lease, needs-data, no-action, selected-action, and cross-tenant payloads.** Run focused workflow/Trigger tests and the decision pgTAP suite.
-- [ ] **Step 6: Commit.** `git commit -m "feat(decisions): qualify campaign opportunities"`.
+**Impacted files:**
+
+- Create: `src/domain/decisions/artifacts.ts` and `src/domain/decisions/artifacts.test.ts` for the exact deterministic implementation-key registry and confidence rules.
+- Modify: `src/domain/decisions/record.ts` and `src/domain/decisions/record.test.ts` to persist bounded, unique `needsDataKeys` on `needs_data` records and require the list to be empty for other outcomes.
+- Modify: `src/modules/decisions/sources/campaign-opportunity-source.ts` and its tests to require defensible impact evidence and return every named missing evidence/capability key without manufacturing a candidate.
+- Modify: `src/modules/decisions/playbooks/meta-campaign-v1.ts` and its tests to keep one industry-neutral `campaign.meta_bundle_v1` action and declare the impact, freshness, capability, policy, margin, and measurement prerequisites used by the runtime.
+- Modify: `src/modules/decisions/application/ports.ts`, `src/modules/decisions/application/service.ts`, and their tests to add strict claim/context/completion contracts and narrow event-producing persistence to a claim-aware aggregate store.
+- Create: `src/modules/decisions/infrastructure/cycle-repository.ts` and `src/modules/decisions/infrastructure/cycle-repository.test.ts` for exact snake-case mappings to the worker-only claim, renew, fail, cancel, context-read, and complete RPCs.
+- Create: `src/modules/decisions/infrastructure/campaign-evidence-repository.ts` and `src/modules/decisions/infrastructure/campaign-evidence-repository.test.ts` to map the bounded database context into production evidence without interpreting onboarding prose or inventing verified facts, assets, grants, tracking, or lift.
+- Modify: `src/modules/decisions/infrastructure/repository.ts` and its tests to remove worker use of the now-unfenced cycle-start and aggregate-write paths while preserving opportunity reads, feedback, and governed artifact promotion.
+- Create: `src/workflows/decisions/contracts.ts`, `src/workflows/decisions/run-cycle.ts`, and `src/workflows/decisions/run-cycle.test.ts` for the pure, dependency-injected Campaign decision workflow.
+- Create: `src/trigger/decisions.ts` and `src/trigger/decisions.test.ts` for the Node-22 `schemaTask`, retry/queue configuration, dependency construction, safe logs, and cancellation hook.
+- Modify: `src/lib/supabase/service.ts` and `src/lib/supabase/service.test.ts` to add a Decision-worker-only client factory with the same service-role checks as the existing worker factories.
+- Create: `supabase/migrations/20260813140000_campaign_decision_cycle_runtime.sql`; regenerate only the numeric prefix if the remote migration tail advances before implementation.
+- Create: `supabase/tests/database/campaign_decision_cycle_runtime_test.sql` and extend the existing Decision aggregate/behavior tests only where the new `needsDataKeys` and fenced write boundary change their contract.
+- Modify: `src/lib/supabase/database.types.test.ts` only to record the deliberately private, RPC-only runtime surface; do not hand-author generated Supabase row types.
+- Inspect only: `trigger.config.ts`; its Trigger directory, Node-22 runtime, retries, and maximum duration are already compatible, so change it only if a failing contract test proves otherwise.
+- Update after implementation: the Task-5 verification report and release-train progress record with local and hosted evidence, deferred findings, and the exact migration versions applied.
+
+**New and changed data contracts:**
+
+- Add private `decision_cycle_operations`, keyed by `(organization_id, idempotency_key)`, with a normalized request digest, decision-cycle ID, status in `claimed | completed | cancelled | failed`, opaque claim token, five-minute lease, attempt count, cancellation timestamp, normalized failure code, bounded result identifiers, 400-day retention floor, and no payload/evidence/credential columns.
+- Enable and force RLS on the private operation ledger, grant no table access to `anon`, `authenticated`, or `service_role`, and permit worker access only through exact security-definer RPCs with `search_path = ''`.
+- Add safe audit rows for claim, reclaim, completion, cancellation, and deterministic failure transitions; record identifiers and normalized state only.
+- Add nullable `implementation_key` to `artifact_versions`; require `decision.ranking.evidence_value_time_v1` for ranking baselines and `decision.confidence.computed_baseline_v1` for confidence baselines, backfill existing organizations, and update future-organization seeding. Other artifact kinds keep the column null.
+- Seed one active organization-owned `campaign.meta_bundle` definition/version for existing and future organizations, with the exact action key, evidence/capability lists, risk tier, metrics, freshness bound, measurement window, and no synthetic prior.
+- Add `needs_data_keys text[]` to `decision_records`, bounded to 50 unique registered-style keys; require a non-empty list only for `needs_data` and an empty list for `no_action` and `action_selected`.
+- Add worker-only `claim_campaign_decision_cycle`, `renew_campaign_decision_cycle_claim`, `load_campaign_decision_context`, `complete_campaign_decision_cycle`, `fail_campaign_decision_cycle`, and `cancel_campaign_decision_cycle` RPCs with exact JSON keys, bounded results, organization checks, advisory locking, and safe public errors.
+- Revoke `service_role` execution on `start_decision_cycle` and `persist_decision_aggregate`; the claim-aware completion RPC is the only service-role path that may persist the Campaign aggregate and finish the cycle atomically.
+- Resolve the active access-policy version, `configuration.max_active_recommendations`, current active-opportunity count, active spend policy, current playbook, current ranking/confidence promotions, suppressions, and authoritative evidence through the bounded context RPC. Missing active access policy or an invalid recommendation limit is an operational failure, never a default.
+- Treat only `proposed`, `awaiting_approval`, and `approved` opportunities as active for slot-budget calculation, matching the existing active-opportunity index.
+- Keep Task-4 event names and identifier-only payloads unchanged; emit `decision.cycle_started` only for a first claim, and emit the existing result event only after claim-aware persistence commits.
+
+**Runtime contracts and assumptions:**
+
+- Parse a strict payload containing `organizationId`, `correlationId`, `idempotencyKey`, and `triggerType` in `manual | scheduled | integration_sync_completed` before creating the Decision worker client.
+- Hash the normalized parsed payload for the request digest; the same business key plus the same digest is a replay, while the same key plus another digest fails closed.
+- Return `acquired`, `reclaimed`, `in_progress`, `completed`, or `cancelled` from claim. A completed replay returns stored identifiers and publishes nothing; a reclaimed lease receives a new token and does not emit a second cycle-start event.
+- Renew and assert the live claim before authoritative reads and before persistence. A cancellation, expired lease, or replacement token fences the old worker.
+- Leave retryable infrastructure failures claimed until the lease expires so Trigger retries can reclaim them. Persist normalized deterministic configuration failures with the claim-aware failure RPC.
+- Read the active access policy as the Decision policy version; read the active spend policy separately and pin its identifier in opportunity assertions. Do not silently combine or convert currencies.
+- Read only authoritative organization-scoped rows. Onboarding prose and uploaded files do not count as verified brand constraints or usable assets; absent governed records remain named gaps.
+- Production impact evidence remains absent until a governed arithmetic or comparable-intervention source supplies low/high minor-unit bounds, currency, source revision IDs, observation time, and time-to-impact. Controlled selected-action fixtures are dependency-injected in tests and are never registered in the production repository.
+- Compute `slotBudget = maxActiveRecommendations - activeOpportunityCount` with the existing pure helper; zero records `no_action` with `slot_budget_exhausted` before source generation.
+- Run at most one `campaign.meta_bundle_v1` candidate through source generation, screening, registered confidence, expected contribution, tier-first ranking, and policy/margin/budget gates.
+- Use the spend ceiling as the conservative execution cost. Use only the declared impact range for expected contribution; contribution margin is a guardrail input and never becomes campaign lift.
+- Map complete computed evidence to confidence `0.75` and partial computed evidence to `0.55`; subtract `0.10` only after half the freshness window and screen evidence beyond the full bound. Reject observed/prior inputs until their approved sources exist.
+- Build templated title, summary, hypothesis, assertions, guardrails, and evaluation plan without a model. Persist exact source revision IDs and version identifiers, never raw provider data or customer PII.
+- Treat an unknown margin-firewall result as `needs_data`, a breach/risk-tier-4/budget exhaustion as deterministic removal, an empty admitted set as `no_action`, and one admitted candidate as one human-approval opportunity.
+- Keep the database ledger authoritative even when Trigger queue configuration serializes dispatches; Trigger run IDs and SDK idempotency never replace the business operation key.
+
+**Blast radius:**
+
+- Task-4 aggregate schemas, repository mocks, pgTAP fixtures, and database contract tests must add `needsDataKeys`; no existing opportunity projection or feedback API changes.
+- Decision workers lose direct access to the legacy start/persist RPCs; artifact promotion remains a separate worker control and user-facing opportunity reads continue through authenticated RLS.
+- Existing organizations receive a Campaign playbook and artifact implementation references, but no opportunity is auto-created and no task is auto-dispatched.
+- Future organization creation triggers seed the same inert playbook/artifact configuration; Meta remains blocked and no capability grant is created.
+- Task 6 may read the persisted `needs_data_keys` to build readiness guidance, but this task adds no Campaign or Opportunity UI.
+- No Trigger.dev task currently dispatches this task from a route, schedule, or integration event; Task 5 proves the callable worker boundary without silently activating it.
+
+**Test-first implementation steps:**
+
+- [ ] **Step 1: Capture RED domain contracts.** Add failing tests for exact implementation keys, unknown-key refusal, the approved confidence values/freshness boundary, selected evidence prerequisites, all named missing keys, controlled impact evidence, and `needsDataKeys` outcome invariants.
+- [ ] **Step 2: Implement the pure contracts.** Add the registry/confidence resolver, extend the Campaign source/playbook, and update the Decision record schema until the focused domain/source/playbook tests pass.
+- [ ] **Step 3: Capture RED runtime-port mappings.** Add failing tests for exact payload parsing before client creation, request digest stability, claim result variants, bounded context parsing, snake-case RPC arguments/results, safe database errors, and removal of unfenced worker persistence.
+- [ ] **Step 4: Implement the workflow ports and repositories.** Add the claim/context repositories and Decision client factory; keep controlled selected-action evidence injectable only through the workflow test dependency.
+- [ ] **Step 5: Capture RED workflow behavior.** Test first claim and safe cycle-start event, completed replay, conflicting key reuse, active duplicate, expired-lease reclaim, stale-token fencing, cancellation before reads and before writes, retryable lease expiry, missing policy failure, slot-budget-zero, production `needs_data`, all deterministic rejection/no-action paths, controlled selected action, exact version tuple/input digest, and identifier-only result events.
+- [ ] **Step 6: Implement the deterministic run-cycle workflow.** Execute the pure funnel in the approved order, persist exactly one aggregate through a claim-scoped store, and publish the Task-4-owned transition only after the transaction commits.
+- [ ] **Step 7: Capture the migration RED state.** Run `pnpm db:migrations:list` and `pnpm db:migrations:dry-run`, then run the new pgTAP suite before applying the migration to prove the ledger, implementation keys, playbook seed, context RPC, fenced completion, `needs_data_keys`, and privilege assertions are absent or failing for the expected reasons.
+- [ ] **Step 8: Implement and transactionally simulate the forward migration.** Add the private ledger, safe audit, seed/backfill logic, new column constraints, exact RPC validation, five-minute lease/CAS behavior, claim-aware aggregate persistence, and direct-RPC revocations; run the migration plus focused pgTAP inside a rollback transaction before any remote write.
+- [ ] **Step 9: Apply and verify the remote migration.** Re-run list/dry-run, push only the new migration, confirm local/remote alignment, run the Campaign cycle pgTAP plus all Decision database suites, and inspect Supabase security/performance advisors. Stop on any migration collision, destructive diff, cross-tenant path, or critical/high finding.
+- [ ] **Step 10: Implement and test the Trigger boundary.** Register one `schemaTask` with the workflow schema, a bounded Decision queue, three attempts, five-minute task duration, safe structured logs, and a cancellation hook that parses before client construction and calls the cancellation RPC.
+- [ ] **Step 11: Run all verification gates.** Run focused Vitest, full `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, full `pnpm db:test`, remote migration alignment, advisor review, and `git diff --check`; independently review the trust boundary and repeat repair/retest until no known critical or high-severity issue remains.
+- [ ] **Step 12: Record evidence and commit.** Update the Task-5 verification/progress artifacts, stage only Task-5 files, and commit with `git commit -m "feat(decisions): qualify campaign opportunities"`; stop for approval before Task 6.
+
+**Risks and rollback:**
+
+- A migration failure before commit rolls back atomically. After remote application, correct defects only with a new forward migration; never edit an applied migration.
+- A false-positive evidence mapper could create an unjustified opportunity. Fail closed on unknown facts, assets, grants, tracking, currencies, implementation keys, policy versions, and impact sources; production selected-action is not an acceptance target for this slice.
+- A stale worker could duplicate a decision. Fence every write with organization, key, digest, token, live lease, and cancellation checks in one transaction; keep direct table and legacy RPC writes revoked.
+- An event failure occurs after authoritative persistence. The completed replay remains non-mutating and non-duplicating; the verification report must state that the current publisher is a safe logging boundary rather than a durable outbox.
+- Operational rollback disables Task dispatch and invokes cancellation or waits five minutes for leases to expire. Preserve operation, cycle, Decision, artifact, and audit history for the 400-day floor.
 
 ### Task 6: Expose the opportunity feed and campaign qualification boundary
 
@@ -373,12 +447,13 @@ The canonical bundle digest is SHA-256 over RFC 8785-style canonical JSON of the
 - Create: `supabase/migrations/20260812140000_campaign_tool_gateway.sql`
 - Create: `supabase/tests/database/campaign_tool_gateway_test.sql`
 
-- [ ] **Step 1: Write RED preflight tests.** Re-evaluate membership/role, exact active approval/version/digest, expiry, visual attestation, schedule window, action inclusion, current policy versions, current capability grant/version/restrictions, credential/account mapping, provider-contract version, privacy/tracking assertions, execution mode, spend currency/ceiling, cancellation, and previous unknown outcome.
-- [ ] **Step 2: Add append-only control records.** Create `campaign_action_runs`, `tool_invocations`, `provider_receipts`, `campaign_budget_reservations`, and a private operation ledger. Browser roles read safe projections only; workers mutate through security-definer RPCs.
-- [ ] **Step 3: Implement one atomic claim RPC.** Lock campaign/action/approval/grant/policy/budget rows, return stable reason codes for a failed assertion, reserve paid spend before returning `claimed`, replay completed keys, and return `provider_outcome_unknown` until reconciliation clears ambiguity.
-- [ ] **Step 4: Implement completion/failure/unknown/reconciliation RPCs.** A stale claim token cannot write. Actual provider spend updates the reservation ledger without erasing approved/reserved values. Provider receipts store bounded normalized fields and a digest, not raw payloads.
-- [ ] **Step 5: Implement the application Tool Gateway.** It accepts only a registered tool key and parsed action. Adapter selection occurs after a successful claim; no campaign worker imports provider `fetch` code directly.
-- [ ] **Step 6: Test concurrent reservation, idempotent replay, direct RPC misuse, unknown outcome, cancellation fence, cross-tenant attack, and audit redaction; run pgTAP; commit.** `git commit -m "feat(execution): gate campaign side effects atomically"`.
+- [x] **Step 1: Write RED preflight tests.** Re-evaluate membership/role, exact active approval/version/digest, expiry, visual attestation, schedule window, action inclusion, current policy versions, current capability grant/version/restrictions, credential/account mapping, provider-contract version, privacy/tracking assertions, execution mode, spend currency/ceiling, cancellation, and previous unknown outcome.
+- [x] **Step 2: Add append-only control records.** Create `campaign_action_runs`, `tool_invocations`, `provider_receipts`, `campaign_budget_reservations`, and a private operation ledger. Browser roles read safe projections only; workers mutate through security-definer RPCs.
+- [x] **Step 3: Implement one atomic claim RPC.** Lock campaign/action/approval/grant/policy/budget rows, return stable reason codes for a failed assertion, reserve paid spend before returning `claimed`, replay completed keys, and return `provider_outcome_unknown` until reconciliation clears ambiguity.
+- [x] **Step 4: Implement completion/failure/unknown/reconciliation RPCs.** A stale claim token cannot write. Actual provider spend updates the reservation ledger without erasing approved/reserved values. Provider receipts store bounded normalized fields and a digest, not raw payloads.
+- [x] **Step 5: Implement the application Tool Gateway.** It accepts only a registered tool key and parsed action. Adapter selection occurs after a successful claim; no campaign worker imports provider `fetch` code directly.
+- [x] **Step 6: Wire the Studio's "Blockers & readiness" panel, which is a stub waiting on this task.** `CampaignStudio` renders a `NotYet` placeholder where per-channel readiness belongs, because a green "ready" before the gateway has decided would be a promise the system cannot keep. Once preflight returns its verdict, replace that placeholder with the real per-channel state: ready or blocked, the stable restriction code, the plain-language reason, and the recovery action. Blocked must never look enabled. **Task 13 is not complete until that panel shows real capability state** — leaving the stub in place would mean shipping a gateway whose answer the operator never sees.
+- [x] **Step 7: Test concurrent reservation, idempotent replay, direct RPC misuse, unknown outcome, cancellation fence, cross-tenant attack, and audit redaction; run pgTAP; commit.** `git commit -m "feat(execution): gate campaign side effects atomically"`.
 
 ### Task 14: Add Telegram-native operator linking, review, and approval
 
