@@ -74,10 +74,7 @@ export {
   CAMPAIGN_VARIANT_STATES,
   campaignCreativeVariantSchema,
 } from "@/domain/campaigns/variants";
-export type {
-  CampaignCreativeVariant,
-  CampaignVariantState,
-} from "@/domain/campaigns/variants";
+export type { CampaignCreativeVariant, CampaignVariantState } from "@/domain/campaigns/variants";
 
 export { checkVariantDerivation, variantContentHash } from "@/domain/campaigns/derivation";
 export type {

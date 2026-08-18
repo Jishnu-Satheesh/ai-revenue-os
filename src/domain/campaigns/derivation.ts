@@ -78,9 +78,7 @@ const RANKING_CLAIM =
   /\b(voted|award[- ]winning|top[- ]rated|number one|no\.? ?1|#1|best (?:restaurant|cafe|place|in\b))/i;
 const OFFERISH = /\b(half price|free|discount|\d+\s*%\s*off|bogo|buy one)\b/i;
 
-export function checkVariantDerivation(
-  input: VariantDerivationInput,
-): VariantDerivationResult {
+export function checkVariantDerivation(input: VariantDerivationInput): VariantDerivationResult {
   const failures: VariantDerivationFailure[] = [];
   const { manifest, variant, evidence } = input;
 
