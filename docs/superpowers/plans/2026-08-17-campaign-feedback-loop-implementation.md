@@ -57,6 +57,16 @@ This is the only item in this plan that engineering cannot unblock, and it is th
 - **If it stalls.** Gates C and D are deliberately independent. Ship organic to production and hold paid at Gate D rather than blocking the whole train. The allocation loop in Task 20 still functions on organic diagnostics, with the honest limitation that organic signal on a cold account is thin.
 - **Contract expiry interacts with this.** ADR 0016 makes provider contracts expire fail-closed. A long review delay can outlive the checked-in contract's verification date, which would require reverification against official sources before Task 18 proceeds. Track the expiry date alongside the review submission.
 
+### There is no Meta account, and the integration is built anyway
+
+Recorded 2026-08-18. This is a standing condition, not a temporary blocker to wait out.
+
+- **What exists.** Nothing. No Meta account, app, Page, Instagram account, or ad account is available to this project, and none may be for some time. No line of the Meta integration can be confirmed by running it.
+- **What is built regardless.** All of it. Provider contracts, the bounded client, webhook intake, reconciliation, and both adapters are written blind, complete, and assuming an account connects at some future point. Waiting would idle the whole execution train for work that is fully writable now.
+- **How blind work stays honest.** Documentation is the only evidence available, so it is read properly for every endpoint rather than guessed at. An unread detail is an unknown, never a default. Nothing invents a scope, field, permission, placement, webhook event, retry class, or error code the documentation does not state — the contract's empty `retryableStatuses` is the model for that: unproven means empty, not assumed.
+- **Building is not granting.** Everything stays fail-closed under ADR 0016. No capability becomes available and no adapter is registered as connectable until controlled-account evidence exists. Code that cannot run is not a capability.
+- **Transport.** Direct Graph calls at the contract's pinned version, not the Business SDK. See ADR 0022 for the evidence, including the SDK's hard-coded `v24.0` against the contract's verified `v26.0`.
+
 ---
 
 ## File Structure
