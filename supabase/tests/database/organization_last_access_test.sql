@@ -31,35 +31,42 @@ values
 
 -- Names are deliberately out of creation order so an alphabetical fallback
 -- cannot be mistaken for insertion order.
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-fed641827f8e'::uuid, 'Fixture agency', 'fixture-agency-organization-last-access-test', '44000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, status, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, status, created_by, account_id
 )
 values
   (
     '54000000-0000-4000-8000-000000000001'::uuid,
     'Zulu Diner', 'zulu-diner', 'testing', 'US', 'USD', 'UTC', 'active',
-    '44000000-0000-4000-8000-000000000001'::uuid
-  ),
+    '44000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-fed641827f8e'::uuid),
   (
     '54000000-0000-4000-8000-000000000002'::uuid,
     'Alpha Bakery', 'alpha-bakery', 'testing', 'US', 'USD', 'UTC', 'active',
-    '44000000-0000-4000-8000-000000000001'::uuid
-  ),
+    '44000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-fed641827f8e'::uuid),
   (
     '54000000-0000-4000-8000-000000000003'::uuid,
     'Mono Grill', 'mono-grill', 'testing', 'US', 'USD', 'UTC', 'draft_onboarding',
-    '44000000-0000-4000-8000-000000000001'::uuid
-  ),
+    '44000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-fed641827f8e'::uuid),
   (
     '54000000-0000-4000-8000-000000000004'::uuid,
     'Archived Place', 'archived-place', 'testing', 'US', 'USD', 'UTC', 'archived',
-    '44000000-0000-4000-8000-000000000001'::uuid
-  ),
+    '44000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-fed641827f8e'::uuid),
   (
     '54000000-0000-4000-8000-000000000005'::uuid,
     'Other Tenant', 'other-tenant', 'testing', 'US', 'USD', 'UTC', 'active',
-    '44000000-0000-4000-8000-000000000002'::uuid
-  );
+    '44000000-0000-4000-8000-000000000002'::uuid,
+    'acc00000-0000-4000-8000-fed641827f8e'::uuid);
 
 -- user 1 holds three workable organizations plus an archived one.
 -- user 2 holds only the other tenant. user 3 holds only an archived one.

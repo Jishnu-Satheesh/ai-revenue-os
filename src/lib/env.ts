@@ -22,6 +22,13 @@ const serverEnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.preprocess(emptyToUndefined, z.string().url()),
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.preprocess(emptyToUndefined, z.string().min(1)),
   SUPABASE_SERVICE_ROLE_KEY: optionalNonEmptyString,
+  // Absent means invitations fall back to copy-link. Email is best-effort on
+  // top of a link that always works, never the only way in.
+  RESEND_API_KEY: optionalNonEmptyString,
+  INVITATION_FROM_ADDRESS: z.preprocess(
+    emptyToUndefined,
+    z.string().min(3).default("AI Revenue OS <invitations@themarga.in>"),
+  ),
   OPENAI_API_KEY: optionalNonEmptyString,
   ANTHROPIC_API_KEY: optionalNonEmptyString,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalNonEmptyString,
@@ -57,6 +64,8 @@ const parsedEnv = serverEnvSchema.safeParse({
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  INVITATION_FROM_ADDRESS: process.env.INVITATION_FROM_ADDRESS,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,

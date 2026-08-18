@@ -19,6 +19,8 @@ import {
 
 import { organizationIdFromPathname, overviewPath } from "@/lib/routes";
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
+import { InviteMemberDialog } from "@/components/accounts/invite-member-dialog";
+import { SidebarIdentity } from "@/components/accounts/sidebar-identity";
 import {
   Sidebar as SidebarPrimitive,
   SidebarContent,
@@ -148,6 +150,12 @@ export function Sidebar() {
       <SidebarFooter>
         <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
         <SidebarMenu>
+          {/* Agency-level, not organization-scoped: membership follows the
+              person across every client, so this sits outside the workspace
+              group and renders with or without an active organization. */}
+          <SidebarMenuItem>
+            <InviteMemberDialog />
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               disabled
@@ -160,15 +168,7 @@ export function Sidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" tooltip="Agency operator" className="cursor-default">
-              <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
-                AR
-              </span>
-              <span className="grid min-w-0 flex-1 text-left leading-tight">
-                <span className="truncate text-sm font-medium">Agency operator</span>
-                <span className="truncate text-xs text-muted-foreground">Workspace admin</span>
-              </span>
-            </SidebarMenuButton>
+            <SidebarIdentity />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

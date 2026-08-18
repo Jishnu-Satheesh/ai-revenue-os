@@ -7,14 +7,21 @@ select extensions.plan(17);
 insert into auth.users (id)
 values ('18000000-0000-4000-8000-000000000001'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-1bab619cc4b2'::uuid, 'Fixture agency', 'fixture-agency-business-memory-embedding-lease-test', '18000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values (
   '28000000-0000-4000-8000-000000000001'::uuid,
   'Embedding lease tenant', 'embedding-lease-tenant', 'testing', 'US', 'USD', 'UTC',
-  '18000000-0000-4000-8000-000000000001'::uuid
-);
+  '18000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-1bab619cc4b2'::uuid);
 
 insert into public.memory_items (
   id, organization_id, memory_type, title, body, origin, verification_state, sensitivity, created_by

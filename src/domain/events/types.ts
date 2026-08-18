@@ -3,11 +3,24 @@ import { z } from "zod";
 export const eventActorTypeSchema = z.enum(["user", "system", "ai"]);
 export type EventActorType = z.infer<typeof eventActorTypeSchema>;
 
-export type DomainEvent<TPayload = Record<string, unknown>> = {
+/**
+ * Every event used to belong to an organization, because every tenant-owned
+ * record did. Agency-level events -- a teammate invited, a member's role changed
+ * -- belong to an account and to no single client, so scope is now one or the
+ * other and at least one is required.
+ *
+ * The union rather than two optional fields: an event with neither scope is
+ * unattributable, and making that unrepresentable is cheaper than checking for
+ * it at every consumer.
+ */
+type EventScope =
+  | { organizationId: string; accountId?: string }
+  | { organizationId?: string; accountId: string };
+
+export type DomainEvent<TPayload = Record<string, unknown>> = EventScope & {
   eventId: string;
   eventName: string;
   occurredAt: string;
-  organizationId: string;
   branchId?: string;
   actorType: EventActorType;
   actorId?: string;
@@ -16,6 +29,22 @@ export type DomainEvent<TPayload = Record<string, unknown>> = {
   schemaVersion: number;
   payload: TPayload;
 };
+
+/**
+ * Membership and invitation changes. `context/06-multi-tenancy-and-security.md`
+ * lists these first among the things that must be audited.
+ */
+export const accountEventNames = [
+  "account.created",
+  "account_member.invited",
+  "account_member.invitation_reissued",
+  "account_member.invitation_revoked",
+  "account_member.joined",
+  "account_member.role_changed",
+  "account_member.removed",
+] as const;
+
+export type AccountEventName = (typeof accountEventNames)[number];
 
 export type EventPublisher = {
   publish<TPayload>(event: DomainEvent<TPayload>): Promise<void>;

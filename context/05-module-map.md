@@ -6,6 +6,38 @@
 
 Authentication, memberships, roles, permissions, session security, and tenant context.
 
+Tenancy is two levels: an `Account` is the agency and owns `Organization` clients. Account membership
+carries an account role and a default organization role, so a teammate admitted once reaches every
+client of the agency, including clients created afterwards, without a row per client. Access is a
+union of grants resolved by `private.effective_organization_role`, which the 219 existing policy
+checks reach through the unchanged `private.is_organization_member` and
+`private.has_organization_role`, and which the application reads through
+`public.current_organization_role`. Lives in `supabase/migrations/20260817120000_account_tenant_root.sql`,
+`src/domain/organizations/types.ts`, and `src/modules/organizations/application/authorization.ts`.
+Roles are bundles of permissions held as seeded rows in `public.permissions`,
+`public.account_role_permissions`, and `public.organization_role_permissions`, mirrored for the
+browser in `src/domain/access/permissions.ts` with a drift test that fails if the two disagree.
+Memory's `memory.*` keys are a view over that catalogue. Checks resolve through
+`private.has_account_permission` and `private.has_organization_permission`, which go through the same
+effective-role rule as every policy.
+
+Invitations bind an email address, an account role, and a default organization role to an account for
+seven days, once. Only a SHA-256 of each token is stored; the raw token exists in the response that
+minted it and nowhere else, so "resend" is necessarily "reissue". The invitation is delivered by
+email through Resend, carrying an admin-minted sign-in token so one click both authenticates the
+recipient and accepts the invitation; the sender falls back to a no-op that returns the copy-link
+when no API key is configured, which is what keeps tests from ever mailing a real person. Acceptance requires the signed-in
+user's confirmed email to equal the invited address, so holding a link is not enough. `member.invite`
+is the first permission enforced at a call site. Lives under `src/modules/accounts`,
+`src/domain/access`, `src/app/api/account`, and the public `src/app/(invitation)` route.
+
+The sidebar footer carries **Invite member**, shown only to holders of `member.invite`, opening a
+dialog that assigns both roles, produces the link, and lists pending invitations with reissue and
+withdraw. The footer identity is resolved from `/api/account`, which joins account, membership, and
+profile into one shape so the UI never deals with the two tables separately.
+
+See `specs/017-account-identity-and-access.md` and ADRs 0022 and 0023.
+
 ### Organization and Digital Twin
 
 Organization creation, branch setup, business profile, facts, goals, constraints, policies, and readiness.

@@ -7,8 +7,15 @@ select extensions.plan(12);
 insert into auth.users (id)
 values ('9a1e0c1f-1760-4b25-8b15-100000000001'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-a5a82b6fa5f8'::uuid, 'Fixture agency', 'fixture-agency-configuration-versioning-test', '9a1e0c1f-1760-4b25-8b15-100000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values (
   '9a1e0c1f-1760-4b25-8b15-200000000001'::uuid,
@@ -18,8 +25,8 @@ values (
   'AE',
   'AED',
   'Asia/Dubai',
-  '9a1e0c1f-1760-4b25-8b15-100000000001'::uuid
-);
+  '9a1e0c1f-1760-4b25-8b15-100000000001'::uuid,
+    'acc00000-0000-4000-8000-a5a82b6fa5f8'::uuid);
 
 -- Subject kinds --------------------------------------------------------------
 

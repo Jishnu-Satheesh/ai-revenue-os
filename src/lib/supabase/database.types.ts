@@ -13,6 +13,8 @@ export type Database = {
           industry_pack_slug: string;
           branchless_confirmed: boolean;
           status: "draft_onboarding" | "active" | "archived";
+          /** The agency that owns this client. Immutable after creation. */
+          account_id: string;
           created_by: string;
           created_at: string;
           updated_at: string;
@@ -27,10 +29,13 @@ export type Database = {
           | "status"
           | "industry_pack_slug"
           | "branchless_confirmed"
+          | "account_id"
         > & {
           status?: Database["public"]["Tables"]["organizations"]["Row"]["status"];
           industry_pack_slug?: string;
           branchless_confirmed?: boolean;
+          /** Set by create_organization_with_owner_v3, never by a client insert. */
+          account_id?: string;
         };
         Update: Partial<Database["public"]["Tables"]["organizations"]["Insert"]>;
         Relationships: [];
@@ -486,7 +491,9 @@ export type Database = {
       audit_events: {
         Row: {
           id: string;
-          organization_id: string;
+          /** Null for agency-level events, which belong to no single client. */
+          organization_id: string | null;
+          account_id: string | null;
           event_name: string;
           actor_type: "user" | "system" | "ai";
           actor_id: string | null;
@@ -718,6 +725,107 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["organization_last_access"]["Insert"]>;
         Relationships: [];
       };
+      /**
+       * The permission vocabulary and its role mapping. Seeded by migration and
+       * read-only to every application role, so Insert and Update are `never`.
+       */
+      permissions: {
+        Row: {
+          key: string;
+          description: string;
+          scope: "account" | "organization";
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      account_role_permissions: {
+        Row: {
+          account_role: "owner" | "admin" | "member";
+          permission_key: string;
+          permission_scope: "account" | "organization";
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      organization_role_permissions: {
+        Row: {
+          organization_role: "owner" | "admin" | "operator" | "viewer";
+          permission_key: string;
+          permission_scope: "account" | "organization";
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * Holds only a hash of each token. The raw token exists once, in the
+       * response that minted it, and there is no route that reads it back.
+       */
+      account_invitations: {
+        Row: {
+          id: string;
+          account_id: string;
+          email: string;
+          account_role: "owner" | "admin" | "member";
+          default_organization_role: "owner" | "admin" | "operator" | "viewer" | null;
+          token_hash: string;
+          status: "pending" | "accepted" | "revoked" | "expired";
+          invited_by: string;
+          expires_at: string;
+          accepted_by: string | null;
+          accepted_at: string | null;
+          revoked_by: string | null;
+          revoked_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Tenant root: the agency. Organizations are the clients it runs. */
+      accounts: {
+        Row: {
+          id: string;
+          name: string;
+          slug: string;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["accounts"]["Row"],
+          "id" | "created_at" | "updated_at"
+        > & { id?: string };
+        Update: Partial<Database["public"]["Tables"]["accounts"]["Insert"]>;
+        Relationships: [];
+      };
+      /**
+       * Agency-level tenancy. `default_organization_role` is the role this member
+       * holds in every client of the account without an explicit override, which
+       * is why organization access never has to be written per client.
+       */
+      account_memberships: {
+        Row: {
+          account_id: string;
+          user_id: string;
+          account_role: "owner" | "admin" | "member";
+          default_organization_role: "owner" | "admin" | "operator" | "viewer" | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["account_memberships"]["Row"],
+          "created_at" | "updated_at" | "account_role" | "default_organization_role"
+        > & {
+          account_role?: Database["public"]["Tables"]["account_memberships"]["Row"]["account_role"];
+          default_organization_role?: Database["public"]["Tables"]["account_memberships"]["Row"]["default_organization_role"];
+        };
+        Update: Partial<Database["public"]["Tables"]["account_memberships"]["Insert"]>;
+        Relationships: [];
+      };
       profiles: {
         Row: {
           id: string;
@@ -764,6 +872,65 @@ export type Database = {
           input_first_branch_kind?: "physical" | "virtual";
         };
         Returns: Database["public"]["Tables"]["organizations"]["Row"];
+      };
+      create_organization_with_owner_v3: {
+        Args: {
+          input_name: string;
+          input_slug: string;
+          input_industry: string;
+          input_country_code: string;
+          input_base_currency: string;
+          input_timezone: string;
+          input_industry_pack_slug: string;
+          input_first_branch_name?: string | null;
+          input_first_branch_slug?: string | null;
+          input_first_branch_kind?: "physical" | "virtual";
+          /** Omitted means the caller's only account; required if they have several. */
+          input_account_id?: string | null;
+        };
+        Returns: Database["public"]["Tables"]["organizations"]["Row"];
+      };
+      create_account_invitation: {
+        Args: {
+          p_account_id: string;
+          p_email: string;
+          p_account_role: "owner" | "admin" | "member";
+          p_default_organization_role: "owner" | "admin" | "operator" | "viewer" | null;
+          p_token_hash: string;
+          p_expires_at: string;
+        };
+        Returns: Database["public"]["Tables"]["account_invitations"]["Row"];
+      };
+      reissue_account_invitation: {
+        Args: { p_invitation_id: string; p_token_hash: string; p_expires_at: string };
+        Returns: Database["public"]["Tables"]["account_invitations"]["Row"];
+      };
+      revoke_account_invitation: {
+        Args: { p_invitation_id: string };
+        Returns: Database["public"]["Tables"]["account_invitations"]["Row"];
+      };
+      preview_account_invitation: {
+        Args: { p_token_hash: string };
+        /** Every field is null unless the invitation is live, so an unknown token reveals nothing. */
+        Returns: {
+          state: "valid" | "invalid" | "already_accepted";
+          account_name: string | null;
+          invited_email: string | null;
+          inviter_name: string | null;
+          account_role: "owner" | "admin" | "member" | null;
+          default_organization_role: "owner" | "admin" | "operator" | "viewer" | null;
+          expires_at: string | null;
+          matches_caller: boolean | null;
+        }[];
+      };
+      accept_account_invitation: {
+        Args: { p_token_hash: string };
+        Returns: Database["public"]["Tables"]["accounts"]["Row"];
+      };
+      current_organization_role: {
+        Args: { target_organization_id: string };
+        /** Null when the caller has no access, which is indistinguishable from no such organization. */
+        Returns: "owner" | "admin" | "operator" | "viewer" | null;
       };
       activate_organization: {
         Args: { target_organization_id: string };

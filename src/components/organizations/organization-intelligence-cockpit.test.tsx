@@ -50,6 +50,7 @@ const snapshot: DigitalTwinSnapshot = {
     industry_pack_slug: "restaurant",
     branchless_confirmed: false,
     status: "draft_onboarding",
+    account_id: "33333333-3333-4333-8333-333333333333",
     created_by: "22222222-2222-4222-8222-222222222222",
     created_at: "2026-08-01T08:00:00.000Z",
     updated_at: "2026-08-12T08:00:00.000Z",
@@ -65,6 +66,7 @@ const snapshot: DigitalTwinSnapshot = {
     {
       id: "event-1",
       organization_id: organizationId,
+      account_id: null,
       event_name: "organization.created",
       actor_type: "user",
       actor_id: "22222222-2222-4222-8222-222222222222",

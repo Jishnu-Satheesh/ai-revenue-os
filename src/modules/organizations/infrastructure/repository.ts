@@ -38,7 +38,10 @@ export async function createOrganization(
 ): Promise<OrganizationRow> {
   const firstBranch = input.firstBranch;
   const { data, error } = await supabase
-    .rpc("create_organization_with_owner_v2", {
+    // v3 records the account that owns the client. The account is deliberately
+    // not passed: a caller belonging to exactly one agency should not have to
+    // name it, and one belonging to several must, which the function enforces.
+    .rpc("create_organization_with_owner_v3", {
       input_name: input.name,
       input_slug: input.slug,
       input_industry: input.industry,

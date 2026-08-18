@@ -7,14 +7,21 @@ select extensions.plan(23);
 insert into auth.users (id)
 values ('6c3a0c1f-1760-4b25-8b15-100000000001'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-be9e6a105435'::uuid, 'Fixture agency', 'fixture-agency-channel-economics-test', '6c3a0c1f-1760-4b25-8b15-100000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values (
   '6c3a0c1f-1760-4b25-8b15-200000000001'::uuid,
   'Economics ledger', 'economics-ledger', 'testing', 'AE', 'AED', 'Asia/Dubai',
-  '6c3a0c1f-1760-4b25-8b15-100000000001'::uuid
-);
+  '6c3a0c1f-1760-4b25-8b15-100000000001'::uuid,
+    'acc00000-0000-4000-8000-be9e6a105435'::uuid);
 
 insert into public.cost_component_definitions (id, key, label, owner_scope, pack_slug, computation_kind)
 values (
