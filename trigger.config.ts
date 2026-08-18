@@ -15,7 +15,7 @@ export default defineConfig({
   },
   // Image generation is the long pole: three drawings, each of which may take
   // minutes under load and is retried once if it hangs.
-  maxDuration: 2_700,
+  maxDuration: 3_300,
   build: {
     // `sharp` ships prebuilt native binaries. Bundling it produces a worker
     // that fails at runtime on the first image, so it has to stay external.

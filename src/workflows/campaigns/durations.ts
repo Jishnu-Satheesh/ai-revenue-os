@@ -28,6 +28,17 @@ export const REVISE_BUNDLE_MAX_DURATION_SECONDS = 1_200;
 export const REVISE_BUNDLE_LEASE_SECONDS = 1_500;
 
 /**
+ * A variant run draws one image per variant, so its ceiling scales with the
+ * cap rather than being a fixed guess. Four per direction across three
+ * directions is twelve images, and the first real bundle run measured roughly
+ * two and a half minutes an image — so forty-five minutes is the honest
+ * envelope for a full fleet, not a round number.
+ */
+export const GENERATE_VARIANTS_MAX_DURATION_SECONDS = 2_700;
+
+export const GENERATE_VARIANTS_LEASE_SECONDS = 3_000;
+
+/**
  * Every task ceiling paired with the lease that must outlast it. Exported so
  * the invariant is testable rather than a comment nobody re-reads.
  */
@@ -36,6 +47,11 @@ export const CAMPAIGN_DURATION_PAIRS = [
     taskId: "campaign.generate-bundle",
     maxDurationSeconds: GENERATE_BUNDLE_MAX_DURATION_SECONDS,
     leaseSeconds: GENERATE_BUNDLE_LEASE_SECONDS,
+  },
+  {
+    taskId: "campaign.generate-variants",
+    maxDurationSeconds: GENERATE_VARIANTS_MAX_DURATION_SECONDS,
+    leaseSeconds: GENERATE_VARIANTS_LEASE_SECONDS,
   },
   {
     taskId: "campaign.revise-bundle",

@@ -22,6 +22,15 @@ type LogContext = {
   errorCode?: string;
   failurePaths?: string;
   httpStatus?: number;
+  /**
+   * Counts and money only. This type is an allowlist on purpose: anything not
+   * named here cannot be logged, which is what keeps prompts, generated copy
+   * and customer text out of the log stream by construction.
+   */
+  variantsRequested?: number;
+  variantsStored?: number;
+  variantsRefused?: number;
+  costMinor?: number;
 };
 
 function write(level: "info" | "warn" | "error", message: string, context: LogContext = {}) {

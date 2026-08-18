@@ -26,6 +26,11 @@ const TYPES_FILE = resolve(process.cwd(), "src/lib/supabase/database.types.ts");
  * leaving one untyped becomes a decision rather than an oversight.
  */
 const UNTYPED_TABLES = new Set([
+  // Creative variants are written only through `append_campaign_creative_variant`,
+  // which assigns the slot numbers under a lock, and read through the narrow
+  // contract in `variant-repository.ts`. A generated row type would invite a
+  // direct insert that skips the RPC and therefore skips the cap.
+  "campaign_creative_variants",
   // Decision persistence uses a deliberately narrow repository contract. The
   // browser can read only the opportunity feed projection, while the remaining
   // ledger tables are worker-only and reached through constrained RPCs.
