@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { FacebookAdsApi } from "facebook-nodejs-business-sdk";
 
 import type { VerifiedProviderContract } from "@/modules/integrations/providers/meta/contract";
 import type { SensitiveCredential } from "@/domain/integrations/credential-store.server";
@@ -8,21 +9,22 @@ import type { SensitiveCredential } from "@/domain/integrations/credential-store
 /**
  * The only way this platform speaks to Meta.
  *
- * Three properties matter more than convenience here.
+ * Transport is the official Business SDK, so the endpoint shapes, URL building
+ * and version pinning come from Meta rather than from us. Everything the
+ * platform's own rules require sits on top of it, because the SDK does not
+ * provide it: bounded response schemas, stable failure codes, retry
+ * classification taken from the contract, and a separate answer for a request
+ * whose outcome nobody knows.
  *
- * It retries nothing the contract has not proven retryable. `retryableStatuses`
- * is currently empty, because no status has been observed against a controlled
- * account, so today this client retries nothing at all. That is the correct
- * reading of an unproven contract, not a gap to paper over — inventing a retry
- * class is how a publish becomes two publishes.
+ * Two SDK behaviours are handled rather than inherited.
  *
- * It distinguishes a failure from an unknown. A response that arrived says what
- * happened. A timeout or a transport error after the request left does not, and
- * is reported as unknown so the caller reconciles instead of retrying.
+ * Its crash reporter is enabled by default and sends diagnostics to Meta. It is
+ * switched off here — this platform decides what leaves it.
  *
- * No raw provider payload crosses the boundary. Callers receive parsed, bounded
- * data or a stable code; a provider message can echo request content, and
- * request content can be anything a customer once wrote.
+ * `api.call()` puts the access token in the query string, which is Meta's
+ * documented form but worse for log hygiene than a header. Nothing in this
+ * module logs a URL, and callers never receive one, so the token stays out of
+ * this platform's own logs and error reports. See ADR 0023.
  */
 
 export type MetaRequestOutcome<T> =
@@ -34,112 +36,84 @@ export type MetaClientDependencies = {
   contract: VerifiedProviderContract;
   /** Resolved inside the adapter boundary. Never held above it, never logged. */
   credential: SensitiveCredential;
-  /** Injected so tests drive it with MSW rather than the network. */
-  fetchImpl?: typeof fetch;
+  /** Injected so tests drive the SDK's transport without the network. */
+  apiFactory?: (accessToken: string) => Pick<FacebookAdsApi, "call">;
   timeoutMs?: number;
 };
 
 /**
  * Long enough for Meta's media endpoints, short enough that a hung socket does
- * not hold a campaign worker's lease. Anything past this is unknown, not failed.
+ * not hold a campaign worker's lease. Past this the outcome is unknown.
  */
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-const GRAPH_ORIGIN = "https://graph.facebook.com";
-
-/** Meta's own error envelope, bounded to the fields worth acting on. */
+/** Meta's error envelope, bounded to the fields worth acting on. */
 const providerErrorSchema = z.object({
-  error: z
-    .object({
-      code: z.number().int().optional(),
-      error_subcode: z.number().int().optional(),
-      type: z.string().optional(),
-    })
-    .optional(),
+  code: z.number().int().optional(),
+  error_subcode: z.number().int().optional(),
+  type: z.string().optional(),
+  http_status: z.number().int().optional(),
 });
 
 export function createMetaGraphClient(dependencies: MetaClientDependencies) {
   const timeoutMs = dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const doFetch = dependencies.fetchImpl ?? fetch;
   const retryable = new Set(dependencies.contract.retryableStatuses);
+
+  // `crash_log: false` is the third argument. Left at its default the SDK
+  // installs a global handler that reports crashes to Meta.
+  const api =
+    dependencies.apiFactory?.(dependencies.credential.value) ??
+    new FacebookAdsApi(dependencies.credential.value, "en_US", false);
 
   return {
     /**
-     * One Graph call, against the pinned API version.
+     * One Graph call at the version the SDK pins, which the contract mirrors.
      *
-     * The version comes from the contract rather than a constant, so a call can
-     * never quietly outlive the contract that documented it.
+     * The path is given as segments rather than a string: the SDK only prepends
+     * its version when handed an array, and a string path is used verbatim.
+     * Passing a string would silently produce an unversioned request.
      */
     async request<T>(input: {
       method: "GET" | "POST";
-      /** Path below the version, e.g. `me/media`. Never a full URL. */
-      path: string;
-      query?: Readonly<Record<string, string>>;
-      body?: Readonly<Record<string, unknown>>;
-      /** Provider-side de-duplication for writes that support it. */
-      idempotencyKey?: string;
+      /** Path segments below the version, e.g. `["me", "media"]`. */
+      path: readonly string[];
+      params?: Readonly<Record<string, unknown>>;
       schema: z.ZodType<T>;
       signal: AbortSignal;
     }): Promise<MetaRequestOutcome<T>> {
-      const url = new URL(
-        `${GRAPH_ORIGIN}/${dependencies.contract.apiVersion}/${input.path.replace(/^\/+/, "")}`,
-      );
-      for (const [key, value] of Object.entries(input.query ?? {})) {
-        url.searchParams.set(key, value);
-      }
-
-      const timeout = new AbortController();
-      const timer = setTimeout(() => timeout.abort(), timeoutMs);
-      // The caller's cancellation and our own timeout both have to stop the
-      // request, and the caller's must not be mistaken for a timeout.
-      const onAbort = () => timeout.abort();
-      input.signal.addEventListener("abort", onAbort, { once: true });
-
-      let response: Response;
+      let raw: unknown;
       try {
-        response = await doFetch(url, {
-          method: input.method,
-          signal: timeout.signal,
-          headers: {
-            // The token travels in a header, never the query string: a URL is
-            // logged by proxies and appears in error reports.
-            authorization: `Bearer ${dependencies.credential.value}`,
-            "content-type": "application/json",
-            ...(input.idempotencyKey ? { "x-meta-idempotency-key": input.idempotencyKey } : {}),
-          },
-          body: input.body ? JSON.stringify(input.body) : undefined,
-        });
+        raw = await withTimeout(
+          api.call(input.method, [...input.path], { ...(input.params ?? {}) }),
+          timeoutMs,
+          input.signal,
+        );
       } catch (error) {
-        // Nobody knows whether this reached Meta. Calling it a failure would
-        // invite a retry, and a retried publish is a duplicate post.
-        return {
-          outcome: "unknown",
-          reason: isAbort(error) ? "timeout" : "transport",
-        };
-      } finally {
-        clearTimeout(timer);
-        input.signal.removeEventListener("abort", onAbort);
-      }
+        if (error instanceof MetaTimeout) return { outcome: "unknown", reason: "timeout" };
 
-      const text = await response.text().catch(() => "");
+        const status = statusOf(error);
+        if (status === null) {
+          // Nobody knows whether this reached Meta. Calling it a failure would
+          // invite a retry, and a retried publish is a second post.
+          return { outcome: "unknown", reason: "transport" };
+        }
 
-      if (!response.ok) {
         return {
           outcome: "failed",
-          status: response.status,
-          failureCode: normalizedFailureCode(response.status, text),
+          status,
+          failureCode: normalizedFailureCode(status, error),
           // Only what the contract proves. An empty list means nothing retries.
-          retryable: retryable.has(response.status),
+          retryable: retryable.has(status),
         };
       }
 
-      const parsed = input.schema.safeParse(safeJson(text));
+      const parsed = input.schema.safeParse(raw);
       if (!parsed.success) {
-        // A 200 whose body is not what the contract describes is a failure of
-        // this integration's understanding, not a provider error to retry.
+        // A success whose body is not what the contract describes is a failure
+        // of this integration's understanding, not a provider error to retry.
         return {
           outcome: "failed",
-          status: response.status,
+          status: 200,
           failureCode: "meta.response_shape_unrecognized",
           retryable: false,
         };
@@ -152,29 +126,46 @@ export function createMetaGraphClient(dependencies: MetaClientDependencies) {
 
 export type MetaGraphClient = ReturnType<typeof createMetaGraphClient>;
 
-function isAbort(error: unknown): boolean {
-  return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+class MetaTimeout extends Error {}
+
+/**
+ * The SDK exposes no timeout or cancellation, so both are imposed here.
+ *
+ * The underlying request is not aborted — it cannot be — which is precisely why
+ * the result is `unknown` rather than `failed`: the call may still land.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new MetaTimeout("timed out")), ms);
+    const onAbort = () => reject(new MetaTimeout("cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
 }
 
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+/** `FacebookRequestError` carries the status; a transport failure does not. */
+function statusOf(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) return null;
+  const candidate = error as { status?: unknown; response?: { status?: unknown } };
+  const status = candidate.status ?? candidate.response?.status;
+  return typeof status === "number" && status >= 100 && status <= 599 ? status : null;
 }
 
 /**
- * A stable code built from the status and Meta's own error type.
+ * A stable code from the status and Meta's own error type.
  *
  * Deliberately not the provider's message. The message is prose that changes
- * without notice and can quote back the request, which may contain a caption a
- * customer wrote.
+ * without notice and can quote the request back, and a request can carry a
+ * caption a customer wrote.
  */
-function normalizedFailureCode(status: number, text: string): string {
-  const parsed = providerErrorSchema.safeParse(safeJson(text));
-  const type = parsed.success ? parsed.data.error?.type : undefined;
-  const code = parsed.success ? parsed.data.error?.code : undefined;
+function normalizedFailureCode(status: number, error: unknown): string {
+  const body = (error as { response?: { error?: unknown } })?.response?.error;
+  const parsed = providerErrorSchema.safeParse(body);
+  const type = parsed.success ? parsed.data.type : undefined;
+  const code = parsed.success ? parsed.data.code : undefined;
   if (type && code !== undefined) return `meta.${status}.${type}.${code}`;
   if (type) return `meta.${status}.${type}`;
   return `meta.${status}`;

@@ -7,6 +7,7 @@ import { createMetaGraphClient } from "@/modules/integrations/providers/meta/cli
 import { getMetaCampaignProviderContract } from "@/modules/integrations/providers/meta/contract";
 
 const CONTRACT = getMetaCampaignProviderContract(new Date("2026-08-18T00:00:00.000Z"));
+const schema = z.object({ id: z.string() });
 
 function credential(value = "token-abc") {
   return {
@@ -18,7 +19,7 @@ function credential(value = "token-abc") {
 }
 
 function client(
-  fetchImpl: typeof fetch,
+  call: (...args: unknown[]) => Promise<unknown>,
   overrides: { retryableStatuses?: readonly number[]; timeoutMs?: number } = {},
 ) {
   return createMetaGraphClient({
@@ -26,66 +27,67 @@ function client(
       ? { ...CONTRACT, retryableStatuses: [...overrides.retryableStatuses] }
       : CONTRACT,
     credential: credential(),
-    fetchImpl,
+    apiFactory: () => ({ call }) as never,
     timeoutMs: overrides.timeoutMs,
   });
 }
 
-const schema = z.object({ id: z.string() });
-
-function respond(status: number, body: unknown): typeof fetch {
-  return vi.fn(
-    async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status }),
-  ) as unknown as typeof fetch;
+/** What the SDK throws for a response that arrived and was not a success. */
+function requestError(status: number, error?: Record<string, unknown>) {
+  return Object.assign(new Error("meta request failed"), {
+    status,
+    response: error ? { error } : undefined,
+  });
 }
 
-describe("a call goes to the pinned API version", () => {
-  it("builds the path from the contract rather than a constant", async () => {
-    const spy = vi.fn(async () => new Response(JSON.stringify({ id: "1" }), { status: 200 }));
-    await client(spy as unknown as typeof fetch).request({
+describe("the SDK carries the transport and the version", () => {
+  it("passes the path as segments, so the SDK prepends its version", async () => {
+    const call = vi.fn(async () => ({ id: "1" }));
+    await client(call).request({
       method: "GET",
-      path: "me/media",
+      path: ["me", "media"],
       schema,
       signal: new AbortController().signal,
     });
 
-    const url = String((spy.mock.calls[0] as unknown[])[0]);
-    expect(url).toContain(`/${CONTRACT.apiVersion}/me/media`);
+    // A string path is used verbatim by the SDK and would produce an
+    // unversioned request; an array is what makes it prepend v24.0.
+    expect(call).toHaveBeenCalledWith("GET", ["me", "media"], {});
+    expect(Array.isArray((call.mock.calls[0] as unknown[])[1])).toBe(true);
   });
 
-  it("sends the token as a header, never in the URL", async () => {
-    const spy = vi.fn(async () => new Response(JSON.stringify({ id: "1" }), { status: 200 }));
-    await client(spy as unknown as typeof fetch).request({
-      method: "GET",
-      path: "me",
-      schema,
-      signal: new AbortController().signal,
-    });
-
-    const [url, init] = spy.mock.calls[0] as [URL, RequestInit];
-    // A URL is logged by proxies and shows up in error reports; a header is not.
-    expect(String(url)).not.toContain("token-abc");
-    expect((init.headers as Record<string, string>).authorization).toBe("Bearer token-abc");
+  it("agrees with the version the contract records", () => {
+    expect(CONTRACT.apiVersion).toBe("v24.0");
   });
 });
 
 describe("nothing retries unless the contract proves it", () => {
   it("reports a failure as not retryable while the contract lists no statuses", async () => {
-    // The checked-in contract has an empty retryableStatuses list, because no
-    // status has been observed against a controlled account.
+    // The checked-in contract's list is empty: no status has been observed
+    // against a controlled account, so nothing is proven retryable.
     expect(CONTRACT.retryableStatuses).toEqual([]);
 
-    const result = await client(
-      respond(500, { error: { type: "OAuthException", code: 1 } }),
-    ).request({ method: "POST", path: "me/media", schema, signal: new AbortController().signal });
+    const result = await client(async () => {
+      throw requestError(500, { type: "OAuthException", code: 1 });
+    }).request({
+      method: "POST",
+      path: ["me", "media"],
+      schema,
+      signal: new AbortController().signal,
+    });
 
     expect(result).toMatchObject({ outcome: "failed", retryable: false });
   });
 
   it("retries only a status the contract actually lists", async () => {
-    const result = await client(respond(503, {}), { retryableStatuses: [503] }).request({
+    const result = await client(
+      async () => {
+        throw requestError(503);
+      },
+      { retryableStatuses: [503] },
+    ).request({
       method: "POST",
-      path: "me/media",
+      path: ["me", "media"],
       schema,
       signal: new AbortController().signal,
     });
@@ -94,9 +96,14 @@ describe("nothing retries unless the contract proves it", () => {
   });
 
   it("does not retry a neighbouring status the contract omits", async () => {
-    const result = await client(respond(502, {}), { retryableStatuses: [503] }).request({
+    const result = await client(
+      async () => {
+        throw requestError(502);
+      },
+      { retryableStatuses: [503] },
+    ).request({
       method: "POST",
-      path: "me/media",
+      path: ["me", "media"],
       schema,
       signal: new AbortController().signal,
     });
@@ -107,33 +114,25 @@ describe("nothing retries unless the contract proves it", () => {
 
 describe("an answer that never arrived is unknown, not failed", () => {
   it("reports a timeout as unknown so the caller reconciles", async () => {
-    const hang: typeof fetch = ((_url: unknown, init: RequestInit) =>
-      new Promise((_resolve, reject) => {
-        init.signal?.addEventListener("abort", () => {
-          const error = new Error("aborted");
-          error.name = "AbortError";
-          reject(error);
-        });
-      })) as unknown as typeof fetch;
-
-    const result = await client(hang, { timeoutMs: 10 }).request({
+    const result = await client(() => new Promise(() => {}), { timeoutMs: 10 }).request({
       method: "POST",
-      path: "me/media",
+      path: ["me", "media"],
       schema,
       signal: new AbortController().signal,
     });
 
     // Calling this failed would invite a retry, and a retried publish is a
-    // second post nobody asked for.
+    // second post nobody asked for. The SDK cannot abort the request, which is
+    // exactly why the outcome is unknown rather than cancelled.
     expect(result).toEqual({ outcome: "unknown", reason: "timeout" });
   });
 
-  it("reports a transport error as unknown too", async () => {
-    const broken: typeof fetch = (() => Promise.reject(new TypeError("network"))) as never;
-
-    const result = await client(broken).request({
+  it("reports a transport error with no status as unknown", async () => {
+    const result = await client(async () => {
+      throw new TypeError("socket hang up");
+    }).request({
       method: "POST",
-      path: "me/media",
+      path: ["me", "media"],
       schema,
       signal: new AbortController().signal,
     });
@@ -144,9 +143,9 @@ describe("an answer that never arrived is unknown, not failed", () => {
 
 describe("no raw provider payload crosses the boundary", () => {
   it("returns parsed data and nothing else on success", async () => {
-    const result = await client(respond(200, { id: "17841", extra: "ignored" })).request({
+    const result = await client(async () => ({ id: "17841", extra: "ignored" })).request({
       method: "GET",
-      path: "me",
+      path: ["me"],
       schema,
       signal: new AbortController().signal,
     });
@@ -154,43 +153,67 @@ describe("no raw provider payload crosses the boundary", () => {
     expect(result).toEqual({ outcome: "succeeded", data: { id: "17841" } });
   });
 
-  it("treats a 200 whose shape the contract does not describe as a failure", async () => {
-    const result = await client(respond(200, { unexpected: true })).request({
+  it("treats a success whose shape the contract does not describe as a failure", async () => {
+    const result = await client(async () => ({ unexpected: true })).request({
       method: "GET",
-      path: "me",
+      path: ["me"],
       schema,
       signal: new AbortController().signal,
     });
 
     expect(result).toMatchObject({
-      outcome: "failed",
       failureCode: "meta.response_shape_unrecognized",
       retryable: false,
     });
   });
 
   it("builds a stable code from the status and error type, never the message", async () => {
-    const result = await client(
-      respond(400, {
-        error: { type: "OAuthException", code: 190, message: "Caption said: buy one get one" },
-      }),
-    ).request({ method: "POST", path: "me/media", schema, signal: new AbortController().signal });
+    const result = await client(async () => {
+      throw requestError(400, {
+        type: "OAuthException",
+        code: 190,
+        message: "Caption said: buy one get one",
+      });
+    }).request({
+      method: "POST",
+      path: ["me", "media"],
+      schema,
+      signal: new AbortController().signal,
+    });
 
     if (result.outcome !== "failed") throw new Error("expected a failure");
     expect(result.failureCode).toBe("meta.400.OAuthException.190");
-    // The message can quote the request back, and the request can contain
+    // A provider message can quote the request back, and a request can carry
     // anything a customer once wrote.
     expect(JSON.stringify(result)).not.toContain("buy one get one");
   });
 
   it("degrades to the status alone when the error envelope is unreadable", async () => {
-    const result = await client(respond(500, "<html>gateway</html>")).request({
+    const result = await client(async () => {
+      throw requestError(500);
+    }).request({
       method: "POST",
-      path: "me/media",
+      path: ["me", "media"],
       schema,
       signal: new AbortController().signal,
     });
 
     expect(result).toMatchObject({ failureCode: "meta.500" });
+  });
+
+  it("never returns a URL, so the query-string token cannot reach a log", async () => {
+    // api.call puts the access token in the query string. Nothing here hands a
+    // URL back, so it stays out of this platform's logs and error reports.
+    const result = await client(async () => {
+      throw requestError(400, { type: "OAuthException", code: 190 });
+    }).request({
+      method: "POST",
+      path: ["me", "media"],
+      schema,
+      signal: new AbortController().signal,
+    });
+
+    expect(JSON.stringify(result)).not.toContain("token-abc");
+    expect(JSON.stringify(result)).not.toContain("graph.facebook.com");
   });
 });

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, and deliberately revisitable. The evidence below is dated and the balance changes if the SDK catches up.
+**Superseded by ADR 0023 on 2026-08-18, one day after being written.** The decision below was reversed by the project owner, and one of its load-bearing facts turned out to be overstated: v24.0 is a supported version until 2028-02-18, not a stale one. The evidence about the SDK's pinning, typing and release cadence remains accurate and is why ADR 0023 constrains the contract rather than the SDK.
 
 ## Context
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FacebookAdsApi } from "facebook-nodejs-business-sdk";
 
 import {
   getMetaCampaignProviderContract,
@@ -108,7 +109,11 @@ describe("verified provider contract boundary", () => {
     const parsed = getMetaCampaignProviderContract(NOW);
 
     expect(parsed.providerKey).toBe("meta_campaign");
-    expect(parsed.apiVersion).toBe("v26.0");
+    // Must equal what the SDK actually calls. FacebookAdsApi.VERSION is a
+    // static getter with no setter, so a contract naming any other version
+    // would describe requests this platform never makes.
+    expect(parsed.apiVersion).toBe("v24.0");
+    expect(FacebookAdsApi.VERSION).toBe(parsed.apiVersion);
     expect(parsed.actions).toEqual([]);
     expect(parsed.knownRestrictions.map(({ code }) => code)).toContain(
       "meta.controlled_account_eligibility_unverified",

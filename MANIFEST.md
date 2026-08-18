@@ -26,6 +26,7 @@
 - `adrs/0020-bounded-creative-family-approval.md`
 - `adrs/0021-two-speed-campaign-optimization.md`
 - `adrs/0022-meta-graph-calls-over-the-business-sdk.md`
+- `adrs/0023-meta-business-sdk-as-transport.md`
 - `context/00-vision.md`
 - `context/01-project-overview.md`
 - `context/02-product-principles.md`

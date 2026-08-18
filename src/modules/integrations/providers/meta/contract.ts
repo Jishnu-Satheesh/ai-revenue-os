@@ -477,6 +477,8 @@ export function parseVerifiedProviderContract(
 }
 
 const META_VERSIONING_SOURCE = "https://developers.facebook.com/docs/graph-api/guides/versioning/";
+const META_VERSION_SCHEDULE_SOURCE =
+  "https://developers.facebook.com/docs/graph-api/changelog/versions/";
 const META_INSTAGRAM_PUBLISHING_SOURCE =
   "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/content-publishing/";
 const META_PAGE_POSTS_SOURCE = "https://developers.facebook.com/docs/pages-api/posts/";
@@ -486,11 +488,23 @@ const metaCampaignProviderContract = {
   schemaVersion: 1,
   providerKey: "meta_campaign",
   contractVersion: "meta_campaign_v1",
-  apiVersion: "v26.0",
+  // Pinned to the version the Business SDK actually calls.
+  //
+  // `FacebookAdsApi.VERSION` is a static getter returning the literal 'v24.0'
+  // with no setter, so every request the SDK issues goes to v24.0 whatever this
+  // field claims. A contract that named a different version would be false at
+  // its most load-bearing field, and every scope, placement and restriction
+  // recorded below inherits it. See ADR 0023.
+  //
+  // v24.0 was released 2025-10-08 and is supported until 2028-02-18, so this is
+  // an older live version rather than a deprecated one. The review date below is
+  // this contract's own, and is far shorter than the version's sunset.
+  apiVersion: "v24.0",
   verifiedAt: "2026-08-11T00:00:00.000Z",
   expiresAt: "2026-09-10T00:00:00.000Z",
   officialSourceUrls: [
     META_VERSIONING_SOURCE,
+    META_VERSION_SCHEDULE_SOURCE,
     META_INSTAGRAM_PUBLISHING_SOURCE,
     META_PAGE_POSTS_SOURCE,
     META_MARKETING_SOURCE,
