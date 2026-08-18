@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import type { CampaignCreativeVariant } from "@/domain/campaigns/variants";
+import {
+  CAMPAIGN_VARIANT_STATES,
+  type CampaignCreativeVariant,
+  type CampaignVariantState,
+} from "@/domain/campaigns/variants";
 
 /**
  * Storage for creative variants.
@@ -67,6 +71,34 @@ export type VariantProvenance = {
 
 const appendedIdSchema = z.string().uuid();
 
+export type StoredVariant = {
+  id: string;
+  directionId: string;
+  ordinal: number;
+  state: CampaignVariantState;
+  assetId: string;
+  channel: string;
+  placement: string;
+  hook: string;
+  caption: string;
+  callToAction: string;
+  hashtags: readonly string[];
+};
+
+const listedVariantSchema = z.object({
+  id: z.string().uuid(),
+  direction_key: z.string().uuid(),
+  direction_ordinal: z.number().int().positive(),
+  state: z.enum(CAMPAIGN_VARIANT_STATES),
+  asset_id: z.string().uuid(),
+  channel: z.string(),
+  placement: z.string(),
+  hook: z.string(),
+  caption: z.string(),
+  call_to_action: z.string(),
+  hashtags: z.array(z.string()).default([]),
+});
+
 const storedVariantSchema = z.object({
   content_hash: z.string(),
   direction_key: z.string().uuid(),
@@ -112,6 +144,47 @@ export function createCampaignVariantStore(persistence: CampaignVariantPersisten
         usedByDirection,
         usedInTotal: rows.length,
       };
+    },
+
+    /**
+     * The fleet, as the Studio renders it.
+     *
+     * Ordered by slot so the grid reads the same way twice, and joined to the
+     * manifest by the caller rather than here — the direction's name lives in
+     * the approved version, not in the variant row.
+     */
+    async listForVersion(
+      organizationId: string,
+      bundleVersionId: string,
+    ): Promise<readonly StoredVariant[]> {
+      const { data, error } = await persistence
+        .from("campaign_creative_variants")
+        .select(
+          "id, direction_key, direction_ordinal, state, asset_id, channel, placement, hook, caption, call_to_action, hashtags",
+        )
+        .eq("organization_id", organizationId)
+        .eq("bundle_version_id", bundleVersionId);
+      if (error) throw new Error("Stored variants could not be read.");
+
+      return (data ?? [])
+        .flatMap((row) => {
+          const parsed = listedVariantSchema.safeParse(row);
+          return parsed.success ? [parsed.data] : [];
+        })
+        .sort((left, right) => left.direction_ordinal - right.direction_ordinal)
+        .map((row) => ({
+          id: row.id,
+          directionId: row.direction_key,
+          ordinal: row.direction_ordinal,
+          state: row.state,
+          assetId: row.asset_id,
+          channel: row.channel,
+          placement: row.placement,
+          hook: row.hook,
+          caption: row.caption,
+          callToAction: row.call_to_action,
+          hashtags: row.hashtags,
+        }));
     },
 
     async append(input: {

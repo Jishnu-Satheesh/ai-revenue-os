@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { attestAndApprove } from "@/components/campaigns/campaign-actions";
+import { VariantGrid, type VariantCard } from "@/components/campaigns/variant-grid";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,6 +88,36 @@ const APPROVAL_WINDOWS = [
   { value: "72", label: "3 days" },
   { value: "168", label: "7 days" },
 ] as const;
+
+/**
+ * The approval must outlive the creative it licenses.
+ *
+ * The policy authorizes variants until a fixed instant, and the database
+ * refuses an approval that lapses before then — a licence with no authority
+ * behind it reads to an operator as permission the system would in fact
+ * decline. So a window shorter than the policy is not offered at all.
+ *
+ * Offering it and failing afterwards is the worse version of the same rule: it
+ * spends the operator's attestation before telling them the choice was never
+ * available.
+ */
+function approvalWindowOptions(policyExpiresAt: string, now: number) {
+  const required = new Date(policyExpiresAt).getTime();
+  const usable = APPROVAL_WINDOWS.filter(
+    (option) => now + Number(option.value) * 3_600_000 >= required,
+  );
+  if (usable.length > 0) return usable;
+
+  // The policy outlasts every preset. Rather than refuse to render an approval
+  // control, offer exactly the window the policy needs.
+  const hours = Math.max(1, Math.ceil((required - now) / 3_600_000));
+  return [
+    {
+      value: String(hours),
+      label: `Until the creative window closes (${Math.ceil(hours / 24)} days)`,
+    },
+  ] as const;
+}
 
 const ATTESTATION_STATEMENT =
   "I have reviewed every proposed asset and confirm none of them depicts or implies a real-world fact the evidence does not support.";
@@ -602,17 +633,30 @@ export function CampaignStudio({
   organizationId,
   organizationName,
   timeZone,
+  variants,
+  variantsRemaining,
 }: Readonly<{
   view: StudioView;
   organizationId: string;
   organizationName: string;
   timeZone: string;
+  /** Creative produced under this approval. Empty until any has been. */
+  variants?: readonly VariantCard[];
+  variantsRemaining?: Readonly<Record<string, number>>;
 }>) {
   const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
   const [directionId, setDirectionId] = useState(evidenceLed?.id ?? view.directions[0]?.id ?? "");
   const [attested, setAttested] = useState(false);
-  const [windowHours, setWindowHours] = useState("24");
+  // Read once on mount rather than on every render. Reading the clock during
+  // render makes the component's output depend on when React happened to run
+  // it, which is the impurity the compiler is right to refuse.
+  const [mountedAt] = useState(() => Date.now());
+  const windowOptions = useMemo(
+    () => approvalWindowOptions(view.generationPolicy.policyExpiresAt, mountedAt),
+    [view.generationPolicy.policyExpiresAt, mountedAt],
+  );
+  const [windowHours, setWindowHours] = useState(windowOptions[0]?.value ?? "168");
   const [approving, setApproving] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
@@ -857,7 +901,7 @@ export function CampaignStudio({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {APPROVAL_WINDOWS.map((option) => (
+                  {windowOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -894,6 +938,19 @@ export function CampaignStudio({
           </section>
         </aside>
       </div>
+
+      {/* Shown only once an approval exists. Before that there is no envelope
+          for creative to sit inside, and an empty grid would imply there is. */}
+      {view.approval.status === "live" ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold">Creative variants</h2>
+          <p className="text-sm text-muted-foreground">
+            Produced inside this approval. Each one varies the image and the words; none of them
+            changes the offer, the claims, the audience, the placement, the schedule or the spend.
+          </p>
+          <VariantGrid variants={variants ?? []} remaining={variantsRemaining ?? {}} />
+        </section>
+      ) : null}
 
       <p className="sr-only">Reviewing campaign artwork for {organizationName}.</p>
     </div>

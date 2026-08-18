@@ -249,10 +249,13 @@ describe("editing opens a workspace at its own address", () => {
 
 describe("the approval window is an explicit choice", () => {
   it("shows the window the approval will be bound to", () => {
+    // The fixture's policy runs to 30 September, which no preset reaches, so
+    // the only offer is the window the policy actually needs. A "24 hours"
+    // option here would be a choice the database refuses.
     renderStudio();
 
     expect(screen.getByLabelText(/approval valid for/i)).toBeInTheDocument();
-    expect(screen.getByText("24 hours")).toBeInTheDocument();
+    expect(screen.getByText(/until the creative window closes/i)).toBeInTheDocument();
   });
 });
 
@@ -335,5 +338,35 @@ describe("the cockpit shows what an operator is being asked to authorise", () =>
 
     expect(screen.getByText(/version digest/i)).toBeInTheDocument();
     expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
+  });
+});
+
+describe("the approval window has to cover the creative it licenses", () => {
+  it("does not offer a window that lapses before the policy does", () => {
+    // The database refuses such an approval, so offering it would spend the
+    // operator's attestation before telling them the choice was unavailable.
+    const view = studioView();
+    view.generationPolicy.policyExpiresAt = "2026-08-20T12:00:00.000Z";
+    vi.setSystemTime(new Date("2026-08-15T12:00:00.000Z"));
+    renderStudio(view);
+
+    // Five days out: 24 hours and 3 days both fall short, 7 days covers it.
+    expect(screen.queryByText("24 hours")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /approval valid for/i })).toHaveTextContent(
+      /7 days/i,
+    );
+    vi.useRealTimers();
+  });
+
+  it("offers exactly the window the policy needs when no preset reaches it", () => {
+    const view = studioView();
+    view.generationPolicy.policyExpiresAt = "2026-10-01T12:00:00.000Z";
+    vi.setSystemTime(new Date("2026-08-15T12:00:00.000Z"));
+    renderStudio(view);
+
+    expect(screen.getByRole("combobox", { name: /approval valid for/i })).toHaveTextContent(
+      /until the creative window closes/i,
+    );
+    vi.useRealTimers();
   });
 });

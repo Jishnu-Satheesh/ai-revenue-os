@@ -10,6 +10,10 @@ import { toGeneration } from "@/modules/campaigns/application/studio-view";
 import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 import { readStudioView } from "@/modules/campaigns/infrastructure/studio-reader";
+import { createCampaignVariantStore } from "@/modules/campaigns/infrastructure/variant-repository";
+import type { CampaignVariantPersistence } from "@/modules/campaigns/infrastructure/variant-repository";
+import { remainingCapacity } from "@/modules/campaigns/application/variant-service";
+import type { VariantCard } from "@/components/campaigns/variant-grid";
 
 type PageProps = {
   params: Promise<{ organizationId: string; campaignId: string }>;
@@ -80,6 +84,13 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
     );
   }
 
+  // Read only once an approval exists: before that there is no envelope for
+  // creative to live inside, and the query would be work with no answer.
+  const fleet =
+    view.approval.status === "live"
+      ? await readFleet(context, view)
+      : { variants: [] as VariantCard[], remaining: {} as Record<string, number> };
+
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -110,7 +121,69 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
         organizationId={context.organizationId}
         organizationName={organization.name}
         timeZone={organization.default_timezone}
+        variants={fleet.variants}
+        variantsRemaining={fleet.remaining}
       />
     </div>
   );
+}
+
+/**
+ * The creative produced under this approval, joined to the directions it varies.
+ *
+ * The direction's name and kind live in the approved manifest rather than on the
+ * variant row, so the join happens here: duplicating them onto every variant
+ * would let a renamed direction disagree with itself across a fleet.
+ */
+async function readFleet(
+  context: { supabase: unknown; organizationId: string },
+  view: Awaited<ReturnType<typeof readStudioView>>,
+): Promise<{ variants: VariantCard[]; remaining: Record<string, number> }> {
+  if (!view) return { variants: [], remaining: {} };
+
+  const store = createCampaignVariantStore(
+    context.supabase as unknown as CampaignVariantPersistence,
+  );
+  const [stored, capacity] = await Promise.all([
+    store.listForVersion(context.organizationId, view.versionId),
+    store.readCapacity(context.organizationId, view.versionId),
+  ]);
+
+  const byDirection = new Map(view.directions.map((direction) => [direction.id, direction]));
+
+  return {
+    variants: stored.flatMap((variant) => {
+      const direction = byDirection.get(variant.directionId);
+      if (!direction) return [];
+      return [
+        {
+          id: variant.id,
+          directionId: variant.directionId,
+          directionName: direction.name,
+          directionKind: direction.kind,
+          ordinal: variant.ordinal,
+          state: variant.state,
+          hook: variant.hook,
+          caption: variant.caption,
+          callToAction: variant.callToAction,
+          hashtags: variant.hashtags,
+          channel: variant.channel,
+          placement: variant.placement,
+          // Signed previews are issued per bundle asset; a variant's own image
+          // gets its link in the same pass once that path exists. Null renders
+          // as "preview unavailable" rather than a broken image.
+          previewUrl: null,
+        },
+      ];
+    }),
+    remaining: Object.fromEntries(
+      view.directions.map((direction) => [
+        direction.id,
+        remainingCapacity({ generationPolicy: view.generationPolicy } as never, {
+          usedInDirection: capacity.usedByDirection[direction.id] ?? 0,
+          usedInTotal: capacity.usedInTotal,
+        }),
+      ]),
+    ),
+  };
 }
