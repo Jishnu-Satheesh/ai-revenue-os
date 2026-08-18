@@ -7,14 +7,21 @@ select extensions.no_plan();
 insert into auth.users (id)
 values ('d5c50000-0000-4000-8000-000000000001'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-f09f6f949ce7'::uuid, 'Fixture agency', 'fixture-agency-campaign-decision-cycle-runtime-test', 'd5c50000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values (
   'd5c50000-0000-4000-8000-000000000101'::uuid,
   'Campaign cycle runtime', 'campaign-cycle-runtime', 'testing', 'AE', 'AED',
-  'Asia/Dubai', 'd5c50000-0000-4000-8000-000000000001'::uuid
-);
+  'Asia/Dubai', 'd5c50000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-f09f6f949ce7'::uuid);
 
 insert into public.policies (
   id, organization_id, policy_type, name, mode, configuration,

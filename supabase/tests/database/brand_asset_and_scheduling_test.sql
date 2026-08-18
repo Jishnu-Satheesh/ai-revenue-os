@@ -9,19 +9,27 @@ values
   ('8b000000-0000-4000-8000-000000000001'::uuid),
   ('8b000000-0000-4000-8000-000000000002'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-9f88898d59d2'::uuid, 'Fixture agency', 'fixture-agency-brand-asset-and-scheduling-test', '8b000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
-) values
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
+)
+values
   (
     '8b000000-0000-4000-8000-000000000101'::uuid,
     'Brand intake tenant', 'brand-intake-tenant', 'testing', 'AE', 'AED', 'Asia/Dubai',
-    '8b000000-0000-4000-8000-000000000001'::uuid
-  ),
+    '8b000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-9f88898d59d2'::uuid),
   (
     '8b000000-0000-4000-8000-000000000102'::uuid,
     'Other tenant', 'brand-intake-other', 'testing', 'AE', 'AED', 'Asia/Dubai',
-    '8b000000-0000-4000-8000-000000000002'::uuid
-  );
+    '8b000000-0000-4000-8000-000000000002'::uuid,
+    'acc00000-0000-4000-8000-9f88898d59d2'::uuid);
 
 insert into public.organization_memberships (organization_id, user_id, role)
 values

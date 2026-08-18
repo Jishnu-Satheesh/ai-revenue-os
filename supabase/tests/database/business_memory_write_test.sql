@@ -9,14 +9,21 @@ values
   ('16000000-0000-4000-8000-000000000001'::uuid),
   ('16000000-0000-4000-8000-000000000002'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-1b181295fbf7'::uuid, 'Fixture agency', 'fixture-agency-business-memory-write-test', '16000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values (
   '26000000-0000-4000-8000-000000000001'::uuid,
   'Write tenant', 'write-tenant', 'testing', 'US', 'USD', 'UTC',
-  '16000000-0000-4000-8000-000000000001'::uuid
-);
+  '16000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-1b181295fbf7'::uuid);
 
 insert into public.organization_memberships (organization_id, user_id, role)
 values
@@ -372,13 +379,13 @@ select extensions.throws_ok(
 reset role;
 
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values (
   '26000000-0000-4000-8000-000000000002'::uuid,
   'Other write tenant', 'other-write-tenant', 'testing', 'US', 'USD', 'UTC',
-  '16000000-0000-4000-8000-000000000002'::uuid
-);
+  '16000000-0000-4000-8000-000000000002'::uuid,
+    'acc00000-0000-4000-8000-1b181295fbf7'::uuid);
 insert into public.memory_items (
   id, organization_id, memory_type, title, origin, verification_state, sensitivity,
   proposed_fact_key, proposed_fact_value

@@ -8,6 +8,14 @@ vi.mock("next/navigation", () => ({ usePathname: () => mocks.pathname }));
 vi.mock("@/components/layout/organization-switcher", () => ({
   OrganizationSwitcher: () => <div data-testid="switcher" />,
 }));
+// Both read the account through react-query, which this suite deliberately does
+// not stand up: their own suites cover them.
+vi.mock("@/components/accounts/invite-member-dialog", () => ({
+  InviteMemberDialog: () => <div data-testid="invite-member-entry" />,
+}));
+vi.mock("@/components/accounts/sidebar-identity", () => ({
+  SidebarIdentity: () => <div data-testid="sidebar-identity" />,
+}));
 
 import { Sidebar } from "@/components/layout/sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";

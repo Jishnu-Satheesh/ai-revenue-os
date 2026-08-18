@@ -3,6 +3,40 @@ import { z } from "zod";
 export const organizationRoleSchema = z.enum(["owner", "admin", "operator", "viewer"]);
 export type OrganizationRole = z.infer<typeof organizationRoleSchema>;
 
+/**
+ * Authority inside the agency, which is a different question from authority
+ * inside a client. An account `member` holds a seat; what they can actually do
+ * in a client is their organization role. See `specs/017-account-identity-and-access.md`.
+ */
+export const accountRoleSchema = z.enum(["owner", "admin", "member"]);
+export type AccountRole = z.infer<typeof accountRoleSchema>;
+
+/**
+ * Mirrors `private.organization_role_rank`. Access is a union of grants and the
+ * effective role is the highest-ranked one, so anything comparing two roles must
+ * agree with the database on their order.
+ *
+ * This is for presentation only. The database decides access; a browser that
+ * disagrees renders the wrong control, it does not grant anything.
+ */
+const organizationRoleRanks: Readonly<Record<OrganizationRole, number>> = {
+  viewer: 1,
+  operator: 2,
+  admin: 3,
+  owner: 4,
+};
+
+export function organizationRoleRank(role: OrganizationRole): number {
+  return organizationRoleRanks[role];
+}
+
+export function isAtLeastOrganizationRole(
+  role: OrganizationRole,
+  minimum: OrganizationRole,
+): boolean {
+  return organizationRoleRank(role) >= organizationRoleRank(minimum);
+}
+
 export const organizationStatusSchema = z.enum(["draft_onboarding", "active", "archived"]);
 export type OrganizationStatus = z.infer<typeof organizationStatusSchema>;
 

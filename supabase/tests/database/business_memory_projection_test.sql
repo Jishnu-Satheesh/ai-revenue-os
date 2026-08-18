@@ -9,12 +9,21 @@ values
   ('17000000-0000-4000-8000-000000000001'::uuid),
   ('17000000-0000-4000-8000-000000000002'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-89bbf84612e1'::uuid, 'Fixture agency', 'fixture-agency-business-memory-projection-test', '17000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values
-  ('27000000-0000-4000-8000-000000000001'::uuid, 'Projection tenant one', 'projection-tenant-one', 'testing', 'US', 'USD', 'UTC', '17000000-0000-4000-8000-000000000001'::uuid),
-  ('27000000-0000-4000-8000-000000000002'::uuid, 'Projection tenant two', 'projection-tenant-two', 'testing', 'US', 'USD', 'UTC', '17000000-0000-4000-8000-000000000002'::uuid);
+  ('27000000-0000-4000-8000-000000000001'::uuid, 'Projection tenant one', 'projection-tenant-one', 'testing', 'US', 'USD', 'UTC', '17000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-89bbf84612e1'::uuid),
+  ('27000000-0000-4000-8000-000000000002'::uuid, 'Projection tenant two', 'projection-tenant-two', 'testing', 'US', 'USD', 'UTC', '17000000-0000-4000-8000-000000000002'::uuid,
+    'acc00000-0000-4000-8000-89bbf84612e1'::uuid);
 
 insert into public.integration_connections (
   id, organization_id, provider_key, adapter_version, connection_mode, status,

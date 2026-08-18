@@ -8,13 +8,21 @@ select extensions.no_plan();
 -- this transaction, so nothing survives it.
 insert into auth.users (id) values ('7a000000-0000-4000-8000-000000000001'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-a2463172fe67'::uuid, 'Fixture agency', 'fixture-agency-campaign-tool-gateway-test', '7a000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
-) values (
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
+)
+values (
   '7a000000-0000-4000-8000-000000000101'::uuid,
   'Tool gateway tenant', 'tool-gateway-tenant', 'testing', 'AE', 'AED', 'Asia/Dubai',
-  '7a000000-0000-4000-8000-000000000001'::uuid
-);
+  '7a000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-a2463172fe67'::uuid);
 
 insert into public.organization_memberships (organization_id, user_id, role)
 values (

@@ -70,5 +70,22 @@ export {
 } from "@/domain/campaigns/permissions";
 export type { CampaignPermission } from "@/domain/campaigns/permissions";
 
+export {
+  CAMPAIGN_VARIANT_STATES,
+  campaignCreativeVariantSchema,
+} from "@/domain/campaigns/variants";
+export type {
+  CampaignCreativeVariant,
+  CampaignVariantState,
+} from "@/domain/campaigns/variants";
+
+export { checkVariantDerivation, variantContentHash } from "@/domain/campaigns/derivation";
+export type {
+  VariantDerivationFailure,
+  VariantDerivationInput,
+  VariantDerivationResult,
+  VariantEvidence,
+} from "@/domain/campaigns/derivation";
+
 export { CampaignError } from "@/domain/campaigns/errors";
 export type { CampaignErrorCode } from "@/domain/campaigns/errors";

@@ -15,20 +15,27 @@ values
   ('14000000-0000-4000-8000-000000000003'::uuid),
   ('14000000-0000-4000-8000-000000000004'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-559774992f61'::uuid, 'Fixture agency', 'fixture-agency-business-memory-rls-test', '14000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values
   (
     '24000000-0000-4000-8000-000000000001'::uuid,
     'Memory tenant one', 'memory-tenant-one', 'testing', 'US', 'USD', 'UTC',
-    '14000000-0000-4000-8000-000000000001'::uuid
-  ),
+    '14000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-559774992f61'::uuid),
   (
     '24000000-0000-4000-8000-000000000002'::uuid,
     'Memory tenant two', 'memory-tenant-two', 'testing', 'US', 'USD', 'UTC',
-    '14000000-0000-4000-8000-000000000002'::uuid
-  );
+    '14000000-0000-4000-8000-000000000002'::uuid,
+    'acc00000-0000-4000-8000-559774992f61'::uuid);
 
 -- user 1: operator in tenant one. user 2: operator in tenant two.
 -- user 3: viewer in tenant one.  user 4: admin in tenant one.

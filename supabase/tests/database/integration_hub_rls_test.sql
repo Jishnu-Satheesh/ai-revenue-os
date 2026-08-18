@@ -18,6 +18,13 @@ values
   ('13000000-0000-4000-8000-000000000003'::uuid),
   ('13000000-0000-4000-8000-000000000004'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-dcaf97c086a6'::uuid, 'Fixture agency', 'fixture-agency-integration-hub-rls-test', '13000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
   id,
   name,
@@ -26,7 +33,7 @@ insert into public.organizations (
   country_code,
   base_currency,
   default_timezone,
-  created_by
+  created_by, account_id
 )
 values
   (
@@ -37,8 +44,8 @@ values
     'US',
     'USD',
     'UTC',
-    '13000000-0000-4000-8000-000000000001'::uuid
-  ),
+    '13000000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-dcaf97c086a6'::uuid),
   (
     '23000000-0000-4000-8000-000000000002'::uuid,
     'Integration tenant two',
@@ -47,8 +54,8 @@ values
     'US',
     'USD',
     'UTC',
-    '13000000-0000-4000-8000-000000000002'::uuid
-  );
+    '13000000-0000-4000-8000-000000000002'::uuid,
+    'acc00000-0000-4000-8000-dcaf97c086a6'::uuid);
 
 insert into public.organization_memberships (organization_id, user_id, role)
 values

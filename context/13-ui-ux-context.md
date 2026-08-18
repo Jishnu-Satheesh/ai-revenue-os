@@ -228,10 +228,20 @@ Complex configuration and bulk operations may be optimized for desktop and table
 
 ## 5.1 Agency-level navigation
 
-**Deferred. No agency-level surface exists, and none is currently planned.** Every authenticated
-route is organization-scoped, and the account-wide overview page was removed rather than left
-standing on placeholder numbers. The root path resolves to an organization instead of to a portfolio
-view; see `adrs/0015-user-scoped-interface-state.md`.
+**No agency-level _workspace_ exists, and none is currently planned.** There is no portfolio page,
+no cross-client dashboard, and no account settings area. The account-wide overview page was removed
+rather than left standing on placeholder numbers, and the root path resolves to an organization
+instead of to a portfolio view; see `adrs/0015-user-scoped-interface-state.md`.
+
+Two agency-level surfaces do now exist, and both are membership rather than reporting:
+
+- **`/invitations/[token]`** — a public route, outside the platform shell and outside its sign-in
+  redirect, because a recipient arrives signed out and belonging to nothing. It is the only page in
+  the product a stranger is meant to reach.
+- **Invite member**, in the sidebar footer, shown only to holders of `member.invite`.
+
+Agency identity is real underneath both: see `specs/017-account-identity-and-access.md` and ADRs
+0022 and 0023. What remains deferred is the cross-client *reporting* surface below.
 
 The order below is retained as intent for when a cross-organization surface is built. Do not treat it
 as describing the shipped product.

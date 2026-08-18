@@ -7,20 +7,27 @@ select extensions.plan(47);
 insert into auth.users (id)
 values ('dc4c0000-0000-4000-8000-000000000001'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-5310eac67927'::uuid, 'Fixture agency', 'fixture-agency-decision-worker-controls-test', 'dc4c0000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
 )
 values
   (
     'dc4c0000-0000-4000-8000-000000000101'::uuid,
     'Decision controls one', 'decision-controls-one', 'testing', 'AE', 'AED',
-    'Asia/Dubai', 'dc4c0000-0000-4000-8000-000000000001'::uuid
-  ),
+    'Asia/Dubai', 'dc4c0000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-5310eac67927'::uuid),
   (
     'dc4c0000-0000-4000-8000-000000000102'::uuid,
     'Decision controls two', 'decision-controls-two', 'testing', 'AE', 'AED',
-    'Asia/Dubai', 'dc4c0000-0000-4000-8000-000000000001'::uuid
-  );
+    'Asia/Dubai', 'dc4c0000-0000-4000-8000-000000000001'::uuid,
+    'acc00000-0000-4000-8000-5310eac67927'::uuid);
 
 insert into public.policies (
   id, organization_id, policy_type, name, mode, version, is_active

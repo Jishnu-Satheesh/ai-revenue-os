@@ -10,11 +10,21 @@ insert into auth.users (id) values
   ('a0000000-0000-4000-8000-000000000002'::uuid),
   ('a0000000-0000-4000-8000-000000000003'::uuid);
 
+-- Inert account fixture: organizations.account_id is NOT NULL, but this
+-- suite grants no account membership, so access still resolves purely from
+-- the organization_memberships rows below -- exactly as it did before
+-- accounts existed.
+insert into public.accounts (id, name, slug, created_by)
+values ('acc00000-0000-4000-8000-2a4117c36173'::uuid, 'Fixture agency', 'fixture-agency-integration-oauth-sessions-test', 'a0000000-0000-4000-8000-000000000001'::uuid);
+
 insert into public.organizations (
-  id, name, slug, industry, country_code, base_currency, default_timezone, created_by
-) values
-  ('b0000000-0000-4000-8000-000000000001', 'Oauth tenant one', 'oauth-tenant-one', 'testing', 'US', 'USD', 'UTC', 'a0000000-0000-4000-8000-000000000001'),
-  ('b0000000-0000-4000-8000-000000000002', 'Oauth tenant two', 'oauth-tenant-two', 'testing', 'US', 'USD', 'UTC', 'a0000000-0000-4000-8000-000000000002');
+  id, name, slug, industry, country_code, base_currency, default_timezone, created_by, account_id
+)
+values
+  ('b0000000-0000-4000-8000-000000000001', 'Oauth tenant one', 'oauth-tenant-one', 'testing', 'US', 'USD', 'UTC', 'a0000000-0000-4000-8000-000000000001',
+    'acc00000-0000-4000-8000-2a4117c36173'::uuid),
+  ('b0000000-0000-4000-8000-000000000002', 'Oauth tenant two', 'oauth-tenant-two', 'testing', 'US', 'USD', 'UTC', 'a0000000-0000-4000-8000-000000000002',
+    'acc00000-0000-4000-8000-2a4117c36173'::uuid);
 
 insert into public.organization_memberships (organization_id, user_id, role)
 values

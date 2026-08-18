@@ -8,13 +8,27 @@ The core domain remains industry-neutral. Restaurant entities are defined in the
 
 A human identity authenticated through Supabase Auth.
 
+### Account
+
+The tenant root: the agency. It owns organizations. User-facing copy calls this level **Agency**;
+code and schema call it `account`.
+
+### AccountMembership
+
+Links a user to an account. It carries two separate things: `accountRole`, which is authority over
+the agency, and `defaultOrganizationRole`, which is the role that member holds inside every
+organization of the account they hold no explicit override for. The second is why organization access
+never has to be written per organization, including for organizations created later.
+
 ### Organization
 
-A tenant representing a client business. It owns data, policies, integrations, goals, and runs.
+A tenant representing a client business, belonging to exactly one account. It owns data, policies,
+integrations, goals, and runs. `accountId` is immutable after creation.
 
 ### OrganizationMembership
 
-Links a user to an organization with a role and status.
+Links a user to a single organization with a role. Since ADR 0022 this is an **override** that raises
+authority above what the account grants, not the only route to access.
 
 ### Branch
 
@@ -22,15 +36,40 @@ A physical or virtual operating location belonging to an organization. Branches 
 
 ### Role and Permission
 
-Roles map to explicit permissions. Initial roles:
+Roles exist at two levels, because authority over the agency and authority inside a client business
+are different questions.
 
-- Platform Admin
-- Agency Admin
-- Agency Operator
-- Client Owner
-- Client Manager
-- Reviewer
-- Read Only
+**Account roles** — what you are in the agency:
+
+- `owner` — everything, including deleting the account and transferring ownership. An account always
+  keeps at least one.
+- `admin` — invites and removes members, manages roles strictly below their own, creates
+  organizations. An admin may only admit members; only an owner may appoint an owner.
+- `member` — holds a seat. No agency administration; what they can do is their organization role.
+
+**Organization roles** — what you can do inside one client:
+
+- `owner` — everything in this client, including archiving it and changing policy and budget.
+- `admin` — all operations plus configuration: integrations, policies, constraints, member roles.
+- `operator` — the daily work: campaigns, memory, verifying facts, *requesting* approvals. Cannot
+  approve money-moving or public actions, and cannot change policy or budget.
+- `viewer` — read only, and barred from `confidential` and `customer_content` memory.
+
+Effective access is a **union of grants**: the highest-ranked grant that applies wins, and a grant
+never subtracts authority. See ADR 0022.
+
+Roles are bundles of **permissions**, held as seeded rows in `public.permissions` and the two
+role-mapping tables rather than as conditionals in code, so changing what a role may do is a data
+change reviewed as a migration. Organization roles nest strictly — `viewer ⊂ operator ⊂ admin ⊂
+owner` — and account roles nest `member ⊂ admin ⊆ owner`. See ADR 0023.
+
+Two roles named in earlier drafts of this document are deliberately absent:
+
+- **Reviewer** — a genuine separation-of-duties need given `specs/010-human-approval-governance.md`,
+  deferred until role-to-permission mapping is data (ADR 0023), at which point it costs one enum
+  value and a few rows.
+- **Platform Admin** — staff or support access into customer tenants is its own security design
+  (consent, bounded duration, session recording). Out of scope rather than approximated.
 
 ## Digital Twin
 
