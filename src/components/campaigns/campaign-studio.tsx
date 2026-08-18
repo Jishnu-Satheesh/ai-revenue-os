@@ -720,7 +720,12 @@ export function CampaignStudio({
         </div>
       </header>
 
-      <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,21rem)]">
+      {/* `min-h-0` here let this grid shrink to a fraction of its own content —
+          measured at 123px against 2949px of children — so everything below the
+          fold overflowed the box and painted over whatever followed. Nothing
+          followed it until the variant grid did, which is why it went unseen.
+          The page scrolls at `main`, so this row sizes to its content. */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,21rem)]">
         <Tabs value={directionId} onValueChange={setDirectionId} className="flex min-w-0 flex-col">
           {/* The filmstrip. Three directions side by side, each showing its own
               artwork, so the alternative is visible rather than imagined. */}
