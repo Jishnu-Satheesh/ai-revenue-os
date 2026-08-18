@@ -12,14 +12,12 @@ import {
   LayoutDashboard,
   type LucideIcon,
   Megaphone,
-  Settings2,
   Sparkles,
   Waypoints,
 } from "lucide-react";
 
 import { organizationIdFromPathname, overviewPath } from "@/lib/routes";
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
-import { InviteMemberDialog } from "@/components/accounts/invite-member-dialog";
 import { SidebarIdentity } from "@/components/accounts/sidebar-identity";
 import {
   Sidebar as SidebarPrimitive,
@@ -33,7 +31,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 
@@ -148,11 +145,14 @@ export function Sidebar() {
         ) : null}
       </SidebarContent>
       <SidebarFooter>
-        <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
         <SidebarMenu>
-          {/* Agency-level, not organization-scoped: membership follows the
-              person across every client, so this sits outside the workspace
-              group and renders with or without an active organization. */}
+          <SidebarMenuItem>
+              <SidebarIdentity />
+          </SidebarMenuItem>
+        </SidebarMenu>
+        {/* <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
+        <SidebarMenu>
+          
           <SidebarMenuItem>
             <InviteMemberDialog />
           </SidebarMenuItem>
@@ -170,9 +170,12 @@ export function Sidebar() {
           <SidebarMenuItem>
             <SidebarIdentity />
           </SidebarMenuItem>
-        </SidebarMenu>
+        </SidebarMenu> */}
       </SidebarFooter>
       <SidebarRail />
     </SidebarPrimitive>
   );
 }
+{/* Agency-level, not organization-scoped: membership follows the
+              person across every client, so this sits outside the workspace
+              group and renders with or without an active organization. */}
