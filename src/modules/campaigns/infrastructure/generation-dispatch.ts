@@ -6,7 +6,11 @@ import type {
   CampaignRunDispatcher,
   EnqueueRunInput,
 } from "@/modules/campaigns/infrastructure/run-repository";
-import type { generateCampaignBundleTask, reviseCampaignBundleTask } from "@/trigger/campaigns";
+import type {
+  generateCampaignBundleTask,
+  generateCampaignVariantsTask,
+  reviseCampaignBundleTask,
+} from "@/trigger/campaigns";
 
 /**
  * Handing an enqueued run to the worker that performs it.
@@ -57,14 +61,20 @@ type DispatchInput = {
 };
 
 async function dispatch(
-  taskId: "campaign.generate-bundle" | "campaign.revise-bundle",
-  payload: DispatchInput & { baseVersionId?: string; baseDigest?: string },
+  taskId: "campaign.generate-bundle" | "campaign.revise-bundle" | "campaign.generate-variants",
+  payload: DispatchInput & {
+    baseVersionId?: string;
+    baseDigest?: string;
+    bundleVersionId?: string;
+  },
   idempotencyKey: string,
 ): Promise<void> {
   try {
     const { tasks } = await import("@trigger.dev/sdk");
     const handle = await tasks.trigger<
-      typeof generateCampaignBundleTask | typeof reviseCampaignBundleTask
+      | typeof generateCampaignBundleTask
+      | typeof reviseCampaignBundleTask
+      | typeof generateCampaignVariantsTask
     >(
       taskId,
       { ...payload, costCeilingMinor: generationCostCeilingMinor() },
@@ -150,4 +160,56 @@ export async function enqueueAndDispatchRevision(
   );
 
   return { runId, replayed };
+}
+
+/**
+ * Queues a variant run and hands it to the worker.
+ *
+ * Same shape as generation for the same reason: recording intent without
+ * dispatching is the failure this path exists to recover from, so it must not
+ * be the failure this path creates.
+ *
+ * The size is written to the run row and deliberately left out of the task
+ * payload. A payload-carried number would let a redelivery ask for a different
+ * amount of creative than the attempt it replaces.
+ */
+export function createTriggerVariantDispatcher(runs: CampaignRunDispatcher) {
+  return {
+    async enqueueVariants(input: {
+      organizationId: string;
+      campaignId: string;
+      sourceSnapshotId: string;
+      bundleVersionId: string;
+      bundleDigest: string;
+      perDirection: number;
+      idempotencyKey: string;
+      correlationId: string;
+    }): Promise<{ runId: string; replayed: boolean }> {
+      const { runId, replayed } = await runs.enqueue({
+        organizationId: input.organizationId,
+        campaignId: input.campaignId,
+        sourceSnapshotId: input.sourceSnapshotId,
+        kind: "variants",
+        idempotencyKey: input.idempotencyKey,
+        correlationId: input.correlationId,
+        baseVersionId: input.bundleVersionId,
+        baseDigest: input.bundleDigest,
+        variantsPerDirection: input.perDirection,
+      });
+
+      await dispatch(
+        "campaign.generate-variants",
+        {
+          organizationId: input.organizationId,
+          campaignId: input.campaignId,
+          bundleVersionId: input.bundleVersionId,
+          runId,
+          correlationId: input.correlationId,
+        },
+        input.idempotencyKey,
+      );
+
+      return { runId, replayed };
+    },
+  };
 }

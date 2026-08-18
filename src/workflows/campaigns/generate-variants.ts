@@ -11,6 +11,8 @@ import type {
   CampaignVariantStore,
   VariantProvenance,
 } from "@/modules/campaigns/infrastructure/variant-repository";
+import type { GenerationRunStore } from "@/workflows/campaigns/generate-bundle";
+import { GENERATE_VARIANTS_LEASE_SECONDS } from "@/workflows/campaigns/durations";
 
 /**
  * Producing creative inside an approval that already exists.
@@ -52,6 +54,7 @@ export type VariantPlanner = {
 };
 
 export type GenerateVariantsDependencies = {
+  runs: GenerationRunStore;
   context: VariantContextReader;
   planner: VariantPlanner;
   variants: CampaignVariantStore;
@@ -65,6 +68,8 @@ export type VariantOutcome =
   | { status: "refused"; directionId: string; reason: VariantRefusal["reason"]; detail: string };
 
 export type GenerateVariantsResult =
+  | { status: "skipped"; reason: "already_claimed" }
+  | { status: "replayed"; previousStatus: string }
   | {
       status: "completed";
       requested: number;
@@ -83,14 +88,70 @@ export async function generateCampaignVariants(
     /** The persisted run this work belongs to. Never a prompt or a secret. */
     runId: string;
     correlationId: string;
-    /** How many variants to attempt per direction. */
-    perDirection: number;
     costCeilingMinor: number;
   },
   dependencies: GenerateVariantsDependencies,
   signal: AbortSignal,
 ): Promise<GenerateVariantsResult> {
   const now = dependencies.now ?? (() => new Date());
+
+  // Claimed before anything is read or drawn. The lease is what stops a
+  // duplicate delivery producing a second fleet, and completing the run is what
+  // stops it sitting claimed for ever after a crash — the failure mode that
+  // made a stalled campaign look like a running one.
+  const claim = await dependencies.runs.claim({
+    organizationId: payload.organizationId,
+    runId: payload.runId,
+    leaseSeconds: GENERATE_VARIANTS_LEASE_SECONDS,
+  });
+
+  if (claim.outcome === "already_claimed") {
+    return { status: "skipped", reason: "already_claimed" };
+  }
+  if (claim.outcome === "already_finished") {
+    return { status: "replayed", previousStatus: claim.status };
+  }
+
+  // Read from the run rather than the payload, so a redelivery reproduces the
+  // size the first attempt asked for.
+  const perDirection = claim.variantsPerDirection ?? 1;
+
+  try {
+    return await produce({ payload, dependencies, claim, perDirection, now, signal });
+  } catch (error) {
+    await dependencies.runs.fail({
+      organizationId: payload.organizationId,
+      runId: payload.runId,
+      claimToken: claim.claimToken,
+      failureCode: "variant_generation_failed",
+      costMinor: null,
+    });
+    throw error;
+  }
+}
+
+async function produce({
+  payload,
+  dependencies,
+  claim,
+  perDirection,
+  now,
+  signal,
+}: {
+  payload: {
+    organizationId: string;
+    campaignId: string;
+    bundleVersionId: string;
+    runId: string;
+    correlationId: string;
+    costCeilingMinor: number;
+  };
+  dependencies: GenerateVariantsDependencies;
+  claim: { claimToken: string };
+  perDirection: number;
+  now: () => Date;
+  signal: AbortSignal;
+}): Promise<GenerateVariantsResult> {
   const context = await dependencies.context.read({
     organizationId: payload.organizationId,
     bundleVersionId: payload.bundleVersionId,
@@ -114,8 +175,18 @@ export async function generateCampaignVariants(
   let requested = 0;
 
   for (const direction of context.manifest.directions) {
-    for (let ordinal = 0; ordinal < payload.perDirection; ordinal += 1) {
+    for (let ordinal = 0; ordinal < perDirection; ordinal += 1) {
       if (dependencies.isCancelled() || signal.aborted) {
+        // Failed rather than left claimed. An abandoned lease reads as a live
+        // worker for as long as it lasts, which is the exact confusion the
+        // stalled-run work removed from the portfolio.
+        await dependencies.runs.fail({
+          organizationId: payload.organizationId,
+          runId: payload.runId,
+          claimToken: claim.claimToken,
+          failureCode: "cancelled",
+          costMinor: spentMinor,
+        });
         return { status: "cancelled", stored };
       }
       requested += 1;
@@ -136,6 +207,13 @@ export async function generateCampaignVariants(
           campaignId: payload.campaignId,
           runId: payload.runId,
           correlationId: payload.correlationId,
+          costMinor: spentMinor,
+        });
+        await dependencies.runs.fail({
+          organizationId: payload.organizationId,
+          runId: payload.runId,
+          claimToken: claim.claimToken,
+          failureCode: "cost_ceiling_reached",
           costMinor: spentMinor,
         });
         return { status: "cost_ceiling_reached", stored, costMinor: spentMinor };
@@ -193,6 +271,17 @@ export async function generateCampaignVariants(
     variantsRequested: requested,
     variantsStored: stored,
     variantsRefused: outcomes.length - stored,
+    costMinor: spentMinor,
+  });
+
+  // A variants run names no result version: it produced creative inside one
+  // that already existed. The relaxed constraint in 20260818110000 is what lets
+  // this succeed honestly rather than pointing at its own input.
+  await dependencies.runs.complete({
+    organizationId: payload.organizationId,
+    runId: payload.runId,
+    claimToken: claim.claimToken,
+    resultVersionId: null,
     costMinor: spentMinor,
   });
 

@@ -38,8 +38,10 @@ export type GenerationRunClaim =
       attempt: number;
       campaignId: string;
       sourceSnapshotId: string;
-      kind: "generate" | "revise";
+      kind: "generate" | "revise" | "variants";
       correlationId: string;
+      /** Set only for a variants run. */
+      variantsPerDirection?: number | null;
     }
   | { outcome: "already_claimed" }
   | {
@@ -59,7 +61,8 @@ export type GenerationRunStore = {
     organizationId: string;
     runId: string;
     claimToken: string;
-    resultVersionId: string;
+    /** Null only for a variants run, which produces creative, not a version. */
+    resultVersionId: string | null;
     costMinor: number | null;
   }): Promise<void>;
   fail(input: {

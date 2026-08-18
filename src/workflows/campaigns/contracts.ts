@@ -62,7 +62,7 @@ export function campaignGenerationRequestDigest(input: {
   organizationId: string;
   campaignId: string;
   sourceSnapshotId: string;
-  kind: "generate" | "revise";
+  kind: "generate" | "revise" | "variants";
   baseVersionId?: string | null;
   baseDigest?: string | null;
 }): string {

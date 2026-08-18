@@ -17,7 +17,6 @@ const PAYLOAD = {
   bundleVersionId: VERSION_ID,
   runId: RUN_ID,
   correlationId: "f1000000-0000-4000-8000-000000000001",
-  perDirection: 1,
   costCeilingMinor: 100_000,
 };
 
@@ -65,9 +64,27 @@ function drawn(directionId: string, seed: number, overrides: Record<string, unkn
   };
 }
 
+function runStore(variantsPerDirection = 1) {
+  return {
+    claim: vi.fn(async () => ({
+      outcome: "claimed" as const,
+      claimToken: "cc000000-0000-4000-8000-000000000001",
+      attempt: 1,
+      campaignId: CAMPAIGN_ID,
+      sourceSnapshotId: "a1000000-0000-4000-8000-000000000001",
+      kind: "variants" as const,
+      correlationId: PAYLOAD.correlationId,
+      variantsPerDirection,
+    })),
+    complete: vi.fn(async () => undefined),
+    fail: vi.fn(async () => undefined),
+  };
+}
+
 function deps(overrides: Record<string, unknown> = {}) {
   let seed = 0;
   return {
+    runs: runStore(),
     context: { read: vi.fn(async () => contextRead()) },
     planner: {
       draw: vi.fn(async ({ directionId }: { directionId: string }) => {
@@ -114,8 +131,7 @@ describe("variants are produced inside an approval that already exists", () => {
       }).success,
     ).toBe(false);
 
-    const { perDirection: _perDirection, ...wire } = PAYLOAD;
-    expect(campaignVariantPayloadSchema.safeParse(wire).success).toBe(true);
+    expect(campaignVariantPayloadSchema.safeParse(PAYLOAD).success).toBe(true);
   });
 });
 
@@ -228,6 +244,7 @@ describe("a partial run is an outcome, not a failure", () => {
 
   it("refuses a duplicate of a variant stored earlier in the same run", async () => {
     const dependencies = deps({
+      runs: runStore(2),
       // Every draw returns the same creative, so the second is a duplicate of
       // the first even though nothing was stored before the run began.
       planner: {
@@ -236,7 +253,7 @@ describe("a partial run is an outcome, not a failure", () => {
     });
 
     const result = await generateCampaignVariants(
-      { ...PAYLOAD, perDirection: 2 },
+      PAYLOAD,
       dependencies,
       new AbortController().signal,
     );
@@ -288,5 +305,90 @@ describe("the run stops when it is told to, or when the money runs out", () => {
     if (result.status !== "cost_ceiling_reached") throw new Error("expected the ceiling");
     // One draw at 100 fits; the second takes it to 200 and stops the run.
     expect(result.stored).toBe(1);
+  });
+});
+
+describe("the run record always reaches a terminal state", () => {
+  it("stands down when another worker already holds the run", async () => {
+    const runs = runStore();
+    runs.claim = vi.fn(async () => ({ outcome: "already_claimed" as const })) as never;
+
+    const result = await generateCampaignVariants(
+      PAYLOAD,
+      deps({ runs }),
+      new AbortController().signal,
+    );
+
+    expect(result.status).toBe("skipped");
+  });
+
+  it("replays a finished run instead of producing a second fleet", async () => {
+    const runs = runStore();
+    runs.claim = vi.fn(async () => ({
+      outcome: "already_finished" as const,
+      status: "succeeded" as const,
+      resultVersionId: null,
+      failureCode: null,
+    })) as never;
+
+    const result = await generateCampaignVariants(
+      PAYLOAD,
+      deps({ runs }),
+      new AbortController().signal,
+    );
+
+    expect(result.status).toBe("replayed");
+  });
+
+  it("completes the run, naming no version, because it produced none", async () => {
+    const runs = runStore();
+    await generateCampaignVariants(PAYLOAD, deps({ runs }), new AbortController().signal);
+
+    expect(runs.complete).toHaveBeenCalledWith(expect.objectContaining({ resultVersionId: null }));
+  });
+
+  it("fails the run on cancellation rather than leaving it claimed", async () => {
+    // An abandoned lease reads as a live worker for as long as it lasts, which
+    // is exactly the confusion the stalled-run work removed from the portfolio.
+    const runs = runStore();
+    const controller = new AbortController();
+    controller.abort();
+
+    await generateCampaignVariants(PAYLOAD, deps({ runs }), controller.signal);
+
+    expect(runs.fail).toHaveBeenCalledWith(expect.objectContaining({ failureCode: "cancelled" }));
+    expect(runs.complete).not.toHaveBeenCalled();
+  });
+
+  it("fails the run when the cost ceiling stops it", async () => {
+    const runs = runStore();
+    await generateCampaignVariants(
+      { ...PAYLOAD, costCeilingMinor: 150 },
+      deps({ runs }),
+      new AbortController().signal,
+    );
+
+    expect(runs.fail).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "cost_ceiling_reached" }),
+    );
+  });
+
+  it("fails the run when something throws mid-flight", async () => {
+    const runs = runStore();
+    const dependencies = deps({
+      runs,
+      context: {
+        read: vi.fn(async () => {
+          throw new Error("storage exploded");
+        }),
+      },
+    });
+
+    await expect(
+      generateCampaignVariants(PAYLOAD, dependencies, new AbortController().signal),
+    ).rejects.toThrow("storage exploded");
+    expect(runs.fail).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "variant_generation_failed" }),
+    );
   });
 });
