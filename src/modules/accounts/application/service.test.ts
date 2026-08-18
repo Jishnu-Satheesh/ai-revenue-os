@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/env", () => ({ env: { NEXT_PUBLIC_APP_URL: "https://app.example.com" } }));
+// No key, no adapter: a suite can never mail a real person.
+vi.mock("@/modules/accounts/application/email", () => ({
+  invitationEmailSender: () => ({ send: async () => ({ sent: false }) }),
+}));
+vi.mock("@/modules/accounts/application/sign-in-links", () => ({
+  mintInvitationSignInUrl: async () => null,
+}));
 
 import { DomainError } from "@/lib/errors";
 import {
@@ -13,6 +20,7 @@ import { tokenDigest } from "@/modules/accounts/application/tokens";
 
 const ACCOUNT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TOKEN = "A".repeat(43);
+const INVITER = { accountName: "Super-admin agency", inviterName: "Jishnu" };
 
 function clientWith(
   rpcResult: { data: unknown; error: unknown },
@@ -42,11 +50,16 @@ describe("createInvitation", () => {
       error: null,
     });
 
-    const invitation = await createInvitation(client, ACCOUNT_ID, {
-      email: "sarah@example.com",
-      accountRole: "member",
-      defaultOrganizationRole: "operator",
-    });
+    const invitation = await createInvitation(
+      client,
+      ACCOUNT_ID,
+      {
+        email: "sarah@example.com",
+        accountRole: "member",
+        defaultOrganizationRole: "operator",
+      },
+      INVITER,
+    );
 
     const args = rpc.mock.calls[0][1];
     expect(args.p_token_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -61,11 +74,16 @@ describe("createInvitation", () => {
   it("reports a duplicate as the inviter's own mistake, not as a mystery", async () => {
     const { client } = clientWith({ data: null, error: { code: "23505" } });
     await expect(
-      createInvitation(client, ACCOUNT_ID, {
-        email: "sarah@example.com",
-        accountRole: "member",
-        defaultOrganizationRole: "viewer",
-      }),
+      createInvitation(
+        client,
+        ACCOUNT_ID,
+        {
+          email: "sarah@example.com",
+          accountRole: "member",
+          defaultOrganizationRole: "viewer",
+        },
+        INVITER,
+      ),
     ).rejects.toMatchObject({
       code: "DOMAIN_ERROR",
       message: "That person already has an invitation or is already a member.",
@@ -75,22 +93,32 @@ describe("createInvitation", () => {
   it("reports the rate limit with a recovery, rather than a generic failure", async () => {
     const { client } = clientWith({ data: null, error: { code: "53400" } });
     await expect(
-      createInvitation(client, ACCOUNT_ID, {
-        email: "sarah@example.com",
-        accountRole: "member",
-        defaultOrganizationRole: "viewer",
-      }),
+      createInvitation(
+        client,
+        ACCOUNT_ID,
+        {
+          email: "sarah@example.com",
+          accountRole: "member",
+          defaultOrganizationRole: "viewer",
+        },
+        INVITER,
+      ),
     ).rejects.toMatchObject({ message: /Too many invitations/ });
   });
 
   it("refuses an over-privileged invitation as an authorization error", async () => {
     const { client } = clientWith({ data: null, error: { code: "42501" } });
     await expect(
-      createInvitation(client, ACCOUNT_ID, {
-        email: "sarah@example.com",
-        accountRole: "owner",
-        defaultOrganizationRole: null,
-      }),
+      createInvitation(
+        client,
+        ACCOUNT_ID,
+        {
+          email: "sarah@example.com",
+          accountRole: "owner",
+          defaultOrganizationRole: null,
+        },
+        INVITER,
+      ),
     ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
   });
 });

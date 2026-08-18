@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { apiErrorResponse } from "@/lib/api/organization-context";
-import { getAccountContext } from "@/lib/api/account-context";
+import { getAccountContext, inviterContext } from "@/lib/api/account-context";
 import { createInvitationInputSchema } from "@/domain/access/invitations";
 import { createInvitation, listPendingInvitations } from "@/modules/accounts/application/service";
 
@@ -21,9 +21,14 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   try {
-    const { supabase, accountId } = await getAccountContext("member.invite");
+    const context = await getAccountContext("member.invite");
     const input = createInvitationInputSchema.parse(await request.json());
-    const invitation = await createInvitation(supabase, accountId, input);
+    const invitation = await createInvitation(
+      context.supabase,
+      context.accountId,
+      input,
+      await inviterContext(context),
+    );
     return NextResponse.json({ invitation }, { status: 201 });
   } catch (error) {
     return apiErrorResponse(error);

@@ -23,7 +23,10 @@ effective-role rule as every policy.
 
 Invitations bind an email address, an account role, and a default organization role to an account for
 seven days, once. Only a SHA-256 of each token is stored; the raw token exists in the response that
-minted it and nowhere else, so "resend" is necessarily "reissue". Acceptance requires the signed-in
+minted it and nowhere else, so "resend" is necessarily "reissue". The invitation is delivered by
+email through Resend, carrying an admin-minted sign-in token so one click both authenticates the
+recipient and accepts the invitation; the sender falls back to a no-op that returns the copy-link
+when no API key is configured, which is what keeps tests from ever mailing a real person. Acceptance requires the signed-in
 user's confirmed email to equal the invited address, so holding a link is not enough. `member.invite`
 is the first permission enforced at a call site. Lives under `src/modules/accounts`,
 `src/domain/access`, `src/app/api/account`, and the public `src/app/(invitation)` route.

@@ -17,6 +17,8 @@ import {
 } from "@/domain/access/invitations";
 import { accountRoleSchema, organizationRoleSchema } from "@/domain/organizations/types";
 import { createInvitationToken, tokenDigest } from "@/modules/accounts/application/tokens";
+import { invitationEmailSender } from "@/modules/accounts/application/email";
+import { mintInvitationSignInUrl } from "@/modules/accounts/application/sign-in-links";
 
 type AccountClient = SupabaseClient<Database>;
 
@@ -50,10 +52,66 @@ function refusalCodeFor(error: { code?: string; message?: string } | null): Invi
   return "unknown";
 }
 
+const accountRoleLabels: Record<string, string> = {
+  owner: "Owner — full control of the agency",
+  admin: "Admin — can invite people and add clients",
+  member: "Member — a seat in the agency",
+};
+
+const organizationRoleLabels: Record<string, string> = {
+  owner: "Owner in every client",
+  admin: "Admin in every client — settings, integrations, approvals",
+  operator: "Operator in every client — day-to-day work, no approvals",
+  viewer: "Viewer in every client — read only",
+};
+
+/**
+ * Delivers the invitation, and never lets delivery decide whether the invitation
+ * exists. The row is already written by the time this runs, and the caller still
+ * gets a working link, so a failed send degrades the experience rather than the
+ * result.
+ *
+ * The preferred link signs the recipient in as well, which is what turns two
+ * trips to an inbox into one. When it cannot be minted the email still goes out
+ * carrying the plain invitation link, and the recipient signs in from the page.
+ */
+async function deliverInvitation(input: {
+  invitationId: string;
+  email: string;
+  token: string;
+  accountName: string;
+  inviterName: string | null;
+  accountRole: string;
+  organizationRole: string | null;
+  expiresAt: string;
+}): Promise<{ emailSent: boolean }> {
+  const signInUrl = await mintInvitationSignInUrl({
+    email: input.email,
+    invitationToken: input.token,
+  }).catch(() => null);
+
+  const { sent } = await invitationEmailSender().send({
+    to: input.email,
+    invitationId: input.invitationId,
+    accountName: input.accountName,
+    inviterName: input.inviterName,
+    accountRoleLabel: accountRoleLabels[input.accountRole] ?? input.accountRole,
+    organizationRoleLabel: input.organizationRole
+      ? (organizationRoleLabels[input.organizationRole] ?? input.organizationRole)
+      : "No access to clients until someone grants it",
+    actionUrl: signInUrl ?? acceptUrlFor(input.token),
+    isOneClick: signInUrl !== null,
+    expiresAt: input.expiresAt,
+  });
+
+  return { emailSent: sent };
+}
+
 export async function createInvitation(
   supabase: AccountClient,
   accountId: string,
   input: CreateInvitationInput,
+  context: { accountName: string; inviterName: string | null },
 ): Promise<InvitationWithToken> {
   const { token, tokenDigest: digest } = createInvitationToken();
   const expiresAt = invitationExpiresAt();
@@ -87,6 +145,17 @@ export async function createInvitation(
 
   logger.info("account_invitation.created", { accountId, invitationId: data.id });
 
+  const { emailSent } = await deliverInvitation({
+    invitationId: data.id,
+    email: data.email,
+    token,
+    accountName: context.accountName,
+    inviterName: context.inviterName,
+    accountRole: data.account_role,
+    organizationRole: data.default_organization_role,
+    expiresAt: data.expires_at,
+  });
+
   return {
     id: data.id,
     email: data.email,
@@ -96,6 +165,7 @@ export async function createInvitation(
       : null,
     expiresAt: data.expires_at,
     acceptUrl: acceptUrlFor(token),
+    emailSent,
   };
 }
 
@@ -106,6 +176,7 @@ export async function createInvitation(
 export async function reissueInvitation(
   supabase: AccountClient,
   invitationId: string,
+  context: { accountName: string; inviterName: string | null },
 ): Promise<InvitationWithToken> {
   const { token, tokenDigest: digest } = createInvitationToken();
   const expiresAt = invitationExpiresAt();
@@ -121,6 +192,17 @@ export async function reissueInvitation(
 
   logger.info("account_invitation.reissued", { invitationId });
 
+  const { emailSent } = await deliverInvitation({
+    invitationId: data.id,
+    email: data.email,
+    token,
+    accountName: context.accountName,
+    inviterName: context.inviterName,
+    accountRole: data.account_role,
+    organizationRole: data.default_organization_role,
+    expiresAt: data.expires_at,
+  });
+
   return {
     id: data.id,
     email: data.email,
@@ -130,6 +212,7 @@ export async function reissueInvitation(
       : null,
     expiresAt: data.expires_at,
     acceptUrl: acceptUrlFor(token),
+    emailSent,
   };
 }
 

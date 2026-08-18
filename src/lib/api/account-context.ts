@@ -75,3 +75,22 @@ export async function getAccountContext(requiredPermission?: AccountPermission) 
 }
 
 export type AccountContext = Awaited<ReturnType<typeof getAccountContext>>;
+
+/**
+ * Who is inviting, as the invitation email should name them.
+ *
+ * Falls back to the address when a profile carries no display name, because an
+ * email that says "Someone invited you" is worse than one that says an address.
+ */
+export async function inviterContext(context: AccountContext) {
+  const { data } = await context.supabase
+    .from("profiles")
+    .select("display_name")
+    .eq("id", context.user.id)
+    .maybeSingle();
+
+  return {
+    accountName: context.accountName,
+    inviterName: data?.display_name ?? context.user.email ?? null,
+  };
+}

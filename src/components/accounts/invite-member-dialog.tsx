@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Check, Copy, Link2, Lock, RotateCw, Trash2, UserPlus } from "lucide-react";
+import { Check, Copy, Link2, Lock, RotateCw, Send, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -86,8 +86,10 @@ function CopyLinkRow({ url }: { url: string }) {
  * carries its consequence in one line, so authority is chosen deliberately
  * rather than by accepting a default nobody read.
  *
- * No email is sent. The link is produced here and shared by the inviter, and the
- * UI says so rather than implying a message went out.
+ * The invitation is emailed when a sender is configured, and the copy-link is
+ * always offered alongside it. The panel reports which of those actually
+ * happened rather than assuming, because that decides whether the inviter
+ * still has something to do.
  */
 export function InviteMemberDialog() {
   const { data: session } = useAccountSession();
@@ -97,7 +99,9 @@ export function InviteMemberDialog() {
   const [email, setEmail] = useState("");
   const [accountRole, setAccountRole] = useState<AccountRole>("member");
   const [organizationRole, setOrganizationRole] = useState<OrganizationRole>("operator");
-  const [issuedUrl, setIssuedUrl] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{ url: string; emailSent: boolean; to: string } | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
@@ -110,11 +114,15 @@ export function InviteMemberDialog() {
   const create = useMutation({
     mutationFn: postInvitation,
     onSuccess: async (invitation) => {
-      setIssuedUrl(invitation.acceptUrl);
+      setIssued({
+        url: invitation.acceptUrl,
+        emailSent: invitation.emailSent,
+        to: invitation.email,
+      });
       setEmail("");
       setError(null);
       await invalidate();
-      toast.success("Invitation created.");
+      toast.success(invitation.emailSent ? "Invitation sent." : "Invitation created.");
     },
     onError: (mutationError: Error) => setError(mutationError.message),
   });
@@ -122,9 +130,17 @@ export function InviteMemberDialog() {
   const reissue = useMutation({
     mutationFn: reissueInvitation,
     onSuccess: async (invitation) => {
-      setIssuedUrl(invitation.acceptUrl);
+      setIssued({
+        url: invitation.acceptUrl,
+        emailSent: invitation.emailSent,
+        to: invitation.email,
+      });
       await invalidate();
-      toast.success("New link created. The previous one no longer works.");
+      toast.success(
+        invitation.emailSent
+          ? "New invitation sent. The previous link no longer works."
+          : "New link created. The previous one no longer works.",
+      );
     },
     onError: (mutationError: Error) => setError(mutationError.message),
   });
@@ -145,7 +161,7 @@ export function InviteMemberDialog() {
   function submit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
-    setIssuedUrl(null);
+    setIssued(null);
     create.mutate({
       email: email.trim(),
       accountRole,
@@ -159,7 +175,7 @@ export function InviteMemberDialog() {
       onOpenChange={(next) => {
         setOpen(next);
         if (!next) {
-          setIssuedUrl(null);
+          setIssued(null);
           setError(null);
         }
       }}
@@ -258,22 +274,28 @@ export function InviteMemberDialog() {
             ) : null}
 
             <Button type="submit" disabled={create.isPending || email.trim().length === 0}>
-              {create.isPending ? <Spinner /> : <Link2 />}
-              {create.isPending ? "Creating…" : "Create invitation link"}
+              {create.isPending ? <Spinner /> : <Send />}
+              {create.isPending ? "Sending…" : "Send invitation"}
             </Button>
           </FieldGroup>
         </form>
 
-        {issuedUrl ? (
+        {issued ? (
           <Alert className="border-success/30 bg-success/5">
-            <Link2 />
-            <AlertTitle>Share this link</AlertTitle>
+            {issued.emailSent ? <Send /> : <Link2 />}
+            <AlertTitle>
+              {issued.emailSent ? `Invitation sent to ${issued.to}` : "Share this link"}
+            </AlertTitle>
             <AlertDescription className="space-y-2">
+              {/* Never claim a send that did not happen: the difference decides
+                  whether the inviter has to do anything else. */}
               <p>
-                No email was sent. Copy the link and send it yourself. It is shown once — if you
-                lose it, reissue below.
+                {issued.emailSent
+                  ? "They can join from the email in one click. The same link is here if you would rather send it yourself."
+                  : "No email was sent. Copy the link and send it yourself."}{" "}
+                It is shown once — if you lose it, reissue below.
               </p>
-              <CopyLinkRow url={issuedUrl} />
+              <CopyLinkRow url={issued.url} />
             </AlertDescription>
           </Alert>
         ) : null}

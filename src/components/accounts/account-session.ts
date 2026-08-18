@@ -41,6 +41,8 @@ export const invitationWithTokenSchema = z.object({
   defaultOrganizationRole: organizationRoleSchema.nullable(),
   expiresAt: z.string(),
   acceptUrl: z.string(),
+  /** False when no email left the system, so the UI never implies one did. */
+  emailSent: z.boolean(),
 });
 
 export const accountSessionKey = ["account", "session"] as const;

@@ -58,6 +58,8 @@ export const invitationWithTokenSchema = z.object({
   defaultOrganizationRole: organizationRoleSchema.nullable(),
   expiresAt: z.string(),
   acceptUrl: z.string().url(),
+  /** False when no email left the system, so the UI never implies one did. */
+  emailSent: z.boolean(),
 });
 export type InvitationWithToken = z.infer<typeof invitationWithTokenSchema>;
 

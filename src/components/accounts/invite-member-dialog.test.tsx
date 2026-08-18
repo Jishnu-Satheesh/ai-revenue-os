@@ -96,7 +96,7 @@ describe("InviteMemberDialog", () => {
     expect(screen.getByText(/choosing specific clients is coming later/i)).toBeInTheDocument();
   });
 
-  it("says no email was sent, rather than implying one was", async () => {
+  it("says an email went out, and to whom", async () => {
     mocks.session = sessionWith(["member.invite", "member.read"]);
     mocks.postInvitation.mockResolvedValue({
       id: "11111111-1111-4111-8111-111111111111",
@@ -105,6 +105,7 @@ describe("InviteMemberDialog", () => {
       defaultOrganizationRole: "operator",
       expiresAt: "2026-08-24T00:00:00.000Z",
       acceptUrl: "https://app.example.com/invitations/abc",
+      emailSent: true,
     });
 
     renderDialog();
@@ -112,7 +113,34 @@ describe("InviteMemberDialog", () => {
     fireEvent.change(screen.getByLabelText(/email address/i), {
       target: { value: "sarah@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create invitation link/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/invitation sent to sarah@example.com/i)).toBeInTheDocument(),
+    );
+    // The link is still offered, because email is best-effort on top of it.
+    expect(screen.getByLabelText(/invitation link/i)).toBeInTheDocument();
+  });
+
+  /** The claim must match reality, or the inviter walks away from an unsent invitation. */
+  it("says no email was sent when none was, rather than implying one was", async () => {
+    mocks.session = sessionWith(["member.invite", "member.read"]);
+    mocks.postInvitation.mockResolvedValue({
+      id: "11111111-1111-4111-8111-111111111111",
+      email: "sarah@example.com",
+      accountRole: "member",
+      defaultOrganizationRole: "operator",
+      expiresAt: "2026-08-24T00:00:00.000Z",
+      acceptUrl: "https://app.example.com/invitations/abc",
+      emailSent: false,
+    });
+
+    renderDialog();
+    fireEvent.click(screen.getByTestId("invite-member-entry"));
+    fireEvent.change(screen.getByLabelText(/email address/i), {
+      target: { value: "sarah@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
 
     await waitFor(() => expect(screen.getByText(/no email was sent/i)).toBeInTheDocument());
     expect(screen.getByLabelText(/invitation link/i)).toHaveValue(
@@ -129,6 +157,7 @@ describe("InviteMemberDialog", () => {
       defaultOrganizationRole: "operator",
       expiresAt: "2026-08-24T00:00:00.000Z",
       acceptUrl: "https://app.example.com/invitations/abc",
+      emailSent: false,
     });
 
     renderDialog();
@@ -136,7 +165,7 @@ describe("InviteMemberDialog", () => {
     fireEvent.change(screen.getByLabelText(/email address/i), {
       target: { value: "sarah@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create invitation link/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
 
     await waitFor(() => expect(screen.getByText(/shown once/i)).toBeInTheDocument());
   });
@@ -152,7 +181,7 @@ describe("InviteMemberDialog", () => {
     fireEvent.change(screen.getByLabelText(/email address/i), {
       target: { value: "sarah@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create invitation link/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send invitation/i }));
 
     await waitFor(() => expect(screen.getByText(/already has an invitation/i)).toBeInTheDocument());
   });

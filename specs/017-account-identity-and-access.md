@@ -4,9 +4,11 @@
 
 Implemented 2026-08-17, all four slices, live on staging.
 
-Delivered against the plan with three deliberate deviations, each recorded where it applies: email delivery is out of scope in favour of copy-link (see Scope); the account role-ceiling rule permits an owner to appoint a co-owner (see Domain rules); and the membership role-ceiling trigger was widened to admit a subject holding a live invitation, which `supabase/migrations/20260817151000_account_invitations.sql` explains and `supabase/tests/database/account_invitation_test.sql` proves cannot be used to self-admit.
+Email delivery followed on 2026-08-18 once a Resend key and verified domain existed, which is why the Scope section now marks it delivered rather than deferred.
 
-Remaining follow-ups are listed under "Out of scope" and are unchanged: per-organization access control, a `reviewer` role, Platform Admin, and transactional email.
+Delivered against the plan with two deliberate deviations, each recorded where it applies: the account role-ceiling rule permits an owner to appoint a co-owner (see Domain rules); and the membership role-ceiling trigger was widened to admit a subject holding a live invitation, which `supabase/migrations/20260817151000_account_invitations.sql` explains and `supabase/tests/database/account_invitation_test.sql` proves cannot be used to self-admit.
+
+Remaining follow-ups are listed under "Out of scope": per-organization access control, a `reviewer` role, and Platform Admin.
 
 Introduces ADR 0022 (Account as the tenant root above Organization) and ADR 0023 (Permission-as-data
 authorization). Amends `context/04-domain-model.md`, `context/05-module-map.md`,
@@ -38,8 +40,10 @@ for getting the level above right, once.
 
 - As an account owner, I invite a teammate by email and choose what they can do before they arrive,
   so authority is a decision I make deliberately rather than one I grant by default.
-- As an account owner, I hand the invited teammate a link, because email delivery is not yet built
-  and a working invitation today is worth more than a blocked one.
+- As an account owner, I type an address and the person receives the invitation, so passing a link
+  around by hand is a fallback rather than the mechanism.
+- As an invited teammate, one email and one click puts me in the workspace, because proving I control
+  the address is the whole of the check and nothing further is asked of me.
 - As an account owner, I revoke an invitation I sent to the wrong address, so a typo is recoverable.
 - As an invited teammate, I follow the link, sign in with the address it was sent to, and land in a
   client workspace, so joining is one step and not a support conversation.
@@ -69,10 +73,11 @@ for getting the level above right, once.
 
 ### Out of scope
 
-- **Email delivery.** Decided deliberately: no transactional email provider exists in the repository
-  and adding one is a separable change. The invitation record and the accept path are designed so
-  that sending the same link by email later is additive — a new adapter and one call site, no schema
-  change. Until then, `Copy link` is the delivery mechanism and the UI says so plainly.
+- ~~**Email delivery.**~~ **Now in scope, delivered 2026-08-18.** Originally deferred because no
+  transactional provider existed here. It was added once a Resend key and a verified domain were
+  available, and it proved additive exactly as designed: an adapter, a link minter, and one call
+  site, with no schema change. `Copy link` remains, because email is best-effort on top of a link
+  that always works — never the only route in.
 - **A `reviewer` organization role.** Genuinely wanted for approval separation of duties, but once
   role-to-permission is a table it costs one enum value and a few rows. Deferred so it is not
   decided under the pressure of this change.
