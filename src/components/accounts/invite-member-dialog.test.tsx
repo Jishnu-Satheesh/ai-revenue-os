@@ -27,6 +27,7 @@ vi.mock("@/components/accounts/account-session", async () => {
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { InviteMemberDialog } from "@/components/accounts/invite-member-dialog";
+import { DropdownMenu, DropdownMenuContent } from "@/components/ui/dropdown-menu";
 import { SidebarProvider } from "@/components/ui/sidebar";
 
 function sessionWith(permissions: string[]) {
@@ -43,7 +44,11 @@ function renderDialog() {
   return render(
     <QueryClientProvider client={client}>
       <SidebarProvider>
-        <InviteMemberDialog />
+        <DropdownMenu open>
+          <DropdownMenuContent>
+            <InviteMemberDialog />
+          </DropdownMenuContent>
+        </DropdownMenu>
       </SidebarProvider>
     </QueryClientProvider>,
   );

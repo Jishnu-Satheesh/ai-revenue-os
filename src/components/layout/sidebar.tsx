@@ -147,35 +147,11 @@ export function Sidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-              <SidebarIdentity />
-          </SidebarMenuItem>
-        </SidebarMenu>
-        {/* <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
-        <SidebarMenu>
-          
-          <SidebarMenuItem>
-            <InviteMemberDialog />
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              disabled
-              tooltip="Settings — not available yet"
-              className="cursor-default"
-            >
-              <Settings2 />
-              <span>Settings</span>
-              <UpcomingBadge />
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
             <SidebarIdentity />
           </SidebarMenuItem>
-        </SidebarMenu> */}
+        </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
     </SidebarPrimitive>
   );
 }
-{/* Agency-level, not organization-scoped: membership follows the
-              person across every client, so this sits outside the workspace
-              group and renders with or without an active organization. */}

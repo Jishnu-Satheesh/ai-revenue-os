@@ -36,7 +36,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { SidebarMenuButton } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import type { AccountRole, OrganizationRole } from "@/domain/organizations/types";
 import { DropdownMenuItem } from "../ui/dropdown-menu";
@@ -52,11 +51,11 @@ const organizationRoleOptions: readonly {
   label: string;
   hint: string;
 }[] = [
-    { value: "viewer", label: "Viewer", hint: "Read only. Cannot see confidential memory." },
-    { value: "operator", label: "Operator", hint: "Day-to-day work. Cannot approve or spend." },
-    { value: "admin", label: "Admin", hint: "Settings, integrations, approvals, budgets." },
-    { value: "owner", label: "Owner", hint: "Everything, including archiving the client." },
-  ];
+  { value: "viewer", label: "Viewer", hint: "Read only. Cannot see confidential memory." },
+  { value: "operator", label: "Operator", hint: "Day-to-day work. Cannot approve or spend." },
+  { value: "admin", label: "Admin", hint: "Settings, integrations, approvals, budgets." },
+  { value: "owner", label: "Owner", hint: "Everything, including archiving the client." },
+];
 
 function CopyLinkRow({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
@@ -182,12 +181,10 @@ export function InviteMemberDialog() {
       }}
     >
       <DialogTrigger asChild>
-        {/* <SidebarMenuButton tooltip="Invite member" data-testid="invite-member-entry"> */}
-        <DropdownMenuItem>
+        <DropdownMenuItem data-testid="invite-member-entry" onSelect={(e) => e.preventDefault()}>
           <UserPlus />
           <span>Invite member</span>
         </DropdownMenuItem>
-        {/* </SidebarMenuButton> */}
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
