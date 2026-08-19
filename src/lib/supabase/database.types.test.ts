@@ -48,6 +48,14 @@ const UNTYPED_TABLES = new Set([
   // contract in `variant-repository.ts`. A generated row type would invite a
   // direct insert that skips the RPC and therefore skips the cap.
   "campaign_creative_variants",
+  // The allocation loop's ledger, resumes, and pause-run substrate are written
+  // only by security-definer RPCs (the loop, and the operator resume route), and
+  // read through the narrow contract in `allocation-repository.ts` or the
+  // read-only allocation route. A generated row type would imply a direct write
+  // path that deliberately does not exist.
+  "campaign_allocation_events",
+  "campaign_variant_resumes",
+  "campaign_pause_runs",
   // Decision persistence uses a deliberately narrow repository contract. The
   // browser can read only the opportunity feed projection, while the remaining
   // ledger tables are worker-only and reached through constrained RPCs.

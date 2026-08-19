@@ -86,3 +86,18 @@ export type {
 
 export { CampaignError } from "@/domain/campaigns/errors";
 export type { CampaignErrorCode } from "@/domain/campaigns/errors";
+
+export {
+  ALLOCATION_RULE_KEYS,
+  ALLOCATION_RULE_VERSIONS,
+  evaluateVariant,
+} from "@/domain/campaigns/allocation";
+export type {
+  AllocationAction,
+  AllocationDecision,
+  AllocationEvaluationInput,
+  AllocationRuleThresholds,
+  ResolvedMargin,
+  ResolvedMarginGrade,
+  VariantDiagnostics,
+} from "@/domain/campaigns/allocation";
