@@ -2,6 +2,35 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+/**
+ * The SDK, replaced by a recorder.
+ *
+ * The adapter is meant to drive Meta's own `IGUser` and `IGMedia` models, so
+ * the test asserts which SDK edge it reached for and with what — not which URL
+ * it built. Each model method records its call and resolves; the scripted
+ * outcome comes from `guard`, which is where this platform's rules live.
+ */
+const recorded: { edge: string; params: Record<string, unknown> }[] = [];
+
+vi.mock("facebook-nodejs-business-sdk", () => {
+  class Recorder {
+    constructor(public id: string) {}
+    async createMedia(_fields: string[], params: Record<string, unknown>) {
+      recorded.push({ edge: "media", params });
+      return {};
+    }
+    async createMediaPublish(_fields: string[], params: Record<string, unknown>) {
+      recorded.push({ edge: "media_publish", params });
+      return {};
+    }
+    async get(fields: string[]) {
+      recorded.push({ edge: "status", params: { fields } });
+      return {};
+    }
+  }
+  return { IGUser: Recorder, IGMedia: Recorder, FacebookAdsApi: class {} };
+});
+
 import { createMetaOrganicAdapter } from "@/modules/integrations/providers/meta/organic-adapter";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -18,32 +47,6 @@ function request(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** Drives the three calls by the path they use. */
-function client(handlers: { create?: unknown; status?: unknown[] | unknown; publish?: unknown }) {
-  const statuses = Array.isArray(handlers.status) ? [...handlers.status] : null;
-  return {
-    request: vi.fn(async (arg: unknown) => {
-      const { path, method } = arg as { path: string[]; method: string };
-      if (method === "POST" && path[1] === "media") return handlers.create;
-      if (method === "POST" && path[1] === "media_publish") return handlers.publish;
-      if (statuses) return statuses.shift() ?? handlers.status;
-      return handlers.status;
-    }),
-  };
-}
-
-function adapter(
-  handlers: Parameters<typeof client>[0],
-  overrides: { request?: Record<string, unknown> } = {},
-) {
-  return createMetaOrganicAdapter("meta.publish_image", {
-    client: client(handlers) as never,
-    loadRequest: async () => request(overrides.request) as never,
-    sleep: async () => {},
-    now: () => new Date("2026-08-19T10:00:00.000Z"),
-  });
-}
-
 const ok = (data: unknown) => ({ outcome: "succeeded" as const, data });
 const failed = (code: string) => ({
   outcome: "failed" as const,
@@ -53,6 +56,33 @@ const failed = (code: string) => ({
 });
 const unknown = { outcome: "unknown" as const, reason: "timeout" as const };
 
+function adapter(
+  handlers: { create?: unknown; status?: unknown[] | unknown; publish?: unknown },
+  overrides: {
+    request?: Record<string, unknown>;
+    toolKey?: "meta.publish_image" | "meta.publish_story";
+  } = {},
+) {
+  recorded.length = 0;
+  const statuses = Array.isArray(handlers.status) ? [...handlers.status] : null;
+
+  return createMetaOrganicAdapter(overrides.toolKey ?? "meta.publish_image", {
+    client: {
+      api: {} as never,
+      guard: vi.fn(async ({ run }: { run: () => Promise<unknown> }) => {
+        await run();
+        const edge = recorded.at(-1)?.edge;
+        if (edge === "media") return handlers.create;
+        if (edge === "media_publish") return handlers.publish;
+        return statuses ? (statuses.shift() ?? handlers.status) : handlers.status;
+      }),
+    } as never,
+    loadRequest: async () => request(overrides.request) as never,
+    sleep: async () => {},
+    now: () => new Date("2026-08-19T10:00:00.000Z"),
+  });
+}
+
 function invoke(a: ReturnType<typeof adapter>) {
   return a.invoke({
     organizationId: ORG,
@@ -61,6 +91,42 @@ function invoke(a: ReturnType<typeof adapter>) {
     signal: new AbortController().signal,
   });
 }
+
+describe("the SDK's own models carry the calls", () => {
+  it("creates the container through IGUser.createMedia", async () => {
+    await invoke(
+      adapter({
+        create: ok({ id: "c1" }),
+        status: ok({ status_code: "FINISHED" }),
+        publish: ok({ id: "m1" }),
+      }),
+    );
+
+    expect(recorded.map((call) => call.edge)).toEqual(["media", "status", "media_publish"]);
+  });
+
+  it("asks the container only for the field it needs", async () => {
+    await invoke(adapter({ create: ok({ id: "c1" }), status: ok({ status_code: "ERROR" }) }));
+
+    expect(recorded.find((call) => call.edge === "status")?.params).toEqual({
+      fields: ["status_code"],
+    });
+  });
+
+  it("publishes by creation id rather than by rebuilding a path", async () => {
+    await invoke(
+      adapter({
+        create: ok({ id: "container-7" }),
+        status: ok({ status_code: "FINISHED" }),
+        publish: ok({ id: "m1" }),
+      }),
+    );
+
+    expect(recorded.find((call) => call.edge === "media_publish")?.params).toEqual({
+      creation_id: "container-7",
+    });
+  });
+});
 
 describe("publishing an image takes three calls, and each can fail differently", () => {
   it("creates a container, waits for it, then publishes", async () => {
@@ -109,29 +175,27 @@ describe("provider constraints are enforced before anything is created", () => {
   it("refuses a non-JPEG image without creating a container", async () => {
     // Discovering this from a provider error would leave a container behind
     // for an image that can never publish.
-    const a = adapter({ create: ok({ id: "unused" }) }, { request: { mimeType: "image/png" } });
-    const result = await invoke(a);
+    const result = await invoke(
+      adapter({ create: ok({ id: "unused" }) }, { request: { mimeType: "image/png" } }),
+    );
 
     expect(result).toEqual({ status: "failed", failureCode: "meta.image_must_be_jpeg" });
+    expect(recorded).toEqual([]);
   });
 
   it("sends the stories media type for a story placement", async () => {
-    const spy = client({
-      create: ok({ id: "c1" }),
-      status: ok({ status_code: "FINISHED" }),
-      publish: ok({ id: "m1" }),
-    });
-    const a = createMetaOrganicAdapter("meta.publish_story", {
-      client: spy as never,
-      loadRequest: async () => request({ placement: "image_story" }) as never,
-      sleep: async () => {},
-    });
-    await invoke(a);
-
-    const createCall = spy.request.mock.calls.find(
-      ([arg]) => (arg as { path: string[] }).path[1] === "media",
+    await invoke(
+      adapter(
+        {
+          create: ok({ id: "c1" }),
+          status: ok({ status_code: "FINISHED" }),
+          publish: ok({ id: "m1" }),
+        },
+        { request: { placement: "image_story" }, toolKey: "meta.publish_story" },
+      ),
     );
-    expect((createCall?.[0] as { params: Record<string, unknown> }).params).toMatchObject({
+
+    expect(recorded.find((call) => call.edge === "media")?.params).toMatchObject({
       media_type: "STORIES",
     });
   });
@@ -149,10 +213,7 @@ describe("ambiguity is reported with the container that can resolve it", () => {
       }),
     );
 
-    expect(result).toEqual({
-      status: "unknown",
-      failureCode: "meta.publish_unknown:container-7",
-    });
+    expect(result).toEqual({ status: "unknown", failureCode: "meta.publish_unknown:container-7" });
   });
 
   it("is unknown with no container when the container itself may not exist", async () => {
@@ -168,6 +229,7 @@ describe("ambiguity is reported with the container that can resolve it", () => {
     );
 
     expect(result).toMatchObject({ status: "succeeded", externalReference: "c9" });
+    expect(recorded.some((call) => call.edge === "media_publish")).toBe(false);
   });
 
   it("hands a container still processing after the ceiling to reconciliation", async () => {

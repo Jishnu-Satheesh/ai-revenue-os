@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { z } from "zod";
+import { IGMedia, IGUser } from "facebook-nodejs-business-sdk";
 
 import type { AdapterOutcome, ToolAdapter } from "@/modules/tool-gateway/application/ports";
 import type { MetaGraphClient } from "@/modules/integrations/providers/meta/client";
@@ -25,6 +26,11 @@ import type { MetaGraphClient } from "@/modules/integrations/providers/meta/clie
  * Two provider constraints are enforced here rather than discovered in
  * production. Instagram accepts JPEG only, and the image must be reachable by
  * Meta's own fetchers — a private storage path is not enough.
+ *
+ * The calls themselves go through the Business SDK's own `IGUser` and `IGMedia`
+ * models, so the endpoint shapes come from Meta. `client.guard` wraps each one
+ * with the timeout, failure vocabulary, bounded parsing and unknown outcome the
+ * SDK does not provide. See ADR 0025.
  */
 
 const containerSchema = z.object({ id: z.string().min(1) });
@@ -87,14 +93,15 @@ export function createMetaOrganicAdapter(
         return { status: "failed", failureCode: "meta.image_must_be_jpeg" };
       }
 
-      const created = await dependencies.client.request({
-        method: "POST",
-        path: [request.igUserId, "media"],
-        params: {
-          image_url: request.imageUrl,
-          caption: request.caption,
-          ...(request.placement === "image_story" ? { media_type: "STORIES" } : {}),
-        },
+      const igUser = new IGUser(request.igUserId, {}, undefined, dependencies.client.api);
+
+      const created = await dependencies.client.guard({
+        run: () =>
+          igUser.createMedia([], {
+            image_url: request.imageUrl,
+            caption: request.caption,
+            ...(request.placement === "image_story" ? { media_type: "STORIES" } : {}),
+          }),
         schema: containerSchema,
         signal,
       });
@@ -129,10 +136,8 @@ export function createMetaOrganicAdapter(
             };
       }
 
-      const published = await dependencies.client.request({
-        method: "POST",
-        path: [request.igUserId, "media_publish"],
-        params: { creation_id: containerId },
+      const published = await dependencies.client.guard({
+        run: () => igUser.createMediaPublish([], { creation_id: containerId }),
         schema: publishedSchema,
         signal,
       });
@@ -175,10 +180,9 @@ async function waitForContainer(input: {
       return { outcome: "unknown", failureCode: `meta.container_cancelled:${input.containerId}` };
     }
 
-    const status = await input.client.request({
-      method: "GET",
-      path: [input.containerId],
-      params: { fields: "status_code" },
+    const container = new IGMedia(input.containerId, {}, undefined, input.client.api);
+    const status = await input.client.guard({
+      run: () => container.get(["status_code"]),
       schema: statusSchema,
       signal: input.signal,
     });

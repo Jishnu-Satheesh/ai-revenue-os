@@ -66,6 +66,56 @@ export function createMetaGraphClient(dependencies: MetaClientDependencies) {
     new FacebookAdsApi(dependencies.credential.value, "en_US", false);
 
   return {
+    /** The API instance SDK objects bind to. Adapters construct their own. */
+    api: api as FacebookAdsApi,
+
+    /**
+     * Runs a typed SDK call under this platform's rules.
+     *
+     * The SDK's object models know the endpoint shapes, which is the reason to
+     * use them. What they do not provide is any of what ADR 0025 requires:
+     * a timeout, a stable failure vocabulary, a bounded result, or a separate
+     * answer for a request whose outcome nobody knows. This supplies all four
+     * around the call without re-implementing the call itself.
+     */
+    async guard<T>(input: {
+      run: () => Promise<unknown>;
+      schema: z.ZodType<T>;
+      signal: AbortSignal;
+    }): Promise<MetaRequestOutcome<T>> {
+      let raw: unknown;
+      try {
+        raw = await withTimeout(input.run(), timeoutMs, input.signal);
+      } catch (error) {
+        if (error instanceof MetaTimeout) return { outcome: "unknown", reason: "timeout" };
+
+        const status = statusOf(error);
+        if (status === null) return { outcome: "unknown", reason: "transport" };
+
+        return {
+          outcome: "failed",
+          status,
+          failureCode: normalizedFailureCode(status, error),
+          retryable: retryable.has(status),
+        };
+      }
+
+      // SDK objects carry their fields on `_data`; a plain response does not.
+      const candidate =
+        raw && typeof raw === "object" && "_data" in raw ? (raw as { _data: unknown })._data : raw;
+
+      const parsed = input.schema.safeParse(candidate);
+      if (!parsed.success) {
+        return {
+          outcome: "failed",
+          status: 200,
+          failureCode: "meta.response_shape_unrecognized",
+          retryable: false,
+        };
+      }
+
+      return { outcome: "succeeded", data: parsed.data };
+    },
     /**
      * One Graph call at the version the SDK pins, which the contract mirrors.
      *
