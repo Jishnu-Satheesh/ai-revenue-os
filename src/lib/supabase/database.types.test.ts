@@ -26,6 +26,10 @@ const TYPES_FILE = resolve(process.cwd(), "src/lib/supabase/database.types.ts");
  * leaving one untyped becomes a decision rather than an oversight.
  */
 const UNTYPED_TABLES = new Set([
+  // Exposures are written only by the dispatch worker through
+  // record_campaign_exposure, which refuses any run the gateway has not
+  // confirmed. Members read them through RLS; nothing writes one from a session.
+  "campaign_exposures",
   // Inbound webhook deliveries are written only by the webhook route under the
   // service role, and read through the narrow contract in webhook-receipts.ts.
   // No session reaches them: a quarantined row has no tenant to scope it to.
