@@ -12,17 +12,17 @@ function outcome(overrides: Partial<OutcomeProofData> = {}): OutcomeProofData {
     id: "o0000000-0000-4000-8000-000000000001",
     verdict: "inconclusive",
     attributionMethod: "observational_prepost",
-    primaryMetricKey: "revenue.purchase_value",
+    primaryMetricKey: "margin.contribution",
     outcomeWindowDays: 14,
-    settlementDelayDays: 3,
-    baselineSource: "goal_baseline_measured:revenue.purchase_value",
-    baselineLookbackDays: 28,
+    settlementDelayDays: 2,
+    baselineSource: "goal_baseline_measured:margin.contribution",
+    baselineLookbackDays: 14,
     plannedExposureCount: 6,
     realizedExposureCount: 4,
     guardrailState: "clear",
     realizedSpendMinor: 4000,
     spendCeilingMinor: 10000,
-    spendCurrency: "USD",
+    spendCurrency: "AED",
     estimateMinor: null,
     estimateLowMinor: null,
     estimateHighMinor: null,
@@ -48,18 +48,34 @@ describe("OutcomeProof", () => {
     expect(screen.getByText(/no settled result yet/i)).toBeInTheDocument();
   });
 
-  it("shows hypothesis, exposure, window, guardrail, and limitations", () => {
-    render(<OutcomeProof outcome={outcome()} />);
+  it("states the hypothesis in words, not backend keys", () => {
+    render(<OutcomeProof outcome={outcome()} timeZone="Asia/Dubai" />);
 
     expect(screen.getByText("Inconclusive")).toBeInTheDocument();
-    expect(screen.getAllByText(/revenue\.purchase_value/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/hypothesis/i)).toBeInTheDocument();
+    expect(screen.getByText("Contribution margin")).toBeInTheDocument();
+    expect(screen.getByText(/measured goal baseline for contribution margin/i)).toBeInTheDocument();
+    // The method appears in both the card subtitle and the method row.
+    expect(
+      screen.getAllByText(/before-and-after comparison \(observational\)/i).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/14 days, plus a 2-day settlement delay/i)).toBeInTheDocument();
+
+    // The raw identifiers stay in the database, never on the screen.
+    expect(screen.queryByText(/margin\.contribution/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/goal_baseline_measured/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps planned and realized exposure apart, with spend and guardrail beside them", () => {
+    render(<OutcomeProof outcome={outcome()} />);
+
+    expect(screen.getByText("Planned exposure")).toBeInTheDocument();
+    expect(screen.getByText("Realized exposure")).toBeInTheDocument();
     expect(screen.getByText("6")).toBeInTheDocument();
     expect(screen.getByText("4")).toBeInTheDocument();
-    expect(screen.getByText("clear")).toBeInTheDocument();
-    expect(screen.getAllByText(/preregistered evidence bar was not met/i).length).toBeGreaterThan(
-      0,
-    );
-    expect(screen.getByText(/was truncated by agent_pause/i)).toBeInTheDocument();
+    expect(screen.getByText("AED 40.00")).toBeInTheDocument();
+    expect(screen.getByText("AED 100.00")).toBeInTheDocument();
+    expect(screen.getByText("Clear")).toBeInTheDocument();
   });
 
   it("shows the estimate and its range only when a claim is made", () => {
@@ -75,10 +91,21 @@ describe("OutcomeProof", () => {
         })}
       />,
     );
-    expect(screen.getByText(/200 USD · range 50 USD to 100 USD/i)).toBeInTheDocument();
+    expect(screen.getByText("US$2.00")).toBeInTheDocument();
+    expect(screen.getByText(/range US\$0\.50 – US\$1\.00/i)).toBeInTheDocument();
 
     rerender(<OutcomeProof outcome={outcome()} />);
-    expect(screen.queryByText(/range/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^estimate$/i)).not.toBeInTheDocument();
+  });
+
+  it("explains why exposure fell short in words", () => {
+    render(<OutcomeProof outcome={outcome()} />);
+
+    expect(
+      screen.getByText(/one variant was paused automatically by the click-through floor/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/agent_pause/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/diagnostic\.ctr_floor/i)).not.toBeInTheDocument();
   });
 
   it("renders an inconclusive result without causal wording", () => {
@@ -105,7 +132,7 @@ describe("OutcomeProof", () => {
       />,
     );
     expect(screen.getByText("Guardrail breach")).toBeInTheDocument();
-    expect(screen.getByText("breached")).toBeInTheDocument();
+    expect(screen.getByText("Breached")).toBeInTheDocument();
     expect(screen.queryByText("Validated outcome")).not.toBeInTheDocument();
   });
 });

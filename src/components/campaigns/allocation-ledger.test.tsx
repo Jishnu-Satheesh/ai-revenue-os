@@ -22,7 +22,7 @@ function event(overrides: Partial<AllocationLedgerEvent> = {}): AllocationLedger
     action: "pause",
     reasonCode: "spend_ceiling_exceeded",
     actor: "agent",
-    occurredAt: "2026-08-19T12:00:00.000Z",
+    occurredAt: "2026-08-19T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -33,18 +33,26 @@ describe("AllocationLedger", () => {
     expect(screen.getByText(/no allocation decisions yet/i)).toBeInTheDocument();
   });
 
-  it("shows, per pause, the rule, observed value, threshold, and time", () => {
-    render(<AllocationLedger events={[event()]} />);
+  it("shows a pause in plain words, with money and a local time", () => {
+    render(<AllocationLedger events={[event()]} timeZone="Asia/Dubai" currency="AED" />);
 
     expect(screen.getByText("Paused")).toBeInTheDocument();
-    expect(screen.getByText(/diagnostic\.spend_ceiling/i)).toBeInTheDocument();
-    expect(screen.getByText("12000")).toBeInTheDocument();
-    expect(screen.getByText("10000")).toBeInTheDocument();
-    expect(screen.getByText(/2026-08-19T12:00:00\.000Z/i)).toBeInTheDocument();
-    expect(screen.getByText(/spend_ceiling_exceeded/i)).toBeInTheDocument();
+    expect(screen.getByText(/spend ceiling/i)).toBeInTheDocument();
+    expect(screen.getByText(/stops a variant the moment it spends more/i)).toBeInTheDocument();
+    expect(screen.getByText("AED 120.00")).toBeInTheDocument();
+    expect(screen.getByText("AED 100.00")).toBeInTheDocument();
+    expect(screen.getByText(/spend went above the approved ceiling/i)).toBeInTheDocument();
+    expect(screen.getByText(/decided automatically/i)).toBeInTheDocument();
+    // 2026-08-19T10:00Z is 14:00 in Dubai, and renders as words, not raw UTC.
+    expect(screen.getByText(/19 Aug 2026, 14:00/i)).toBeInTheDocument();
+
+    // The backend vocabulary never reaches the screen.
+    expect(screen.queryByText(/diagnostic\.spend_ceiling/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/spend_ceiling_exceeded/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/2026-08-19T10:00:00\.000Z/i)).not.toBeInTheDocument();
   });
 
-  it("shows the resolved margin and its grade where a margin rule fired", () => {
+  it("names the margin rule and its quality in words", () => {
     render(
       <AllocationLedger
         events={[
@@ -57,29 +65,45 @@ describe("AllocationLedger", () => {
             reasonCode: "margin_below_floor",
           }),
         ]}
+        currency="AED"
       />,
     );
 
-    expect(screen.getByText(/margin\.contribution_floor/i)).toBeInTheDocument();
-    expect(screen.getByText(/4200 \(measured\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/contribution margin floor/i)).toBeInTheDocument();
+    expect(screen.getByText(/contribution margin fell below the floor/i)).toBeInTheDocument();
+    expect(screen.getByText("Measured")).toBeInTheDocument();
+    expect(screen.queryByText(/margin\.contribution_floor/i)).not.toBeInTheDocument();
   });
 
-  it("renders a no_action decision as a visible choice, not an absence", () => {
+  it("shows a click-through rate as a percentage", () => {
     render(
       <AllocationLedger
         events={[
           event({
+            ruleKey: "diagnostic.ctr_floor",
+            observedValue: 0.042,
+            threshold: 0.05,
             action: "no_action",
-            observedValue: 5_000,
-            threshold: 10_000,
             reasonCode: "no_threshold_breached",
           }),
         ]}
       />,
     );
 
+    expect(screen.getByText("4.2%")).toBeInTheDocument();
+    expect(screen.getByText("5.0%")).toBeInTheDocument();
+  });
+
+  it("renders a no_action decision as a visible choice, not an absence", () => {
+    render(
+      <AllocationLedger
+        events={[event({ action: "no_action", reasonCode: "no_threshold_breached" })]}
+        currency="AED"
+      />,
+    );
+
     expect(screen.getByText("No action")).toBeInTheDocument();
-    expect(screen.getByText(/no_threshold_breached/i)).toBeInTheDocument();
+    expect(screen.getByText(/every threshold held/i)).toBeInTheDocument();
   });
 
   it("shows a placeholder rather than a fabricated number when a value is missing", () => {

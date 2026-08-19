@@ -136,6 +136,7 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
         variantsRemaining={fleet.remaining}
         allocationEvents={allocationEvents}
         outcome={outcome}
+        currency={organization.base_currency}
       />
     </div>
   );

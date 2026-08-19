@@ -1,5 +1,19 @@
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { AlertTriangle } from "lucide-react";
+
+import { allocationRuleCopy, TRUNCATION_CAUSE_COPY } from "@/components/campaigns/allocation-copy";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Separator } from "@/components/ui/separator";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { cn } from "@/lib/utils";
 
 /**
  * The settled result and its proof, laid out for an operator to interrogate.
@@ -8,13 +22,14 @@ import { Card, CardContent } from "@/components/ui/card";
  * they cannot trust, so every section shows the fact behind the verdict rather
  * than a summary of it: the preregistered hypothesis, planned versus realized
  * exposure, the baseline and window, the estimate and its range, spend, the
- * guardrail, the evidence tier and method, the truncations, the limitations,
- * and a plain statement of why the verdict carries its label.
+ * guardrail, the evidence tier and method, why exposure fell short, the
+ * limitations, and a plain statement of why the verdict carries its label.
  *
- * The "why" wording is deterministic and passes the no-overclaim validator in
- * the measurement domain; a result that was not validated never reads as
- * causal. Times render as stored (UTC); the caller converts to the
- * organization's timezone.
+ * Metric keys, baseline sources, and verdicts are shown in plain words — the
+ * raw identifiers stay in the database and in the audit record. The "why"
+ * wording is deterministic and passes the no-overclaim validator in the
+ * measurement domain; a result that was not validated never reads as causal.
+ * Times render in the organization's timezone.
  */
 
 export type OutcomeTruncation = {
@@ -49,11 +64,16 @@ export type OutcomeProofData = {
   settledAt: string;
 };
 
-const VERDICT_LABEL: Readonly<Record<OutcomeProofData["verdict"], string>> = {
-  validated_outcome: "Validated outcome",
-  inconclusive: "Inconclusive",
-  guardrail_breach: "Guardrail breach",
-  execution_only: "Execution only",
+const VERDICT_COPY: Readonly<
+  Record<
+    OutcomeProofData["verdict"],
+    { label: string; tone: "success" | "warning" | "danger" | "neutral" }
+  >
+> = {
+  validated_outcome: { label: "Validated outcome", tone: "success" },
+  inconclusive: { label: "Inconclusive", tone: "neutral" },
+  guardrail_breach: { label: "Guardrail breach", tone: "danger" },
+  execution_only: { label: "Execution only", tone: "neutral" },
 };
 
 const VERDICT_EXPLANATION: Readonly<Record<OutcomeProofData["verdict"], string>> = {
@@ -67,10 +87,37 @@ const VERDICT_EXPLANATION: Readonly<Record<OutcomeProofData["verdict"], string>>
     "The campaign ran, but no observation of the primary metric was recorded, so no conclusion is drawn.",
 };
 
+const METRIC_LABELS: Readonly<Record<string, string>> = {
+  "margin.contribution": "Contribution margin",
+  "revenue.gross": "Gross revenue",
+  "revenue.purchase_value": "Purchase value",
+  "transactions.count": "Transactions",
+  "units.count": "Units sold",
+};
+
 const METHOD_LABEL: Readonly<Record<OutcomeProofData["attributionMethod"], string>> = {
-  observational_prepost: "Observational, before and after",
+  observational_prepost: "Before-and-after comparison (observational)",
   provider_randomized_experiment: "Provider randomized experiment",
 };
+
+const GUARDRAIL_LABEL: Readonly<Record<OutcomeProofData["guardrailState"], string>> = {
+  breached: "Breached",
+  clear: "Clear",
+  unmeasured: "Not measured",
+};
+
+function metricLabel(key: string): string {
+  return METRIC_LABELS[key] ?? key;
+}
+
+/** Turns a stored baseline source like `goal_baseline_measured:<key>` into words. */
+function baselineLabel(source: string): string {
+  const measured = source.match(/^goal_baseline_measured:(.+)$/);
+  if (measured) return `Measured goal baseline for ${metricLabel(measured[1])}`;
+  const estimated = source.match(/^goal_baseline_estimated:(.+)$/);
+  if (estimated) return `Estimated goal baseline for ${metricLabel(estimated[1])}`;
+  return source;
+}
 
 function asLimitations(value: unknown): readonly string[] {
   return Array.isArray(value) ? (value as string[]) : [];
@@ -95,149 +142,244 @@ function asTruncations(value: unknown): readonly OutcomeTruncation[] {
 }
 
 function money(minor: number | null, currency: string | null): string {
-  if (minor === null || currency === null) return "—";
-  return `${minor} ${currency}`;
+  if (minor === null) return "—";
+  if (!currency) return minor.toLocaleString("en-GB");
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format(minor / 100);
 }
 
-export function OutcomeProof({ outcome }: Readonly<{ outcome: OutcomeProofData | null }>) {
+/** An instant, rendered in the organization's timezone rather than raw UTC. */
+function formatMoment(iso: string, timeZone: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone,
+    }).format(parsed);
+  } catch {
+    return iso;
+  }
+}
+
+function SectionHeading({ children }: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <h3 className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
+      {children}
+    </h3>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  mono = false,
+}: Readonly<{ label: string; value: string; mono?: boolean }>) {
+  return (
+    <div className="flex items-start justify-between gap-4 px-3 py-2">
+      <dt className="shrink-0 text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn("text-right text-sm font-medium", mono && "font-mono text-xs break-all")}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function StatCell({
+  label,
+  value,
+  valueClassName,
+}: Readonly<{ label: string; value: string; valueClassName?: string }>) {
+  return (
+    <div className="flex flex-col gap-0.5 bg-card p-3">
+      <dt className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
+        {label}
+      </dt>
+      <dd className={cn("text-sm font-medium", valueClassName)}>{value}</dd>
+    </div>
+  );
+}
+
+export function OutcomeProof({
+  outcome,
+  timeZone = "UTC",
+}: Readonly<{
+  outcome: OutcomeProofData | null;
+  /** The organization's timezone; the settle time renders in it, never in UTC. */
+  timeZone?: string;
+}>) {
   if (!outcome) {
     return (
-      <section className="rounded-lg border border-dashed p-6 text-center" aria-label="Outcome">
-        <p className="text-sm font-medium">No settled result yet</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          The evidence loop settles a verdict only after the registered outcome window and
-          settlement delay have passed.
-        </p>
-      </section>
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>No settled result yet</EmptyTitle>
+          <EmptyDescription>
+            The evidence loop settles a verdict only after the registered outcome window and
+            settlement delay have passed.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 
+  const verdict = VERDICT_COPY[outcome.verdict];
   const limitations = asLimitations(outcome.limitations);
   const truncations = asTruncations(outcome.truncationCauses);
 
   return (
-    <section className="flex flex-col gap-3" aria-label="Outcome">
-      <Card>
-        <CardContent className="flex flex-col gap-3 p-4 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={outcome.verdict === "guardrail_breach" ? "destructive" : "outline"}>
-              {VERDICT_LABEL[outcome.verdict]}
-            </Badge>
-            <time className="ml-auto text-xs text-muted-foreground" dateTime={outcome.settledAt}>
-              Settled {outcome.settledAt}
-            </time>
-          </div>
+    <Card aria-label="Outcome">
+      <CardHeader>
+        <CardAction>
+          <StatusBadge label={verdict.label} tone={verdict.tone} />
+        </CardAction>
+        <CardTitle>Settled result</CardTitle>
+        <CardDescription>
+          Settled{" "}
+          <time dateTime={outcome.settledAt}>{formatMoment(outcome.settledAt, timeZone)}</time>
+        </CardDescription>
+      </CardHeader>
 
-          <div>
-            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Hypothesis
-            </h3>
-            <p className="mt-1">
-              This campaign preregistered{" "}
-              <span className="font-mono">{outcome.primaryMetricKey}</span> as its primary metric,
-              measured against a baseline from{" "}
-              <span className="font-mono">{outcome.baselineSource}</span> over the prior{" "}
-              {outcome.baselineLookbackDays} days, under the{" "}
-              {METHOD_LABEL[outcome.attributionMethod].toLowerCase()} method.
-            </p>
-          </div>
-
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Planned exposure</dt>
-              <dd className="font-mono">{outcome.plannedExposureCount ?? "—"}</dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Realized exposure</dt>
-              <dd className="font-mono">{outcome.realizedExposureCount ?? "—"}</dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Outcome window</dt>
-              <dd className="font-mono">{outcome.outcomeWindowDays} days</dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Settlement delay</dt>
-              <dd className="font-mono">{outcome.settlementDelayDays} days</dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Evidence tier</dt>
-              <dd className="font-mono">{outcome.evidenceTier ?? "—"}</dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Spend</dt>
-              <dd className="font-mono">
-                {money(outcome.realizedSpendMinor, outcome.spendCurrency)}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Spend ceiling</dt>
-              <dd className="font-mono">
-                {money(outcome.spendCeilingMinor, outcome.spendCurrency)}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted-foreground">Guardrail</dt>
-              <dd className="font-mono">{outcome.guardrailState}</dd>
-            </div>
+      <CardContent className="flex flex-col gap-4">
+        <section className="flex flex-col gap-2">
+          <SectionHeading>Hypothesis</SectionHeading>
+          <dl className="divide-y rounded-md ring-1 ring-foreground/10">
+            <InfoRow label="Primary metric" value={metricLabel(outcome.primaryMetricKey)} />
+            <InfoRow
+              label="Baseline"
+              value={`${baselineLabel(outcome.baselineSource)} · prior ${outcome.baselineLookbackDays} days`}
+            />
+            <InfoRow label="Method" value={METHOD_LABEL[outcome.attributionMethod]} />
+            <InfoRow
+              label="Outcome window"
+              value={`${outcome.outcomeWindowDays} days, plus a ${outcome.settlementDelayDays}-day settlement delay`}
+            />
           </dl>
+        </section>
 
-          {outcome.estimateMinor !== null ? (
-            <div>
-              <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Estimate
-              </h3>
-              <p className="mt-1 font-mono">
-                {money(outcome.estimateMinor, outcome.estimateCurrency)} · range{" "}
-                {money(outcome.estimateLowMinor, outcome.estimateCurrency)} to{" "}
-                {money(outcome.estimateHighMinor, outcome.estimateCurrency)}
-              </p>
-            </div>
-          ) : null}
+        <Separator />
 
-          {truncations.length > 0 ? (
-            <div>
-              <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Missing data
-              </h3>
-              <ul className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground">
+        <section className="flex flex-col gap-2">
+          <SectionHeading>Delivery and spend</SectionHeading>
+          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-md bg-border ring-1 ring-border">
+            <StatCell
+              label="Planned exposure"
+              value={
+                outcome.plannedExposureCount === null ? "—" : String(outcome.plannedExposureCount)
+              }
+            />
+            <StatCell
+              label="Realized exposure"
+              value={
+                outcome.realizedExposureCount === null ? "—" : String(outcome.realizedExposureCount)
+              }
+            />
+            <StatCell
+              label="Spend"
+              value={money(outcome.realizedSpendMinor, outcome.spendCurrency)}
+            />
+            <StatCell
+              label="Spend ceiling"
+              value={money(outcome.spendCeilingMinor, outcome.spendCurrency)}
+            />
+            <StatCell
+              label="Guardrail"
+              value={GUARDRAIL_LABEL[outcome.guardrailState]}
+              valueClassName={outcome.guardrailState === "breached" ? "text-danger" : undefined}
+            />
+            <StatCell label="Evidence tier" value={outcome.evidenceTier ?? "—"} />
+          </dl>
+        </section>
+
+        {outcome.estimateMinor !== null ? (
+          <>
+            <Separator />
+            <section className="flex flex-col gap-2">
+              <SectionHeading>Estimate</SectionHeading>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-md bg-muted/40 p-3">
+                <span className="font-mono text-xl font-semibold">
+                  {money(outcome.estimateMinor, outcome.estimateCurrency)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Range {money(outcome.estimateLowMinor, outcome.estimateCurrency)} –{" "}
+                  {money(outcome.estimateHighMinor, outcome.estimateCurrency)}
+                </span>
+              </div>
+            </section>
+          </>
+        ) : null}
+
+        {truncations.length > 0 ? (
+          <>
+            <Separator />
+            <section className="flex flex-col gap-2">
+              <SectionHeading>Why exposure fell short</SectionHeading>
+              <ul className="flex flex-col gap-2">
                 {truncations.map((truncation, index) => (
-                  <li key={`${truncation.variantId}-${index}`}>
-                    Variant <span className="font-mono">{truncation.variantId}</span> was truncated
-                    by {truncation.cause}
-                    {truncation.ruleKey ? (
-                      <>
-                        {" "}
-                        (<span className="font-mono">{truncation.ruleKey}</span>)
-                      </>
-                    ) : null}
-                    .
+                  <li
+                    key={`${truncation.variantId}-${index}`}
+                    className="flex items-start gap-1.5 rounded-md border border-dashed p-2"
+                  >
+                    <AlertTriangle
+                      className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      One variant was {TRUNCATION_CAUSE_COPY[truncation.cause]}
+                      {truncation.ruleKey
+                        ? truncation.cause === "guardrail"
+                          ? ` (${allocationRuleCopy(truncation.ruleKey).title.toLowerCase()})`
+                          : ` by the ${allocationRuleCopy(truncation.ruleKey).title.toLowerCase()}`
+                        : null}{" "}
+                      before its scheduled delivery finished.
+                      <span className="block font-mono text-[10px] break-all">
+                        {truncation.variantId}
+                      </span>
+                    </span>
                   </li>
                 ))}
               </ul>
-            </div>
-          ) : null}
+            </section>
+          </>
+        ) : null}
 
-          {limitations.length > 0 ? (
-            <div>
-              <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Limitations
-              </h3>
-              <ul className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground">
+        {limitations.length > 0 ? (
+          <>
+            <Separator />
+            <section className="flex flex-col gap-2">
+              <SectionHeading>Limitations</SectionHeading>
+              <ul className="flex flex-col gap-1.5">
                 {limitations.map((limitation) => (
-                  <li key={limitation}>{limitation}</li>
+                  <li
+                    key={limitation}
+                    className="flex items-start gap-2 text-xs text-muted-foreground"
+                  >
+                    <span
+                      className="mt-1.5 size-1 shrink-0 rounded-full bg-muted-foreground/60"
+                      aria-hidden="true"
+                    />
+                    {limitation}
+                  </li>
                 ))}
               </ul>
-            </div>
-          ) : null}
+            </section>
+          </>
+        ) : null}
 
-          <div>
-            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Why this verdict
-            </h3>
-            <p className="mt-1">{VERDICT_EXPLANATION[outcome.verdict]}</p>
-          </div>
-        </CardContent>
-      </Card>
-    </section>
+        <Separator />
+
+        <Alert variant={outcome.verdict === "guardrail_breach" ? "destructive" : "default"}>
+          <AlertTitle>Why this verdict</AlertTitle>
+          <AlertDescription>{VERDICT_EXPLANATION[outcome.verdict]}</AlertDescription>
+        </Alert>
+      </CardContent>
+    </Card>
   );
 }

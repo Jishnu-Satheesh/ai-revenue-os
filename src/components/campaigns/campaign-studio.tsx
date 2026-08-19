@@ -642,6 +642,7 @@ export function CampaignStudio({
   variantsRemaining,
   allocationEvents = [],
   outcome = null,
+  currency = null,
 }: Readonly<{
   view: StudioView;
   organizationId: string;
@@ -661,6 +662,8 @@ export function CampaignStudio({
    * passed.
    */
   outcome?: OutcomeProofData | null;
+  /** The organization's currency; money values in both panels render in it. */
+  currency?: string | null;
 }>) {
   const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
@@ -977,11 +980,10 @@ export function CampaignStudio({
             <div className="mt-4 flex flex-col gap-2">
               <h3 className="text-base font-semibold">Allocation decisions</h3>
               <p className="text-sm text-muted-foreground">
-                What the fast loop decided, and why. Every pause shows the rule that fired, the
-                value it saw, the threshold it compared, and — where a margin was used — the
-                resolved figure and its quality grade.
+                Every decision the loop made, and why — including the decisions not to act. Each one
+                names the rule, the values it compared, and when.
               </p>
-              <AllocationLedger events={allocationEvents} />
+              <AllocationLedger events={allocationEvents} timeZone={timeZone} currency={currency} />
             </div>
           ) : null}
         </section>
@@ -993,11 +995,10 @@ export function CampaignStudio({
         <section className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold">Result</h2>
           <p className="text-sm text-muted-foreground">
-            The settled verdict from the evidence loop and the proof behind it: hypothesis, planned
-            versus realized exposure, baseline and window, estimate and range, spend, guardrail,
-            evidence tier and method, and the limitations the verdict carries.
+            The settled verdict and the proof behind it: what was hypothesized, what actually
+            delivered, what it cost, and why the verdict carries its label.
           </p>
-          <OutcomeProof outcome={outcome} />
+          <OutcomeProof outcome={outcome} timeZone={timeZone} />
         </section>
       ) : null}
 

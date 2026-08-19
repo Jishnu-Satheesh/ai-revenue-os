@@ -404,10 +404,11 @@ describe("the fast loop's reasoning is shown to the operator", () => {
     ]);
 
     expect(screen.getByRole("heading", { name: /allocation decisions/i })).toBeInTheDocument();
-    expect(screen.getByText(/diagnostic\.spend_ceiling/i)).toBeInTheDocument();
-    expect(screen.getByText("12000")).toBeInTheDocument();
-    expect(screen.getByText("10000")).toBeInTheDocument();
-    expect(screen.getByText(/spend_ceiling_exceeded/i)).toBeInTheDocument();
+    // The studio also shows a spend ceiling in the proposal rail, so the card
+    // copy is asserted by its plain-language reason rather than its title.
+    expect(screen.getByText(/spend went above the approved ceiling/i)).toBeInTheDocument();
+    // Rendered in the organization's currency and timezone, not raw backend data.
+    expect(screen.getByText(/19 Aug 2026, 16:00/i)).toBeInTheDocument();
   });
 
   it("shows the resolved margin and its grade when a margin rule fired", () => {
@@ -428,8 +429,9 @@ describe("the fast loop's reasoning is shown to the operator", () => {
       },
     ]);
 
-    expect(screen.getByText(/margin\.contribution_floor/i)).toBeInTheDocument();
-    expect(screen.getByText(/4200 \(measured\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/contribution margin floor/i)).toBeInTheDocument();
+    expect(screen.getByText(/contribution margin fell below the floor/i)).toBeInTheDocument();
+    expect(screen.getByText("Measured")).toBeInTheDocument();
   });
 
   it("hides the section until the loop has recorded something worth reading", () => {
