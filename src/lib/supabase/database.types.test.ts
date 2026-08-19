@@ -26,6 +26,10 @@ const TYPES_FILE = resolve(process.cwd(), "src/lib/supabase/database.types.ts");
  * leaving one untyped becomes a decision rather than an oversight.
  */
 const UNTYPED_TABLES = new Set([
+  // Inbound webhook deliveries are written only by the webhook route under the
+  // service role, and read through the narrow contract in webhook-receipts.ts.
+  // No session reaches them: a quarantined row has no tenant to scope it to.
+  "provider_webhook_receipts",
   // Creative variants are written only through `append_campaign_creative_variant`,
   // which assigns the slot numbers under a lock, and read through the narrow
   // contract in `variant-repository.ts`. A generated row type would invite a

@@ -47,6 +47,12 @@ const serverEnvSchema = z.object({
   CAMPAIGN_GENERATION_COST_CEILING_MINOR: optionalNonEmptyString,
   META_APP_ID: optionalNonEmptyString,
   META_APP_SECRET: optionalNonEmptyString,
+  /**
+   * The token Meta echoes during the subscription handshake. Separate from the
+   * app secret on purpose: the secret signs payloads and must never be sent
+   * anywhere, while this one is quoted back in a query string by design.
+   */
+  META_WEBHOOK_VERIFY_TOKEN: optionalNonEmptyString,
   SENTRY_DSN: optionalUrl,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
 });
@@ -84,6 +90,7 @@ const parsedEnv = serverEnvSchema.safeParse({
   CAMPAIGN_GENERATION_COST_CEILING_MINOR: process.env.CAMPAIGN_GENERATION_COST_CEILING_MINOR,
   META_APP_ID: process.env.META_APP_ID,
   META_APP_SECRET: process.env.META_APP_SECRET,
+  META_WEBHOOK_VERIFY_TOKEN: process.env.META_WEBHOOK_VERIFY_TOKEN,
   SENTRY_DSN: process.env.SENTRY_DSN,
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
 });
