@@ -24,7 +24,7 @@ import type { SensitiveCredential } from "@/domain/integrations/credential-store
  * `api.call()` puts the access token in the query string, which is Meta's
  * documented form but worse for log hygiene than a header. Nothing in this
  * module logs a URL, and callers never receive one, so the token stays out of
- * this platform's own logs and error reports. See ADR 0023.
+ * this platform's own logs and error reports. See ADR 0025.
  */
 
 export type MetaRequestOutcome<T> =

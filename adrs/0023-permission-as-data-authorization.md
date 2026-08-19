@@ -8,8 +8,8 @@ Builds on ADR 0022, which established the account tenancy this resolves through.
 
 ## Context
 
-`context/06-multi-tenancy-and-security.md` has claimed since the beginning that *"authorization is
-permission-based, not based only on role labels"* and listed a vocabulary — `campaign.publish`,
+`context/06-multi-tenancy-and-security.md` has claimed since the beginning that _"authorization is
+permission-based, not based only on role labels"_ and listed a vocabulary — `campaign.publish`,
 `budget.modify`, `integration.connect`.
 
 That was true in exactly one module. `src/domain/memory/permissions.ts` defined six `memory.*` keys
@@ -21,8 +21,8 @@ intention; the code had a partial implementation and no plan to finish it.
 authority before the invitee ever signs in. "What is this person allowed to do?" stopped being
 answerable by reading scattered role arrays.
 
-The requirement was explicit: something *concrete, consistent and reliable in future — not just some
-bunch of codes which can make it happen.*
+The requirement was explicit: something _concrete, consistent and reliable in future — not just some
+bunch of codes which can make it happen._
 
 ## Decision
 

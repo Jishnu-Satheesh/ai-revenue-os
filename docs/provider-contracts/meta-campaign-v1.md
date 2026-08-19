@@ -9,7 +9,7 @@ Checked-in contract: `src/modules/integrations/providers/meta/contract.ts`. Cons
 ## Review window
 
 - Contract version: `meta_campaign_v1`
-- Pinned Graph API version: `v24.0` — the version `FacebookAdsApi.VERSION` calls, which cannot be overridden. Released 2025-10-08, supported to 2028-02-18. See ADR 0023.
+- Pinned Graph API version: `v24.0` — the version `FacebookAdsApi.VERSION` calls, which cannot be overridden. Released 2025-10-08, supported to 2028-02-18. See ADR 0025.
 - Verified at: `2026-08-11T00:00:00.000Z`
 - Expires at: `2026-09-10T00:00:00.000Z`
 - Review rule: expiry is fail-closed; recheck official documentation and controlled-account evidence before renewing. An SDK upgrade is also a review trigger: a test asserts this version equals the SDK's, so bumping the dependency fails until the contract is re-verified against the new version.

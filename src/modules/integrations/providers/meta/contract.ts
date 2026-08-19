@@ -494,7 +494,7 @@ const metaCampaignProviderContract = {
   // with no setter, so every request the SDK issues goes to v24.0 whatever this
   // field claims. A contract that named a different version would be false at
   // its most load-bearing field, and every scope, placement and restriction
-  // recorded below inherits it. See ADR 0023.
+  // recorded below inherits it. See ADR 0025.
   //
   // v24.0 was released 2025-10-08 and is supported until 2028-02-18, so this is
   // an older live version rather than a deprecated one. The review date below is

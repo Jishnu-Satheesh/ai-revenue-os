@@ -1,16 +1,16 @@
-# ADR 0023: Use the Meta Business SDK as transport, and pin the contract to the version it calls
+# ADR 0025: Use the Meta Business SDK as transport, and pin the contract to the version it calls
 
 ## Status
 
-Accepted. Supersedes ADR 0022.
+Accepted. Supersedes ADR 0024.
 
 ## Context
 
-ADR 0022 chose direct Graph calls over `facebook-nodejs-business-sdk`, principally because the SDK hard-codes `v24.0` while the checked-in contract verified `v26.0`. The project owner reviewed that and reaffirmed the preference for the official SDK.
+ADR 0024 chose direct Graph calls over `facebook-nodejs-business-sdk`, principally because the SDK hard-codes `v24.0` while the checked-in contract verified `v26.0`. The project owner reviewed that and reaffirmed the preference for the official SDK.
 
 Re-checking the facts under that decision improved it, and corrected one of them.
 
-- **v24.0 is not stale.** Meta's version schedule lists it as released 2025-10-08 and supported until 2028-02-18. ADR 0022 treated the gap as a risk of calling an aging surface; it is an older _live_ version with roughly eighteen months of support remaining. That materially weakens the original objection.
+- **v24.0 is not stale.** Meta's version schedule lists it as released 2025-10-08 and supported until 2028-02-18. ADR 0024 treated the gap as a risk of calling an aging surface; it is an older _live_ version with roughly eighteen months of support remaining. That materially weakens the original objection.
 - **The version cannot be moved.** `FacebookAdsApi.VERSION` is a static getter returning the literal `'v24.0'` with no setter, and `call()` builds URLs as `[GRAPH, VERSION, ...path]`. Every request the SDK issues goes to v24.0 regardless of what any contract says.
 - **Coverage is real.** `IGUser`, `IGMedia` and `Page` cover the organic surfaces; `AdAccount`, `Campaign` and `AdSet` cover the ads object graph the paid work needs.
 - **Two SDK behaviours are unsafe by default.** Its crash reporter is enabled unless the third constructor argument is `false`, and it reports diagnostics to Meta. Its `call()` places the access token in the query string rather than a header.
@@ -26,7 +26,7 @@ Re-checking the facts under that decision improved it, and corrected one of them
 
 ## Consequences
 
-- Endpoint shapes, URL building and version pinning come from Meta rather than from us, which is the point of using an SDK and the main thing ADR 0022 gave up.
+- Endpoint shapes, URL building and version pinning come from Meta rather than from us, which is the point of using an SDK and the main thing ADR 0024 gave up.
 - The platform is anchored to v24.0 until the SDK moves. That is acceptable while v24.0 is supported to 2028-02-18, and the contract test makes the day it changes impossible to miss.
 - Typing is community-maintained via DefinitelyTyped and can drift from runtime behaviour, so response parsing stays the authority rather than the types. Zod was already required at every external boundary, so nothing is weakened.
 - The SDK's own error and retry behaviour is deliberately not inherited. A caller sees this platform's vocabulary, not Meta's.
@@ -35,7 +35,7 @@ Re-checking the facts under that decision improved it, and corrected one of them
 ## References
 
 - `adrs/0016-integration-action-capabilities.md`
-- `adrs/0022-meta-graph-calls-over-the-business-sdk.md` (superseded)
+- `adrs/0024-meta-graph-calls-over-the-business-sdk.md` (superseded)
 - `docs/provider-contracts/meta-campaign-v1.md`
 - `src/modules/integrations/providers/meta/client.ts`
 - https://developers.facebook.com/docs/graph-api/changelog/versions/
