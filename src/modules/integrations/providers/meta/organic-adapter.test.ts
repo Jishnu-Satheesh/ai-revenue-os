@@ -88,6 +88,8 @@ function invoke(a: ReturnType<typeof adapter>) {
     organizationId: ORG,
     actionRunId: RUN,
     idempotencyKey: "idem-abcdefgh",
+    // An organic post moves no money, so nothing is reserved for it.
+    reservation: { amountMinor: null, currency: null },
     signal: new AbortController().signal,
   });
 }

@@ -25,6 +25,7 @@ export const TOOL_KEYS = [
   "meta.publish_image",
   "meta.publish_story",
   "meta.ads.run_bounded_experiment",
+  "meta.ads.pause_ad",
 ] as const;
 
 export const toolKeySchema = z.enum(TOOL_KEYS);
@@ -83,12 +84,28 @@ export type AdapterOutcome =
   | { status: "failed"; failureCode: string }
   | { status: "unknown"; failureCode: string };
 
+/**
+ * What the database actually committed for this action.
+ *
+ * Handed to the adapter rather than kept here, because the adapter is what
+ * tells the provider a number. A ceiling the gateway reserved but the adapter
+ * never sees is a ceiling only one of the two enforces, and the one that talks
+ * to the provider is the one that matters. Null means nothing was reserved,
+ * which is normal for an action that cannot spend and disqualifying for one
+ * that can.
+ */
+export type ClaimedReservation = {
+  amountMinor: number | null;
+  currency: string | null;
+};
+
 export type ToolAdapter = {
   readonly toolKey: ToolKey;
   invoke(input: {
     organizationId: string;
     actionRunId: string;
     idempotencyKey: string;
+    reservation: ClaimedReservation;
     signal: AbortSignal;
   }): Promise<AdapterOutcome>;
 };

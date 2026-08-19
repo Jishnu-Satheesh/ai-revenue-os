@@ -39,6 +39,7 @@ function request(overrides: Record<string, unknown> = {}) {
     name: "Weekend feast test",
     objective: "OUTCOME_AWARENESS",
     dailyBudgetMinor: 15_000,
+    currency: "AED",
     endTime: "2026-08-25T00:00:00.000Z",
     imageUrl: "https://cdn.test/a.jpg",
     caption: "Weekend table",
@@ -87,11 +88,18 @@ function adapter(
   };
 }
 
-function invoke(a: ReturnType<typeof adapter>["adapter"]) {
+function invoke(
+  a: ReturnType<typeof adapter>["adapter"],
+  reservation: { amountMinor: number | null; currency: string | null } = {
+    amountMinor: 15_000,
+    currency: "AED",
+  },
+) {
   return a.invoke({
     organizationId: ORG,
     actionRunId: RUN,
     idempotencyKey: "idem-abcdefgh",
+    reservation,
     signal: new AbortController().signal,
   });
 }
@@ -190,5 +198,61 @@ describe("a refused step fails the whole build cleanly", () => {
 
     if (result.status !== "succeeded") throw new Error("expected success");
     expect(result.settledMinor).toBe(0);
+  });
+});
+
+describe("the provider is never told a number larger than the one committed", () => {
+  it("refuses a ceiling above what the database reserved", async () => {
+    // The plan asking for more than was committed is caught here, before any
+    // object exists — not after a campaign is already sitting in the account.
+    const { adapter: a } = adapter({});
+    const result = await invoke(a, { amountMinor: 10_000, currency: "AED" });
+
+    expect(result).toEqual({
+      status: "failed",
+      failureCode: "meta.ads.budget_exceeds_reservation",
+    });
+    expect(recorded).toEqual([]);
+  });
+
+  it("allows a ceiling at or below the reservation", async () => {
+    const { adapter: a } = adapter({});
+    const result = await invoke(a, { amountMinor: 20_000, currency: "AED" });
+
+    expect(result.status).toBe("succeeded");
+    expect(recorded.find((call) => call.edge === "ad_set")?.params).toMatchObject({
+      daily_budget: 15_000,
+    });
+  });
+
+  it("refuses two currencies rather than comparing their numbers", async () => {
+    // 15000 fils and 15000 cents are the same integer and different money.
+    const { adapter: a } = adapter({});
+    const result = await invoke(a, { amountMinor: 15_000, currency: "USD" });
+
+    expect(result).toEqual({ status: "failed", failureCode: "meta.ads.currency_mismatch" });
+    expect(recorded).toEqual([]);
+  });
+
+  it("refuses to spend at all when nothing was reserved", async () => {
+    const { adapter: a } = adapter({});
+    const result = await invoke(a, { amountMinor: null, currency: null });
+
+    expect(result).toEqual({ status: "failed", failureCode: "meta.ads.no_reservation" });
+    expect(recorded).toEqual([]);
+  });
+
+  it("records what was approved against what was committed", async () => {
+    const { adapter: a } = adapter({});
+    const result = await invoke(a, { amountMinor: 20_000, currency: "AED" });
+
+    if (result.status !== "succeeded") throw new Error("expected success");
+    // Both figures on the receipt, in one currency, so approved, reserved,
+    // provider-reported and settled spend reconcile later without inference.
+    expect(result.normalized).toMatchObject({
+      dailyBudgetMinor: 15_000,
+      reservedMinor: 20_000,
+      currency: "AED",
+    });
   });
 });

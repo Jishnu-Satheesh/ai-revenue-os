@@ -667,6 +667,13 @@ const metaCampaignProviderContract = {
       sourceUrl: META_MARKETING_SOURCE,
     },
     {
+      code: "meta.ads_pause_blocked",
+      actionKey: "meta_ads.pause",
+      detail:
+        "Stopping an ad, ad set, or campaign is a documented Marketing API write under ads_management, but controlled-account evidence that a pause takes effect and is reflected by effective_status is unverified.",
+      sourceUrl: META_MARKETING_SOURCE,
+    },
+    {
       code: "meta.webhook_contract_unverified",
       actionKey: "meta.webhook_intake",
       detail:

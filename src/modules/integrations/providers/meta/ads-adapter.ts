@@ -27,9 +27,12 @@ import type { MetaGraphClient } from "@/modules/integrations/providers/meta/clie
  * money leaving on a configuration nobody finished.
  *
  * Spend is enforced twice on purpose. The Tool Gateway reserves the full
- * ceiling before this runs; the ad set carries a provider-side daily budget and
- * an end time. Either alone is a single point of failure for the one thing this
- * platform must never get wrong.
+ * ceiling before this runs, and hands the reservation down; the ad set then
+ * carries a provider-side daily budget and end time no larger than it. Either
+ * alone is a single point of failure for the one thing this platform must never
+ * get wrong. Both together mean a plan asking for more than was committed is
+ * refused before an object exists, and an experiment that outlives this process
+ * still stops on the provider's own clock.
  */
 
 const createdSchema = z.object({ id: z.string().min(1) });
@@ -59,6 +62,8 @@ export type CappedExperimentRequest = {
   objective: string;
   /** The approved ceiling, in the account's own minor units. */
   dailyBudgetMinor: number;
+  /** ISO code the ceiling is denominated in. Must match the ad account's. */
+  currency: string;
   /** Hard stop. The provider enforces this even if nothing here runs again. */
   endTime: string;
   imageUrl: string;
@@ -82,13 +87,32 @@ export function createMetaAdsAdapter(dependencies: AdsAdapterDependencies): Tool
 
   return {
     toolKey: "meta.ads.run_bounded_experiment",
-    async invoke({ organizationId, actionRunId, signal }): Promise<AdapterOutcome> {
+    async invoke({ organizationId, actionRunId, reservation, signal }): Promise<AdapterOutcome> {
       const request = await dependencies.loadRequest({ organizationId, actionRunId });
 
       if (request.dailyBudgetMinor <= 0) {
         // A zero ceiling is not a free experiment, it is a configuration that
         // should never have been approved.
         return { status: "failed", failureCode: "meta.ads.budget_not_positive" };
+      }
+
+      // The second half of the double enforcement, and the only half that can
+      // catch the first being wrong. Everything below runs against what the
+      // database committed, not against what the plan asked for.
+      if (reservation.amountMinor === null || reservation.currency === null) {
+        // A money-moving action with nothing reserved has no ceiling at all.
+        return { status: "failed", failureCode: "meta.ads.no_reservation" };
+      }
+      if (reservation.currency !== request.currency) {
+        // Comparing 15000 fils to 15000 cents is how a ceiling silently becomes
+        // a different number. Two currencies are never compared here.
+        return { status: "failed", failureCode: "meta.ads.currency_mismatch" };
+      }
+      if (request.dailyBudgetMinor > reservation.amountMinor) {
+        // Structurally forbids an increase: the provider can never be told a
+        // number larger than the one the platform committed, whatever the plan
+        // that produced it believed.
+        return { status: "failed", failureCode: "meta.ads.budget_exceeds_reservation" };
       }
 
       const built = await dependencies.ledger.read({ organizationId, actionRunId });
@@ -185,6 +209,8 @@ export function createMetaAdsAdapter(dependencies: AdsAdapterDependencies): Tool
         creativeId: creative.id,
         adId: ad.id,
         dailyBudgetMinor: request.dailyBudgetMinor,
+        currency: request.currency,
+        reservedMinor: reservation.amountMinor,
         endTime: request.endTime,
       };
 
