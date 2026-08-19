@@ -31,6 +31,9 @@ type LogContext = {
   variantsStored?: number;
   variantsRefused?: number;
   costMinor?: number;
+  /** Campaign metric collection counts, kept to the same opaque-count rule. */
+  metricsConsidered?: number;
+  metricsRecorded?: number;
 };
 
 function write(level: "info" | "warn" | "error", message: string, context: LogContext = {}) {

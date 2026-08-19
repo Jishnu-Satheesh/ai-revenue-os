@@ -258,14 +258,14 @@ New events, past tense, identifier-only payloads: `campaign.variant_generated`, 
 - Create: `src/modules/integrations/providers/meta/insights-reader.ts` and test
 - Create: `src/modules/campaigns/infrastructure/metric-ingest.ts` and test
 - Create: `src/workflows/campaigns/collect-metrics.ts` and test
-- Create: `supabase/migrations/20260817140000_campaign_metric_grain.sql`
+- Create: `supabase/migrations/20260819110000_campaign_metric_grain.sql` (prefix regenerated: the applied tail advanced to `20260819100000`)
 - Create: `supabase/tests/database/campaign_metric_grain_test.sql`
 
-- [ ] **Step 1: Write RED ingestion tests.** Exact metric definitions and dimensions; correct period grain and branch timezone; quality tier preserved; missing, late, and restated metrics; append-only revision and supersession; a provider figure never silently overwriting a prior observation.
-- [ ] **Step 2: Add the metric grain.** Register `campaign`, `campaign_action`, and `creative_variant` in `subject_kinds`, and add `campaign_metric_observations` linking a variant or action to `normalized_metrics` revisions while preserving missingness. Without this grain the agent has nowhere to reason from.
-- [ ] **Step 3: Implement the insights reader.** Fetch only metrics the contract permits under a metrics-read capability grant, bounded and schema-validated. An undocumented field is unavailable, not inferred.
-- [ ] **Step 4: Implement `campaign.collect-metrics`.** Durable, idempotent per period and subject, respecting the registered reporting delay. A gap is recorded as a gap and never imputed.
-- [ ] **Step 5: Verify and commit.** Focused tests, pgTAP two-tenant isolation on the new table, typecheck, lint, and a live staging call of every new plpgsql function. Commit `feat(campaigns): return provider results to the warehouse`.
+- [x] **Step 1: Write RED ingestion tests.** Exact metric definitions and dimensions; correct period grain and branch timezone; quality tier preserved; missing, late, and restated metrics; append-only revision and supersession; a provider figure never silently overwriting a prior observation. Covered by `metric-ingest.test.ts` (RPC shape, money-versus-count currency, absent-is-not-zero, unchanged re-run) and `insights-reader.test.ts` (field mapping, absent fields, minor-unit spend conversion, unregistered-metric refusal).
+- [x] **Step 2: Add the metric grain.** Register `campaign`, `campaign_action`, and `creative_variant` in `subject_kinds`, and add `campaign_metric_observations` linking a variant or action to `normalized_metrics` revisions while preserving missingness. Without this grain the agent has nowhere to reason from. Migration applied to staging; `record_campaign_metric_observation` called live through the pgTAP run, satisfying the standing rule.
+- [x] **Step 3: Implement the insights reader.** Fetch only metrics the contract permits under a metrics-read capability grant, bounded and schema-validated. An undocumented field is unavailable, not inferred. `readAdInsights` maps exactly the three registered diagnostics (`impressions`/`clicks`/`spend`) and refuses anything else; reach and frequency are deliberately never asked for. The grant check sits in the workflow, before any provider call.
+- [x] **Step 4: Implement `campaign.collect-metrics`.** Durable, idempotent per period and subject, respecting the registered reporting delay. A gap is recorded as a gap and never imputed. The workflow checks the grant first, then reads and records; idempotency is the database's `unchanged` outcome. Not registered as a Trigger task yet — same un-activated state as the Task 17 sweeper, awaiting the collection loop's schedule.
+- [x] **Step 5: Verify and commit.** Focused tests, pgTAP two-tenant isolation on the new table, typecheck, lint, and a live staging call of every new plpgsql function. 25 pgTAP assertions green against staging; 19 focused Vitest assertions green; typecheck clean; lint 0 errors; new files pass Prettier. Committed `feat(campaigns): return provider results to the warehouse`.
 
 ### Task 20: Run the deterministic allocation loop
 

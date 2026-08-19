@@ -26,6 +26,11 @@ const TYPES_FILE = resolve(process.cwd(), "src/lib/supabase/database.types.ts");
  * leaving one untyped becomes a decision rather than an oversight.
  */
 const UNTYPED_TABLES = new Set([
+  // Campaign results are written only by the collection worker through
+  // record_campaign_metric_observation, which writes the value and the
+  // observation in one transaction. A direct insert could leave a figure with
+  // nothing pointing at it, or a gap recorded as a zero.
+  "campaign_metric_observations",
   // Paid provider objects are written only by the ads adapter through
   // record_campaign_ads_object as each id is returned. Members read them; a
   // direct insert would defeat the resume-rather-than-duplicate guarantee.
