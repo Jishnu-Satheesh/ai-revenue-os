@@ -165,5 +165,8 @@ describe("the allocation loop wall", () => {
     expect(text).not.toMatch(/campaign_exposures/);
     expect(text).not.toMatch(/campaign_metric_observations/);
     expect(text).not.toMatch(/campaign_outcomes/);
+    // Task 22: the allocation loop can neither trigger nor influence a
+    // learning proposal, so it cannot name that table either.
+    expect(text).not.toMatch(/campaign_learning_proposals/);
   });
 });

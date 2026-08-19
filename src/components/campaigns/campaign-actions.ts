@@ -142,6 +142,28 @@ export function approveVersion(input: {
 }
 
 /**
+ * Records the operator's decision on a learning proposal.
+ *
+ * The proposal was drafted by the evidence loop and then waited. This is the
+ * whole human surface: dismiss, keep campaign-only, or submit as a separate
+ * reusable-recipe proposal under ADR 0013. Submitting sets the target artifact
+ * type and status only — it promotes nothing and never mutates the source
+ * campaign.
+ */
+export function decideLearningProposal(input: {
+  organizationId: string;
+  campaignId: string;
+  proposalId: string;
+  decision: "dismiss" | "keep_campaign_only" | "submit_for_promotion";
+}): Promise<ActionResult<{ outcome: string; proposalId: string; status: string | null }>> {
+  const { organizationId, campaignId, proposalId, decision } = input;
+  return post(
+    `/api/organizations/${organizationId}/campaigns/${campaignId}/learning/${proposalId}/decision`,
+    { decision },
+  );
+}
+
+/**
  * Attestation then approval, in that order, as two separate records.
  *
  * They are not merged into one call because they are two different claims: a

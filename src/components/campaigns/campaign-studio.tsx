@@ -14,13 +14,18 @@ import {
   Wand2,
 } from "lucide-react";
 
-import { attestAndApprove } from "@/components/campaigns/campaign-actions";
+import { attestAndApprove, decideLearningProposal } from "@/components/campaigns/campaign-actions";
 import {
   AllocationLedger,
   type AllocationLedgerEvent,
 } from "@/components/campaigns/allocation-ledger";
 import { VariantGrid, type VariantCard } from "@/components/campaigns/variant-grid";
 import { OutcomeProof, type OutcomeProofData } from "@/components/campaigns/outcome-proof";
+import {
+  LearningReview,
+  type LearningDecision,
+  type LearningProposalData,
+} from "@/components/campaigns/learning-review";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -642,6 +647,8 @@ export function CampaignStudio({
   variantsRemaining,
   allocationEvents = [],
   outcome = null,
+  learningProposal = null,
+  canDecideLearning = false,
   currency = null,
 }: Readonly<{
   view: StudioView;
@@ -662,6 +669,13 @@ export function CampaignStudio({
    * passed.
    */
   outcome?: OutcomeProofData | null;
+  /**
+   * The learning proposal the evidence loop drafted from the settled outcome,
+   * once one exists. Null until the loop has proposed and none has been decided.
+   */
+  learningProposal?: LearningProposalData | null;
+  /** Whether the viewer may record a decision; viewers may read but not decide. */
+  canDecideLearning?: boolean;
   /** The organization's currency; money values in both panels render in it. */
   currency?: string | null;
 }>) {
@@ -711,6 +725,24 @@ export function CampaignStudio({
 
     toast.success("Approved", { description: "This exact version is now authorized to execute." });
     router.refresh();
+  }
+
+  /**
+   * Records the operator's decision on a learning proposal and refreshes so the
+   * closed proposal renders as history. The decision route only records a
+   * human's choice; it promotes nothing.
+   */
+  async function decideLearning(decision: LearningDecision) {
+    if (!learningProposal) return { ok: false as const, message: "No proposal to decide." };
+    const result = await decideLearningProposal({
+      organizationId,
+      campaignId: view.campaignId,
+      proposalId: learningProposal.id,
+      decision,
+    });
+    if (!result.ok) return { ok: false as const, message: result.message };
+    router.refresh();
+    return { ok: true as const };
   }
 
   return (
@@ -1001,6 +1033,23 @@ export function CampaignStudio({
           <OutcomeProof outcome={outcome} timeZone={timeZone} />
         </section>
       ) : null}
+
+      {/* A learning proposal only exists after settlement, and only until an
+          operator decides it. It is the loop's last arrow, and the operator's
+          decision is the last word on whether a lesson leaves its campaign. */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">Learning</h2>
+        <p className="text-sm text-muted-foreground">
+          A lesson the evidence loop drafted from this campaign&apos;s own settled outcome. It stays
+          attached to this campaign until you decide otherwise.
+        </p>
+        <LearningReview
+          proposal={learningProposal}
+          canDecide={canDecideLearning}
+          timeZone={timeZone}
+          onDecide={decideLearning}
+        />
+      </section>
 
       <p className="sr-only">Reviewing campaign artwork for {organizationName}.</p>
     </div>

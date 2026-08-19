@@ -305,6 +305,16 @@ select extensions.ok(
   'the allocation writer never names an observation record'
 );
 
+-- Task 22: the allocation loop can neither trigger nor influence a learning
+-- proposal, so its writer can never name the proposals table either.
+select extensions.ok(
+  (select pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef('public.append_campaign_allocation_event(uuid, jsonb)'::regprocedure),
+    'campaign_learning_proposals'
+  ) = 0),
+  'the allocation writer never names a learning proposal'
+);
+
 -- Variant state ---------------------------------------------------------------
 
 select extensions.is(

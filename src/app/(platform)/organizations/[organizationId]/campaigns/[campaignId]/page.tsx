@@ -3,6 +3,7 @@ import { Megaphone } from "lucide-react";
 
 import { type AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
 import { type OutcomeProofData } from "@/components/campaigns/outcome-proof";
+import { type LearningProposalData } from "@/components/campaigns/learning-review";
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -102,6 +103,12 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
   // campaign that ran and settled keeps its proof after the approval lapses.
   const outcome = await readOutcome(context, resolved.campaignId);
 
+  // The learning proposal is read through the caller's own session, so row
+  // level security decides what is visible. A viewer can read it but cannot
+  // decide it, which the component enforces through `canDecideLearning`.
+  const learningProposal = await readLearningProposal(context, resolved.campaignId);
+  const canDecideLearning = context.membership.role !== "viewer";
+
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -136,6 +143,8 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
         variantsRemaining={fleet.remaining}
         allocationEvents={allocationEvents}
         outcome={outcome}
+        learningProposal={learningProposal}
+        canDecideLearning={canDecideLearning}
         currency={organization.base_currency}
       />
     </div>
@@ -325,6 +334,93 @@ type OutcomeRow = {
   truncation_causes: unknown;
   limitations: unknown;
   settled_at: string;
+};
+
+/**
+ * The learning proposal the evidence loop drafted from the settled outcome, if
+ * one exists. Read through the caller's own session so row level security
+ * decides what is visible, exactly as it does for the rest of the studio.
+ */
+async function readLearningProposal(
+  context: { supabase: unknown; organizationId: string },
+  campaignId: string,
+): Promise<LearningProposalData | null> {
+  const client = context.supabase as unknown as {
+    from(table: "campaign_learning_proposals"): {
+      select(columns: string): {
+        eq(
+          column: string,
+          value: string,
+        ): {
+          eq(
+            column: string,
+            value: string,
+          ): {
+            order(
+              column: string,
+              opts: { ascending: boolean },
+            ): PromiseLike<{
+              data: LearningProposalRow[] | null;
+              error: unknown;
+            }>;
+          };
+        };
+      };
+    };
+  };
+
+  const { data, error } = await client
+    .from("campaign_learning_proposals")
+    .select(
+      "id, verdict, evidence_tier, planned_exposure_count, realized_exposure_count, hypothesis, observation, proposed_lesson, limitations, suggested_next_test, evidence_links, status, target_artifact_type, decided_by, decided_at, created_at",
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("campaign_id", campaignId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error("The campaign learning proposal could not be read.");
+
+  const row = data?.[0];
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    campaignId,
+    verdict: row.verdict,
+    evidenceTier: row.evidence_tier,
+    plannedExposureCount: toNumber(row.planned_exposure_count),
+    realizedExposureCount: toNumber(row.realized_exposure_count),
+    hypothesis: row.hypothesis,
+    observation: row.observation,
+    proposedLesson: row.proposed_lesson,
+    limitations: row.limitations,
+    suggestedNextTest: row.suggested_next_test,
+    evidenceLinks: row.evidence_links,
+    status: row.status,
+    targetArtifactType: row.target_artifact_type,
+    decidedBy: row.decided_by,
+    decidedAt: row.decided_at,
+    createdAt: row.created_at,
+  };
+}
+
+type LearningProposalRow = {
+  id: string;
+  verdict: LearningProposalData["verdict"];
+  evidence_tier: LearningProposalData["evidenceTier"];
+  planned_exposure_count: number | string;
+  realized_exposure_count: number | string;
+  hypothesis: string;
+  observation: string;
+  proposed_lesson: string;
+  limitations: unknown;
+  suggested_next_test: string;
+  evidence_links: unknown;
+  status: LearningProposalData["status"];
+  target_artifact_type: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
 };
 
 /**

@@ -61,6 +61,11 @@ const UNTYPED_TABLES = new Set([
   // the settlement delay, and read through the read-only outcome route. A
   // generated row type would imply a direct write path that does not exist.
   "campaign_outcomes",
+  // Learning proposals are written only by the evidence loop through
+  // propose_campaign_learning (which enforces settlement and campaign-scoped
+  // evidence) and decided only by the operator decision route. A generated row
+  // type would imply a direct write path that deliberately does not exist.
+  "campaign_learning_proposals",
   // Decision persistence uses a deliberately narrow repository contract. The
   // browser can read only the opportunity feed projection, while the remaining
   // ledger tables are worker-only and reached through constrained RPCs.
