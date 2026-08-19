@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import { Megaphone } from "lucide-react";
 
+import {
+  type AllocationLedgerEvent,
+} from "@/components/campaigns/allocation-ledger";
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -91,6 +94,11 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
       ? await readFleet(context, view)
       : { variants: [] as VariantCard[], remaining: {} as Record<string, number> };
 
+  // Same gate as the fleet. The ledger is the fast loop's reasoning, and there
+  // is nothing to reason about before an approval authorizes anything.
+  const allocationEvents =
+    view.approval.status === "live" ? await readAllocationEvents(context, resolved.campaignId) : [];
+
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -123,9 +131,95 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
         timeZone={organization.default_timezone}
         variants={fleet.variants}
         variantsRemaining={fleet.remaining}
+        allocationEvents={allocationEvents}
       />
     </div>
   );
+}
+
+/**
+ * The fast loop's decisions for this campaign, newest first.
+ *
+ * Read through the caller's own session client, so row level security decides
+ * what is visible exactly as it does for the rest of the studio. The mapping is
+ * the same shape the allocation API returns, so the component consumes the same
+ * contract whether the data came from a page render or a fetch.
+ */
+async function readAllocationEvents(
+  context: { supabase: unknown; organizationId: string },
+  campaignId: string,
+): Promise<readonly AllocationLedgerEvent[]> {
+  const client = context.supabase as unknown as {
+    from(table: "campaign_allocation_events"): {
+      select(columns: string): {
+        eq(
+          column: string,
+          value: string,
+        ): {
+          eq(
+            column: string,
+            value: string,
+          ): {
+            order(
+              column: string,
+              opts: { ascending: boolean },
+            ): PromiseLike<{
+              data: AllocationRow[] | null;
+              error: unknown;
+            }>;
+          };
+        };
+      };
+    };
+  };
+
+  const { data, error } = await client
+    .from("campaign_allocation_events")
+    .select(
+      "id, variant_id, rule_key, rule_version, observed_value, threshold, resolved_margin_minor, resolved_margin_grade, action, reason_code, actor, occurred_at",
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("campaign_id", campaignId)
+    .order("occurred_at", { ascending: false });
+
+  if (error) throw new Error("Allocation decisions could not be read.");
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    variantId: row.variant_id,
+    ruleKey: row.rule_key,
+    ruleVersion: row.rule_version,
+    observedValue: toNumber(row.observed_value),
+    threshold: toNumber(row.threshold),
+    resolvedMarginMinor: toNumber(row.resolved_margin_minor),
+    resolvedMarginGrade: row.resolved_margin_grade,
+    action: row.action,
+    reasonCode: row.reason_code,
+    actor: row.actor,
+    occurredAt: row.occurred_at,
+  }));
+}
+
+type AllocationRow = {
+  id: string;
+  variant_id: string;
+  rule_key: string;
+  rule_version: string;
+  observed_value: number | string | null;
+  threshold: number | string | null;
+  resolved_margin_minor: number | string | null;
+  resolved_margin_grade: AllocationLedgerEvent["resolvedMarginGrade"];
+  action: AllocationLedgerEvent["action"];
+  reason_code: string;
+  actor: string;
+  occurred_at: string;
+};
+
+function toNumber(value: number | string | null): number | null {
+  if (value === null || value === "") return null;
+  if (typeof value === "number") return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /**

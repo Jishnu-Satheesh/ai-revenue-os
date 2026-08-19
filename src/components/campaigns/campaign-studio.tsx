@@ -15,6 +15,10 @@ import {
 } from "lucide-react";
 
 import { attestAndApprove } from "@/components/campaigns/campaign-actions";
+import {
+  AllocationLedger,
+  type AllocationLedgerEvent,
+} from "@/components/campaigns/allocation-ledger";
 import { VariantGrid, type VariantCard } from "@/components/campaigns/variant-grid";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -635,6 +639,7 @@ export function CampaignStudio({
   timeZone,
   variants,
   variantsRemaining,
+  allocationEvents = [],
 }: Readonly<{
   view: StudioView;
   organizationId: string;
@@ -643,6 +648,11 @@ export function CampaignStudio({
   /** Creative produced under this approval. Empty until any has been. */
   variants?: readonly VariantCard[];
   variantsRemaining?: Readonly<Record<string, number>>;
+  /**
+   * The fast loop's decisions for this campaign, newest first. Empty until the
+   * loop has run and recorded something worth an operator's attention.
+   */
+  allocationEvents?: readonly AllocationLedgerEvent[];
 }>) {
   const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
@@ -954,6 +964,18 @@ export function CampaignStudio({
             changes the offer, the claims, the audience, the placement, the schedule or the spend.
           </p>
           <VariantGrid variants={variants ?? []} remaining={variantsRemaining ?? {}} />
+
+          {allocationEvents.length > 0 ? (
+            <div className="mt-4 flex flex-col gap-2">
+              <h3 className="text-base font-semibold">Allocation decisions</h3>
+              <p className="text-sm text-muted-foreground">
+                What the fast loop decided, and why. Every pause shows the rule that fired, the
+                value it saw, the threshold it compared, and — where a margin was used — the
+                resolved figure and its quality grade.
+              </p>
+              <AllocationLedger events={allocationEvents} />
+            </div>
+          ) : null}
         </section>
       ) : null}
 

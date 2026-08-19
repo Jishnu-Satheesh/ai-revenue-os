@@ -6,6 +6,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
+import type { AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
 import { toStudioView, type StudioView } from "@/modules/campaigns/application/studio-view";
 import type {
@@ -368,5 +369,73 @@ describe("the approval window has to cover the creative it licenses", () => {
       /until the creative window closes/i,
     );
     vi.useRealTimers();
+  });
+});
+
+describe("the fast loop's reasoning is shown to the operator", () => {
+  function renderLive(allocationEvents: readonly AllocationLedgerEvent[] = []) {
+    return render(
+      <CampaignStudio
+        view={studioView(approvalFor())}
+        organizationId={ORGANIZATION_ID}
+        organizationName="Al Noor Kitchen"
+        timeZone="Asia/Dubai"
+        allocationEvents={allocationEvents}
+      />,
+    );
+  }
+
+  it("shows, per pause, the rule, the observed value, the threshold and the time", () => {
+    renderLive([
+      {
+        id: "e0000000-0000-4000-8000-000000000001",
+        variantId: "f0000000-0000-4000-8000-000000000001",
+        ruleKey: "diagnostic.spend_ceiling",
+        ruleVersion: "v1",
+        observedValue: 12_000,
+        threshold: 10_000,
+        resolvedMarginMinor: null,
+        resolvedMarginGrade: null,
+        action: "pause",
+        reasonCode: "spend_ceiling_exceeded",
+        actor: "agent",
+        occurredAt: "2026-08-19T12:00:00.000Z",
+      },
+    ]);
+
+    expect(screen.getByRole("heading", { name: /allocation decisions/i })).toBeInTheDocument();
+    expect(screen.getByText(/diagnostic\.spend_ceiling/i)).toBeInTheDocument();
+    expect(screen.getByText("12000")).toBeInTheDocument();
+    expect(screen.getByText("10000")).toBeInTheDocument();
+    expect(screen.getByText(/spend_ceiling_exceeded/i)).toBeInTheDocument();
+  });
+
+  it("shows the resolved margin and its grade when a margin rule fired", () => {
+    renderLive([
+      {
+        id: "e0000000-0000-4000-8000-000000000002",
+        variantId: "f0000000-0000-4000-8000-000000000001",
+        ruleKey: "margin.contribution_floor",
+        ruleVersion: "v1",
+        observedValue: 4_200,
+        threshold: 5_000,
+        resolvedMarginMinor: 4_200,
+        resolvedMarginGrade: "measured",
+        action: "pause",
+        reasonCode: "margin_below_floor",
+        actor: "agent",
+        occurredAt: "2026-08-19T12:00:00.000Z",
+      },
+    ]);
+
+    expect(screen.getByText(/margin\.contribution_floor/i)).toBeInTheDocument();
+    expect(screen.getByText(/4200 \(measured\)/i)).toBeInTheDocument();
+  });
+
+  it("hides the section until the loop has recorded something worth reading", () => {
+    renderLive();
+    expect(
+      screen.queryByRole("heading", { name: /allocation decisions/i }),
+    ).not.toBeInTheDocument();
   });
 });
