@@ -56,6 +56,11 @@ const UNTYPED_TABLES = new Set([
   "campaign_allocation_events",
   "campaign_variant_resumes",
   "campaign_pause_runs",
+  // The evidence loop's verdict record is written only by the settlement
+  // worker through settle_campaign_outcome, which enforces preregistration and
+  // the settlement delay, and read through the read-only outcome route. A
+  // generated row type would imply a direct write path that does not exist.
+  "campaign_outcomes",
   // Decision persistence uses a deliberately narrow repository contract. The
   // browser can read only the opportunity feed projection, while the remaining
   // ledger tables are worker-only and reached through constrained RPCs.

@@ -1,9 +1,8 @@
 import { notFound } from "next/navigation";
 import { Megaphone } from "lucide-react";
 
-import {
-  type AllocationLedgerEvent,
-} from "@/components/campaigns/allocation-ledger";
+import { type AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
+import { type OutcomeProofData } from "@/components/campaigns/outcome-proof";
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -99,6 +98,10 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
   const allocationEvents =
     view.approval.status === "live" ? await readAllocationEvents(context, resolved.campaignId) : [];
 
+  // The settled result is independent of whether an approval is still live: a
+  // campaign that ran and settled keeps its proof after the approval lapses.
+  const outcome = await readOutcome(context, resolved.campaignId);
+
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -132,6 +135,7 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
         variants={fleet.variants}
         variantsRemaining={fleet.remaining}
         allocationEvents={allocationEvents}
+        outcome={outcome}
       />
     </div>
   );
@@ -221,6 +225,106 @@ function toNumber(value: number | string | null): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+/**
+ * The settled result, if one exists. Read through the caller's own session
+ * client so row level security decides what is visible, exactly as it does for
+ * the rest of the studio. The mapping matches the outcome API, so the component
+ * consumes the same contract whether the data came from a page render or a
+ * fetch.
+ */
+async function readOutcome(
+  context: { supabase: unknown; organizationId: string },
+  campaignId: string,
+): Promise<OutcomeProofData | null> {
+  const client = context.supabase as unknown as {
+    from(table: "campaign_outcomes"): {
+      select(columns: string): {
+        eq(
+          column: string,
+          value: string,
+        ): {
+          eq(
+            column: string,
+            value: string,
+          ): {
+            order(
+              column: string,
+              opts: { ascending: boolean },
+            ): PromiseLike<{
+              data: OutcomeRow[] | null;
+              error: unknown;
+            }>;
+          };
+        };
+      };
+    };
+  };
+
+  const { data, error } = await client
+    .from("campaign_outcomes")
+    .select(
+      "id, verdict, attribution_method, primary_metric_key, outcome_window_days, settlement_delay_days, baseline_source, baseline_lookback_days, planned_exposure_count, realized_exposure_count, guardrail_state, realized_spend_minor, spend_ceiling_minor, spend_currency, estimate_minor, estimate_low_minor, estimate_high_minor, estimate_currency, evidence_tier, truncation_causes, limitations, settled_at",
+    )
+    .eq("organization_id", context.organizationId)
+    .eq("campaign_id", campaignId)
+    .order("settled_at", { ascending: false });
+
+  if (error) throw new Error("The campaign outcome could not be read.");
+
+  const row = data?.[0];
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    verdict: row.verdict,
+    attributionMethod: row.attribution_method,
+    primaryMetricKey: row.primary_metric_key,
+    outcomeWindowDays: row.outcome_window_days,
+    settlementDelayDays: row.settlement_delay_days,
+    baselineSource: row.baseline_source,
+    baselineLookbackDays: row.baseline_lookback_days,
+    plannedExposureCount: toNumber(row.planned_exposure_count),
+    realizedExposureCount: toNumber(row.realized_exposure_count),
+    guardrailState: row.guardrail_state,
+    realizedSpendMinor: toNumber(row.realized_spend_minor),
+    spendCeilingMinor: toNumber(row.spend_ceiling_minor),
+    spendCurrency: row.spend_currency,
+    estimateMinor: toNumber(row.estimate_minor),
+    estimateLowMinor: toNumber(row.estimate_low_minor),
+    estimateHighMinor: toNumber(row.estimate_high_minor),
+    estimateCurrency: row.estimate_currency,
+    evidenceTier: row.evidence_tier,
+    truncationCauses: row.truncation_causes,
+    limitations: row.limitations,
+    settledAt: row.settled_at,
+  };
+}
+
+type OutcomeRow = {
+  id: string;
+  verdict: OutcomeProofData["verdict"];
+  attribution_method: OutcomeProofData["attributionMethod"];
+  primary_metric_key: string;
+  outcome_window_days: number;
+  settlement_delay_days: number;
+  baseline_source: string;
+  baseline_lookback_days: number;
+  planned_exposure_count: number | string;
+  realized_exposure_count: number | string;
+  guardrail_state: OutcomeProofData["guardrailState"];
+  realized_spend_minor: number | string | null;
+  spend_ceiling_minor: number | string | null;
+  spend_currency: string | null;
+  estimate_minor: number | string | null;
+  estimate_low_minor: number | string | null;
+  estimate_high_minor: number | string | null;
+  estimate_currency: string | null;
+  evidence_tier: OutcomeProofData["evidenceTier"];
+  truncation_causes: unknown;
+  limitations: unknown;
+  settled_at: string;
+};
 
 /**
  * The creative produced under this approval, joined to the directions it varies.

@@ -81,7 +81,9 @@ async function evalJson(expression) {
     if (item.type === "text") {
       const text = item.text ?? "";
       const match = text.match(/```json\s*([\s\S]*?)```/);
-      const raw = match ? match[1].trim() : text.replace(/^Script ran on page and returned:\s*/, "").trim();
+      const raw = match
+        ? match[1].trim()
+        : text.replace(/^Script ran on page and returned:\s*/, "").trim();
       try {
         return JSON.parse(raw);
       } catch {
@@ -114,7 +116,8 @@ try {
     headers: { apikey: PUBLISHABLE, "Content-Type": "application/json" },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   }).then((r) => r.json());
-  if (!signIn.access_token) throw new Error(`sign in failed: ${JSON.stringify(signIn).slice(0, 300)}`);
+  if (!signIn.access_token)
+    throw new Error(`sign in failed: ${JSON.stringify(signIn).slice(0, 300)}`);
   const cookieValue = "base64-" + Buffer.from(JSON.stringify(signIn), "utf8").toString("base64url");
 
   await withTimeout(
@@ -166,7 +169,11 @@ try {
   console.log("OVERFLOW_CHECK_1440:", JSON.stringify(overflow1440));
 
   const consoleAfter = await call("list_console_messages", {});
-  const consoleLines = [...(consoleBefore.content ?? []), ...(console390.content ?? []), ...(consoleAfter.content ?? [])]
+  const consoleLines = [
+    ...(consoleBefore.content ?? []),
+    ...(console390.content ?? []),
+    ...(consoleAfter.content ?? []),
+  ]
     .map((item) => (item.type === "text" ? item.text : ""))
     .join("\n");
   const errors = consoleLines
@@ -185,6 +192,28 @@ try {
   );
   console.log("ALLOC_SECTION:", allocSection);
   console.log("VARIANT_CARDS:", variantCards);
+
+  // The settled result and its proof. The "why" copy for a non-validated verdict
+  // must never read as causal, so its text is asserted against the banned terms.
+  const outcomeSection = await evalJson(`(() => {
+    const section = [...document.querySelectorAll("section")].find(s => s.getAttribute("aria-label") === "Outcome");
+    return section ? section.textContent.replace(/\\s+/g, " ").trim() : null;
+  })()`);
+  const verdictBadge = await evalJson(`(() => {
+    const section = [...document.querySelectorAll("section")].find(s => s.getAttribute("aria-label") === "Outcome");
+    return section ? section.querySelector(".inline-flex")?.textContent?.trim() ?? null : null;
+  })()`);
+  console.log("OUTCOME_SECTION:", outcomeSection);
+  console.log("OUTCOME_VERDICT_BADGE:", verdictBadge);
+
+  if (outcomeSection && !/validated outcome/i.test(verdictBadge ?? "")) {
+    const causal =
+      /\b(caused|cause|impact|effect|lifted|increased|grew|growth|improved|boosted|proven|significant|roas|converted|won|winning)\b/i;
+    const hits = (outcomeSection.match(causal) ?? []).filter((w) => !/inconclusive/i.test(w));
+    console.log("OUTCOME_CAUSAL_HITS:", hits.length ? hits.join(", ") : "none");
+  } else {
+    console.log("OUTCOME_CAUSAL_HITS: n/a (no outcome or validated)");
+  }
 } catch (error) {
   console.error("VERIFY_ERROR:", error.message);
   process.exitCode = 1;

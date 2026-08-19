@@ -101,3 +101,27 @@ export type {
   ResolvedMarginGrade,
   VariantDiagnostics,
 } from "@/domain/campaigns/allocation";
+
+export {
+  assessGuardrail,
+  computeVerdict,
+  meetsEvidenceTier,
+  validateOutcomeWording,
+  OVERCLAIM_PATTERNS,
+} from "@/domain/campaigns/measurement";
+export type {
+  AttributionMethod,
+  CampaignVerdict,
+  Estimate,
+  EvidenceTier,
+  ExposureReconstruction,
+  GuardrailAssessment,
+  GuardrailState,
+  MetricObservation,
+  Outcome,
+  RegisteredMeasurementPlan,
+  TruncationCause,
+  TruncationCauseKind,
+  VerdictInput,
+  WordingViolation,
+} from "@/domain/campaigns/measurement";

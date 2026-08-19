@@ -166,6 +166,98 @@ try {
     console.log("EVENTS: already present");
   }
 
+  // --- Outcome seeding (Task 21) -------------------------------------------------
+  // A settled outcome so the Result section renders. This needs a confirmed
+  // exposure far enough in the past for the preregistered window and settlement
+  // delay to have passed, then a single call to the evidence loop's write RPC.
+  const plan = await sql`
+    select v.digest, p.primary_metric_key, p.attribution_method,
+           p.outcome_window_days, p.settlement_delay_days,
+           p.baseline_source, p.baseline_lookback_days
+    from public.campaign_bundle_versions v
+    join public.campaign_measurement_plans p on p.bundle_version_id = v.id
+    where v.organization_id = ${ORG} and v.id = ${VERSION}`;
+  if (plan.length === 0) throw new Error("verification campaign has no measurement plan");
+  const {
+    digest,
+    primary_metric_key: primaryMetricKey,
+    attribution_method: attributionMethod,
+    outcome_window_days: outcomeWindowDays,
+    settlement_delay_days: settlementDelayDays,
+    baseline_source: baselineSource,
+    baseline_lookback_days: baselineLookbackDays,
+  } = plan[0];
+
+  const planned = await sql`
+    select count(*)::bigint as n from public.campaign_channel_actions
+    where organization_id = ${ORG} and bundle_version_id = ${VERSION}`;
+
+  const actionRunId = "b0000000-0000-4000-8000-0000000000c1";
+  const actionKey = "c0000000-0000-4000-8000-0000000000aa";
+  const publishedAt = new Date(
+    Date.now() - (outcomeWindowDays + settlementDelayDays + 4) * 86_400_000,
+  ).toISOString();
+
+  await sql`
+    insert into public.campaign_action_runs (
+      id, organization_id, campaign_id, bundle_version_id, action_key, scheduled_for, status
+    ) values (
+      ${actionRunId}, ${ORG}, ${CAMPAIGN}, ${VERSION}, ${actionKey}, ${publishedAt}, 'confirmed'
+    )
+    on conflict (id) do nothing`;
+
+  await sql`
+    insert into public.campaign_exposures (
+      organization_id, campaign_id, bundle_version_id, action_run_id,
+      external_reference, provider_status, published_at, metrics_eligible_at
+    ) values (
+      ${ORG}, ${CAMPAIGN}, ${VERSION}, ${actionRunId}, 'verify-post-1', 'published',
+      ${publishedAt}, ${publishedAt}
+    )
+    on conflict (organization_id, action_run_id) do nothing`;
+
+  const { error: settleError, data: settled } = await supabase.rpc("settle_campaign_outcome", {
+    target_organization_id: ORG,
+    input_outcome: {
+      organization_id: ORG,
+      campaign_id: CAMPAIGN,
+      bundle_version_id: VERSION,
+      plan_digest: digest,
+      verdict: "inconclusive",
+      attribution_method: attributionMethod,
+      primary_metric_key: primaryMetricKey,
+      outcome_window_days: outcomeWindowDays,
+      settlement_delay_days: settlementDelayDays,
+      planned_exposure_count: Number(planned[0]?.n ?? 0),
+      realized_exposure_count: 1,
+      guardrail_state: "unmeasured",
+      realized_spend_minor: null,
+      spend_ceiling_minor: null,
+      spend_currency: null,
+      estimate_minor: null,
+      estimate_low_minor: null,
+      estimate_high_minor: null,
+      estimate_currency: null,
+      evidence_tier: null,
+      truncation_causes: [
+        {
+          variant_id: variantId,
+          cause: "guardrail",
+          rule_key: "diagnostic.spend_ceiling",
+          at: "2026-08-19T10:00:00+00",
+        },
+      ],
+      limitations: [
+        `No numeric baseline is recorded (baseline described by source only: ${baselineSource}).`,
+        "The preregistered evidence bar was not met.",
+      ],
+      baseline_source: baselineSource,
+      baseline_lookback_days: baselineLookbackDays,
+    },
+  });
+  if (settleError) throw new Error(`outcome settle failed: ${settleError.message}`);
+  console.log("OUTCOME:", settled?.outcome ?? "present");
+
   const session = await signIn();
   console.log("SESSION_OK:", Boolean(session.access_token));
   process.stdout.write(JSON.stringify({ userId, variantId, session }));

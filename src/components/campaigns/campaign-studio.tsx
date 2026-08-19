@@ -20,6 +20,7 @@ import {
   type AllocationLedgerEvent,
 } from "@/components/campaigns/allocation-ledger";
 import { VariantGrid, type VariantCard } from "@/components/campaigns/variant-grid";
+import { OutcomeProof, type OutcomeProofData } from "@/components/campaigns/outcome-proof";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -640,6 +641,7 @@ export function CampaignStudio({
   variants,
   variantsRemaining,
   allocationEvents = [],
+  outcome = null,
 }: Readonly<{
   view: StudioView;
   organizationId: string;
@@ -653,6 +655,12 @@ export function CampaignStudio({
    * loop has run and recorded something worth an operator's attention.
    */
   allocationEvents?: readonly AllocationLedgerEvent[];
+  /**
+   * The settled result and its proof, once the evidence loop has settled the
+   * campaign. Null while the outcome window and settlement delay have not yet
+   * passed.
+   */
+  outcome?: OutcomeProofData | null;
 }>) {
   const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
@@ -976,6 +984,20 @@ export function CampaignStudio({
               <AllocationLedger events={allocationEvents} />
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {/* The settled result is not gated on a live approval: a campaign that ran
+          and settled keeps its proof after the approval has lapsed. */}
+      {outcome !== null ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold">Result</h2>
+          <p className="text-sm text-muted-foreground">
+            The settled verdict from the evidence loop and the proof behind it: hypothesis, planned
+            versus realized exposure, baseline and window, estimate and range, spend, guardrail,
+            evidence tier and method, and the limitations the verdict carries.
+          </p>
+          <OutcomeProof outcome={outcome} />
         </section>
       ) : null}
 
