@@ -7,6 +7,7 @@ import {
 import {
   buildGuidedContractDocument,
   buildGuidedProjectionDocument,
+  GuidedProjectionUndecidable,
 } from "@/domain/reports/guided-mapping";
 import { findProviderReportDefinition } from "@/domain/reports/provider-library";
 import { reportContractDocumentSchema } from "@/domain/reports/contracts";
@@ -142,13 +143,22 @@ async function resolveProjectionProposal(
     // Derived from the approved contract rather than from the operator's
     // answers a second time, so whatever an owner approved is exactly what
     // gets read. Answers given twice could differ; a contract cannot.
-    return {
-      projectionDocument: buildGuidedProjectionDocument(
-        reportContractDocumentSchema.parse(version.mapping_document),
-      ),
-      proposalSource: "human",
-      providerDefinitionKey: null,
-    };
+    try {
+      return {
+        projectionDocument: buildGuidedProjectionDocument(
+          reportContractDocumentSchema.parse(version.mapping_document),
+        ),
+        proposalSource: "human",
+        providerDefinitionKey: null,
+      };
+    } catch (error) {
+      // The operator can act on this one: it names what is ambiguous about
+      // their own mapping. Anything else is not theirs to fix.
+      if (error instanceof GuidedProjectionUndecidable) {
+        throw new DomainError("VALIDATION_ERROR", error.message);
+      }
+      throw error;
+    }
   }
   return {
     projectionDocument: proposal.projectionDocument,

@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildGuidedContractDocument,
   buildGuidedProjectionDocument,
+  GuidedProjectionUndecidable,
   guidedReportMappingSchema,
 } from "@/domain/reports/guided-mapping";
+import { reportContractDocumentSchema } from "@/domain/reports/contracts";
 import { projectExactRangeMetrics, projectPeriodGrainMetrics } from "@/domain/reports/projection";
 
 function answers(overrides: Record<string, unknown> = {}) {
@@ -119,6 +121,74 @@ describe("the declaration that follows from the approved contract", () => {
 
   it("states no total to check when the sheet states none", () => {
     expect(buildGuidedProjectionDocument(build()).controlTotals).toEqual([]);
+  });
+});
+
+describe("figures for a mapping this path did not write", () => {
+  // A contract written before the guided path existed uses whatever field
+  // names the person chose. Reading what each column *is* rather than what it
+  // is called is what lets those keep working.
+  const legacy = (fields: unknown[]) =>
+    reportContractDocumentSchema.parse({
+      schemaVersion: 1,
+      currency: "AED",
+      outletGrain: "branch",
+      sheets: [
+        {
+          normalizedSheetName: "csv",
+          headerRow: 1,
+          dataStartRow: 2,
+          allowFormula: false,
+          allowMergedCells: false,
+          fields,
+        },
+      ],
+      controls: [],
+      unmappedFieldDisposition: "reviewed_ignore",
+    });
+
+  it("records both figures from names it has never seen", () => {
+    const document = buildGuidedProjectionDocument(
+      legacy([
+        { canonicalField: "gross_sales", sourceHeader: "gross_sales", parser: "money", financialSign: "positive", required: true },
+        { canonicalField: "successful_orders", sourceHeader: "successful_orders", parser: "integer", required: true },
+      ]),
+    );
+
+    expect(document.outputKind).toBe("exact_range");
+    expect(document.outputs.map((output) => [output.canonicalField, output.metricKey])).toEqual([
+      ["gross_sales", "revenue.gross"],
+      ["successful_orders", "transactions.count"],
+    ]);
+  });
+
+  it("refuses rather than guessing which of two money columns is the sales", () => {
+    // Proposing one of them would read half the file and look complete.
+    expect(() =>
+      buildGuidedProjectionDocument(
+        legacy([
+          { canonicalField: "gross_sales", sourceHeader: "gross_sales", parser: "money", financialSign: "positive", required: true },
+          { canonicalField: "net_sales", sourceHeader: "net_sales", parser: "money", financialSign: "positive", required: true },
+        ]),
+      ),
+    ).toThrow(GuidedProjectionUndecidable);
+  });
+
+  it("refuses a mapping with no figure in it at all", () => {
+    expect(() =>
+      buildGuidedProjectionDocument(
+        legacy([{ canonicalField: "outlet", sourceHeader: "outlet", parser: "text", required: true }]),
+      ),
+    ).toThrow(GuidedProjectionUndecidable);
+  });
+
+  it("dates a series only when every row must carry a date", () => {
+    const optionalDate = legacy([
+      { canonicalField: "seen_on", sourceHeader: "seen_on", parser: "local_date", required: false },
+      { canonicalField: "gross_sales", sourceHeader: "gross_sales", parser: "money", financialSign: "positive", required: true },
+    ]);
+
+    expect(buildGuidedProjectionDocument(optionalDate).outputKind).toBe("exact_range");
   });
 });
 

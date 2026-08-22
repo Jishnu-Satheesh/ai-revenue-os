@@ -101,6 +101,20 @@ const SALES_FIELD = "gross_sales";
 const ORDERS_FIELD = "order_count";
 const LABEL_FIELD = "row_label";
 
+/**
+ * A contract this path cannot turn into a set of figures.
+ *
+ * Refusing is the point. The alternative is proposing a declaration that reads
+ * some of the file and quietly omits the rest, which an operator would approve
+ * believing it complete.
+ */
+export class GuidedProjectionUndecidable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GuidedProjectionUndecidable";
+  }
+}
+
 export function buildGuidedContractDocument(input: {
   answers: GuidedReportMapping;
   declaredCurrency: string;
@@ -177,34 +191,71 @@ export function buildGuidedContractDocument(input: {
 }
 
 /**
- * The declaration that follows from an approved guided contract.
+ * The declaration that follows from an approved contract.
  *
- * Derived from the contract rather than from the answers a second time, so the
- * two cannot drift: whatever an owner approved is exactly what gets read.
+ * Read from the contract's own fields rather than from the answers a second
+ * time, so whatever an owner approved is exactly what gets read. Answers given
+ * twice can differ; a contract cannot.
+ *
+ * Fields are recognised by what they are, not by what they are called. A
+ * contract written by hand before the guided path existed names its columns
+ * whatever its author chose, and keying off those names would silently drop
+ * figures it does not recognise — a mapping that looks approved and records
+ * half of what it should.
  */
+export class GuidedProjectionUndeterminable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GuidedProjectionUndeterminable";
+  }
+}
+
 export function buildGuidedProjectionDocument(
   contract: ReportContractDocument,
 ): ReportProjectionDocument {
   const sheet = contract.sheets[0];
-  const has = (canonicalField: string) =>
-    sheet?.fields.some((field) => field.canonicalField === canonicalField) ?? false;
+  if (!sheet) throw new GuidedProjectionUndecidable("That mapping describes no sheet to read.");
+
+  // Read from what each column *is*, not from what it is called. The names a
+  // guided mapping assigns are its own; a mapping written before this path
+  // existed uses whatever the person chose, and both have to work.
+  const of = (parser: string) => sheet.fields.filter((field) => field.parser === parser);
+  const only = (parser: string, whatItIs: string) => {
+    const matches = of(parser);
+    if (matches.length > 1) {
+      throw new GuidedProjectionUndecidable(
+        `That mapping has ${matches.length} columns that could be ${whatItIs}, so we cannot tell which one to read. Map this upload again and point at the one you mean.`,
+      );
+    }
+    return matches[0];
+  };
+
+  const period = only("local_date", "the date");
+  const sales = only("money", "your sales");
+  const orders = only("integer", "your orders");
+
+  if (!sales && !orders) {
+    throw new GuidedProjectionUndecidable(
+      "That mapping has no sales or orders column, so there is nothing to record from it.",
+    );
+  }
 
   const outputs: unknown[] = [];
-  if (has(SALES_FIELD)) {
+  if (sales) {
     outputs.push({
       key: "gross_revenue",
       normalizedSheetName: sheet.normalizedSheetName,
-      canonicalField: SALES_FIELD,
+      canonicalField: sales.canonicalField,
       metricKey: "revenue.gross",
       valueKind: "money",
       aggregation: "sum",
     });
   }
-  if (has(ORDERS_FIELD)) {
+  if (orders) {
     outputs.push({
       key: "orders",
       normalizedSheetName: sheet.normalizedSheetName,
-      canonicalField: ORDERS_FIELD,
+      canonicalField: orders.canonicalField,
       metricKey: "transactions.count",
       valueKind: "count",
       aggregation: "sum",
@@ -214,18 +265,19 @@ export function buildGuidedProjectionDocument(
   // A stated total is only checkable against money, and only when the sheet
   // states one. See ADR 0029.
   const controlTotals =
-    sheet?.totalsRow && has(SALES_FIELD)
+    sheet.totalsRow && sales
       ? [{ outputKey: "gross_revenue", source: "sheet_totals_row", toleranceMinorUnits: 0 }]
       : [];
 
-  if (has(PERIOD_FIELD)) {
+  // A date column only dates rows if every row is required to carry one.
+  if (period?.required) {
     return reportProjectionDocumentSchema.parse({
       schemaVersion: 1,
       outputKind: "period_grain",
       grain: "day",
       periodKey: {
         normalizedSheetName: sheet.normalizedSheetName,
-        canonicalField: PERIOD_FIELD,
+        canonicalField: period.canonicalField,
       },
       outputs,
       controlTotals,
