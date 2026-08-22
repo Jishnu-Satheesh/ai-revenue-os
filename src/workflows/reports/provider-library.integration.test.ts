@@ -12,7 +12,9 @@ import {
   PROVIDER_REPORT_DEFINITIONS,
   type ProviderReportDefinition,
 } from "@/domain/reports/provider-library";
+import { matchProviderDefinitions, type ProfiledSheet } from "@/domain/reports/provider-library/match";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
+import { profileXlsxBuffer } from "@/workflows/reports/profile-report-package";
 import { readWorkbookRows } from "@/workflows/reports/project-report-package";
 import { validateXlsxBuffer } from "@/workflows/reports/validate-report-package";
 
@@ -62,6 +64,64 @@ describe("every checked-in provider definition", () => {
   });
 });
 
+/**
+ * Files the client exports that no definition claims, and none should.
+ *
+ * Three of Keeta's data exports carry order-level and item-level detail with no
+ * aggregate to project. EatEasily's customer-wise report carries names and
+ * phone numbers. Its day-orders report heads the value column with the branch
+ * name, so a second branch would change every heading.
+ */
+const UNCLAIMED = [
+  "Keeta/Keeta-Jan-Feb-2026-Item-Data.xlsx",
+  "Keeta/Keeta-Jan-Feb-2026-Orders-Data.xlsx",
+  "Keeta/Keeta-Jan-Feb-2026-Promotions-Data.xlsx",
+  "EatEasily-Smile/Jan_feb_2026_Customer_wise_EatEasily.xlsx",
+  "EatEasily-Smile/Jan_feb_2026_day_orders_EatEasily.xlsx",
+];
+
+async function profileOf(path: string): Promise<ProfiledSheet[]> {
+  return (await profileXlsxBuffer(readFileSync(path))).map((manifest) => ({
+    normalizedSheetName: manifest.normalizedSheetName,
+    sheetPosition: manifest.sheetPosition,
+    hasFormula: manifest.hasFormula,
+    hasMergedCells: manifest.hasMergedCells,
+    headerCandidateDigests: manifest.headerCandidateDigests,
+  }));
+}
+
+describe("recognising one report family from another", () => {
+  it("claims each real download for its own definition and no other", async () => {
+    // Two of Keeta's exports use a worksheet named `0`, and every EatEasily
+    // report opens a sheet called `Sales Report`. Only the columns tell them
+    // apart, so this is the assertion that matters: offering an operator the
+    // wrong known mapping would be worse than offering none.
+    for (const definition of PROVIDER_REPORT_DEFINITIONS) {
+      const path = fixturePath(definition);
+      if (!existsSync(path)) continue;
+      const matched = matchProviderDefinitions({
+        declaredCurrency: definition.contract.currency,
+        sheets: await profileOf(path),
+      }).map((match) => match.key);
+
+      expect(matched, definition.draftedFrom).toEqual([definition.key]);
+    }
+  });
+
+  it("claims nothing for the exports no definition covers", async () => {
+    for (const relative of UNCLAIMED) {
+      const path = resolve(RAW, relative);
+      if (!existsSync(path)) continue;
+      const matched = matchProviderDefinitions({
+        declaredCurrency: "AED",
+        sheets: await profileOf(path),
+      });
+
+      expect(matched.map((match) => match.key), relative).toEqual([]);
+    }
+  });
+});
+
 for (const definition of PROVIDER_REPORT_DEFINITIONS) {
   const path = fixturePath(definition);
   const present = existsSync(path);
@@ -100,6 +160,19 @@ for (const definition of PROVIDER_REPORT_DEFINITIONS) {
           );
         }
       }
+    });
+
+    it("is recognised from its profile alone, with no workbook value read", async () => {
+      // The profile is sheet names, positions and digests of the headers. What
+      // an operator gets offered is decided from that and nothing else, which
+      // is why recognition can happen before anyone has approved reading the
+      // file's contents.
+      const matched = matchProviderDefinitions({
+        declaredCurrency: definition.contract.currency,
+        sheets: await profileOf(path),
+      }).map((match) => match.key);
+
+      expect(matched, definition.key).toContain(definition.key);
     });
 
     it("validates without an error", async () => {
