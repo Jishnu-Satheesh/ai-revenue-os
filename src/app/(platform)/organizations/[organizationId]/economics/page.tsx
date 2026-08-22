@@ -1,6 +1,7 @@
 import { Coins } from "lucide-react";
 
 import { ChannelEconomicsPanel } from "@/components/economics/channel-economics-panel";
+import { EvidenceReadinessPanel } from "@/components/economics/evidence-readiness-panel";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
@@ -13,6 +14,9 @@ import {
   loadCatalogCoverage,
   loadLedgerEntries,
 } from "@/modules/economics/infrastructure/repository";
+import { createEvidenceReadinessService } from "@/modules/economics/application/readiness-service";
+import { createAuthenticatedEvidenceReadinessRepository } from "@/modules/economics/infrastructure/readiness-repository";
+import { isGovernedEconomicsReadinessEnabled } from "@/modules/integrations/application/feature-access";
 
 type PageProps = {
   params: Promise<{ organizationId: string }>;
@@ -52,6 +56,18 @@ export default async function ChannelEconomicsPage({ params, searchParams }: Pag
 
   const view = buildEconomicsView({ window, entries, catalog });
 
+  // The flag is enforced here rather than in navigation. An organization it is
+  // off for does not reach the read at all, so there is nothing to leak through
+  // a hand-typed URL and nothing to pay for on a page that would not show it.
+  const readiness = isGovernedEconomicsReadinessEnabled(context.organizationId)
+    ? await createEvidenceReadinessService(
+        createAuthenticatedEvidenceReadinessRepository(context.supabase),
+      ).loadReadiness({
+        organizationId: context.organizationId,
+        role: context.membership.role,
+      })
+    : null;
+
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -66,6 +82,14 @@ export default async function ChannelEconomicsPage({ params, searchParams }: Pag
           </p>
         </div>
       </div>
+
+      {readiness ? (
+        <EvidenceReadinessPanel
+          view={readiness}
+          costStructureHref={`/organizations/${context.organizationId}/onboarding?section=cost_structure`}
+          reportsHref={`/organizations/${context.organizationId}/integrations?tab=data-sources`}
+        />
+      ) : null}
 
       <ChannelEconomicsPanel
         view={view}

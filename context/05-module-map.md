@@ -54,6 +54,12 @@ The approved V1 is a health-first organization workspace with a provider-agnosti
 
 Schemas, validation, deduplication, source quality, reconciliation, and normalized metrics.
 
+### Channel Economics
+
+Contribution margin by channel, its cost component vocabulary, effective-dated tenant rates, and the completeness grade on every figure.
+
+Ahead of any margin, a read-only **evidence readiness** model classifies each organization/channel/branch/exact-period tuple as `ready_for_economics`, `partial_evidence`, `needs_data`, `not_comparable`, or `blocked`. It is derived at request time from the governed exact-range ledger and from the governed cost-coverage function, stores nothing, computes no margin, and reads no workbook value. Cost inputs appear only as availability and quality tier, never as an amount. Organization-scoped and off by default behind `GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS`, enforced in the page loader and the API boundary. See `specs/012-channel-economics-ledger.md` sections 6.3 and 7.5, `specs/018-governed-channel-intelligence.md` section 10.2, and ADRs 0026 and 0027.
+
 ### Business Memory
 
 Facts, documents, events, summaries, decisions, outcomes, retrieval, freshness, and provenance.

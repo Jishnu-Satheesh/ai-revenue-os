@@ -71,3 +71,28 @@ export function assertGovernedReportProjectionEnabled(organizationId: string): v
     throw new DomainError("FEATURE_NOT_AVAILABLE", "Deterministic report projection is not enabled for this organization.");
   }
 }
+
+/**
+ * Whether this organization sees governed economics evidence readiness.
+ *
+ * Unset means off for everyone. Rollback for the readiness slice is removing an
+ * ID from this list: nothing is written by that surface, so turning it off
+ * leaves no evidence, projection, or history behind to unwind.
+ */
+export function isGovernedEconomicsReadinessEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(
+    env.GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS,
+  ),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+export function assertGovernedEconomicsReadinessEnabled(organizationId: string): void {
+  if (!isGovernedEconomicsReadinessEnabled(organizationId)) {
+    throw new DomainError(
+      "FEATURE_NOT_AVAILABLE",
+      "Economics evidence readiness is not enabled for this organization.",
+    );
+  }
+}
