@@ -97,10 +97,35 @@ function stateVariant(
   return "outline";
 }
 
-function fileKind(file: File): "csv" | "xlsx" | null {
-  const extension = file.name.split(".").pop()?.toLowerCase();
-  return extension === "csv" || extension === "xlsx" ? extension : null;
+type UploadFileKind = "csv" | "xlsx" | "pdf";
+
+/**
+ * Formats worth naming in the refusal rather than lumping in with "unsupported".
+ *
+ * A provider in the pilot serves pre-2007 binary `.xls`. Its icon says Excel, so
+ * "only CSV, XLSX and PDF are accepted" reads as a mistake by the platform
+ * rather than as something the operator can fix in twenty seconds.
+ */
+const unsupportedFileMessages: Readonly<Record<string, string>> = {
+  xls: "This is an older Excel format (.xls). Open it and save as .xlsx, then upload again.",
+  xlsm: "Macro-enabled workbooks are not accepted. Save as .xlsx, then upload again.",
+  numbers: "Numbers files are not accepted. Export as .xlsx or CSV, then upload again.",
+};
+
+function fileExtension(file: File): string {
+  return file.name.split(".").pop()?.toLowerCase() ?? "";
 }
+
+function fileKind(file: File): UploadFileKind | null {
+  const extension = fileExtension(file);
+  return extension === "csv" || extension === "xlsx" || extension === "pdf" ? extension : null;
+}
+
+const contentTypeFor: Readonly<Record<UploadFileKind, string>> = {
+  csv: "text/csv",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pdf: "application/pdf",
+};
 
 function approvedProjectionSources(
   version: ReportPackageSnapshot["contractVersions"][number] | undefined,
@@ -221,18 +246,21 @@ export function ReportPackageUpload({
 
   const upload = useMutation({
     mutationFn: async () => {
-      if (!file) throw new Error("Choose a CSV or XLSX report first.");
+      if (!file) throw new Error("Choose a CSV, XLSX, or PDF report first.");
       const kind = fileKind(file);
-      if (!kind) throw new Error("Only CSV and XLSX files are accepted.");
+      if (!kind) {
+        throw new Error(
+          unsupportedFileMessages[fileExtension(file)] ??
+            "Only CSV, XLSX, and PDF files are accepted.",
+        );
+      }
       if (file.size < 1 || file.size > REPORT_PACKAGE_LIMITS.maxCompressedBytes) {
         throw new Error("The upload must be no larger than 50 MiB.");
       }
       const contentType =
-        kind === "csv"
-          ? file.type === "application/csv"
-            ? "application/csv"
-            : "text/csv"
-          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        kind === "csv" && file.type === "application/csv"
+          ? "application/csv"
+          : contentTypeFor[kind];
       const intent = await requestJson<UploadIntentResponse>(
         `${reportPackagesPath(organizationId)}/upload-intents`,
         {
@@ -530,7 +558,9 @@ export function ReportPackageUpload({
               <FileSpreadsheet className="size-5" /> Governed reports
             </CardTitle>
             <CardDescription>
-              Upload one declared CSV or XLSX report directly to private storage. Files are
+              Upload one declared CSV, XLSX, or PDF report directly to private storage. A PDF is
+              read only where its figures are already text; a scan is refused rather than guessed
+              at. Files are
               structurally checked before any future contract review.
             </CardDescription>
           </div>
@@ -625,11 +655,11 @@ export function ReportPackageUpload({
               />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="report-file">CSV or XLSX, up to 50 MiB</Label>
+              <Label htmlFor="report-file">CSV, XLSX, or PDF, up to 50 MiB</Label>
               <Input
                 id="report-file"
                 type="file"
-                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                accept=".csv,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 required
               />

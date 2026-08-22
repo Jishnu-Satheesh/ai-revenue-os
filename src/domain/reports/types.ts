@@ -25,7 +25,12 @@ export const REPORT_PACKAGE_STATUSES = [
 
 export type ReportPackageStatus = (typeof REPORT_PACKAGE_STATUSES)[number];
 
-export const REPORT_FILE_KINDS = ["csv", "xlsx"] as const;
+/**
+ * `pdf` is admitted only where the figures already exist as text; see ADR 0028.
+ * Legacy binary `.xls` is deliberately absent — it is refused at upload with a
+ * message naming the format, rather than parsed by a second spreadsheet engine.
+ */
+export const REPORT_FILE_KINDS = ["csv", "xlsx", "pdf"] as const;
 export type ReportFileKind = (typeof REPORT_FILE_KINDS)[number];
 
 export const REPORT_PACKAGE_FAILURE_CODES = [
@@ -40,6 +45,10 @@ export const REPORT_PACKAGE_FAILURE_CODES = [
   "EXPANDED_CONTENT_TOO_LARGE",
   "UNSAFE_WORKBOOK",
   "UNREADABLE_WORKBOOK",
+  "LEGACY_XLS_UNSUPPORTED",
+  "PDF_NO_TEXT_LAYER",
+  "PDF_NO_TABLE_STRUCTURE",
+  "TOO_MANY_PAGES",
   "PROFILE_FAILED",
   "PACKAGE_EXPIRED",
   "CONTRACT_VERSION_NOT_APPROVED",

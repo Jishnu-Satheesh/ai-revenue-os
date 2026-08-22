@@ -9,6 +9,8 @@ import {
   createReportSchemaFingerprint,
   normalizeReportStructureIdentifier,
 } from "@/domain/reports/contracts";
+import { reconstructPdfGrid } from "@/domain/reports/pdf-grid";
+import { extractPdfTextLayer, isLegacyXlsBuffer } from "@/workflows/reports/pdf-text-layer";
 import { REPORT_PACKAGE_LIMITS, type ReportPackageFailureCode } from "@/domain/reports/types";
 import { reportProfilingTaskSchema } from "@/domain/reports/schemas";
 import type { ReportPackageRow } from "@/modules/reports/application/ports";
@@ -87,6 +89,20 @@ function headerCandidateDigest(rowPosition: number, values: unknown[]) {
   };
 }
 
+/**
+ * How many candidate header rows a sheet records.
+ *
+ * One is not enough against real exports. Noon states a field row, an English
+ * description row, and an Arabic description row before its single line of
+ * values; Keeta's billing summary stacks a category row and a subcategory row
+ * above its field names. Recording only the first leaves the contract unable to
+ * say which row the headers are actually on, and no amount of guessing
+ * downstream can recover a row that was never profiled.
+ *
+ * Five covers every layout observed and still bounds the fingerprint.
+ */
+const MAX_HEADER_CANDIDATES = 5;
+
 function hasFormulaValue(values: unknown[]): boolean {
   return values.some(
     (value) =>
@@ -121,7 +137,9 @@ export async function profileCsvBuffer(buffer: Buffer): Promise<SheetManifestInp
       assertWithinLimit(rowCount, REPORT_PACKAGE_LIMITS.maxRows, "TOO_MANY_ROWS");
       if (!Array.isArray(row)) fail("UNREADABLE_WORKBOOK");
       const candidate = headerCandidateDigest(rowCount, row);
-      if (headerCandidateDigests.length === 0 && candidate) headerCandidateDigests.push(candidate);
+      if (candidate && headerCandidateDigests.length < MAX_HEADER_CANDIDATES) {
+        headerCandidateDigests.push(candidate);
+      }
       if (
         headerCandidateDigests[0] &&
         rowCount > headerCandidateDigests[0].rowPosition &&
@@ -153,6 +171,74 @@ export async function profileCsvBuffer(buffer: Buffer): Promise<SheetManifestInp
       hasRepeatedHeader,
     },
   ];
+}
+
+/**
+ * A PDF profiled as one sheet per page.
+ *
+ * A page is the closest thing the format has to a worksheet, and treating it as
+ * one keeps everything downstream — the fingerprint, the contract's sheet
+ * selection, validation, lineage — working exactly as it does for a workbook,
+ * with no branch anywhere else in the pipeline that knows what a PDF is.
+ */
+export async function profilePdfBuffer(buffer: Buffer): Promise<SheetManifestInput[]> {
+  assertWithinLimit(
+    buffer.byteLength,
+    REPORT_PACKAGE_LIMITS.maxExpandedBytes,
+    "EXPANDED_CONTENT_TOO_LARGE",
+  );
+
+  const extracted = await extractPdfTextLayer(buffer);
+  if (extracted.outcome === "failed") fail(extracted.code);
+  assertWithinLimit(extracted.pages.length, REPORT_PACKAGE_LIMITS.maxSheets, "TOO_MANY_SHEETS");
+
+  const sheets: SheetManifestInput[] = [];
+  let populatedCellCount = 0;
+  let rowCount = 0;
+
+  for (const page of extracted.pages) {
+    const grid = reconstructPdfGrid(page.items);
+    // A cover page or a page of terms carries no table. It is recorded as an
+    // empty sheet rather than failing the document, exactly as an empty
+    // worksheet would be; the contract decides which pages it requires.
+    const rows = grid.outcome === "reconstructed" ? grid.grid.rows : [];
+
+    rowCount += rows.length;
+    assertWithinLimit(rowCount, REPORT_PACKAGE_LIMITS.maxRows, "TOO_MANY_ROWS");
+
+    const headerCandidateDigests: SheetManifestInput["headerCandidateDigests"] = [];
+    rows.forEach((row, index) => {
+      populatedCellCount += populatedValueCount([...row.cells]);
+      const candidate = headerCandidateDigest(index + 1, [...row.cells]);
+      if (candidate && headerCandidateDigests.length < MAX_HEADER_CANDIDATES) {
+        headerCandidateDigests.push(candidate);
+      }
+    });
+    assertWithinLimit(
+      populatedCellCount,
+      REPORT_PACKAGE_LIMITS.maxPopulatedCells,
+      "TOO_MANY_POPULATED_CELLS",
+    );
+
+    sheets.push({
+      sheetPosition: page.pageNumber,
+      sheetName: `Page ${page.pageNumber}`,
+      normalizedSheetName: `page_${page.pageNumber}`,
+      rowCount: rows.length,
+      populatedCellCount: rows.reduce((sum, row) => sum + populatedValueCount([...row.cells]), 0),
+      expandedBytes: 0,
+      headerCandidateDigests,
+      hasFormula: false,
+      hasMergedCells: false,
+      hasRepeatedHeader: false,
+    });
+  }
+
+  // Text came out but not one page held a table. The document is prose, and
+  // pretending otherwise is what ADR 0028 forbids.
+  if (sheets.every((sheet) => sheet.rowCount === 0)) fail("PDF_NO_TABLE_STRUCTURE");
+
+  return sheets;
 }
 
 type XlsxArchiveInfo = {
@@ -252,8 +338,9 @@ export async function profileXlsxBuffer(buffer: Buffer): Promise<SheetManifestIn
         assertWithinLimit(totalRows, REPORT_PACKAGE_LIMITS.maxRows, "TOO_MANY_ROWS");
         const values = Array.isArray(row.values) ? row.values : [];
         const candidate = headerCandidateDigest(rows, values);
-        if (headerCandidateDigests.length === 0 && candidate)
+        if (candidate && headerCandidateDigests.length < MAX_HEADER_CANDIDATES) {
           headerCandidateDigests.push(candidate);
+        }
         if (
           headerCandidateDigests[0] &&
           rows > headerCandidateDigests[0].rowPosition &&
@@ -366,10 +453,17 @@ export async function runReportPackageProfiling(
     if (buffer.byteLength !== claim.reportPackage.declared_content_length)
       fail("OBJECT_IDENTITY_CHANGED");
     const contentSha256 = createHash("sha256").update(buffer).digest("hex");
+    // Checked by content rather than by the declared kind. A BIFF file renamed
+    // to .xlsx would otherwise reach ExcelJS and fail as an unreadable archive,
+    // which tells the operator nothing they can act on.
+    if (isLegacyXlsBuffer(buffer)) fail("LEGACY_XLS_UNSUPPORTED");
+
     const sheets =
       claim.reportPackage.file_kind === "csv"
         ? await profileCsvBuffer(buffer)
-        : await profileXlsxBuffer(buffer);
+        : claim.reportPackage.file_kind === "pdf"
+          ? await profilePdfBuffer(buffer)
+          : await profileXlsxBuffer(buffer);
     const schemaFingerprint = createReportSchemaFingerprint({
       reportType: claim.reportPackage.report_type,
       currency: claim.reportPackage.declared_currency,

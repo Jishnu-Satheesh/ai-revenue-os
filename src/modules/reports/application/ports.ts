@@ -1,3 +1,4 @@
+import type { ReportFileKind } from "@/domain/reports/types";
 import type { Database } from "@/lib/supabase/database.types";
 
 export type ReportPackageRow = Database["public"]["Tables"]["integration_report_packages"]["Row"];
@@ -114,7 +115,7 @@ export type ReportPackageRepository = {
       periodStart: string;
       periodEnd: string;
       currency: string;
-      fileKind: "csv" | "xlsx";
+      fileKind: ReportFileKind;
       originalFilename: string;
       contentType: string;
       contentLength: number;

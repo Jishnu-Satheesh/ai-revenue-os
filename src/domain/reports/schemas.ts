@@ -14,6 +14,21 @@ const csvMimeTypes = ["text/csv", "application/csv"] as const;
 const xlsxMimeTypes = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ] as const;
+const pdfMimeTypes = ["application/pdf"] as const;
+
+/**
+ * Formats that are recognised only so the refusal can say something useful.
+ *
+ * A provider in the pilot serves pre-2007 binary `.xls`, which no parser here
+ * reads. Falling through to "only CSV, XLSX and PDF are accepted" leaves the
+ * operator staring at a file whose icon says Excel, so the message names the
+ * format and the fix instead.
+ */
+const namedUnsupportedExtensions: Readonly<Record<string, string>> = {
+  xls: "This is an older Excel format (.xls). Open it and save as .xlsx, then upload again.",
+  xlsm: "Macro-enabled workbooks are not accepted. Save as .xlsx, then upload again.",
+  numbers: "Numbers files are not accepted. Export as .xlsx or CSV, then upload again.",
+};
 
 export const reportPackageUploadIntentSchema = z
   .object({
@@ -49,13 +64,17 @@ export const reportPackageUploadIntentSchema = z
         message: "Period end must not precede period start.",
       });
     }
-    const extension = value.originalFilename.split(".").pop()?.toLowerCase();
-    const fileKind = extension === "csv" || extension === "xlsx" ? extension : null;
+    const extension = value.originalFilename.split(".").pop()?.toLowerCase() ?? "";
+    const fileKind = REPORT_FILE_KINDS.includes(extension as ReportFileKind)
+      ? (extension as ReportFileKind)
+      : null;
     if (!fileKind) {
       ctx.addIssue({
         code: "custom",
         path: ["originalFilename"],
-        message: "Only CSV and XLSX files are accepted.",
+        message:
+          namedUnsupportedExtensions[extension] ??
+          "Only CSV, XLSX, and PDF files are accepted.",
       });
       return;
     }
@@ -63,7 +82,9 @@ export const reportPackageUploadIntentSchema = z
       (fileKind === "csv" &&
         csvMimeTypes.includes(value.contentType as (typeof csvMimeTypes)[number])) ||
       (fileKind === "xlsx" &&
-        xlsxMimeTypes.includes(value.contentType as (typeof xlsxMimeTypes)[number]));
+        xlsxMimeTypes.includes(value.contentType as (typeof xlsxMimeTypes)[number])) ||
+      (fileKind === "pdf" &&
+        pdfMimeTypes.includes(value.contentType as (typeof pdfMimeTypes)[number]));
     if (!validMimeType) {
       ctx.addIssue({
         code: "custom",
@@ -76,9 +97,11 @@ export const reportPackageUploadIntentSchema = z
 export type ReportPackageUploadIntent = z.output<typeof reportPackageUploadIntentSchema>;
 
 export function reportFileKindFromFilename(filename: string): ReportFileKind {
-  const extension = filename.split(".").pop()?.toLowerCase();
+  const extension = filename.split(".").pop()?.toLowerCase() ?? "";
   if (!REPORT_FILE_KINDS.includes(extension as ReportFileKind)) {
-    throw new Error("Only CSV and XLSX files are accepted.");
+    throw new Error(
+      namedUnsupportedExtensions[extension] ?? "Only CSV, XLSX, and PDF files are accepted.",
+    );
   }
   return extension as ReportFileKind;
 }

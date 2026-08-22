@@ -298,7 +298,7 @@ export type Database = {
           declared_period_end: string;
           declared_currency: string;
           period_timezone: string;
-          file_kind: "csv" | "xlsx";
+          file_kind: "csv" | "xlsx" | "pdf";
           original_filename: string;
           declared_content_type: string;
           declared_content_length: number;
@@ -1403,7 +1403,7 @@ export type Database = {
           p_period_start: string;
           p_period_end: string;
           p_currency: string;
-          p_file_kind: "csv" | "xlsx";
+          p_file_kind: "csv" | "xlsx" | "pdf";
           p_original_filename: string;
           p_content_type: string;
           p_content_length: number;
