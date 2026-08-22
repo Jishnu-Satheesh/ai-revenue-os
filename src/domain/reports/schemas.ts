@@ -118,12 +118,50 @@ export const retryReportPackageSchema = z
   })
   .strict();
 
-export const proposeReportContractSchema = z
-  .object({
-    mappingDocument: reportContractDocumentSchema,
-    idempotencyKey: z.string().trim().min(16).max(200),
-  })
-  .strict();
+/**
+ * A body that names no source is a hand-written one.
+ *
+ * A discriminated union will not fall back to a default when its discriminator
+ * is absent, and every caller written before the library existed omits it.
+ * Filling it in here keeps those callers working and keeps the union's
+ * guarantee — that a document and a library key can never arrive together —
+ * exactly as strict.
+ */
+function withDefaultProposalSource(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const body = input as Record<string, unknown>;
+  return body.source === undefined ? { ...body, source: "human" } : body;
+}
+
+/**
+ * A proposal names either a mapping written by hand or a report family the
+ * platform already knows.
+ *
+ * The two are mutually exclusive by construction rather than by a rule someone
+ * has to remember. A caller that sends a document cannot also claim it came
+ * from the library, and a caller that names a definition sends no document at
+ * all — the server builds it from the checked-in artifact, so the provenance
+ * recorded against the version is the server's statement and not the caller's.
+ */
+export const proposeReportContractSchema = z.preprocess(
+  withDefaultProposalSource,
+  z.discriminatedUnion("source", [
+    z
+      .object({
+        source: z.literal("human").default("human"),
+        mappingDocument: reportContractDocumentSchema,
+        idempotencyKey: z.string().trim().min(16).max(200),
+      })
+      .strict(),
+    z
+      .object({
+        source: z.literal("library"),
+        providerDefinitionKey: z.string().trim().min(2).max(80),
+        idempotencyKey: z.string().trim().min(16).max(200),
+      })
+      .strict(),
+  ]),
+);
 
 export const decideReportContractSchema = z
   .object({
@@ -142,12 +180,25 @@ export const decideReportContractSchema = z
     }
   });
 
-export const proposeReportProjectionSchema = z
-  .object({
-    projectionDocument: reportProjectionDocumentSchema,
-    idempotencyKey: z.string().trim().min(16).max(200),
-  })
-  .strict();
+export const proposeReportProjectionSchema = z.preprocess(
+  withDefaultProposalSource,
+  z.discriminatedUnion("source", [
+    z
+      .object({
+        source: z.literal("human").default("human"),
+        projectionDocument: reportProjectionDocumentSchema,
+        idempotencyKey: z.string().trim().min(16).max(200),
+      })
+      .strict(),
+    z
+      .object({
+        source: z.literal("library"),
+        providerDefinitionKey: z.string().trim().min(2).max(80),
+        idempotencyKey: z.string().trim().min(16).max(200),
+      })
+      .strict(),
+  ]),
+);
 
 /**
  * Accept one accidental double-envelope from clients that wrapped the full
@@ -168,6 +219,7 @@ export function normalizeReportProjectionProposalBody(input: unknown): unknown {
     typeof body.idempotencyKey !== "string"
   ) return input;
   return {
+    source: "human",
     projectionDocument: nestedBody.projectionDocument,
     idempotencyKey: body.idempotencyKey,
   };

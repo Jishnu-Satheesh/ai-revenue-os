@@ -151,6 +151,13 @@ export type ReportPackageRepository = {
     actorId: string;
     packageId: string;
     mappingDocument: unknown;
+    /**
+     * Where the shape came from. Stated by the server, never by the caller: the
+     * document behind a `library` proposal is built from the checked-in
+     * definition itself, so a hand-written one cannot arrive wearing its name.
+     */
+    proposalSource: "human" | "library";
+    providerDefinitionKey: string | null;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<ReportContractVersionRow>;
@@ -168,6 +175,8 @@ export type ReportPackageRepository = {
     actorId: string;
     contractVersionId: string;
     projectionDocument: unknown;
+    proposalSource: "human" | "library";
+    providerDefinitionKey: string | null;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<ReportProjectionVersionRow>;

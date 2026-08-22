@@ -88,12 +88,45 @@ describe("governed report contract request schemas", () => {
   };
 
   it("accepts a human proposal only with a bounded mapping document and replay key", () => {
+    // A body that names no source is a hand-written one, which keeps every
+    // caller written before the provider library existed working unchanged.
     expect(
       proposeReportContractSchema.parse({
         mappingDocument: document,
         idempotencyKey: "report-contract-proposal-0001",
       }),
-    ).toEqual({ mappingDocument: document, idempotencyKey: "report-contract-proposal-0001" });
+    ).toEqual({
+      source: "human",
+      mappingDocument: document,
+      idempotencyKey: "report-contract-proposal-0001",
+    });
+  });
+
+  it("accepts a proposal that names a known report family instead of a document", () => {
+    expect(
+      proposeReportContractSchema.parse({
+        source: "library",
+        providerDefinitionKey: "talabat.performance.daily",
+        idempotencyKey: "report-contract-proposal-0002",
+      }),
+    ).toEqual({
+      source: "library",
+      providerDefinitionKey: "talabat.performance.daily",
+      idempotencyKey: "report-contract-proposal-0002",
+    });
+  });
+
+  it("refuses a document that also claims to have come from the library", () => {
+    // The provenance recorded against a version has to be the server's
+    // statement. Letting one request carry both would make it the caller's.
+    expect(
+      proposeReportContractSchema.safeParse({
+        source: "library",
+        providerDefinitionKey: "talabat.performance.daily",
+        mappingDocument: document,
+        idempotencyKey: "report-contract-proposal-0003",
+      }).success,
+    ).toBe(false);
   });
 
   it("requires a reason when an owner rejects a proposal", () => {

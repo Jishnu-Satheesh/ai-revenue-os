@@ -373,6 +373,8 @@ export function createAuthenticatedReportPackageRepository(
       actorId,
       packageId,
       mappingDocument,
+      proposalSource,
+      providerDefinitionKey,
       idempotencyKey,
       correlationId,
     }) {
@@ -383,6 +385,8 @@ export function createAuthenticatedReportPackageRepository(
         p_mapping_document: mappingDocument,
         p_idempotency_key: idempotencyKey,
         p_correlation_id: correlationId,
+        p_proposal_source: proposalSource,
+        p_provider_definition_key: providerDefinitionKey,
       });
       if (error || !data) persistenceFailure(reportContractProposalFailureMessage(error), error);
       return data;
@@ -415,6 +419,8 @@ export function createAuthenticatedReportPackageRepository(
       actorId,
       contractVersionId,
       projectionDocument,
+      proposalSource,
+      providerDefinitionKey,
       idempotencyKey,
       correlationId,
     }) {
@@ -425,6 +431,8 @@ export function createAuthenticatedReportPackageRepository(
         p_projection_document: projectionDocument,
         p_idempotency_key: idempotencyKey,
         p_correlation_id: correlationId,
+        p_proposal_source: proposalSource,
+        p_provider_definition_key: providerDefinitionKey,
       });
       if (error || !data) persistenceFailure(reportProjectionProposalFailureMessage(error), error);
       return data;

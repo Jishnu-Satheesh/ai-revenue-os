@@ -11,9 +11,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ org
     const body = await reportRequest(
       request,
       proposeReportProjectionSchema,
-      "Projection declarations must include projectionDocument (schemaVersion 1, outputKind exact_range, valid outputs) and an idempotencyKey at least 16 characters long.",
+      "A projection proposal must either name a known report family, or include a projectionDocument (schemaVersion 1, outputKind exact_range or period_grain, valid outputs). Either way it needs an idempotencyKey at least 16 characters long.",
       normalizeReportProjectionProposalBody,
     );
-    return { status: 201, body: { reportProjectionVersion: await context.service.proposeProjection(context, context.params.contractVersionId, body.projectionDocument, body.idempotencyKey) } };
+    return { status: 201, body: { reportProjectionVersion: await context.service.proposeProjection(context, context.params.contractVersionId, body, body.idempotencyKey) } };
   } });
 }

@@ -21,7 +21,7 @@ export async function POST(
           reportContractVersion: await context.service.proposeContract(
             context,
             context.params.packageId,
-            body.mappingDocument,
+            body,
             body.idempotencyKey,
           ),
         },

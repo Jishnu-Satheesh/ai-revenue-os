@@ -4,12 +4,33 @@ import {
   reportFileKindFromFilename,
   type ReportPackageUploadIntent,
 } from "@/domain/reports/schemas";
-import type { ReportContractDocument } from "@/domain/reports/contracts";
-import type { ReportProjectionDocument } from "@/domain/reports/projection";
+import { findProviderReportDefinition } from "@/domain/reports/provider-library";
+import type {
+  proposeReportContractSchema,
+  proposeReportProjectionSchema,
+} from "@/domain/reports/schemas";
 import { hasReportPermission } from "@/domain/reports/permissions";
 import { DomainError } from "@/lib/errors";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import type { ReportPackageRepository } from "@/modules/reports/application/ports";
+
+export type ReportContractProposal = z.output<typeof proposeReportContractSchema>;
+export type ReportProjectionProposal = z.output<typeof proposeReportProjectionSchema>;
+
+/**
+ * The checked-in definition a proposal named, or a refusal.
+ *
+ * A key nobody recognises is the caller's mistake, not a reason to fall back to
+ * something similar. Adopting the wrong known mapping would be silent and
+ * wrong, where a refusal is neither.
+ */
+function requireDefinition(key: string) {
+  const definition = findProviderReportDefinition(key);
+  if (!definition) {
+    throw new DomainError("VALIDATION_ERROR", "That report family is not one this platform knows.");
+  }
+  return definition;
+}
 
 export type AuthenticatedReportContext = {
   organizationId: string;
@@ -109,15 +130,27 @@ export function createReportPackageService(repository: ReportPackageRepository) 
     async proposeContract(
       context: AuthenticatedReportContext,
       packageId: string,
-      mappingDocument: ReportContractDocument,
+      proposal: ReportContractProposal,
       idempotencyKey: string,
     ) {
       assertPermission(context, "report.contract_approve");
+      // A library proposal carries a key, never a document. The document is
+      // read from the checked-in definition here, so what gets recorded as
+      // library-sourced is what the library actually says.
+      const resolved =
+        proposal.source === "library"
+          ? {
+              mappingDocument: requireDefinition(proposal.providerDefinitionKey).contract,
+              providerDefinitionKey: proposal.providerDefinitionKey,
+            }
+          : { mappingDocument: proposal.mappingDocument, providerDefinitionKey: null };
       return repository.proposeContract({
         organizationId: context.organizationId,
         actorId: context.actorId,
         packageId: packageIdSchema.parse(packageId),
-        mappingDocument,
+        mappingDocument: resolved.mappingDocument,
+        proposalSource: proposal.source,
+        providerDefinitionKey: resolved.providerDefinitionKey,
         idempotencyKey,
         correlationId: context.correlationId,
       });
@@ -142,9 +175,30 @@ export function createReportPackageService(repository: ReportPackageRepository) 
       });
     },
 
-    async proposeProjection(context: AuthenticatedReportContext, contractVersionId: string, projectionDocument: ReportProjectionDocument, idempotencyKey: string) {
+    async proposeProjection(
+      context: AuthenticatedReportContext,
+      contractVersionId: string,
+      proposal: ReportProjectionProposal,
+      idempotencyKey: string,
+    ) {
       assertPermission(context, "report.contract_approve");
-      return repository.proposeProjection({ organizationId: context.organizationId, actorId: context.actorId, contractVersionId: packageIdSchema.parse(contractVersionId), projectionDocument, idempotencyKey, correlationId: context.correlationId });
+      const resolved =
+        proposal.source === "library"
+          ? {
+              projectionDocument: requireDefinition(proposal.providerDefinitionKey).projection,
+              providerDefinitionKey: proposal.providerDefinitionKey,
+            }
+          : { projectionDocument: proposal.projectionDocument, providerDefinitionKey: null };
+      return repository.proposeProjection({
+        organizationId: context.organizationId,
+        actorId: context.actorId,
+        contractVersionId: packageIdSchema.parse(contractVersionId),
+        projectionDocument: resolved.projectionDocument,
+        proposalSource: proposal.source,
+        providerDefinitionKey: resolved.providerDefinitionKey,
+        idempotencyKey,
+        correlationId: context.correlationId,
+      });
     },
 
     async decideProjection(context: AuthenticatedReportContext, projectionVersionId: string, decision: "approved" | "rejected", reason: string | undefined, idempotencyKey: string) {

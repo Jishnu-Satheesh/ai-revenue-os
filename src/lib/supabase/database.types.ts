@@ -466,7 +466,8 @@ export type Database = {
           financial_sign_semantics: unknown;
           controls: unknown;
           unmapped_field_disposition: "reviewed_ignore" | "requires_mapping";
-          proposal_source: "human";
+          proposal_source: "human" | "library";
+          provider_definition_key: string | null;
           created_by: string;
           correlation_id: string;
           created_at: string;
@@ -522,7 +523,8 @@ export type Database = {
           projection_document: unknown;
           projection_digest: string;
           calculation_version: number;
-          proposal_source: "human";
+          proposal_source: "human" | "library";
+          provider_definition_key: string | null;
           created_by: string;
           correlation_id: string;
           created_at: string;
@@ -1460,6 +1462,8 @@ export type Database = {
           p_mapping_document: unknown;
           p_idempotency_key: string;
           p_correlation_id: string;
+          p_proposal_source?: "human" | "library";
+          p_provider_definition_key?: string | null;
         };
         Returns: Database["public"]["Tables"]["report_contract_versions"]["Row"];
       };
@@ -1536,6 +1540,8 @@ export type Database = {
           p_projection_document: unknown;
           p_idempotency_key: string;
           p_correlation_id: string;
+          p_proposal_source?: "human" | "library";
+          p_provider_definition_key?: string | null;
         };
         Returns: Database["public"]["Tables"]["report_projection_versions"]["Row"];
       };
