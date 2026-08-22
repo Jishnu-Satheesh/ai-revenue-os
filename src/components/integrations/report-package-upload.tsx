@@ -3,7 +3,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload } from "tus-js-client";
 import { useMemo, useState } from "react";
-import { FileSpreadsheet, RotateCcw, ShieldCheck, UploadCloud } from "lucide-react";
+import {
+  Calculator,
+  FileSpreadsheet,
+  Lock,
+  RotateCcw,
+  ScanLine,
+  ShieldCheck,
+  UploadCloud,
+  UserCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +22,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Textarea } from "@/components/ui/textarea";
+import { ReportIntakeMapping } from "@/components/integrations/report-intake-mapping";
 import {
   Select,
   SelectContent,
@@ -218,10 +227,8 @@ export function ReportPackageUpload({
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [proposalPackageId, setProposalPackageId] = useState("");
-  const [mappingDocument, setMappingDocument] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [projectionContractVersionId, setProjectionContractVersionId] = useState("");
-  const [projectionDocument, setProjectionDocument] = useState("");
   const canUpload = hasReportPermission(role, "report.upload");
   const canRetry = hasReportPermission(role, "report.retry");
   const canApproveContract = hasReportPermission(role, "report.contract_approve");
@@ -405,37 +412,6 @@ export function ReportPackageUpload({
       toast.error(error instanceof Error ? error.message : "Projection could not be requested."),
   });
 
-  const proposeContract = useMutation({
-    mutationFn: async () => {
-      if (!proposalPackageId) throw new Error("Select a profiled package first.");
-      let parsedDocument: unknown;
-      try {
-        parsedDocument = JSON.parse(mappingDocument);
-      } catch {
-        throw new Error("The contract document must be valid JSON.");
-      }
-      return requestJson(
-        `${reportPackagesPath(organizationId)}/${proposalPackageId}/contract-proposals`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            mappingDocument: parsedDocument,
-            idempotencyKey: operationKey("report-contract-proposal"),
-          }),
-        },
-      );
-    },
-    onSuccess: () => {
-      setProposalPackageId("");
-      setMappingDocument("");
-      toast.success("Contract proposal saved for owner/admin review.");
-      invalidate();
-    },
-    onError: (error) =>
-      toast.error(error instanceof Error ? error.message : "Contract proposal could not be saved."),
-  });
-
   const decideContract = useMutation({
     mutationFn: ({
       versionId,
@@ -463,34 +439,30 @@ export function ReportPackageUpload({
   });
 
   const proposeProjection = useMutation({
-    mutationFn: () => {
-      if (!projectionContractVersionId) throw new Error("Select an approved contract first.");
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(projectionDocument);
-      } catch {
-        throw new Error("The projection declaration must be valid JSON.");
-      }
+    mutationFn: (contractVersionId: string) => {
+      const version = view.contractVersions.find((candidate) => candidate.id === contractVersionId);
+      // Only the source is sent. A library contract's declaration comes from the
+      // same checked-in definition; a guided one is derived from the contract an
+      // owner already approved. Neither can drift from what was approved.
+      const body = version?.provider_definition_key
+        ? { source: "library", providerDefinitionKey: version.provider_definition_key }
+        : { source: "guided" };
       return requestJson(
-        `/api/organizations/${organizationId}/report-contracts/${projectionContractVersionId}/projection-proposals`,
+        `/api/organizations/${organizationId}/report-contracts/${contractVersionId}/projection-proposals`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            projectionDocument: parsed,
-            idempotencyKey: operationKey("report-projection-proposal"),
-          }),
+          body: JSON.stringify({ ...body, idempotencyKey: operationKey("report-projection-proposal") }),
         },
       );
     },
     onSuccess: () => {
-      setProjectionDocument("");
-      toast.success("Projection declaration saved for owner/admin approval.");
+      toast.success("Figures to read proposed. Nothing is read until an owner or admin approves.");
       invalidate();
     },
     onError: (error) =>
       toast.error(
-        error instanceof Error ? error.message : "Projection declaration could not be saved.",
+        error instanceof Error ? error.message : "The figures to read could not be proposed.",
       ),
   });
 
@@ -691,7 +663,7 @@ export function ReportPackageUpload({
         )}
 
         <div className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">Recent packages</h3>
+          <h3 className="text-sm font-medium">1 · Recent uploads</h3>
           {view.packages.length ? (
             view.packages.map((reportPackage) => {
               const latestValidation = view.validationRuns.find(
@@ -945,10 +917,9 @@ export function ReportPackageUpload({
 
         <div className="space-y-3 border-t pt-4">
           <div>
-            <h3 className="text-sm font-medium">Contract trust</h3>
+            <h3 className="text-sm font-medium">2 · Approve what the columns mean</h3>
             <p className="text-xs text-muted-foreground">
-              A contract is a reviewed structural mapping. It does not import or calculate values
-              yet.
+              An owner or admin decides. Until then the file has been profiled and nothing more.
             </p>
           </div>
           {view.contractVersions.length ? (
@@ -960,7 +931,14 @@ export function ReportPackageUpload({
               return (
                 <div key={version.id} className="rounded-lg border p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-medium">Contract v{version.version}</span>
+                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                      Mapping v{version.version}
+                      <Badge variant="secondary" className="font-normal">
+                        {version.provider_definition_key
+                          ? `From the known ${version.provider_definition_key} report`
+                          : "Described by hand"}
+                      </Badge>
+                    </span>
                     <Badge variant={decision?.decision === "rejected" ? "destructive" : "outline"}>
                       {decision?.decision === "approved"
                         ? "Approved · validation next"
@@ -1044,50 +1022,49 @@ export function ReportPackageUpload({
               );
             })
           ) : (
-            <p className="text-sm text-muted-foreground">No contract proposal has been saved.</p>
+            <p className="text-sm text-muted-foreground">Nothing has been mapped yet.</p>
           )}
           {canApproveContract ? (
-            <form
-              className="space-y-3 rounded-lg border border-dashed p-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                proposeContract.mutate();
-              }}
-            >
-              <Label htmlFor="report-contract-package">Profiled package to map</Label>
-              <Select value={proposalPackageId} onValueChange={setProposalPackageId}>
-                <SelectTrigger id="report-contract-package">
-                  <SelectValue placeholder="Select a package awaiting a contract" />
-                </SelectTrigger>
-                <SelectContent>
-                  {view.packages
-                    .filter((reportPackage) => reportPackage.status === "awaiting_contract")
-                    .map((reportPackage) => (
-                      <SelectItem key={reportPackage.id} value={reportPackage.id}>
-                        {reportPackage.report_type} · {reportPackage.declared_period_start}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              <Label htmlFor="report-contract-document">Declarative mapping document</Label>
-              <Textarea
-                id="report-contract-document"
-                value={mappingDocument}
-                onChange={(event) => setMappingDocument(event.target.value)}
-                placeholder='{"schemaVersion":1,"currency":"AED","outletGrain":"branch","sheets":[…],"controls":[],"unmappedFieldDisposition":"reviewed_ignore"}'
-                className="min-h-36 font-mono text-xs"
-                required
-              />
-              <Button type="submit" disabled={proposeContract.isPending || !proposalPackageId}>
-                {proposeContract.isPending ? "Saving…" : "Save contract proposal"}
-              </Button>
-            </form>
+            <div className="space-y-3 rounded-lg border border-dashed p-4">
+              <div className="space-y-2">
+                <Label htmlFor="report-contract-package">Which upload are you mapping?</Label>
+                <Select value={proposalPackageId} onValueChange={setProposalPackageId}>
+                  <SelectTrigger id="report-contract-package">
+                    <SelectValue placeholder="Select an upload waiting to be mapped" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {view.packages
+                      .filter((reportPackage) => reportPackage.status === "awaiting_contract")
+                      .map((reportPackage) => (
+                        <SelectItem key={reportPackage.id} value={reportPackage.id}>
+                          {reportPackage.report_type} · {reportPackage.declared_period_start}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {proposalPackageId ? (
+                <ReportIntakeMapping
+                  key={proposalPackageId}
+                  organizationId={organizationId}
+                  packageId={proposalPackageId}
+                  onProposed={() => {
+                    setProposalPackageId("");
+                    invalidate();
+                  }}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Choose an upload and we will tell you whether we already know how to read it.
+                </p>
+              )}
+            </div>
           ) : null}
           <div className="border-t pt-4">
-            <h3 className="text-sm font-medium">Deterministic projection trust</h3>
+            <h3 className="text-sm font-medium">3 · Approve what gets recorded</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Declarations map approved fields to registered exact-range aggregates; workbook values
-              never appear here.
+              A separate decision, because it is a separate consequence: this is what enters the
+              ledger and drives every figure downstream. No workbook value appears here.
             </p>
             {view.projectionVersions.map((version) => {
               const decision = view.projectionDecisions.find(
@@ -1135,66 +1112,79 @@ export function ReportPackageUpload({
               );
             })}
             {canApproveContract ? (
-              <form
-                className="mt-3 space-y-3 rounded-lg border border-dashed p-3"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  proposeProjection.mutate();
-                }}
-              >
-                <Label htmlFor="report-projection-contract">Approved contract</Label>
-                <Select
-                  value={projectionContractVersionId}
-                  onValueChange={(value) => {
-                    setProjectionContractVersionId(value);
-                    setProjectionDocument("");
-                  }}
-                >
-                  <SelectTrigger id="report-projection-contract">
-                    <SelectValue placeholder="Select approved contract" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {view.contractVersions
-                      .filter((version) =>
-                        view.contractDecisions.some(
-                          (decision) =>
-                            decision.report_contract_version_id === version.id &&
-                            decision.decision === "approved",
-                        ),
-                      )
-                      .map((version) => (
-                        <SelectItem key={version.id} value={version.id}>
-                          Contract v{version.version}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+              <div className="mt-3 space-y-3 rounded-lg border border-dashed p-4">
+                <div className="space-y-2">
+                  <Label htmlFor="report-projection-contract">Approved mapping</Label>
+                  <Select
+                    value={projectionContractVersionId}
+                    onValueChange={setProjectionContractVersionId}
+                  >
+                    <SelectTrigger id="report-projection-contract">
+                      <SelectValue placeholder="Select an approved mapping" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {view.contractVersions
+                        .filter((version) =>
+                          view.contractDecisions.some(
+                            (decision) =>
+                              decision.report_contract_version_id === version.id &&
+                              decision.decision === "approved",
+                          ),
+                        )
+                        .map((version) => (
+                          <SelectItem key={version.id} value={version.id}>
+                            Mapping v{version.version}
+                            {version.provider_definition_key
+                              ? ` · ${version.provider_definition_key}`
+                              : ""}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 {projectionSources.length ? (
                   <p className="text-xs text-muted-foreground">
-                    Exact approved projection sources: {projectionSources.join(", ")}. Use these
-                    identities exactly; a CSV file does not create a sheet named “csv”.
+                    Reads from {projectionSources.join(", ")}.
                   </p>
                 ) : null}
-                <Label htmlFor="report-projection-document">
-                  Exact-range projection declaration
-                </Label>
-                <Textarea
-                  id="report-projection-document"
-                  value={projectionDocument}
-                  onChange={(event) => setProjectionDocument(event.target.value)}
-                  placeholder='{"schemaVersion":1,"outputKind":"exact_range","outputs":[…]}'
-                  className="min-h-28 font-mono text-xs"
-                  required
-                />
+                <p className="text-xs text-muted-foreground">
+                  The figures follow from the mapping that was approved, so nothing here can differ
+                  from what an owner already agreed to.
+                </p>
                 <Button
-                  type="submit"
+                  size="sm"
                   disabled={proposeProjection.isPending || !projectionContractVersionId}
+                  onClick={() => proposeProjection.mutate(projectionContractVersionId)}
                 >
-                  {proposeProjection.isPending ? "Saving…" : "Save projection declaration"}
+                  {proposeProjection.isPending ? "Proposing…" : "Propose the figures to read"}
                 </Button>
-              </form>
+              </div>
             ) : null}
           </div>
+        </div>
+
+        <div className="space-y-3 border-t pt-4">
+          <h3 className="text-sm font-medium">What happens to your file</h3>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            <li className="flex gap-2">
+              <Lock className="mt-0.5 size-4 shrink-0" />
+              It stays in private storage. Nobody outside your organization can reach it.
+            </li>
+            <li className="flex gap-2">
+              <ScanLine className="mt-0.5 size-4 shrink-0" />
+              Recognition looks at column headings only — never at a customer, an order or an
+              amount.
+            </li>
+            <li className="flex gap-2">
+              <UserCheck className="mt-0.5 size-4 shrink-0" />
+              A person approves twice before any figure is recorded, and both decisions are kept.
+            </li>
+            <li className="flex gap-2">
+              <Calculator className="mt-0.5 size-4 shrink-0" />
+              Where the file states its own total, the rows have to add up to it or the import
+              stops.
+            </li>
+          </ul>
         </div>
       </CardContent>
     </Card>
