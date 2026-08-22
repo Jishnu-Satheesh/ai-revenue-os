@@ -1,0 +1,265 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "/organizations/[organizationId]/economics": {
+      "targetKind": "existing-ui",
+      "projectId": "4824afb0-94ad-432f-9ea4-eb7a1987bafe",
+      "baselineDraftId": "613cd757-a16b-4880-a884-a334cc8ceb62",
+      "activeDraftId": "3d91fc1d-c011-4bdb-8259-f8bf7a2a5bcd",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "src/app/globals.css",
+        "src/app/(platform)/organizations/[organizationId]/economics/page.tsx",
+        "src/components/economics/channel-economics-panel.tsx",
+        "src/components/economics/channel-economics-client.tsx",
+        "src/components/economics/channel-margin-table.tsx",
+        "src/components/economics/grade-badge.tsx",
+        "src/components/economics/margin-waterfall.tsx",
+        "src/components/economics/trust-panel.tsx",
+        "src/components/layout/app-shell.tsx",
+        "src/components/layout/sidebar.tsx",
+        "src/components/layout/organization-switcher.tsx",
+        "src/components/layout/route-context.tsx",
+        "src/components/accounts/sidebar-identity.tsx",
+        "src/components/ui/sidebar.tsx",
+        "src/components/ui/card.tsx",
+        "src/components/ui/alert.tsx",
+        "src/components/ui/button.tsx",
+        "src/components/organizations/organization-intelligence-cockpit.tsx",
+        "src/components/organizations/channel-economics-overview.tsx"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "6b82a4e5bdb263638930208e74577b5a70c818721e57618fc37e9a3d187361ef",
+        "src/app/globals.css": "4302c374707c1d9b586506199f8e3a7f233965765d3782c79c4876779e80fd95",
+        "src/app/(platform)/organizations/[organizationId]/economics/page.tsx": "db709da1d0496db751ebc7bc217fdac1b714f6d163fba4a1cf5bfee3e5e7fa3d",
+        "src/components/economics/channel-economics-panel.tsx": "fd9b3b668774976eb0ffddb0973115fafe8de619eda11d370e202e873262425a",
+        "src/components/economics/channel-economics-client.tsx": "eb81276e3949546744c153e39c156abda4069992ed4b81556d2fa63e6d3f8e34",
+        "src/components/economics/channel-margin-table.tsx": "c8b7b934b3c41e2f28323c0177fa262e1464282a2b439c06f3e417a36d134331",
+        "src/components/economics/grade-badge.tsx": "9c0f63a2d3bcc6c16844fda53ff26d4dbc0c1645316faa1e5d04b21c47e70711",
+        "src/components/economics/margin-waterfall.tsx": "e39b0cd037fd98f2cc30c2444cc41aa73cf8481e919676a5c23107b3f1eb8880",
+        "src/components/economics/trust-panel.tsx": "ff541b4b0af42584db8c81f1000bfb5e501e3903124e42fe3f7827b3e1b668ff",
+        "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+        "src/components/layout/sidebar.tsx": "35b3981551e1d6753c6fefb392d21ab350e05be89fccc0b136402503b2517a39",
+        "src/components/layout/organization-switcher.tsx": "bf3df750ea428345ba6b1d0334de950fcd138df5a5646d3320edab733369736f",
+        "src/components/layout/route-context.tsx": "7d9ef1f1dc401f8224f3e6cff3c315bd735d638478e9101a3d13c59bcb09571a",
+        "src/components/accounts/sidebar-identity.tsx": "0d48e272f77f2393a2f2f1da931bd17b9bb5c6d16183979371d7e62e962d93d1",
+        "src/components/ui/sidebar.tsx": "0fedefcbefab30499e62944a6ab15ed9641ee81ec602974cf3fc00905bd505b6",
+        "src/components/ui/card.tsx": "b2b19796c2454d90a1ceab4cff5db9a171d6d331e6386ff3d1295050563f7d55",
+        "src/components/ui/alert.tsx": "8a3130341608d5d3d4b84e3883071153c00fd67cdf02c433866b0417ac84c2ca",
+        "src/components/ui/button.tsx": "dc0a281924aa9f24eb599a08ab7a9bb114adb3de1711ca5217e8ca4ee1f38afb",
+        "src/components/organizations/organization-intelligence-cockpit.tsx": "43e9795be046a6d8ee6fc405c223f0e72f5b239be90b50c064a272f679bbdaf3",
+        "src/components/organizations/channel-economics-overview.tsx": "f0903fb3f9606b7273ef1a73f7edf946087f32e26dbdc8987f26c9ecefe27563"
+      },
+      "components": [
+        {
+          "name": "AppSidebar",
+          "id": "79f12a44-8782-405e-ba4f-6387ef739e64",
+          "sourcePath": "src/components/layout/sidebar.tsx"
+        }
+      ],
+      "drafts": {
+        "613cd757-a16b-4880-a884-a334cc8ceb62": {
+          "title": "Channel Economics Workspace",
+          "visualDirection": "faithful current economics baseline",
+          "currentVersion": 1
+        },
+        "3d91fc1d-c011-4bdb-8259-f8bf7a2a5bcd": {
+          "title": "Refined Channel Intelligence Cockpit",
+          "visualDirection": "selected version-3 comparison canvas with structure locked and platform color border and shadow treatment",
+          "parentDraftId": "613cd757-a16b-4880-a884-a334cc8ceb62",
+          "currentVersion": 9
+        },
+        "0c94baee-d533-4599-bbc0-f4d77bcefa10": {
+          "title": "Complete Marketplace Audit Prototype",
+          "visualDirection": "marketplace audit report with section-indexed chapters",
+          "parentDraftId": "613cd757-a16b-4880-a884-a334cc8ceb62",
+          "currentVersion": 3
+        }
+      },
+      "updatedAt": "2026-08-20T11:16:14Z"
+    },
+    "/organizations/[organizationId]/channels": {
+      "targetKind": "new-ui",
+      "projectId": "4824afb0-94ad-432f-9ea4-eb7a1987bafe",
+      "activeDraftId": "b85dda86-0980-47e9-9e42-532ec382af7f",
+      "sourceTarget": "/organizations/[organizationId]/economics",
+      "sourceDraftId": "3d91fc1d-c011-4bdb-8259-f8bf7a2a5bcd",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "src/app/globals.css",
+        "src/app/(platform)/organizations/[organizationId]/economics/page.tsx",
+        "src/components/economics/channel-economics-panel.tsx",
+        "src/components/economics/channel-economics-client.tsx",
+        "src/components/economics/channel-margin-table.tsx",
+        "src/components/economics/grade-badge.tsx",
+        "src/components/economics/margin-waterfall.tsx",
+        "src/components/economics/trust-panel.tsx",
+        "src/components/layout/app-shell.tsx",
+        "src/components/layout/sidebar.tsx",
+        "src/components/layout/organization-switcher.tsx",
+        "src/components/layout/route-context.tsx",
+        "src/components/accounts/sidebar-identity.tsx",
+        "src/components/ui/sidebar.tsx",
+        "src/components/ui/card.tsx",
+        "src/components/ui/alert.tsx",
+        "src/components/ui/button.tsx",
+        "src/components/organizations/organization-intelligence-cockpit.tsx",
+        "src/components/organizations/channel-economics-overview.tsx"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "6b82a4e5bdb263638930208e74577b5a70c818721e57618fc37e9a3d187361ef",
+        "src/app/globals.css": "4302c374707c1d9b586506199f8e3a7f233965765d3782c79c4876779e80fd95",
+        "src/app/(platform)/organizations/[organizationId]/economics/page.tsx": "db709da1d0496db751ebc7bc217fdac1b714f6d163fba4a1cf5bfee3e5e7fa3d",
+        "src/components/economics/channel-economics-panel.tsx": "fd9b3b668774976eb0ffddb0973115fafe8de619eda11d370e202e873262425a",
+        "src/components/economics/channel-economics-client.tsx": "eb81276e3949546744c153e39c156abda4069992ed4b81556d2fa63e6d3f8e34",
+        "src/components/economics/channel-margin-table.tsx": "c8b7b934b3c41e2f28323c0177fa262e1464282a2b439c06f3e417a36d134331",
+        "src/components/economics/grade-badge.tsx": "9c0f63a2d3bcc6c16844fda53ff26d4dbc0c1645316faa1e5d04b21c47e70711",
+        "src/components/economics/margin-waterfall.tsx": "e39b0cd037fd98f2cc30c2444cc41aa73cf8481e919676a5c23107b3f1eb8880",
+        "src/components/economics/trust-panel.tsx": "ff541b4b0af42584db8c81f1000bfb5e501e3903124e42fe3f7827b3e1b668ff",
+        "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+        "src/components/layout/sidebar.tsx": "35b3981551e1d6753c6fefb392d21ab350e05be89fccc0b136402503b2517a39",
+        "src/components/layout/organization-switcher.tsx": "bf3df750ea428345ba6b1d0334de950fcd138df5a5646d3320edab733369736f",
+        "src/components/layout/route-context.tsx": "7d9ef1f1dc401f8224f3e6cff3c315bd735d638478e9101a3d13c59bcb09571a",
+        "src/components/accounts/sidebar-identity.tsx": "0d48e272f77f2393a2f2f1da931bd17b9bb5c6d16183979371d7e62e962d93d1",
+        "src/components/ui/sidebar.tsx": "0fedefcbefab30499e62944a6ab15ed9641ee81ec602974cf3fc00905bd505b6",
+        "src/components/ui/card.tsx": "b2b19796c2454d90a1ceab4cff5db9a171d6d331e6386ff3d1295050563f7d55",
+        "src/components/ui/alert.tsx": "8a3130341608d5d3d4b84e3883071153c00fd67cdf02c433866b0417ac84c2ca",
+        "src/components/ui/button.tsx": "dc0a281924aa9f24eb599a08ab7a9bb114adb3de1711ca5217e8ca4ee1f38afb",
+        "src/components/organizations/organization-intelligence-cockpit.tsx": "43e9795be046a6d8ee6fc405c223f0e72f5b239be90b50c064a272f679bbdaf3",
+        "src/components/organizations/channel-economics-overview.tsx": "f0903fb3f9606b7273ef1a73f7edf946087f32e26dbdc8987f26c9ecefe27563"
+      },
+      "components": [
+        {
+          "name": "AppSidebar",
+          "id": "79f12a44-8782-405e-ba4f-6387ef739e64",
+          "sourcePath": "src/components/layout/sidebar.tsx"
+        }
+      ],
+      "drafts": {
+        "b85dda86-0980-47e9-9e42-532ec382af7f": {
+          "title": "Channels Management",
+          "visualDirection": "organization-owned channel management derived from the selected comparison canvas",
+          "parentDraftId": "3d91fc1d-c011-4bdb-8259-f8bf7a2a5bcd",
+          "currentVersion": 3
+        }
+      },
+      "updatedAt": "2026-08-20T11:16:14Z"
+    },
+    "/organizations/[organizationId]/economics/channels/[channelId]": {
+      "targetKind": "new-ui",
+      "projectId": "4824afb0-94ad-432f-9ea4-eb7a1987bafe",
+      "activeDraftId": "15361ace-cb37-45d1-aed0-0d91efb2944d",
+      "sourceTarget": "/organizations/[organizationId]/economics",
+      "sourceDraftId": "3d91fc1d-c011-4bdb-8259-f8bf7a2a5bcd",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "src/app/globals.css",
+        "src/app/(platform)/organizations/[organizationId]/economics/page.tsx",
+        "src/components/economics/channel-economics-panel.tsx",
+        "src/components/economics/channel-economics-client.tsx",
+        "src/components/economics/channel-margin-table.tsx",
+        "src/components/economics/grade-badge.tsx",
+        "src/components/economics/margin-waterfall.tsx",
+        "src/components/economics/trust-panel.tsx",
+        "src/components/layout/app-shell.tsx",
+        "src/components/layout/sidebar.tsx",
+        "src/components/layout/organization-switcher.tsx",
+        "src/components/layout/route-context.tsx",
+        "src/components/accounts/sidebar-identity.tsx",
+        "src/components/ui/sidebar.tsx",
+        "src/components/ui/card.tsx",
+        "src/components/ui/alert.tsx",
+        "src/components/ui/button.tsx",
+        "src/components/organizations/organization-intelligence-cockpit.tsx",
+        "src/components/organizations/channel-economics-overview.tsx"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "6b82a4e5bdb263638930208e74577b5a70c818721e57618fc37e9a3d187361ef",
+        "src/app/globals.css": "4302c374707c1d9b586506199f8e3a7f233965765d3782c79c4876779e80fd95",
+        "src/app/(platform)/organizations/[organizationId]/economics/page.tsx": "db709da1d0496db751ebc7bc217fdac1b714f6d163fba4a1cf5bfee3e5e7fa3d",
+        "src/components/economics/channel-economics-panel.tsx": "fd9b3b668774976eb0ffddb0973115fafe8de619eda11d370e202e873262425a",
+        "src/components/economics/channel-economics-client.tsx": "eb81276e3949546744c153e39c156abda4069992ed4b81556d2fa63e6d3f8e34",
+        "src/components/economics/channel-margin-table.tsx": "c8b7b934b3c41e2f28323c0177fa262e1464282a2b439c06f3e417a36d134331",
+        "src/components/economics/grade-badge.tsx": "9c0f63a2d3bcc6c16844fda53ff26d4dbc0c1645316faa1e5d04b21c47e70711",
+        "src/components/economics/margin-waterfall.tsx": "e39b0cd037fd98f2cc30c2444cc41aa73cf8481e919676a5c23107b3f1eb8880",
+        "src/components/economics/trust-panel.tsx": "ff541b4b0af42584db8c81f1000bfb5e501e3903124e42fe3f7827b3e1b668ff",
+        "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+        "src/components/layout/sidebar.tsx": "35b3981551e1d6753c6fefb392d21ab350e05be89fccc0b136402503b2517a39",
+        "src/components/layout/organization-switcher.tsx": "bf3df750ea428345ba6b1d0334de950fcd138df5a5646d3320edab733369736f",
+        "src/components/layout/route-context.tsx": "7d9ef1f1dc401f8224f3e6cff3c315bd735d638478e9101a3d13c59bcb09571a",
+        "src/components/accounts/sidebar-identity.tsx": "0d48e272f77f2393a2f2f1da931bd17b9bb5c6d16183979371d7e62e962d93d1",
+        "src/components/ui/sidebar.tsx": "0fedefcbefab30499e62944a6ab15ed9641ee81ec602974cf3fc00905bd505b6",
+        "src/components/ui/card.tsx": "b2b19796c2454d90a1ceab4cff5db9a171d6d331e6386ff3d1295050563f7d55",
+        "src/components/ui/alert.tsx": "8a3130341608d5d3d4b84e3883071153c00fd67cdf02c433866b0417ac84c2ca",
+        "src/components/ui/button.tsx": "dc0a281924aa9f24eb599a08ab7a9bb114adb3de1711ca5217e8ca4ee1f38afb",
+        "src/components/organizations/organization-intelligence-cockpit.tsx": "43e9795be046a6d8ee6fc405c223f0e72f5b239be90b50c064a272f679bbdaf3",
+        "src/components/organizations/channel-economics-overview.tsx": "f0903fb3f9606b7273ef1a73f7edf946087f32e26dbdc8987f26c9ecefe27563"
+      },
+      "components": [
+        {
+          "name": "AppSidebar",
+          "id": "79f12a44-8782-405e-ba4f-6387ef739e64",
+          "sourcePath": "src/components/layout/sidebar.tsx"
+        }
+      ],
+      "drafts": {
+        "15361ace-cb37-45d1-aed0-0d91efb2944d": {
+          "title": "Channel Workspace",
+          "visualDirection": "channel detail workspace using the marketplace-audit chapter index from the alternate direction",
+          "parentDraftId": "3d91fc1d-c011-4bdb-8259-f8bf7a2a5bcd",
+          "currentVersion": 2
+        }
+      },
+      "updatedAt": "2026-08-20T11:16:14Z"
+    },
+    "/organizations/[organizationId]/integrations#report-intake": {
+      "targetKind": "existing-ui",
+      "projectId": "c56ff025-6cff-4837-a596-fa46748ee582",
+      "baselineDraftId": "36eb0389-670f-4907-9b6b-c8c0548a454e",
+      "activeDraftId": "36eb0389-670f-4907-9b6b-c8c0548a454e",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/init/theme.md",
+        "src/components/integrations/report-package-upload.tsx",
+        "src/components/integrations/data-sources-tab.tsx",
+        "src/components/integrations/integration-hub-client.tsx",
+        "src/components/ui/card.tsx",
+        "src/components/ui/button.tsx",
+        "src/components/ui/badge.tsx",
+        "src/components/ui/select.tsx",
+        "src/components/ui/input.tsx",
+        "src/components/ui/label.tsx",
+        "src/components/ui/progress.tsx",
+        "src/lib/utils.ts"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "6b82a4e5bdb263638930208e74577b5a70c818721e57618fc37e9a3d187361ef",
+        ".superdesign/init/theme.md": "858d9670a5c9cd6d826352a9b9d2de14593ebf2d4228b657e274665f580d29d3",
+        "src/components/integrations/report-package-upload.tsx": "d49bd229c73c40f3901d5e77d2c182d45c2da60b7304bfbc5c74f235ab1cbe7f",
+        "src/components/integrations/data-sources-tab.tsx": "2c72bac302fc407863398a99a87cf2042551a806b88209ddb960dbe000d5e7e5",
+        "src/components/integrations/integration-hub-client.tsx": "73ec60e00dbe06847cc9c409bcd59fb58e4a4685b22740e8dc7f655dfc4334b3",
+        "src/components/ui/card.tsx": "b2b19796c2454d90a1ceab4cff5db9a171d6d331e6386ff3d1295050563f7d55",
+        "src/components/ui/button.tsx": "dc0a281924aa9f24eb599a08ab7a9bb114adb3de1711ca5217e8ca4ee1f38afb",
+        "src/components/ui/badge.tsx": "81ae24325209085fabe6b2e8bf81117fc0011c9e915f4c7bbe76e5ac2517f26a",
+        "src/components/ui/select.tsx": "42ee7dc5c577b188a10a2aed44988959db16af3ed44c530544478838fa889e0b",
+        "src/components/ui/input.tsx": "63be4dd718c6f5af0d8317f03aab7662fdbf5a1fd4c9aa682c7c3243e87524e2",
+        "src/components/ui/label.tsx": "f7f52ff0158cc11668bbf92e28fea0da65a3c719974fb3219a1738139f3f9448",
+        "src/components/ui/progress.tsx": "d2e9a1abe9048a1cd1c842a7e49842b249c7b68580ef73e7e5ea5946aaa008d7",
+        "src/lib/utils.ts": "d1f1e0d62cb8d8d1e04c26e14de842d8a151f75812d81b046c65b5d1fe8e4b27"
+      },
+      "components": [],
+      "drafts": {
+        "36eb0389-670f-4907-9b6b-c8c0548a454e": {
+          "title": "Report intake \u2014 recognition led",
+          "visualDirection": "recognition-led four-step intake replacing both raw JSON textareas; known-family confirmation card, guided column mapper for unrecognised exports, separate approvals for meaning and for what gets recorded; platform emerald-on-neutral shadcn language kept unchanged",
+          "currentVersion": 1
+        }
+      },
+      "updatedAt": "2026-08-22T12:08:51.920960Z"
+    }
+  }
+}

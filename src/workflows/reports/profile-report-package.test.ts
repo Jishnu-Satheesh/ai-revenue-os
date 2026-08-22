@@ -133,4 +133,19 @@ describe("governed report package profiling", () => {
     expect(result).toEqual({ outcome: "failed" });
     expect(fail).toHaveBeenCalledWith(expect.objectContaining({ code: "OBJECT_IDENTITY_CHANGED" }));
   });
+
+  it("keeps the column names an operator would need to map an unknown export", async () => {
+    // Only names, and only normalized ones. The values under them are never
+    // read here, and a digest cannot be turned back into a column name — which
+    // is exactly why the names have to be kept alongside it.
+    const sheets = await profileCsvBuffer(
+      Buffer.from("Order Date,Total Sales,Total Orders\n2026-08-01,89.00,3\n"),
+    );
+
+    expect(sheets[0]?.headerCandidates).toEqual([
+      { rowPosition: 1, normalizedHeaders: ["order_date", "total_sales", "total_orders"] },
+    ]);
+    expect(sheets[0]?.headerCandidateDigests[0]?.normalizedHeaderDigests).toHaveLength(3);
+    expect(JSON.stringify(sheets[0]?.headerCandidates)).not.toContain("89");
+  });
 });

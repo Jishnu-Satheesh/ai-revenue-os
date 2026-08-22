@@ -28,6 +28,16 @@ export type SheetManifestInput = {
     digest: string;
     normalizedHeaderDigests: string[];
   }>;
+  /**
+   * The normalized column names of each candidate header row.
+   *
+   * Retained alongside the digests because an operator mapping an export the
+   * platform does not recognise has to see which columns it has, and a digest
+   * is one-way by design. A column name is schema, not data: `customer_name`
+   * as a heading says nothing about any customer, while the values under it
+   * are never read here and never stored.
+   */
+  headerCandidates: Array<{ rowPosition: number; normalizedHeaders: string[] }>;
   hasFormula: boolean;
   hasMergedCells: boolean;
   hasRepeatedHeader: boolean;
@@ -72,7 +82,43 @@ function headerValueDigest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function headerCandidateDigest(rowPosition: number, values: unknown[]) {
+/** Column names are bounded so a pathological sheet cannot bloat the manifest. */
+const MAX_RETAINED_HEADERS = 250;
+
+/** Anything that reads as a figure, however it is punctuated. */
+const LOOKS_NUMERIC = /^[([]?[+-]?[\d,]*\.?\d+([eE][+-]?\d+)?[)\]]?%?$/;
+
+/**
+ * Whether a candidate row is safe to keep the text of.
+ *
+ * In a CSV every cell is a string, so a row of figures satisfies the same test
+ * a header row does and becomes a candidate. Its digests are harmless — they
+ * are one-way — but keeping its text would store the client's actual numbers
+ * under the name "column names", which is precisely what the profile must
+ * never do. A row is only named if not one of its cells reads as a figure.
+ */
+function readsAsLabels(values: readonly string[]): boolean {
+  return values.every((value) => !LOOKS_NUMERIC.test(value.trim()));
+}
+
+type HeaderCandidate = {
+  rowPosition: number;
+  fieldCount: number;
+  digest: string;
+  normalizedHeaderDigests: string[];
+  normalizedHeaders: string[];
+};
+
+function retainedHeaderNames(candidates: readonly HeaderCandidate[]) {
+  return candidates
+    .filter((candidate) => candidate.normalizedHeaders.length > 0)
+    .map((candidate) => ({
+      rowPosition: candidate.rowPosition,
+      normalizedHeaders: candidate.normalizedHeaders,
+    }));
+}
+
+function headerCandidateDigest(rowPosition: number, values: unknown[]): HeaderCandidate | null {
   const candidates = values[0] === null || values[0] === undefined ? values.slice(1) : values;
   const populated = candidates.filter(
     (value) => value !== null && value !== undefined && value !== "",
@@ -86,6 +132,9 @@ function headerCandidateDigest(rowPosition: number, values: unknown[]) {
     fieldCount: headers.length,
     digest: createHash("sha256").update(JSON.stringify(normalizedHeaderDigests)).digest("hex"),
     normalizedHeaderDigests,
+    normalizedHeaders: readsAsLabels(populated as string[])
+      ? headers.slice(0, MAX_RETAINED_HEADERS)
+      : [],
   };
 }
 
@@ -121,7 +170,7 @@ export async function profileCsvBuffer(buffer: Buffer): Promise<SheetManifestInp
   );
   let rowCount = 0;
   let populatedCellCount = 0;
-  const headerCandidateDigests: SheetManifestInput["headerCandidateDigests"] = [];
+  const headerCandidateDigests: HeaderCandidate[] = [];
   let hasRepeatedHeader = false;
   try {
     const parser = Readable.from([buffer]).pipe(
@@ -166,6 +215,7 @@ export async function profileCsvBuffer(buffer: Buffer): Promise<SheetManifestInp
       populatedCellCount,
       expandedBytes: buffer.byteLength,
       headerCandidateDigests,
+      headerCandidates: retainedHeaderNames(headerCandidateDigests),
       hasFormula: false,
       hasMergedCells: false,
       hasRepeatedHeader,
@@ -206,7 +256,7 @@ export async function profilePdfBuffer(buffer: Buffer): Promise<SheetManifestInp
     rowCount += rows.length;
     assertWithinLimit(rowCount, REPORT_PACKAGE_LIMITS.maxRows, "TOO_MANY_ROWS");
 
-    const headerCandidateDigests: SheetManifestInput["headerCandidateDigests"] = [];
+    const headerCandidateDigests: HeaderCandidate[] = [];
     rows.forEach((row, index) => {
       populatedCellCount += populatedValueCount([...row.cells]);
       const candidate = headerCandidateDigest(index + 1, [...row.cells]);
@@ -228,6 +278,7 @@ export async function profilePdfBuffer(buffer: Buffer): Promise<SheetManifestInp
       populatedCellCount: rows.reduce((sum, row) => sum + populatedValueCount([...row.cells]), 0),
       expandedBytes: 0,
       headerCandidateDigests,
+      headerCandidates: retainedHeaderNames(headerCandidateDigests),
       hasFormula: false,
       hasMergedCells: false,
       hasRepeatedHeader: false,
@@ -329,7 +380,7 @@ export async function profileXlsxBuffer(buffer: Buffer): Promise<SheetManifestIn
       if (manifests.length >= REPORT_PACKAGE_LIMITS.maxSheets) fail("TOO_MANY_SHEETS");
       let rows = 0;
       let cells = 0;
-      const headerCandidateDigests: SheetManifestInput["headerCandidateDigests"] = [];
+      const headerCandidateDigests: HeaderCandidate[] = [];
       let hasRepeatedHeader = false;
       let hasFormula = false;
       for await (const row of worksheet) {
@@ -368,6 +419,7 @@ export async function profileXlsxBuffer(buffer: Buffer): Promise<SheetManifestIn
         populatedCellCount: cells,
         expandedBytes: archive.worksheetExpandedBytes.get(reader.id ?? position) ?? 0,
         headerCandidateDigests,
+        headerCandidates: retainedHeaderNames(headerCandidateDigests),
         hasFormula: hasFormula || archiveFlags?.hasFormula === true,
         hasMergedCells: archiveFlags?.hasMergedCells ?? false,
         hasRepeatedHeader,

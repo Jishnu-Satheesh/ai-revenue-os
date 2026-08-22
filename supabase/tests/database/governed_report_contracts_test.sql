@@ -30,7 +30,7 @@ select extensions.ok(
 select extensions.ok(
   pg_catalog.has_function_privilege(
     'authenticated',
-    'public.propose_governed_report_contract(uuid,uuid,uuid,jsonb,text,uuid)',
+    'public.propose_governed_report_contract(uuid,uuid,uuid,jsonb,text,uuid,text,text)',
     'execute'
   ),
   'authenticated administrators use the constrained contract proposal RPC'
@@ -46,7 +46,7 @@ select extensions.ok(
 select extensions.ok(
   not pg_catalog.has_function_privilege(
     'authenticated',
-    'public.complete_governed_report_package_profiling(uuid,uuid,uuid,text,jsonb)',
+    'public.complete_governed_report_package_profiling(uuid,uuid,uuid,text,text,jsonb)',
     'execute'
   ),
   'authenticated users cannot complete profiling with arbitrary fingerprint evidence'

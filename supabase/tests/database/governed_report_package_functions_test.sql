@@ -122,11 +122,11 @@ select extensions.throws_ok(
       'd1000000-0000-4000-8000-000000000601'::uuid,
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      '[{"sheetPosition":1,"sheetName":"CSV","normalizedSheetName":"csv","rowCount":1,"populatedCellCount":1,"expandedBytes":4,"headerCandidates":[{"rowPosition":1,"normalizedHeaders":["raw_value_must_be_rejected"]}],"hasFormula":false,"hasMergedCells":false,"hasRepeatedHeader":false}]'::jsonb
+      '[{"sheetPosition":1,"sheetName":"CSV","normalizedSheetName":"csv","rowCount":1,"populatedCellCount":1,"expandedBytes":4,"headerCandidates":[{"rowPosition":1,"normalizedHeaders":["orphaned_without_a_digest"]}],"hasFormula":false,"hasMergedCells":false,"hasRepeatedHeader":false}]'::jsonb
     )
   $$,
   '22023', 'report sheet manifest is invalid',
-  'profiling rejects a payload carrying legacy raw header evidence'
+  'profiling rejects column names with no digests behind them'
 );
 
 select extensions.lives_ok(
@@ -153,13 +153,19 @@ select extensions.is(
   'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   'profile completion stores the supplied structural fingerprint once'
 );
+-- A profile keeps column names, and nothing from under them. The names let an
+-- operator map an export the platform does not recognise, which a one-way
+-- digest cannot. Every retained name is a normalized identifier: a raw cell
+-- could carry anything the provider typed, and this shape cannot.
 select extensions.ok(
   not exists (
-    select 1 from public.integration_report_sheet_manifests
+    select 1 from public.integration_report_sheet_manifests,
+      lateral jsonb_array_elements(header_candidates) candidate,
+      lateral jsonb_array_elements_text(candidate -> 'normalizedHeaders') header
     where organization_id = 'd1000000-0000-4000-8000-000000000201'::uuid
-      and header_candidates <> '[]'::jsonb
+      and header !~ '^[a-z][a-z0-9_]{0,63}$'
   ),
-  'profile completion never persists legacy raw header evidence'
+  'profile completion retains only normalized column names, never a cell value'
 );
 
 reset role;
