@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload } from "tus-js-client";
 import { useMemo, useState } from "react";
 import {
+  Banknote,
   Calculator,
   FileSpreadsheet,
   Lock,
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ReportIntakeMapping } from "@/components/integrations/report-intake-mapping";
+import { summarizeReportProjection } from "@/domain/reports/projection-copy";
 import {
   Select,
   SelectContent,
@@ -246,6 +248,21 @@ export function ReportPackageUpload({
   const selectedProjectionContract = view.contractVersions.find(
     (version) => version.id === projectionContractVersionId,
   );
+  /**
+   * Whether the selected mapping already has figures nobody has rejected.
+   *
+   * Two live declarations for one mapping would either agree, and be
+   * redundant, or disagree, and leave no honest answer about which one the
+   * ledger follows.
+   */
+  const alreadyProposed = view.projectionVersions.some(
+    (version) =>
+      version.report_contract_version_id === projectionContractVersionId &&
+      view.projectionDecisions.find(
+        (decision) => decision.report_projection_version_id === version.id,
+      )?.decision !== "rejected",
+  );
+
   const projectionSources = useMemo(
     () => approvedProjectionSources(selectedProjectionContract),
     [selectedProjectionContract],
@@ -452,7 +469,14 @@ export function ReportPackageUpload({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...body, idempotencyKey: operationKey("report-projection-proposal") }),
+          // Keyed to the mapping rather than to the click. The declaration for
+          // an approved mapping is always the same document, so a second click
+          // replays the first instead of stacking an identical version beside
+          // it. A random key per click is what produced three approved copies.
+          body: JSON.stringify({
+            ...body,
+            idempotencyKey: `report-projection-proposal:${contractVersionId}`,
+          }),
         },
       );
     },
@@ -1070,10 +1094,20 @@ export function ReportPackageUpload({
               const decision = view.projectionDecisions.find(
                 (item) => item.report_projection_version_id === version.id,
               );
+              const contractVersion = view.contractVersions.find(
+                (candidate) => candidate.id === version.report_contract_version_id,
+              );
+              // The last thing a person reads before figures enter the ledger.
+              // A digest proves two documents are the same and is useless for
+              // deciding whether to approve one.
+              const summary = summarizeReportProjection(
+                version.projection_document,
+                contractVersion?.mapping_document,
+              );
               return (
                 <div key={version.id} className="mt-2 rounded-lg border p-3 text-sm">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">Projection v{version.version}</span>
+                    <span className="font-medium">Figures v{version.version}</span>
                     <Badge variant={decision?.decision === "rejected" ? "destructive" : "outline"}>
                       {decision?.decision === "approved"
                         ? "Approved"
@@ -1082,8 +1116,44 @@ export function ReportPackageUpload({
                           : "Awaiting approval"}
                     </Badge>
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Declaration digest {version.projection_digest.slice(0, 12)}… · exact-range only
+                  {summary ? (
+                    <div className="mt-2 space-y-2">
+                      <ul className="space-y-1">
+                        {summary.entries.map((entry) => (
+                          <li key={entry.label} className="flex items-start gap-2">
+                            <Banknote className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                            <span>
+                              <span className="font-medium capitalize">{entry.label}</span>
+                              <span className="text-muted-foreground">
+                                {" — "}
+                                {summary.shape}
+                                {entry.sourceColumn ? `, from ${entry.sourceColumn}` : ""}
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      {summary.checkedAgainst ? (
+                        <p className="text-xs text-muted-foreground">
+                          Checked against {summary.checkedAgainst}. The import stops if the rows do
+                          not reach it.
+                        </p>
+                      ) : null}
+                      {summary.mayHaveGaps ? (
+                        <p className="text-xs text-muted-foreground">
+                          Days the provider left blank stay blank. They are not recorded as zero, so
+                          a quiet day and a day nobody reported on never look the same.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      This declaration was written in a form this screen cannot read back. Reject it
+                      and map the upload again rather than approving what you cannot see.
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Declaration digest {version.projection_digest.slice(0, 12)}…
                   </p>
                   {canApproveContract && !decision ? (
                     <div className="mt-2 flex gap-2">
@@ -1094,7 +1164,7 @@ export function ReportPackageUpload({
                         }
                         disabled={decideProjection.isPending}
                       >
-                        Approve projection
+                        Approve these figures
                       </Button>
                       <Button
                         size="sm"
@@ -1151,9 +1221,17 @@ export function ReportPackageUpload({
                   The figures follow from the mapping that was approved, so nothing here can differ
                   from what an owner already agreed to.
                 </p>
+                {alreadyProposed ? (
+                  <p className="text-xs text-muted-foreground">
+                    This mapping already has a set of figures above. Reject that one before
+                    proposing another, so there is never a question about which one governs.
+                  </p>
+                ) : null}
                 <Button
                   size="sm"
-                  disabled={proposeProjection.isPending || !projectionContractVersionId}
+                  disabled={
+                    proposeProjection.isPending || !projectionContractVersionId || alreadyProposed
+                  }
                   onClick={() => proposeProjection.mutate(projectionContractVersionId)}
                 >
                   {proposeProjection.isPending ? "Proposing…" : "Propose the figures to read"}
