@@ -8,6 +8,7 @@ import {
   type ReportContractDocument,
 } from "@/domain/reports/contracts";
 import { parsePeriodKey, periodStartFor } from "@/domain/reports/period-key";
+import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
   ReportControlTotalMismatch,
   ReportProjectionError,
@@ -46,14 +47,42 @@ const reportProjectionOutputSchema = z
 const projectionControlTotalSchema = z
   .object({
     outputKey: normalizedIdentifierSchema,
-    /** Minor units of the declaration's currency, signed. */
-    statedTotalMinorUnits: z.string().regex(/^-?(0|[1-9]\d{0,17})$/),
+    /**
+     * Where the figure comes from.
+     *
+     * `operator_stated` is a figure read off the provider's separate statement
+     * and recorded at approval time — Keeta invoices a month's credit sales and
+     * repeats it nowhere in the workbook. `sheet_totals_row` is the total the
+     * file states about itself, which EatEasily and Smile both render.
+     */
+    source: z.enum(["operator_stated", "sheet_totals_row"]).default("operator_stated"),
+    /** Minor units of the declaration's currency, signed. Operator-stated only. */
+    statedTotalMinorUnits: z.string().regex(/^-?(0|[1-9]\d{0,17})$/).optional(),
     /** Minor units. Zero means the figures have to agree exactly. */
     toleranceMinorUnits: z.number().int().min(0).max(100_000_000),
-    /** Which statement the figure was read from. Kept for the audit trail. */
-    statedSource: z.string().min(1).max(200),
+    /** Which statement the figure was read from. Operator-stated only. */
+    statedSource: z.string().min(1).max(200).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((control, context) => {
+    const stated = control.source === "operator_stated";
+    if (stated && (control.statedTotalMinorUnits === undefined || control.statedSource === undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["statedTotalMinorUnits"],
+        // An unattributed figure is not evidence, and a figure with no value
+        // cannot be checked against anything.
+        message: "An operator-stated total needs both the figure and the statement it came from.",
+      });
+    }
+    if (!stated && (control.statedTotalMinorUnits !== undefined || control.statedSource !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["statedTotalMinorUnits"],
+        message: "A total taken from the sheet cannot also be stated by hand.",
+      });
+    }
+  });
 
 const exactRangeDocumentSchema = z
   .object({
@@ -364,32 +393,36 @@ function negateIntegerString(value: string): string {
  * import that is wrong about one figure is not admitted because the rest agreed,
  * and the first mismatch is the one an operator should look at.
  */
+type DeclaredControlTotal = z.output<typeof projectionControlTotalSchema>;
+
 function reconcileControlTotals(
-  controls: readonly {
-    outputKey: string;
-    statedTotalMinorUnits: string;
-    toleranceMinorUnits: number;
-    statedSource: string;
-  }[],
+  controls: readonly DeclaredControlTotal[],
   projectedByOutputKey: ReadonlyMap<string, string>,
+  /** Figures read from the sheet's own totals row, keyed by output. */
+  sheetTotalsByOutputKey: ReadonlyMap<string, string>,
 ): ControlTotalReconciliation[] {
   return controls.map((control) => {
+    const fromSheet = control.source === "sheet_totals_row";
+    const statedMinorUnits = fromSheet
+      ? sheetTotalsByOutputKey.get(control.outputKey)
+      : control.statedTotalMinorUnits;
+    // The declaration named a totals row the file did not yield a figure in.
+    // Comparing against nothing would report a pass nobody checked.
+    if (statedMinorUnits === undefined) throw new ReportProjectionError("TOTALS_ROW_NOT_RESOLVED");
+    const statedSource = fromSheet ? "sheet totals row" : (control.statedSource ?? "");
     // An output that produced no figure at all is not "zero" anywhere else in
     // this engine, but a stated total is an assertion that the file carries
     // figures. Reporting the whole stated amount as the gap describes that
     // truthfully, and the comparison below refuses the import.
     const projected = projectedByOutputKey.get(control.outputKey) ?? "0";
-    const difference = addIntegerStrings(
-      projected,
-      negateIntegerString(control.statedTotalMinorUnits),
-    );
+    const difference = addIntegerStrings(projected, negateIntegerString(statedMinorUnits));
     const reconciliation: ControlTotalReconciliation = {
       outputKey: control.outputKey,
-      statedMinorUnits: control.statedTotalMinorUnits,
+      statedMinorUnits,
       projectedMinorUnits: projected,
       differenceMinorUnits: difference,
       toleranceMinorUnits: control.toleranceMinorUnits,
-      statedSource: control.statedSource,
+      statedSource,
     };
     const overshoot = compareAbsolute(
       difference.replace("-", ""),
@@ -398,7 +431,7 @@ function reconcileControlTotals(
     if (overshoot > 0) {
       throw new ReportControlTotalMismatch(
         control.outputKey,
-        control.statedTotalMinorUnits,
+        statedMinorUnits,
         projected,
         difference,
         control.toleranceMinorUnits,
@@ -406,6 +439,31 @@ function reconcileControlTotals(
     }
     return reconciliation;
   });
+}
+
+/**
+ * Which row of this sheet the provider rendered as its own total, if any.
+ *
+ * A declared totals row that cannot be pinned to exactly one row stops the
+ * import. The alternative is summing the total in with the data, which doubles
+ * every figure and looks entirely successful while doing it.
+ */
+function resolveTotalsRowIndex(
+  rule: ReportContractDocument["sheets"][number],
+  rows: readonly (readonly unknown[])[],
+): number | null {
+  if (!rule.totalsRow) return null;
+  const header = rows[rule.headerRow - 1];
+  if (!header) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
+  const headers = sourceHeaderMap(header);
+  const fieldColumns = new Map<string, number>();
+  for (const field of rule.fields) {
+    const index = headers.get(field.sourceHeader);
+    if (index !== undefined) fieldColumns.set(field.canonicalField, index);
+  }
+  const found = findTotalsRow({ rule, rows, fieldColumns });
+  if (found.outcome === "found") return found.rowIndex;
+  throw new ReportProjectionError("TOTALS_ROW_NOT_RESOLVED");
 }
 
 function findSourceField(
@@ -434,6 +492,8 @@ export function projectExactRangeMetrics(input: {
 }): ExactRangeProjectionResult {
   const sheetsByName = new Map(input.sheets.map((sheet) => [sheet.normalizedSheetName, sheet]));
   const outputs: ExactRangeProjectionOutput[] = [];
+  const totalsRowIndexes = new Map<string, number | null>();
+  const sheetTotals = new Map<string, string>();
 
   for (const output of input.document.outputs) {
     const { sheet: rule, field } = findSourceField(input.contract, output);
@@ -444,9 +504,17 @@ export function projectExactRangeMetrics(input: {
     const columnIndex = sourceHeaderMap(header).get(field.sourceHeader);
     if (columnIndex === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
 
+    if (!totalsRowIndexes.has(output.normalizedSheetName)) {
+      totalsRowIndexes.set(output.normalizedSheetName, resolveTotalsRowIndex(rule, source.rows));
+    }
+    const totalsRowIndex = totalsRowIndexes.get(output.normalizedSheetName) ?? null;
+
     let total = "0";
     let contributorCount = 0;
     for (let rowIndex = rule.dataStartRow - 1; rowIndex < source.rows.length; rowIndex += 1) {
+      // The provider's own total is set aside, never summed. Adding it to the
+      // rows it totals would double the figure and look like a clean import.
+      if (rowIndex === totalsRowIndex) continue;
       const value = source.rows[rowIndex]?.[columnIndex];
       // An exact-range sum covers the whole declared period, so a row that said
       // nothing leaves the total unknowable rather than merely smaller.
@@ -458,6 +526,13 @@ export function projectExactRangeMetrics(input: {
         output.valueKind === "money" ? moneyMinorUnits(value, input.declaredCurrency) : integer(value),
       );
       contributorCount += 1;
+    }
+
+    if (totalsRowIndex !== null && output.valueKind === "money") {
+      const stated = source.rows[totalsRowIndex]?.[columnIndex];
+      if (!isAbsentValue(stated, field.absentMarkers)) {
+        sheetTotals.set(output.key, moneyMinorUnits(stated, input.declaredCurrency));
+      }
     }
 
     outputs.push({
@@ -479,6 +554,7 @@ export function projectExactRangeMetrics(input: {
     controlTotals: reconcileControlTotals(
       input.document.controlTotals,
       new Map(outputs.map((output) => [output.key, output.valueNumerator])),
+      sheetTotals,
     ),
   };
 }
@@ -570,12 +646,27 @@ export function projectPeriodGrainMetrics(input: {
     return { output, index, absentMarkers: field.absentMarkers };
   });
 
+  const totalsRowIndex = resolveTotalsRowIndex(rule, source.rows);
+  const sheetTotals = new Map<string, string>();
+  if (totalsRowIndex !== null) {
+    for (const { output, index, absentMarkers } of columns) {
+      if (output.valueKind !== "money") continue;
+      const stated = source.rows[totalsRowIndex]?.[index];
+      if (isAbsentValue(stated, absentMarkers)) continue;
+      sheetTotals.set(output.key, moneyMinorUnits(stated, input.declaredCurrency));
+    }
+  }
+
   // Keyed by period then output, so the same period appearing on two rows sums
   // rather than producing two observations that later collide.
   const totals = new Map<string, Map<string, { total: string; contributors: number }>>();
   let absentRowCount = 0;
 
   for (let rowIndex = rule.dataStartRow - 1; rowIndex < source.rows.length; rowIndex += 1) {
+    // The provider's own total is not a period, and it carries no date to be
+    // one. Reading it as data would both double the figures and fail the date
+    // parser on whatever label sits in the period column.
+    if (rowIndex === totalsRowIndex) continue;
     const row = source.rows[rowIndex];
     if (!row) continue;
     // Padding is a structurally empty row. An absent marker is a statement
@@ -648,6 +739,10 @@ export function projectPeriodGrainMetrics(input: {
   return {
     observations,
     absentRowCount,
-    controlTotals: reconcileControlTotals(input.document.controlTotals, projectedByOutputKey),
+    controlTotals: reconcileControlTotals(
+      input.document.controlTotals,
+      projectedByOutputKey,
+      sheetTotals,
+    ),
   };
 }

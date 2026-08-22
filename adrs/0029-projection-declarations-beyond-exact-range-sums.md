@@ -37,14 +37,32 @@ The declaration language gains exactly three capabilities, and no more:
   arithmetic rather than trust, and it is what allows a PDF-derived grid to be
   admitted at all under ADR 0028.
 
-  The figure is recorded in the declaration by the operator at approval time,
-  read from the provider's own statement, and attributed to that statement by
-  name. It is not located inside the data file: profiling all thirteen of the
-  pilot client's exports found no in-sheet totals row anywhere, while Keeta
-  states January's credit sales and invoiced commission on a separate commission
-  invoice that no import ever compares against. A locator that hunts for a
-  labelled total row inside the workbook would be built against no evidence and
-  is therefore not built.
+  A total comes from one of two places, declared explicitly. It may be recorded
+  in the declaration by the operator at approval time, read from the provider's
+  own separate statement and attributed to that statement by name: Keeta states
+  January's credit sales and invoiced commission on a commission invoice and
+  repeats them nowhere in the workbook. Or it may be the total the file states
+  about itself, in a totals row the contract declares.
+
+  Both exist in the pilot client's evidence, and the second was found late. The
+  first thirteen exports profiled carried no in-sheet totals row, and this ADR
+  originally recorded that a locator for one would be built against nothing.
+  EatEasily's five sales exports — the same platform Smile serves under another
+  name — reversed it: three of them render a totals row, with the literal word
+  `Total` in whatever column precedes the first figure, and in the branch-wise
+  report it is the first data row rather than the last. Those rows are currently
+  the only row in each file, because the client went live in August 2026 and the
+  January exports are empty. With real data behind them an exact-range sum would
+  have added the total to the rows it totals and doubled every figure, while
+  reporting a clean import.
+
+  A declared totals row must resolve to exactly one row. None means the export
+  changed shape or this is not the file the contract was approved for; several
+  means the label does not identify a row, and choosing the first, the last, or
+  the largest would be a guess dressed as a rule. Both are
+  `TOTALS_ROW_NOT_RESOLVED`. The row is set aside during validation as well as
+  projection, because a provider leaves fields blank on it that are required of
+  every real row.
 
   Money only, and one total per output. A count total is the same arithmetic and
   will be admitted when a provider's statement asks for one. Two totals for one

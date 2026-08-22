@@ -10,6 +10,7 @@ import {
   createReportProjectionResultDigest,
   projectExactRangeMetrics,
   ReportControlTotalMismatch,
+  ReportProjectionError,
   reportProjectionDocumentSchema,
 } from "@/domain/reports/projection";
 
@@ -111,6 +112,7 @@ export type ReportProjectionFailureCode =
   | "UNREADABLE_WORKBOOK"
   | "CONTROL_TOTAL_MISMATCH"
   | "PROJECTION_OUTPUT_KIND_UNSUPPORTED"
+  | "TOTALS_ROW_NOT_RESOLVED"
   | "PROJECTION_PROCESSING_FAILED";
 
 export class ReportProjectionFailure extends Error {
@@ -296,7 +298,9 @@ export async function runReportPackageProjection(
         ? error.code
         : error instanceof ReportControlTotalMismatch
           ? "CONTROL_TOTAL_MISMATCH"
-          : "PROJECTION_PROCESSING_FAILED";
+          : error instanceof ReportProjectionError && error.code === "TOTALS_ROW_NOT_RESOLVED"
+            ? "TOTALS_ROW_NOT_RESOLVED"
+            : "PROJECTION_PROCESSING_FAILED";
     if (error instanceof ReportControlTotalMismatch) {
       // The difference is the only part an operator can act on, and there is no
       // column for it, so it goes to the log with the identifiers that make it

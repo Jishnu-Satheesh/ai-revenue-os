@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(24);
+select extensions.plan(25);
 
 select extensions.has_table('public', 'report_projection_versions', 'immutable projection declarations are versioned');
 select extensions.has_table('public', 'report_projection_decisions', 'owner decisions are append-only');
@@ -43,6 +43,10 @@ select extensions.lives_ok(
 select extensions.lives_ok(
   $$ select public.fail_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'PROJECTION_OUTPUT_KIND_UNSUPPORTED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') $$,
   'failure function accepts an unsupported projection target'
+);
+select extensions.lives_ok(
+  $$ select public.fail_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'TOTALS_ROW_NOT_RESOLVED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') $$,
+  'failure function accepts an unresolvable totals row'
 );
 select extensions.throws_ok(
   $$ select public.fail_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'CONTROL_TOTAL_INVENTED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') $$,

@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import { parse } from "csv-parse";
 
 import { isAbsentValue } from "@/domain/reports/absent";
+import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
   normalizeReportStructureIdentifier,
   reportContractDocumentSchema,
@@ -324,7 +325,19 @@ function validateSheets(
       }
     }
 
-    for (const row of sheet.rows.slice(rule.dataStartRow - 1)) {
+    // The provider's own total is set aside here as well as in projection.
+    // EatEasily leaves Total Orders and Total Commission blank on that row, so
+    // validating it as data would fail the whole package on required fields
+    // that were never meant to be filled. A totals row the file does not carry
+    // is not failed here: projection is where that decision belongs, and it
+    // makes it with a code of its own.
+    const totalsRow = findTotalsRow({ rule, rows: sheet.rows, fieldColumns });
+    const totalsRowIndex = totalsRow.outcome === "found" ? totalsRow.rowIndex : null;
+
+    for (let rowIndex = rule.dataStartRow - 1; rowIndex < sheet.rows.length; rowIndex += 1) {
+      if (rowIndex === totalsRowIndex) continue;
+      const row = sheet.rows[rowIndex];
+      if (!row) continue;
       for (const field of rule.fields) {
         const column = fieldColumns.get(field.canonicalField);
         if (column === undefined) continue;

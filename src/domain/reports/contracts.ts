@@ -74,6 +74,28 @@ const contractSheetSchema = z
     allowFormula: z.boolean(),
     allowMergedCells: z.boolean(),
     fields: z.array(contractFieldSchema).min(1).max(250),
+    /**
+     * A row the provider renders as the sheet's own total rather than as data.
+     *
+     * EatEasily and Smile — the same platform under two names — put one in
+     * every sales export, with the literal word `Total` in whatever column
+     * precedes the first figure. It is not always at the bottom: in the
+     * branch-wise report it is the first data row.
+     *
+     * It has to be found and set aside, not summed. A till receipt whose last
+     * line is the total charges the customer twice if you add up every line,
+     * and that is exactly what an exact-range sum over these files would do.
+     * Once found it is also the honest place to check the import against, so a
+     * projection may reconcile to it. See ADR 0029.
+     */
+    totalsRow: z
+      .object({
+        canonicalField: normalizedIdentifierSchema,
+        /** Matched against the cell after the same normalization headers get. */
+        label: z.string().trim().min(1).max(64),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((sheet, ctx) => {
@@ -94,6 +116,13 @@ const contractSheetSchema = z
         });
       }
       fields.add(field.canonicalField);
+    }
+    if (sheet.totalsRow && !fields.has(sheet.totalsRow.canonicalField)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["totalsRow"],
+        message: "The totals row must be labelled in a field this sheet binds.",
+      });
     }
   });
 
