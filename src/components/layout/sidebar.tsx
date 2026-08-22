@@ -55,6 +55,7 @@ const workspaceEntries: readonly WorkspaceEntry[] = [
   },
   { label: "Campaigns", icon: Megaphone, path: (id) => `/organizations/${id}/campaigns` },
   { label: "Business Memory", icon: BrainCircuit, path: (id) => `/organizations/${id}/memory` },
+  { label: "Channels", icon: Waypoints, path: (id) => `/organizations/${id}/channels` },
   { label: "Channel economics", icon: Coins, path: (id) => `/organizations/${id}/economics` },
   { label: "Integration Hub", icon: Cable, path: (id) => `/organizations/${id}/integrations` },
   { label: "Guided onboarding", icon: Compass, path: (id) => `/organizations/${id}/onboarding` },

@@ -9,12 +9,14 @@ import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import {
   buildDataSourceStoragePath,
-  buildDeterministicUploadId,
-  buildOperationSubkey,
-  csvContentDigest,
   parseAndValidateCsv,
   validateColumnMapping,
 } from "@/modules/integrations/application/csv";
+import {
+  buildDeterministicUploadId,
+  buildOperationSubkey,
+  csvContentDigest,
+} from "@/modules/integrations/application/csv-server";
 
 const manualSourceRequestSchema = z
   .object({

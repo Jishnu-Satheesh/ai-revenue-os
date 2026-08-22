@@ -1,6 +1,6 @@
-# Revenue Intelligence System — Onboarding Design System
+# AI Revenue OS — Product Design System
 
-AI Revenue OS is a calm, financially serious, multi-tenant operator cockpit. The onboarding user is an agency operator constructing trustworthy context for a client organization. Preserve the existing New York shadcn/Radix language, semantic CSS variables, compact-professional density, restrained borders/shadows, and Arial system typography. Do not invent gradients, decorative illustrations, consumer-app patterns, or unrelated colors.
+AI Revenue OS is a calm, financially serious, multi-tenant operator cockpit. The onboarding user is an agency operator constructing trustworthy context for a client organization. Preserve the existing New York shadcn/Radix language, semantic CSS variables, compact-professional density, restrained borders/shadows, and Manrope typography from the current root layout. Do not invent gradients, decorative illustrations, consumer-app patterns, or unrelated colors.
 
 The approved onboarding direction is a hybrid: a persistent section rail showing all ten sections and a focused work panel with a compact six-phase stepper. The active panel uses animated directional slide transitions and smooth dynamic height, but motion must be short, purposeful, and disabled or reduced under `prefers-reduced-motion`. Each step supports save/resume, unknown values, source/verification status, client follow-up requests, and clear completion.
 
@@ -24,7 +24,7 @@ The three generation profiles are explicit operator controls: `Brand restricted`
 
 Mobile is a review surface, not a compressed desktop editor: one creative at a time, thumb-reachable direction switching, readable caption and hashtags, expandable readiness/spend/measurement sections, and a sticky attestation-plus-approve area. Telegram review must visually match this contract while remaining operator control only.
 
-Use only the repo's system sans typography, semantic CSS variables, neutral/emerald chart ramp, compact shadcn `Card`, `Tabs`, `Badge`, `Alert`, `Button`, `Dialog`, `Sheet`, `Field`, `Select`, `Textarea`, `ToggleGroup`, `Progress`, and `ScrollArea` patterns. No gradients, glassmorphism, decorative serif type, neon AI styling, invented provider capability, fabricated business result, or colour-only state.
+Use only the repo's Manrope sans typography, semantic CSS variables, neutral/emerald chart ramp, compact shadcn `Card`, `Tabs`, `Badge`, `Alert`, `Button`, `Dialog`, `Sheet`, `Field`, `Select`, `Textarea`, `ToggleGroup`, `Progress`, and `ScrollArea` patterns. No gradients, glassmorphism, decorative serif type, neon AI styling, invented provider capability, fabricated business result, or colour-only state.
 
 ## Organization Overview extension
 
@@ -37,3 +37,32 @@ Compose the main story from real module read models. Channel economics shows gro
 Use restrained visual hooks: compact emerald chart marks, comparison bars, sparklines only where a real time series exists, progressive disclosure, meaningful icons, and short directional transitions. Keep the application chrome neutral and let information hierarchy create energy. Use no invented KPI, fake trend, decorative AI orb, chat-first layout, gradient, glass effect, or dense wall of equal-weight cards. Mobile prioritizes the briefing, attention queue, and one module summary at a time; management controls remain secondary and touch-friendly.
 
 The approved Overview composition is the Performance and Readiness Intelligence Cockpit. Place a full-width six-section Digital Twin readiness strip beneath organization context, then use an 8/4 desktop grid: Strategic Briefing, a tabbed shadcn Channel Economics chart, progressive Current Digital Twin Data, and three preview Campaign ideas in the primary column; Action Required, enabled Integration Health, and Recent Activity in the rail. The economics tabs are Trend, Channel comparison, and Data trust. Management forms remain collapsed and role-gated below the client-readable story.
+
+## Governed Channel Intelligence extension
+
+Channel Economics is the organization's marketplace and sales-channel audit workspace, not a generic KPI dashboard. It must make commercially important comparisons obvious while preserving complete evidence and uncertainty. Use the existing fixed AppShell, floating organization sidebar, route breadcrumb, compact cards, Manrope typography, neutral surfaces, and emerald chart ramp.
+
+The portfolio landing leads with global period, branch, and currency controls; a compact trusted KPI strip; a sortable channel matrix; revenue-versus-margin comparison; compatible trend small multiples; marketplace-take comparison; prioritized findings and recommendations; and visible report/data trust. Noon-style exact-range evidence must never look like a daily trend. Missing, partial, stale, reported-versus-derived, currency-mismatched, and ambiguous-overlap states remain visible in text.
+
+The comparison-led direction uses a modular full-analysis grid with a sticky evidence rail. The audit-report direction uses section-indexed analytical chapters. Both expose every applicable analysis on the main workspace—priority changes order and prominence, never visibility. Every number, chart mark, finding, and recommendation has a clear affordance to open calculation, definition, package/sheet/column, period, quality, reconciliation, and limitations.
+
+Channel detail uses sticky navigation for Summary, Money, Funnel, Operations, Items, Promotions, Customer Voice, Recommendations, and Reports & Trust. Recommendations permit acknowledge, dismiss with reason, or mark planned; no design may show an execute, publish, price-change, promotion-change, or money-moving action. Channels management explicitly separates business identity from provider connection or campaign capability.
+
+Prefer dense-but-readable analytical hierarchy: 12-column desktop grid, 8px spacing rhythm, short labels, aligned numbers, compact legends, accessible chart annotations, and progressive evidence disclosure. Mobile presents one analytical story at a time with sticky filters and evidence in a Sheet. Do not use gradients, glass effects, neon accents, decorative AI imagery, fabricated benchmarks, fake trend lines, unsupported savings, or colour-only status.
+
+### Concrete platform composition language
+
+Channel Intelligence must look like a native extension of the existing Organization Intelligence Cockpit, not a standalone BI template. Reuse these concrete source patterns:
+
+- Start the page with the platform's icon-led organization header: an 11-by-11 rounded accent tile containing a Lucide icon, a 3xl semibold title, a semantic status badge beside the title, and one concise muted context line. Keep organization scope in the existing breadcrumb and avoid inventing a second application header.
+- Build the desktop story on the same 12-column rhythm as the Overview: the primary analytical narrative occupies eight or nine columns and the attention/trust rail occupies four or three. Align card edges across both columns and use `gap-6`; do not create a detached dark floating inspector.
+- Use real shadcn card anatomy. Every major module has a purposeful `CardHeader`, title, one-line description, optional outline/secondary badge, `CardContent`, and only a necessary footer. Nested evidence/finding rows use rounded-lg borders and compact icon tiles, not unstructured white space.
+- Give hierarchy visual energy through meaning: emerald chart marks, small primary-tint icon tiles, status badges, compact legends, progress bars, tabs, and subtle `bg-primary/[0.03]` emphasis for the most important evidence briefing. Do not color entire cards merely for decoration.
+- Treat the top analytical summary as an evidence briefing, not four anonymous KPI boxes. Pair commercially important totals with trust status and a plain-language conclusion. Each metric retains an inspect-evidence affordance.
+- Use the existing Channel Economics chart grammar: tabular values; Chart 1/2/4 emerald ramp; solid measured series; dashed indicative/upper-bound series; accessible legends; restrained Cartesian grids; chart summaries; and clear no-data panels inside a chart frame.
+- Use Tabs or a compact segmented control where several analytical views share one narrative. The portfolio matrix remains immediately visible; secondary analyses form a deliberate modular sequence rather than a wall of equal-weight cards.
+- The right rail follows the Overview's `Action Required` and `Integration Health` patterns: normal bordered cards, warning/success icons, plain-language limitations, and review-only recommendation triage. Evidence detail opens in a Sheet or Dialog from an explicit `Inspect evidence` control.
+- Empty states must still feel designed: icon media, concise title, explanation, and the next safe data action when authorized. Avoid filling the screen with repeated em dashes, generic placeholder sentences, or skeletal boxes that make the product look unfinished.
+- Use labels that match the platform: `Channel Economics`, `Evidence briefing`, `Data trust`, `Findings & recommendations`, `Reports & trust`, `Inspect evidence`, `Acknowledge`, `Dismiss with reason`, and `Mark planned`. Never use `Action Queue`, `Evidence Node`, or generic bracketed placeholder copy.
+
+The intended result is calm and financially serious, but not barren: one strong page story, visibly grouped modules, meaningful emerald data visualization, trustworthy status treatment, and progressive evidence detail inside the established AppShell.

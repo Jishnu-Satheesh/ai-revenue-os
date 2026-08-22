@@ -123,6 +123,39 @@
   }
 }
 
+.cn-toast-success,
+.cn-toast-error,
+.cn-toast-info {
+  color: white !important;
+}
+
+.cn-toast-success {
+  background-color: var(--success) !important;
+  border-color: var(--success) !important;
+}
+
+.cn-toast-success * {
+  color: white !important;
+}
+
+.cn-toast-error {
+  background-color: var(--danger) !important;
+  border-color: var(--danger) !important;
+}
+
+.cn-toast-error * {
+  color: white !important;
+}
+
+.cn-toast-info {
+  background-color: #000 !important;
+  border-color: #000 !important;
+}
+
+.cn-toast-info * {
+  color: white !important;
+}
+
 .dark {
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);

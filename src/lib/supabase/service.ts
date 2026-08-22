@@ -65,6 +65,14 @@ export function createIntegrationWorkerServiceClient(): SupabaseClient<Database>
   });
 }
 
+/** Report profiling runs only in Trigger after its strict task payload is parsed. */
+export function createReportWorkerServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Report profiling workers");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
+
 /**
  * Trigger worker-only client for Business Memory. This must only be created
  * after the task payload has passed its strict UUID validation.

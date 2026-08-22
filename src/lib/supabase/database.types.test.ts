@@ -130,6 +130,19 @@ const UNTYPED_TABLES = new Set([
   "campaign_budget_reservations",
   "provider_receipts",
   "tool_invocations",
+  // Exact-range report projection writes only through claim-fenced RPCs. The
+  // hand-maintained UI types expose its safe read surface; this guard keeps the
+  // migration parser from implying browser writes.
+  "report_projection_versions",
+  "report_projection_decisions",
+  "report_projection_bindings",
+  "integration_report_projection_runs",
+  "exact_range_metric_observations",
+  "report_projection_lineage",
+  // Reconciliation writes and resolution outcomes are confined to claim-fenced
+  // RPCs; public row types model the safe read projection only.
+  "report_projection_reconciliations",
+  "report_projection_reconciliation_resolutions",
 ]);
 
 /**
@@ -140,6 +153,12 @@ const UNTYPED_TABLES = new Set([
 const PRIVATE_RPC_ONLY_TABLES = new Set([
   "decision_cycle_operations",
   "integration_credentials",
+  "integration_report_profile_operations",
+  "integration_report_validation_operations",
+  "integration_report_write_operations",
+  "report_contract_write_operations",
+  "integration_report_projection_operations",
+  "report_projection_write_operations",
   "tool_gateway_operations",
 ]);
 

@@ -116,7 +116,7 @@ Because staging is shared, a destructive migration affects everyone. Prefer addi
 ## Integration Hub
 
 The Integration Hub lives at `/organizations/:organizationId/integrations` and covers connection
-health, the provider catalog, manual/CSV data sources, and activity.
+health, the provider catalog, manual/CSV data sources, governed report-package intake, and activity. Governed report packages upload XLSX/CSV directly to private Storage with declared channel, outlet, period, and currency context. The worker records value-free schema structure and an owner/admin can save and approve an exact declarative mapping; it still does not import or derive economics.
 
 V1 is deliberately narrow: Google Business Profile runs from a deterministic fixture, no provider
 credential is stored, and there are no provider writes or webhooks. Real OAuth stays disabled until

@@ -47,3 +47,27 @@ export function isIntegrationHubEnabled(
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
 }
+
+export function isGovernedReportValidationEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(
+    env.GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS,
+  ),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+export function isGovernedReportProjectionEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(
+    env.GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS,
+  ),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+export function assertGovernedReportProjectionEnabled(organizationId: string): void {
+  if (!isGovernedReportProjectionEnabled(organizationId)) {
+    throw new DomainError("FEATURE_NOT_AVAILABLE", "Deterministic report projection is not enabled for this organization.");
+  }
+}

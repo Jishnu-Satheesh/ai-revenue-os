@@ -25,12 +25,14 @@ import {
  * asserts the live rows, so both ends are covered.
  */
 
-const MIGRATION = resolve(
-  process.cwd(),
+const MIGRATIONS = [
   "supabase/migrations/20260817141000_permission_catalogue.sql",
-);
+  "supabase/migrations/20260820112520_governed_channel_identity_foundation.sql",
+] as const;
 
-const sql = readFileSync(MIGRATION, "utf8");
+const sql = MIGRATIONS.map((migration) =>
+  readFileSync(resolve(process.cwd(), migration), "utf8"),
+).join("\n");
 
 /** Reads SQL string literals out of one `(...)` tuple, unescaping `''`. */
 function parseTuple(inner: string): string[] {
@@ -62,11 +64,7 @@ function parseTuple(inner: string): string[] {
 }
 
 /** The tuples of the `values` block that follows `header`, up to its `;`. */
-function seededRows(header: string): string[][] {
-  const start = sql.indexOf(header);
-  if (start === -1) throw new Error(`Seed block not found: ${header}`);
-
-  const body = sql.slice(start + header.length);
+function seededRowsFrom(body: string): string[][] {
   const rows: string[][] = [];
   let index = 0;
   let depth = 0;
@@ -101,6 +99,21 @@ function seededRows(header: string): string[][] {
     index += 1;
   }
   return rows;
+}
+
+function seededRows(header: string): string[][] {
+  const blocks: string[][] = [];
+  let searchFrom = 0;
+
+  while (true) {
+    const start = sql.indexOf(header, searchFrom);
+    if (start === -1) break;
+    blocks.push(...seededRowsFrom(sql.slice(start + header.length)));
+    searchFrom = start + header.length;
+  }
+
+  if (blocks.length === 0) throw new Error(`Seed block not found: ${header}`);
+  return blocks;
 }
 
 const permissionRows = seededRows(

@@ -64,6 +64,115 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["branches"]["Insert"]>;
         Relationships: [];
       };
+      organization_channels: {
+        Row: {
+          id: string;
+          organization_id: string;
+          key: string;
+          display_name: string;
+          category: "marketplace" | "owned_digital" | "physical" | "reseller" | "other";
+          template_key: string | null;
+          status: "active" | "archived";
+          created_by: string;
+          archived_by: string | null;
+          archived_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_channels"]["Row"],
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "template_key"
+          | "status"
+          | "archived_by"
+          | "archived_at"
+        > &
+          Partial<
+            Pick<
+              Database["public"]["Tables"]["organization_channels"]["Row"],
+              "template_key" | "status" | "archived_by" | "archived_at"
+            >
+          >;
+        Update: Partial<Database["public"]["Tables"]["organization_channels"]["Insert"]>;
+        Relationships: [];
+      };
+      organization_channel_branches: {
+        Row: {
+          id: string;
+          organization_id: string;
+          channel_id: string;
+          branch_id: string;
+          status: "active" | "inactive";
+          effective_from: string | null;
+          effective_to: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_channel_branches"]["Row"],
+          "id" | "created_at" | "updated_at" | "status" | "effective_from" | "effective_to"
+        > &
+          Partial<
+            Pick<
+              Database["public"]["Tables"]["organization_channel_branches"]["Row"],
+              "status" | "effective_from" | "effective_to"
+            >
+          >;
+        Update: Partial<Database["public"]["Tables"]["organization_channel_branches"]["Insert"]>;
+        Relationships: [];
+      };
+      channel_source_aliases: {
+        Row: {
+          id: string;
+          organization_id: string;
+          channel_id: string;
+          alias: string;
+          normalized_alias: string;
+          source_scope:
+            | "onboarding"
+            | "normalized_metric"
+            | "economics_entry"
+            | "cost_rate"
+            | "report_package"
+            | "manual";
+          source_record_reference: string | null;
+          status: "active" | "retired";
+          effective_from: string | null;
+          effective_to: string | null;
+          confirmed_at: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["channel_source_aliases"]["Row"],
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "source_record_reference"
+          | "status"
+          | "effective_from"
+          | "effective_to"
+          | "confirmed_at"
+          | "created_by"
+        > &
+          Partial<
+            Pick<
+              Database["public"]["Tables"]["channel_source_aliases"]["Row"],
+              | "source_record_reference"
+              | "status"
+              | "effective_from"
+              | "effective_to"
+              | "confirmed_at"
+              | "created_by"
+            >
+          >;
+        Update: Partial<Database["public"]["Tables"]["channel_source_aliases"]["Insert"]>;
+        Relationships: [];
+      };
       business_profiles: {
         Row: {
           organization_id: string;
@@ -177,6 +286,419 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["integration_data_sources"]["Insert"]>;
         Relationships: [];
       };
+      /** Immutable governed report intake metadata. Original files stay in private Storage. */
+      integration_report_packages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          channel_id: string;
+          branch_id: string;
+          report_type: string;
+          declared_period_start: string;
+          declared_period_end: string;
+          declared_currency: string;
+          period_timezone: string;
+          file_kind: "csv" | "xlsx";
+          original_filename: string;
+          declared_content_type: string;
+          declared_content_length: number;
+          storage_bucket_id: string;
+          storage_path: string;
+          storage_object_id: string | null;
+          storage_object_version: string | null;
+          content_sha256: string | null;
+          parser_version: number;
+          fingerprint_version: number;
+          schema_fingerprint: string | null;
+          status:
+            | "awaiting_upload"
+            | "uploaded"
+            | "profiling"
+            | "awaiting_contract"
+            | "awaiting_approval"
+            | "awaiting_validation"
+            | "validating"
+            | "validated"
+            | "partially_validated"
+            | "validation_failed"
+            | "awaiting_projection"
+            | "projecting"
+            | "projected"
+            | "partially_projected"
+            | "reconciliation_required"
+            | "projection_failed"
+            | "failed";
+          safe_failure_code: string | null;
+          safe_failure_at: string | null;
+          upload_expires_at: string;
+          uploaded_at: string | null;
+          profiled_at: string | null;
+          retained_until: string;
+          created_by: string;
+          correlation_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Bounded structural evidence only: no raw sheet cells or rows. */
+      integration_report_sheet_manifests: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_package_id: string;
+          sheet_position: number;
+          sheet_name: string;
+          normalized_sheet_name: string;
+          row_count: number;
+          populated_cell_count: number;
+          expanded_bytes: number;
+          content_digest: string | null;
+          /** SHA-256 structural-header evidence only; never workbook values. */
+          header_candidate_digests: unknown;
+          /** Deprecated legacy column. Database migration permanently redacts it. */
+          header_candidates: unknown;
+          has_formula: boolean;
+          has_merged_cells: boolean;
+          has_repeated_header: boolean;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Bounded deterministic evidence for one approved report contract validation. */
+      integration_report_validation_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_package_id: string;
+          report_contract_version_id: string;
+          report_contract_binding_id: string;
+          validator_version: number;
+          input_digest: string;
+          result_digest: string | null;
+          status: "running" | "validated" | "partially_validated" | "failed";
+          quality_state: "complete" | "partial" | "failed" | null;
+          completeness_state: "complete" | "partial" | "unavailable" | null;
+          error_codes: unknown;
+          warning_codes: unknown;
+          correlation_id: string;
+          started_at: string;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Sheet-level counters and codes; no workbook values or cells. */
+      integration_report_validation_sheet_results: {
+        Row: {
+          id: string;
+          organization_id: string;
+          validation_run_id: string;
+          normalized_sheet_name: string;
+          required: boolean;
+          outcome: "validated" | "warning" | "failed";
+          row_count: number;
+          populated_cell_count: number;
+          parsed_field_success_count: number;
+          parsed_field_failure_count: number;
+          error_codes: unknown;
+          warning_codes: unknown;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Contract control counters only; no report values. */
+      integration_report_validation_control_results: {
+        Row: {
+          id: string;
+          organization_id: string;
+          validation_run_id: string;
+          control_key: string;
+          control_kind: "row_count" | "populated_cell_count";
+          normalized_sheet_name: string;
+          expected_count: number;
+          actual_count: number;
+          tolerance: number;
+          passed: boolean;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Stable identity for one organization/channel/report-family contract lineage. */
+      report_contracts: {
+        Row: {
+          id: string;
+          organization_id: string;
+          channel_id: string;
+          report_type: string;
+          outlet_grain: "branch";
+          created_by: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Immutable, declarative and value-free report contract proposal. */
+      report_contract_versions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_contract_id: string;
+          report_package_id: string;
+          version: number;
+          schema_fingerprint: string;
+          parser_version: number;
+          fingerprint_version: number;
+          mapping_document: unknown;
+          mapping_digest: string;
+          declared_currency: string;
+          financial_sign_semantics: unknown;
+          controls: unknown;
+          unmapped_field_disposition: "reviewed_ignore" | "requires_mapping";
+          proposal_source: "human";
+          created_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Append-only owner/admin decision on one exact report contract version. */
+      report_contract_decisions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_contract_version_id: string;
+          decision: "approved" | "rejected";
+          mapping_digest: string;
+          reason: string | null;
+          decided_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** One active exact fingerprint binding may be trusted after human approval. */
+      report_contract_bindings: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_contract_id: string;
+          report_contract_version_id: string;
+          channel_id: string;
+          report_type: string;
+          schema_fingerprint: string;
+          declared_currency: string;
+          outlet_grain: "branch";
+          active: boolean;
+          bound_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      report_projection_versions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_contract_version_id: string;
+          version: number;
+          projection_document: unknown;
+          projection_digest: string;
+          calculation_version: number;
+          proposal_source: "human";
+          created_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      report_projection_decisions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_projection_version_id: string;
+          decision: "approved" | "rejected";
+          projection_digest: string;
+          reason: string | null;
+          decided_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      report_projection_bindings: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_contract_version_id: string;
+          report_contract_binding_id: string;
+          report_projection_version_id: string;
+          schema_fingerprint: string;
+          declared_currency: string;
+          active: boolean;
+          bound_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      integration_report_projection_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_package_id: string;
+          report_contract_version_id: string;
+          report_contract_binding_id: string;
+          report_projection_version_id: string;
+          report_projection_binding_id: string;
+          validation_run_id: string;
+          calculation_version: number;
+          input_digest: string;
+          result_digest: string | null;
+          status: "running" | "projected" | "partially_projected" | "failed";
+          quality_state: "complete" | "partial" | "failed" | null;
+          completeness_state: "complete" | "partial" | "unavailable" | null;
+          output_count: number;
+          error_codes: unknown;
+          warning_codes: unknown;
+          correlation_id: string;
+          started_at: string;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      exact_range_metric_observations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string;
+          channel_id: string;
+          metric_definition_id: string;
+          projection_output_key: string;
+          value_kind: "money" | "count";
+          subject_kind: "organization";
+          subject_ref: null;
+          dimensions: unknown;
+          period_start: string;
+          period_end: string;
+          period_timezone: string;
+          value_numerator: number;
+          value_denominator: null;
+          currency: string | null;
+          quality_state: "complete" | "partial";
+          completeness_state: "complete" | "partial";
+          revision: number;
+          superseded_by_id: string | null;
+          supersede_reason: string | null;
+          reconciliation_state: "current" | "blocked_overlap" | "excluded" | "superseded";
+          reconciliation_digest: string | null;
+          report_package_id: string;
+          validation_run_id: string;
+          report_contract_version_id: string;
+          report_projection_version_id: string;
+          projection_run_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      report_projection_lineage: {
+        Row: {
+          id: string;
+          organization_id: string;
+          exact_range_metric_observation_id: string;
+          report_package_id: string;
+          validation_run_id: string;
+          projection_run_id: string;
+          report_contract_version_id: string;
+          report_projection_version_id: string;
+          normalized_sheet_name: string;
+          canonical_field: string;
+          source_column_ordinal: number;
+          first_data_row: number;
+          last_data_row: number;
+          contributor_count: number;
+          calculation_version: number;
+          source_digest: string;
+          quality_state: "complete" | "partial";
+          completeness_state: "complete" | "partial";
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      report_projection_reconciliations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_package_id: string;
+          projection_run_id: string;
+          projection_output_key: string;
+          classification:
+            | "exact_duplicate"
+            | "non_overlapping"
+            | "ambiguous_overlap"
+            | "approved_correction";
+          reconciliation_digest: string;
+          prior_observation_id: string | null;
+          result_observation_id: string | null;
+          candidate_count: number;
+          quality_state: "complete" | "partial";
+          completeness_state: "complete" | "partial";
+          calculation_version: number;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      report_projection_reconciliation_resolutions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          reconciliation_id: string;
+          resolution: "accept_correction" | "keep_existing";
+          outcome_classification: "approved_correction" | "existing_retained" | null;
+          reconciliation_digest: string;
+          prior_observation_id: string;
+          result_observation_id: string;
+          resolved_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       cost_component_definitions: {
         Row: {
           id: string;
@@ -208,6 +730,8 @@ export type Database = {
           definition_id: string;
           branch_id: string | null;
           channel: string | null;
+          channel_id: string | null;
+          channel_label_snapshot: string | null;
           amount_minor: number | null;
           rate_of_revenue: number | null;
           currency: string | null;
@@ -221,8 +745,14 @@ export type Database = {
         };
         Insert: Omit<
           Database["public"]["Tables"]["cost_component_rates"]["Row"],
-          "id" | "created_at" | "updated_at"
-        >;
+          "id" | "created_at" | "updated_at" | "channel_id" | "channel_label_snapshot"
+        > &
+          Partial<
+            Pick<
+              Database["public"]["Tables"]["cost_component_rates"]["Row"],
+              "channel_id" | "channel_label_snapshot"
+            >
+          >;
         Update: Partial<Database["public"]["Tables"]["cost_component_rates"]["Insert"]>;
         Relationships: [];
       };
@@ -233,6 +763,8 @@ export type Database = {
           branch_id: string | null;
           grain: "transaction" | "period";
           channel: string | null;
+          channel_id: string | null;
+          channel_label_snapshot: string | null;
           period_start: string;
           period_end: string;
           period_timezone: string;
@@ -254,10 +786,18 @@ export type Database = {
         };
         Insert: Omit<
           Database["public"]["Tables"]["channel_economics_entries"]["Row"],
-          "id" | "created_at" | "updated_at" | "computed_at"
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "computed_at"
+          | "channel_id"
+          | "channel_label_snapshot"
         > &
           Partial<
-            Pick<Database["public"]["Tables"]["channel_economics_entries"]["Row"], "computed_at">
+            Pick<
+              Database["public"]["Tables"]["channel_economics_entries"]["Row"],
+              "computed_at" | "channel_id" | "channel_label_snapshot"
+            >
           >;
         Update: Partial<Database["public"]["Tables"]["channel_economics_entries"]["Insert"]>;
         Relationships: [];
@@ -361,6 +901,8 @@ export type Database = {
           subject_kind: string;
           subject_ref: string | null;
           channel: string | null;
+          channel_id: string | null;
+          channel_label_snapshot: string | null;
           dimensions: Record<string, unknown>;
           period_grain: "hour" | "day" | "week" | "month";
           period_start: string;
@@ -386,6 +928,8 @@ export type Database = {
           | "subject_kind"
           | "subject_ref"
           | "channel"
+          | "channel_id"
+          | "channel_label_snapshot"
           | "dimensions"
           | "revision"
           | "superseded_by_id"
@@ -400,6 +944,8 @@ export type Database = {
               | "subject_kind"
               | "subject_ref"
               | "channel"
+              | "channel_id"
+              | "channel_label_snapshot"
               | "dimensions"
               | "revision"
               | "superseded_by_id"
@@ -847,6 +1393,221 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      start_governed_report_package_upload: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_channel_id: string;
+          p_branch_id: string;
+          p_report_type: string;
+          p_period_start: string;
+          p_period_end: string;
+          p_currency: string;
+          p_file_kind: "csv" | "xlsx";
+          p_original_filename: string;
+          p_content_type: string;
+          p_content_length: number;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"];
+      };
+      complete_governed_report_package_upload: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_package_id: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"];
+      };
+      retry_governed_report_package_profiling: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_package_id: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"];
+      };
+      claim_governed_report_package_profiling: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_idempotency_key: string;
+          p_claim_token: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      complete_governed_report_package_profiling: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_claim_token: string;
+          p_content_sha256: string;
+          p_schema_fingerprint: string;
+          p_sheets: unknown;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
+      propose_governed_report_contract: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_package_id: string;
+          p_mapping_document: unknown;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["report_contract_versions"]["Row"];
+      };
+      decide_governed_report_contract: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_contract_version_id: string;
+          p_decision: "approved" | "rejected";
+          p_reason: string | null;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["report_contract_decisions"]["Row"];
+      };
+      fail_governed_report_package_profiling: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_claim_token: string;
+          p_failure_code: string;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
+      claim_governed_report_package_validation: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_report_contract_version_id: string;
+          p_validation_run_id: string;
+          p_idempotency_key: string;
+          p_claim_token: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      complete_governed_report_package_validation: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_validation_run_id: string;
+          p_claim_token: string;
+          p_result_digest: string;
+          p_result: unknown;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
+      fail_governed_report_package_validation: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_validation_run_id: string;
+          p_claim_token: string;
+          p_failure_code: string;
+          p_result_digest: string;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
+      retry_governed_report_package_validation: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_package_id: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"];
+      };
+      propose_governed_report_projection: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_contract_version_id: string;
+          p_projection_document: unknown;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["report_projection_versions"]["Row"];
+      };
+      decide_governed_report_projection: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_projection_version_id: string;
+          p_decision: "approved" | "rejected";
+          p_reason: string | null;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["report_projection_decisions"]["Row"];
+      };
+      request_governed_report_package_projection: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_package_id: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      claim_governed_report_package_projection: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_report_contract_version_id: string;
+          p_report_projection_version_id: string;
+          p_projection_run_id: string;
+          p_idempotency_key: string;
+          p_claim_token: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      complete_governed_report_package_projection: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_projection_run_id: string;
+          p_claim_token: string;
+          p_result_digest: string;
+          p_result: unknown;
+          p_outputs: unknown;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
+      fail_governed_report_package_projection: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_projection_run_id: string;
+          p_claim_token: string;
+          p_failure_code: string;
+          p_result_digest: string;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
+      resolve_governed_report_projection_overlap: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_reconciliation_id: string;
+          p_resolution: "accept_correction" | "keep_existing";
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
       create_organization_with_owner: {
         Args: {
           input_name: string;

@@ -43,6 +43,7 @@ describe("Sidebar", () => {
       "Opportunities",
       "Campaigns",
       "Business Memory",
+      "Channels",
       "Channel economics",
       "Integration Hub",
       "Guided onboarding",
@@ -56,6 +57,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Business Memory/ })).toHaveAttribute(
       "href",
       `/organizations/${organizationId}/memory`,
+    );
+    expect(screen.getByRole("link", { name: /^Channels$/ })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/channels`,
     );
   });
 

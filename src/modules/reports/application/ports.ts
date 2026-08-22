@@ -1,0 +1,201 @@
+import type { Database } from "@/lib/supabase/database.types";
+
+export type ReportPackageRow = Database["public"]["Tables"]["integration_report_packages"]["Row"];
+export type ReportSheetManifestRow =
+  Database["public"]["Tables"]["integration_report_sheet_manifests"]["Row"];
+export type ReportSheetManifestSummary = Pick<
+  ReportSheetManifestRow,
+  | "id"
+  | "organization_id"
+  | "report_package_id"
+  | "sheet_position"
+  | "sheet_name"
+  | "normalized_sheet_name"
+  | "row_count"
+  | "populated_cell_count"
+  | "expanded_bytes"
+  | "content_digest"
+  | "header_candidate_digests"
+  | "has_formula"
+  | "has_merged_cells"
+  | "has_repeated_header"
+  | "created_at"
+>;
+export type ReportContractRow = Database["public"]["Tables"]["report_contracts"]["Row"];
+export type ReportContractVersionRow =
+  Database["public"]["Tables"]["report_contract_versions"]["Row"];
+export type ReportContractDecisionRow =
+  Database["public"]["Tables"]["report_contract_decisions"]["Row"];
+export type ReportContractBindingRow =
+  Database["public"]["Tables"]["report_contract_bindings"]["Row"];
+export type ReportValidationRunRow =
+  Database["public"]["Tables"]["integration_report_validation_runs"]["Row"];
+export type ReportValidationSheetResultRow =
+  Database["public"]["Tables"]["integration_report_validation_sheet_results"]["Row"];
+export type ReportValidationControlResultRow =
+  Database["public"]["Tables"]["integration_report_validation_control_results"]["Row"];
+export type ReportProjectionVersionRow =
+  Database["public"]["Tables"]["report_projection_versions"]["Row"];
+export type ReportProjectionDecisionRow =
+  Database["public"]["Tables"]["report_projection_decisions"]["Row"];
+export type ReportProjectionBindingRow =
+  Database["public"]["Tables"]["report_projection_bindings"]["Row"];
+export type ReportProjectionRunRow =
+  Database["public"]["Tables"]["integration_report_projection_runs"]["Row"];
+export type ReportProjectionReconciliationRow =
+  Database["public"]["Tables"]["report_projection_reconciliations"]["Row"];
+export type ReportProjectionReconciliationResolutionRow =
+  Database["public"]["Tables"]["report_projection_reconciliation_resolutions"]["Row"];
+export type ReportExactRangeObservationSummary = Pick<
+  Database["public"]["Tables"]["exact_range_metric_observations"]["Row"],
+  | "id"
+  | "report_package_id"
+  | "projection_output_key"
+  | "period_start"
+  | "period_end"
+  | "period_timezone"
+  | "currency"
+  | "quality_state"
+  | "completeness_state"
+  | "revision"
+  | "reconciliation_state"
+  | "reconciliation_digest"
+  | "superseded_by_id"
+  | "created_at"
+>;
+export type ReportChannelChoice = Pick<
+  Database["public"]["Tables"]["organization_channels"]["Row"],
+  "id" | "display_name" | "key" | "status"
+>;
+export type ReportBranchChoice = Pick<
+  Database["public"]["Tables"]["branches"]["Row"],
+  "id" | "name" | "timezone" | "currency" | "is_active"
+>;
+
+export type ReportPackageSnapshot = {
+  packages: ReportPackageRow[];
+  sheetManifests: ReportSheetManifestSummary[];
+  contracts: ReportContractRow[];
+  contractVersions: ReportContractVersionRow[];
+  contractDecisions: ReportContractDecisionRow[];
+  contractBindings: ReportContractBindingRow[];
+  validationRuns: ReportValidationRunRow[];
+  validationSheetResults: ReportValidationSheetResultRow[];
+  validationControlResults: ReportValidationControlResultRow[];
+  projectionVersions: ReportProjectionVersionRow[];
+  projectionDecisions: ReportProjectionDecisionRow[];
+  projectionBindings: ReportProjectionBindingRow[];
+  projectionRuns: ReportProjectionRunRow[];
+  reconciliations: ReportProjectionReconciliationRow[];
+  reconciliationResolutions: ReportProjectionReconciliationResolutionRow[];
+  exactRangeObservations: ReportExactRangeObservationSummary[];
+  channels: ReportChannelChoice[];
+  branches: ReportBranchChoice[];
+};
+
+export type ReportPackageRepository = {
+  listSnapshot(input: { organizationId: string }): Promise<ReportPackageSnapshot>;
+  findPackage(input: {
+    organizationId: string;
+    packageId: string;
+  }): Promise<ReportPackageRow | null>;
+  findContractVersion(input: {
+    organizationId: string;
+    contractVersionId: string;
+  }): Promise<ReportContractVersionRow | null>;
+  startUpload(input: {
+    organizationId: string;
+    actorId: string;
+    correlationId: string;
+    body: {
+      channelId: string;
+      branchId: string;
+      reportType: string;
+      periodStart: string;
+      periodEnd: string;
+      currency: string;
+      fileKind: "csv" | "xlsx";
+      originalFilename: string;
+      contentType: string;
+      contentLength: number;
+      idempotencyKey: string;
+    };
+  }): Promise<ReportPackageRow>;
+  createSignedResumableUpload(input: {
+    storagePath: string;
+  }): Promise<{ token: string; signedUrl: string }>;
+  completeUpload(input: {
+    organizationId: string;
+    actorId: string;
+    packageId: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportPackageRow>;
+  retryProfiling(input: {
+    organizationId: string;
+    actorId: string;
+    packageId: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportPackageRow>;
+  retryValidation(input: {
+    organizationId: string;
+    actorId: string;
+    packageId: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportPackageRow>;
+  proposeContract(input: {
+    organizationId: string;
+    actorId: string;
+    packageId: string;
+    mappingDocument: unknown;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportContractVersionRow>;
+  decideContract(input: {
+    organizationId: string;
+    actorId: string;
+    contractVersionId: string;
+    decision: "approved" | "rejected";
+    reason?: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportContractDecisionRow>;
+  proposeProjection(input: {
+    organizationId: string;
+    actorId: string;
+    contractVersionId: string;
+    projectionDocument: unknown;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportProjectionVersionRow>;
+  decideProjection(input: {
+    organizationId: string;
+    actorId: string;
+    projectionVersionId: string;
+    decision: "approved" | "rejected";
+    reason?: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportProjectionDecisionRow>;
+  requestProjection(input: {
+    organizationId: string;
+    actorId: string;
+    packageId: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<{
+    reportPackage: ReportPackageRow;
+    projectionVersionId: string;
+    contractVersionId: string;
+  }>;
+  resolveProjectionOverlap(input: {
+    organizationId: string;
+    actorId: string;
+    reconciliationId: string;
+    resolution: "accept_correction" | "keep_existing";
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<Record<string, unknown>>;
+};

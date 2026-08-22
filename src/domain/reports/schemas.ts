@@ -1,0 +1,206 @@
+import { z } from "zod";
+
+import {
+  REPORT_FILE_KINDS,
+  REPORT_PACKAGE_LIMITS,
+  type ReportFileKind,
+} from "@/domain/reports/types";
+import { reportContractDocumentSchema } from "@/domain/reports/contracts";
+import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
+
+const dateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const csvMimeTypes = ["text/csv", "application/csv"] as const;
+const xlsxMimeTypes = [
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+] as const;
+
+export const reportPackageUploadIntentSchema = z
+  .object({
+    channelId: z.string().uuid(),
+    branchId: z.string().uuid(),
+    // There is deliberately no provider/report-family registry in this slice.
+    // A bounded explicit label preserves the operator declaration without
+    // implying that the system understands its financial semantics.
+    reportType: z
+      .string()
+      .trim()
+      .min(2)
+      .max(120)
+      .regex(/^[\p{L}\p{N} ._/-]+$/u),
+    periodStart: dateOnlySchema,
+    periodEnd: dateOnlySchema,
+    currency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z]{3}$/),
+    originalFilename: z.string().trim().min(1).max(255),
+    contentType: z.string().trim().min(1).max(200),
+    contentLength: z.number().int().positive().max(REPORT_PACKAGE_LIMITS.maxCompressedBytes),
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.periodEnd < value.periodStart) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["periodEnd"],
+        message: "Period end must not precede period start.",
+      });
+    }
+    const extension = value.originalFilename.split(".").pop()?.toLowerCase();
+    const fileKind = extension === "csv" || extension === "xlsx" ? extension : null;
+    if (!fileKind) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["originalFilename"],
+        message: "Only CSV and XLSX files are accepted.",
+      });
+      return;
+    }
+    const validMimeType =
+      (fileKind === "csv" &&
+        csvMimeTypes.includes(value.contentType as (typeof csvMimeTypes)[number])) ||
+      (fileKind === "xlsx" &&
+        xlsxMimeTypes.includes(value.contentType as (typeof xlsxMimeTypes)[number]));
+    if (!validMimeType) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["contentType"],
+        message: "The file type does not match its extension.",
+      });
+    }
+  });
+
+export type ReportPackageUploadIntent = z.output<typeof reportPackageUploadIntentSchema>;
+
+export function reportFileKindFromFilename(filename: string): ReportFileKind {
+  const extension = filename.split(".").pop()?.toLowerCase();
+  if (!REPORT_FILE_KINDS.includes(extension as ReportFileKind)) {
+    throw new Error("Only CSV and XLSX files are accepted.");
+  }
+  return extension as ReportFileKind;
+}
+
+export const completeReportPackageUploadSchema = z
+  .object({
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
+
+export const retryReportPackageSchema = z
+  .object({
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
+
+export const proposeReportContractSchema = z
+  .object({
+    mappingDocument: reportContractDocumentSchema,
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
+
+export const decideReportContractSchema = z
+  .object({
+    decision: z.enum(["approved", "rejected"]),
+    reason: z.string().trim().min(1).max(500).optional(),
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.decision === "rejected" && !value.reason) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "A rejection reason is required.",
+      });
+    }
+  });
+
+export const proposeReportProjectionSchema = z
+  .object({
+    projectionDocument: reportProjectionDocumentSchema,
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
+
+/**
+ * Accept one accidental double-envelope from clients that wrapped the full
+ * proposal request inside `projectionDocument`. The outer idempotency key is
+ * authoritative; the inner key is discarded before strict validation.
+ */
+export function normalizeReportProjectionProposalBody(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const body = input as Record<string, unknown>;
+  const nested = body.projectionDocument;
+  if (!nested || typeof nested !== "object" || Array.isArray(nested)) return input;
+  const nestedBody = nested as Record<string, unknown>;
+  if (
+    !nestedBody.projectionDocument ||
+    typeof nestedBody.projectionDocument !== "object" ||
+    Array.isArray(nestedBody.projectionDocument) ||
+    typeof nestedBody.idempotencyKey !== "string" ||
+    typeof body.idempotencyKey !== "string"
+  ) return input;
+  return {
+    projectionDocument: nestedBody.projectionDocument,
+    idempotencyKey: body.idempotencyKey,
+  };
+}
+
+export const decideReportProjectionSchema = z
+  .object({
+    decision: z.enum(["approved", "rejected"]),
+    reason: z.string().trim().min(1).max(500).optional(),
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.decision === "rejected" && !value.reason) {
+      ctx.addIssue({ code: "custom", path: ["reason"], message: "A rejection reason is required." });
+    }
+  });
+
+export const requestReportProjectionSchema = z
+  .object({ idempotencyKey: z.string().trim().min(16).max(200) })
+  .strict();
+
+export const resolveReportProjectionOverlapSchema = z
+  .object({
+    resolution: z.enum(["accept_correction", "keep_existing"]),
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
+
+export const reportProfilingTaskSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    packageId: z.string().uuid(),
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
+
+export const reportValidationTaskSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    packageId: z.string().uuid(),
+    contractVersionId: z.string().uuid(),
+    validationRunId: z.string().uuid(),
+    correlationId: z.string().uuid(),
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
+
+export const reportProjectionTaskSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    packageId: z.string().uuid(),
+    contractVersionId: z.string().uuid(),
+    projectionVersionId: z.string().uuid(),
+    projectionRunId: z.string().uuid(),
+    correlationId: z.string().uuid(),
+    idempotencyKey: z.string().trim().min(16).max(200),
+  })
+  .strict();
