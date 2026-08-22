@@ -21,6 +21,13 @@ const contractFieldSchema = z
     ]),
     required: z.boolean(),
     financialSign: z.enum(["positive", "negative"]).optional(),
+    /**
+     * Tokens this provider writes to mean "no data", which are read as absent
+     * rather than as a value. Keeta writes `-`; Talabat leaves the cell empty.
+     * Declared rather than guessed, because the same character is a minus sign
+     * somewhere else. See `@/domain/reports/absent`.
+     */
+    absentMarkers: z.array(z.string().trim().min(1).max(16)).max(5).optional(),
   })
   .strict()
   .superRefine((field, ctx) => {
@@ -36,6 +43,25 @@ const contractFieldSchema = z
         code: "custom",
         path: ["financialSign"],
         message: "Only money fields may declare a financial sign.",
+      });
+    }
+    for (const marker of field.absentMarkers ?? []) {
+      // A marker that reads as a figure would turn real data into silence. `0`
+      // is the one every provider actually writes and the one that must never
+      // be swallowed.
+      if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(marker)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["absentMarkers"],
+          message: "A number cannot mean absent.",
+        });
+      }
+    }
+    if (new Set(field.absentMarkers ?? []).size !== (field.absentMarkers ?? []).length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["absentMarkers"],
+        message: "Each absent marker may be declared once.",
       });
     }
   });

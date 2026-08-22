@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import { isAbsentValue, isEmptyCell } from "@/domain/reports/absent";
 import {
   normalizeReportStructureIdentifier,
   type ReportContractDocument,
@@ -250,9 +251,6 @@ export function createReportProjectionResultDigest(result: {
   return createHash("sha256").update(canonicalize(result)).digest("hex");
 }
 
-function isBlank(value: unknown): boolean {
-  return value === null || value === undefined || (typeof value === "string" && value.trim() === "");
-}
 
 function isFormula(value: unknown): boolean {
   return value !== null && typeof value === "object" && "formula" in value;
@@ -450,7 +448,11 @@ export function projectExactRangeMetrics(input: {
     let contributorCount = 0;
     for (let rowIndex = rule.dataStartRow - 1; rowIndex < source.rows.length; rowIndex += 1) {
       const value = source.rows[rowIndex]?.[columnIndex];
-      if (isBlank(value)) throw new ReportProjectionError("REQUIRED_PROJECTED_VALUE_MISSING");
+      // An exact-range sum covers the whole declared period, so a row that said
+      // nothing leaves the total unknowable rather than merely smaller.
+      if (isAbsentValue(value, field.absentMarkers)) {
+        throw new ReportProjectionError("REQUIRED_PROJECTED_VALUE_MISSING");
+      }
       total = addIntegerStrings(
         total,
         output.valueKind === "money" ? moneyMinorUnits(value, input.declaredCurrency) : integer(value),
@@ -565,7 +567,7 @@ export function projectPeriodGrainMetrics(input: {
     const { field } = findSourceField(input.contract, output);
     const index = headers.get(field.sourceHeader);
     if (index === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
-    return { output, index };
+    return { output, index, absentMarkers: field.absentMarkers };
   });
 
   // Keyed by period then output, so the same period appearing on two rows sums
@@ -576,8 +578,10 @@ export function projectPeriodGrainMetrics(input: {
   for (let rowIndex = rule.dataStartRow - 1; rowIndex < source.rows.length; rowIndex += 1) {
     const row = source.rows[rowIndex];
     if (!row) continue;
-    // A wholly empty trailing row is padding, not a period with no data.
-    if (row.every((value) => isBlank(value))) continue;
+    // Padding is a structurally empty row. An absent marker is a statement
+    // about one field's value, so it does not make the row disappear: a dated
+    // row of dashes is a day the provider reported on and had nothing to say.
+    if (row.every((value) => isEmptyCell(value))) continue;
 
     const periodStart = periodStartFor(
       parsePeriodKey(row[periodColumn], periodKey.encoding),
@@ -586,9 +590,9 @@ export function projectPeriodGrainMetrics(input: {
     const byOutput = totals.get(periodStart) ?? new Map();
     totals.set(periodStart, byOutput);
 
-    for (const { output, index } of columns) {
+    for (const { output, index, absentMarkers } of columns) {
       const value = row[index];
-      if (isBlank(value)) {
+      if (isAbsentValue(value, absentMarkers)) {
         absentRowCount += 1;
         continue;
       }

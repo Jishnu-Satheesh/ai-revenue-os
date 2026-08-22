@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import ExcelJS from "exceljs";
 import { parse } from "csv-parse";
 
+import { isAbsentValue } from "@/domain/reports/absent";
 import {
   normalizeReportStructureIdentifier,
   reportContractDocumentSchema,
@@ -190,13 +191,6 @@ function sourceHeaderMap(row: unknown[]): Map<string, number> {
   return map;
 }
 
-function isBlank(value: unknown): boolean {
-  return (
-    value === null ||
-    value === undefined ||
-    (typeof value === "string" && (value.trim().length === 0 || value.trim() === "-"))
-  );
-}
 
 function isFormulaCell(value: unknown): boolean {
   return (
@@ -335,7 +329,11 @@ function validateSheets(
         const column = fieldColumns.get(field.canonicalField);
         if (column === undefined) continue;
         const value = row[column];
-        if (isBlank(value)) {
+        // `-` used to be treated as absent here and nowhere else, so a Keeta
+        // dash passed validation and then failed projection as an unreadable
+        // number. Absence is now declared per field and read the same way by
+        // both. See `@/domain/reports/absent`.
+        if (isAbsentValue(value, field.absentMarkers)) {
           if (field.required) {
             sheetErrors.push("REQUIRED_FIELD_MISSING");
             failure += 1;
