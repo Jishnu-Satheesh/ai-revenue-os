@@ -5,6 +5,11 @@ import ExcelJS from "exceljs";
 import { parse } from "csv-parse";
 
 import { isAbsentValue } from "@/domain/reports/absent";
+import {
+  parsePeriodKey,
+  type PeriodKeyContext,
+  type PeriodKeyEncoding,
+} from "@/domain/reports/period-key";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
@@ -223,11 +228,25 @@ function parserCode(parser: ReportContractDocument["sheets"][number]["fields"][n
   return codes[parser];
 }
 
-function isValidDate(value: unknown): boolean {
-  if (value instanceof Date) return !Number.isNaN(value.getTime());
-  if (typeof value !== "string" || !datePattern.test(value.trim())) return false;
-  const date = new Date(`${value.trim()}T00:00:00.000Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value.trim();
+/**
+ * Whether a cell is a date this provider could have written.
+ *
+ * Read through the same parser the projection uses, so a column cannot pass
+ * validation and then fail projection on the same value. Keeta's billing report
+ * writes `1 Jan 2026` and EatEasily writes `01/Jan`; both are dates, and
+ * neither is ISO.
+ */
+function isValidDate(
+  value: unknown,
+  encoding: PeriodKeyEncoding = "iso_date",
+  declaredPeriod?: PeriodKeyContext,
+): boolean {
+  try {
+    parsePeriodKey(value, encoding, declaredPeriod);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isValidTimestamp(value: unknown): boolean {
@@ -237,18 +256,19 @@ function isValidTimestamp(value: unknown): boolean {
 
 function isValidParserValue(
   value: unknown,
-  parser: ReportContractDocument["sheets"][number]["fields"][number]["parser"],
+  field: ReportContractDocument["sheets"][number]["fields"][number],
+  declaredPeriod?: PeriodKeyContext,
 ): boolean {
   if (isFormulaCell(value)) return false;
   const text = typeof value === "string" ? value.trim() : String(value);
-  switch (parser) {
+  switch (field.parser) {
     case "integer":
       return typeof value === "number" ? Number.isSafeInteger(value) : integerPattern.test(text);
     case "decimal":
     case "money":
       return typeof value === "number" ? Number.isFinite(value) : numericPattern.test(text);
     case "local_date":
-      return isValidDate(value);
+      return isValidDate(value, field.dateEncoding, declaredPeriod);
     case "timestamp":
       return isValidTimestamp(value);
     case "duration":
@@ -277,6 +297,8 @@ function validateSheets(
   sheets: ParsedSheet[],
   contract: ReportContractDocument,
   profiles: readonly ValidationProfileSheet[],
+  /** Needed only by the `day_month` encoding, whose values carry no year. */
+  declaredPeriod?: PeriodKeyContext,
 ): ReportValidationResult {
   const sheetResults: ReportValidationSheetResult[] = [];
   const errors: ReportValidationCode[] = [];
@@ -366,7 +388,7 @@ function validateSheets(
           failure += 1;
           continue;
         }
-        if (!isValidParserValue(parsedValue, field.parser)) {
+        if (!isValidParserValue(parsedValue, field, declaredPeriod)) {
           const code = parserCode(field.parser);
           sheetErrors.push(code);
           failure += 1;
@@ -471,6 +493,7 @@ export async function validateCsvBuffer(
   buffer: Buffer,
   contract: ReportContractDocument,
   profiles: readonly ValidationProfileSheet[],
+  declaredPeriod?: PeriodKeyContext,
 ): Promise<ReportValidationResult> {
   const rows: unknown[][] = [];
   let populatedCellCount = 0;
@@ -495,6 +518,7 @@ export async function validateCsvBuffer(
     ],
     contract,
     profiles,
+    declaredPeriod,
   );
 }
 
@@ -502,6 +526,7 @@ export async function validateXlsxBuffer(
   buffer: Buffer,
   contract: ReportContractDocument,
   profiles: readonly ValidationProfileSheet[],
+  declaredPeriod?: PeriodKeyContext,
 ): Promise<ReportValidationResult> {
   const archive = await inspectXlsxArchive(buffer);
   const workbook = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), {
@@ -534,7 +559,7 @@ export async function validateXlsxBuffer(
       hasMergedCells: archiveFlags?.hasMergedCells ?? false,
     });
   }
-  return validateSheets(sheets, contract, profiles);
+  return validateSheets(sheets, contract, profiles, declaredPeriod);
 }
 
 function validationFailureDigest(code: ReportValidationFailureCode): string {
@@ -591,10 +616,16 @@ export async function runReportPackageValidation(
     if (contract.currency !== claim.reportPackage.declared_currency || contract.outletGrain !== "branch") {
       throw new ReportValidationFailure("VALIDATION_PROCESSING_FAILED");
     }
+    // The package already states the period it covers, which is the only thing
+    // that can say which year a date like `01/Jan` meant.
+    const declaredPeriod = {
+      periodStart: claim.reportPackage.declared_period_start,
+      periodEnd: claim.reportPackage.declared_period_end,
+    };
     const result =
       claim.reportPackage.file_kind === "csv"
-        ? await validateCsvBuffer(buffer, contract, claim.sheetManifests)
-        : await validateXlsxBuffer(buffer, contract, claim.sheetManifests);
+        ? await validateCsvBuffer(buffer, contract, claim.sheetManifests, declaredPeriod)
+        : await validateXlsxBuffer(buffer, contract, claim.sheetManifests, declaredPeriod);
     await dependencies.complete({
       organizationId: payload.organizationId,
       packageId: payload.packageId,

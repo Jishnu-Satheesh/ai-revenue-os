@@ -223,7 +223,7 @@ describe("governed report package projection", () => {
         schemaVersion: 1,
         outputKind: "period_grain",
         grain: "day",
-        periodKey: { normalizedSheetName: "csv", canonicalField: "period_date", encoding: "iso_date" },
+        periodKey: { normalizedSheetName: "csv", canonicalField: "period_date" },
         outputs: [
           {
             key: "gross_revenue",

@@ -91,7 +91,6 @@ function periodGrain(overrides: Record<string, unknown> = {}): ReportProjectionD
     periodKey: {
       normalizedSheetName: "sheet1",
       canonicalField: "period_date",
-      encoding: "iso_date",
     },
     outputs: [revenueOutput],
     controlTotals: [statedTotal()],

@@ -117,7 +117,6 @@ const periodGrainDocumentSchema = z
       .object({
         normalizedSheetName: normalizedIdentifierSchema,
         canonicalField: normalizedIdentifierSchema,
-        encoding: z.enum(["iso_date", "compact_date", "text_date", "day_month"]),
       })
       .strict(),
     outputs: z.array(reportProjectionOutputSchema).min(1).max(50),
@@ -474,6 +473,17 @@ function resolveTotalsRowIndex(
 function findSourceField(
   contract: ReportContractDocument,
   output: ReportProjectionDocument["outputs"][number],
+  /**
+   * Whether every row has to carry a value.
+   *
+   * An exact-range sum covers one declared period and is unknowable if any row
+   * is silent, so its source field must be required. A period-grain series is
+   * the opposite: Talabat's export carries a row for all fifty-nine days and
+   * leaves the figures blank on the days it has nothing to say about, and those
+   * days are meant to stay absent. Demanding a required field there would make
+   * the provider's own normal export unmappable.
+   */
+  everyRowRequired: boolean,
 ) {
   const sheet = contract.sheets.find(
     (candidate) => candidate.normalizedSheetName === output.normalizedSheetName,
@@ -481,7 +491,9 @@ function findSourceField(
   if (!sheet) throw new ReportProjectionError("PROJECTION_SHEET_NOT_DECLARED");
   const field = sheet.fields.find((candidate) => candidate.canonicalField === output.canonicalField);
   if (!field) throw new ReportProjectionError("PROJECTION_FIELD_NOT_DECLARED");
-  if (!field.required) throw new ReportProjectionError("PROJECTION_FIELD_NOT_REQUIRED");
+  if (everyRowRequired && !field.required) {
+    throw new ReportProjectionError("PROJECTION_FIELD_NOT_REQUIRED");
+  }
   if ((output.valueKind === "money" && field.parser !== "money") ||
       (output.valueKind === "count" && field.parser !== "integer")) {
     throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
@@ -500,7 +512,7 @@ export function projectExactRangeMetrics(input: {
   const sheetTotals = new Map<string, string>();
 
   for (const output of input.document.outputs) {
-    const { sheet: rule, field } = findSourceField(input.contract, output);
+    const { sheet: rule, field } = findSourceField(input.contract, output, true);
     const source = selectContractSheet(rule, input.sheets);
     if (!source) throw new ReportProjectionError("REQUIRED_SHEET_MISSING");
     const header = source.rows[rule.headerRow - 1];
@@ -643,11 +655,17 @@ export function projectPeriodGrainMetrics(input: {
     (field) => field.canonicalField === periodKey.canonicalField,
   );
   if (!periodField) throw new ReportProjectionError("PROJECTION_FIELD_NOT_DECLARED");
+  if (periodField.parser !== "local_date") {
+    throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
+  }
+  // The encoding lives on the contract field, so the validator and the
+  // projector read the same column the same way.
+  const encoding = periodField.dateEncoding ?? "iso_date";
   const periodColumn = headers.get(periodField.sourceHeader);
   if (periodColumn === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
 
   const columns = input.document.outputs.map((output) => {
-    const { field } = findSourceField(input.contract, output);
+    const { field } = findSourceField(input.contract, output, false);
     const index = headers.get(field.sourceHeader);
     if (index === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
     return { output, index, absentMarkers: field.absentMarkers };
@@ -682,7 +700,7 @@ export function projectPeriodGrainMetrics(input: {
     if (row.every((value) => isEmptyCell(value))) continue;
 
     const periodStart = periodStartFor(
-      parsePeriodKey(row[periodColumn], periodKey.encoding, input.declaredPeriod),
+      parsePeriodKey(row[periodColumn], encoding, input.declaredPeriod),
       grain,
     );
     const byOutput = totals.get(periodStart) ?? new Map();

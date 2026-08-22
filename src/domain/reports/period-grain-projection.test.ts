@@ -54,7 +54,6 @@ function declaration(overrides: Record<string, unknown> = {}): ReportProjectionD
     periodKey: {
       normalizedSheetName: "sheet1",
       canonicalField: "period_date",
-      encoding: "iso_date",
     },
     outputs: [
       {
@@ -203,6 +202,63 @@ describe("rolling days up to a coarser grain", () => {
   });
 });
 
+describe("a provider that leaves days blank", () => {
+  it("projects a field the contract does not require on every row", () => {
+    // Talabat's export carries a row for all fifty-nine days and leaves the
+    // figures blank on the days it has nothing to say about. Demanding a
+    // required field here would make the provider's own normal export
+    // unmappable, which is the opposite of what "required" is protecting.
+    const optional = {
+      ...contract,
+      sheets: [
+        {
+          ...contract.sheets[0],
+          fields: contract.sheets[0].fields.map((field) =>
+            field.canonicalField === "gross_sales" ? { ...field, required: false } : field,
+          ),
+        },
+      ],
+    } as unknown as ReportContractDocument;
+
+    const result = projectPeriodGrainMetrics({
+      contract: optional,
+      document: declaration() as Extract<ReportProjectionDocument, { outputKind: "period_grain" }>,
+      declaredCurrency: "AED",
+      sheets: [{ normalizedSheetName: "sheet1", rows: [HEADER, ["2026-01-01", 70, 2], ["2026-01-02", null, 1]] }],
+    });
+
+    expect(result.observations.filter((row) => row.key === "gross_revenue")).toHaveLength(1);
+    expect(result.absentRowCount).toBe(1);
+  });
+
+  it("reads the date the way the contract says this provider writes it", () => {
+    // Keeta's billing report writes `1 Jan 2026`, and the encoding lives on the
+    // contract field so validation and projection cannot disagree about it.
+    const keeta = {
+      ...contract,
+      sheets: [
+        {
+          ...contract.sheets[0],
+          fields: contract.sheets[0].fields.map((field) =>
+            field.canonicalField === "period_date"
+              ? { ...field, dateEncoding: "text_date" }
+              : field,
+          ),
+        },
+      ],
+    } as unknown as ReportContractDocument;
+
+    const result = projectPeriodGrainMetrics({
+      contract: keeta,
+      document: declaration() as Extract<ReportProjectionDocument, { outputKind: "period_grain" }>,
+      declaredCurrency: "AED",
+      sheets: [{ normalizedSheetName: "sheet1", rows: [HEADER, ["1 Jan 2026", 70, 2]] }],
+    });
+
+    expect(result.observations[0]?.periodStart).toBe("2026-01-01");
+  });
+});
+
 describe("what the declaration refuses to express", () => {
   it("will not take the date from a different sheet than the values", () => {
     expect(() =>
@@ -210,7 +266,6 @@ describe("what the declaration refuses to express", () => {
         periodKey: {
           normalizedSheetName: "other",
           canonicalField: "period_date",
-          encoding: "iso_date",
         },
       }),
     ).toThrow();

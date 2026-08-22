@@ -28,6 +28,15 @@ const contractFieldSchema = z
      * somewhere else. See `@/domain/reports/absent`.
      */
     absentMarkers: z.array(z.string().trim().min(1).max(16)).max(5).optional(),
+    /**
+     * How this provider writes a date, for `local_date` fields only.
+     *
+     * It belongs to the source column rather than to anything read from it, so
+     * validation and projection cannot end up disagreeing about what
+     * `1 Jan 2026` means. Defaults to ISO, which is what every contract
+     * approved before this existed was reading.
+     */
+    dateEncoding: z.enum(["iso_date", "compact_date", "text_date", "day_month"]).optional(),
   })
   .strict()
   .superRefine((field, ctx) => {
@@ -43,6 +52,13 @@ const contractFieldSchema = z
         code: "custom",
         path: ["financialSign"],
         message: "Only money fields may declare a financial sign.",
+      });
+    }
+    if (field.dateEncoding && field.parser !== "local_date") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["dateEncoding"],
+        message: "Only a local date field may declare a date encoding.",
       });
     }
     for (const marker of field.absentMarkers ?? []) {
