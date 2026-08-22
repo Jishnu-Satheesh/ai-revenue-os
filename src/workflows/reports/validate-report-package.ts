@@ -158,7 +158,6 @@ type ParsedSheet = {
 
 const numericPattern = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
 const integerPattern = /^[+-]?\d+$/;
-const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const durationPattern = /^\d{1,3}:\d{2}(?::\d{2})?$/;
 
 function canonicalize(value: unknown): string {
@@ -428,8 +427,9 @@ function validateSheets(
   const declaredSheets = new Set(
     contract.sheets.map((rule) => selectContractSheet(rule, sheets)).filter(Boolean),
   );
+  const ignoreUnmappedSheets = contract.unmappedSheetDisposition === "reviewed_ignore";
   for (const sheet of sheets) {
-    if (declaredSheets.has(sheet)) continue;
+    if (declaredSheets.has(sheet) || ignoreUnmappedSheets) continue;
     errors.push("UNDECLARED_SHEET_PRESENT");
     sheetResults.push({
       normalizedSheetName: sheet.normalizedSheetName,

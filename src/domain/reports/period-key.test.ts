@@ -78,6 +78,29 @@ describe("reading the date a row belongs to", () => {
       ).toBe("2024-02-29");
     });
 
+    it("reads Talabat's raw spreadsheet serial", () => {
+      // The reader ignores cell styles, so a date arrives as the number the
+      // spreadsheet stores it as. 46023 and 46081 are the first and last rows
+      // of the client's own export, and they have to come back as the range
+      // Talabat says the file covers.
+      expect(parsePeriodKey(46023, "excel_serial")).toBe("2026-01-01");
+      expect(parsePeriodKey(46081, "excel_serial")).toBe("2026-02-28");
+      expect(parsePeriodKey("46023", "excel_serial")).toBe("2026-01-01");
+    });
+
+    it("refuses a serial carrying a time of day", () => {
+      // A fraction is a time. Discarding it would file an order under a day
+      // nobody chose; a column of times is a timestamp column, not a date one.
+      expect(() => parsePeriodKey(46023.5, "excel_serial")).toThrow(ReportProjectionError);
+    });
+
+    it("refuses a serial from before the calendar can be trusted", () => {
+      // Spreadsheets keep Lotus 1-2-3's phantom 29 February 1900, so anything
+      // below 1 March 1900 is off by a day and is refused rather than shifted.
+      expect(() => parsePeriodKey(60, "excel_serial")).toThrow(ReportProjectionError);
+      expect(parsePeriodKey(61, "excel_serial")).toBe("1900-03-01");
+    });
+
     it("reads a spreadsheet date cell by its UTC parts", () => {
       // A reader anchors a date cell at UTC midnight. Reading it locally would
       // move the day backwards for anyone west of Greenwich, quietly filing a

@@ -155,7 +155,7 @@ async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
   return rows;
 }
 
-async function readWorkbookRows(buffer: Buffer): Promise<Array<{ normalizedSheetName: string; rows: unknown[][] }>> {
+export async function readWorkbookRows(buffer: Buffer): Promise<Array<{ normalizedSheetName: string; rows: unknown[][] }>> {
   try {
     const workbook = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), {
       entries: "ignore",

@@ -36,7 +36,9 @@ const contractFieldSchema = z
      * `1 Jan 2026` means. Defaults to ISO, which is what every contract
      * approved before this existed was reading.
      */
-    dateEncoding: z.enum(["iso_date", "compact_date", "text_date", "day_month"]).optional(),
+    dateEncoding: z
+      .enum(["iso_date", "compact_date", "text_date", "day_month", "excel_serial"])
+      .optional(),
   })
   .strict()
   .superRefine((field, ctx) => {
@@ -175,6 +177,19 @@ export const reportContractDocumentSchema = z
     sheets: z.array(contractSheetSchema).min(1).max(25),
     controls: z.array(contractControlSchema).max(50),
     unmappedFieldDisposition: z.enum(["reviewed_ignore", "requires_mapping"]),
+    /**
+     * What to do about sheets in the file that this contract does not describe.
+     *
+     * Every real workbook the client's providers export has some. Keeta's
+     * billing report carries a glossary, an order-level sheet and a settlement
+     * sheet beside the daily one; Noon and EatEasily both ship an empty second
+     * tab. Requiring all of them to be mapped would mean describing three
+     * sheets nobody reads in order to read the fourth.
+     *
+     * Defaults to `requires_mapping`, so every contract approved before this
+     * existed keeps refusing sheets it never saw.
+     */
+    unmappedSheetDisposition: z.enum(["reviewed_ignore", "requires_mapping"]).optional(),
   })
   .strict()
   .superRefine((document, ctx) => {

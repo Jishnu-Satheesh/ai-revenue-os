@@ -26,12 +26,35 @@ export type PeriodKeyEncoding =
    * `01/Jan`, the form EatEasily's day-orders report uses. Carries no year, so
    * the year is taken from the period the package declares.
    */
-  | "day_month";
+  | "day_month"
+  /**
+   * `46023` — the raw serial a spreadsheet stores a date as.
+   *
+   * Talabat's export arrives this way. The reader deliberately ignores cell
+   * styles, so nothing in the bytes says the number is a date, and the contract
+   * has to. Guessing would be worse than useless here: every quantity in the
+   * file is also a number.
+   */
+  | "excel_serial";
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 const COMPACT = /^(\d{4})(\d{2})(\d{2})$/;
 const TEXT = /^(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})$/;
 const DAY_MONTH = /^(\d{1,2})\s*[/\- ]\s*([A-Za-z]{3,9})\.?$/;
+
+/**
+ * Day zero of the spreadsheet serial calendar.
+ *
+ * 1899-12-30 rather than 1899-12-31, because spreadsheets keep Lotus 1-2-3's
+ * mistake of treating 1900 as a leap year. The offset absorbs the phantom day,
+ * which is why every serial from 61 upwards lands on the right date.
+ */
+const SERIAL_EPOCH_MS = Date.UTC(1899, 11, 30);
+const MS_PER_DAY = 86_400_000;
+/** 1900-03-01, the first date the leap-year bug does not distort. */
+const FIRST_TRUSTWORTHY_SERIAL = 61;
+/** 9999-12-31, past which the result stops being a date anyone meant. */
+const LAST_SERIAL = 2_958_465;
 
 const MONTHS: Readonly<Record<string, number>> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
@@ -121,6 +144,19 @@ export function parsePeriodKey(
     const match = COMPACT.exec(text);
     if (!match) throw new ReportProjectionError("INVALID_LOCAL_DATE");
     return fromParts(Number(match[1]), Number(match[2]), Number(match[3]));
+  }
+
+  if (encoding === "excel_serial") {
+    const serial = typeof value === "number" ? value : Number(text);
+    // A fraction is a time of day. A column carrying times is a timestamp
+    // column, and silently discarding the time would file an order under a day
+    // nobody chose.
+    if (!Number.isInteger(serial)) throw new ReportProjectionError("INVALID_LOCAL_DATE");
+    if (serial < FIRST_TRUSTWORTHY_SERIAL || serial > LAST_SERIAL) {
+      throw new ReportProjectionError("INVALID_LOCAL_DATE");
+    }
+    const utc = new Date(SERIAL_EPOCH_MS + serial * MS_PER_DAY);
+    return fromParts(utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate());
   }
 
   if (encoding === "day_month") {
