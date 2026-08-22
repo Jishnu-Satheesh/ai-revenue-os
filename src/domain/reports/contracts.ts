@@ -69,6 +69,22 @@ const contractFieldSchema = z
 const contractSheetSchema = z
   .object({
     normalizedSheetName: normalizedIdentifierSchema,
+    /**
+     * How to find this sheet in an uploaded file.
+     *
+     * `name` is the normal case. `position` exists because Talabat names its
+     * worksheet after the export range — January's download is
+     * `Talabat-Jan-Feb-2026-Performanc` — so a contract keyed on the name would
+     * stop recognising the provider's own report the month after approval.
+     * `normalizedSheetName` stays either way, as this sheet's stable identifier
+     * inside the contract and the projection that extends it.
+     */
+    sheetLocator: z
+      .discriminatedUnion("kind", [
+        z.object({ kind: z.literal("name") }).strict(),
+        z.object({ kind: z.literal("position"), position: z.number().int().min(1).max(25) }).strict(),
+      ])
+      .optional(),
     headerRow: z.number().int().min(1).max(250_000),
     dataStartRow: z.number().int().min(2).max(250_000),
     allowFormula: z.boolean(),
@@ -156,6 +172,18 @@ export const reportContractDocumentSchema = z
         });
       }
       sheets.add(sheet.normalizedSheetName);
+    }
+    const positions = new Set<number>();
+    for (const sheet of document.sheets) {
+      if (sheet.sheetLocator?.kind !== "position") continue;
+      if (positions.has(sheet.sheetLocator.position)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["sheets"],
+          message: "Two sheets cannot be read from the same position.",
+        });
+      }
+      positions.add(sheet.sheetLocator.position);
     }
     for (const control of document.controls) {
       if (!sheets.has(control.normalizedSheetName)) {

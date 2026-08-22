@@ -12,6 +12,7 @@ import {
   periodStartFor,
   type PeriodKeyContext,
 } from "@/domain/reports/period-key";
+import { selectContractSheet } from "@/domain/reports/sheet-locator";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
   ReportControlTotalMismatch,
@@ -494,14 +495,13 @@ export function projectExactRangeMetrics(input: {
   declaredCurrency: string;
   sheets: readonly { normalizedSheetName: string; rows: readonly (readonly unknown[])[] }[];
 }): ExactRangeProjectionResult {
-  const sheetsByName = new Map(input.sheets.map((sheet) => [sheet.normalizedSheetName, sheet]));
   const outputs: ExactRangeProjectionOutput[] = [];
   const totalsRowIndexes = new Map<string, number | null>();
   const sheetTotals = new Map<string, string>();
 
   for (const output of input.document.outputs) {
     const { sheet: rule, field } = findSourceField(input.contract, output);
-    const source = sheetsByName.get(output.normalizedSheetName);
+    const source = selectContractSheet(rule, input.sheets);
     if (!source) throw new ReportProjectionError("REQUIRED_SHEET_MISSING");
     const header = source.rows[rule.headerRow - 1];
     if (!header) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
@@ -627,15 +627,13 @@ export function projectPeriodGrainMetrics(input: {
   sheets: readonly { normalizedSheetName: string; rows: readonly (readonly unknown[])[] }[];
 }): PeriodGrainProjectionResult {
   const { periodKey, grain } = input.document;
-  const source = input.sheets.find(
-    (sheet) => sheet.normalizedSheetName === periodKey.normalizedSheetName,
-  );
-  if (!source) throw new ReportProjectionError("REQUIRED_SHEET_MISSING");
-
   const rule = input.contract.sheets.find(
     (sheet) => sheet.normalizedSheetName === periodKey.normalizedSheetName,
   );
   if (!rule) throw new ReportProjectionError("PROJECTION_SHEET_NOT_DECLARED");
+
+  const source = selectContractSheet(rule, input.sheets);
+  if (!source) throw new ReportProjectionError("REQUIRED_SHEET_MISSING");
 
   const header = source.rows[rule.headerRow - 1];
   if (!header) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");

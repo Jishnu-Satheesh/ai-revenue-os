@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import { parse } from "csv-parse";
 
 import { isAbsentValue } from "@/domain/reports/absent";
+import { selectContractSheet } from "@/domain/reports/sheet-locator";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
   normalizeReportStructureIdentifier,
@@ -280,11 +281,10 @@ function validateSheets(
   const sheetResults: ReportValidationSheetResult[] = [];
   const errors: ReportValidationCode[] = [];
   const warnings: ReportValidationCode[] = [];
-  const sheetByName = new Map(sheets.map((sheet) => [sheet.normalizedSheetName, sheet]));
 
   for (const rule of contract.sheets) {
     const required = rule.fields.some((field) => field.required);
-    const sheet = sheetByName.get(rule.normalizedSheetName);
+    const sheet = selectContractSheet(rule, sheets);
     if (!sheet) {
       const code = required ? "REQUIRED_SHEET_MISSING" : "OPTIONAL_SHEET_MISSING";
       (required ? errors : warnings).push(code);
@@ -400,9 +400,14 @@ function validateSheets(
     sheetResults.push(result);
   }
 
-  const declaredSheetNames = new Set(contract.sheets.map((rule) => rule.normalizedSheetName));
+  // A sheet is declared if some contract sheet resolves to it, by name or by
+  // position. Comparing names alone would report a positionally-located sheet
+  // as an intruder in the very file its contract was approved against.
+  const declaredSheets = new Set(
+    contract.sheets.map((rule) => selectContractSheet(rule, sheets)).filter(Boolean),
+  );
   for (const sheet of sheets) {
-    if (declaredSheetNames.has(sheet.normalizedSheetName)) continue;
+    if (declaredSheets.has(sheet)) continue;
     errors.push("UNDECLARED_SHEET_PRESENT");
     sheetResults.push({
       normalizedSheetName: sheet.normalizedSheetName,
@@ -416,10 +421,15 @@ function validateSheets(
     });
   }
 
-  const profileByName = new Map(profiles.map((profile) => [profile.normalizedSheetName, profile]));
   const controlResults = contract.controls.map((control) => {
-    const sheet = sheetByName.get(control.normalizedSheetName);
-    const profile = profileByName.get(control.normalizedSheetName);
+    // A control names a contract sheet by the contract's own identifier for it,
+    // so the file sheet and its profile are both reached through that rule's
+    // locator rather than by matching the name against the file.
+    const rule = contract.sheets.find(
+      (candidate) => candidate.normalizedSheetName === control.normalizedSheetName,
+    );
+    const sheet = rule ? selectContractSheet(rule, sheets) : undefined;
+    const profile = rule ? selectContractSheet(rule, profiles) : undefined;
     const expectedCount =
       control.kind === "row_count" ? (profile?.rowCount ?? 0) : (profile?.populatedCellCount ?? 0);
     const actualCount =
