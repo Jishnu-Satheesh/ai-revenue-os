@@ -4,7 +4,12 @@ import {
   reportFileKindFromFilename,
   type ReportPackageUploadIntent,
 } from "@/domain/reports/schemas";
+import {
+  buildGuidedContractDocument,
+  buildGuidedProjectionDocument,
+} from "@/domain/reports/guided-mapping";
 import { findProviderReportDefinition } from "@/domain/reports/provider-library";
+import { reportContractDocumentSchema } from "@/domain/reports/contracts";
 import type {
   proposeReportContractSchema,
   proposeReportProjectionSchema,
@@ -51,6 +56,105 @@ function assertPermission(
       "You do not have permission for this report action.",
     );
   }
+}
+
+
+/**
+ * Where a proposed shape came from, and what provenance to record for it.
+ *
+ * The request's `source` and the recorded `proposalSource` are deliberately
+ * different vocabularies. A guided mapping is recorded as hand-authored,
+ * because it is: the platform assembled the JSON, but a person answered every
+ * question in it. Only a shape lifted whole from a checked-in artifact is
+ * `library`, and only that names a definition.
+ */
+type ResolvedContractProposal = {
+  mappingDocument: unknown;
+  proposalSource: "human" | "library";
+  providerDefinitionKey: string | null;
+};
+
+
+async function resolveContractProposal(
+  context: AuthenticatedReportContext,
+  packageId: string,
+  proposal: ReportContractProposal,
+  repository: ReportPackageRepository,
+): Promise<ResolvedContractProposal> {
+  if (proposal.source === "library") {
+    return {
+      mappingDocument: requireDefinition(proposal.providerDefinitionKey).contract,
+      proposalSource: "library",
+      providerDefinitionKey: proposal.providerDefinitionKey,
+    };
+  }
+  if (proposal.source === "guided") {
+    const reportPackage = await repository.findPackage({
+      organizationId: context.organizationId,
+      packageId,
+    });
+    if (!reportPackage) {
+      throw new DomainError("VALIDATION_ERROR", "That upload is not available to map.");
+    }
+    return {
+      // The currency is the package's, never the caller's. An operator
+      // answering questions about columns is not choosing what money this is.
+      mappingDocument: buildGuidedContractDocument({
+        answers: proposal.guided,
+        declaredCurrency: reportPackage.declared_currency,
+      }),
+      proposalSource: "human",
+      providerDefinitionKey: null,
+    };
+  }
+  return {
+    mappingDocument: proposal.mappingDocument,
+    proposalSource: "human",
+    providerDefinitionKey: null,
+  };
+}
+
+async function resolveProjectionProposal(
+  context: AuthenticatedReportContext,
+  contractVersionId: string,
+  proposal: ReportProjectionProposal,
+  repository: ReportPackageRepository,
+): Promise<{
+  projectionDocument: unknown;
+  proposalSource: "human" | "library";
+  providerDefinitionKey: string | null;
+}> {
+  if (proposal.source === "library") {
+    return {
+      projectionDocument: requireDefinition(proposal.providerDefinitionKey).projection,
+      proposalSource: "library",
+      providerDefinitionKey: proposal.providerDefinitionKey,
+    };
+  }
+  if (proposal.source === "guided") {
+    const version = await repository.findContractVersion({
+      organizationId: context.organizationId,
+      contractVersionId,
+    });
+    if (!version) {
+      throw new DomainError("VALIDATION_ERROR", "That approved mapping is not available.");
+    }
+    // Derived from the approved contract rather than from the operator's
+    // answers a second time, so whatever an owner approved is exactly what
+    // gets read. Answers given twice could differ; a contract cannot.
+    return {
+      projectionDocument: buildGuidedProjectionDocument(
+        reportContractDocumentSchema.parse(version.mapping_document),
+      ),
+      proposalSource: "human",
+      providerDefinitionKey: null,
+    };
+  }
+  return {
+    projectionDocument: proposal.projectionDocument,
+    proposalSource: "human",
+    providerDefinitionKey: null,
+  };
 }
 
 export function createReportPackageService(repository: ReportPackageRepository) {
@@ -134,22 +238,14 @@ export function createReportPackageService(repository: ReportPackageRepository) 
       idempotencyKey: string,
     ) {
       assertPermission(context, "report.contract_approve");
-      // A library proposal carries a key, never a document. The document is
-      // read from the checked-in definition here, so what gets recorded as
-      // library-sourced is what the library actually says.
-      const resolved =
-        proposal.source === "library"
-          ? {
-              mappingDocument: requireDefinition(proposal.providerDefinitionKey).contract,
-              providerDefinitionKey: proposal.providerDefinitionKey,
-            }
-          : { mappingDocument: proposal.mappingDocument, providerDefinitionKey: null };
+      const resolvedPackageId = packageIdSchema.parse(packageId);
+      const resolved = await resolveContractProposal(context, resolvedPackageId, proposal, repository);
       return repository.proposeContract({
         organizationId: context.organizationId,
         actorId: context.actorId,
-        packageId: packageIdSchema.parse(packageId),
+        packageId: resolvedPackageId,
         mappingDocument: resolved.mappingDocument,
-        proposalSource: proposal.source,
+        proposalSource: resolved.proposalSource,
         providerDefinitionKey: resolved.providerDefinitionKey,
         idempotencyKey,
         correlationId: context.correlationId,
@@ -182,19 +278,14 @@ export function createReportPackageService(repository: ReportPackageRepository) 
       idempotencyKey: string,
     ) {
       assertPermission(context, "report.contract_approve");
-      const resolved =
-        proposal.source === "library"
-          ? {
-              projectionDocument: requireDefinition(proposal.providerDefinitionKey).projection,
-              providerDefinitionKey: proposal.providerDefinitionKey,
-            }
-          : { projectionDocument: proposal.projectionDocument, providerDefinitionKey: null };
+      const resolvedVersionId = packageIdSchema.parse(contractVersionId);
+      const resolved = await resolveProjectionProposal(context, resolvedVersionId, proposal, repository);
       return repository.proposeProjection({
         organizationId: context.organizationId,
         actorId: context.actorId,
-        contractVersionId: packageIdSchema.parse(contractVersionId),
+        contractVersionId: resolvedVersionId,
         projectionDocument: resolved.projectionDocument,
-        proposalSource: proposal.source,
+        proposalSource: resolved.proposalSource,
         providerDefinitionKey: resolved.providerDefinitionKey,
         idempotencyKey,
         correlationId: context.correlationId,

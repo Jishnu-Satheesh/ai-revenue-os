@@ -141,7 +141,7 @@ export function createAuthenticatedReportPackageRepository(
         supabase
           .from("integration_report_sheet_manifests")
           .select(
-            "id,organization_id,report_package_id,sheet_position,sheet_name,normalized_sheet_name,row_count,populated_cell_count,expanded_bytes,content_digest,header_candidate_digests,has_formula,has_merged_cells,has_repeated_header,created_at",
+            "id,organization_id,report_package_id,sheet_position,sheet_name,normalized_sheet_name,row_count,populated_cell_count,expanded_bytes,content_digest,header_candidate_digests,header_candidates,has_formula,has_merged_cells,has_repeated_header,created_at",
           )
           .eq("organization_id", organizationId)
           .order("sheet_position", { ascending: true }),

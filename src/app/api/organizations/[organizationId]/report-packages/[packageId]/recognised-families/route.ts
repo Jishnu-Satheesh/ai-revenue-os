@@ -5,7 +5,7 @@ import {
 } from "@/modules/reports/application/api";
 
 /**
- * Which known report families this upload could be.
+ * What this upload looks like, and which known report families it could be.
  *
  * Decided from the profile alone — sheet names, positions and digests of the
  * headers — so the answer costs nothing but what profiling already recorded and
@@ -43,6 +43,18 @@ export async function GET(
       return {
         status: 200,
         body: {
+          // The columns an operator needs in order to describe an export the
+          // platform does not recognise. Names only, and only normalized ones:
+          // the profile holds nothing from under them.
+          sheets: snapshot.sheetManifests
+            .filter((manifest) => manifest.report_package_id === reportPackage.id)
+            .sort((left, right) => left.sheet_position - right.sheet_position)
+            .map((manifest) => ({
+              normalizedSheetName: manifest.normalized_sheet_name,
+              sheetPosition: manifest.sheet_position,
+              rowCount: manifest.row_count,
+              headerRows: retainedHeaders(manifest.header_candidates),
+            })),
           recognisedFamilies: matchProviderDefinitions({
             declaredCurrency: reportPackage.declared_currency,
             sheets,
@@ -64,6 +76,23 @@ export async function GET(
 }
 
 type HeaderCandidate = { rowPosition: number; normalizedHeaderDigests: string[] };
+
+/** The candidate header rows whose column names the profile kept. */
+function retainedHeaders(value: unknown): { rowPosition: number; columns: string[] }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as Record<string, unknown>;
+    const headers = candidate.normalizedHeaders;
+    if (typeof candidate.rowPosition !== "number" || !Array.isArray(headers)) return [];
+    return [
+      {
+        rowPosition: candidate.rowPosition,
+        columns: headers.filter((header): header is string => typeof header === "string"),
+      },
+    ];
+  });
+}
 
 /**
  * The profile stores header candidates as free-form JSON, so it is narrowed

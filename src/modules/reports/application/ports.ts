@@ -17,6 +17,7 @@ export type ReportSheetManifestSummary = Pick<
   | "expanded_bytes"
   | "content_digest"
   | "header_candidate_digests"
+  | "header_candidates"
   | "has_formula"
   | "has_merged_cells"
   | "has_repeated_header"

@@ -6,6 +6,7 @@ import {
   type ReportFileKind,
 } from "@/domain/reports/types";
 import { reportContractDocumentSchema } from "@/domain/reports/contracts";
+import { guidedReportMappingSchema } from "@/domain/reports/guided-mapping";
 import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
 
 const dateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -160,6 +161,13 @@ export const proposeReportContractSchema = z.preprocess(
         idempotencyKey: z.string().trim().min(16).max(200),
       })
       .strict(),
+    z
+      .object({
+        source: z.literal("guided"),
+        guided: guidedReportMappingSchema,
+        idempotencyKey: z.string().trim().min(16).max(200),
+      })
+      .strict(),
   ]),
 );
 
@@ -194,6 +202,14 @@ export const proposeReportProjectionSchema = z.preprocess(
       .object({
         source: z.literal("library"),
         providerDefinitionKey: z.string().trim().min(2).max(80),
+        idempotencyKey: z.string().trim().min(16).max(200),
+      })
+      .strict(),
+    z
+      .object({
+        // Carries no document and no answers: the declaration follows from the
+        // contract an owner already approved, so the two cannot drift.
+        source: z.literal("guided"),
         idempotencyKey: z.string().trim().min(16).max(200),
       })
       .strict(),
