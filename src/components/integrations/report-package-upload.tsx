@@ -134,6 +134,44 @@ function approvedProjectionSources(
   });
 }
 
+/**
+ * Every list the panel reads, present and empty by default.
+ *
+ * The snapshot arrives over the network, so its shape is a promise rather than
+ * a fact: a partial body, an error envelope, or an older server all leave a
+ * list undefined, and a component that reached straight into one took the whole
+ * Data Sources tab down with it. Normalizing once here means no reader below
+ * has to remember, and a missing list renders as "nothing yet" rather than a
+ * blank screen.
+ */
+function toSnapshotView(data: ReportPackageSnapshot | undefined): ReportPackageSnapshot {
+  const list = <TKey extends keyof ReportPackageSnapshot>(
+    key: TKey,
+  ): ReportPackageSnapshot[TKey] =>
+    (Array.isArray(data?.[key]) ? data[key] : []) as ReportPackageSnapshot[TKey];
+
+  return {
+    packages: list("packages"),
+    sheetManifests: list("sheetManifests"),
+    contracts: list("contracts"),
+    contractVersions: list("contractVersions"),
+    contractDecisions: list("contractDecisions"),
+    contractBindings: list("contractBindings"),
+    validationRuns: list("validationRuns"),
+    validationSheetResults: list("validationSheetResults"),
+    validationControlResults: list("validationControlResults"),
+    projectionVersions: list("projectionVersions"),
+    projectionDecisions: list("projectionDecisions"),
+    projectionBindings: list("projectionBindings"),
+    projectionRuns: list("projectionRuns"),
+    reconciliations: list("reconciliations"),
+    reconciliationResolutions: list("reconciliationResolutions"),
+    exactRangeObservations: list("exactRangeObservations"),
+    channels: list("channels"),
+    branches: list("branches"),
+  };
+}
+
 function safeValidationCodes(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((code): code is string => typeof code === "string").slice(0, 20)
@@ -168,11 +206,12 @@ export function ReportPackageUpload({
     queryFn: () => requestJson<ReportPackageSnapshot>(reportPackagesPath(organizationId)),
   });
 
-  const activeBranches = useMemo(() => snapshot.data?.branches ?? [], [snapshot.data?.branches]);
+  const view = useMemo(() => toSnapshotView(snapshot.data), [snapshot.data]);
+  const activeBranches = view.branches;
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
 
-  const selectedProjectionContract = snapshot.data?.contractVersions.find(
+  const selectedProjectionContract = view.contractVersions.find(
     (version) => version.id === projectionContractVersionId,
   );
   const projectionSources = useMemo(
@@ -516,7 +555,7 @@ export function ReportPackageUpload({
                   <SelectValue placeholder="Select channel" />
                 </SelectTrigger>
                 <SelectContent>
-                  {snapshot.data?.channels.map((channel) => (
+                  {view.channels.map((channel) => (
                     <SelectItem key={channel.id} value={channel.id}>
                       {channel.display_name}
                     </SelectItem>
@@ -623,25 +662,25 @@ export function ReportPackageUpload({
 
         <div className="space-y-3 border-t pt-4">
           <h3 className="text-sm font-medium">Recent packages</h3>
-          {snapshot.data?.packages.length ? (
-            snapshot.data.packages.map((reportPackage) => {
-              const latestValidation = snapshot.data.validationRuns.find(
+          {view.packages.length ? (
+            view.packages.map((reportPackage) => {
+              const latestValidation = view.validationRuns.find(
                 (run) => run.report_package_id === reportPackage.id,
               );
               const validationErrorCodes = safeValidationCodes(latestValidation?.error_codes);
               const validationWarningCodes = safeValidationCodes(latestValidation?.warning_codes);
               const validationSheetResults = latestValidation
-                ? snapshot.data.validationSheetResults.filter(
+                ? view.validationSheetResults.filter(
                     (result) => result.validation_run_id === latestValidation.id,
                   )
                 : [];
-              const latestProjection = snapshot.data.projectionRuns.find(
+              const latestProjection = view.projectionRuns.find(
                 (run) => run.report_package_id === reportPackage.id,
               );
-              const reconciliations = snapshot.data.reconciliations.filter(
+              const reconciliations = view.reconciliations.filter(
                 (item) => item.report_package_id === reportPackage.id,
               );
-              const exactRangeObservations = snapshot.data.exactRangeObservations.filter(
+              const exactRangeObservations = view.exactRangeObservations.filter(
                 (item) => item.report_package_id === reportPackage.id,
               );
               return (
@@ -816,7 +855,7 @@ export function ReportPackageUpload({
                   ))}
                   {reconciliations.map((reconciliation) => {
                     const resolved =
-                      snapshot.data?.reconciliationResolutions.some(
+                      view.reconciliationResolutions.some(
                         (item) => item.reconciliation_id === reconciliation.id,
                       ) ?? false;
                     const needsReview =
@@ -882,9 +921,9 @@ export function ReportPackageUpload({
               yet.
             </p>
           </div>
-          {snapshot.data?.contractVersions.length ? (
-            snapshot.data.contractVersions.map((version) => {
-              const decision = snapshot.data?.contractDecisions.find(
+          {view.contractVersions.length ? (
+            view.contractVersions.map((version) => {
+              const decision = view.contractDecisions.find(
                 (item) => item.report_contract_version_id === version.id,
               );
               const contractSummary = summarizeReportContract(version.mapping_document);
@@ -991,7 +1030,7 @@ export function ReportPackageUpload({
                   <SelectValue placeholder="Select a package awaiting a contract" />
                 </SelectTrigger>
                 <SelectContent>
-                  {snapshot.data?.packages
+                  {view.packages
                     .filter((reportPackage) => reportPackage.status === "awaiting_contract")
                     .map((reportPackage) => (
                       <SelectItem key={reportPackage.id} value={reportPackage.id}>
@@ -1020,8 +1059,8 @@ export function ReportPackageUpload({
               Declarations map approved fields to registered exact-range aggregates; workbook values
               never appear here.
             </p>
-            {snapshot.data?.projectionVersions.map((version) => {
-              const decision = snapshot.data.projectionDecisions.find(
+            {view.projectionVersions.map((version) => {
+              const decision = view.projectionDecisions.find(
                 (item) => item.report_projection_version_id === version.id,
               );
               return (
@@ -1085,9 +1124,9 @@ export function ReportPackageUpload({
                     <SelectValue placeholder="Select approved contract" />
                   </SelectTrigger>
                   <SelectContent>
-                    {snapshot.data?.contractVersions
+                    {view.contractVersions
                       .filter((version) =>
-                        snapshot.data.contractDecisions.some(
+                        view.contractDecisions.some(
                           (decision) =>
                             decision.report_contract_version_id === version.id &&
                             decision.decision === "approved",
