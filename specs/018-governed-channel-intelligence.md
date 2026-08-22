@@ -105,6 +105,73 @@ computes the business results.
 - The Integration Hub shows current exact-range evidence, superseded history, duplicate replay, blocked overlap, and the next safe owner/admin step. It does not show workbook rows, cells, aggregate values, formulas, URLs, prompts, model output, or calculations.
 - This remains a deterministic control slice only: it does not infer calendar grains, prorate, sum overlaps, write Channel Economics, run detectors, make benchmarks/recommendations, narrate with AI, or trigger provider/campaign actions.
 
+### 4.1.5 Planned operator-usable ingestion slice
+
+The four delivered slices above are complete and correct, and together they deliver no usable
+value: the only way to map a report today is to hand-write two JSON documents into textareas, and
+the pipeline ends at a status badge. Governance became the interface instead of the audit trail.
+This slice inverts that, and widens ingestion to the shape the client's real exports actually take.
+
+#### What the real exports turned out to be
+
+Profiled on 2026-08-22 from the pilot client's own downloads across Talabat, Keeta, Noon, Smile, and
+the offline store. Everything below is observed, not assumed:
+
+- **Most of the data is daily, not period totals.** Talabat performance is one row per day over 56
+  columns. Keeta's restaurant, item, and promotion exports are one row per day. Only Noon and Smile
+  state a single period total. The exact-range ledger in 10.2 was built for the minority shape;
+  10.1's period grain is the majority one and is not yet wired to the governed pipeline.
+- **A provider delivers a set of files, not one file.** Keeta alone exports restaurant, item,
+  order, promotion, and billing reports for a single period. One package equals one file today.
+- **Costs frequently arrive measured rather than as rates.** Keeta states commission, bank fees, and
+  delivery subsidies per day and per order; Smile states total commission. Those are `sourced`
+  components under `specs/012` 4.2, not figures an operator should be asked to type. Rates remain
+  necessary only where the provider is silent, which for this client is Talabat.
+- **Headers are not always on row one.** Noon carries a field row, an English description row, and
+  an Arabic description row before its single value row. Keeta's billing summary carries a category
+  row and a subcategory row above its field names.
+- **Dates arrive in at least three encodings** across providers: a real date, the integer
+  `20260228`, and the text `1 Jan 2026`.
+- **Blank and zero are genuinely different in the source.** Talabat records a true zero-sales day
+  and a no-data day differently, which `specs/012` 6.2 already requires be preserved.
+- **The period is sometimes only in the filename.** Noon and Smile state no period inside the file,
+  which is why the declared period at upload is load-bearing rather than redundant.
+- **Some inputs exist only as PDF.** The offline store's profit and loss is the only source for
+  food cost and packaging — the inputs contribution margin has always lacked — and it is a
+  wkhtmltopdf-rendered table. Keeta's commission invoices are iText-generated. None is a scan.
+
+#### What the operator does after this slice
+
+Three steps, replacing eleven:
+
+1. Choose the channel and outlet, and upload the file. The declared period and currency are
+   presented for confirmation rather than typed where the file or its name states them.
+2. Confirm one plain-language mapping: *"This looks like a Keeta billing report. Total Original item
+   price is your sales, Total Commission is a cost, and it arrives negative. Correct?"* Recognised
+   report families are pre-filled from a checked-in contract; anything unrecognised falls back to a
+   guided list of dropdowns over the detected columns. A model may propose the mapping under 8.4;
+   it never reads a value into the database and its proposal is inert until a human approves it.
+3. See the numbers.
+
+The contract version, the projection declaration, the approval record, the digest, and the lineage
+are all still written exactly as the delivered slices define them. They stop being questions put to
+the operator and go back to being the receipt.
+
+#### Capability changes this requires
+
+- Period-grain projection into `normalized_metrics` per 10.1, alongside the existing exact-range
+  path, with the grain declared by the approved contract and never inferred from a row.
+- A date parser and a money control total in the projection declaration language, which ADR 0027
+  deliberately limited to `money` and `count` sums. See ADR 0029.
+- A report set: one channel and period owning several report types, each with its own contract.
+- A machine-generated PDF adapter per 7.3 and ADR 0028.
+- Checked-in report-family contracts keyed by schema fingerprint for the recognised providers.
+
+#### What this slice still does not do
+
+No contribution margin, no detectors, no recommendations, no benchmarks, no Business Memory writes,
+no AI narration, no provider or campaign actions, no OCR, and no model-read values.
+
 ### 4.2 Release 2
 
 - Provider-neutral public benchmark research, with Exa Search and Contents as the first adapter.
@@ -119,9 +186,10 @@ computes the business results.
   actions.
 - Migrating the campaign-specific Instagram/Facebook action vocabulary. Those values represent
   verified executable capabilities, not organization channel identity.
-- PDFs as financial-data uploads. The attached Talabat metric-definition PDF is vocabulary evidence
-  only.
-- OCR, email inbox scraping, arbitrary document types, formulas as executable calculations, macros,
+- **Scanned or image-only PDFs, and OCR of any kind.** Machine-generated PDFs carrying a real text
+  layer are in scope under 7.3 and ADR 0028; a document whose numbers exist only as pixels is not,
+  and is refused rather than guessed at.
+- Email inbox scraping, arbitrary document types, formulas as executable calculations, macros,
   external workbook links, or generated SQL/code transforms.
 - Full accounting, tax filing, fixed-cost allocation, or guarantees that marketplace statements
   reconcile to the client's books.
@@ -287,10 +355,22 @@ free-form settings.
 
 ### 7.3 Parser boundary
 
-The parser port has versioned adapters for XLSX and CSV.
+The parser port has versioned adapters for XLSX, CSV, and machine-generated PDF.
 
 - ExcelJS is pinned exactly and used in streaming mode in the worker runtime.
 - CSV reuses the existing BOM-aware parser and gains the same package envelope and hard limits.
+- **PDF is admitted only where the numbers already exist as text.** The adapter extracts a
+  positioned text layer and reconstructs a cell grid from it, then hands that grid to exactly the
+  same contract, validation, and projection path a spreadsheet takes. A PDF with no text layer, or
+  one whose text layer yields no reconstructable grid, is a typed failure. No OCR, no image
+  interpretation, and no model reads a value. See ADR 0028.
+- **Legacy binary `.xls` (BIFF, pre-2007) is refused with an actionable message** naming the format
+  and asking for an `.xlsx` export. ExcelJS cannot read it, and admitting a second spreadsheet
+  engine to serve one provider that can already export `.xlsx` is not worth the parser surface.
+- A PDF that restates a figure a spreadsheet already carries is a **control document, not a
+  source**. Where both exist for one period, the spreadsheet is projected and the PDF's stated
+  totals are reconciled against it under 8.3's control-total rules. A mismatch fails the import
+  loudly rather than picking a winner.
 - Every cell is normalized first into a typed, bounded string representation with its coordinate,
   source type, and flags. Numeric interpretation happens only through an approved contract.
 - Formula text is never persisted. Formula cells and cached results are inspected transiently under
