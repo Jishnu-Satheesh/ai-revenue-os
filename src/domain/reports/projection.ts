@@ -7,9 +7,12 @@ import {
   type ReportContractDocument,
 } from "@/domain/reports/contracts";
 import { parsePeriodKey, periodStartFor } from "@/domain/reports/period-key";
-import { ReportProjectionError } from "@/domain/reports/projection-error";
+import {
+  ReportControlTotalMismatch,
+  ReportProjectionError,
+} from "@/domain/reports/projection-error";
 
-export { ReportProjectionError };
+export { ReportControlTotalMismatch, ReportProjectionError };
 
 const normalizedIdentifierSchema = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
 const metricKeySchema = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/);
@@ -25,11 +28,38 @@ const reportProjectionOutputSchema = z
   })
   .strict();
 
+/**
+ * A money figure the provider itself states as the total for this period, which
+ * the projected rows have to reach.
+ *
+ * The figure is recorded by the operator at approval time from the provider's
+ * own statement — Keeta states January's credit sales on its commission
+ * invoice, and nothing in the workbook repeats it. That makes the import
+ * checkable by arithmetic instead of trust: if the rows do not add up to what
+ * the provider says they should, the mapping or the period is wrong and the
+ * import is refused rather than admitted.
+ *
+ * Money only, per ADR 0029. A count total is the same code and no new evidence
+ * asks for it yet.
+ */
+const projectionControlTotalSchema = z
+  .object({
+    outputKey: normalizedIdentifierSchema,
+    /** Minor units of the declaration's currency, signed. */
+    statedTotalMinorUnits: z.string().regex(/^-?(0|[1-9]\d{0,17})$/),
+    /** Minor units. Zero means the figures have to agree exactly. */
+    toleranceMinorUnits: z.number().int().min(0).max(100_000_000),
+    /** Which statement the figure was read from. Kept for the audit trail. */
+    statedSource: z.string().min(1).max(200),
+  })
+  .strict();
+
 const exactRangeDocumentSchema = z
   .object({
     schemaVersion: z.literal(1),
     outputKind: z.literal("exact_range"),
     outputs: z.array(reportProjectionOutputSchema).min(1).max(50),
+    controlTotals: z.array(projectionControlTotalSchema).max(50).default([]),
   })
   .strict();
 
@@ -56,6 +86,7 @@ const periodGrainDocumentSchema = z
       })
       .strict(),
     outputs: z.array(reportProjectionOutputSchema).min(1).max(50),
+    controlTotals: z.array(projectionControlTotalSchema).max(50).default([]),
   })
   .strict();
 
@@ -111,6 +142,37 @@ export const reportProjectionDocumentSchema = z
       metricKeys.add(output.metricKey);
       sourceFields.add(source);
     }
+
+    const byOutputKey = new Map(document.outputs.map((output) => [output.key, output]));
+    const checked = new Set<string>();
+    for (const control of document.controlTotals) {
+      const output = byOutputKey.get(control.outputKey);
+      if (!output) {
+        context.addIssue({
+          code: "custom",
+          path: ["controlTotals"],
+          message: "A control total must name an output this declaration emits.",
+        });
+        continue;
+      }
+      if (output.valueKind !== "money") {
+        context.addIssue({
+          code: "custom",
+          path: ["controlTotals"],
+          message: "Only a money output can be reconciled to a stated total.",
+        });
+      }
+      if (checked.has(control.outputKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["controlTotals"],
+          // Two totals for one output would either agree, and be redundant, or
+          // disagree, and leave no honest answer about which one governs.
+          message: "An output may be reconciled to one stated total.",
+        });
+      }
+      checked.add(control.outputKey);
+    }
   });
 
 export type ReportProjectionDocument = z.output<typeof reportProjectionDocumentSchema>;
@@ -128,8 +190,25 @@ export type ExactRangeProjectionOutput = {
   contributorCount: number;
 };
 
+/**
+ * A stated total and what the projected rows actually came to.
+ *
+ * Returned even when it reconciles, so an operator can be shown that the import
+ * was checked against the provider's own figure rather than merely accepted.
+ */
+export type ControlTotalReconciliation = {
+  outputKey: string;
+  statedMinorUnits: string;
+  projectedMinorUnits: string;
+  /** Projected minus stated. Negative means the file came up short. */
+  differenceMinorUnits: string;
+  toleranceMinorUnits: number;
+  statedSource: string;
+};
+
 export type ExactRangeProjectionResult = {
   outputs: ExactRangeProjectionOutput[];
+  controlTotals: ControlTotalReconciliation[];
 };
 
 
@@ -158,7 +237,16 @@ function canonicalize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function createReportProjectionResultDigest(result: ExactRangeProjectionResult): string {
+/**
+ * Identifies the projected figures, and only those.
+ *
+ * A reconciled control total is a check that passed, not a figure, so it stays
+ * out: including it would change the digest of every existing declaration and
+ * make an unchanged import look like a correction.
+ */
+export function createReportProjectionResultDigest(result: {
+  outputs: readonly ExactRangeProjectionOutput[];
+}): string {
   return createHash("sha256").update(canonicalize(result)).digest("hex");
 }
 
@@ -266,6 +354,62 @@ function integer(value: unknown): string {
   return normalizeInteger(text);
 }
 
+function negateIntegerString(value: string): string {
+  if (value === "0") return "0";
+  return value.startsWith("-") ? value.slice(1) : `-${value}`;
+}
+
+/**
+ * Check every projected figure against the total the provider stated.
+ *
+ * Throws on the first gap outside tolerance rather than collecting them: an
+ * import that is wrong about one figure is not admitted because the rest agreed,
+ * and the first mismatch is the one an operator should look at.
+ */
+function reconcileControlTotals(
+  controls: readonly {
+    outputKey: string;
+    statedTotalMinorUnits: string;
+    toleranceMinorUnits: number;
+    statedSource: string;
+  }[],
+  projectedByOutputKey: ReadonlyMap<string, string>,
+): ControlTotalReconciliation[] {
+  return controls.map((control) => {
+    // An output that produced no figure at all is not "zero" anywhere else in
+    // this engine, but a stated total is an assertion that the file carries
+    // figures. Reporting the whole stated amount as the gap describes that
+    // truthfully, and the comparison below refuses the import.
+    const projected = projectedByOutputKey.get(control.outputKey) ?? "0";
+    const difference = addIntegerStrings(
+      projected,
+      negateIntegerString(control.statedTotalMinorUnits),
+    );
+    const reconciliation: ControlTotalReconciliation = {
+      outputKey: control.outputKey,
+      statedMinorUnits: control.statedTotalMinorUnits,
+      projectedMinorUnits: projected,
+      differenceMinorUnits: difference,
+      toleranceMinorUnits: control.toleranceMinorUnits,
+      statedSource: control.statedSource,
+    };
+    const overshoot = compareAbsolute(
+      difference.replace("-", ""),
+      String(control.toleranceMinorUnits),
+    );
+    if (overshoot > 0) {
+      throw new ReportControlTotalMismatch(
+        control.outputKey,
+        control.statedTotalMinorUnits,
+        projected,
+        difference,
+        control.toleranceMinorUnits,
+      );
+    }
+    return reconciliation;
+  });
+}
+
 function findSourceField(
   contract: ReportContractDocument,
   output: ReportProjectionDocument["outputs"][number],
@@ -328,7 +472,13 @@ export function projectExactRangeMetrics(input: {
     });
   }
 
-  return { outputs };
+  return {
+    outputs,
+    controlTotals: reconcileControlTotals(
+      input.document.controlTotals,
+      new Map(outputs.map((output) => [output.key, output.valueNumerator])),
+    ),
+  };
 }
 
 export type PeriodGrainObservation = {
@@ -355,6 +505,12 @@ export type PeriodGrainProjectionResult = {
    * to be able to see that eleven of thirty days said nothing.
    */
   absentRowCount: number;
+  /**
+   * Stated totals are checked against the sum across every period, which is the
+   * grain a provider states them at: Keeta invoices a month, and the file it
+   * came from carries a row per day.
+   */
+  controlTotals: ControlTotalReconciliation[];
 };
 
 function periodEndFor(start: string, grain: "day" | "week" | "month"): string {
@@ -477,5 +633,17 @@ export function projectPeriodGrainMetrics(input: {
       left.periodStart.localeCompare(right.periodStart) || left.key.localeCompare(right.key),
   );
 
-  return { observations, absentRowCount };
+  const projectedByOutputKey = new Map<string, string>();
+  for (const observation of observations) {
+    projectedByOutputKey.set(
+      observation.key,
+      addIntegerStrings(projectedByOutputKey.get(observation.key) ?? "0", observation.valueNumerator),
+    );
+  }
+
+  return {
+    observations,
+    absentRowCount,
+    controlTotals: reconcileControlTotals(input.document.controlTotals, projectedByOutputKey),
+  };
 }

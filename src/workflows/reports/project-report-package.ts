@@ -9,6 +9,7 @@ import { normalizeReportStructureIdentifier, reportContractDocumentSchema } from
 import {
   createReportProjectionResultDigest,
   projectExactRangeMetrics,
+  ReportControlTotalMismatch,
   reportProjectionDocumentSchema,
 } from "@/domain/reports/projection";
 
@@ -98,19 +99,22 @@ export type ReportProjectionDependencies = {
     packageId: string;
     projectionRunId: string;
     claimToken: string;
-    code: "OBJECT_IDENTITY_CHANGED" | "OBJECT_UNAVAILABLE" | "UNREADABLE_WORKBOOK" | "PROJECTION_PROCESSING_FAILED";
+    code: ReportProjectionFailureCode;
     resultDigest: string;
   }): Promise<void>;
 };
 
+/** Every code `fail_governed_report_package_projection` will accept. */
+export type ReportProjectionFailureCode =
+  | "OBJECT_IDENTITY_CHANGED"
+  | "OBJECT_UNAVAILABLE"
+  | "UNREADABLE_WORKBOOK"
+  | "CONTROL_TOTAL_MISMATCH"
+  | "PROJECTION_OUTPUT_KIND_UNSUPPORTED"
+  | "PROJECTION_PROCESSING_FAILED";
+
 export class ReportProjectionFailure extends Error {
-  constructor(
-    public readonly code:
-      | "OBJECT_IDENTITY_CHANGED"
-      | "OBJECT_UNAVAILABLE"
-      | "UNREADABLE_WORKBOOK"
-      | "PROJECTION_PROCESSING_FAILED",
-  ) {
+  constructor(public readonly code: ReportProjectionFailureCode) {
     super(code);
     this.name = "ReportProjectionFailure";
   }
@@ -230,6 +234,13 @@ export async function runReportPackageProjection(
     }
     const contract = reportContractDocumentSchema.parse(claim.contractVersion.mapping_document);
     const document = reportProjectionDocumentSchema.parse(claim.projectionVersion.projection_document);
+    // A period-grain declaration projects into `normalized_metrics` per
+    // `specs/018` section 10.1, and that write path does not exist yet. Summing
+    // its daily rows into one exact-range total would be the silent
+    // reinterpretation ADR 0029 exists to prevent, so it is refused instead.
+    if (document.outputKind !== "exact_range") {
+      throw new ReportProjectionFailure("PROJECTION_OUTPUT_KIND_UNSUPPORTED");
+    }
     if (contract.currency !== claim.reportPackage.declared_currency || contract.outletGrain !== "branch") {
       throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
     }
@@ -280,7 +291,26 @@ export async function runReportPackageProjection(
     });
     return { outcome: result.status };
   } catch (error) {
-    const code = error instanceof ReportProjectionFailure ? error.code : "PROJECTION_PROCESSING_FAILED";
+    const code: ReportProjectionFailureCode =
+      error instanceof ReportProjectionFailure
+        ? error.code
+        : error instanceof ReportControlTotalMismatch
+          ? "CONTROL_TOTAL_MISMATCH"
+          : "PROJECTION_PROCESSING_FAILED";
+    if (error instanceof ReportControlTotalMismatch) {
+      // The difference is the only part an operator can act on, and there is no
+      // column for it, so it goes to the log with the identifiers that make it
+      // findable. No figure from the workbook itself is logged.
+      console.error("report projection control total mismatch", {
+        organizationId: payload.organizationId,
+        packageId: payload.packageId,
+        projectionRunId: payload.projectionRunId,
+        correlationId: payload.correlationId,
+        outputKey: error.outputKey,
+        differenceMinorUnits: error.differenceMinorUnits,
+        toleranceMinorUnits: error.toleranceMinorUnits,
+      });
+    }
     await dependencies.fail({
       organizationId: payload.organizationId,
       packageId: payload.packageId,

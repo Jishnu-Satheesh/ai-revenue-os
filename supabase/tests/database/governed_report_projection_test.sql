@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(21);
+select extensions.plan(24);
 
 select extensions.has_table('public', 'report_projection_versions', 'immutable projection declarations are versioned');
 select extensions.has_table('public', 'report_projection_decisions', 'owner decisions are append-only');
@@ -32,6 +32,21 @@ select extensions.lives_ok(
 select extensions.lives_ok(
   $$ select public.fail_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'PROJECTION_PROCESSING_FAILED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') $$,
   'failure function executes safely without an active lease'
+);
+-- The two codes added for control totals and unsupported projection targets.
+-- A code the failure function rejects would surface to the operator as the
+-- generic processing failure, which tells them nothing they can act on.
+select extensions.lives_ok(
+  $$ select public.fail_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'CONTROL_TOTAL_MISMATCH', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') $$,
+  'failure function accepts a control total mismatch'
+);
+select extensions.lives_ok(
+  $$ select public.fail_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'PROJECTION_OUTPUT_KIND_UNSUPPORTED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') $$,
+  'failure function accepts an unsupported projection target'
+);
+select extensions.throws_ok(
+  $$ select public.fail_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'CONTROL_TOTAL_INVENTED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') $$,
+  '22023', 'report projection failure is invalid', 'failure function still refuses a code it does not know'
 );
 reset role;
 select extensions.throws_ok(

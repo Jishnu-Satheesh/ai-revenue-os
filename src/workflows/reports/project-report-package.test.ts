@@ -167,4 +167,126 @@ describe("governed report package projection", () => {
     expect(result.outcome).toBe("projected");
     expect(JSON.stringify(completions)).not.toContain("customer-42");
   });
+
+  async function runWith(
+    projectionDocument: unknown,
+    options: { input?: Buffer; mappingDocument?: unknown } = {},
+  ) {
+    const input = options.input ?? Buffer.from("net_sales\n12.34\n0.66\n");
+    const failures: { code: string }[] = [];
+    const completions: unknown[] = [];
+    const result = await runReportPackageProjection(
+      {
+        organizationId: packageRow.organization_id,
+        packageId: packageRow.id,
+        contractVersionId: "33333333-3333-4333-8333-333333333333",
+        projectionVersionId: "44444444-4444-4444-8444-444444444444",
+        projectionRunId: "55555555-5555-4555-8555-555555555555",
+        correlationId: "66666666-6666-4666-8666-666666666666",
+        idempotencyKey: "report-projection-guard-test",
+      },
+      {
+        claim: async () => ({
+          outcome: "acquired",
+          reportPackage: {
+            ...packageRow,
+            declared_content_length: input.byteLength,
+            content_sha256: (await import("node:crypto")).createHash("sha256").update(input).digest("hex"),
+          },
+          contractVersion: { mapping_document: options.mappingDocument ?? contract.mapping_document },
+          projectionVersion: { projection_document: projectionDocument },
+          metricDefinitions: [
+            { id: "77777777-7777-4777-8777-777777777777", key: "revenue.gross", value_kind: "money" },
+          ],
+        }),
+        objectStore: {
+          stat: async () => ({ id: "storage-object", metadata: { size: input.byteLength, mimetype: "text/csv" } }),
+          download: async () => input,
+        },
+        complete: async (value) => {
+          completions.push(value);
+        },
+        fail: async (value) => {
+          failures.push({ code: value.code });
+        },
+      },
+    );
+    return { result, failures, completions };
+  }
+
+  it("refuses a period-grain declaration rather than summing it as one total", async () => {
+    // The daily write path does not exist yet. Projecting a month of rows into
+    // a single exact-range figure would look like a successful import and be
+    // wrong about the shape of every number in it.
+    const { result, failures } = await runWith(
+      {
+        schemaVersion: 1,
+        outputKind: "period_grain",
+        grain: "day",
+        periodKey: { normalizedSheetName: "csv", canonicalField: "period_date", encoding: "iso_date" },
+        outputs: [
+          {
+            key: "gross_revenue",
+            normalizedSheetName: "csv",
+            canonicalField: "net_sales",
+            metricKey: "revenue.gross",
+            valueKind: "money",
+            aggregation: "sum",
+          },
+        ],
+      },
+      {
+        input: Buffer.from("date,net_sales\n2026-01-01,12.34\n2026-01-02,0.66\n"),
+        mappingDocument: {
+          ...contract.mapping_document,
+          sheets: [
+            {
+              ...contract.mapping_document.sheets[0],
+              fields: [
+                { canonicalField: "period_date", sourceHeader: "date", parser: "local_date", required: true },
+                ...contract.mapping_document.sheets[0].fields,
+              ],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(result.outcome).toBe("failed");
+    expect(failures).toEqual([{ code: "PROJECTION_OUTPUT_KIND_UNSUPPORTED" }]);
+  });
+
+  it("reports a control total mismatch as itself, not as a generic failure", async () => {
+    const { result, failures } = await runWith({
+      ...projection.projection_document,
+      controlTotals: [
+        {
+          outputKey: "gross_revenue",
+          statedTotalMinorUnits: "9999",
+          toleranceMinorUnits: 0,
+          statedSource: "provider settlement statement",
+        },
+      ],
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(failures).toEqual([{ code: "CONTROL_TOTAL_MISMATCH" }]);
+  });
+
+  it("projects normally when the rows do reach the stated total", async () => {
+    const { result, failures } = await runWith({
+      ...projection.projection_document,
+      controlTotals: [
+        {
+          outputKey: "gross_revenue",
+          statedTotalMinorUnits: "1300",
+          toleranceMinorUnits: 0,
+          statedSource: "provider settlement statement",
+        },
+      ],
+    });
+
+    expect(failures).toEqual([]);
+    expect(result.outcome).toBe("projected");
+  });
 });
