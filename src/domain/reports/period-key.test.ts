@@ -19,6 +19,65 @@ describe("reading the date a row belongs to", () => {
       expect(parsePeriodKey("28 February 2026", "text_date")).toBe("2026-02-28");
     });
 
+    it("reads EatEasily's day and month, taking the year from the declared period", () => {
+      // The day-orders export writes `01/Jan` and never says which year. The
+      // package already declares the period it covers, and that is the diary
+      // the page came from.
+      const period = { periodStart: "2026-01-01", periodEnd: "2026-02-28" };
+
+      expect(parsePeriodKey("01/Jan", "day_month", period)).toBe("2026-01-01");
+      expect(parsePeriodKey("28/Feb", "day_month", period)).toBe("2026-02-28");
+      expect(parsePeriodKey("1 Jan", "day_month", period)).toBe("2026-01-01");
+    });
+
+    it("refuses a year-less date when no period was declared", () => {
+      expect(() => parsePeriodKey("01/Jan", "day_month")).toThrow(ReportProjectionError);
+    });
+
+    it("refuses a year-less date that falls outside the declared period", () => {
+      // A row dated in March inside a January-to-February export is not a row
+      // whose year needs working out. It is the wrong file, or the wrong row.
+      expect(() =>
+        parsePeriodKey("05/Mar", "day_month", {
+          periodStart: "2026-01-01",
+          periodEnd: "2026-02-28",
+        }),
+      ).toThrow(ReportProjectionError);
+    });
+
+    it("refuses a year-less date the period could place in two years", () => {
+      // Over fourteen months, `15/Jan` is two different days and choosing
+      // either would be a guess.
+      expect(() =>
+        parsePeriodKey("15/Jan", "day_month", {
+          periodStart: "2025-12-01",
+          periodEnd: "2027-01-31",
+        }),
+      ).toThrow(ReportProjectionError);
+    });
+
+    it("resolves a year-less date across a New Year without ambiguity", () => {
+      const period = { periodStart: "2025-12-15", periodEnd: "2026-01-15" };
+
+      expect(parsePeriodKey("20/Dec", "day_month", period)).toBe("2025-12-20");
+      expect(parsePeriodKey("05/Jan", "day_month", period)).toBe("2026-01-05");
+    });
+
+    it("refuses a year-less leap day in a year that has none", () => {
+      expect(() =>
+        parsePeriodKey("29/Feb", "day_month", {
+          periodStart: "2026-01-01",
+          periodEnd: "2026-12-31",
+        }),
+      ).toThrow(ReportProjectionError);
+      expect(
+        parsePeriodKey("29/Feb", "day_month", {
+          periodStart: "2024-01-01",
+          periodEnd: "2024-12-31",
+        }),
+      ).toBe("2024-02-29");
+    });
+
     it("reads a spreadsheet date cell by its UTC parts", () => {
       // A reader anchors a date cell at UTC midnight. Reading it locally would
       // move the day backwards for anyone west of Greenwich, quietly filing a

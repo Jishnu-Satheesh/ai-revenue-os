@@ -162,7 +162,14 @@ the operator and go back to being the receipt.
 - Period-grain projection into `normalized_metrics` per 10.1, alongside the existing exact-range
   path, with the grain declared by the approved contract and never inferred from a row.
 - A date parser and a money control total in the projection declaration language, which ADR 0027
-  deliberately limited to `money` and `count` sums. See ADR 0029.
+  deliberately limited to `money` and `count` sums. See ADR 0029. Four date encodings are carried by
+  the client's own exports — a spreadsheet date cell, the compact integer `20260228`, the text
+  `1 Jan 2026`, and EatEasily's `01/Jan`, which states no year and takes one from the period the
+  package declares.
+- Provider-declared absence markers on a contract field. Keeta writes `-` where Talabat leaves the
+  cell empty, and both mean absent rather than zero.
+- A declared totals row on a contract sheet, set aside during validation and projection rather than
+  summed. EatEasily and Smile — one platform under two names — render one in every sales export.
 - A report set: one channel and period owning several report types, each with its own contract.
 - A machine-generated PDF adapter per 7.3 and ADR 0028.
 - Checked-in report-family contracts keyed by schema fingerprint for the recognised providers.

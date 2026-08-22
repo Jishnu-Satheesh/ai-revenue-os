@@ -21,11 +21,17 @@ export type PeriodKeyEncoding =
   /** `20260131`, as a number or a string. */
   | "compact_date"
   /** `1 Jan 2026`, the form Keeta's billing report uses. */
-  | "text_date";
+  | "text_date"
+  /**
+   * `01/Jan`, the form EatEasily's day-orders report uses. Carries no year, so
+   * the year is taken from the period the package declares.
+   */
+  | "day_month";
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 const COMPACT = /^(\d{4})(\d{2})(\d{2})$/;
 const TEXT = /^(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})$/;
+const DAY_MONTH = /^(\d{1,2})\s*[/\- ]\s*([A-Za-z]{3,9})\.?$/;
 
 const MONTHS: Readonly<Record<string, number>> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
@@ -48,7 +54,47 @@ function fromParts(year: number, month: number, day: number): string {
   return `${year}-${pad(month)}-${pad(day)}`;
 }
 
-export function parsePeriodKey(value: unknown, encoding: PeriodKeyEncoding): string {
+/**
+ * The period the package declares it covers, as inclusive local dates.
+ *
+ * Only `day_month` needs it, and only because the value itself is incomplete.
+ */
+export type PeriodKeyContext = { periodStart: string; periodEnd: string };
+
+/**
+ * Which year `01/Jan` meant.
+ *
+ * A diary page reading "1 Jan" is unambiguous once you know which diary it came
+ * from. The declared period is that diary. Every year the period touches is
+ * tried, and exactly one of them has to land inside it: none means the row is
+ * not from this period at all, and more than one means the period is long
+ * enough to contain the same day twice, where picking either would be a guess.
+ */
+function resolveYear(month: number, day: number, context: PeriodKeyContext | undefined): number {
+  if (!context) throw new ReportProjectionError("PERIOD_CONTEXT_REQUIRED");
+  const firstYear = Number(context.periodStart.slice(0, 4));
+  const lastYear = Number(context.periodEnd.slice(0, 4));
+  if (!Number.isInteger(firstYear) || !Number.isInteger(lastYear) || lastYear < firstYear) {
+    throw new ReportProjectionError("PERIOD_CONTEXT_REQUIRED");
+  }
+
+  const candidates: number[] = [];
+  for (let year = firstYear; year <= lastYear; year += 1) {
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day > daysInMonth) continue;
+    const candidate = `${year}-${pad(month)}-${pad(day)}`;
+    if (candidate >= context.periodStart && candidate <= context.periodEnd) candidates.push(year);
+  }
+
+  if (candidates.length !== 1) throw new ReportProjectionError("INVALID_LOCAL_DATE");
+  return candidates[0];
+}
+
+export function parsePeriodKey(
+  value: unknown,
+  encoding: PeriodKeyEncoding,
+  context?: PeriodKeyContext,
+): string {
   if (value === null || value === undefined || (typeof value === "string" && !value.trim())) {
     throw new ReportProjectionError("INVALID_LOCAL_DATE");
   }
@@ -75,6 +121,15 @@ export function parsePeriodKey(value: unknown, encoding: PeriodKeyEncoding): str
     const match = COMPACT.exec(text);
     if (!match) throw new ReportProjectionError("INVALID_LOCAL_DATE");
     return fromParts(Number(match[1]), Number(match[2]), Number(match[3]));
+  }
+
+  if (encoding === "day_month") {
+    const match = DAY_MONTH.exec(text);
+    if (!match) throw new ReportProjectionError("INVALID_LOCAL_DATE");
+    const month = MONTHS[match[2].slice(0, 3).toLowerCase()];
+    if (!month) throw new ReportProjectionError("INVALID_LOCAL_DATE");
+    const day = Number(match[1]);
+    return fromParts(resolveYear(month, day, context), month, day);
   }
 
   const match = TEXT.exec(text);

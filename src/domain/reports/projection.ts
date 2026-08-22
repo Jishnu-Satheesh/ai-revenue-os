@@ -7,7 +7,11 @@ import {
   normalizeReportStructureIdentifier,
   type ReportContractDocument,
 } from "@/domain/reports/contracts";
-import { parsePeriodKey, periodStartFor } from "@/domain/reports/period-key";
+import {
+  parsePeriodKey,
+  periodStartFor,
+  type PeriodKeyContext,
+} from "@/domain/reports/period-key";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
   ReportControlTotalMismatch,
@@ -112,7 +116,7 @@ const periodGrainDocumentSchema = z
       .object({
         normalizedSheetName: normalizedIdentifierSchema,
         canonicalField: normalizedIdentifierSchema,
-        encoding: z.enum(["iso_date", "compact_date", "text_date"]),
+        encoding: z.enum(["iso_date", "compact_date", "text_date", "day_month"]),
       })
       .strict(),
     outputs: z.array(reportProjectionOutputSchema).min(1).max(50),
@@ -615,6 +619,11 @@ export function projectPeriodGrainMetrics(input: {
   contract: ReportContractDocument;
   document: Extract<ReportProjectionDocument, { outputKind: "period_grain" }>;
   declaredCurrency: string;
+  /**
+   * The period the package declares it covers. Required only by the `day_month`
+   * encoding, whose values carry no year of their own.
+   */
+  declaredPeriod?: PeriodKeyContext;
   sheets: readonly { normalizedSheetName: string; rows: readonly (readonly unknown[])[] }[];
 }): PeriodGrainProjectionResult {
   const { periodKey, grain } = input.document;
@@ -675,7 +684,7 @@ export function projectPeriodGrainMetrics(input: {
     if (row.every((value) => isEmptyCell(value))) continue;
 
     const periodStart = periodStartFor(
-      parsePeriodKey(row[periodColumn], periodKey.encoding),
+      parsePeriodKey(row[periodColumn], periodKey.encoding, input.declaredPeriod),
       grain,
     );
     const byOutput = totals.get(periodStart) ?? new Map();
