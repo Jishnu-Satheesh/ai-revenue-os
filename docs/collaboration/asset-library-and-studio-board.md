@@ -115,7 +115,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 6b | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts` | codex | high | 6 | **done** |
 | 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
 | 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **in-progress** |
-| 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **review** |
+| 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **in-progress** |
 | 8v | Run the generation, inspect the run | codex | — | 8 | todo |
 | A-r | **Slice A code review** | claude | — | 8 | todo |
 | 9 | Asset library service + reviews | codex | high | 2 | todo |
@@ -1140,3 +1140,51 @@ and one unexamined migration is one too many.
 3. Codex sets 8av to `in-progress` for me. I call the RPC on staging: both phases, a replay, a stale
    claim, a cross-tenant attempt, and the role conflict.
 4. `git push` remains the user's, at a moment of their choosing.
+
+### 2026-08-24 · claude · early Slice A review (Tasks 2–7) — one finding for Task 8
+
+8av is blocked on the migrations being applied, so I reviewed Tasks 2–7 now rather than batching it
+all after Task 8. Cheaper to find things here. **577 tests across 43 files, all green.**
+
+**Three things are better than what I specified, and I want them named rather than passed over:**
+
+1. **`artDirectionBlueprintSchema` is a `z.strictObject`.** ADR 0041 said the fence is that the
+   blueprint has no subject and no text field. Strict makes that load-bearing rather than decorative:
+   a planner emitting `subject` gets a **parse failure**, not a silent strip. A non-strict object
+   would have discarded it quietly and nobody would have learned the planner was misbehaving.
+2. **`referenceResolutionSchema` superRefines the resolver's own output.** A `resolved` outcome must
+   carry a subject reference; `insufficient` and `no_declared_subject` are enforced as a
+   biconditional; per-role caps are re-checked after selection. So a future edit to the selection
+   logic fails at the module boundary instead of reaching the worker. I asked for the rules; you made
+   the module hold itself to them.
+3. **`GeneratedAssetTruthClass = Exclude<CampaignAssetTruthClass, "authentic_source">`.** The type
+   system now makes it impossible to label a generated asset as the client's own photograph. That is
+   a spec rule turned into something that cannot compile wrong, which is the best place for it.
+
+Also verified: `reference-prompt.ts:38` carries the absolute ban — *"Do not render text of any kind,
+in any script"* — and `truthClass` is gone from what the model declares in `campaign-planner.ts`.
+
+**The finding, for Task 8 rather than a defect today.**
+
+`refineImagePrompt` in `model-router.ts:266` still carries the *narrow* ban — "price, a discount, or
+a claim" — and **`variant-planner.ts:78` still calls it.**
+
+Bundle generation moved to `buildReferencePrompt` and is correct. Variant generation did not. So on
+the variant path a model may still be asked for an image and render text on it, and it also gets no
+references, no blueprint and no negative rules — it is still drawing from alt text.
+
+The plan does cover this, in one line of Task 8: *"generate-variants.ts follows the same path."* The
+trap is that the change is not in the workflow file. **It is in `variant-planner.ts`**, which is
+where the prompt is actually built. Touching only `generate-variants.ts` would leave the weak path
+intact and passing tests.
+
+Two suggestions when you get there:
+
+- Route the variant path through `buildReferencePrompt` as well, so both paths share one prompt
+  contract rather than two that can drift.
+- Once nothing calls `refineImagePrompt`, **delete it.** A weaker prompt builder left in the tree is
+  a trap for whoever writes the next generation path, and knip will not catch it while its own test
+  still imports it.
+
+Nothing here blocks the migration work. 8av remains mine as soon as `20260825100000` and
+`20260825110000` are applied to staging.
