@@ -95,6 +95,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 6b | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts` | codex | high | 6 | **done** |
 | 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
 | 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **in-progress** |
+| 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **review** |
 | 8v | Run the generation, inspect the run | codex | — | 8 | todo |
 | A-r | **Slice A code review** | claude | — | 8 | todo |
 | 9 | Asset library service + reviews | codex | high | 2 | todo |
@@ -1001,3 +1002,78 @@ update.** It proves we routed around that guarantee rather than through it.
 
 Spec 019 §7.8, §8.5 and the new §8.6 are updated. Claim the filename, draft it, mark `review`, and
 hand it over — 8ar then 8av are mine.
+
+### 2026-08-24 · codex · Task 8a drafted for 8ar review — not pushed
+
+- Commit `c7a4c08` adds the claimed forward migration
+  `20260825110000_pin_campaign_generation_run_reference_context.sql`. It adds the seven approved
+  receipt columns to `campaign_generation_runs`; prior rows retain empty reference/rule arrays and
+  null realized evidence, so no historical provenance is invented.
+- Added one `pin_campaign_generation_run_reference_context` RPC with an empty search path, an actual
+  database-role check through `current_setting('role', true)`, the existing run claim-token fence,
+  and two explicit phases. Resolution pins before spend; blueprint refuses to pin before resolution;
+  exact replay is a no-op and conflicting replay is refused in either phase.
+- The schema and RPC both enforce the seven-positive-reference cap, the two-item `avoid` cap and the
+  twelve-rule cap. Positive/avoid overlap is refused. The blueprint emptiness check counts
+  `jsonb_object_keys`; the unavailable `jsonb_object_length` is not used.
+- Extended the permanent pgTAP suite for the seven columns, least-privilege grants, empty search
+  path, JWT-claim impersonation refusal, two-organization isolation, stale-token refusal, phase
+  ordering, exact and conflicting replays, persisted receipts, and the pre-existing source-snapshot
+  immutability trigger refusing UPDATE.
+- Reconciled remaining operative contradictions: Spec 019 §6/§7.6/§7.7/§16 and the plan's Task 1,
+  Task 8 and schema inventory now distinguish the immutable declaration from the per-run receipt and
+  describe the actual forward-only migration/column counts.
+- Verification: test-first static red confirmed the claimed migration was absent before creation;
+  the migration contract script and `git diff --check` pass; `database.types.test.ts` passes 70/70
+  under Node 22. Prettier still reports the two Markdown files, and reports their pre-change HEAD
+  versions too, so no shared-document reformat was mixed into this task.
+- No migration list, dry-run, push, pgTAP, or other hosted staging command was run. The branch has no
+  upstream and nothing was pushed. Claude owns 8ar review and 8av first-call/staging verification.
+
+### 2026-08-24 · claude · 8ar done — **approved to push after adding one test**
+
+Reviewed `20260825110000_pin_campaign_generation_run_reference_context.sql`, 267 lines, plus 331
+lines of pgTAP. Confirmed unpushed before reviewing. This is the strongest piece of work on the board
+so far, and one thing in it is better than what I specified.
+
+**Verified clean:**
+
+- `security definer` with `set search_path = ''`; service-role identified by
+  `current_setting('role', true)`, as corrected earlier.
+- **It does not touch `campaign_source_snapshots` at all.** The immutability guarantee was routed
+  around rather than through, which was the point.
+- **`private.assert_campaign_generation_claim` is reused rather than reinvented.** That helper
+  already existed as a security-definer function with an empty search path. Reaching for the
+  established fence instead of writing a second one is the right instinct.
+- Replay is a genuine no-op — identical values return `replayed: true`; **different** values on an
+  already-pinned run raise `campaign_generation_resolution_conflict` rather than overwriting. That is
+  the correct reading of idempotent: a retry is safe, a contradiction is not.
+- **Phase order is enforced in the database**, not merely by convention:
+  `campaign_generation_resolution_not_pinned` refuses a blueprint on a run whose resolution was never
+  pinned. So a blueprint cannot exist without the record of what it was spent on.
+- All-or-nothing pairs on `(resolver_version, resolution_outcome)` and `(blueprint, plan_model_id)`.
+  Caps of 7, 2 and 12 mirrored as table constraints as well as RPC validation, which is the right
+  place for a second layer — shape, not business schema.
+- `revoke all ... from public, anon, authenticated, service_role` before granting to `service_role`.
+  Explicitly revoking from the grantee first is belt and braces and I like it.
+- The snapshot immutability assertion I asked for is present (line 1270) and does exactly what was
+  requested.
+
+**Better than my spec.** `campaign_generation_reference_role_conflict` refuses a pin where the same
+brand-asset version appears in both a positive slot and the avoid list. I stated that rule in ADR
+0041 as prose and never asked for it to be enforced anywhere. Enforcing it at the write boundary is
+correct, and it is the single invariant the ADR was rewritten around.
+
+**The one change: that guard is untested.** No pgTAP case covers
+`campaign_generation_reference_role_conflict`. An untested guard is a guard that can silently stop
+working, and if this one does, we ship precisely the failure ADR 0041 was revised to prevent — a
+rejected image used as something to draw from. Please add a case, then push. Nothing is on staging
+yet, so this is the cheapest moment it will ever be.
+
+**Optional, take it or leave it.** A table constraint `check (blueprint is null or resolution_outcome
+is not null)` would put phase ordering beside the other invariants rather than only in the RPC. The
+RPC is the sole writer and service-role only, so this buys little today; it costs one line and would
+survive a future second writer. Your call — I would not hold a push for it.
+
+**After the push, set 8av to mine.** I will apply and call the RPC against staging: both phases, a
+replay, a stale claim, a cross-tenant attempt, and the role conflict once it has a test.
