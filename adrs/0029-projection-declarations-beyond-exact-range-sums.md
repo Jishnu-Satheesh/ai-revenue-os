@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed. Extends ADR 0027 rather than replacing it.
+Accepted. Extends ADR 0027 rather than replacing it, and is completed by
+ADR 0030, which builds the period-grain write path this ADR deferred.
 
 ## Context
 
@@ -97,10 +98,13 @@ correction.
 Two failure codes are added, both actionable by the operator who sees them:
 `CONTROL_TOTAL_MISMATCH` when the rows do not reach the stated figure, and
 `PROJECTION_OUTPUT_KIND_UNSUPPORTED` when a declaration names a projection target
-the worker cannot yet write to. The second exists because period-grain writes
-into `normalized_metrics` are not built: until they are, an approved period-grain
-declaration is refused rather than summed into a single exact-range figure, which
-would look like a successful import and be wrong about the shape of every number
-in it. The mismatch amount has no column to live in and is written to the
-structured log with the organization, package, run, and correlation identifiers;
-surfacing it in the operator's view is a follow-up.
+the worker cannot yet write to. The mismatch amount has no column to live in and
+is written to the structured log with the organization, package, run, and
+correlation identifiers; surfacing it in the operator's view is a follow-up.
+
+`PROJECTION_OUTPUT_KIND_UNSUPPORTED` originally existed because period-grain
+writes into `normalized_metrics` were not built, so an approved period-grain
+declaration was refused rather than summed into a single exact-range figure. That
+write path now exists: see ADR 0030. The code is retained and no longer describes
+period grain — it now means only that some future projection target has no writer
+yet.

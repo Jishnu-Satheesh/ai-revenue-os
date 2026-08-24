@@ -1,0 +1,314 @@
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
+import type { Database } from "@/lib/supabase/database.types";
+import type {
+  ChannelAnalysisReadPort,
+  ChannelAnalysisRunRecord,
+  ChannelEvidenceWindow,
+  ChannelFindingEvidenceRecord,
+  ChannelFindingRecord,
+} from "@/modules/analysis/application/ports";
+
+/**
+ * Reads channel analysis through the caller's own session.
+ *
+ * Never the service role. `specs/018` section 14 and the platform rule in
+ * `AGENTS.md` both forbid bypassing RLS in a user-facing path, and there is
+ * nothing here that needs it: findings carry a read policy for `report.read`,
+ * so a member who may not see them gets an empty list rather than a refusal
+ * assembled in application code.
+ */
+
+type AnalysisClient = SupabaseClient<Database>;
+
+/** A page shows a handful of runs and the findings of the newest completed one. */
+const MAX_RUNS = 10;
+const MAX_FINDINGS = 500;
+const MAX_EVIDENCE = 5_000;
+/** A picker an operator can read, not every package they ever uploaded. */
+const MAX_EVIDENCE_WINDOWS = 24;
+const MAX_LINEAGE = 10_000;
+
+export class ChannelAnalysisReadError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+    this.name = "ChannelAnalysisReadError";
+  }
+}
+
+/**
+ * Postgres `numeric` arrives as a string over the wire often enough that
+ * trusting the type is a bug waiting for a large figure. A value that is not an
+ * exact integer never reaches a tile: money is minor units and a count is
+ * whole, so a fraction here means something upstream stopped being exact.
+ */
+function toExactInteger(value: number | string | null): number | null {
+  if (value === null) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new ChannelAnalysisReadError("VALUE_NOT_EXACT");
+  return parsed;
+}
+
+/**
+ * The two parts of a stored ratio may carry exactly the decimals the provider
+ * measured -- closed minutes arrive as `34216.93` -- and rounding them on read
+ * would restate the finding the detector recorded (ADR 0036). What is still
+ * refused is anything non-finite or beyond the exact integer range: a figure
+ * this loose never reaches a tile.
+ */
+function toExactQuantity(value: number | string | null): number | null {
+  if (value === null) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || Math.abs(parsed) >= Number.MAX_SAFE_INTEGER) {
+    throw new ChannelAnalysisReadError("VALUE_NOT_EXACT");
+  }
+  return parsed;
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+function toDetectorVersions(value: unknown): { key: string; calculationVersion: number }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as { key?: unknown; calculationVersion?: unknown };
+    return typeof record.key === "string" && typeof record.calculationVersion === "number"
+      ? [{ key: record.key, calculationVersion: record.calculationVersion }]
+      : [];
+  });
+}
+
+export function createAuthenticatedChannelAnalysisRepository(
+  supabase: AnalysisClient,
+): ChannelAnalysisReadPort {
+  return {
+    async loadRuns({ organizationId, channelId, limit }) {
+      const { data, error } = await supabase
+        .from("channel_analysis_runs")
+        .select(
+          "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at",
+        )
+        .eq("organization_id", organizationId)
+        .eq("channel_id", channelId)
+        .order("started_at", { ascending: false })
+        .limit(Math.min(limit, MAX_RUNS));
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      return (data ?? []).map(
+        (row): ChannelAnalysisRunRecord => ({
+          id: row.id,
+          channelId: row.channel_id,
+          branchId: row.branch_id,
+          windowStart: row.window_start,
+          windowEnd: row.window_end,
+          periodGrain: row.period_grain as AnalysisGrain,
+          windowTimezone: row.window_timezone,
+          registryVersion: row.registry_version,
+          detectorVersions: toDetectorVersions(row.detector_versions),
+          status: row.status,
+          findingCount: row.finding_count,
+          observationCount: row.observation_count,
+          needsDataCount: row.needs_data_count,
+          safeFailureCode: row.safe_failure_code,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+        }),
+      );
+    },
+
+    async loadFindingsForRun({ organizationId, analysisRunId }) {
+      const { data, error } = await supabase
+        .from("channel_findings")
+        .select(
+          "id, analysis_run_id, channel_id, branch_id, detector_key, detector_version, kind, code, severity, priority, metric_key, period_start, period_end, value_kind, value_numerator, value_denominator, currency, monetary_impact_minor_units, expected_period_count, observed_period_count, absent_period_count, quality_state, needs_data_reason, limitations, calculation_digest, created_at",
+        )
+        .eq("organization_id", organizationId)
+        // One run, so every figure on the page was computed for the window the
+        // page names. Reading by channel instead mixes windows: the header
+        // states one, the headline figure comes from another.
+        .eq("analysis_run_id", analysisRunId)
+        // A superseded finding is the answer a later run replaced. Two figures
+        // for one question on one page is worse than one figure.
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(MAX_FINDINGS);
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      return (data ?? []).map(
+        (row): ChannelFindingRecord => ({
+          id: row.id,
+          analysisRunId: row.analysis_run_id,
+          channelId: row.channel_id,
+          branchId: row.branch_id,
+          detectorKey: row.detector_key,
+          detectorVersion: row.detector_version,
+          kind: row.kind as FindingKind,
+          code: row.code,
+          severity: row.severity as DetectorSeverity | null,
+          priority: row.priority,
+          metricKey: row.metric_key,
+          periodStart: row.period_start,
+          periodEnd: row.period_end,
+          valueKind: row.value_kind,
+          valueNumerator: toExactQuantity(row.value_numerator),
+          valueDenominator: toExactQuantity(row.value_denominator),
+          currency: row.currency,
+          monetaryImpactMinorUnits: toExactInteger(row.monetary_impact_minor_units),
+          expectedPeriodCount: row.expected_period_count,
+          observedPeriodCount: row.observed_period_count,
+          absentPeriodCount: row.absent_period_count,
+          qualityState: row.quality_state,
+          needsDataReason: row.needs_data_reason,
+          limitations: toStringArray(row.limitations),
+          calculationDigest: row.calculation_digest,
+          createdAt: row.created_at,
+        }),
+      );
+    },
+
+    async loadEvidenceWindows({ organizationId, channelId, limit }) {
+      // Packages first: the declared window lives here, and it is the window an
+      // analysis must use. Deriving one from the evidence instead would move
+      // the edges inward onto the first and last day that happen to carry a
+      // figure, and a window cannot report a gap at its own edge.
+      const { data: packages, error: packageError } = await supabase
+        .from("integration_report_packages")
+        .select(
+          "id, channel_id, branch_id, declared_period_start, declared_period_end, period_timezone, original_filename, uploaded_at",
+        )
+        .eq("organization_id", organizationId)
+        .eq("channel_id", channelId)
+        .eq("status", "projected")
+        .not("declared_period_start", "is", null)
+        .not("declared_period_end", "is", null)
+        .order("declared_period_end", { ascending: false })
+        .limit(Math.min(limit, MAX_EVIDENCE_WINDOWS));
+
+      if (packageError) throw new ChannelAnalysisReadError(packageError.code ?? "unknown");
+      const packageRows = packages ?? [];
+      if (packageRows.length === 0) return [];
+
+      // Which grain each package's projection actually wrote, and how many
+      // current rows survive today. A package whose rows were all superseded or
+      // held is not a window anything can be analysed over, so it is dropped
+      // rather than offered as an empty choice.
+      const { data: runs, error: runError } = await supabase
+        .from("integration_report_projection_runs")
+        .select("id, report_package_id")
+        .eq("organization_id", organizationId)
+        .in(
+          "report_package_id",
+          packageRows.map((row) => row.id),
+        );
+      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+
+      const packageByRun = new Map((runs ?? []).map((row) => [row.id, row.report_package_id]));
+      if (packageByRun.size === 0) return [];
+
+      const { data: lineage, error: lineageError } = await supabase
+        .from("report_projection_lineage")
+        .select("projection_run_id, normalized_metric_id")
+        .eq("organization_id", organizationId)
+        .in("projection_run_id", [...packageByRun.keys()])
+        .limit(MAX_LINEAGE);
+      if (lineageError) throw new ChannelAnalysisReadError(lineageError.code ?? "unknown");
+
+      const runByMetricId = new Map<string, string>();
+      for (const row of lineage ?? []) {
+        if (row.normalized_metric_id)
+          runByMetricId.set(row.normalized_metric_id, row.projection_run_id);
+      }
+      if (runByMetricId.size === 0) return [];
+
+      const { data: metrics, error: metricError } = await supabase
+        .from("normalized_metrics")
+        .select("id, period_grain")
+        .eq("organization_id", organizationId)
+        .in("id", [...runByMetricId.keys()])
+        .eq("reconciliation_state", "current")
+        .is("superseded_by_id", null)
+        .limit(MAX_LINEAGE);
+      if (metricError) throw new ChannelAnalysisReadError(metricError.code ?? "unknown");
+
+      // One package can only be offered at the grain its projection wrote. Two
+      // grains from one package would be two windows an operator cannot tell
+      // apart, so the grain with the most current rows is the one offered.
+      const grainCounts = new Map<string, Map<string, number>>();
+      for (const row of metrics ?? []) {
+        const runId = runByMetricId.get(row.id);
+        const packageId = runId ? packageByRun.get(runId) : undefined;
+        if (!packageId) continue;
+        const byGrain = grainCounts.get(packageId) ?? new Map<string, number>();
+        byGrain.set(row.period_grain, (byGrain.get(row.period_grain) ?? 0) + 1);
+        grainCounts.set(packageId, byGrain);
+      }
+
+      return packageRows.flatMap((row): ChannelEvidenceWindow[] => {
+        const byGrain = grainCounts.get(row.id);
+        if (!byGrain || byGrain.size === 0) return [];
+        const [grain, count] = [...byGrain.entries()].sort(
+          (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
+        )[0];
+        // A grain the analysis registry cannot bind is not a window to offer.
+        if (grain !== "day" && grain !== "week" && grain !== "month") return [];
+        return [
+          {
+            packageId: row.id,
+            channelId: row.channel_id as string,
+            branchId: row.branch_id,
+            windowStart: row.declared_period_start as string,
+            windowEnd: row.declared_period_end as string,
+            timeZone: row.period_timezone,
+            grain,
+            governedRowCount: count,
+            sourceFilename: row.original_filename,
+          },
+        ];
+      });
+    },
+
+    async loadEvidence({ organizationId, findingIds }) {
+      if (findingIds.length === 0) return [];
+
+      const { data, error } = await supabase
+        .from("channel_finding_evidence")
+        .select(
+          "finding_id, evidence_kind, evidence_role, normalized_metric_id, exact_range_metric_observation_id, reconciliation_id, projection_run_id",
+        )
+        .eq("organization_id", organizationId)
+        .in("finding_id", [...findingIds])
+        .limit(MAX_EVIDENCE);
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      return (data ?? []).flatMap((row): ChannelFindingEvidenceRecord[] => {
+        // Exactly one of the four columns is set, guaranteed by a check
+        // constraint. Resolving it here keeps the union out of the view layer.
+        const referenceId =
+          row.normalized_metric_id ??
+          row.exact_range_metric_observation_id ??
+          row.reconciliation_id ??
+          row.projection_run_id;
+        return referenceId
+          ? [
+              {
+                findingId: row.finding_id,
+                evidenceKind: row.evidence_kind,
+                evidenceRole: row.evidence_role,
+                referenceId,
+              },
+            ]
+          : [];
+      });
+    },
+  };
+}

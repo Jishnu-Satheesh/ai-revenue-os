@@ -104,7 +104,13 @@ describe("a definition that finds its sheet by position", () => {
     headerCandidateDigests: [
       {
         rowPosition: 1,
-        normalizedHeaderDigests: ["date", "gross_sales", "successful_orders"].map(digest),
+        normalizedHeaderDigests: [
+          ...new Set(
+            talabatPerformance.contract.sheets[0].fields.map((field) => field.sourceHeader),
+          ),
+        ]
+          .concat(["successful_orders"])
+          .map(digest),
       },
     ],
   };

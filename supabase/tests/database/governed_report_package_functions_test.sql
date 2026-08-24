@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(14);
+select extensions.plan(17);
 
 insert into auth.users (id)
 values ('d1000000-0000-4000-8000-000000000001'::uuid);
@@ -98,6 +98,41 @@ select extensions.lives_ok(
     )
   $$,
   'operator retry restores only a previously failed package to uploaded'
+);
+
+-- A package nothing ever came for ------------------------------------------------
+--
+-- The dispatch that should have profiled this package can simply never run, and
+-- when it does not the package stops at `uploaded` rather than at `failed`:
+-- nothing claimed it, so nothing marked it wrong. The pilot client's real
+-- Talabat export sat exactly there for a day. Refusing to retry a waiting
+-- package left an operator with a file the platform had accepted, would happily
+-- profile, and offered no way to ask about again.
+
+select extensions.is(
+  (select status from public.integration_report_packages
+    where id = (select (package ->> 'id')::uuid from report_package_execution)),
+  'uploaded',
+  'the retried package is waiting rather than failed'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.retry_governed_report_package_profiling(
+      'd1000000-0000-4000-8000-000000000201'::uuid,
+      'd1000000-0000-4000-8000-000000000001'::uuid,
+      (select (package ->> 'id')::uuid from report_package_execution),
+      'report-retry-verifier-0002', 'd1000000-0000-4000-8000-000000000504'::uuid
+    )
+  $$,
+  'a package no worker ever claimed can be asked for again'
+);
+
+select extensions.is(
+  (select status from public.integration_report_packages
+    where id = (select (package ->> 'id')::uuid from report_package_execution)),
+  'uploaded',
+  'and stays uploaded, which is the state the profiling claim already admits'
 );
 
 reset role;

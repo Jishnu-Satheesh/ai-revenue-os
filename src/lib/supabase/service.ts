@@ -104,3 +104,16 @@ export function createCampaignWorkerServiceClient(): SupabaseClient<Database> {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 }
+
+/**
+ * Channel analysis worker client, constructed only after strict payload
+ * parsing. Findings are written through fenced RPCs that check every rule
+ * again, but the evidence read is tenant-wide, so the credential must not be
+ * created for a request nobody validated.
+ */
+export function createAnalysisWorkerServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Channel analysis workers");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}

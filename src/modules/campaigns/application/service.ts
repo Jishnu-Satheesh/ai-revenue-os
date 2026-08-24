@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { approvalStatus, type ApprovalRow } from "@/domain/campaigns/state-machine";
 import { bundleDigest } from "@/domain/campaigns/digest";
-import { diffManifests, type CampaignDiff } from "@/domain/campaigns/diff";
+import type { CampaignDiff } from "@/domain/campaigns/diff";
+import { diffManifests } from "@/domain/campaigns/digest";
 import { DomainError } from "@/lib/errors";
 import type { EventPublisher } from "@/domain/events/types";
 import {

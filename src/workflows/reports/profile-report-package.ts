@@ -5,10 +5,8 @@ import ExcelJS from "exceljs";
 import { parse } from "csv-parse";
 import * as yauzl from "yauzl";
 
-import {
-  createReportSchemaFingerprint,
-  normalizeReportStructureIdentifier,
-} from "@/domain/reports/contracts";
+import { normalizeReportStructureIdentifier } from "@/domain/reports/contracts";
+import { createReportSchemaFingerprint } from "@/domain/reports/document-digest";
 import { reconstructPdfGrid } from "@/domain/reports/pdf-grid";
 import { extractPdfTextLayer, isLegacyXlsBuffer } from "@/workflows/reports/pdf-text-layer";
 import { REPORT_PACKAGE_LIMITS, type ReportPackageFailureCode } from "@/domain/reports/types";

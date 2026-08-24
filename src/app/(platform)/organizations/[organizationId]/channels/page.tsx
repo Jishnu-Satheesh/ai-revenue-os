@@ -5,6 +5,7 @@ import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { createChannelService } from "@/modules/channels/application/service";
 import { createAuthenticatedChannelRepository } from "@/modules/channels/infrastructure/repository";
+import { isGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
 
 export default async function ChannelsPage({
   params,
@@ -33,6 +34,7 @@ export default async function ChannelsPage({
         aliases={snapshot.aliases}
         canManage={hasOrganizationPermission(context.membership.role, "channel.manage")}
         canMapBranches={hasOrganizationPermission(context.membership.role, "channel.map_branch")}
+        workspaceEnabled={isGovernedChannelAnalysisEnabled(context.organizationId)}
       />
     </>
   );

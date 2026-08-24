@@ -55,7 +55,17 @@ function reportContractProposalFailureMessage(cause: unknown): string {
     case "report contract sheet rule is invalid":
       return "A sheet rule is not valid. Use the profiled sheet name, header/data rows, formula and merged-cell settings, and at least one field.";
     case "report contract field rule is invalid":
-      return "A field rule is not valid. Use normalized field/header names, a supported parser, and an explicit sign for money fields.";
+      return "A field rule is not valid. Use normalized field/header names, a supported parser, an explicit sign for money fields, and a date encoding only on a date field.";
+    case "report contract sheet locator is invalid":
+      return "The way this sheet is found in the file is not valid. Locate it by name, or by a position between 1 and 25.";
+    case "report contract totals row is invalid":
+      return "The totals row is not valid. Give it a label of up to 64 characters, in a column this sheet already reads.";
+    case "report contract absent markers are invalid":
+      return 'The tokens meaning "no data" are not valid. Use up to five distinct tokens of at most 16 characters, and never a number.';
+    case "report contract fields are duplicated":
+      return "Each field may be read from only one column per sheet. Remove the duplicate field and try again.";
+    case "report contract sheet positions are duplicated":
+      return "Two sheets cannot be read from the same position. Give each sheet its own position and try again.";
     case "report contract sheet rules are duplicated":
       return "Each sheet may appear only once in the proposal. Remove the duplicate sheet rule and try again.";
     case "report contract does not match its package context":

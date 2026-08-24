@@ -5,14 +5,22 @@ import ExcelJS from "exceljs";
 import { parse } from "csv-parse";
 import { z } from "zod";
 
-import { normalizeReportStructureIdentifier, reportContractDocumentSchema } from "@/domain/reports/contracts";
 import {
+  normalizeReportStructureIdentifier,
+  reportContractDocumentSchema,
+} from "@/domain/reports/contracts";
+import {
+  createReportPeriodGrainResultDigest,
   createReportProjectionResultDigest,
+} from "@/domain/reports/document-digest";
+import {
   projectExactRangeMetrics,
+  projectPeriodGrainMetrics,
   ReportControlTotalMismatch,
   ReportProjectionError,
   reportProjectionDocumentSchema,
 } from "@/domain/reports/projection";
+import { selectContractSheet } from "@/domain/reports/sheet-locator";
 
 const payloadSchema = z
   .object({
@@ -36,6 +44,9 @@ type ProjectionPackage = {
   declared_content_type: string;
   content_sha256: string | null;
   declared_currency: string;
+  /** Inclusive local dates, as the operator declared the package covers. */
+  declared_period_start: string;
+  declared_period_end: string;
   file_kind: "csv" | "xlsx";
 };
 
@@ -52,6 +63,31 @@ type ProjectionOutput = {
   firstDataRow: number;
   lastDataRow: number;
   contributorCount: number;
+  sourceDigest: string;
+};
+
+/**
+ * One period of a series, in the exact shape
+ * `complete_governed_report_package_period_grain_projection` accepts. The
+ * database checks every one of these fields again; this type only keeps the two
+ * copies of the rule from drifting silently.
+ */
+type PeriodGrainObservationPayload = {
+  key: string;
+  metricKey: string;
+  metricDefinitionId: string;
+  valueKind: "money" | "count";
+  valueNumerator: string;
+  currency: string | null;
+  /** Inclusive local dates. No timezone arithmetic happens in the worker. */
+  periodStart: string;
+  periodEnd: string;
+  normalizedSheetName: string;
+  canonicalField: string;
+  sourceColumnOrdinal: number;
+  contributorCount: number;
+  /** Present exactly when the output is categorical. See the projection schema. */
+  dimensions?: { readonly [dimensionKey: string]: string };
   sourceDigest: string;
 };
 
@@ -74,7 +110,16 @@ export type ReportProjectionDependencies = {
         metricDefinitions: Array<{ id: string; key: string; value_kind: "money" | "count" }>;
         validationStatus?: "validated" | "partially_validated";
       }
-    | { outcome: "completed" | "not_found" | "not_ready" | "in_progress" | "conflict" | "expired" | "object_mismatch" }
+    | {
+        outcome:
+          | "completed"
+          | "not_found"
+          | "not_ready"
+          | "in_progress"
+          | "conflict"
+          | "expired"
+          | "object_mismatch";
+      }
   >;
   objectStore: {
     stat(input: { path: string }): Promise<{ id: string; metadata: Record<string, unknown> }>;
@@ -95,6 +140,27 @@ export type ReportProjectionDependencies = {
     };
     outputs: ProjectionOutput[];
   }): Promise<void>;
+  completePeriodGrain(input: {
+    organizationId: string;
+    packageId: string;
+    projectionRunId: string;
+    claimToken: string;
+    resultDigest: string;
+    result: {
+      status: "projected" | "partially_projected";
+      qualityState: "complete" | "partial";
+      completenessState: "complete" | "partial";
+      errorCodes: string[];
+      warningCodes: string[];
+    };
+    observations: PeriodGrainObservationPayload[];
+    /**
+     * Periods the provider left blank. Carried through so Postgres can record
+     * it: a gap is a fact about the evidence, and `specs/018` section 10.1 says
+     * gaps stay absent rather than becoming zeros nobody can tell apart.
+     */
+    absentRowCount: number;
+  }): Promise<void>;
   fail(input: {
     organizationId: string;
     packageId: string;
@@ -113,6 +179,8 @@ export type ReportProjectionFailureCode =
   | "CONTROL_TOTAL_MISMATCH"
   | "PROJECTION_OUTPUT_KIND_UNSUPPORTED"
   | "TOTALS_ROW_NOT_RESOLVED"
+  | "INVALID_LOCAL_DATE"
+  | "PERIOD_OUT_OF_DECLARED_RANGE"
   | "PROJECTION_PROCESSING_FAILED";
 
 export class ReportProjectionFailure extends Error {
@@ -146,7 +214,12 @@ function assertObjectIdentity(
 async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
   const rows: unknown[][] = [];
   const parser = Readable.from([buffer]).pipe(
-    parse({ bom: true, relax_column_count: false, skip_empty_lines: true, max_record_size: 1024 * 1024 }),
+    parse({
+      bom: true,
+      relax_column_count: false,
+      skip_empty_lines: true,
+      max_record_size: 1024 * 1024,
+    }),
   );
   for await (const row of parser as AsyncIterable<unknown>) {
     if (!Array.isArray(row)) throw new ReportProjectionFailure("UNREADABLE_WORKBOOK");
@@ -155,7 +228,9 @@ async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
   return rows;
 }
 
-export async function readWorkbookRows(buffer: Buffer): Promise<Array<{ normalizedSheetName: string; rows: unknown[][] }>> {
+export async function readWorkbookRows(
+  buffer: Buffer,
+): Promise<Array<{ normalizedSheetName: string; rows: unknown[][] }>> {
   try {
     const workbook = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from([buffer]), {
       entries: "ignore",
@@ -173,7 +248,9 @@ export async function readWorkbookRows(buffer: Buffer): Promise<Array<{ normaliz
       }
       const reader = worksheet as unknown as { name?: string };
       sheets.push({
-        normalizedSheetName: normalizeReportStructureIdentifier(reader.name ?? `sheet_${sheets.length + 1}`),
+        normalizedSheetName: normalizeReportStructureIdentifier(
+          reader.name ?? `sheet_${sheets.length + 1}`,
+        ),
         rows,
       });
     }
@@ -183,10 +260,15 @@ export async function readWorkbookRows(buffer: Buffer): Promise<Array<{ normaliz
   }
 }
 
-function findColumn(rows: readonly (readonly unknown[])[], headerRow: number, sourceHeader: string): number {
+function findColumn(
+  rows: readonly (readonly unknown[])[],
+  headerRow: number,
+  sourceHeader: string,
+): number {
   const header = rows[headerRow - 1] ?? [];
   const index = header.findIndex(
-    (value) => typeof value === "string" && normalizeReportStructureIdentifier(value) === sourceHeader,
+    (value) =>
+      typeof value === "string" && normalizeReportStructureIdentifier(value) === sourceHeader,
   );
   if (index < 0) throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
   return index + 1;
@@ -211,6 +293,29 @@ function safeSourceDigest(output: ProjectionOutput): string {
     .digest("hex");
 }
 
+function safePeriodSourceDigest(observation: PeriodGrainObservationPayload): string {
+  return createHash("sha256")
+    .update(
+      [
+        observation.key,
+        observation.metricKey,
+        observation.valueKind,
+        observation.valueNumerator,
+        // Two categories of one output are different facts about the same
+        // period, and a digest that could not tell them apart would make one
+        // look like an idempotent replay of the other.
+        observation.dimensions ? JSON.stringify(observation.dimensions) : "",
+        observation.periodStart,
+        observation.periodEnd,
+        observation.normalizedSheetName,
+        observation.canonicalField,
+        observation.sourceColumnOrdinal,
+        observation.contributorCount,
+      ].join("|"),
+    )
+    .digest("hex");
+}
+
 function failureDigest(code: string): string {
   return createHash("sha256").update(`report-projection-failure:${code}`).digest("hex");
 }
@@ -218,7 +323,7 @@ function failureDigest(code: string): string {
 export async function runReportPackageProjection(
   input: unknown,
   dependencies: ReportProjectionDependencies,
-): Promise<{ outcome: string }> {
+): Promise<{ outcome: string; absentRowCount?: number }> {
   const payload = payloadSchema.parse(input);
   const claimToken = crypto.randomUUID();
   const claim = await dependencies.claim({ ...payload, claimToken });
@@ -227,7 +332,9 @@ export async function runReportPackageProjection(
   try {
     const object = await dependencies.objectStore.stat({ path: claim.reportPackage.storage_path });
     assertObjectIdentity(claim.reportPackage, object);
-    const buffer = await dependencies.objectStore.download({ path: claim.reportPackage.storage_path });
+    const buffer = await dependencies.objectStore.download({
+      path: claim.reportPackage.storage_path,
+    });
     if (
       buffer.byteLength !== claim.reportPackage.declared_content_length ||
       createHash("sha256").update(buffer).digest("hex") !== claim.reportPackage.content_sha256
@@ -235,45 +342,22 @@ export async function runReportPackageProjection(
       throw new ReportProjectionFailure("OBJECT_IDENTITY_CHANGED");
     }
     const contract = reportContractDocumentSchema.parse(claim.contractVersion.mapping_document);
-    const document = reportProjectionDocumentSchema.parse(claim.projectionVersion.projection_document);
-    // A period-grain declaration projects into `normalized_metrics` per
-    // `specs/018` section 10.1, and that write path does not exist yet. Summing
-    // its daily rows into one exact-range total would be the silent
-    // reinterpretation ADR 0029 exists to prevent, so it is refused instead.
-    if (document.outputKind !== "exact_range") {
-      throw new ReportProjectionFailure("PROJECTION_OUTPUT_KIND_UNSUPPORTED");
-    }
-    if (contract.currency !== claim.reportPackage.declared_currency || contract.outletGrain !== "branch") {
+    const document = reportProjectionDocumentSchema.parse(
+      claim.projectionVersion.projection_document,
+    );
+    if (
+      contract.currency !== claim.reportPackage.declared_currency ||
+      contract.outletGrain !== "branch"
+    ) {
       throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
     }
     const sheets =
       claim.reportPackage.file_kind === "csv"
         ? [{ normalizedSheetName: "csv", rows: await readCsvRows(buffer) }]
         : await readWorkbookRows(buffer);
-    const projected = projectExactRangeMetrics({
-      contract,
-      document,
-      declaredCurrency: claim.reportPackage.declared_currency,
-      sheets,
-    });
-    const definitions = new Map(claim.metricDefinitions.map((definition) => [definition.key, definition]));
-    const outputs: ProjectionOutput[] = projected.outputs.map((output) => {
-      const definition = definitions.get(output.metricKey);
-      if (!definition || definition.value_kind !== output.valueKind) {
-        throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
-      }
-      const rule = contract.sheets.find((sheet) => sheet.normalizedSheetName === output.normalizedSheetName);
-      const field = rule?.fields.find((candidate) => candidate.canonicalField === output.canonicalField);
-      const source = sheets.find((sheet) => sheet.normalizedSheetName === output.normalizedSheetName);
-      if (!rule || !field || !source) throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
-      const prepared: ProjectionOutput = {
-        ...output,
-        metricDefinitionId: definition.id,
-        sourceColumnOrdinal: findColumn(source.rows, rule.headerRow, field.sourceHeader),
-        sourceDigest: "",
-      };
-      return { ...prepared, sourceDigest: safeSourceDigest(prepared) };
-    });
+    const definitions = new Map(
+      claim.metricDefinitions.map((definition) => [definition.key, definition]),
+    );
     const partial = claim.validationStatus === "partially_validated";
     const result = {
       status: partial ? ("partially_projected" as const) : ("projected" as const),
@@ -282,6 +366,102 @@ export async function runReportPackageProjection(
       errorCodes: [],
       warningCodes: partial ? ["OPTIONAL_VALIDATION_DEPENDENCY_UNAVAILABLE"] : [],
     };
+
+    // A series projects into `normalized_metrics` per `specs/018` section 10.1,
+    // one observation per period, rather than into the exact-range ledger.
+    // Summing its days into a single total would be the silent reinterpretation
+    // ADR 0029 exists to prevent. See ADR 0030.
+    if (document.outputKind === "period_grain") {
+      const series = projectPeriodGrainMetrics({
+        contract,
+        document,
+        declaredCurrency: claim.reportPackage.declared_currency,
+        declaredPeriod: {
+          periodStart: claim.reportPackage.declared_period_start,
+          periodEnd: claim.reportPackage.declared_period_end,
+        },
+        sheets,
+      });
+      const observations: PeriodGrainObservationPayload[] = series.observations.map(
+        (observation) => {
+          // A figure dated outside the window the operator declared this package
+          // covers would be filed under someone else's month.
+          if (
+            observation.periodStart < claim.reportPackage.declared_period_start ||
+            observation.periodEnd > claim.reportPackage.declared_period_end
+          ) {
+            throw new ReportProjectionFailure("PERIOD_OUT_OF_DECLARED_RANGE");
+          }
+          const definition = definitions.get(observation.metricKey);
+          if (!definition || definition.value_kind !== observation.valueKind) {
+            throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
+          }
+          const rule = contract.sheets.find(
+            (sheet) => sheet.normalizedSheetName === observation.normalizedSheetName,
+          );
+          const field = rule?.fields.find(
+            (candidate) => candidate.canonicalField === observation.canonicalField,
+          );
+          // Selected the way the projector selected it, so the column ordinal
+          // recorded in lineage names the sheet the figures actually came from.
+          const source = rule ? selectContractSheet(rule, sheets) : undefined;
+          if (!rule || !field || !source)
+            throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
+          const prepared: PeriodGrainObservationPayload = {
+            ...observation,
+            metricDefinitionId: definition.id,
+            sourceColumnOrdinal: findColumn(source.rows, rule.headerRow, field.sourceHeader),
+            sourceDigest: "",
+          };
+          return { ...prepared, sourceDigest: safePeriodSourceDigest(prepared) };
+        },
+      );
+      await dependencies.completePeriodGrain({
+        organizationId: payload.organizationId,
+        packageId: payload.packageId,
+        projectionRunId: payload.projectionRunId,
+        claimToken,
+        resultDigest: createReportPeriodGrainResultDigest({
+          observations: series.observations,
+          absentRowCount: series.absentRowCount,
+        }),
+        result,
+        observations,
+        absentRowCount: series.absentRowCount,
+      });
+      return { outcome: result.status, absentRowCount: series.absentRowCount };
+    }
+
+    const projected = projectExactRangeMetrics({
+      contract,
+      document,
+      declaredCurrency: claim.reportPackage.declared_currency,
+      sheets,
+    });
+    const outputs: ProjectionOutput[] = projected.outputs.map((output) => {
+      const definition = definitions.get(output.metricKey);
+      if (!definition || definition.value_kind !== output.valueKind) {
+        throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
+      }
+      const rule = contract.sheets.find(
+        (sheet) => sheet.normalizedSheetName === output.normalizedSheetName,
+      );
+      const field = rule?.fields.find(
+        (candidate) => candidate.canonicalField === output.canonicalField,
+      );
+      const source = sheets.find(
+        (sheet) => sheet.normalizedSheetName === output.normalizedSheetName,
+      );
+      if (!rule || !field || !source)
+        throw new ReportProjectionFailure("PROJECTION_PROCESSING_FAILED");
+      const prepared: ProjectionOutput = {
+        ...output,
+        metricDefinitionId: definition.id,
+        sourceColumnOrdinal: findColumn(source.rows, rule.headerRow, field.sourceHeader),
+        sourceDigest: "",
+      };
+      return { ...prepared, sourceDigest: safeSourceDigest(prepared) };
+    });
     await dependencies.complete({
       organizationId: payload.organizationId,
       packageId: payload.packageId,
@@ -300,7 +480,12 @@ export async function runReportPackageProjection(
           ? "CONTROL_TOTAL_MISMATCH"
           : error instanceof ReportProjectionError && error.code === "TOTALS_ROW_NOT_RESOLVED"
             ? "TOTALS_ROW_NOT_RESOLVED"
-            : "PROJECTION_PROCESSING_FAILED";
+            : // A row whose date cannot be read is the likeliest way a series
+              // fails, across three date encodings. Flattening it into the
+              // generic code leaves an operator with nothing to act on.
+              error instanceof ReportProjectionError && error.code === "INVALID_LOCAL_DATE"
+              ? "INVALID_LOCAL_DATE"
+              : "PROJECTION_PROCESSING_FAILED";
     if (error instanceof ReportControlTotalMismatch) {
       // The difference is the only part an operator can act on, and there is no
       // column for it, so it goes to the log with the identifiers that make it

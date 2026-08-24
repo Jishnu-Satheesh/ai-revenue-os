@@ -584,6 +584,7 @@ export type Database = {
           quality_state: "complete" | "partial" | "failed" | null;
           completeness_state: "complete" | "partial" | "unavailable" | null;
           output_count: number;
+          absent_row_count: number | null;
           error_codes: unknown;
           warning_codes: unknown;
           correlation_id: string;
@@ -635,7 +636,9 @@ export type Database = {
         Row: {
           id: string;
           organization_id: string;
-          exact_range_metric_observation_id: string;
+          /** Exactly one of these two names the ledger this lineage resolves into. */
+          exact_range_metric_observation_id: string | null;
+          normalized_metric_id: string | null;
           report_package_id: string;
           validation_run_id: string;
           projection_run_id: string;
@@ -644,8 +647,9 @@ export type Database = {
           normalized_sheet_name: string;
           canonical_field: string;
           source_column_ordinal: number;
-          first_data_row: number;
-          last_data_row: number;
+          /** Null for a series: the projector computes no row range per period. */
+          first_data_row: number | null;
+          last_data_row: number | null;
           contributor_count: number;
           calculation_version: number;
           source_digest: string;
@@ -664,6 +668,10 @@ export type Database = {
           report_package_id: string;
           projection_run_id: string;
           projection_output_key: string;
+          projection_target: "exact_range" | "period_grain";
+          /** Inclusive local dates, set for a series and null for an exact range. */
+          period_start: string | null;
+          period_end: string | null;
           classification:
             | "exact_duplicate"
             | "non_overlapping"
@@ -671,7 +679,9 @@ export type Database = {
             | "approved_correction";
           reconciliation_digest: string;
           prior_observation_id: string | null;
+          prior_normalized_metric_id: string | null;
           result_observation_id: string | null;
+          result_normalized_metric_id: string | null;
           candidate_count: number;
           quality_state: "complete" | "partial";
           completeness_state: "complete" | "partial";
@@ -691,10 +701,113 @@ export type Database = {
           resolution: "accept_correction" | "keep_existing";
           outcome_classification: "approved_correction" | "existing_retained" | null;
           reconciliation_digest: string;
-          prior_observation_id: string;
-          result_observation_id: string;
+          prior_observation_id: string | null;
+          prior_normalized_metric_id: string | null;
+          result_observation_id: string | null;
+          result_normalized_metric_id: string | null;
           resolved_by: string;
           correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_analysis_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          /** Null for a run whose detectors compare channels against each other. */
+          channel_id: string | null;
+          branch_id: string | null;
+          /** Inclusive local calendar dates in `window_timezone`. */
+          window_start: string;
+          window_end: string;
+          period_grain: "day" | "week" | "month";
+          window_timezone: string;
+          registry_version: number;
+          /** `[{ key, calculationVersion }]` -- what actually ran. */
+          detector_versions: unknown;
+          /** `[{ key, metricDefinitionId, valueKind }]`, resolved by the database. */
+          metric_versions: unknown;
+          input_digest: string;
+          result_digest: string | null;
+          status: "running" | "completed" | "failed";
+          finding_count: number;
+          observation_count: number;
+          needs_data_count: number;
+          safe_failure_code: string | null;
+          correlation_id: string;
+          started_at: string;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_findings: {
+        Row: {
+          id: string;
+          organization_id: string;
+          analysis_run_id: string;
+          channel_id: string | null;
+          branch_id: string | null;
+          detector_key: string;
+          detector_version: number;
+          kind: "observation" | "finding" | "needs_data";
+          code: string;
+          /** Set only when `kind` is `finding`. */
+          severity: "critical" | "high" | "medium" | "low" | null;
+          /** 1 is most urgent. Set only when `kind` is `finding`. */
+          priority: number | null;
+          metric_key: string | null;
+          metric_definition_id: string | null;
+          period_start: string | null;
+          period_end: string | null;
+          value_kind: "money" | "count" | "ratio" | null;
+          value_numerator: number | null;
+          value_denominator: number | null;
+          currency: string | null;
+          monetary_impact_minor_units: number | null;
+          expected_period_count: number | null;
+          observed_period_count: number | null;
+          absent_period_count: number | null;
+          quality_state: "complete" | "partial";
+          needs_data_reason: string | null;
+          limitations: unknown;
+          calculation_digest: string;
+          status: "open" | "superseded";
+          superseded_by_run_id: string | null;
+          superseded_at: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_finding_evidence: {
+        Row: {
+          id: string;
+          organization_id: string;
+          finding_id: string;
+          evidence_kind:
+            | "normalized_metric"
+            | "exact_range_metric_observation"
+            | "report_projection_reconciliation"
+            | "projection_run";
+          evidence_role:
+            | "subject_period"
+            | "prior_period"
+            | "component"
+            | "denominator"
+            | "held_evidence"
+            | "gap_count";
+          /** Exactly one of these four names the record this citation resolves to. */
+          normalized_metric_id: string | null;
+          exact_range_metric_observation_id: string | null;
+          reconciliation_id: string | null;
+          projection_run_id: string | null;
           created_at: string;
         };
         Insert: never;
@@ -918,6 +1031,8 @@ export type Database = {
           superseded_by_id: string | null;
           supersede_reason: string | null;
           source_ingestion_run_id: string | null;
+          reconciliation_state: "current" | "blocked_overlap" | "excluded";
+          reconciliation_digest: string | null;
           observed_at: string;
           ingested_at: string;
           created_at: string;
@@ -937,6 +1052,8 @@ export type Database = {
           | "superseded_by_id"
           | "supersede_reason"
           | "source_ingestion_run_id"
+          | "reconciliation_state"
+          | "reconciliation_digest"
           | "branch_id"
         > &
           Partial<
@@ -953,6 +1070,8 @@ export type Database = {
               | "superseded_by_id"
               | "supersede_reason"
               | "source_ingestion_run_id"
+              | "reconciliation_state"
+              | "reconciliation_digest"
               | "branch_id"
             >
           >;
@@ -1592,6 +1711,19 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
       };
+      complete_governed_report_package_period_grain_projection: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_projection_run_id: string;
+          p_claim_token: string;
+          p_result_digest: string;
+          p_result: unknown;
+          p_observations: unknown;
+          p_absent_row_count: number;
+        };
+        Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
       fail_governed_report_package_projection: {
         Args: {
           p_organization_id: string;
@@ -1602,6 +1734,44 @@ export type Database = {
           p_result_digest: string;
         };
         Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
+      };
+      claim_channel_analysis: {
+        Args: {
+          p_organization_id: string;
+          p_channel_id: string | null;
+          p_branch_id: string | null;
+          p_window_start: string;
+          p_window_end: string;
+          p_period_grain: "day" | "week" | "month";
+          p_analysis_run_id: string;
+          p_registry_version: number;
+          p_detectors: unknown;
+          p_metric_keys: unknown;
+          p_idempotency_key: string;
+          p_claim_token: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      complete_channel_analysis: {
+        Args: {
+          p_organization_id: string;
+          p_analysis_run_id: string;
+          p_claim_token: string;
+          p_result_digest: string;
+          p_findings: unknown;
+        };
+        Returns: Database["public"]["Tables"]["channel_analysis_runs"]["Row"] | null;
+      };
+      fail_channel_analysis: {
+        Args: {
+          p_organization_id: string;
+          p_analysis_run_id: string;
+          p_claim_token: string;
+          p_failure_code: string;
+          p_result_digest: string;
+        };
+        Returns: Database["public"]["Tables"]["channel_analysis_runs"]["Row"] | null;
       };
       resolve_governed_report_projection_overlap: {
         Args: {

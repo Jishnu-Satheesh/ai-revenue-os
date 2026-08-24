@@ -17,6 +17,16 @@
 - Trigger.dev becoming the only source of business state.
 - n8n containing core policy or decision logic.
 - Premature microservices.
+- A hashing or filesystem call living in the same module as the schemas or pure
+  helpers a screen imports. A `node:*` import fails a browser build outright, even
+  when nothing on the page calls it, so the split has to hold at the module level.
+  `src/lib/client-module-boundary.test.ts` fails the build if a client component
+  can reach one.
+- Widening a Zod document schema without widening the Postgres validator that
+  guards the same write. The validator works from an allow-list, so an unknown
+  key refuses the whole document rather than being ignored, and the refusal only
+  appears when a person clicks approve.
+  `src/domain/reports/provider-library/database-agreement.test.ts` compares the two.
 
 ## AI anti-patterns
 

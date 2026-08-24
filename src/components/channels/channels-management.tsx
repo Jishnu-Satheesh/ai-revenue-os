@@ -10,6 +10,7 @@ import {
   TagsIcon,
   WaypointsIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -579,6 +580,7 @@ export function ChannelsManagement({
   aliases,
   canManage,
   canMapBranches = false,
+  workspaceEnabled = false,
 }: {
   organizationId: string;
   organizationName: string;
@@ -588,6 +590,8 @@ export function ChannelsManagement({
   aliases?: readonly ChannelSourceAliasRow[];
   canManage: boolean;
   canMapBranches?: boolean;
+  /** Whether governed channel analysis is on for this organization. */
+  workspaceEnabled?: boolean;
 }) {
   const router = useRouter();
   const activeChannels = channels.filter((channel) => channel.status === "active");
@@ -718,8 +722,10 @@ export function ChannelsManagement({
                   <Badge variant="outline">Hint: {channel.template_key}</Badge>
                 ) : null}
                 <Badge variant="outline">
-                  {availableMappings.filter((mapping) => mapping.channel_id === channel.id).length} outlet
-                  {availableMappings.filter((mapping) => mapping.channel_id === channel.id).length === 1
+                  {availableMappings.filter((mapping) => mapping.channel_id === channel.id).length}{" "}
+                  outlet
+                  {availableMappings.filter((mapping) => mapping.channel_id === channel.id)
+                    .length === 1
                     ? ""
                     : "s"}
                 </Badge>
@@ -727,9 +733,13 @@ export function ChannelsManagement({
                   (mapping) => mapping.channel_id === channel.id && mapping.status === "inactive",
                 ) ? (
                   <Badge variant="secondary">
-                    {availableMappings.filter(
-                      (mapping) => mapping.channel_id === channel.id && mapping.status === "inactive",
-                    ).length} historical
+                    {
+                      availableMappings.filter(
+                        (mapping) =>
+                          mapping.channel_id === channel.id && mapping.status === "inactive",
+                      ).length
+                    }{" "}
+                    historical
                   </Badge>
                 ) : null}
                 <Badge variant="outline">
@@ -741,7 +751,21 @@ export function ChannelsManagement({
               </CardContent>
               <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
                 <span>Evidence and financial reports are governed separately.</span>
-                {channel.status === "archived" ? <ArchiveIcon aria-label="Archived" /> : null}
+                <div className="flex items-center gap-2">
+                  {/* Only for a channel that still trades. An archived channel's
+                      workspace would invite an analysis of a channel nobody is
+                      importing for any more. */}
+                  {workspaceEnabled && channel.status === "active" ? (
+                    <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+                      <Link
+                        href={`/organizations/${organizationId}/economics/channels/${channel.id}`}
+                      >
+                        Open workspace
+                      </Link>
+                    </Button>
+                  ) : null}
+                  {channel.status === "archived" ? <ArchiveIcon aria-label="Archived" /> : null}
+                </div>
               </CardFooter>
             </Card>
           ))}

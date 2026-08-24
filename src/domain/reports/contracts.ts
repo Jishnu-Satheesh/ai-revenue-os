@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
 
 const normalizedIdentifierSchema = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
@@ -100,7 +98,9 @@ const contractSheetSchema = z
     sheetLocator: z
       .discriminatedUnion("kind", [
         z.object({ kind: z.literal("name") }).strict(),
-        z.object({ kind: z.literal("position"), position: z.number().int().min(1).max(25) }).strict(),
+        z
+          .object({ kind: z.literal("position"), position: z.number().int().min(1).max(25) })
+          .strict(),
       ])
       .optional(),
     headerRow: z.number().int().min(1).max(250_000),
@@ -127,6 +127,27 @@ const contractSheetSchema = z
         canonicalField: normalizedIdentifierSchema,
         /** Matched against the cell after the same normalization headers get. */
         label: z.string().trim().min(1).max(64),
+      })
+      .strict()
+      .optional(),
+    /**
+     * A provider that appends extra values into some rows mid-sheet.
+     *
+     * Talabat writes a second unavailability reason straight after the first
+     * when a day closed for two causes. The extra cell has no column of its
+     * own, so every later cell in that row sits further right than the header
+     * says -- eleven of the fifty-nine rows of the drafting export carry two
+     * reasons, and binding their later columns by header name alone reads the
+     * wrong cell silently, on exactly the days that matter most.
+     *
+     * A row is ragged when it reaches further right than the header row does.
+     * The overflow is read off the row itself rather than declared, so the
+     * declaration stays one fact: which header columns are allowed to move.
+     * Columns before it never shift.
+     */
+    raggedRows: z
+      .object({
+        injectedFromColumnIndex: z.number().int().min(0).max(249_999),
       })
       .strict()
       .optional(),
@@ -249,25 +270,6 @@ export type ReportSchemaFingerprintInput = {
     hasRepeatedHeader: boolean;
   }>;
 };
-
-function canonicalize(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalize(item)}`);
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-export function createReportSchemaFingerprint(input: ReportSchemaFingerprintInput): string {
-  return createHash("sha256").update(canonicalize(input)).digest("hex");
-}
-
-export function createReportContractDocumentDigest(document: ReportContractDocument): string {
-  return createHash("sha256").update(canonicalize(document)).digest("hex");
-}
 
 export function normalizeReportStructureIdentifier(input: string): string {
   const normalized = input

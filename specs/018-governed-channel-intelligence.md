@@ -179,6 +179,40 @@ the operator and go back to being the receipt.
 No contribution margin, no detectors, no recommendations, no benchmarks, no Business Memory writes,
 no AI narration, no provider or campaign actions, no OCR, and no model-read values.
 
+### 4.1.6 Delivered first detector slice (2026-08-23)
+
+- Four core-owned detectors ship — `evidence.period_coverage`, `evidence.reconciliation_blocked`, `revenue.period_movement`, and `revenue.channel_share` — chosen because each runs on evidence a governed report package already produces. Everything else in section 11.2 is deferred by name, because it needs economics inputs or metric vocabulary no governed report currently writes. See ADR 0031.
+- Postgres owns the analysis lease, the version tuples a run binds, the rule that a finding may only cite current evidence, supersession by a later run, and the immutable audit event. Trigger.dev carries identifiers only, and the worker is never the authority on what may be recorded.
+- All three outcomes are stored. `needs_data` is a visible record, not a silence: an operator who cannot see that a detector had nothing to work with reads its absence as an all-clear.
+- Severity and priority exist only on a quantified finding. Three of the four detectors report authoritative observations without either, because no agreed threshold turns a movement, a share, or a share of missing periods into a problem of a given size.
+- Two currencies, two grains, two recorded timezones, two branches, or two channels are refused rather than reconciled, and a period-over-period comparison never reaches across a gap. An absent period stays absent everywhere in this slice.
+- The workspace at `/organizations/[organizationId]/economics/channels/[channelId]` ships from the approved Superdesign draft, with all nine chapters and one route that starts a run. Recommendation triage, narration, and benchmarks remain out.
+
+### 4.1.7 Talabat vertical slice (2026-08-23)
+
+- One approved contract binds 23 columns of the Talabat performance family, including ragged-row
+  realignment: 11 of the 59 rows carry a second unavailability reason that shifts later cells right
+  from column 22, and the contract declares the injection point rather than hardcoding the shift.
+  See ADR 0036.
+- New metric definitions are seeded for the vocabulary these detectors read, and provider reason
+  codes land as dimension values on numeric `normalized_metrics` rows under a declared allowed
+  vocabulary that refuses an unknown label. See ADR 0034.
+- Registry version 2 registers four more core-owned detectors — `funnel.stage_conversion`,
+  `orders.cancellation_loss`, `operations.closed_share`, and `customer.new_share`; see section 11.2.
+  `orders.cancellation_loss` is the second detector with a declared computable monetary impact,
+  alongside `revenue.period_movement`. See ADR 0035.
+- Recommendation generation and triage ship behind
+  `GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS`. The model reads the run's findings and writes a
+  schema-validated explanation citing the findings it used; operators Acknowledge, Mark planned, or
+  Dismiss with a required reason; and a helpful/not-helpful review hook travels separately from the
+  triage decision.
+- Presentation follows the refined Data-Ink Maximal Narrative draft approved 2026-08-23: verdict
+  band first, numbered narrative chapters ordered by ADR 0035, and evidence in a Sheet from an
+  explicit Inspect evidence control. See section 17.3.
+- Money, Items, Promotions, and Customer Voice stay awaiting-other-reports, collapsed into one muted
+  row naming the report each needs, because the Talabat performance export holds no commission or
+  payout columns, no per-item rows, no promotion funding detail, and no ratings.
+
 ### 4.2 Release 2
 
 - Provider-neutral public benchmark research, with Exa Search and Contents as the first adapter.
@@ -458,6 +492,10 @@ The mapping document is validated by Zod and may contain only versioned predefin
 - aggregate using a metric definition's declared semantics;
 - declare control totals, tolerances, required coverage, and unmapped-field disposition.
 
+A sheet rule may also declare ragged-row realignment, and a projection output may bind a decimal
+parser to a count metric or count occurrences of declared categorical labels into dimension values;
+see ADR 0036 and ADR 0034.
+
 The language cannot contain JavaScript, Python, SQL, regular expressions supplied by a model,
 network calls, file paths, dynamic imports, tool calls, or arbitrary expressions. Unknown operation
 types fail validation.
@@ -517,6 +555,24 @@ Daily, weekly, and monthly canonical observations use the existing metric regist
 `normalized_metrics` revision model. New writes require `channel_id`; the historical channel label
 is retained as a source snapshot. Ratios always store numerator and denominator. Gaps stay absent.
 
+**Shipped.** An approved `period_grain` declaration is written by
+`complete_governed_report_package_period_grain_projection`, a fenced RPC the worker calls under its
+claim token and lease. One observation per period; no observation at all for a period the provider
+left blank, and the count of those blanks is recorded on the projection run as `absent_row_count`
+rather than turned into a zero nobody can tell apart from a day that genuinely sold nothing.
+
+Period boundaries are computed in the **branch's** timezone, per `specs/015` section 4.4, not in the
+organization default the package copies at intake, and the zone in force is recorded on the row.
+`period_start` is local midnight of the first day; `period_end` is local midnight of the day after
+the last. The grain comes from the approved declaration and is re-derived by the database rather than
+accepted from the worker. A row dated outside the package's declared window is
+`PERIOD_OUT_OF_DECLARED_RANGE`; a row whose date cannot be read is `INVALID_LOCAL_DATE`. See
+ADR 0030.
+
+Categorical outputs write provider reason codes as dimension values on those same numeric rows, and
+continuous quantities reach count metrics through decimal-parser columns accumulated in exact
+fixed-point addition, never floating point. See ADR 0034 and ADR 0036.
+
 ### 10.2 Exact-range metric ledger
 
 `exact_range_metric_observations` stores Noon-style arbitrary-period totals that cannot honestly be
@@ -567,7 +623,10 @@ entry, economics component, finding input, and recommendation input to:
 - contract version, field binding, transform steps, and calculation version;
 - reconciliation and quality state.
 
-It stores coordinates, digests, and bounded metadata, not raw cell values. Every read-model number
+It stores coordinates, digests, and bounded metadata, not raw cell values. A lineage row names
+exactly one of the two ledgers. A series row records the sheet, the column, and how many rows fed
+each period; it records no first and last data row, because the projector computes none per period
+and a sheet-wide range would claim evidence nobody checked. Per-period row ranges are a follow-up. Every read-model number
 and chart mark resolves through this lineage. A read that cannot resolve required lineage is marked
 untrusted rather than silently displayed as verified.
 
@@ -582,6 +641,15 @@ untrusted rather than silently displayed as verified.
 - Overlapping packages are stored but cannot both contribute to the same current rollup. An approved
   supersession or deterministic precedence decision selects current evidence.
 - Ambiguous overlap remains a reconciliation failure requiring owner/admin resolution.
+- Overlap is searched across **both** projection targets. A daily series and an exact-range total
+  covering the same days collide, and each side is compared in its own recorded zone's local dates so
+  a branch zone differing from the package's cannot hide a collision. Only rows a governed projection
+  wrote are candidates. Every colliding prior is recorded as a decision of its own, so accepting a
+  correction sets aside all of them rather than the first.
+- An accepted correction supersedes priors in its own ledger and marks priors in the other one
+  `excluded`, because a supersession pointer cannot cross tables. Held evidence carries
+  `reconciliation_state = 'blocked_overlap'` in whichever ledger it landed in and is excluded from
+  every current read. See ADR 0030.
 
 ## 11. Detector and analysis catalogue
 
@@ -630,6 +698,85 @@ Item profit is `needs_data` without trusted item COGS. Promotion incremental ROI
 without a registered baseline or experiment. Monetary impact is omitted when a detector cannot
 derive it from accepted evidence.
 
+#### First shipped detector slice
+
+The first shipped slice is deliberately limited to detectors that run on evidence a governed report
+package already produces, and to core ownership. It registers four:
+
+- `evidence.period_coverage` — which periods in a window carry current governed evidence and which
+  are absent, from the metrics ledger and the projection run's recorded gap count. An absent period
+  is reported as absent; it is never inferred, interpolated, or read as zero.
+- `evidence.reconciliation_blocked` — evidence held for an owner or admin decision in either ledger,
+  named by its reconciliation record so the operator can act on it.
+- `revenue.period_movement` — period-over-period movement in `revenue.gross` for one channel over a
+  window, from the period-grain series only. `needs_data` with fewer than two comparable periods, or
+  where grain, currency, branch, or channel differ. This is the only detector in the slice that
+  computes a monetary impact, and it computes it as the movement itself in integer minor units.
+- `revenue.channel_share` — each channel's share of gross revenue in a window. Two currencies are
+  refused, never converted.
+
+Deferred at that slice, and named rather than implied: every margin, take-rate, fee, funnel, item,
+promotion, review, and operational detector in section 11.2, each of which needs economics inputs or
+metric
+vocabulary that no governed report currently populates. A detector registered against vocabulary
+nothing writes returns `needs_data` forever and teaches an operator nothing.
+
+`channel_recommendations` and `channel_recommendation_decisions` are also deferred. They exist to
+hold a cited model explanation over selected findings under section 11.4; shipping the tables before
+the narration path would be dead schema, and shipping narration alongside an unproven detector layer
+would put an AI boundary on top of numbers nobody has checked in production yet. Findings are
+visible without narration, which section 11.4 already requires as the fallback.
+
+**Shipped.** All four are registered in `src/domain/analysis/`, run by the
+`channel-analysis.run` worker, and written through the fenced RPCs in section 11.3, together with
+the registry-version-2 additions below. Three details
+of the shipped slice are decisions in their own right and are recorded in ADR 0031:
+
+- A run names one channel or none. `revenue.channel_share` compares channels and has no single
+  channel to bind to, so each detector declares a scope and the registry binds only the detectors
+  whose scope matches the run.
+- Severity is omitted rather than invented. It exists only on a quantified finding, and three of the
+  four detectors emit authoritative observations without one, because no agreed threshold turns a
+  movement or a share into a problem of a given size. The single shipped severity rule is a case
+  distinction on the evidence — held evidence is high when it blocks a period nothing else covers,
+  medium when it does not — and is versioned with its detector.
+- A finding may cite only current evidence from either ledger. It may still cite a reconciliation
+  record, which is what `evidence.reconciliation_blocked` does: an outstanding decision is a fact
+  about the evidence, while the held figure behind it is not yet a fact about the business, and that
+  detector never reports its value.
+
+**Exercised over real evidence.** The slice was first run against a governed Talabat package
+declaring 1 January to 28 February 2026 at day grain, with 20 of 59 days carrying evidence. Every
+figure resolved to the ledger rows it cited. Two refusals were wrong in the same way and were
+repaired, each as a new detector calculation version (ADR 0032):
+
+- `evidence.period_coverage` is at calculation version 2. A window whose evidence exists but is
+  recorded at another grain now reports `EVIDENCE_AT_DIFFERENT_GRAIN` and names that grain, instead
+  of `NO_GOVERNED_EVIDENCE_IN_WINDOW`. Describing a ledger full of days as an empty window sends an
+  operator to chase a provider for a file the platform already holds.
+- `revenue.period_movement` is at calculation version 2. A refusal for want of two comparable
+  periods now names the rows it set aside and reports itself as partial, which
+  `evidence.period_coverage` already did. Two detectors describing the same evidence differently is
+  a defect in whichever one says less.
+
+`evidence.reconciliation_blocked` remains at calculation version 1 and correctly emits an
+observation, not a finding, where nothing is held.
+
+#### Registry version 2
+
+Registry version 2 appends four core-owned detectors, each running on vocabulary a governed
+projection now writes — reason codes as dimension values (ADR 0034) and continuous quantities
+through decimal-parser bindings (ADR 0036):
+
+- `funnel.stage_conversion` — conversion between consecutive reported funnel stages
+  (impressions, menu views, add-to-cart, placed order) for one channel over a window.
+- `orders.cancellation_loss` — cancelled and rejected orders over a window, with the provider's own
+  reported rejection loss summed over the window as its declared monetary impact. See ADR 0035.
+- `operations.closed_share` — the share of scheduled operating minutes the provider reports closed,
+  with closure reasons carried as dimension values.
+- `customer.new_share` — the provider-reported share of orders from first-time customers over a
+  window.
+
 ### 11.3 Analysis records
 
 `channel_analysis_runs` binds one organization/channel/branch/window to exact metric, economics,
@@ -638,6 +785,21 @@ contract, detector, and model version tuples.
 `channel_findings` stores deterministic outputs, priority, quality, typed evidence references,
 calculation digest, limitations, and status. The authoritative observation and numeric values are
 never model-authored.
+
+**Shipped.** `channel_analysis_runs`, `channel_findings`, and `channel_finding_evidence` exist, and
+the worker reaches them only through `claim_channel_analysis`, `complete_channel_analysis`, and
+`fail_channel_analysis` — security definer, granted to `service_role` alone, with an idempotency row
+and a lease, exactly as the projection path works. Economics, contract, and model version tuples are
+absent from the shipped run because this slice binds none of them; the run records the metric and
+detector tuples it did bind, and the completion RPC refuses any finding naming a detector version or
+a metric the run did not bind.
+
+`channel_findings.kind` is `observation`, `finding`, or `needs_data`. All three are stored: a
+`needs_data` outcome an operator cannot see reads as "nothing wrong here", which is the opposite of
+what it means. Severity and priority exist only on `finding`. A run is keyed for idempotency on the
+run id rather than the window, because re-analysing a window as new evidence arrives is ordinary; a
+later run supersedes the earlier findings for the detectors it carried, and those stay readable.
+Findings are readable through RLS to `report.read` and writable from no session at all.
 
 `channel_recommendations` stores a cited model explanation over selected findings with exactly one
 label: `observation`, `recommendation`, or `needs_data`. It includes evidence references, supported
@@ -703,6 +865,18 @@ proxies bytes through the application.
 Read models use discriminated unions for trusted, partial, indicative, insufficient, stale,
 ambiguous-overlap, and currency-mismatch states. An unavailable value is absent, not zero.
 
+**Shipped.** One route so far: `POST /api/organizations/:organizationId/channels/:channelId/analysis`
+starts a deterministic analysis over a declared window. It carries `windowStart`, `windowEnd`,
+`periodGrain`, and an optional `branchId`; it is gated on `report.retry` and on the governed channel
+analysis flag; and it returns `202` with the run id it created. The window is supplied and never
+inferred — a window derived from whatever evidence exists cannot report a gap at its own edges. The
+route decides nothing: the claim RPC re-resolves the channel, the branch timezone, and the metric
+vocabulary, and refuses what it cannot bind. A dispatch that did not happen is reported as a failure
+rather than as a success nobody got.
+
+Findings themselves have no read route yet. They are read server-side through the caller's own
+session, so RLS decides what is visible rather than application code deciding for it.
+
 ### 12.4 Release-2 benchmarks
 
 - `POST /api/organizations/:organizationId/benchmark-research`
@@ -730,7 +904,9 @@ Required stable events:
 - `report_package.partially_projected`
 - `report_package.failed`
 - `report_package.superseded`
+- `channel_analysis.started`
 - `channel_analysis.completed`
+- `channel_analysis.failed`
 - `channel_recommendation.triaged`
 - `report_package.purged`
 - `benchmark_candidate.approved`
@@ -818,6 +994,12 @@ lineage below 100% for displayed trusted results.
 - **Currency ambiguity or mismatch:** projection/comparison fails; no inferred conversion.
 - **Parser or worker crash:** lease expires and retry resumes idempotently from the authoritative
   stage.
+- **Dispatch never ran:** a package stops in a *waiting* state rather than a failed one, because
+  nothing claimed it and so nothing marked it wrong. Every stage's recovery path admits its own
+  waiting state — `uploaded` and `profiling` for profiling, `awaiting_validation` for validation,
+  `awaiting_projection` for projection — so an operator can ask again for work that was queued and
+  never picked up. Admitting the waiting state widens nothing: each claim RPC already accepts it,
+  and every approval boundary is re-checked at claim time.
 - **Narrative failure:** deterministic findings remain available without AI copy.
 - **Retention failure:** original remains private, purge is retried, and operators are alerted.
 - **Source purged:** UI retains digest, lineage, calculations, approval, and limitation metadata but
@@ -874,6 +1056,44 @@ contract and calculation versions, and limitations.
 
 Recommendations may be acknowledged, dismissed with a required reason, or marked planned. There is
 no execute button.
+
+**Shipped.** All nine chapters render, and since 2026-08-23 the presentation follows the refined
+Data-Ink Maximal Narrative draft: the verdict band leads, and the narrative chapters are numbered in
+the order ADR 0035 defines — declared monetary impact first, then the deterministic fallbacks — so
+the page opens with what each problem cost. Chapters the current exports cannot fill do not render
+empty frames: Money, Items, Promotions, and Customer Voice collapse into one muted
+awaiting-other-reports row naming the report each needs, because the Talabat performance export
+holds no data for them (section 4.1.7). The page still distinguishes reported, needs data, no
+detector yet, and not analysed, because all four look identical as a blank frame and mean entirely
+different things.
+
+A figure the platform cannot state renders as an em-dash with the reason beside it, never as a zero.
+The window on screen is stated as exact local dates and the zone they were bucketed in, never as a
+month name. Evidence opens in a Sheet from an explicit Inspect evidence control beside any figure,
+showing the detector key, its calculation version, the window, the quality state, the limitations
+the detector itself recorded, every cited row, and the calculation digest. The earlier dark floating
+Evidence Node rail is gone; `.superdesign/design-system.md` forbids it by name.
+
+The window control is a free-range calendar per ADR 0033, which supersedes ADR 0032's
+declared-package picker: any start and end can be chosen, the grain is derived from the range's
+length (thirty-one days or fewer daily, six months or fewer weekly, longer monthly), and every day
+is shaded by governed-evidence density on the chart emerald ramp, so the operator sees where
+evidence lives while choosing rather than being told after a run that a window reached nothing. A
+zero-evidence range stays runnable, and the page states coverage honestly afterwards — including at
+the window's own edges, which is why ADR 0032 offered the declared range rather than the occupied
+extent. The false "no evidence" that picker prevented is now prevented by visibility instead of by
+restricting choice. A channel with no governed evidence at all sees an unshaded calendar and a
+coverage statement that says so in words; the control is not hidden from them.
+
+The page reads the findings of the one run it displays, so the window in the header and every figure
+beneath it come from the same analysis. Reading every open finding for the channel put two runs'
+answers on one page, under a header naming only one of their windows.
+
+Recommendation generation and triage ship with the Talabat vertical slice (section 4.1.7), behind
+`GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS`: Acknowledge, Mark planned, or Dismiss with a required
+reason, each recommendation schema-validated and citing the findings it used, and a
+helpful/not-helpful review hook separate from the triage decision. Findings remain visible without
+narration, which section 11.4 already requires as the fallback.
 
 ## 18. Superdesign approval gate
 
@@ -1116,6 +1336,11 @@ These inputs are required before their corresponding production slices can be ac
 ## 25. References
 
 - ADR 0026: governed declarative report contracts and stable organization channel identity
+- ADR 0031: the first shipped detector slice
+- ADR 0033: free-range windows shaded by evidence density
+- ADR 0034: reason codes are metric-row dimensions
+- ADR 0035: findings rank by declared money first
+- ADR 0036: ragged rows are a declared contract capability
 - [Vercel Functions limits](https://vercel.com/docs/functions/limitations)
 - [Supabase resumable uploads](https://supabase.com/docs/guides/storage/uploads/resumable-uploads)
 - [OWASP prompt injection](https://genai.owasp.org/llmrisk2023-24/llm01-24-prompt-injection/)

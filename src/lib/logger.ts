@@ -16,6 +16,8 @@ type LogContext = {
   campaignId?: string;
   connectionId?: string;
   dataSourceId?: string;
+  /** An organization-owned channel. Opaque, and not a provider connection. */
+  channelId?: string;
   runId?: string;
   workerId?: string;
   durationMs?: number;

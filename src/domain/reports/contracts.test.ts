@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  createReportSchemaFingerprint,
-  reportContractDocumentSchema,
-} from "@/domain/reports/contracts";
+import { reportContractDocumentSchema } from "@/domain/reports/contracts";
+import { createReportSchemaFingerprint } from "@/domain/reports/document-digest";
 
 const contract = {
   schemaVersion: 1,

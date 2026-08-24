@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
 
 import { isAbsentValue, isEmptyCell } from "@/domain/reports/absent";
@@ -32,6 +30,33 @@ const reportProjectionOutputSchema = z
     metricKey: metricKeySchema,
     valueKind: z.enum(["money", "count"]),
     aggregation: z.literal("sum"),
+    /**
+     * A categorical output: the source column carries provider category labels
+     * rather than figures, and each label becomes its own observation tagged
+     * with a dimension, so a question like "how many days closed for each
+     * reason" lands as counted evidence instead of prose.
+     *
+     * The allowed values are declared here, in the approved document, because
+     * the alternative is trusting whatever string arrives. A label outside the
+     * list refuses the import rather than becoming an "other" bucket nobody
+     * defined.
+     */
+    categorical: z
+      .object({
+        dimensionKey: normalizedIdentifierSchema,
+        allowedValues: z
+          .array(z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/))
+          .min(1)
+          .max(20),
+        /**
+         * Also read this field's labels out of the cells a ragged row injects.
+         * Talabat continues its reason list into the cells it inserts, so the
+         * second cause of a closed day lives in the displacement itself.
+         */
+        collectInjectedValues: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -172,6 +197,22 @@ export const reportProjectionDocumentSchema = z
       if (sourceFields.has(source)) {
         context.addIssue({ code: "custom", path: ["outputs"], message: "A source field may feed one exact-range metric." });
       }
+      if (output.categorical) {
+        if (output.valueKind !== "count") {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs"],
+            message: "A categorical output counts occurrences, so its value kind must be count.",
+          });
+        }
+        if (new Set(output.categorical.allowedValues).size !== output.categorical.allowedValues.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs"],
+            message: "Each allowed value may be declared once.",
+          });
+        }
+      }
       outputKeys.add(output.key);
       metricKeys.add(output.metricKey);
       sourceFields.add(source);
@@ -245,8 +286,6 @@ export type ExactRangeProjectionResult = {
   controlTotals: ControlTotalReconciliation[];
 };
 
-
-
 const currencyExponents: Readonly<Record<string, number>> = {
   BHD: 3,
   IQD: 3,
@@ -260,31 +299,6 @@ const currencyExponents: Readonly<Record<string, number>> = {
 const numericPattern = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
 const integerPattern = /^[+-]?\d+$/;
 
-function canonicalize(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalize(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-/**
- * Identifies the projected figures, and only those.
- *
- * A reconciled control total is a check that passed, not a figure, so it stays
- * out: including it would change the digest of every existing declaration and
- * make an unchanged import look like a correction.
- */
-export function createReportProjectionResultDigest(result: {
-  outputs: readonly ExactRangeProjectionOutput[];
-}): string {
-  return createHash("sha256").update(canonicalize(result)).digest("hex");
-}
-
-
 function isFormula(value: unknown): boolean {
   return value !== null && typeof value === "object" && "formula" in value;
 }
@@ -297,6 +311,63 @@ function sourceHeaderMap(row: readonly unknown[]): Map<string, number> {
     if (!headers.has(header)) headers.set(header, index);
   });
   return headers;
+}
+
+/** The furthest right non-empty cell of a row, or -1 when the row is empty. */
+function lastPopulatedIndex(row: readonly unknown[]): number {
+  let last = -1;
+  row.forEach((value, index) => {
+    if (!isEmptyCell(value)) last = index;
+  });
+  return last;
+}
+
+/**
+ * How far one data row's later columns sit from where the header names them.
+ *
+ * Zero unless the sheet declares ragged rows and this particular row reaches
+ * further right than the header does. The overflow is read off the row rather
+ * than declared because the declaration describes the shape of the problem,
+ * not each row's private amount of damage.
+ */
+function rowShift(
+  row: readonly unknown[],
+  ragged: { injectedFromColumnIndex: number } | null,
+  headerLastPopulated: number,
+): number {
+  if (!ragged) return 0;
+  const overflow = lastPopulatedIndex(row) - headerLastPopulated;
+  return overflow > 0 ? overflow : 0;
+}
+
+function columnInRow(
+  headerIndex: number,
+  shift: number,
+  ragged: { injectedFromColumnIndex: number } | null,
+): number {
+  if (!ragged || shift === 0) return headerIndex;
+  return headerIndex < ragged.injectedFromColumnIndex ? headerIndex : headerIndex + shift;
+}
+
+/**
+ * The category label a cell carries, under the declared rules.
+ *
+ * Empty cells say nothing. Numbers in an injected region are the provider's
+ * own figures passing through, not categories, and are ignored rather than
+ * coerced. Any other text has to be one of the declared labels: a category
+ * nobody approved refuses the import instead of quietly becoming part of a
+ * breakdown an operator will read as complete.
+ */
+function categoryLabel(value: unknown, allowed: readonly string[]): string | null {
+  if (isEmptyCell(value)) return null;
+  if (typeof value === "number") return null;
+  if (isFormula(value) || value instanceof Date || typeof value === "object") {
+    throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
+  }
+  const text = String(value).trim().toUpperCase();
+  if (text.length === 0) return null;
+  if (!allowed.includes(text)) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
+  return text;
 }
 
 function stringValue(value: unknown, code: string): string {
@@ -348,7 +419,16 @@ function subtractAbsolute(larger: string, smaller: string): string {
   return result.replace(/^0+(?=\d)/, "") || "0";
 }
 
+const digitsOnly = /^[0-9]+$/;
+
 function addIntegerStrings(left: string, right: string): string {
+  // A decimal slipping in here would not merely mis-sum: its digits would
+  // turn into NaN and the result string would triple every round, hanging the
+  // projection inside an exponentially growing write. Refusing loudly keeps a
+  // wrong-shaped string from ever reaching arithmetic built for integers.
+  if (!digitsOnly.test(left.replace("-", "")) || !digitsOnly.test(right.replace("-", ""))) {
+    throw new ReportProjectionError("INVALID_INTEGER");
+  }
   const leftNegative = left.startsWith("-");
   const rightNegative = right.startsWith("-");
   const leftAbsolute = left.replace("-", "");
@@ -385,8 +465,60 @@ function integer(value: unknown): string {
   return normalizeInteger(text);
 }
 
+/**
+ * An exact decimal quantity as a canonical string.
+ *
+ * Providers measure things in fractions -- Talabat reports closed time as
+ * `355.6` minutes -- and a quantity with a unit is not made integral by
+ * wishing. The string keeps every digit the provider wrote: parsed through
+ * fixed-point addition below, never through floating point, because a sum
+ * whose last digit depends on rounding mode is not evidence. Canonical form
+ * strips leading zeroes and trailing fractional zeroes so identical inputs
+ * always produce byte-identical observations and digests.
+ */
+function decimalQuantity(value: unknown): string {
+  if (isFormula(value) || value instanceof Date || typeof value === "object") {
+    throw new ReportProjectionError("INVALID_DECIMAL");
+  }
+  const text = typeof value === "string" ? value.trim() : String(value);
+  if (!numericPattern.test(text)) throw new ReportProjectionError("INVALID_DECIMAL");
+  const negative = text.startsWith("-");
+  const unsigned = text.replace(/^[+-]/, "");
+  const [whole, fraction = ""] = unsigned.split(".");
+  const trimmedFraction = fraction.replace(/0+$/, "");
+  const wholeDigits = (whole || "0").replace(/^0+(?=\d)/, "") || "0";
+  const joined = trimmedFraction.length > 0 ? `${wholeDigits}.${trimmedFraction}` : wholeDigits;
+  const normalized = joined === "0" || joined === "0.0" ? "0" : joined;
+  return negative && normalized !== "0" ? `-${normalized}` : normalized;
+}
+
+/** Fixed-point addition of two canonical decimal strings, exactly. */
+function addDecimals(left: string, right: string): string {
+  const [leftWhole, leftFraction = ""] = left.replace("-", "").split(".");
+  const [rightWhole, rightFraction = ""] = right.replace("-", "").split(".");
+  const scale = Math.max(leftFraction.length, rightFraction.length);
+  const leftScaled = `${leftWhole}${leftFraction.padEnd(scale, "0")}`;
+  const rightScaled = `${rightWhole}${rightFraction.padEnd(scale, "0")}`;
+  const sum = addIntegerStrings(
+    left.startsWith("-") ? `-${leftScaled}` : leftScaled,
+    right.startsWith("-") ? `-${rightScaled}` : rightScaled,
+  );
+  const negative = sum.startsWith("-");
+  const unsignedSum = sum.replace("-", "");
+  const whole = unsignedSum.slice(0, unsignedSum.length - scale) || "0";
+  const fraction = scale > 0 ? unsignedSum.slice(-scale).replace(/0+$/, "") : "";
+  const joined = fraction.length > 0 ? `${whole.replace(/^0+(?=\d)/, "")}.${fraction}` : whole.replace(/^0+(?=\d)/, "") || "0";
+  return negative && joined !== "0" ? `-${joined}` : joined;
+}
+
 function negateIntegerString(value: string): string {
   if (value === "0") return "0";
+  return value.startsWith("-") ? value.slice(1) : `-${value}`;
+}
+
+/** Negation of a canonical integer-or-decimal quantity string. */
+function negateDecimalString(value: string): string {
+  if (Number(value) === 0 || value === "0") return "0";
   return value.startsWith("-") ? value.slice(1) : `-${value}`;
 }
 
@@ -419,7 +551,7 @@ function reconcileControlTotals(
     // figures. Reporting the whole stated amount as the gap describes that
     // truthfully, and the comparison below refuses the import.
     const projected = projectedByOutputKey.get(control.outputKey) ?? "0";
-    const difference = addIntegerStrings(projected, negateIntegerString(statedMinorUnits));
+    const difference = addDecimals(projected, negateDecimalString(statedMinorUnits));
     const reconciliation: ControlTotalReconciliation = {
       outputKey: control.outputKey,
       statedMinorUnits,
@@ -494,8 +626,21 @@ function findSourceField(
   if (everyRowRequired && !field.required) {
     throw new ReportProjectionError("PROJECTION_FIELD_NOT_REQUIRED");
   }
-  if ((output.valueKind === "money" && field.parser !== "money") ||
-      (output.valueKind === "count" && field.parser !== "integer")) {
+  if (
+    (output.valueKind === "money" && field.parser !== "money") ||
+    // A count may bind an integer or a decimal column: providers measure
+    // continuous quantities in fractions, and refusing them would leave whole
+    // chapters unmeasurable. The exact-range sum stays integer-only -- its
+    // accumulator refuses decimals loudly rather than rounding silently.
+    (output.valueKind === "count" &&
+      !output.categorical &&
+      field.parser !== "integer" &&
+      field.parser !== "decimal") ||
+    (output.valueKind === "count" &&
+      !!output.categorical &&
+      field.parser !== "text" &&
+      field.parser !== "enum")
+  ) {
     throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
   }
   return { sheet, field };
@@ -517,8 +662,18 @@ export function projectExactRangeMetrics(input: {
     if (!source) throw new ReportProjectionError("REQUIRED_SHEET_MISSING");
     const header = source.rows[rule.headerRow - 1];
     if (!header) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
-    const columnIndex = sourceHeaderMap(header).get(field.sourceHeader);
+    const headers = sourceHeaderMap(header);
+    const columnIndex = headers.get(field.sourceHeader);
     if (columnIndex === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
+    if (output.categorical) {
+      throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
+    }
+
+    // An exact-range sum covers a whole declared period, so a ragged row in the
+    // span would corrupt its total exactly as it would corrupt a day. The same
+    // realignment applies.
+    const ragged = rule.raggedRows ?? null;
+    const headerLastPopulated = ragged ? lastPopulatedIndex(header) : -1;
 
     if (!totalsRowIndexes.has(output.normalizedSheetName)) {
       totalsRowIndexes.set(output.normalizedSheetName, resolveTotalsRowIndex(rule, source.rows));
@@ -531,7 +686,10 @@ export function projectExactRangeMetrics(input: {
       // The provider's own total is set aside, never summed. Adding it to the
       // rows it totals would double the figure and look like a clean import.
       if (rowIndex === totalsRowIndex) continue;
-      const value = source.rows[rowIndex]?.[columnIndex];
+      const row = source.rows[rowIndex];
+      const value = row?.[
+        columnInRow(columnIndex, rowShift(row ?? [], ragged, headerLastPopulated), ragged)
+      ];
       // An exact-range sum covers the whole declared period, so a row that said
       // nothing leaves the total unknowable rather than merely smaller.
       if (isAbsentValue(value, field.absentMarkers)) {
@@ -587,6 +745,13 @@ export type PeriodGrainObservation = {
   normalizedSheetName: string;
   canonicalField: string;
   contributorCount: number;
+  /**
+   * The one dimension a categorical output tags its observations with, shaped
+   * exactly as `normalized_metrics.dimensions` stores it. Absent on every
+   * numeric output: a figure without a category carries no dimensions at all,
+   * which is not the same as dimensions it has not read yet.
+   */
+  dimensions?: { readonly [dimensionKey: string]: string };
 };
 
 export type PeriodGrainProjectionResult = {
@@ -664,27 +829,35 @@ export function projectPeriodGrainMetrics(input: {
   const periodColumn = headers.get(periodField.sourceHeader);
   if (periodColumn === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
 
+  const ragged = rule.raggedRows ?? null;
+  const headerLastPopulated = ragged ? lastPopulatedIndex(header) : -1;
+
   const columns = input.document.outputs.map((output) => {
     const { field } = findSourceField(input.contract, output, false);
     const index = headers.get(field.sourceHeader);
     if (index === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
-    return { output, index, absentMarkers: field.absentMarkers };
+    return { output, index, absentMarkers: field.absentMarkers, parser: field.parser };
   });
 
   const totalsRowIndex = resolveTotalsRowIndex(rule, source.rows);
   const sheetTotals = new Map<string, string>();
   if (totalsRowIndex !== null) {
-    for (const { output, index, absentMarkers } of columns) {
-      if (output.valueKind !== "money") continue;
-      const stated = source.rows[totalsRowIndex]?.[index];
-      if (isAbsentValue(stated, absentMarkers)) continue;
+    const totalsShift = rowShift(source.rows[totalsRowIndex] ?? [], ragged, headerLastPopulated);
+    for (const { output, index } of columns) {
+      if (output.categorical || output.valueKind !== "money") continue;
+      const stated =
+        source.rows[totalsRowIndex]?.[columnInRow(index, totalsShift, ragged)];
+      if (isAbsentValue(stated, [])) continue;
       sheetTotals.set(output.key, moneyMinorUnits(stated, input.declaredCurrency));
     }
   }
 
-  // Keyed by period then output, so the same period appearing on two rows sums
-  // rather than producing two observations that later collide.
+  // Numeric outputs accumulate per period; categorical outputs count the rows
+  // carrying each declared label. A day that closed for two reasons counts once
+  // towards each, because each is a fact about the day and neither implies the
+  // other.
   const totals = new Map<string, Map<string, { total: string; contributors: number }>>();
+  const categoryCounts = new Map<string, Map<string, number>>();
   let absentRowCount = 0;
 
   for (let rowIndex = rule.dataStartRow - 1; rowIndex < source.rows.length; rowIndex += 1) {
@@ -699,15 +872,40 @@ export function projectPeriodGrainMetrics(input: {
     // row of dashes is a day the provider reported on and had nothing to say.
     if (row.every((value) => isEmptyCell(value))) continue;
 
+    const shift = rowShift(row, ragged, headerLastPopulated);
     const periodStart = periodStartFor(
-      parsePeriodKey(row[periodColumn], encoding, input.declaredPeriod),
+      parsePeriodKey(row[columnInRow(periodColumn, shift, ragged)], encoding, input.declaredPeriod),
       grain,
     );
     const byOutput = totals.get(periodStart) ?? new Map();
     totals.set(periodStart, byOutput);
+    const byCategory = categoryCounts.get(periodStart) ?? new Map();
+    categoryCounts.set(periodStart, byCategory);
 
-    for (const { output, index, absentMarkers } of columns) {
-      const value = row[index];
+    for (const { output, index, absentMarkers, parser } of columns) {
+      if (output.categorical) {
+        const base = columnInRow(index, shift, ragged);
+        const cells = [row[base]];
+        if (
+          output.categorical.collectInjectedValues &&
+          shift > 0 &&
+          ragged &&
+          index < ragged.injectedFromColumnIndex
+        ) {
+          // The injected region begins where the shiftable columns begin; every
+          // displaced slot is one cell this provider inserted ahead of them.
+          for (let offset = ragged.injectedFromColumnIndex; offset < ragged.injectedFromColumnIndex + shift; offset += 1) {
+            cells.push(row[offset]);
+          }
+        }
+        for (const cell of cells) {
+          const label = categoryLabel(cell, output.categorical.allowedValues);
+          if (label === null) continue;
+          byCategory.set(`${output.key}\u0000${label}`, (byCategory.get(`${output.key}\u0000${label}`) ?? 0) + 1);
+        }
+        continue;
+      }
+      const value = row[columnInRow(index, shift, ragged)];
       if (isAbsentValue(value, absentMarkers)) {
         absentRowCount += 1;
         continue;
@@ -715,10 +913,14 @@ export function projectPeriodGrainMetrics(input: {
       const amount =
         output.valueKind === "money"
           ? moneyMinorUnits(value, input.declaredCurrency)
-          : integer(value);
+          : // A decimal column is a quantity measured in fractions, kept exact
+            // through fixed-point addition; an integer column stays integral.
+            parser === "decimal"
+            ? decimalQuantity(value)
+            : integer(value);
       const running = byOutput.get(output.key) ?? { total: "0", contributors: 0 };
       byOutput.set(output.key, {
-        total: addIntegerStrings(running.total, amount),
+        total: addDecimals(running.total, amount),
         contributors: running.contributors + 1,
       });
     }
@@ -727,6 +929,29 @@ export function projectPeriodGrainMetrics(input: {
   const observations: PeriodGrainObservation[] = [];
   for (const [periodStart, byOutput] of totals) {
     for (const output of input.document.outputs) {
+      if (output.categorical) {
+        const byCategory = categoryCounts.get(periodStart) ?? new Map();
+        for (const label of [...byCategory.keys()]
+          .filter((key) => key.startsWith(`${output.key}\u0000`))
+          .map((key) => key.slice(output.key.length + 1))
+          .sort()) {
+          const days = byCategory.get(`${output.key}\u0000${label}`) ?? 0;
+          observations.push({
+            key: output.key,
+            metricKey: output.metricKey,
+            valueKind: "count",
+            periodStart,
+            periodEnd: periodEndFor(periodStart, grain),
+            valueNumerator: String(days),
+            currency: null,
+            normalizedSheetName: output.normalizedSheetName,
+            canonicalField: output.canonicalField,
+            contributorCount: days,
+            dimensions: { [output.categorical.dimensionKey]: label },
+          });
+        }
+        continue;
+      }
       const running = byOutput.get(output.key);
       // Absent, not zero. A period every one of whose rows was blank for this
       // output has nothing to say about it, and saying "0" would be a claim.
@@ -750,14 +975,20 @@ export function projectPeriodGrainMetrics(input: {
   // on the order a Map happened to iterate in.
   observations.sort(
     (left, right) =>
-      left.periodStart.localeCompare(right.periodStart) || left.key.localeCompare(right.key),
+      left.periodStart.localeCompare(right.periodStart) ||
+      left.key.localeCompare(right.key) ||
+      (left.dimensions?.[Object.keys(left.dimensions)[0]] ?? "").localeCompare(
+        right.dimensions?.[Object.keys(right.dimensions)[0]] ?? "",
+      ),
   );
 
   const projectedByOutputKey = new Map<string, string>();
   for (const observation of observations) {
+    // Decimal quantities are legal numerators on a period-grain series, so
+    // the rollup adds exactly across both shapes.
     projectedByOutputKey.set(
       observation.key,
-      addIntegerStrings(projectedByOutputKey.get(observation.key) ?? "0", observation.valueNumerator),
+      addDecimals(projectedByOutputKey.get(observation.key) ?? "0", observation.valueNumerator),
     );
   }
 

@@ -241,6 +241,7 @@ export const reportPackageProjectionTask = schemaTask({
       name:
         | "claim_governed_report_package_projection"
         | "complete_governed_report_package_projection"
+        | "complete_governed_report_package_period_grain_projection"
         | "fail_governed_report_package_projection",
       args: Record<string, unknown>,
     ) => {
@@ -301,6 +302,14 @@ export const reportPackageProjectionTask = schemaTask({
           p_result_digest: input.resultDigest, p_result: input.result, p_outputs: input.outputs,
         });
       },
+      async completePeriodGrain(input) {
+        await rpc("complete_governed_report_package_period_grain_projection", {
+          p_organization_id: input.organizationId, p_report_package_id: input.packageId,
+          p_projection_run_id: input.projectionRunId, p_claim_token: input.claimToken,
+          p_result_digest: input.resultDigest, p_result: input.result,
+          p_observations: input.observations, p_absent_row_count: input.absentRowCount,
+        });
+      },
       async fail(input) {
         await rpc("fail_governed_report_package_projection", {
           p_organization_id: input.organizationId, p_report_package_id: input.packageId,
@@ -309,7 +318,10 @@ export const reportPackageProjectionTask = schemaTask({
         });
       },
     });
-    logger.info("report_package.projection_completed", { organizationId: payload.organizationId, packageId: payload.packageId, projectionVersionId: payload.projectionVersionId, projectionRunId: payload.projectionRunId, outcome: result.outcome });
+    // The gap count is evidence, not noise: a series that arrived with eleven
+    // blank days is a different import from one with none, and no workbook
+    // value is carried here.
+    logger.info("report_package.projection_completed", { organizationId: payload.organizationId, packageId: payload.packageId, projectionVersionId: payload.projectionVersionId, projectionRunId: payload.projectionRunId, correlationId: payload.correlationId, outcome: result.outcome, absentRowCount: result.absentRowCount });
     return result;
   },
 });

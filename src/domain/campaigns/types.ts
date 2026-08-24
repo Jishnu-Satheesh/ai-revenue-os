@@ -38,7 +38,7 @@ export type {
 
 export { bundleDigest, canonicalManifestJson } from "@/domain/campaigns/digest";
 export { normalizeManifest } from "@/domain/campaigns/normalization";
-export { diffManifests } from "@/domain/campaigns/diff";
+export { diffManifests } from "@/domain/campaigns/digest";
 export type { CampaignDiff, CampaignDiffChange } from "@/domain/campaigns/diff";
 
 export { evaluateContentPolicy, effectiveProfile } from "@/domain/campaigns/content-policy";

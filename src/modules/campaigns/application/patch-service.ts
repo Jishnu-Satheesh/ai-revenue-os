@@ -3,7 +3,8 @@ import { z } from "zod";
 import { campaignBundleSchema } from "@/domain/campaigns/schemas";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
 import { bundleDigest } from "@/domain/campaigns/digest";
-import { diffManifests, type CampaignDiff } from "@/domain/campaigns/diff";
+import type { CampaignDiff } from "@/domain/campaigns/diff";
+import { diffManifests } from "@/domain/campaigns/digest";
 
 /**
  * Turning an operator's sentence into a change.

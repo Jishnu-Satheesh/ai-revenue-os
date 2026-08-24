@@ -1,8 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { bundleDigest, canonicalManifestJson } from "@/domain/campaigns/digest";
-import { diffManifests } from "@/domain/campaigns/diff";
+import { bundleDigest, canonicalManifestJson, diffManifests } from "@/domain/campaigns/digest";
 import { CampaignError } from "@/domain/campaigns/errors";
 import { normalizeManifest } from "@/domain/campaigns/normalization";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";

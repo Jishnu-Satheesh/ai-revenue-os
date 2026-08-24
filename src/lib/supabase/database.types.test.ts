@@ -151,6 +151,7 @@ const UNTYPED_TABLES = new Set([
  * one to the public type surface would falsely imply direct table access.
  */
 const PRIVATE_RPC_ONLY_TABLES = new Set([
+  "channel_analysis_operations",
   "decision_cycle_operations",
   "integration_credentials",
   "integration_report_profile_operations",

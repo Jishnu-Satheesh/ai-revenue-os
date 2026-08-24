@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { createReportProjectionResultDigest } from "@/domain/reports/document-digest";
 import {
-  createReportProjectionResultDigest,
   projectExactRangeMetrics,
   reportProjectionDocumentSchema,
 } from "@/domain/reports/projection";
