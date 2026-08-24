@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(66);
+select extensions.plan(75);
 
 -- Storage for the narration slice (ADR 0037) and its judge (ADR 0038): five
 -- tables that any organization member with `report.read` can read and that no
@@ -40,6 +40,31 @@ select extensions.has_index('public', 'channel_recommendation_decisions',
   'channel_recommendation_decisions_organization_id_id_key', 'so does a triage decision');
 select extensions.has_index('public', 'channel_recommendation_evaluations',
   'channel_recommendation_evaluations_organization_id_id_key', 'and so does a judge verdict');
+
+-- A recommendation is bound to its tenant's own facts by composite foreign
+-- key, the same wiring channel_findings received in 20260823120000, so the
+-- narrator RPC is never the only thing standing between one tenant and
+-- another's evidence.
+select extensions.ok(exists (
+  select 1 from pg_catalog.pg_constraint
+  where conrelid = 'public.channel_recommendations'::regclass
+    and conname = 'channel_recommendations_organization_id_fkey'
+), 'a recommendation belongs to a real organization');
+select extensions.ok(exists (
+  select 1 from pg_catalog.pg_constraint
+  where conrelid = 'public.channel_recommendations'::regclass
+    and conname = 'channel_recommendations_organization_id_analysis_run_id_fkey'
+), 'its analysis run resolves within its own tenant');
+select extensions.ok(exists (
+  select 1 from pg_catalog.pg_constraint
+  where conrelid = 'public.channel_recommendations'::regclass
+    and conname = 'channel_recommendations_organization_id_channel_id_fkey'
+), 'so does its channel');
+select extensions.ok(exists (
+  select 1 from pg_catalog.pg_constraint
+  where conrelid = 'public.channel_recommendations'::regclass
+    and conname = 'channel_recommendations_organization_id_branch_id_fkey'
+), 'and its branch');
 
 -- No policy may write these rows. Reads go through RLS; writes belong to the
 -- worker and member RPCs of the next tasks.
@@ -113,6 +138,24 @@ insert into public.branches (id, organization_id, name, slug, kind, timezone, cu
 values ('f2000000-0000-4000-8000-000000000301'::uuid, 'f2000000-0000-4000-8000-000000000201'::uuid, 'Dubai outlet', 'dubai-outlet', 'physical', 'Asia/Dubai', 'AED');
 insert into public.organization_channels (id, organization_id, key, display_name, category, created_by)
 values ('f2000000-0000-4000-8000-000000000401'::uuid, 'f2000000-0000-4000-8000-000000000201'::uuid, 'talabat', 'Talabat', 'marketplace', 'f2000000-0000-4000-8000-000000000001'::uuid);
+
+-- The outsider organization gets real parents of its own -- branch, channel,
+-- and a completed analysis run -- so the cross-tenant refusals below are
+-- exercised against rows another tenant actually owns rather than invented ids.
+insert into public.branches (id, organization_id, name, slug, kind, timezone, currency)
+values ('f2000000-0000-4000-8000-000000000302'::uuid, 'f2000000-0000-4000-8000-000000000202'::uuid, 'Outsider outlet', 'outsider-outlet', 'physical', 'Asia/Dubai', 'AED');
+insert into public.organization_channels (id, organization_id, key, display_name, category, created_by)
+values ('f2000000-0000-4000-8000-000000000402'::uuid, 'f2000000-0000-4000-8000-000000000202'::uuid, 'talabat', 'Talabat', 'marketplace', 'f2000000-0000-4000-8000-000000000002'::uuid);
+insert into public.channel_analysis_runs (
+  id, organization_id, window_start, window_end, period_grain, window_timezone,
+  registry_version, detector_versions, metric_versions, input_digest,
+  status, result_digest, correlation_id, completed_at
+) values (
+  'f2000000-0000-4000-8000-000000000602'::uuid, 'f2000000-0000-4000-8000-000000000202'::uuid,
+  date '2026-01-01', date '2026-01-05', 'day', 'Asia/Dubai', 1,
+  '[{"key":"evidence.period_coverage","calculationVersion":1}]'::jsonb, '[]'::jsonb,
+  repeat('0', 64), 'completed', repeat('9', 64),
+  'f2000000-0000-4000-8000-000000000702'::uuid, now());
 
 insert into public.channel_analysis_runs (
   id, organization_id, channel_id, branch_id, window_start, window_end, period_grain,
@@ -295,6 +338,69 @@ select extensions.ok(not exists (
     and a.event_name = 'channel_recommendation.triaged'
     and payload_key not in ('decisionId', 'transition', 'decision', 'priorDecision')
 ), 'audit payloads carry ids and transitions only, never the operator''s words');
+
+-- Cross-tenant parents are refused by the database, not by the RPC that will
+-- one day write these rows. Each attempt below violates exactly one key.
+select extensions.throws_ok(
+  $$ insert into public.channel_recommendations (
+    organization_id, channel_id, analysis_run_id, window_start, window_end, period_grain,
+    label, headline, detail, prompt_version, prompt_digest, output_digest, provider, model_id,
+    result_digest
+  ) values (
+    'f2000000-0000-4000-8000-000000000299'::uuid, 'f2000000-0000-4000-8000-000000000401'::uuid,
+    'f2000000-0000-4000-8000-000000000601'::uuid, date '2026-01-01', date '2026-01-05', 'day',
+    'observation', 'x', 'x', 1, repeat('b', 64), repeat('c', 64), 'openai', 'gpt-test', repeat('8', 64)) $$,
+  '23503', 'insert or update on table "channel_recommendations" violates foreign key constraint "channel_recommendations_organization_id_fkey"',
+  'a recommendation cannot name an organization that does not exist');
+
+select extensions.throws_ok(
+  $$ insert into public.channel_recommendations (
+    organization_id, channel_id, analysis_run_id, window_start, window_end, period_grain,
+    label, headline, detail, prompt_version, prompt_digest, output_digest, provider, model_id,
+    result_digest
+  ) values (
+    'f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000401'::uuid,
+    'f2000000-0000-4000-8000-000000000602'::uuid, date '2026-01-01', date '2026-01-05', 'day',
+    'observation', 'x', 'x', 1, repeat('d', 64), repeat('e', 64), 'openai', 'gpt-test', repeat('7', 64)) $$,
+  '23503', 'insert or update on table "channel_recommendations" violates foreign key constraint "channel_recommendations_organization_id_analysis_run_id_fkey"',
+  'our tenant''s narration cannot be bound to another organization''s analysis run');
+
+select extensions.throws_ok(
+  $$ insert into public.channel_recommendations (
+    organization_id, channel_id, analysis_run_id, window_start, window_end, period_grain,
+    label, headline, detail, prompt_version, prompt_digest, output_digest, provider, model_id,
+    result_digest
+  ) values (
+    'f2000000-0000-4000-8000-000000000202'::uuid, 'f2000000-0000-4000-8000-000000000402'::uuid,
+    'f2000000-0000-4000-8000-000000000601'::uuid, date '2026-01-01', date '2026-01-05', 'day',
+    'observation', 'x', 'x', 1, repeat('f', 64), repeat('1', 64), 'openai', 'gpt-test', repeat('6', 64)) $$,
+  '23503', 'insert or update on table "channel_recommendations" violates foreign key constraint "channel_recommendations_organization_id_analysis_run_id_fkey"',
+  'and an outside tenant cannot bind itself to our run either');
+
+select extensions.throws_ok(
+  $$ insert into public.channel_recommendations (
+    organization_id, channel_id, analysis_run_id, window_start, window_end, period_grain,
+    label, headline, detail, prompt_version, prompt_digest, output_digest, provider, model_id,
+    result_digest
+  ) values (
+    'f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000402'::uuid,
+    'f2000000-0000-4000-8000-000000000601'::uuid, date '2026-01-01', date '2026-01-05', 'day',
+    'observation', 'x', 'x', 1, repeat('2', 64), repeat('3', 64), 'openai', 'gpt-test', repeat('5', 64)) $$,
+  '23503', 'insert or update on table "channel_recommendations" violates foreign key constraint "channel_recommendations_organization_id_channel_id_fkey"',
+  'a recommendation cannot ride another organization''s channel');
+
+select extensions.throws_ok(
+  $$ insert into public.channel_recommendations (
+    organization_id, channel_id, branch_id, analysis_run_id, window_start, window_end, period_grain,
+    label, headline, detail, prompt_version, prompt_digest, output_digest, provider, model_id,
+    result_digest
+  ) values (
+    'f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000401'::uuid,
+    'f2000000-0000-4000-8000-000000000302'::uuid, 'f2000000-0000-4000-8000-000000000601'::uuid,
+    date '2026-01-01', date '2026-01-05', 'day',
+    'observation', 'x', 'x', 1, repeat('4', 64), repeat('0', 64), 'openai', 'gpt-test', repeat('a', 64)) $$,
+  '23503', 'insert or update on table "channel_recommendations" violates foreign key constraint "channel_recommendations_organization_id_branch_id_fkey"',
+  'nor speak about another organization''s branch');
 
 -- Member sessions can read their own tenant and write nothing ------------------------
 
