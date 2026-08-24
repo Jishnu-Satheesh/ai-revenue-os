@@ -60,7 +60,10 @@ set search_path = ''
 as $$
   select input_names is not null
     and pg_catalog.jsonb_typeof(input_names) = 'object'
-    and pg_catalog.jsonb_object_length(input_names) <= 16
+    and (
+      select pg_catalog.count(*)
+      from pg_catalog.jsonb_object_keys(input_names)
+    ) <= 16
     and not exists (
       select 1
       from pg_catalog.jsonb_each_text(input_names) as script(key, value)
