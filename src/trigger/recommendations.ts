@@ -3,6 +3,7 @@ import { logger, schedules, schemaTask } from "@trigger.dev/sdk";
 import { findingHeadline, needsDataSentence } from "@/domain/analysis/copy";
 import { DomainError } from "@/lib/errors";
 import { env } from "@/lib/env";
+import type { Database } from "@/lib/supabase/database.types";
 import { createAnalysisWorkerServiceClient } from "@/lib/supabase/service";
 import { createRecommendationGenerationProvider } from "@/modules/analysis/infrastructure/recommendation-generation-provider";
 import type { NarrationPromptFinding } from "@/workflows/analysis/recommendation-prompt";
@@ -126,24 +127,23 @@ export const channelRecommendationsTask = schemaTask({
     // Built after the strict payload parse, never at module scope: the service
     // credential must not exist for a request nobody validated.
     const supabase = createAnalysisWorkerServiceClient();
-    const rpc = async <T>(
-      name:
+    const rpc = async <
+      Name extends
         | "claim_channel_recommendations"
         | "complete_channel_recommendations"
         | "fail_channel_recommendations",
-      args: Record<string, unknown>,
+    >(
+      name: Name,
+      args: Database["public"]["Functions"][Name]["Args"],
     ) => {
-      // The recommendation RPCs are not in the hand-maintained Database types
-      // yet, so the name rides through as `never`. Names and arguments are
-      // pinned to the migrations by the registration tests one file over.
-      const { data, error } = await supabase.rpc(name as never, args as never);
+      const { data, error } = await supabase.rpc(name, args);
       if (error) throw new Error(`Channel recommendation state transition failed: ${error.code}`);
-      return data as T;
+      return data;
     };
 
     const result = await runChannelRecommendations(payload, {
       async claim(input) {
-        const data = await rpc<Record<string, unknown> | null>("claim_channel_recommendations", {
+        const data = await rpc("claim_channel_recommendations", {
           p_organization_id: input.organizationId,
           p_analysis_run_id: input.analysisRunId,
           p_correlation_id: input.correlationId,
