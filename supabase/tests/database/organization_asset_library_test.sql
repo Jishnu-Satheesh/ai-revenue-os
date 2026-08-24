@@ -1050,6 +1050,36 @@ select extensions.throws_ok(
         'organization_id', 'a5100000-0000-4000-8000-000000000101',
         'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
         'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+        'phase', 'resolution',
+        'reference_slots', jsonb_build_array(
+          jsonb_build_object(
+            'slot', 'subject',
+            'ordinal', 0,
+            'brandAssetVersionId', 'a5100000-0000-4000-8000-000000000301'
+          )
+        ),
+        'avoid_reference_version_ids',
+          jsonb_build_array('a5100000-0000-4000-8000-000000000301'),
+        'negative_rules', jsonb_build_array(
+          jsonb_build_object('code', 'wrong_style', 'description', 'Do not repeat this style.')
+        ),
+        'resolver_version', 1,
+        'resolution_outcome', 'resolved'
+      )
+    )
+  $$,
+  '22023', 'campaign_generation_reference_role_conflict',
+  'one reference version cannot be both a positive source and an avoid example'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.pin_campaign_generation_run_reference_context(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+        'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
         'phase', 'blueprint',
         'blueprint', jsonb_build_object('composition', 'Too early'),
         'plan_model_id', 'gemini-plan-test'
