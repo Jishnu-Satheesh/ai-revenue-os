@@ -50,6 +50,11 @@ and `DATABASE_URL` in `.env.local`. Everything below follows from that:
 ## 2. Non-negotiable product rules
 
 - Optimize for measurable incremental gross profit and customer acquisition, not automation volume.
+- Advise freely, execute narrowly. The platform exists to do the analysis the client cannot do
+  themselves. Make the recommendation whenever the evidence supports one, and attach its citations
+  so the client can check the reasoning. Withholding useful advice because impact is not yet
+  measurable is a failure, not rigour. The fence belongs on execution and on claims about realized
+  results — never on the advice itself. See ADR 0039.
 - Keep the platform core industry-neutral. Restaurant-specific logic belongs in the Restaurant Industry Pack.
 - Enforce tenant isolation at the database and application layers.
 - Separate decisions from execution. The Decision Engine proposes actions; the Execution Plane performs validated actions.
@@ -126,7 +131,7 @@ Never:
 - allow LLM output to be executed without schema validation.
 - hard-code restaurant concepts into platform-core tables or services.
 - hide errors, silently discard events, or mark uncertain data as verified.
-- declare business impact without an explicit baseline, attribution method, and measurement window.
+- state a **realized or attributed** business result without an explicit baseline, attribution method, and measurement window. This governs claims about what *did* happen — "this recommendation earned you AED 4,000". A forward-looking estimate is not a realized result: offer one whenever its inputs are cited and its assumptions are stated on the same surface, and label it an estimate rather than a measurement.
 - make autonomous budget, price, discount, or public-brand changes beyond configured policy.
 - log secrets, access tokens, raw payment details, or unnecessary customer PII.
 - write Tier 3 feature code before its Execution Plan, or its spec where one is required, has been approved.
