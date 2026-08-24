@@ -82,15 +82,16 @@ alter table public.organization_brand_assets
   add column conditioning_roles text[] not null default '{}'::text[],
   add column tags text[] not null default '{}'::text[],
   add column scripts text[] not null default '{}'::text[],
+  add column ownership text not null default 'third_party',
   add column archived_at timestamptz;
 
 alter table public.organization_brand_assets
   add constraint organization_brand_assets_conditioning_roles_check check (
     private.asset_library_text_array_valid(
       conditioning_roles,
-      6,
+      7,
       32,
-      array['subject', 'brand_mark', 'setting', 'style_exemplar', 'palette', 'typography']
+      array['subject', 'brand_mark', 'setting', 'style_exemplar', 'palette', 'typography', 'avoid']
     )
   ),
   add constraint organization_brand_assets_tags_check check (
@@ -98,6 +99,9 @@ alter table public.organization_brand_assets
   ),
   add constraint organization_brand_assets_scripts_check check (
     private.asset_library_scripts_valid(scripts)
+  ),
+  add constraint organization_brand_assets_ownership_check check (
+    ownership in ('owned', 'third_party')
   ),
   add constraint organization_brand_assets_typography_scripts_check check (
     (conditioning_roles @> array['typography']::text[] and pg_catalog.cardinality(scripts) > 0)
@@ -282,7 +286,11 @@ alter table public.campaign_source_snapshots
   add column resolver_version integer,
   add column resolution_outcome text,
   add column subject_profile_id uuid,
-  add column subject_description text;
+  add column subject_description text,
+  add column avoid_reference_version_ids uuid[] not null default '{}'::uuid[],
+  add column blueprint jsonb,
+  add column plan_model_id text,
+  add column creative_direction text;
 
 alter table public.campaign_source_snapshots
   add constraint campaign_source_snapshots_reference_slots_check check (
@@ -304,6 +312,9 @@ alter table public.campaign_source_snapshots
   add constraint campaign_source_snapshots_subject_description_check check (
     subject_description is null
     or pg_catalog.char_length(pg_catalog.btrim(subject_description)) between 1 and 2000
+  ),
+  add constraint campaign_source_snapshots_blueprint_check check (
+    blueprint is null or pg_catalog.jsonb_typeof(blueprint) = 'object'
   ),
   add constraint campaign_source_snapshots_resolved_subject_check check (
     resolution_outcome is distinct from 'resolved'
@@ -811,16 +822,13 @@ as $$
 declare
   candidate_rows jsonb;
   rejected_reason_rows jsonb;
-  caller_claim_role text := coalesce(
-    nullif(pg_catalog.current_setting('request.jwt.claim.role', true), ''),
-    (select auth.jwt() ->> 'role')
-  );
+  caller_database_role text := pg_catalog.current_setting('role', true);
 begin
   if target_organization_id is null then
     raise exception 'reference_candidates_organization_required' using errcode = '23514';
   end if;
 
-  if caller_claim_role is distinct from 'service_role'
+  if caller_database_role is distinct from 'service_role'
     and (
       (select auth.uid()) is null
       or not private.has_organization_permission(target_organization_id, 'asset.read')
@@ -838,6 +846,7 @@ begin
         'conditioning_roles', pg_catalog.to_jsonb(asset.conditioning_roles),
         'tags', pg_catalog.to_jsonb(asset.tags),
         'scripts', pg_catalog.to_jsonb(asset.scripts),
+        'ownership', asset.ownership,
         'version', version.version,
         'storage_path', version.storage_path,
         'content_hash', version.content_hash,
@@ -1077,7 +1086,11 @@ begin
     resolver_version,
     resolution_outcome,
     subject_profile_id,
-    subject_description
+    subject_description,
+    avoid_reference_version_ids,
+    blueprint,
+    plan_model_id,
+    creative_direction
   ) values (
     target_organization_id,
     campaign_id,
@@ -1095,7 +1108,19 @@ begin
     nullif(input_campaign ->> 'resolver_version', '')::integer,
     nullif(input_campaign ->> 'resolution_outcome', ''),
     pinned_subject_profile_id,
-    pinned_subject_description
+    pinned_subject_description,
+    coalesce(
+      (
+        select pg_catalog.array_agg((value #>> '{}')::uuid)
+        from pg_catalog.jsonb_array_elements(
+          input_campaign -> 'avoid_reference_version_ids'
+        )
+      ),
+      '{}'::uuid[]
+    ),
+    nullif(input_campaign -> 'blueprint', 'null'::jsonb),
+    nullif(input_campaign ->> 'plan_model_id', ''),
+    nullif(input_campaign ->> 'creative_direction', '')
   )
   returning id into snapshot_id;
 
@@ -1171,6 +1196,11 @@ begin
     'resolution_outcome', snapshot_row.resolution_outcome,
     'subject_profile_id', snapshot_row.subject_profile_id,
     'subject_description', snapshot_row.subject_description,
+    'avoid_reference_version_ids',
+      pg_catalog.to_jsonb(snapshot_row.avoid_reference_version_ids),
+    'blueprint', snapshot_row.blueprint,
+    'plan_model_id', snapshot_row.plan_model_id,
+    'creative_direction', snapshot_row.creative_direction,
     'campaign_title', campaign_row.title,
     'latest_version_id', latest_version_id,
     'operator_prompt', run_row.operator_prompt,

@@ -30,6 +30,10 @@ select extensions.has_column(
   'typography references declare their scripts'
 );
 select extensions.has_column(
+  'public', 'organization_brand_assets', 'ownership',
+  'brand assets distinguish owned work from third-party references'
+);
+select extensions.has_column(
   'public', 'organization_brand_assets', 'archived_at', 'brand assets archive in place'
 );
 
@@ -56,6 +60,22 @@ select extensions.has_column(
 select extensions.has_column(
   'public', 'campaign_source_snapshots', 'subject_description',
   'the exact confirmed description is copied into the snapshot'
+);
+select extensions.has_column(
+  'public', 'campaign_source_snapshots', 'avoid_reference_version_ids',
+  'negative reference versions remain separate from positive sources'
+);
+select extensions.has_column(
+  'public', 'campaign_source_snapshots', 'blueprint',
+  'the validated art-direction blueprint is pinned'
+);
+select extensions.has_column(
+  'public', 'campaign_source_snapshots', 'plan_model_id',
+  'the reasoning model is pinned'
+);
+select extensions.has_column(
+  'public', 'campaign_source_snapshots', 'creative_direction',
+  'the operator creative direction is pinned'
 );
 
 select extensions.has_function(
@@ -264,9 +284,13 @@ values
   (
     'a5100000-0000-4000-8000-000000000203'::uuid,
     'a5100000-0000-4000-8000-000000000101'::uuid,
-    'Rejected style', 'other', array['style_exemplar'], array['dark'], '{}',
+    'Rejected style', 'other', array['avoid'], array['dark'], '{}',
     'a5100000-0000-4000-8000-000000000001'::uuid
   );
+
+update public.organization_brand_assets
+set ownership = 'owned'
+where id = 'a5100000-0000-4000-8000-000000000201'::uuid;
 
 insert into public.organization_brand_asset_versions (
   id, organization_id, brand_asset_id, version, storage_path, content_hash,
@@ -358,6 +382,30 @@ select extensions.throws_ok(
   $$,
   '23514', null,
   'an unknown conditioning role is refused'
+);
+
+select extensions.is(
+  (
+    select ownership
+    from public.organization_brand_assets
+    where id = 'a5100000-0000-4000-8000-000000000202'::uuid
+  ),
+  'third_party'::text,
+  'third-party ownership is the safe default'
+);
+
+select extensions.throws_ok(
+  $$
+    insert into public.organization_brand_assets (
+      organization_id, label, asset_role, conditioning_roles, tags, scripts, ownership, created_by
+    ) values (
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      'Unknown ownership', 'other', array['palette'], '{}', '{}', 'licensed',
+      'a5100000-0000-4000-8000-000000000001'::uuid
+    )
+  $$,
+  '23514', null,
+  'an unknown ownership value is refused'
 );
 
 -- A real campaign asset in tenant B proves the polymorphic review writer does
@@ -585,6 +633,7 @@ select extensions.ok(
     where state.key = 'candidates'
       and candidate ->> 'brand_asset_version_id'
         = 'a5100000-0000-4000-8000-000000000301'
+      and candidate ->> 'ownership' = 'owned'
   ) and not exists (
     select 1
     from asset_library_state state,
@@ -708,6 +757,18 @@ select extensions.throws_ok(
 );
 
 reset request.jwt.claim.sub;
+set local request.jwt.claim.role = 'service_role';
+select extensions.throws_ok(
+  $$
+    select public.read_reference_candidates(
+      'a5100000-0000-4000-8000-000000000101'::uuid
+    )
+  $$,
+  '42501', 'reference_candidates_forbidden',
+  'a JWT role claim cannot grant the worker path without a database role switch'
+);
+
+reset request.jwt.claim.role;
 select extensions.throws_ok(
   $$
     select public.read_reference_candidates(
@@ -721,7 +782,7 @@ select extensions.throws_ok(
 reset role;
 
 -- ---------------------------------------------------------------------------
--- Changed campaign functions pin and return all six fields
+-- Changed campaign functions pin and return all ten fields
 -- ---------------------------------------------------------------------------
 
 set local role authenticated;
@@ -761,7 +822,15 @@ select 'campaign', public.create_campaign_with_source(
       select value ->> 'subject_profile_id' from asset_library_state where key = 'subject'
     ),
     'subject_description',
-      'Kingfish steaks in brick-red tamarind coconut gravy, served in a red clay pot.'
+      'Kingfish steaks in brick-red tamarind coconut gravy, served in a red clay pot.',
+    'avoid_reference_version_ids',
+      jsonb_build_array('a5100000-0000-4000-8000-000000000303'),
+    'blueprint', jsonb_build_object(
+      'composition', 'Centered clay pot with generous negative space',
+      'lighting', 'Warm side light'
+    ),
+    'plan_model_id', 'gemini-plan-test',
+    'creative_direction', 'Keep the treatment warm and restrained.'
   )
 );
 
@@ -777,13 +846,21 @@ select extensions.ok(
       )
       and subject_description =
         'Kingfish steaks in brick-red tamarind coconut gravy, served in a red clay pot.'
+      and avoid_reference_version_ids =
+        array['a5100000-0000-4000-8000-000000000303'::uuid]
+      and blueprint = jsonb_build_object(
+        'composition', 'Centered clay pot with generous negative space',
+        'lighting', 'Warm side light'
+      )
+      and plan_model_id = 'gemini-plan-test'
+      and creative_direction = 'Keep the treatment warm and restrained.'
     from public.campaign_source_snapshots
     where id = (
       select (value ->> 'source_snapshot_id')::uuid
       from asset_library_state where key = 'campaign'
     )
   ),
-  'campaign creation pins all six resolver fields without a later snapshot mutation'
+  'campaign creation pins all ten resolver and art-direction fields without a later mutation'
 );
 
 insert into asset_library_state (key, value)
@@ -808,7 +885,7 @@ reset role;
 reset request.jwt.claim.sub;
 
 set local role service_role;
-set local request.jwt.claim.role = 'service_role';
+reset request.jwt.claim.role;
 
 insert into asset_library_state (key, value)
 select 'worker_candidates', public.read_reference_candidates(
@@ -858,14 +935,21 @@ select extensions.ok(
       )
       and value ->> 'subject_description' =
         'Kingfish steaks in brick-red tamarind coconut gravy, served in a red clay pot.'
+      and value -> 'avoid_reference_version_ids' =
+        jsonb_build_array('a5100000-0000-4000-8000-000000000303')
+      and value -> 'blueprint' = jsonb_build_object(
+        'composition', 'Centered clay pot with generous negative space',
+        'lighting', 'Warm side light'
+      )
+      and value ->> 'plan_model_id' = 'gemini-plan-test'
+      and value ->> 'creative_direction' = 'Keep the treatment warm and restrained.'
     from asset_library_state
     where key = 'context'
   ),
-  'the claimed worker context returns all six pinned resolver fields'
+  'the claimed worker context returns all ten pinned resolver and art-direction fields'
 );
 
 reset role;
-reset request.jwt.claim.role;
 
 select * from extensions.finish();
 rollback;
