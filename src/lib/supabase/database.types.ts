@@ -814,6 +814,95 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      channel_recommendations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          channel_id: string;
+          branch_id: string | null;
+          analysis_run_id: string;
+          /** Inclusive local calendar dates copied from the analysed run's window. */
+          window_start: string;
+          window_end: string;
+          period_grain: "day" | "week" | "month";
+          label: "observation" | "recommendation" | "needs_data";
+          headline: string;
+          detail: string;
+          supported_actions: unknown;
+          limitations: unknown;
+          prompt_version: number;
+          prompt_digest: string;
+          output_digest: string;
+          provider: string;
+          model_id: string;
+          result_digest: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_recommendation_citations: {
+        Row: {
+          recommendation_id: string;
+          finding_id: string;
+          organization_id: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_recommendation_decisions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          recommendation_id: string;
+          decision: "acknowledged" | "dismissed" | "planned";
+          /** Required when the decision dismisses; null for every other answer. */
+          dismissal_reason: string | null;
+          actor_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_recommendation_feedback: {
+        Row: {
+          organization_id: string;
+          recommendation_id: string;
+          actor_id: string;
+          helpful: boolean;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_recommendation_evaluations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          recommendation_id: string;
+          batch_id: string;
+          citation_faithful: boolean;
+          label_appropriate: boolean;
+          invented_value_detected: boolean;
+          uncertainty_honest: boolean;
+          score: number;
+          issues: unknown;
+          notes: string;
+          judge_provider: string;
+          judge_model: string;
+          judge_prompt_version: number;
+          judge_prompt_digest: string;
+          judge_output_digest: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       cost_component_definitions: {
         Row: {
           id: string;
@@ -1827,6 +1916,59 @@ export type Database = {
           p_result_digest: string;
         };
         Returns: Database["public"]["Tables"]["channel_analysis_runs"]["Row"] | null;
+      };
+      claim_channel_recommendations: {
+        Args: {
+          p_organization_id: string;
+          p_analysis_run_id: string;
+          p_correlation_id: string;
+          p_claim_token: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      complete_channel_recommendations: {
+        Args: {
+          p_organization_id: string;
+          p_analysis_run_id: string;
+          p_claim_token: string;
+          p_provider: string;
+          p_model_id: string;
+          p_prompt_version: number;
+          p_prompt_digest: string;
+          p_output_digest: string;
+          p_result_digest: string;
+          p_recommendations: unknown;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      fail_channel_recommendations: {
+        Args: {
+          p_organization_id: string;
+          p_analysis_run_id: string;
+          p_claim_token: string;
+          p_failure_code: string;
+          p_result_digest: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      triage_channel_recommendation: {
+        Args: {
+          p_organization_id: string;
+          p_recommendation_id: string;
+          p_decision: "acknowledged" | "dismissed" | "planned";
+          p_dismissal_reason: string | null;
+          p_actor_id: string;
+        };
+        Returns: undefined;
+      };
+      record_channel_recommendation_feedback: {
+        Args: {
+          p_organization_id: string;
+          p_recommendation_id: string;
+          p_helpful: boolean;
+          p_actor_id: string;
+        };
+        Returns: undefined;
       };
       resolve_governed_report_projection_overlap: {
         Args: {

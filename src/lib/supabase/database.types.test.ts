@@ -152,6 +152,9 @@ const UNTYPED_TABLES = new Set([
  */
 const PRIVATE_RPC_ONLY_TABLES = new Set([
   "channel_analysis_operations",
+  // The narrator's lease ledger (ADR 0037): claimed, completed, and failed only
+  // through the fenced recommendation RPCs; no session role holds a grant.
+  "channel_recommendation_operations",
   "decision_cycle_operations",
   "integration_credentials",
   "integration_report_profile_operations",
