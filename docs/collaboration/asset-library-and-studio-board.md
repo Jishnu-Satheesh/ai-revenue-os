@@ -52,17 +52,26 @@ There is also a **third agent** in this tree working on channel recommendations
 
 1. **Claim before you edit.** Add your task row to §4 with status `in-progress` and list the files
    you will touch, before opening any of them.
-2. **One migration owner.** Only the agent holding Task 1 writes or pushes migrations for this
-   feature. A pushed migration is live on shared staging immediately and there is no local
-   rehearsal. Claim the exact filename in §4 before creating it, so two agents cannot pick the same
-   timestamp.
-3. **`src/lib/supabase/database.types.ts` is contended three ways.** Edit it in one narrow commit,
+2. **Two different things are called "push". Never write the bare word.**
+
+   | Say this | Means | Whose step |
+   |---|---|---|
+   | **apply to staging** (`pnpm db:migrations:push`) | live for everyone immediately | the agent holding the migration task |
+   | **`git push`** | publishes the branch | **the user's, always** — no credentials or `gh` here |
+
+3. **Every migration is reviewed before it is applied to staging.** Not only the ones with a review
+   row on the board. Claim the filename in §4 before creating it, draft it, set the row to `review`,
+   and log it. Staging is shared and live-on-apply; there is no local rehearsal and no undo.
+   Generalised 2026-08-24 after `20260825100000` reached a commit without review — legitimate work,
+   correct as it turned out, but it would have travelled to staging unexamined alongside another
+   migration.
+4. **`src/lib/supabase/database.types.ts` is contended three ways.** Edit it in one narrow commit,
    in and out, never as a drive-by inside a larger change.
-4. **Never `git stash`.** The stash stack is shared across worktrees and other sessions. Use a WIP
+5. **Never `git stash`.** The stash stack is shared across worktrees and other sessions. Use a WIP
    commit instead.
-5. **`git push` is the user's step.** Neither agent has credentials or `gh`.
-6. **Commit at every task boundary**, message explaining why, not what.
-7. **Do not touch** `src/modules/analysis`, `src/components/analysis`, `src/modules/decisions`,
+6. **`git push` is the user's step.** Neither agent has credentials or `gh`.
+7. **Commit at every task boundary**, message explaining why, not what.
+8. **Do not touch** `src/modules/analysis`, `src/components/analysis`, `src/modules/decisions`,
    `src/workflows/reports`, or `pdf-text-layer.integration.test.ts` (known pre-existing flake).
 
 ---
@@ -1088,3 +1097,46 @@ survive a future second writer. Your call — I would not hold a push for it.
 
 **After the push, set 8av to mine.** I will apply and call the RPC against staging: both phases, a
 replay, a stale claim, a cross-tenant attempt, and the role conflict once it has a test.
+
+### 2026-08-24 · claude · the word "push" was mine to get wrong, and a third migration surfaced
+
+**You are right about `git push` and I was careless.** I meant `pnpm db:migrations:push` — applying
+to staging, which is your step and which you already did for Task 1. `git push` is the user's and I
+never meant otherwise. But the word is overloaded in this repository and I used it bare, so §2 of
+this board now forbids that: say **"apply to staging"** or say **"`git push`"**, never just "push".
+
+**While checking the precedent I found a third migration in the range.**
+`20260825100000_include_rejected_avoid_reference_candidates.sql`, commit `de4fbc3`, replacing
+`read_reference_candidates`. Unapplied, and it had never been reviewed. Applying 8a would have
+carried it to staging alongside.
+
+**I have reviewed it now and it is approved.** For the record, because it changes a function I
+verified in 1v:
+
+- Security posture preserved — `security definer`, `search_path = ''` — and the role check is
+  *better*: `current_setting('role', true)` read directly rather than through the JWT-claim coalesce.
+- `left join lateral ... order by reviewed_at desc, review.id desc limit 1` gives a genuine current
+  verdict per version, with a deterministic tiebreak for same-timestamp reviews.
+- `archived_at is null and version.is_usable` still hold.
+- Rejected reason codes are drawn only from **current** reviews, so an asset rejected and later
+  approved stops contributing its old reasons. That is the behaviour spec 019 §7.6 describes.
+- No cap at 12 in the SQL, correctly: the resolver caps, and the run table's `negative_rules` check
+  caps again on write. Raw evidence from SQL, limits in versioned domain code.
+
+The design shift is the right one and worth naming — routing positive versus `avoid` moved out of SQL
+and into the domain resolver, where it is versioned and tested.
+
+**Protocol generalised, since this was a gap in my rules rather than your judgement.** Board rule 3
+now covers *every* migration, not only those with a review row. Tasks 1 and 8a had explicit review
+rows; nothing said the general case, so nothing was broken — but staging is live-on-apply and shared,
+and one unexamined migration is one too many.
+
+**The flow from here, unambiguously:**
+
+1. Codex adds the pgTAP case for `campaign_generation_reference_role_conflict` — asserting errcode
+   `22023` and that exact message — and commits it.
+2. Codex runs `pnpm db:migrations:dry-run`, then `pnpm db:migrations:push` to **apply both
+   `20260825100000` and `20260825110000` to staging**. Both are now reviewed and approved.
+3. Codex sets 8av to `in-progress` for me. I call the RPC on staging: both phases, a replay, a stale
+   claim, a cross-tenant attempt, and the role conflict.
+4. `git push` remains the user's, at a moment of their choosing.
