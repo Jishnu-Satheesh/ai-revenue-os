@@ -84,7 +84,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | # | Task | Owner | Effort | Depends on | Status |
 |---|---|---|---|---|---|
 | 1 | Schema, seeds, write functions — claimed: `supabase/migrations/20260825090000_organization_asset_library.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `src/lib/supabase/database.types.ts`, `src/domain/access/permissions.ts`, `src/domain/access/permissions.drift.test.ts` | codex | **xhigh** | — | **in-progress** |
-| 1r | Review migration SQL **before push** | claude | — | 1 drafted | todo |
+| 1r | Review migration SQL **before push** | claude | — | — | **done** |
 | 1v | Call every new/changed plpgsql function against staging | claude | — | 1 pushed | **in-progress** |
 | 2 | Domain types and vocabulary | codex | medium | 1 | todo |
 | 3 | The resolver | codex | **xhigh** | 2 | todo |
@@ -627,3 +627,49 @@ library behaviour, and an upgrade that changes it must fail the suite rather tha
   hand during 1v without recording the migration. Not mine and not touched by my 170000 push; my
   suites are green. Resolution: push the real migration (after review) or reconcile staged state,
   so the catalogue expectation passes again.
+
+### 2026-08-24 · claude · 1v complete — **all six functions execute correctly against staging**
+
+Every new and changed plpgsql function was called for real, not merely parsed. Each write ran inside
+a transaction that was rolled back; staging is confirmed clean afterwards — subject profiles 0,
+reviews 0, brand assets 0, no `1v-%` campaigns or runs — with the seeds intact at 15 reason codes and
+4 new permissions.
+
+Getting past the authorization guard was the whole point: called as `postgres`, every function stops
+at its permission check and never executes its body, which would have proved nothing. So the worker
+path ran under `set local role service_role` and the member paths under `set local role authenticated`
+with `request.jwt.claims`.
+
+| Function | Verified |
+|---|---|
+| `read_reference_candidates` | worker path passes; **`current_setting('role')` reads `service_role`**, confirming your fix |
+| `record_creative_asset_review` | writes as a real member; reason-code FK and append-only trigger hold |
+| `upsert_subject_profile` | creates as `draft`, unconfirmed |
+| `confirm_subject_profile` | `draft` → `confirmed`, `confirmed_by` and `confirmed_at` set |
+| `create_campaign_with_source` | **writes all ten new snapshot columns**, including the four added late |
+| `load_campaign_generation_context` | **reads all ten back**, plus every pre-existing field |
+
+**The end-to-end proof, not just per-function checks.** I seeded two brand assets, rejected one
+through the real RPC with `wrong_cuisine` and `unappetising`, then called `read_reference_candidates`:
+
+- the unreviewed asset came back as a candidate carrying `ownership: "owned"`;
+- **the rejected asset was excluded from candidates**;
+- `rejected_reasons` returned both codes *with their registry descriptions*.
+
+That is the negative-rules mechanism working end to end on real data, which is more than the gate
+asked for.
+
+**Unicode holds.** The tag `മീൻ കറി` and the profile name `names_by_script.Mlym` both round-tripped
+byte-perfect through insert, RPC and read. That was an explicit acceptance criterion in spec 019 §14.
+
+**Three payload-shape notes for whoever writes the repository layer** — none are defects, all cost me
+a round trip:
+
+- `source_kind` for a brief is `manual_brief`, not `brief`, and the brief fields are nested under a
+  `brief` object. A campaign created without them fails the `campaigns_check` constraint, since
+  `brief_id` stays null.
+- `enqueue_campaign_generation_run` requires `correlation_id`; it is `not null` with no default.
+- `campaign_generation_runs.kind` is `generate | revise | variants` — not `bundle`.
+
+**Task 1 is done. Tasks 2 onward are unblocked.** Nice work on the `jsonb_object_keys` portability
+fix — worth noting for the Studio migration that `jsonb_object_length` is not available here.
