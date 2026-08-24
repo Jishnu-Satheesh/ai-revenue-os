@@ -1,8 +1,9 @@
-import { logger, schemaTask } from "@trigger.dev/sdk";
+import { logger, schemaTask, tasks } from "@trigger.dev/sdk";
 
 import { createAnalysisWorkerServiceClient } from "@/lib/supabase/service";
 import { createChannelAnalysisEvidenceRepository } from "@/modules/analysis/infrastructure/evidence-repository";
 import { createGovernedMetricWindowRepository } from "@/modules/metrics/infrastructure/repository";
+import type { channelRecommendationsTask } from "@/trigger/recommendations";
 import {
   channelAnalysisTaskSchema,
   runChannelAnalysis,
@@ -102,6 +103,28 @@ export const channelAnalysisTask = schemaTask({
         });
       },
     });
+
+    // A completed detector run wakes the narrator (ADR 0037). The dispatch is
+    // best-effort by design: a missed narration must never fail the run that
+    // already counted, and the claim fence makes a duplicate wake harmless.
+    if (result.outcome === "completed") {
+      try {
+        await tasks.trigger<typeof channelRecommendationsTask>("channel-recommendations.generate", {
+          organizationId: payload.organizationId,
+          channelId: payload.channelId,
+          analysisRunId: payload.analysisRunId,
+          correlationId: payload.correlationId,
+        });
+      } catch (error) {
+        logger.warn("channel_recommendations.dispatch_failed", {
+          organizationId: payload.organizationId,
+          channelId: payload.channelId,
+          analysisRunId: payload.analysisRunId,
+          correlationId: payload.correlationId,
+          errorCode: error instanceof Error ? error.name : "unknown",
+        });
+      }
+    }
 
     // Counts and identifiers only. No figure and no cited row travels to a log.
     logger.info("channel_analysis.run_completed", {
