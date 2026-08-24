@@ -508,6 +508,12 @@ Other rules:
 - Changing an asset's roles, tags or verdict does not alter any set already pinned.
 - The pinned set records the resolution outcome and the `subjectProfileId` where one was used, so a
   `synthetic_generated` asset can be traced to the exact description that produced it.
+- **The resolution is pinned to the generation run, not to the source snapshot.** Corrected
+  2026-08-24, during implementation. The snapshot is immutable by trigger and is captured once at
+  creation, while a resolution is made per run against a library that changes between runs — so
+  pinning to the snapshot would let a later run silently rewrite the provenance of an earlier run's
+  images. The split mirrors the planned-versus-realized distinction spec 016 already draws for
+  exposure: the snapshot holds the request, the run holds the receipt.
 
 ### 7.9 Scripts and language
 
@@ -608,30 +614,51 @@ Constraints: unique `(organization_id, slug)`; `confirmed_by` and `confirmed_at`
 when `state = 'confirmed'`; `description` non-empty when `state = 'confirmed'`. Tags follow §8.1's
 Unicode rules. Only a `confirmed` profile may be used for generation.
 
-### 8.5 Changed — `campaign_source_snapshots`
+### 8.5 Changed — `campaign_source_snapshots` — what the brief *declared*
 
 Additive. `brand_asset_version_ids` is retained as the flat list it already is.
+
+**This table is immutable by trigger** (`campaign_source_snapshots_immutable`, BEFORE DELETE OR
+UPDATE) and stays that way. It records what the operator declared when the campaign was created, and
+nothing may rewrite it afterwards. The resolver's actual output lives on the run — see §8.6, and the
+reasoning in §7.8.
 
 - `reference_slots jsonb not null default '[]'` — the slot assignment.
 - `negative_rules jsonb not null default '[]'` — the rules in force.
 - `resolver_version integer null` — null on rows written before this feature.
-- `resolution_outcome text null` — `resolved | synthesis_permitted`, null on prior rows.
-- `subject_profile_id uuid null` — the confirmed profile used, where one was.
-- `subject_description text null` — the exact confirmed text as it stood at pin time, copied rather
-  than referenced, so editing a profile later cannot rewrite the record of what was drawn.
-- `avoid_reference_version_ids uuid[] not null default '{}'` — the negatives supplied, kept apart
-  from `brand_asset_version_ids` so a negative can never be mistaken for a source.
-- `blueprint jsonb null` — the parsed art direction from stage one, pinned so an operator can read
-  why an image looks the way it does.
-- `plan_model_id text null` and `creative_direction text null` — which reasoning model wrote the
-  blueprint, and the operator's own direction that fed it.
+- `resolution_outcome text null`, `avoid_reference_version_ids uuid[]`, `blueprint jsonb`,
+  `plan_model_id text` — retained as **what the brief proposed**, where an operator picked references
+  in the brief picker. They are a request, not a receipt, and are never the provenance of a
+  generated image.
+- `subject_profile_id uuid null` — the confirmed profile the operator chose.
+- `subject_description text null` — the exact confirmed text as it stood at creation, copied rather
+  than referenced, so editing a profile later cannot rewrite the record of what was asked for.
+- `creative_direction text null` — the operator's own direction.
 
-### 8.6 Storage
+### 8.6 Changed — `campaign_generation_runs` — what the worker *actually used*
+
+Additive, and the correction recorded in §7.8. A campaign has many generation runs — `generate`,
+`revise`, `variants` — resolved at different times against a library that changes between them. One
+campaign on staging already has more than one run out of three in total, so this is not hypothetical.
+
+- `reference_slots jsonb not null default '[]'` — the slot assignment this run sent.
+- `avoid_reference_version_ids uuid[] not null default '{}'` — the negatives this run sent.
+- `negative_rules jsonb not null default '[]'` — the rules in force for this run.
+- `resolver_version integer null`, `resolution_outcome text null`.
+- `blueprint jsonb null`, `plan_model_id text null` — stage one's parsed art direction and the model
+  that wrote it.
+
+Written by one security-definer RPC, **fenced by the run's claim token**, service-role only, and
+idempotent on replay. It writes in two phases because the worker learns these facts at two different
+moments: the resolution is pinned **before** any model is called, so a run that dies mid-generation
+still records what it was about to spend on; the blueprint is added **after** stage one returns.
+
+### 8.7 Storage
 
 The `brand-assets` bucket and its `{organizationId}/{brandAssetId}/{versionId}/source` layout are
 unchanged. No new bucket.
 
-### 8.7 Types
+### 8.8 Types
 
 `src/lib/supabase/database.types.ts` is hand-maintained; `pnpm db:types` cannot run. All three new
 tables are typed there, or listed in `UNTYPED_TABLES`. Another agent is concurrently editing this

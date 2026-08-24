@@ -164,14 +164,34 @@ has said what the campaign is about.
   the planner, and write the derived truth class.
 - `src/modules/campaigns/infrastructure/generation-readers.ts` and `creation-repository.ts`: read and
   write the six new snapshot fields.
-- Populate `campaign_assets.provenance.derivedFromBrandAssetVersionIds` from the pinned set, and pin
-  `avoid_reference_version_ids`, `blueprint`, `plan_model_id` and `creative_direction` alongside it.
+- Populate `campaign_assets.provenance.derivedFromBrandAssetVersionIds` from the pinned set.
+- **Pin onto `campaign_generation_runs`, not the snapshot** — amended 2026-08-24. The snapshot is
+  immutable by trigger and holds what the brief declared; the run holds what this run actually used.
+  See Task 8a.
 - Call the blueprint planner (Task 6b) before the image call, and pass the parsed blueprint through.
 - `src/workflows/campaigns/generate-variants.ts` follows the same path, since a variant is generated
   under the same policy.
 - **Gate:** one real generation on staging from a confirmed description, inspected by eye. Requires
   `pnpm run:trigger` running with the task registered, or the dispatch queues with nobody to execute
   it.
+
+## Task 8a — The run-scoped resolution pin (added 2026-08-24)
+
+- One additive migration. Claim the filename on the board before creating it.
+- Adds to `campaign_generation_runs`: `reference_slots`, `avoid_reference_version_ids`,
+  `negative_rules`, `resolver_version`, `resolution_outcome`, `blueprint`, `plan_model_id`.
+- One security-definer RPC, `search_path = ''`, **service-role only**, identified by
+  `pg_catalog.current_setting('role', true) = 'service_role'`, and **fenced by the run's claim
+  token** — a worker whose lease lapsed must not overwrite the run that replaced it.
+- Two phases, because the worker learns these at different moments: the resolution is pinned before
+  any model call, so a run that dies mid-generation still records what it was about to spend on; the
+  blueprint is added after stage one returns.
+- Idempotent on replay: pinning the same values twice succeeds and changes nothing.
+- **Do not touch `campaign_source_snapshots`.** Its `campaign_source_snapshots_immutable` trigger
+  refuses UPDATE and DELETE, and that guarantee is not to be weakened to make room for this.
+- pgTAP: two-organization isolation; a stale claim token is refused; replay is a no-op; and the
+  snapshot immutability trigger still refuses an update, proving nothing was loosened.
+- **Gate:** called once against staging before the task is done.
 
 ## Task 9 — Asset library: application, infrastructure and reviews
 
