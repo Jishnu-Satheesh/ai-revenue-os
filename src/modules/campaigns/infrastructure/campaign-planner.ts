@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { refineImagePrompt, type ModelRouter } from "@/ai/model-router";
+import { type ModelRouter } from "@/ai/model-router";
 import type {
   CampaignGenerationProvider,
   CampaignGenerationTelemetrySink,
@@ -10,12 +10,18 @@ import type {
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
 import type { GenerationContext } from "@/modules/campaigns/application/generation-context";
 import type { EvaluationFailure } from "@/modules/campaigns/application/evaluation";
-import type { CampaignPlanner, GeneratedAssetUpload } from "@/workflows/campaigns/generate-bundle";
+import type {
+  CampaignImageGuidance,
+  CampaignPlanner,
+  GeneratedAssetUpload,
+} from "@/workflows/campaigns/generate-bundle";
 import type { RevisionPlanner } from "@/workflows/campaigns/revise-bundle";
+import { DomainError } from "@/lib/errors";
 import {
   campaignAssetPath,
   ingestCampaignImage,
 } from "@/modules/campaigns/infrastructure/asset-intake";
+import { buildReferencePrompt } from "@/modules/campaigns/infrastructure/reference-prompt";
 
 /**
  * The planner: pinned evidence in, candidate creative out.
@@ -355,7 +361,15 @@ export function createCampaignPlanner(
       context: GenerationContext;
       manifest: CampaignBundleManifest;
       signal: AbortSignal;
+      imageGuidance?: CampaignImageGuidance;
     }) {
+      if (!input.imageGuidance) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "No governed image reference context is available for this generation.",
+        );
+      }
+
       const startedAt = Date.now();
       const uploads: GeneratedAssetUpload[] = [];
       const imageRoute = dependencies.router.resolve("image");
@@ -381,15 +395,13 @@ export function createCampaignPlanner(
             campaignId: context.campaignId,
             correlationId: context.correlationId,
           },
-          prompt: refineImagePrompt({
-            route: imageRoute,
-            // The alt text is the description of the image, so it is also the
-            // most honest thing to draw from: the picture and its description
-            // cannot drift apart if one produced the other.
-            subject: asset.altText,
-            brandDirection: direction?.rationale ?? input.context.objective,
-            negativeConstraints: input.context.hardConstraints,
+          prompt: buildReferencePrompt({
+            operatorCreativeDirection: direction?.rationale ?? input.context.objective,
+            subjectDescription: input.imageGuidance.subjectDescription,
+            resolution: input.imageGuidance.resolution,
+            hardConstraints: input.context.hardConstraints,
           }),
+          references: input.imageGuidance.references,
           widthPx: size.widthPx,
           heightPx: size.heightPx,
         });

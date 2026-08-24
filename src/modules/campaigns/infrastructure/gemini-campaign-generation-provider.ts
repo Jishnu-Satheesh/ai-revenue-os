@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { experimental_generateImage as generateImage, generateText } from "ai";
+import { generateText, type UserContent } from "ai";
 
 import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -16,6 +16,16 @@ import type {
   CampaignPatchInput,
   GeneratedImage,
 } from "@/ai/campaign-generation-provider";
+
+const REFERENCE_ROLE_ORDER = {
+  subject: 0,
+  brand_mark: 1,
+  setting: 2,
+  style_exemplar: 3,
+  palette: 4,
+  typography: 5,
+  avoid: 6,
+} as const;
 
 /**
  * The configured campaign generation adapter, on Google Gemini.
@@ -200,13 +210,33 @@ export function createGeminiCampaignGenerationProvider(
         // ordinary generation, not through the Imagen predict endpoint that
         // `google.image()` targets. Pointing the wrong API at the model fails
         // for a reason that has nothing to do with the prompt.
+        const framedPrompt = [
+          input.prompt,
+          "",
+          `Compose for a ${input.widthPx}x${input.heightPx} pixel frame.`,
+        ].join("\n");
+        const references = [...(input.references ?? [])].sort(
+          (left, right) =>
+            REFERENCE_ROLE_ORDER[left.role] - REFERENCE_ROLE_ORDER[right.role] ||
+            left.ordinal - right.ordinal,
+        );
+        const content: UserContent = [
+          { type: "text", text: framedPrompt },
+          ...references.flatMap((reference) => [
+            {
+              type: "text" as const,
+              text: `<reference role="${reference.role}" ordinal="${reference.ordinal}">`,
+            },
+            {
+              type: "file" as const,
+              data: reference.bytes,
+              mediaType: reference.mimeType,
+            },
+          ]),
+        ];
         const result = await generateText({
           model: google(route.modelId),
-          prompt: [
-            input.prompt,
-            "",
-            `Compose for a ${input.widthPx}x${input.heightPx} pixel frame.`,
-          ].join("\n"),
+          messages: [{ role: "user", content }],
           providerOptions: { google: { responseModalities: ["TEXT", "IMAGE"] } },
           abortSignal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
         });

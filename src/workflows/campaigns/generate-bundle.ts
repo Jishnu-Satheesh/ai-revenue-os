@@ -1,6 +1,8 @@
 import { bundleDigest } from "@/domain/campaigns/digest";
 import { logger } from "@/lib/logger";
+import type { CampaignImageReference } from "@/ai/campaign-generation-provider";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
+import type { ReferenceResolution } from "@/domain/campaigns/reference-resolution";
 import type { ChannelContentLimits } from "@/domain/campaigns/content-policy";
 import type { CampaignChannel } from "@/domain/campaigns/schemas";
 import {
@@ -98,6 +100,14 @@ export type GeneratedAssetUpload = {
   contentHash: string;
 };
 
+export type CampaignImageGuidance = {
+  /** Exact confirmed description pinned for this run, where synthesis is used. */
+  subjectDescription: string | null;
+  resolution: ReferenceResolution;
+  /** Bytes corresponding to the pinned positive and avoid references. */
+  references: readonly CampaignImageReference[];
+};
+
 export type CampaignPlanner = {
   /** Returns a candidate manifest and the assets it actually produced. */
   plan(input: {
@@ -111,6 +121,8 @@ export type CampaignPlanner = {
     context: GenerationContext;
     manifest: CampaignBundleManifest;
     signal: AbortSignal;
+    /** Transitional until Task 8 loads the pinned reference set for the worker. */
+    imageGuidance?: CampaignImageGuidance;
   }): Promise<{ uploads: readonly GeneratedAssetUpload[]; costMinor: number | null }>;
 };
 

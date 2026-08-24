@@ -76,6 +76,38 @@ function generationContext() {
   };
 }
 
+function imageGuidance() {
+  return {
+    subjectDescription:
+      "Kingfish in brick-red coconut gravy, served in a clay pot with curry leaves.",
+    resolution: {
+      resolverVersion: 1 as const,
+      outcome: "synthesis_permitted" as const,
+      refusalCode: null,
+      referenceSlots: [],
+      avoidReferences: [
+        {
+          role: "avoid" as const,
+          brandAssetId: "51111111-1111-4111-8111-111111111111",
+          brandAssetVersionId: "61111111-1111-4111-8111-111111111111",
+          reasonCodes: ["wrong_subject" as const],
+        },
+      ],
+      negativeRules: [
+        { code: "wrong_subject" as const, description: "Do not substitute another dish." },
+      ],
+    },
+    references: [
+      {
+        role: "avoid" as const,
+        ordinal: 0,
+        mimeType: "image/png" as const,
+        bytes: new Uint8Array([4, 5, 6]),
+      },
+    ],
+  };
+}
+
 beforeEach(() => {
   for (const spy of [generatePlan, generateImage, generatePatch, upload]) spy.mockReset();
   generatePlan.mockResolvedValue({
@@ -133,6 +165,7 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest,
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads[0]?.contentHash).toMatch(/^[0-9a-f]{64}$/);
@@ -144,22 +177,43 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     const call = upload.mock.calls[0]?.[0] as { path: string };
     expect(call.path.split("/")[0]).toBe(ORGANIZATION_ID);
   });
 
-  it("carries the hard constraints into the image prompt", async () => {
+  it("draws from the declared subject and governed references, never accessibility alt text", async () => {
+    const manifest = validManifest();
     await planner().materializeAssets({
       context: generationContext(),
-      manifest: validManifest(),
+      manifest,
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
-    const call = generateImage.mock.calls[0]?.[0] as { prompt: string };
+    const call = generateImage.mock.calls[0]?.[0] as {
+      prompt: string;
+      references: Array<{ role: string; bytes: Uint8Array }>;
+    };
     expect(call.prompt).toContain("Never imply a health claim.");
-    expect(call.prompt).toContain("not documentary photography");
+    expect(call.prompt).toContain("Kingfish in brick-red coconut gravy");
+    expect(call.prompt).toContain("role=avoid ordinal=0 reasons=wrong_subject");
+    expect(call.prompt).toContain("Do not render text of any kind, in any script");
+    expect(call.prompt).not.toContain(manifest.assets[0]!.altText);
+    expect(call.references).toEqual(imageGuidance().references);
+  });
+
+  it("fails closed before image spend when governed image guidance is missing", async () => {
+    await expect(
+      planner().materializeAssets({
+        context: generationContext(),
+        manifest: validManifest(),
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("No governed image reference context is available");
+    expect(generateImage).not.toHaveBeenCalled();
   });
 
   it("stops at the next image when the run is cancelled", async () => {
@@ -176,6 +230,7 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: controller.signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads.length).toBeLessThan(validManifest().assets.length);
@@ -197,6 +252,7 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads).toEqual([]);
@@ -210,6 +266,7 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads).toEqual([]);

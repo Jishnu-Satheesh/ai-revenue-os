@@ -326,7 +326,7 @@ Slot caps, enforced in domain code:
 | `setting` | 0 | 1 |
 | `style_exemplar` | 0 | 2 |
 | `palette` | 0 | 1 |
-| `typography` | 0 | 1 |
+| `typography` | 0 | 1 per requested script, maximum 3 |
 | `avoid` | 0 | **2** |
 
 Positive references per generation may not exceed 7. The schema's existing bound of 40 is a safety

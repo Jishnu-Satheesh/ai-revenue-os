@@ -27,9 +27,28 @@ export type CampaignGenerationInput = {
   outputContract: string;
 };
 
+export type CampaignImageReferenceRole =
+  | "subject"
+  | "brand_mark"
+  | "setting"
+  | "style_exemplar"
+  | "palette"
+  | "typography"
+  | "avoid";
+
+export type CampaignImageReference = {
+  role: CampaignImageReferenceRole;
+  /** Position inside this role. The adapter sorts role first, then ordinal. */
+  ordinal: number;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  bytes: Uint8Array;
+};
+
 export type CampaignImageGenerationInput = {
   context: CampaignGenerationCallContext;
   prompt: string;
+  /** Governed positive references followed by the separately bounded avoid set. */
+  references?: readonly CampaignImageReference[];
   /** Pixel dimensions the placement requires. */
   widthPx: number;
   heightPx: number;

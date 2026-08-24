@@ -3,11 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const generateText = vi.fn();
-const generateImageCall = vi.fn();
 
 vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => generateText(...args),
-  experimental_generateImage: (...args: unknown[]) => generateImageCall(...args),
 }));
 
 const languageModel = vi.fn((id: string) => ({ id }));
@@ -49,7 +47,6 @@ function lastTextCall() {
 
 beforeEach(() => {
   generateText.mockReset();
-  generateImageCall.mockReset();
   languageModel.mockClear();
   imageModel.mockClear();
   generateText.mockResolvedValue({
@@ -216,6 +213,76 @@ describe("gemini campaign generation provider", () => {
     expect(result.image.modelId).toBe("imagen-1");
   });
 
+  it("sends positive reference files first and rejected avoid files last", async () => {
+    generateText.mockResolvedValue({
+      text: "",
+      files: [{ mediaType: "image/png", uint8Array: new Uint8Array([9]) }],
+      usage: {},
+    });
+    const provider = createGeminiCampaignGenerationProvider();
+
+    await provider.generateImage({
+      context: CONTEXT,
+      prompt: "Draw the governed plate.",
+      widthPx: 1024,
+      heightPx: 1024,
+      references: [
+        {
+          role: "avoid",
+          ordinal: 0,
+          mimeType: "image/png",
+          bytes: new Uint8Array([30]),
+        },
+        {
+          role: "style_exemplar",
+          ordinal: 1,
+          mimeType: "image/jpeg",
+          bytes: new Uint8Array([20]),
+        },
+        {
+          role: "subject",
+          ordinal: 0,
+          mimeType: "image/webp",
+          bytes: new Uint8Array([10]),
+        },
+      ],
+    });
+
+    const call = generateText.mock.calls.at(-1)?.[0] as {
+      prompt?: string;
+      messages: Array<{
+        role: string;
+        content: Array<
+          { type: "text"; text: string } | { type: "file"; data: Uint8Array; mediaType: string }
+        >;
+      }>;
+    };
+    expect(call.prompt).toBeUndefined();
+    const content = call.messages[0]!.content;
+    expect(
+      content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text),
+    ).toEqual([
+      "Draw the governed plate.\n\nCompose for a 1024x1024 pixel frame.",
+      '<reference role="subject" ordinal="0">',
+      '<reference role="style_exemplar" ordinal="1">',
+      '<reference role="avoid" ordinal="0">',
+    ]);
+    expect(
+      content
+        .filter(
+          (part): part is { type: "file"; data: Uint8Array; mediaType: string } =>
+            part.type === "file",
+        )
+        .map((part) => [part.mediaType, [...part.data]]),
+    ).toEqual([
+      ["image/webp", [10]],
+      ["image/jpeg", [20]],
+      ["image/png", [30]],
+    ]);
+  });
+
   it("refuses a text-only answer rather than publishing an empty asset", async () => {
     generateText.mockResolvedValue({ text: "I cannot draw that.", files: [], usage: {} });
     const provider = createGeminiCampaignGenerationProvider();
@@ -249,7 +316,7 @@ describe("gemini campaign generation provider", () => {
   });
 
   it("keeps a provider image failure opaque too", async () => {
-    generateImageCall.mockRejectedValue(new Error("policy: 'the venue at 12 Main St'"));
+    generateText.mockRejectedValue(new Error("policy: 'the venue at 12 Main St'"));
     const provider = createGeminiCampaignGenerationProvider();
 
     await expect(
