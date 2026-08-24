@@ -114,8 +114,9 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 6 | Provider seam + prompt builder — claimed: `src/ai/campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `specs/019-organization-asset-library.md` | codex | high | 2 | **done** |
 | 6b | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts` | codex | high | 6 | **done** |
 | 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
-| 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **in-progress** |
-| 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **in-progress** |
+| 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/variant-planner.ts`, `src/modules/campaigns/infrastructure/variant-planner.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **in-progress** |
+| 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **done** |
+| 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **in-progress** |
 | 8v | Run the generation, inspect the run | codex | — | 8 | todo |
 | A-r | **Slice A code review** | claude | — | 8 | todo |
 | 9 | Asset library service + reviews | codex | high | 2 | todo |
@@ -1141,6 +1142,23 @@ and one unexamined migration is one too many.
    claim, a cross-tenant attempt, and the role conflict.
 4. `git push` remains the user's, at a moment of their choosing.
 
+### 2026-08-24 · codex · 8a amended and applied to staging; 8av handed to Claude
+
+- Commit `8174cec` adds the requested real-RPC pgTAP case: one version placed in both a positive
+  `subject` slot and `avoid_reference_version_ids` must raise SQLSTATE `22023` with
+  `campaign_generation_reference_role_conflict`.
+- Static test-contract verification and `git diff --check` passed; the database type-drift suite
+  passed 70/70 under Node 22. The pgTAP suite itself was not run before apply because staging did not
+  yet have the reviewed function.
+- `pnpm db:migrations:dry-run` reported exactly two pending migrations and no seeds or roles:
+  `20260825100000_include_rejected_avoid_reference_candidates.sql` and
+  `20260825110000_pin_campaign_generation_run_reference_context.sql`.
+- `pnpm db:migrations:push` then applied exactly those two reviewed migrations to staging and exited
+  successfully. No other migration, seed or role was applied.
+- Task 8a is `done`; 8av is `in-progress` for Claude's two phases, replay, stale-claim,
+  cross-tenant and reference-role-conflict calls. Codex is proceeding with application-side Task 8
+  and will not duplicate Claude's staging verification.
+
 ### 2026-08-24 · claude · early Slice A review (Tasks 2–7) — one finding for Task 8
 
 8av is blocked on the migrations being applied, so I reviewed Tasks 2–7 now rather than batching it
@@ -1188,3 +1206,54 @@ Two suggestions when you get there:
 
 Nothing here blocks the migration work. 8av remains mine as soon as `20260825100000` and
 `20260825110000` are applied to staging.
+
+### 2026-08-24 · channel-rec agent · Task 11 claimed (decisions + feedback routes)
+
+- Claiming: `src/modules/analysis/application/triage.ts` (new),
+  `src/modules/analysis/application/triage.test.ts` (new),
+  `src/app/api/organizations/[organizationId]/channel-recommendations/[recommendationId]/decisions/route.ts`
+  (+ `route.test.ts`) and `.../feedback/route.ts` (+ `route.test.ts`) — all new files, plus
+  `.superpowers/sdd/2026-08-24-channel-recommendations/task-11-report.md`. Route tests added beyond
+  the brief's file list to match the analysis route's own convention; nothing else touched.
+- No migrations, no `database.types.ts`, no shared files. Authenticated client via
+  `getOrganizationContext`; never service role.
+
+### 2026-08-24 · claude · 8av complete — **the run receipt behaves correctly on staging, 10 of 10**
+
+All three migrations are applied: `supabase_migrations.schema_migrations` records `20260825090000`,
+`20260825100000` and `20260825110000`; all seven run columns exist; the pin RPC is present; and
+`read_reference_candidates` is the new version. The user's `db:migrations:push` reporting *"Remote
+database is up to date"* was accurate — you had already applied them, so their command was a no-op.
+Nothing was wrong, and I have said so.
+
+Every branch was called for real inside a transaction that was rolled back. Staging is confirmed
+clean afterwards: no `8av-%` runs or campaigns, zero subject profiles, zero runs carrying receipts.
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | `authenticated` caller | `permission denied for function` |
+| 2 | blueprint before resolution | `campaign_generation_resolution_not_pinned` |
+| 3 | same asset in a positive slot **and** the avoid list | `campaign_generation_reference_role_conflict` |
+| 4 | resolution pin | `replayed: false` |
+| 5 | identical replay | `replayed: true` |
+| 6 | contradicting re-pin | `campaign_generation_resolution_conflict` |
+| 7 | blueprint pin | `replayed: false` |
+| 8 | stale claim token | `campaign_generation_claim_lost` |
+| 9 | cross-tenant organization | `campaign_generation_organization_mismatch` |
+| 10 | stored receipt | outcome, version, rules, blueprint and model all present |
+
+**Two things worth keeping from this.**
+
+Case 1 refused at the **grant** layer, before the function body ran at all — `revoke all ... from
+authenticated` fires ahead of the in-function `current_setting('role')` check. Two independent
+layers, the outer one winning. That is the right order.
+
+Case 3 is the one I most wanted to see. `campaign_generation_reference_role_conflict` fired against
+real staging, which means the invariant ADR 0041 was rewritten around — a rejected image is never
+something to draw *from* — is now enforced at the write boundary and proven there, not merely
+asserted in prose. Thank you for adding the test in `8174cec` before applying; the sequence was
+right.
+
+**Task 8a is done. Task 8 is unblocked** — and before you start it, please read the Slice A review
+entry above this one. The finding about `variant-planner.ts` still calling `refineImagePrompt` lands
+squarely inside Task 8, and the change is not in the workflow file the plan names.
