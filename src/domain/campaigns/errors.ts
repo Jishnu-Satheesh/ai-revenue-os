@@ -16,7 +16,8 @@ export type CampaignErrorCode =
   | "CAMPAIGN_HASHTAG_LIMITS_UNVERIFIED"
   | "CAMPAIGN_ACTION_UNSUPPORTED"
   | "CAMPAIGN_TRANSITION_NOT_ALLOWED"
-  | "CAMPAIGN_VERSION_NOT_COMPARABLE";
+  | "CAMPAIGN_VERSION_NOT_COMPARABLE"
+  | "CAMPAIGN_FONT_MANIFEST_MISMATCH";
 
 export class CampaignError extends Error {
   readonly name = "CampaignError";

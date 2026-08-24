@@ -83,10 +83,11 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 
 | # | Task | Owner | Effort | Depends on | Status |
 |---|---|---|---|---|---|
-| 1 | Schema, seeds, write functions — claimed: `supabase/migrations/20260825090000_organization_asset_library.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `src/lib/supabase/database.types.ts`, `src/domain/access/permissions.ts`, `src/domain/access/permissions.drift.test.ts` | codex | **xhigh** | — | **in-progress** |
+| 1 | Schema, seeds, write functions — claimed: `supabase/migrations/20260825090000_organization_asset_library.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `src/lib/supabase/database.types.ts`, `src/domain/access/permissions.ts`, `src/domain/access/permissions.drift.test.ts` | codex | **xhigh** | — | **done** |
 | 1r | Review migration SQL **before push** | claude | — | — | **done** |
 | 1v | Call every new/changed plpgsql function against staging | claude | — | 1 pushed | **in-progress** |
-| 2 | Domain types and vocabulary | codex | medium | 1 | todo |
+| 1c | Forward correction: expose rejected candidates only for resolver `avoid` routing — claimed: `supabase/migrations/20260825100000_include_rejected_avoid_reference_candidates.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 1 | **review** |
+| 2 | Domain types and vocabulary + rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/asset-library.ts`, `src/domain/campaigns/asset-library.test.ts`, `src/domain/campaigns/schemas.ts`, `src/domain/campaigns/schemas.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md` | codex | medium | 1 | **in-progress** |
 | 3 | The resolver | codex | **xhigh** | 2 | todo |
 | 4 | Subject profiles: service + repository | codex | high | 2 | todo |
 | 5 | Subject profile routes | codex | high | 4 | todo |
@@ -104,7 +105,8 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 13v | Verify pinned rows on staging | claude | — | 13 | todo |
 | S | Campaign Studio spec + ADR 0042 + plan | claude | — | — | **done** |
 | S0 | **Renderer spike** — PASSED all 4 cases; `@napi-rs/canvas` 1.0.8 + `fontkit` | claude | — | — | **done** |
-| S0j | Judge the renderings | user | — | S0 | awaiting user's read of the Malayalam |
+| S0j | Judge the renderings | user | — | S0 | **done — Malayalam confirmed correct** |
+| S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -673,3 +675,87 @@ a round trip:
 
 **Task 1 is done. Tasks 2 onward are unblocked.** Nice work on the `jsonb_object_keys` portability
 fix — worth noting for the Studio migration that `jsonb_object_length` is not available here.
+
+### 2026-08-24 · codex · Task 2 claimed
+
+- Claimed `src/domain/campaigns/asset-library.ts`, its new focused test, and the existing campaign
+  manifest schema plus its focused test. No analysis, database, route, repository, provider, or
+  workflow file is part of this task.
+- Carrying the three verified staging payload facts into later repository/workflow fixtures:
+  `manual_brief` with nested brief fields, required `correlation_id`, and run kind vocabulary
+  `generate | revise | variants`. Carrying the absent `jsonb_object_length` primitive into the
+  later Studio migration review.
+
+### 2026-08-24 · codex · rejected-reference documentation correction claimed
+
+- At the user's explicit direction, claimed `specs/019-organization-asset-library.md` to reconcile
+  stale pre-amendment passages with the approved rule already recorded by the plan, ADR and board:
+  rejected assets never enter a positive slot; at most two may enter the separate `avoid` set, with
+  their reason codes attached.
+
+### 2026-08-24 · codex · Task 1c migration filename claimed before creation
+
+- Claimed `supabase/migrations/20260825100000_include_rejected_avoid_reference_candidates.sql` and
+  the existing asset-library pgTAP file for a forward-only correction to
+  `read_reference_candidates`.
+- The live function currently filters out rejected versions before returning candidates. The
+  approved resolver therefore cannot populate its capped `avoid` set with the rejected bytes and
+  asset-specific reasons. The correction will return unarchived usable versions with the latest
+  verdict and latest reason codes; domain code remains solely responsible for routing rejected rows
+  into `avoid` and refusing them every positive slot.
+- This migration is draft-only. Codex will not push it; Claude reviews it before staging.
+
+### 2026-08-24 · codex · Task 1c ready for Claude review — not pushed
+
+- Drafted `20260825100000_include_rejected_avoid_reference_candidates.sql` as a
+  `create or replace` of the one reader. The existing role guard, tenant predicate, definer status,
+  empty search path, reason registry aggregation, revokes and grants are unchanged.
+- Additions only: rejected usable/unarchived versions remain in `candidates`; every candidate now
+  carries the latest verdict, asset-specific reason codes and review time. Those fields let the pure
+  resolver route rejected rows only into `avoid`, attach their reasons, and choose the most recent
+  two deterministically.
+- Updated the existing pgTAP assertion to require the rejected local version and its routing
+  evidence while still excluding the foreign tenant. Updated stale Spec 019 passages and live-proof
+  criteria to the same approved rule.
+- Static checks: `git diff --check` passed; stale-rule search across Spec 019, ADR 0041, the approved
+  plan and the pgTAP file returned no matches. No staging command and no migration push were run;
+  Claude owns review and staging verification.
+
+### 2026-08-24 · claude · Studio Task 1 done — fonts vendored and pinned
+
+Three Noto faces are now in `assets/fonts/`, pinned by SHA-256 in
+`src/domain/campaigns/font-manifest.ts`, with `assertVendoredFonts()` in
+`src/modules/campaigns/infrastructure/font-assertion.ts` throwing at worker start on any mismatch.
+17 tests, lint clean, typecheck clean.
+
+Domain stays pure — it holds the manifest and a `verifyFontHashes` that takes observed hashes and
+returns problems. The filesystem reading lives in infrastructure, so the decision is testable without
+a disk.
+
+**Three things worth knowing:**
+
+- **An undeclared font file is also a problem**, not just a missing or altered one. A renderer that
+  can reach an unpinned font can render with it, and nobody approved that file.
+- **The assertion throws rather than warns.** The failure it guards is silent by nature: a renderer
+  handed the wrong font does not error, it draws empty boxes at a plausible width and publishes them.
+  Refusing to start is loud and early.
+- `fontManifestDigest()` is exported for inclusion in the render digest, per spec 020 §4 — a font
+  upgrade must produce a new version rather than a silent substitution under an old approval.
+
+**Two shared-file touches, both minimal, both verified as mine alone before committing:**
+
+- `src/domain/campaigns/errors.ts` — one new code, `CAMPAIGN_FONT_MANIFEST_MISMATCH`.
+- `package.json` + `pnpm-lock.yaml` — `@napi-rs/canvas@1.0.8`, plus `trigger.config.ts` externals
+  and a `knip.json` ignore entry.
+
+**On that knip entry, since silencing a linter deserves a reason.** Nothing imports the renderer
+until Studio Task 4, so knip correctly called it unused. I kept the dependency and declared it
+ignored rather than deferring it, because the failure mode of forgetting the externals line is a
+worker that builds cleanly and dies on the first render — found late and expensively.
+`@trigger.dev/build` is already in the same category. The three other unused deps knip reports —
+`drizzle-orm`, `drizzle-kit`, `@trigger.dev/build` — are pre-existing and I left them alone.
+
+**Heads-up on the shared tree, not a complaint.** Midway through, `pnpm typecheck` failed on
+`src/domain/campaigns/schemas.test.ts` for `subjectProfileSchema` and a renamed manifest schema —
+Task 2 in flight. It resolved on its own within minutes. Nothing was touched; noting it so the next
+person who sees a red typecheck checks the clock before the blame.

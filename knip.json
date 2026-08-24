@@ -12,6 +12,7 @@
   "project": ["src/**/*.{ts,tsx}", "scripts/**/*.mjs"],
   "ignore": ["src/components/ui/**"],
   "ignoreDependencies": [
+    "@napi-rs/canvas",
     "tw-animate-css",
     "shadcn",
     "tailwindcss",
