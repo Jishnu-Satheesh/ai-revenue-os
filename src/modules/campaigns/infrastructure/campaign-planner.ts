@@ -21,7 +21,7 @@ import {
   campaignAssetPath,
   ingestCampaignImage,
 } from "@/modules/campaigns/infrastructure/asset-intake";
-import { buildReferencePrompt } from "@/modules/campaigns/infrastructure/reference-prompt";
+import { buildBlueprintReferencePrompt } from "@/modules/campaigns/infrastructure/reference-prompt";
 
 /**
  * The planner: pinned evidence in, candidate creative out.
@@ -387,6 +387,13 @@ export function createCampaignPlanner(
           input.manifest.actions.find((action) => action.directionId === direction?.id)
             ?.placement ?? "feed_image";
         const size = PLACEMENT_SIZES[placement];
+        const blueprint = input.imageGuidance.blueprintsByAssetId[asset.id];
+        if (!blueprint) {
+          throw new DomainError(
+            "VALIDATION_ERROR",
+            "No governed art-direction blueprint is available for this image.",
+          );
+        }
 
         const generated = await dependencies.provider.generateImage({
           context: {
@@ -394,11 +401,12 @@ export function createCampaignPlanner(
             campaignId: context.campaignId,
             correlationId: context.correlationId,
           },
-          prompt: buildReferencePrompt({
+          prompt: buildBlueprintReferencePrompt({
             operatorCreativeDirection: direction?.rationale ?? input.context.objective,
             subjectDescription: input.imageGuidance.subjectDescription,
             resolution: input.imageGuidance.resolution,
             hardConstraints: input.context.hardConstraints,
+            blueprint,
           }),
           references: input.imageGuidance.references,
           widthPx: size.widthPx,

@@ -24,11 +24,18 @@ const RUN_ID = "e0000000-0000-4000-8000-000000000001";
 const SNAPSHOT_ID = "e0000000-0000-4000-8000-000000000002";
 const VERSION_ID = "f0000000-0000-4000-8000-000000000001";
 const CORRELATION_ID = "d0000000-0000-4000-8000-000000000001";
+const SUBJECT_ASSET_ID = "a0000000-0000-4000-8000-000000000008";
+const SUBJECT_VERSION_ID = "a0000000-0000-4000-8000-000000000009";
 
 const claim = vi.fn();
 const complete = vi.fn();
 const fail = vi.fn();
 const readSnapshot = vi.fn();
+const readCandidates = vi.fn();
+const readReference = vi.fn();
+const pinResolution = vi.fn();
+const pinBlueprint = vi.fn();
+const planBlueprint = vi.fn();
 const plan = vi.fn();
 const materializeAssets = vi.fn();
 const publish = vi.fn();
@@ -67,8 +74,63 @@ function pinnedSnapshot() {
       })),
     },
     generationProfile: "brand_guided" as const,
-    brandAssetVersionIds: ["a0000000-0000-4000-8000-000000000009"],
+    brandAssetVersionIds: [SUBJECT_VERSION_ID],
+    resolutionRequest: {
+      subjectTags: ["kingfish curry"],
+      subjectDescription: "Kingfish curry in a clay pot.",
+      settingTags: [],
+      occasionTags: [],
+      styleTags: [],
+      scripts: [],
+    },
+    declaredReferenceSlots: [],
+    subjectDescription: "Kingfish curry in a clay pot.",
+    creativeDirection: "Warm daylight and a tight crop.",
     syntheticAssetsAllowed: false,
+  };
+}
+
+function referenceCandidates() {
+  return {
+    candidates: [
+      {
+        brandAssetId: SUBJECT_ASSET_ID,
+        brandAssetVersionId: SUBJECT_VERSION_ID,
+        conditioningRoles: ["subject" as const],
+        tags: ["kingfish curry"],
+        scripts: [],
+        ownership: "owned" as const,
+        version: 1,
+        currentVerdict: "approved" as const,
+        currentReasonCodes: [],
+        currentReviewedAt: "2026-08-24T10:00:00.000Z",
+        archivedAt: null,
+        requestedReferenceMode: "inspiration" as const,
+        storagePath: `${ORGANIZATION_ID}/${SUBJECT_ASSET_ID}/${SUBJECT_VERSION_ID}/source`,
+        mimeType: "image/png" as const,
+      },
+    ],
+    reasonRegistry: [],
+  };
+}
+
+const BLUEPRINT = {
+  composition: "Centered clay pot with restrained negative space.",
+  framing: "Tight overhead crop.",
+  lighting: "Soft daylight from camera left.",
+  cameraTreatment: "Natural 50mm treatment.",
+  palette: ["brick red", "deep green"],
+  focalPoint: "The curry at the centre.",
+  surfaceNotes: ["matte stone"],
+  propNotes: [],
+  avoid: ["busy tableware"],
+};
+
+function modelManifest() {
+  const manifest = validManifest();
+  return {
+    ...manifest,
+    assets: manifest.assets.map(({ truthClass: _truthClass, ...asset }) => asset),
   };
 }
 
@@ -86,6 +148,10 @@ function generateDeps(
   return {
     runs: { claim, complete, fail },
     snapshots: { read: readSnapshot },
+    candidates: { read: readCandidates },
+    referenceObjects: { read: readReference },
+    referenceContext: { pinResolution, pinBlueprint },
+    blueprintPlanner: { plan: planBlueprint },
     planner: { plan, materializeAssets },
     publisher: { publish },
     limitsByChannel: LIMITS,
@@ -103,10 +169,23 @@ const PAYLOAD = {
 };
 
 beforeEach(() => {
-  for (const spy of [claim, complete, fail, readSnapshot, plan, materializeAssets, publish]) {
+  for (const spy of [
+    claim,
+    complete,
+    fail,
+    readSnapshot,
+    readCandidates,
+    readReference,
+    pinResolution,
+    pinBlueprint,
+    planBlueprint,
+    plan,
+    materializeAssets,
+    publish,
+  ]) {
     spy.mockReset();
   }
-  const manifest = validManifest();
+  const manifest = modelManifest();
   claim.mockResolvedValue({
     outcome: "claimed",
     claimToken: "token-1",
@@ -117,8 +196,21 @@ beforeEach(() => {
     correlationId: CORRELATION_ID,
   });
   readSnapshot.mockResolvedValue(pinnedSnapshot());
+  readCandidates.mockResolvedValue(referenceCandidates());
+  readReference.mockResolvedValue(new Uint8Array([1, 2, 3]));
+  pinResolution.mockResolvedValue(undefined);
+  pinBlueprint.mockResolvedValue(undefined);
+  planBlueprint.mockResolvedValue({
+    blueprint: BLUEPRINT,
+    planModelId: "gemini-plan",
+    repairModelId: null,
+    costMinor: 25,
+  });
   plan.mockResolvedValue({ candidate: manifest, costMinor: 1_000 });
-  materializeAssets.mockResolvedValue({ uploads: uploadsFor(manifest), costMinor: 2_000 });
+  materializeAssets.mockResolvedValue({
+    uploads: uploadsFor(validManifest()),
+    costMinor: 2_000,
+  });
   publish.mockResolvedValue({
     bundleVersionId: VERSION_ID,
     version: 1,
@@ -185,6 +277,99 @@ describe("generateCampaignBundle", () => {
     );
   });
 
+  it("pins resolution before any model spend and pins every parsed blueprint before images", async () => {
+    const order: string[] = [];
+    pinResolution.mockImplementation(async () => void order.push("resolution"));
+    plan.mockImplementation(async () => {
+      order.push("bundle-plan");
+      return { candidate: modelManifest(), costMinor: 1_000 };
+    });
+    planBlueprint.mockImplementation(async () => {
+      order.push("blueprint-plan");
+      return {
+        blueprint: BLUEPRINT,
+        planModelId: "gemini-plan",
+        repairModelId: null,
+        costMinor: 25,
+      };
+    });
+    pinBlueprint.mockImplementation(async () => void order.push("blueprint-pin"));
+    materializeAssets.mockImplementation(async () => {
+      order.push("images");
+      return { uploads: uploadsFor(validManifest()), costMinor: 2_000 };
+    });
+
+    await generateCampaignBundle(PAYLOAD, generateDeps(), new AbortController().signal);
+
+    expect(order.indexOf("resolution")).toBeLessThan(order.indexOf("bundle-plan"));
+    expect(order.indexOf("blueprint-pin")).toBeGreaterThan(order.lastIndexOf("blueprint-plan"));
+    expect(order.indexOf("blueprint-pin")).toBeLessThan(order.indexOf("images"));
+  });
+
+  it("refuses no_declared_subject before pinning or model spend", async () => {
+    readSnapshot.mockResolvedValue({
+      ...pinnedSnapshot(),
+      resolutionRequest: {
+        subjectTags: [],
+        subjectDescription: null,
+        settingTags: [],
+        occasionTags: [],
+        styleTags: [],
+        scripts: [],
+      },
+      subjectDescription: null,
+    });
+    readCandidates.mockResolvedValue({ candidates: [], reasonRegistry: [] });
+
+    const result = await generateCampaignBundle(
+      PAYLOAD,
+      generateDeps(),
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({ status: "needs_data", missing: ["no_declared_subject"] });
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "no_declared_subject", costMinor: null }),
+    );
+    expect(pinResolution).not.toHaveBeenCalled();
+    expect(plan).not.toHaveBeenCalled();
+    expect(planBlueprint).not.toHaveBeenCalled();
+  });
+
+  it("fails rather than silently dropping a pinned reference whose bytes are unavailable", async () => {
+    readReference.mockResolvedValue(null);
+
+    const result = await generateCampaignBundle(
+      PAYLOAD,
+      generateDeps(),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ status: "failed", failureCode: "reference_bytes_unavailable" });
+    expect(pinResolution).toHaveBeenCalledTimes(1);
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it("passes the exact reference bytes and per-asset blueprints into image generation", async () => {
+    await generateCampaignBundle(PAYLOAD, generateDeps(), new AbortController().signal);
+
+    expect(materializeAssets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageGuidance: expect.objectContaining({
+          subjectDescription: "Kingfish curry in a clay pot.",
+          references: [
+            expect.objectContaining({
+              role: "subject",
+              ordinal: 0,
+              mimeType: "image/png",
+            }),
+          ],
+          blueprintsByAssetId: expect.any(Object),
+        }),
+      }),
+    );
+  });
+
   it("stands down when another worker holds the claim", async () => {
     claim.mockResolvedValue({ outcome: "already_claimed" });
 
@@ -232,7 +417,7 @@ describe("generateCampaignBundle", () => {
     let cancelled = false;
     plan.mockImplementation(async () => {
       cancelled = true;
-      return { candidate: validManifest(), costMinor: 1_000 };
+      return { candidate: modelManifest(), costMinor: 1_000 };
     });
 
     const result = await generateCampaignBundle(
@@ -287,7 +472,7 @@ describe("generateCampaignBundle", () => {
   it("passes the named failures into the repair attempt", async () => {
     plan
       .mockResolvedValueOnce({ candidate: "not a manifest", costMinor: 1_000 })
-      .mockResolvedValueOnce({ candidate: validManifest(), costMinor: 1_000 });
+      .mockResolvedValueOnce({ candidate: modelManifest(), costMinor: 1_000 });
 
     await generateCampaignBundle(PAYLOAD, generateDeps(), new AbortController().signal);
 
@@ -297,7 +482,23 @@ describe("generateCampaignBundle", () => {
   });
 
   it("stops at the cost ceiling instead of spending past it", async () => {
-    plan.mockResolvedValue({ candidate: validManifest(), costMinor: 900_000 });
+    plan.mockResolvedValue({ candidate: modelManifest(), costMinor: 900_000 });
+
+    const result = await generateCampaignBundle(
+      PAYLOAD,
+      generateDeps(),
+      new AbortController().signal,
+    );
+
+    expect(result).toMatchObject({ status: "failed", failureCode: "cost_ceiling_exceeded" });
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("does not publish when the final image spend crosses the cost ceiling", async () => {
+    materializeAssets.mockResolvedValue({
+      uploads: uploadsFor(validManifest()),
+      costMinor: PAYLOAD.costCeilingMinor,
+    });
 
     const result = await generateCampaignBundle(
       PAYLOAD,
@@ -335,6 +536,12 @@ describe("generateCampaignBundle", () => {
       digest: string;
     };
     expect(published.manifest.assets[0]?.contentHash).toBe("1".repeat(64));
+    expect(published.manifest.assets[0]?.truthClass).toBe("synthetic_composite");
+    expect(
+      published.manifest.assets[0]?.provenance.kind === "generated"
+        ? published.manifest.assets[0].provenance.derivedFromBrandAssetVersionIds
+        : [],
+    ).toEqual([SUBJECT_VERSION_ID]);
     expect(published.digest).toBe(bundleDigest(published.manifest));
   });
 

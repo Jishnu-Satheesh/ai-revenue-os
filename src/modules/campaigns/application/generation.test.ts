@@ -74,6 +74,8 @@ function evaluate(candidate: unknown, context = contextFor()) {
   return evaluateGeneratedBundle({
     candidate,
     context,
+    truthClass: "synthetic_composite",
+    derivedFromBrandAssetVersionIds: ["a0000000-0000-4000-8000-000000000009"],
     limitsByChannel: VERIFIED_LIMITS,
     producedAssetIds: manifest.assets.map((asset) => asset.id),
   });
@@ -89,7 +91,10 @@ function alignedManifest() {
   // context actually carries, and may only name an offer this context records.
   manifest.generationPolicy.lockedAssertionKeys = context.facts.map((fact) => fact.key);
   manifest.generationPolicy.lockedOfferRef = context.offer;
-  return manifest;
+  return {
+    ...manifest,
+    assets: manifest.assets.map(({ truthClass: _truthClass, ...asset }) => asset),
+  };
 }
 
 describe("generation readiness", () => {
@@ -127,7 +132,7 @@ describe("generation readiness", () => {
     expect(readiness.missing.length).toBeGreaterThan(3);
   });
 
-  it("refuses to generate imagery with neither a brand asset nor synthetic permission", () => {
+  it("does not treat synthetic setting permission as permission to invent a subject", () => {
     const readiness = buildGenerationContext({
       organizationId: ORGANIZATION_ID,
       campaignId: CAMPAIGN_ID,
@@ -139,7 +144,7 @@ describe("generation readiness", () => {
       now: new Date("2026-08-16T09:00:00.000Z"),
     });
 
-    expect(readiness.outcome).toBe("needs_data");
+    expect(readiness.outcome).toBe("ready");
   });
 
   it("drops a fact that cannot say where it came from", () => {
@@ -274,6 +279,17 @@ describe("evaluating generated bundles", () => {
     expect(result.outcome).toBe("invalid");
   });
 
+  it("rejects a model-authored truth class rather than trusting or stripping it", () => {
+    const manifest = alignedManifest();
+
+    const result = evaluate({
+      ...manifest,
+      assets: manifest.assets.map((asset) => ({ ...asset, truthClass: "authentic_source" })),
+    });
+
+    expect(result.outcome).toBe("invalid");
+  });
+
   it("rejects an asset the planner did not produce", () => {
     const manifest = alignedManifest();
     manifest.assets[0]!.id = "a0000000-0000-4000-8000-000000000099";
@@ -389,6 +405,8 @@ describe("evaluating generated bundles", () => {
     const result = evaluateGeneratedBundle({
       candidate: manifest,
       context: contextFor(),
+      truthClass: "synthetic_composite",
+      derivedFromBrandAssetVersionIds: ["a0000000-0000-4000-8000-000000000009"],
       limitsByChannel: VERIFIED_LIMITS,
       producedAssetIds: manifest.assets.map((asset) => asset.id),
     });

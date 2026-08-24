@@ -25,6 +25,8 @@ import {
 } from "@/modules/campaigns/infrastructure/run-repository";
 import {
   createGenerationContextLoader,
+  createReferenceCandidateReader,
+  createSupabaseReferenceObjectReader,
   type GenerationContextPersistence,
 } from "@/modules/campaigns/infrastructure/generation-readers";
 import {
@@ -32,7 +34,15 @@ import {
   createRevisionPlanner,
   createSupabaseCampaignAssetStorage,
 } from "@/modules/campaigns/infrastructure/campaign-planner";
-import { createGeminiCampaignGenerationProvider } from "@/modules/campaigns/infrastructure/gemini-campaign-generation-provider";
+import {
+  createGeminiCampaignGenerationProvider,
+  createGeminiRepairCall,
+} from "@/modules/campaigns/infrastructure/gemini-campaign-generation-provider";
+import { createBlueprintPlanner } from "@/modules/campaigns/infrastructure/blueprint-planner";
+import {
+  createGenerationReferenceContextWriter,
+  type GenerationReferenceContextPersistence,
+} from "@/modules/campaigns/infrastructure/creation-repository";
 import { createCampaignVariantStore } from "@/modules/campaigns/infrastructure/variant-repository";
 import { createVariantContextLoader } from "@/modules/campaigns/infrastructure/variant-readers";
 import {
@@ -114,16 +124,29 @@ export const generateCampaignBundleTask = schemaTask({
       supabase as unknown as GenerationContextPersistence,
       { organizationId: parsed.organizationId, runId: parsed.runId },
     );
+    const router = campaignRouter();
+    const generation = createGeminiRepairCall({ router });
 
     const result = await generateCampaignBundle(
       parsed,
       {
         runs,
         snapshots: context.snapshots,
+        candidates: createReferenceCandidateReader(
+          supabase as unknown as GenerationContextPersistence,
+        ),
+        referenceObjects: createSupabaseReferenceObjectReader(supabase),
+        referenceContext: createGenerationReferenceContextWriter(
+          supabase as unknown as GenerationReferenceContextPersistence,
+        ),
+        blueprintPlanner: createBlueprintPlanner({
+          provider: generation.provider,
+          repair: generation,
+        }),
         planner: createCampaignPlanner(
           {
-            provider: createGeminiCampaignGenerationProvider(),
-            router: campaignRouter(),
+            provider: generation.provider,
+            router,
             storage: createSupabaseCampaignAssetStorage(supabase),
             telemetry: createConsoleCampaignGenerationSink(),
           },
@@ -222,16 +245,35 @@ export const generateCampaignVariantsTask = schemaTask({
   run: async (payload, { signal }) => {
     const parsed = parseCampaignVariantPayload(payload);
     const supabase = createCampaignWorkerServiceClient();
+    const runs = createCampaignRunStore(supabase as unknown as CampaignRunPersistence);
+    const generationContext = createGenerationContextLoader(
+      supabase as unknown as GenerationContextPersistence,
+      { organizationId: parsed.organizationId, runId: parsed.runId },
+    );
+    const router = campaignRouter();
+    const generation = createGeminiRepairCall({ router });
 
     const result = await generateCampaignVariants(
       parsed,
       {
-        runs: createCampaignRunStore(supabase as unknown as CampaignRunPersistence),
+        runs,
         context: createVariantContextLoader(supabase as never),
+        snapshots: generationContext.snapshots,
+        candidates: createReferenceCandidateReader(
+          supabase as unknown as GenerationContextPersistence,
+        ),
+        referenceObjects: createSupabaseReferenceObjectReader(supabase),
+        referenceContext: createGenerationReferenceContextWriter(
+          supabase as unknown as GenerationReferenceContextPersistence,
+        ),
+        blueprintPlanner: createBlueprintPlanner({
+          provider: generation.provider,
+          repair: generation,
+        }),
         planner: createVariantPlanner(
           {
-            provider: createGeminiCampaignGenerationProvider(),
-            router: campaignRouter(),
+            provider: generation.provider,
+            router,
             storage: createSupabaseCampaignAssetStorage(supabase),
           },
           {

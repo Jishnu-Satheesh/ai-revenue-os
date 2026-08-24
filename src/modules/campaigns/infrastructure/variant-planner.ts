@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { refineImagePrompt, type ModelRouter } from "@/ai/model-router";
+import type { ModelRouter } from "@/ai/model-router";
 import type { CampaignGenerationProvider } from "@/ai/campaign-generation-provider";
 import {
   campaignAssetPath,
@@ -8,6 +8,7 @@ import {
 } from "@/modules/campaigns/infrastructure/asset-intake";
 import type { CampaignAssetStorage } from "@/modules/campaigns/infrastructure/campaign-planner";
 import type { VariantPlanner } from "@/workflows/campaigns/generate-variants";
+import { buildBlueprintReferencePrompt } from "@/modules/campaigns/infrastructure/reference-prompt";
 
 /**
  * Draws one variant: an image, and the words that go with it.
@@ -54,15 +55,13 @@ export function createVariantPlanner(
   context: { organizationId: string; campaignId: string; correlationId: string },
 ): VariantPlanner {
   return {
-    async draw({ manifest, directionId, attemptOrdinal, signal }) {
+    async draw({ manifest, directionId, attemptOrdinal, signal, imageGuidance }) {
       const direction = manifest.directions.find((entry) => entry.id === directionId);
       if (!direction) throw new Error("The direction to vary is not in this bundle.");
 
       const action = manifest.actions.find((entry) => entry.directionId === directionId);
       const placement = action?.placement ?? "feed_image";
       const size = PLACEMENT_SIZES[placement];
-      const reference = manifest.assets.find((asset) => direction.assetIds.includes(asset.id));
-
       const textRoute = dependencies.router.resolve("plan");
       const imageRoute = dependencies.router.resolve("image");
 
@@ -75,12 +74,14 @@ export function createVariantPlanner(
 
       const generated = await dependencies.provider.generateImage({
         context,
-        prompt: refineImagePrompt({
-          route: imageRoute,
-          subject: reference?.altText ?? manifest.objective,
-          brandDirection: direction.rationale,
-          negativeConstraints: [],
+        prompt: buildBlueprintReferencePrompt({
+          operatorCreativeDirection: direction.rationale,
+          subjectDescription: imageGuidance.subjectDescription,
+          resolution: imageGuidance.resolution,
+          hardConstraints: imageGuidance.hardConstraints,
+          blueprint: imageGuidance.blueprint,
         }),
+        references: imageGuidance.references,
         widthPx: size.widthPx,
         heightPx: size.heightPx,
       });

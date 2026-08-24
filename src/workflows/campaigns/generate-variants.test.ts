@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { generateCampaignVariants } from "@/workflows/campaigns/generate-variants";
+import {
+  generateCampaignVariants,
+  type GenerateVariantsDependencies,
+} from "@/workflows/campaigns/generate-variants";
 import { campaignVariantPayloadSchema } from "@/workflows/campaigns/contracts";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
 
@@ -10,6 +13,8 @@ const VERSION_ID = "d1000000-0000-4000-8000-000000000001";
 const RUN_ID = "e1000000-0000-4000-8000-000000000001";
 const DIGEST = "a".repeat(64);
 const NOW = new Date("2026-09-01T00:00:00.000Z");
+const SUBJECT_ASSET_ID = "21111111-1111-4111-8111-111111111111";
+const SUBJECT_VERSION_ID = "31111111-1111-4111-8111-111111111111";
 
 const PAYLOAD = {
   organizationId: ORGANIZATION_ID,
@@ -19,6 +24,89 @@ const PAYLOAD = {
   correlationId: "f1000000-0000-4000-8000-000000000001",
   costCeilingMinor: 100_000,
 };
+
+const readSnapshot = vi.fn();
+const readCandidates = vi.fn();
+const readReference = vi.fn();
+const pinResolution = vi.fn();
+const pinBlueprint = vi.fn();
+const planBlueprint = vi.fn();
+
+const BLUEPRINT = {
+  composition: "Centered plate with negative space.",
+  framing: "Tight overhead crop.",
+  lighting: "Soft daylight.",
+  cameraTreatment: "Natural 50mm treatment.",
+  palette: ["brick red"],
+  focalPoint: "The dish.",
+  surfaceNotes: [],
+  propNotes: [],
+  avoid: ["busy tableware"],
+};
+
+beforeEach(() => {
+  for (const spy of [
+    readSnapshot,
+    readCandidates,
+    readReference,
+    pinResolution,
+    pinBlueprint,
+    planBlueprint,
+  ]) {
+    spy.mockReset();
+  }
+  readSnapshot.mockResolvedValue({
+    snapshot: {
+      organizationProfile: "Al Noor Kitchen.",
+      brandVoice: "Warm and direct.",
+      hardConstraints: ["Never imply a health claim."],
+    },
+    generationProfile: "brand_guided",
+    brandAssetVersionIds: [SUBJECT_VERSION_ID],
+    resolutionRequest: {
+      subjectTags: ["kingfish curry"],
+      subjectDescription: "Kingfish curry in a clay pot.",
+      settingTags: [],
+      occasionTags: [],
+      styleTags: [],
+      scripts: [],
+    },
+    declaredReferenceSlots: [],
+    subjectDescription: "Kingfish curry in a clay pot.",
+    creativeDirection: "Warm daylight.",
+    syntheticAssetsAllowed: false,
+  });
+  readCandidates.mockResolvedValue({
+    candidates: [
+      {
+        brandAssetId: SUBJECT_ASSET_ID,
+        brandAssetVersionId: SUBJECT_VERSION_ID,
+        conditioningRoles: ["subject"],
+        tags: ["kingfish curry"],
+        scripts: [],
+        ownership: "owned",
+        version: 1,
+        currentVerdict: "approved",
+        currentReasonCodes: [],
+        currentReviewedAt: "2026-08-24T10:00:00.000Z",
+        archivedAt: null,
+        requestedReferenceMode: "inspiration",
+        storagePath: `${ORGANIZATION_ID}/asset/version/source`,
+        mimeType: "image/png",
+      },
+    ],
+    reasonRegistry: [],
+  });
+  readReference.mockResolvedValue(new Uint8Array([1, 2, 3]));
+  pinResolution.mockResolvedValue(undefined);
+  pinBlueprint.mockResolvedValue(undefined);
+  planBlueprint.mockResolvedValue({
+    blueprint: BLUEPRINT,
+    planModelId: "gemini-plan",
+    repairModelId: null,
+    costMinor: 10,
+  });
+});
 
 function contextRead(overrides: Record<string, unknown> = {}) {
   const manifest = validManifest();
@@ -81,11 +169,16 @@ function runStore(variantsPerDirection = 1) {
   };
 }
 
-function deps(overrides: Record<string, unknown> = {}) {
+function deps(overrides: Partial<GenerateVariantsDependencies> = {}): GenerateVariantsDependencies {
   let seed = 0;
   return {
     runs: runStore(),
     context: { read: vi.fn(async () => contextRead()) },
+    snapshots: { read: readSnapshot },
+    candidates: { read: readCandidates },
+    referenceObjects: { read: readReference },
+    referenceContext: { pinResolution, pinBlueprint },
+    blueprintPlanner: { plan: planBlueprint },
     planner: {
       draw: vi.fn(async ({ directionId }: { directionId: string }) => {
         seed += 1;
@@ -98,6 +191,7 @@ function deps(overrides: Record<string, unknown> = {}) {
         usedByDirection: {} as Record<string, number>,
         usedInTotal: 0,
       })),
+      listForVersion: vi.fn(async () => []),
       append: vi.fn(async () => ({
         outcome: "appended" as const,
         variantId: "aa000000-0000-4000-8000-000000000001",
@@ -107,7 +201,7 @@ function deps(overrides: Record<string, unknown> = {}) {
     promptVersionId: "campaign-variant-prompt-v1",
     now: () => NOW,
     ...overrides,
-  } as never;
+  };
 }
 
 describe("variants are produced inside an approval that already exists", () => {
@@ -132,6 +226,76 @@ describe("variants are produced inside an approval that already exists", () => {
     ).toBe(false);
 
     expect(campaignVariantPayloadSchema.safeParse(PAYLOAD).success).toBe(true);
+  });
+
+  it("pins the resolution and all blueprints before any variant image is drawn", async () => {
+    const order: string[] = [];
+    pinResolution.mockImplementation(async () => void order.push("resolution"));
+    planBlueprint.mockImplementation(async () => {
+      order.push("blueprint-plan");
+      return {
+        blueprint: BLUEPRINT,
+        planModelId: "gemini-plan",
+        repairModelId: null,
+        costMinor: 10,
+      };
+    });
+    pinBlueprint.mockImplementation(async () => void order.push("blueprint-pin"));
+    const dependencies = deps();
+    const draw = dependencies.planner.draw as ReturnType<typeof vi.fn>;
+    draw.mockImplementation(async ({ directionId }: { directionId: string }) => {
+      order.push("draw");
+      return drawn(directionId, 1);
+    });
+
+    await generateCampaignVariants(PAYLOAD, dependencies, new AbortController().signal);
+
+    expect(order.indexOf("resolution")).toBeLessThan(order.indexOf("blueprint-plan"));
+    expect(order.indexOf("blueprint-pin")).toBeGreaterThan(order.lastIndexOf("blueprint-plan"));
+    expect(order.indexOf("blueprint-pin")).toBeLessThan(order.indexOf("draw"));
+  });
+
+  it("passes governed references and the keyed blueprint into every draw", async () => {
+    const dependencies = deps();
+
+    await generateCampaignVariants(PAYLOAD, dependencies, new AbortController().signal);
+
+    expect(dependencies.planner.draw).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageGuidance: expect.objectContaining({
+          subjectDescription: "Kingfish curry in a clay pot.",
+          references: [expect.objectContaining({ role: "subject", mimeType: "image/png" })],
+          blueprint: BLUEPRINT,
+        }),
+      }),
+    );
+  });
+
+  it("refuses no_declared_subject before any model spend", async () => {
+    readSnapshot.mockResolvedValue({
+      ...(await readSnapshot()),
+      subjectDescription: null,
+      resolutionRequest: {
+        subjectTags: [],
+        subjectDescription: null,
+        settingTags: [],
+        occasionTags: [],
+        styleTags: [],
+        scripts: [],
+      },
+    });
+    readCandidates.mockResolvedValue({ candidates: [], reasonRegistry: [] });
+    const dependencies = deps();
+
+    const result = await generateCampaignVariants(
+      PAYLOAD,
+      dependencies,
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({ status: "needs_data", missing: ["no_declared_subject"] });
+    expect(dependencies.planner.draw).not.toHaveBeenCalled();
+    expect(planBlueprint).not.toHaveBeenCalled();
   });
 });
 
@@ -224,6 +388,7 @@ describe("a partial run is an outcome, not a failure", () => {
           usedByDirection: {},
           usedInTotal: 0,
         })),
+        listForVersion: vi.fn(async () => []),
         append: vi.fn(async () => ({
           outcome: "refused" as const,
           reason: "total_cap_reached" as const,

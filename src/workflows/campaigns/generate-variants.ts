@@ -7,11 +7,23 @@ import type { VariantEvidence } from "@/domain/campaigns/derivation";
 import type { ChannelContentLimits } from "@/domain/campaigns/content-policy";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
 import type { ApprovalRow } from "@/domain/campaigns/state-machine";
+import type { ArtDirectionBlueprint } from "@/domain/campaigns/art-direction";
+import { resolveReferences } from "@/domain/campaigns/reference-resolution";
 import type {
   CampaignVariantStore,
   VariantProvenance,
 } from "@/modules/campaigns/infrastructure/variant-repository";
-import type { GenerationRunStore } from "@/workflows/campaigns/generate-bundle";
+import {
+  declaredBrandContext,
+  loadReferenceBytes,
+  type CampaignBlueprintPlanner,
+  type GenerationReferenceContextWriter,
+  type GenerationRunStore,
+  type GenerationSnapshotReader,
+  type ReferenceCandidateReader,
+  type ReferenceObjectReader,
+} from "@/workflows/campaigns/generate-bundle";
+import type { CampaignImageReference } from "@/ai/campaign-generation-provider";
 import { GENERATE_VARIANTS_LEASE_SECONDS } from "@/workflows/campaigns/durations";
 
 /**
@@ -50,12 +62,24 @@ export type VariantPlanner = {
     directionId: string;
     attemptOrdinal: number;
     signal: AbortSignal;
+    imageGuidance: {
+      subjectDescription: string | null;
+      resolution: ReturnType<typeof resolveReferences>;
+      references: readonly CampaignImageReference[];
+      blueprint: ArtDirectionBlueprint;
+      hardConstraints: readonly string[];
+    };
   }): Promise<{ candidate: unknown; assetId: string; costMinor: number; modelId: string }>;
 };
 
 export type GenerateVariantsDependencies = {
   runs: GenerationRunStore;
   context: VariantContextReader;
+  snapshots: GenerationSnapshotReader;
+  candidates: ReferenceCandidateReader;
+  referenceObjects: ReferenceObjectReader;
+  referenceContext: GenerationReferenceContextWriter;
+  blueprintPlanner: CampaignBlueprintPlanner;
   planner: VariantPlanner;
   variants: CampaignVariantStore;
   isCancelled: () => boolean;
@@ -78,7 +102,9 @@ export type GenerateVariantsResult =
       costMinor: number;
     }
   | { status: "cancelled"; stored: number }
-  | { status: "cost_ceiling_reached"; stored: number; costMinor: number };
+  | { status: "cost_ceiling_reached"; stored: number; costMinor: number }
+  | { status: "needs_data"; missing: readonly ["no_declared_subject"] }
+  | { status: "failed"; failureCode: "source_snapshot_missing" | "reference_bytes_unavailable" };
 
 export async function generateCampaignVariants(
   payload: {
@@ -147,7 +173,11 @@ async function produce({
     costCeilingMinor: number;
   };
   dependencies: GenerateVariantsDependencies;
-  claim: { claimToken: string };
+  claim: {
+    claimToken: string;
+    campaignId: string;
+    sourceSnapshotId: string;
+  };
   perDirection: number;
   now: () => Date;
   signal: AbortSignal;
@@ -160,6 +190,130 @@ async function produce({
   const outcomes: VariantOutcome[] = [];
   let spentMinor = 0;
   let stored = 0;
+
+  const pinned = await dependencies.snapshots.read({
+    organizationId: payload.organizationId,
+    campaignId: claim.campaignId,
+    sourceSnapshotId: claim.sourceSnapshotId,
+    claimToken: claim.claimToken,
+  });
+  if (!pinned) {
+    await dependencies.runs.fail({
+      organizationId: payload.organizationId,
+      runId: payload.runId,
+      claimToken: claim.claimToken,
+      failureCode: "source_snapshot_missing",
+      costMinor: null,
+    });
+    return { status: "failed", failureCode: "source_snapshot_missing" };
+  }
+
+  const candidateSet = await dependencies.candidates.read(payload.organizationId);
+  const declaredModes = new Map(
+    pinned.declaredReferenceSlots.map((slot) => [slot.brandAssetVersionId, slot.referenceMode]),
+  );
+  const resolution = resolveReferences({
+    candidates: candidateSet.candidates.map((candidate) => {
+      const { storagePath: _storagePath, mimeType: _mimeType, ...domainCandidate } = candidate;
+      return {
+        ...domainCandidate,
+        requestedReferenceMode:
+          declaredModes.get(candidate.brandAssetVersionId) ?? candidate.requestedReferenceMode,
+      };
+    }),
+    reasonRegistry: candidateSet.reasonRegistry,
+    request: pinned.resolutionRequest,
+  });
+  if (resolution.outcome === "insufficient") {
+    await dependencies.runs.fail({
+      organizationId: payload.organizationId,
+      runId: payload.runId,
+      claimToken: claim.claimToken,
+      failureCode: "no_declared_subject",
+      costMinor: null,
+    });
+    return { status: "needs_data", missing: ["no_declared_subject"] };
+  }
+
+  await dependencies.referenceContext.pinResolution({
+    organizationId: payload.organizationId,
+    runId: payload.runId,
+    claimToken: claim.claimToken,
+    resolution,
+  });
+  const references = await loadReferenceBytes(
+    resolution,
+    candidateSet.candidates,
+    dependencies.referenceObjects,
+  );
+  if (!references) {
+    await dependencies.runs.fail({
+      organizationId: payload.organizationId,
+      runId: payload.runId,
+      claimToken: claim.claimToken,
+      failureCode: "reference_bytes_unavailable",
+      costMinor: null,
+    });
+    return { status: "failed", failureCode: "reference_bytes_unavailable" };
+  }
+
+  const hardConstraints = readStringArray(pinned.snapshot.hardConstraints);
+  const blueprintsByKey: Record<string, ArtDirectionBlueprint> = {};
+  const planModelIds = new Set<string>();
+  for (const direction of context.manifest.directions) {
+    for (let ordinal = 0; ordinal < perDirection; ordinal += 1) {
+      if (dependencies.isCancelled() || signal.aborted) {
+        await dependencies.runs.fail({
+          organizationId: payload.organizationId,
+          runId: payload.runId,
+          claimToken: claim.claimToken,
+          failureCode: "cancelled",
+          costMinor: spentMinor > 0 ? spentMinor : null,
+        });
+        return { status: "cancelled", stored };
+      }
+      const planned = await dependencies.blueprintPlanner.plan({
+        context: {
+          organizationId: payload.organizationId,
+          campaignId: claim.campaignId,
+          correlationId: payload.correlationId,
+        },
+        operatorCreativeDirection: [pinned.creativeDirection, direction.rationale]
+          .filter((value): value is string => Boolean(value))
+          .join("\n"),
+        brandContext: declaredBrandContext(pinned.snapshot, {
+          hardConstraints,
+          softConventions: readStringArray(pinned.snapshot.softConventions),
+        }),
+        subjectDescription: pinned.subjectDescription,
+        resolution,
+        references,
+      });
+      spentMinor += planned.costMinor ?? 0;
+      if (spentMinor > payload.costCeilingMinor) {
+        await dependencies.runs.fail({
+          organizationId: payload.organizationId,
+          runId: payload.runId,
+          claimToken: claim.claimToken,
+          failureCode: "cost_ceiling_reached",
+          costMinor: spentMinor,
+        });
+        return { status: "cost_ceiling_reached", stored, costMinor: spentMinor };
+      }
+      blueprintsByKey[blueprintKey(direction.id, ordinal + 1)] = planned.blueprint;
+      planModelIds.add(planned.planModelId);
+    }
+  }
+  if (planModelIds.size !== 1) {
+    throw new Error("Variant blueprints did not use one configured model.");
+  }
+  await dependencies.referenceContext.pinBlueprint({
+    organizationId: payload.organizationId,
+    runId: payload.runId,
+    claimToken: claim.claimToken,
+    blueprint: { byVariantKey: blueprintsByKey },
+    planModelId: [...planModelIds][0]!,
+  });
 
   // Read once up front, then tracked in memory. The database counts again
   // under a lock when each variant lands, so this is a fast path rather than
@@ -196,6 +350,13 @@ async function produce({
         directionId: direction.id,
         attemptOrdinal: ordinal + 1,
         signal,
+        imageGuidance: {
+          subjectDescription: pinned.subjectDescription,
+          resolution,
+          references,
+          blueprint: blueprintsByKey[blueprintKey(direction.id, ordinal + 1)]!,
+          hardConstraints,
+        },
       });
       spentMinor += drawn.costMinor;
 
@@ -349,4 +510,14 @@ async function storeOne(input: {
     directionId: input.direction,
     contentHash: admission.contentHash,
   };
+}
+
+function blueprintKey(directionId: string, attemptOrdinal: number): string {
+  return `${directionId}:${attemptOrdinal}`;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }

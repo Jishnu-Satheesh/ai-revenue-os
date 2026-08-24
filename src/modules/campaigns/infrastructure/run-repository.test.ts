@@ -156,6 +156,33 @@ describe("run store", () => {
     });
   });
 
+  it("accepts a variants claim and carries the persisted size into the workflow", async () => {
+    const { persistence } = persistenceReturning({
+      outcome: "claimed",
+      claim_token: CLAIM_TOKEN,
+      attempt: 1,
+      campaign_id: CAMPAIGN_ID,
+      source_snapshot_id: SNAPSHOT_ID,
+      kind: "variants",
+      base_version_id: VERSION_ID,
+      base_digest: "a".repeat(64),
+      correlation_id: CORRELATION_ID,
+      variants_per_direction: 4,
+    });
+
+    const claim = await createCampaignRunStore(persistence).claim({
+      organizationId: ORGANIZATION_ID,
+      runId: RUN_ID,
+      leaseSeconds: 300,
+    });
+
+    expect(claim).toMatchObject({
+      outcome: "claimed",
+      kind: "variants",
+      variantsPerDirection: 4,
+    });
+  });
+
   it("passes an already-claimed run straight through", async () => {
     const { persistence } = persistenceReturning({ outcome: "already_claimed" });
 

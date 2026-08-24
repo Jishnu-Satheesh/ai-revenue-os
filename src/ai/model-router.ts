@@ -241,32 +241,3 @@ export function refinePrompt(input: RefinePromptInput): RefinedPrompt {
 
   return { system, prompt, route };
 }
-
-/**
- * Shapes an image prompt for the routed image model.
- *
- * The truth clause is not decoration. An image model asked for "a busy
- * restaurant" will happily produce something that reads as a photograph of a
- * real venue on a real night, and that image would then need an attestation
- * nobody can honestly give.
- */
-export function refineImagePrompt(input: {
-  route: ModelRoute;
-  subject: string;
-  brandDirection: string;
-  negativeConstraints?: readonly string[];
-}): string {
-  const lines = [
-    input.subject,
-    "",
-    `Art direction: ${input.brandDirection}`,
-    "",
-    "This is an illustrative marketing image, not documentary photography.",
-    "Do not depict real identifiable people, real branded products, logos you were not given, awards, or review scores.",
-    "Do not render text that states a price, a discount, or a claim.",
-  ];
-  if (input.negativeConstraints?.length) {
-    lines.push("", `Avoid: ${input.negativeConstraints.join("; ")}`);
-  }
-  return lines.join("\n");
-}

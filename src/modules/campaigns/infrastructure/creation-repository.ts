@@ -7,6 +7,8 @@ import type {
 } from "@/modules/campaigns/application/service";
 import type { QualificationOpportunity } from "@/modules/campaigns/application/qualification";
 import type { CampaignRunDispatcher } from "@/modules/campaigns/infrastructure/run-repository";
+import { referenceResolutionSchema } from "@/domain/campaigns/reference-resolution";
+import type { GenerationReferenceContextWriter } from "@/workflows/campaigns/generate-bundle";
 
 /**
  * The request-path writes for creating a campaign.
@@ -35,6 +37,13 @@ export type CampaignCreationPersistence = {
       };
     };
   };
+};
+
+export type GenerationReferenceContextPersistence = {
+  rpc(
+    name: "pin_campaign_generation_run_reference_context",
+    args: Record<string, unknown>,
+  ): Promise<RpcResult<unknown>>;
 };
 
 function creationError(): never {
@@ -193,6 +202,61 @@ export function createGenerationDispatcher(
         correlationId: input.correlationId,
       });
       return { runId };
+    },
+  };
+}
+
+/** Worker receipt writer. Both phases are fenced by the run's live claim token in Postgres. */
+export function createGenerationReferenceContextWriter(
+  persistence: GenerationReferenceContextPersistence,
+): GenerationReferenceContextWriter {
+  async function pin(input: {
+    organizationId: string;
+    runId: string;
+    claimToken: string;
+    phase: "resolution" | "blueprint";
+    body: Record<string, unknown>;
+  }) {
+    const { error } = await persistence.rpc("pin_campaign_generation_run_reference_context", {
+      target_organization_id: input.organizationId,
+      input_pin: {
+        organization_id: input.organizationId,
+        run_id: input.runId,
+        claim_token: input.claimToken,
+        phase: input.phase,
+        ...input.body,
+      },
+    });
+    if (error) throw new Error("Campaign generation reference context could not be pinned.");
+  }
+
+  return {
+    async pinResolution(input) {
+      const resolution = referenceResolutionSchema.parse(input.resolution);
+      if (resolution.outcome === "insufficient") {
+        throw new Error("An insufficient reference resolution cannot be pinned for generation.");
+      }
+      await pin({
+        ...input,
+        phase: "resolution",
+        body: {
+          reference_slots: resolution.referenceSlots,
+          avoid_reference_version_ids: resolution.avoidReferences.map(
+            (reference) => reference.brandAssetVersionId,
+          ),
+          negative_rules: resolution.negativeRules,
+          resolver_version: resolution.resolverVersion,
+          resolution_outcome: resolution.outcome,
+        },
+      });
+    },
+
+    async pinBlueprint(input) {
+      await pin({
+        ...input,
+        phase: "blueprint",
+        body: { blueprint: input.blueprint, plan_model_id: input.planModelId },
+      });
     },
   };
 }

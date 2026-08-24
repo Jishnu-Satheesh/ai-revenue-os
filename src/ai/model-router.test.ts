@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  createModelRouter,
-  refineImagePrompt,
-  refinePrompt,
-  type ModelTask,
-} from "@/ai/model-router";
+import { createModelRouter, refinePrompt, type ModelTask } from "@/ai/model-router";
 
 const FULL_CONFIG = {
   textModel: "gemini-text",
@@ -166,41 +161,5 @@ describe("prompt refinement", () => {
     const refined = refine("plan", { repairFailures: ["something"] });
 
     expect(refined.prompt).not.toContain("<validation_failures>");
-  });
-});
-
-describe("image prompt refinement", () => {
-  const route = createModelRouter(FULL_CONFIG).resolve("image");
-
-  it("states plainly that the image is illustrative, not documentary", () => {
-    const prompt = refineImagePrompt({
-      route,
-      subject: "A plated lunch dish",
-      brandDirection: "Warm, natural light",
-    });
-
-    expect(prompt).toContain("not documentary photography");
-  });
-
-  it("forbids the things an image must never imply", () => {
-    const prompt = refineImagePrompt({
-      route,
-      subject: "A dining room",
-      brandDirection: "Warm",
-    });
-
-    expect(prompt).toContain("real identifiable people");
-    expect(prompt).toContain("Do not render text that states a price, a discount, or a claim");
-  });
-
-  it("passes negative constraints through when supplied", () => {
-    const prompt = refineImagePrompt({
-      route,
-      subject: "A dining room",
-      brandDirection: "Warm",
-      negativeConstraints: ["no alcohol", "no children"],
-    });
-
-    expect(prompt).toContain("no alcohol; no children");
   });
 });
