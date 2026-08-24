@@ -810,6 +810,24 @@ provider payload.
 `planned`, actor, required dismissal reason, timestamp, and the recommendation version. A later
 analysis may supersede a recommendation but may not erase the human's prior decision.
 
+`channel_recommendation_feedback` stores the helpful / not-helpful review hook: one vote per actor
+per recommendation, replaceable, stored apart from triage decisions so a statement about usefulness
+is never mistaken for a statement about action.
+
+Generation is a second fenced worker, not a phase of the detector run (ADR 0037). It claims a
+completed analysis run through a security-definer RPC, reads that run's findings alone with no tools
+and no retrieval, and files at most six schema-validated recommendations whose citations the
+completion RPC re-checks against the findings of the same run. Each recommendation records the
+prompt version that produced it. A failed or refused narration leaves the run's findings visible
+untouched, which section 11.4 requires as the fallback.
+
+Quality is evaluated by a scheduled judge that reports and never modifies (ADR 0038). Every
+forty-eight hours it receives each not-yet-judged recommendation together with the exact findings it
+cites, returns a structured verdict on citation faithfulness, label appropriateness, invented values,
+and uncertainty honesty, and files it into `channel_recommendation_evaluations` through a
+worker-only RPC with digests and judge-model metadata. Verdicts are internal quality evidence for human prompt iteration; they never render on a
+client-facing surface and never change a recommendation, a prompt, or a rule by themselves.
+
 ### 11.4 Narrative constraints
 
 AI may translate a deterministic finding into plain language, group related findings, and suggest
@@ -861,6 +879,7 @@ proxies bytes through the application.
 - `GET /api/organizations/:organizationId/channels/:channelId/economics`
 - `GET /api/organizations/:organizationId/channel-evidence/:evidenceId`
 - `POST /api/organizations/:organizationId/channel-recommendations/:recommendationId/decisions`
+- `POST /api/organizations/:organizationId/channel-recommendations/:recommendationId/feedback`
 
 Read models use discriminated unions for trusted, partial, indicative, insufficient, stale,
 ambiguous-overlap, and currency-mismatch states. An unavailable value is absent, not zero.
@@ -935,6 +954,8 @@ provider payloads, credentials, or customer PII.
 - Treat file names, sheet names, headers, descriptions, formulas, URLs, reviews, and cell text as
   attacker-controlled. They never determine tool calls or prompt instructions.
 - The contract-proposal model has no tools and no retrieval outside the bounded package context.
+  The recommendation-narration model and the scheduled judge have the same constraint, bounded to
+  one run's findings and their citations.
 - Redact or remove customer names, phone numbers, email addresses, delivery addresses, free-text
   order notes, and unrestricted review text unless a declared detector needs minimized content and
   policy permits it.
@@ -1089,11 +1110,14 @@ The page reads the findings of the one run it displays, so the window in the hea
 beneath it come from the same analysis. Reading every open finding for the channel put two runs'
 answers on one page, under a header naming only one of their windows.
 
-Recommendation generation and triage ship with the Talabat vertical slice (section 4.1.7), behind
-`GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS`: Acknowledge, Mark planned, or Dismiss with a required
-reason, each recommendation schema-validated and citing the findings it used, and a
-helpful/not-helpful review hook separate from the triage decision. Findings remain visible without
-narration, which section 11.4 already requires as the fallback.
+Recommendations ship with the Talabat vertical slice (section 4.1.7), behind
+`GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS`. Narration is written by a second fenced worker
+chained after the detector run (ADR 0037), capped at six per run and citing the findings it used;
+triage offers Acknowledge, Mark planned, and Dismiss with a required reason through an append-only
+decision log; a helpful/not-helpful hook sits apart from triage; and a scheduled judge reviews each
+recommendation against its own citations every forty-eight hours as advisory quality evidence for
+human prompt iteration (ADR 0038). Findings remain visible without narration, which section 11.4
+already requires as the fallback.
 
 ## 18. Superdesign approval gate
 
