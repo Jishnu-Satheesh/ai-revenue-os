@@ -4,6 +4,8 @@ import { buildChannelWorkspaceView } from "@/modules/analysis/application/read-m
 import type {
   ChannelAnalysisRunRecord,
   ChannelFindingRecord,
+  ChannelRecommendationDecisionRecord,
+  ChannelRecommendationRecord,
 } from "@/modules/analysis/application/ports";
 
 const CHANNEL = "channel-1";
@@ -80,6 +82,7 @@ describe("buildChannelWorkspaceView", () => {
         }),
       ],
       evidence: [],
+      recommendations: [],
     });
 
     const summary = view.chapters.find((chapter) => chapter.id === "summary");
@@ -93,7 +96,12 @@ describe("buildChannelWorkspaceView", () => {
   });
 
   it("marks the chapters no report fills as deferred, each with a reason", () => {
-    const view = buildChannelWorkspaceView({ runs: [run()], findings: [finding()], evidence: [] });
+    const view = buildChannelWorkspaceView({
+      runs: [run()],
+      findings: [finding()],
+      evidence: [],
+      recommendations: [],
+    });
 
     // Registry version 2 gave Funnel and Operations detectors, so only the
     // chapters waiting on other reports stay deferred.
@@ -110,7 +118,12 @@ describe("buildChannelWorkspaceView", () => {
   });
 
   it("tells a chapter nobody analysed apart from one whose detector needed data", () => {
-    const notRun = buildChannelWorkspaceView({ runs: [], findings: [], evidence: [] });
+    const notRun = buildChannelWorkspaceView({
+      runs: [],
+      findings: [],
+      evidence: [],
+      recommendations: [],
+    });
     expect(notRun.chapters.find((chapter) => chapter.id === "summary")?.state).toBe("not_run");
 
     const needsData = buildChannelWorkspaceView({
@@ -129,6 +142,7 @@ describe("buildChannelWorkspaceView", () => {
         }),
       ],
       evidence: [],
+      recommendations: [],
     });
     expect(needsData.chapters.find((chapter) => chapter.id === "trust")?.state).toBe("needs_data");
   });
@@ -148,6 +162,7 @@ describe("buildChannelWorkspaceView", () => {
         }),
       ],
       evidence: [],
+      recommendations: [],
     });
 
     const outcome = view.chapters.find((chapter) => chapter.id === "summary")?.findings[0];
@@ -157,7 +172,12 @@ describe("buildChannelWorkspaceView", () => {
   });
 
   it("leaves a tile blank with a reason rather than showing a zero", () => {
-    const view = buildChannelWorkspaceView({ runs: [run()], findings: [], evidence: [] });
+    const view = buildChannelWorkspaceView({
+      runs: [run()],
+      findings: [],
+      evidence: [],
+      recommendations: [],
+    });
 
     for (const tile of view.summaryTiles) {
       expect(tile.value).toBeNull();
@@ -183,6 +203,7 @@ describe("buildChannelWorkspaceView", () => {
         }),
       ],
       evidence: [],
+      recommendations: [],
     });
 
     const gross = view.summaryTiles[0];
@@ -212,6 +233,7 @@ describe("buildChannelWorkspaceView", () => {
         }),
       ],
       evidence: [],
+      recommendations: [],
     });
 
     expect(view.summaryTiles[1].value).toBeNull();
@@ -227,6 +249,7 @@ describe("buildChannelWorkspaceView", () => {
       ],
       findings: [],
       evidence: [],
+      recommendations: [],
     });
 
     expect(view.run?.id).toBe("run-1");
@@ -251,6 +274,7 @@ describe("buildChannelWorkspaceView", () => {
           referenceId: "r1",
         },
       ],
+      recommendations: [],
     });
 
     const first = view.chapters
@@ -268,6 +292,7 @@ describe("buildChannelWorkspaceView", () => {
         finding({ id: "future", detectorKey: "margin.contribution", code: "SOMETHING_NEW" }),
       ],
       evidence: [],
+      recommendations: [],
     });
 
     expect(view.unplacedFindings.map((entry) => entry.id)).toEqual(["future"]);
@@ -294,6 +319,7 @@ describe("buildChannelWorkspaceView", () => {
         }),
       ],
       evidence: [],
+      recommendations: [],
     });
 
     const trust = view.chapters.find((chapter) => chapter.id === "trust");
@@ -335,6 +361,7 @@ describe("buildChannelWorkspaceView", () => {
           }),
         ],
         evidence: [],
+        recommendations: [],
       });
 
       // Amount descending is taken literally from the stored figure, sign
@@ -361,6 +388,7 @@ describe("buildChannelWorkspaceView", () => {
           }),
         ],
         evidence: [],
+        recommendations: [],
       });
 
       // A declared amount outranks everything, including a higher severity
@@ -407,6 +435,7 @@ describe("buildChannelWorkspaceView", () => {
           }),
         ],
         evidence: [],
+        recommendations: [],
       });
 
       // Severity is checked before priority, so a critical finding with no
@@ -437,6 +466,7 @@ describe("buildChannelWorkspaceView", () => {
           }),
         ],
         evidence: [],
+        recommendations: [],
       });
 
       // Same kind, no money on either, and no severity or priority: the stored
@@ -478,6 +508,7 @@ describe("buildChannelWorkspaceView", () => {
           finding({ id: "coverage", code: "PERIOD_COVERAGE_COMPLETE", observedPeriodCount: 31 }),
         ],
         evidence: [],
+        recommendations: [],
       });
 
       expect(view.verdict.headlineSentence).toContain("rose");
@@ -503,6 +534,7 @@ describe("buildChannelWorkspaceView", () => {
           finding({ id: "coverage", code: "PERIOD_COVERAGE_INCOMPLETE" }),
         ],
         evidence: [],
+        recommendations: [],
       });
 
       expect(view.verdict.headlineSentence).toMatch(/with care/);
@@ -512,13 +544,182 @@ describe("buildChannelWorkspaceView", () => {
     });
 
     it("says what is missing instead of inventing figures when nothing ran", () => {
-      const view = buildChannelWorkspaceView({ runs: [], findings: [], evidence: [] });
+      const view = buildChannelWorkspaceView({
+        runs: [],
+        findings: [],
+        evidence: [],
+        recommendations: [],
+      });
 
       expect(view.verdict.headlineSentence).toMatch(/not enough governed evidence/);
       expect(view.verdict.badges).toHaveLength(3);
       // Honesty check: with no run at all there is no figure to speak of, so
       // no badge may carry a digit that looks like one.
       for (const badge of view.verdict.badges) expect(badge).not.toMatch(/\d/);
+    });
+  });
+
+  describe("recommendations", () => {
+    function triageDecision(
+      overrides: Partial<ChannelRecommendationDecisionRecord> = {},
+    ): ChannelRecommendationDecisionRecord {
+      return {
+        recommendationId: "rec-1",
+        decision: "acknowledged",
+        reason: null,
+        actorId: "actor-1",
+        actorName: "Dana",
+        createdAt: "2026-02-02T09:00:00Z",
+        ...overrides,
+      };
+    }
+
+    function recommendation(
+      overrides: Partial<ChannelRecommendationRecord> = {},
+    ): ChannelRecommendationRecord {
+      return {
+        id: "rec-1",
+        analysisRunId: "run-1",
+        channelId: CHANNEL,
+        branchId: "branch-1",
+        label: "recommendation",
+        headline: "Close the seventeen uncovered days first",
+        detail:
+          "Seventeen days in January carry no governed evidence, so any conclusion about them is a guess.",
+        supportedActions: ["reupload_report"],
+        limitations: ["Impact has not been measured."],
+        citationFindingIds: ["finding-1"],
+        decisions: [],
+        myFeedback: null,
+        createdAt: "2026-02-01T00:05:00Z",
+        ...overrides,
+      };
+    }
+
+    it("carries the narrator's words with their citations and nothing invented", () => {
+      const view = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [finding()],
+        evidence: [],
+        recommendations: [recommendation()],
+      });
+
+      expect(view.recommendations).toHaveLength(1);
+      const rec = view.recommendations[0];
+      expect(rec.id).toBe("rec-1");
+      expect(rec.label).toBe("recommendation");
+      expect(rec.headline).toBe("Close the seventeen uncovered days first");
+      expect(rec.detail).toContain("Seventeen days");
+      expect(rec.supportedActions).toEqual(["reupload_report"]);
+      expect(rec.limitations).toEqual(["Impact has not been measured."]);
+      // Citations travel as finding ids so the page can attach the narration
+      // to the chapter that holds the evidence; none is invented here.
+      expect(rec.citationFindingIds).toEqual(["finding-1"]);
+      expect(rec.decision).toBeNull();
+      expect(rec.myFeedback).toBeNull();
+    });
+
+    it("passes each label through exactly as the narrator filed it", () => {
+      const view = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [],
+        evidence: [],
+        recommendations: [
+          recommendation({ id: "rec-o", label: "observation" }),
+          recommendation({ id: "rec-r", label: "recommendation" }),
+          recommendation({ id: "rec-n", label: "needs_data" }),
+        ],
+      });
+
+      expect(view.recommendations.map((rec) => rec.label)).toEqual([
+        "observation",
+        "recommendation",
+        "needs_data",
+      ]);
+    });
+
+    it("announces the newest triage answer when several people decided", () => {
+      const view = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [],
+        evidence: [],
+        recommendations: [
+          recommendation({
+            decisions: [
+              triageDecision({
+                decision: "acknowledged",
+                actorName: "Dana",
+                createdAt: "2026-02-02T09:00:00Z",
+              }),
+              triageDecision({
+                decision: "dismissed",
+                reason: "We already reuploaded January.",
+                actorId: "actor-2",
+                actorName: "Omar",
+                createdAt: "2026-02-03T11:30:00Z",
+              }),
+            ],
+          }),
+        ],
+      });
+
+      expect(view.recommendations[0].decision).toEqual({
+        decision: "dismissed",
+        reason: "We already reuploaded January.",
+        actorName: "Omar",
+        createdAt: "2026-02-03T11:30:00Z",
+      });
+    });
+
+    it("reflects the viewer's own vote, whatever it was", () => {
+      const view = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [],
+        evidence: [],
+        recommendations: [
+          recommendation({ id: "rec-helpful", myFeedback: true }),
+          recommendation({ id: "rec-not", myFeedback: false }),
+          recommendation({ id: "rec-silent", myFeedback: null }),
+        ],
+      });
+
+      expect(view.recommendations.find((rec) => rec.id === "rec-helpful")?.myFeedback).toBe(true);
+      expect(view.recommendations.find((rec) => rec.id === "rec-not")?.myFeedback).toBe(false);
+      // Absence is null, never a silent false.
+      expect(view.recommendations.find((rec) => rec.id === "rec-silent")?.myFeedback).toBeNull();
+    });
+
+    it("keeps a recommendation whose citations name nothing on display", () => {
+      const view = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [finding()],
+        evidence: [],
+        recommendations: [
+          recommendation({ id: "rec-cited", citationFindingIds: ["finding-1"] }),
+          recommendation({ id: "rec-unplaced", citationFindingIds: [] }),
+          recommendation({ id: "rec-superseded", citationFindingIds: ["finding-gone"] }),
+        ],
+      });
+
+      // Band data with no displayed anchor still reaches the page: dropping it
+      // would hide what the narrator said about the run.
+      expect(view.recommendations.map((rec) => rec.id)).toEqual([
+        "rec-cited",
+        "rec-unplaced",
+        "rec-superseded",
+      ]);
+      expect(view.recommendations[1].citationFindingIds).toEqual([]);
+    });
+
+    it("renders an empty list when the narrator never spoke", () => {
+      const view = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [finding()],
+        evidence: [],
+        recommendations: [],
+      });
+
+      expect(view.recommendations).toEqual([]);
     });
   });
 });

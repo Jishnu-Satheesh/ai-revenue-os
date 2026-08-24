@@ -99,6 +99,7 @@ function renderWorkspace(input: {
     runs: input.runs ?? [run()],
     findings: input.findings ?? [],
     evidence: input.evidence ?? [],
+    recommendations: [],
   });
   render(
     <ChannelWorkspace
@@ -157,9 +158,7 @@ describe("ChannelWorkspace", () => {
     ).toBeTruthy();
     // No comparison bars without a recorded base; the absence explains itself.
     expect(screen.queryByText("Prior period")).toBeNull();
-    expect(
-      screen.getByText("No period-over-period comparison is available yet."),
-    ).toBeTruthy();
+    expect(screen.getByText("No period-over-period comparison is available yet.")).toBeTruthy();
     // The deterministic claim requires a run that produced findings.
     expect(screen.queryByText("Deterministic findings only")).toBeNull();
     expect(screen.getByText("Nothing analysed")).toBeTruthy();
@@ -238,7 +237,10 @@ describe("ChannelWorkspace", () => {
       "the platform does not yet import.",
       "without narration, which is the fallback the specification requires.",
     ]) {
-      expect(clause && within(shelf).getByText(new RegExp(clause.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeTruthy();
+      expect(
+        clause &&
+          within(shelf).getByText(new RegExp(clause.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))),
+      ).toBeTruthy();
     }
     expect(within(shelf).getByText("Money")).toBeTruthy();
     expect(within(shelf).getByText("Items")).toBeTruthy();
@@ -320,9 +322,7 @@ describe("ChannelWorkspace", () => {
     const cancellation = screen.getByText(
       "Avoidable cancellations, with the provider's own rejection loss",
     );
-    const closedShare = screen.getByText(
-      "Share of scheduled minutes this channel reported closed",
-    );
+    const closedShare = screen.getByText("Share of scheduled minutes this channel reported closed");
     expect(
       cancellation.compareDocumentPosition(closedShare) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -370,7 +370,9 @@ describe("ChannelWorkspace", () => {
       ],
     });
 
-    expect(screen.getAllByText("No period-over-period comparison is available").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("No period-over-period comparison is available").length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getAllByText(/Reaching further back would compare across days nobody measured/i)
         .length,

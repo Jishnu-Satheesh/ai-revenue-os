@@ -14,6 +14,8 @@ import type {
   ChannelAnalysisRunRecord,
   ChannelFindingEvidenceRecord,
   ChannelFindingRecord,
+  ChannelRecommendationDecisionRecord,
+  ChannelRecommendationRecord,
 } from "@/modules/analysis/application/ports";
 
 /**
@@ -106,6 +108,33 @@ export type WorkspaceRunView = {
   detectorVersions: readonly { key: string; calculationVersion: number }[];
 };
 
+/**
+ * The narrator's words for the displayed run, with their receipts.
+ *
+ * Nothing here is judged or ranked: what the model wrote is passed through
+ * under its own admitted label, the findings it cited travel as ids so the
+ * page can attach each item beside the evidence it rests on, and the human
+ * aftermath -- the standing triage answer and this viewer's vote -- arrives
+ * exactly as stored. A recommendation citing nothing displayed still appears,
+ * because dropping it would hide words the run actually produced.
+ */
+export type WorkspaceRecommendationView = {
+  id: string;
+  label: "observation" | "recommendation" | "needs_data";
+  headline: string;
+  detail: string;
+  supportedActions: readonly string[];
+  limitations: readonly string[];
+  citationFindingIds: readonly string[];
+  decision: {
+    decision: "acknowledged" | "dismissed" | "planned";
+    reason: string | null;
+    actorName: string;
+    createdAt: string;
+  } | null;
+  myFeedback: boolean | null;
+};
+
 export type ChannelWorkspaceView = {
   /** The completed run these findings came from, or null if none has completed. */
   run: WorkspaceRunView | null;
@@ -117,6 +146,8 @@ export type ChannelWorkspaceView = {
   chapters: readonly WorkspaceChapterView[];
   /** Findings whose detector belongs to no chapter, so nothing is ever dropped. */
   unplacedFindings: readonly WorkspaceFindingView[];
+  /** The displayed run's narration and its triage state, newest first. */
+  recommendations: readonly WorkspaceRecommendationView[];
 };
 
 const MONEY_DEFERRED_REASON =
@@ -206,6 +237,44 @@ function toFindingView(
         role: row.evidenceRole,
         referenceId: row.referenceId,
       })),
+  };
+}
+
+/**
+ * The standing triage answer is simply the newest one: decisions are
+ * append-only, so a later answer by anyone -- including a different teammate
+ * -- supersedes what stood before. Ties keep the first stored answer, which
+ * the repository hands over newest-first.
+ */
+function standingDecision(
+  decisions: readonly ChannelRecommendationDecisionRecord[],
+): ChannelRecommendationDecisionRecord | null {
+  return (
+    [...decisions].sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null
+  );
+}
+
+function toRecommendationView(
+  recommendation: ChannelRecommendationRecord,
+): WorkspaceRecommendationView {
+  const decision = standingDecision(recommendation.decisions);
+  return {
+    id: recommendation.id,
+    label: recommendation.label,
+    headline: recommendation.headline,
+    detail: recommendation.detail,
+    supportedActions: recommendation.supportedActions,
+    limitations: recommendation.limitations,
+    citationFindingIds: recommendation.citationFindingIds,
+    decision: decision
+      ? {
+          decision: decision.decision,
+          reason: decision.reason,
+          actorName: decision.actorName,
+          createdAt: decision.createdAt,
+        }
+      : null,
+    myFeedback: recommendation.myFeedback,
   };
 }
 
@@ -363,6 +432,7 @@ export function buildChannelWorkspaceView(input: {
   runs: readonly ChannelAnalysisRunRecord[];
   findings: readonly ChannelFindingRecord[];
   evidence: readonly ChannelFindingEvidenceRecord[];
+  recommendations: readonly ChannelRecommendationRecord[];
 }): ChannelWorkspaceView {
   const runViews = input.runs.map(toRunView);
   const completed = runViews.find((run) => run.status === "completed") ?? null;
@@ -407,5 +477,6 @@ export function buildChannelWorkspaceView(input: {
     // A detector registered after this file was written still reaches the page.
     // Dropping its findings silently would be the same failure as a blank frame.
     unplacedFindings: findingViews.filter((finding) => !placed.has(finding.id)).sort(byUrgency),
+    recommendations: input.recommendations.map(toRecommendationView),
   };
 }

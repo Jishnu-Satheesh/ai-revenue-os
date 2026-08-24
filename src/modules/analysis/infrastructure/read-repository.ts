@@ -10,6 +10,8 @@ import type {
   ChannelEvidenceWindow,
   ChannelFindingEvidenceRecord,
   ChannelFindingRecord,
+  ChannelRecommendationDecisionRecord,
+  ChannelRecommendationRecord,
 } from "@/modules/analysis/application/ports";
 
 /**
@@ -31,6 +33,14 @@ const MAX_EVIDENCE = 5_000;
 /** A picker an operator can read, not every package they ever uploaded. */
 const MAX_EVIDENCE_WINDOWS = 24;
 const MAX_LINEAGE = 10_000;
+/**
+ * The narrator files at most six recommendations per submission, but a run may
+ * be narrated more than once (a re-submission writes new rows rather than
+ * overwriting), so the cap is generous and the order newest-first.
+ */
+const MAX_RECOMMENDATIONS = 60;
+const MAX_CITATIONS = 600;
+const MAX_RECOMMENDATION_DECISIONS = 1_000;
 
 export class ChannelAnalysisReadError extends Error {
   constructor(public readonly code: string) {
@@ -309,6 +319,110 @@ export function createAuthenticatedChannelAnalysisRepository(
             ]
           : [];
       });
+    },
+
+    async loadRecommendationsForRun({ organizationId, analysisRunId, viewerId }) {
+      // Only the displayed run's narration, for the same reason findings are
+      // read per run: words narrated over another window must not sit above
+      // this window's figures.
+      const { data: rows, error } = await supabase
+        .from("channel_recommendations")
+        .select(
+          "id, channel_id, branch_id, label, headline, detail, supported_actions, limitations, created_at",
+        )
+        .eq("organization_id", organizationId)
+        .eq("analysis_run_id", analysisRunId)
+        .order("created_at", { ascending: false })
+        .limit(MAX_RECOMMENDATIONS);
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+      const recommendationRows = rows ?? [];
+      if (recommendationRows.length === 0) return [];
+      const recommendationIds = recommendationRows.map((row) => row.id);
+
+      // What each item cited. A citation is a receipt, not a visibility rule:
+      // it may name a finding this page does not display (a superseded one),
+      // and the id still travels so nothing about the run is hidden.
+      const { data: citations, error: citationError } = await supabase
+        .from("channel_recommendation_citations")
+        .select("recommendation_id, finding_id")
+        .eq("organization_id", organizationId)
+        .in("recommendation_id", [...recommendationIds])
+        .limit(MAX_CITATIONS);
+      if (citationError) throw new ChannelAnalysisReadError(citationError.code ?? "unknown");
+
+      // Every triage answer ever recorded; which one stands is decided by the
+      // view builder from `created_at`, not silently here.
+      const { data: decisions, error: decisionError } = await supabase
+        .from("channel_recommendation_decisions")
+        .select("id, recommendation_id, decision, dismissal_reason, actor_id, created_at")
+        .eq("organization_id", organizationId)
+        .in("recommendation_id", [...recommendationIds])
+        .order("created_at", { ascending: false })
+        .limit(MAX_RECOMMENDATION_DECISIONS);
+      if (decisionError) throw new ChannelAnalysisReadError(decisionError.code ?? "unknown");
+
+      // Names come through the caller's own session, so RLS -- which shows a
+      // member only their own profile row -- decides whose name is readable.
+      // Nobody else's is fetched behind their back with a service role; an
+      // unreadable name reads as "Unknown" on the page instead.
+      const decisionRows = decisions ?? [];
+      const actorIds = [...new Set(decisionRows.map((row) => row.actor_id))];
+      const { data: profiles } = actorIds.length
+        ? await supabase.from("profiles").select("id, display_name").in("id", actorIds)
+        : { data: [] as { id: string; display_name: string | null }[] | null };
+      const nameById = new Map((profiles ?? []).map((row) => [row.id, row.display_name]));
+
+      // One vote per actor per recommendation, and the only vote this page can
+      // honestly show the reader is their own.
+      const { data: feedback, error: feedbackError } = await supabase
+        .from("channel_recommendation_feedback")
+        .select("recommendation_id, helpful")
+        .eq("organization_id", organizationId)
+        .eq("actor_id", viewerId)
+        .in("recommendation_id", [...recommendationIds]);
+      if (feedbackError) throw new ChannelAnalysisReadError(feedbackError.code ?? "unknown");
+
+      const citationsByRecommendation = new Map<string, string[]>();
+      for (const row of citations ?? []) {
+        const own = citationsByRecommendation.get(row.recommendation_id) ?? [];
+        own.push(row.finding_id);
+        citationsByRecommendation.set(row.recommendation_id, own);
+      }
+      const feedbackByRecommendation = new Map(
+        (feedback ?? []).map((row) => [row.recommendation_id, row.helpful]),
+      );
+
+      return recommendationRows.map(
+        (row): ChannelRecommendationRecord => ({
+          id: row.id,
+          analysisRunId: analysisRunId,
+          channelId: row.channel_id,
+          branchId: row.branch_id,
+          label: row.label,
+          headline: row.headline,
+          detail: row.detail,
+          supportedActions: toStringArray(row.supported_actions),
+          limitations: toStringArray(row.limitations),
+          citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
+          decisions: decisionRows.flatMap((entry): ChannelRecommendationDecisionRecord[] =>
+            entry.recommendation_id === row.id
+              ? [
+                  {
+                    recommendationId: entry.recommendation_id,
+                    decision: entry.decision,
+                    reason: entry.dismissal_reason,
+                    actorId: entry.actor_id,
+                    actorName: nameById.get(entry.actor_id) ?? "Unknown",
+                    createdAt: entry.created_at,
+                  },
+                ]
+              : [],
+          ),
+          myFeedback: feedbackByRecommendation.get(row.id) ?? null,
+          createdAt: row.created_at,
+        }),
+      );
     },
   };
 }

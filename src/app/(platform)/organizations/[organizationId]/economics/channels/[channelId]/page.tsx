@@ -62,12 +62,23 @@ export default async function ChannelWorkspacePage({
         analysisRunId: displayedRun.id,
       })
     : [];
-  const evidence = await analysis.loadEvidence({
-    organizationId: context.organizationId,
-    findingIds: findings.map((finding) => finding.id),
-  });
+  // Both reads hang off the displayed run alone, so the page never pairs one
+  // window's figures with another window's narration.
+  const [evidence, recommendations] = await Promise.all([
+    analysis.loadEvidence({
+      organizationId: context.organizationId,
+      findingIds: findings.map((finding) => finding.id),
+    }),
+    displayedRun
+      ? analysis.loadRecommendationsForRun({
+          organizationId: context.organizationId,
+          analysisRunId: displayedRun.id,
+          viewerId: context.user.id,
+        })
+      : Promise.resolve([]),
+  ]);
 
-  const view = buildChannelWorkspaceView({ runs, findings, evidence });
+  const view = buildChannelWorkspaceView({ runs, findings, evidence, recommendations });
 
   return (
     <>

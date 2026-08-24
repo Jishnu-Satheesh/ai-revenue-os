@@ -83,6 +83,55 @@ export type ChannelFindingEvidenceRecord = {
 };
 
 /**
+ * One stored triage answer to one recommendation.
+ *
+ * Every answer ever recorded travels, not just the current one: which human
+ * answer is the standing one is a view decision, made by `createdAt`, so the
+ * read boundary never silently discards history a later reader may need.
+ */
+export type ChannelRecommendationDecisionRecord = {
+  recommendationId: string;
+  decision: "acknowledged" | "dismissed" | "planned";
+  /** Required by storage when dismissing; null for every other answer. */
+  reason: string | null;
+  actorId: string;
+  /**
+   * Read through the caller's own session, where each member may see only
+   * their own profile row. Another actor's name therefore arrives as "Unknown"
+   * rather than through a service-role bypass of that policy.
+   */
+  actorName: string;
+  createdAt: string;
+};
+
+/**
+ * The model-written narration over exactly one analysis run's findings, with
+ * everything the workspace page needs to show it and its human aftermath:
+ * what it cited, every triage answer, and the viewer's own feedback vote.
+ *
+ * Like findings, these rows are written only by a fenced worker and are read
+ * only through here, so RLS -- not application code -- decides visibility.
+ */
+export type ChannelRecommendationRecord = {
+  id: string;
+  analysisRunId: string;
+  channelId: string;
+  branchId: string | null;
+  label: "observation" | "recommendation" | "needs_data";
+  headline: string;
+  detail: string;
+  supportedActions: readonly string[];
+  limitations: readonly string[];
+  /** The stored findings this narration was built from, cited by id. */
+  citationFindingIds: readonly string[];
+  /** Newest first, so the latest answer is also the first stored one. */
+  decisions: readonly ChannelRecommendationDecisionRecord[];
+  /** The viewer's own helpfulness vote; null when they have not voted. */
+  myFeedback: boolean | null;
+  createdAt: string;
+};
+
+/**
  * A window an operator can actually ask about.
  *
  * The window is the one a governed package *declared*, not the span its
@@ -134,6 +183,22 @@ export type ChannelAnalysisReadPort = {
     organizationId: string;
     findingIds: readonly string[];
   }): Promise<ChannelFindingEvidenceRecord[]>;
+
+  /**
+   * The narration written over exactly one run's findings.
+   *
+   * Scoped to the run for the same reason `loadFindingsForRun` is: a page
+   * about one window must not carry another run's words above its figures.
+   * Citations are joined, every triage answer travels with a resolved display
+   * name where RLS allows one, and the feedback row returned is the viewer's
+   * own and nobody else's.
+   */
+  loadRecommendationsForRun(input: {
+    organizationId: string;
+    analysisRunId: string;
+    /** The signed-in reader, whose own feedback vote is the only one read. */
+    viewerId: string;
+  }): Promise<ChannelRecommendationRecord[]>;
 
   /**
    * Every window this channel has governed evidence for, newest first.
