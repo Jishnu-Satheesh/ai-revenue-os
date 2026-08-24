@@ -17,6 +17,8 @@ Before changing code, read only the context needed for the task, starting with:
 9. `context/14-coding-standards.md`
 10. `context/15-ai-coding-standards.md`
 11. `context/18-anti-patterns.md`
+12. `docs/collaboration/asset-library-and-studio-board.md` — always, before touching any file, while
+    more than one agent is active. See section 10.
 
 Do not read every document automatically. Load context deliberately to reduce noise and stale assumptions.
 
@@ -168,7 +170,23 @@ When implementation contradicts documentation, stop and resolve the contradictio
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only. Never replace the symlink with a copy.
 
-## 10. Misc
+## 10. Multi-agent coordination
+
+More than one AI agent works in this repository at the same time, in the same working tree.
+
+Before starting any task, read `docs/collaboration/asset-library-and-studio-board.md`. It records who
+owns which task, which files are claimed, which agent holds which tool access, and an append-only
+log of what has already been decided and discovered. Add your own entries as you go; edit your own
+rows only.
+
+Three rules exist because the tree is shared:
+
+- Claim the files you intend to touch on the board before opening them.
+- Only the agent holding the migration task writes or pushes migrations. A pushed migration is live
+  on shared staging immediately.
+- Never use `git stash`. The stash stack is shared across worktrees and other sessions.
+
+## 11. Misc
 <!-- TRIGGER.DEV SKILLS START -->
 ## Trigger.dev agent skills
 
