@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { campaignBundleSchema } from "@/domain/campaigns/schemas";
+import {
+  campaignBundleModelManifestSchema,
+  campaignBundleSchema,
+  subjectProfileSchema,
+} from "@/domain/campaigns/schemas";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
 
 function issuePaths(result: ReturnType<typeof campaignBundleSchema.safeParse>) {
@@ -183,6 +187,72 @@ describe("campaignBundleSchema", () => {
       manifestIds.evidenceLed,
       manifestIds.experimental,
     ]);
+  });
+});
+
+describe("campaignBundleModelManifestSchema", () => {
+  it("does not let the image model declare its own truth class", () => {
+    expect(campaignBundleModelManifestSchema.safeParse(validManifest()).success).toBe(false);
+  });
+
+  it("accepts a manifest whose assets leave truth classification to deterministic code", () => {
+    const manifest = validManifest() as unknown as Record<string, unknown>;
+    manifest.assets = (manifest.assets as Array<Record<string, unknown>>).map((asset) => {
+      const modelAsset = { ...asset };
+      delete modelAsset.truthClass;
+      return modelAsset;
+    });
+
+    expect(campaignBundleModelManifestSchema.safeParse(manifest).success).toBe(true);
+  });
+});
+
+describe("subjectProfileSchema", () => {
+  const baseProfile = {
+    id: "10000000-0000-4000-8000-000000000001",
+    organizationId: "20000000-0000-4000-8000-000000000002",
+    name: "Kerala fish curry",
+    slug: "kerala-fish-curry",
+    description: null,
+    tags: ["fish curry", "കേരളം"],
+    namesByScript: { Latn: "Kerala fish curry", Mlym: "കേരള മീൻ കറി" },
+    mustNotAppear: ["naan", "cream"],
+    illustratedStyle: false,
+    state: "draft" as const,
+    confirmedBy: null,
+    confirmedAt: null,
+    createdBy: "30000000-0000-4000-8000-000000000003",
+    createdAt: "2026-08-24T10:00:00.000Z",
+    updatedAt: "2026-08-24T10:00:00.000Z",
+    archivedAt: null,
+  };
+
+  it("accepts a Unicode draft with ISO 15924 name keys", () => {
+    expect(subjectProfileSchema.safeParse(baseProfile).success).toBe(true);
+  });
+
+  it("requires confirmed profiles to carry the human confirmation evidence", () => {
+    expect(subjectProfileSchema.safeParse({ ...baseProfile, state: "confirmed" }).success).toBe(
+      false,
+    );
+
+    expect(
+      subjectProfileSchema.safeParse({
+        ...baseProfile,
+        state: "confirmed",
+        description: "Kingfish steaks in a brick-red tamarind and coconut gravy.",
+        confirmedBy: "40000000-0000-4000-8000-000000000004",
+        confirmedAt: "2026-08-24T10:05:00.000Z",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects malformed script keys and unknown fields", () => {
+    expect(
+      subjectProfileSchema.safeParse({ ...baseProfile, namesByScript: { latin: "Fish curry" } })
+        .success,
+    ).toBe(false);
+    expect(subjectProfileSchema.safeParse({ ...baseProfile, price: 2_500 }).success).toBe(false);
   });
 });
 

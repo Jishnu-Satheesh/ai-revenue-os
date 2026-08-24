@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import {
+  assetTagsSchema,
+  namesByScriptSchema,
+  subjectExclusionsSchema,
+} from "@/domain/campaigns/asset-library";
+
 /**
  * The Campaign Bundle manifest.
  *
@@ -47,6 +53,63 @@ export const ASSET_TRUTH_CLASSES = [
 ] as const;
 export const assetTruthClassSchema = z.enum(ASSET_TRUTH_CLASSES);
 
+export const SUBJECT_PROFILE_STATES = ["draft", "confirmed"] as const;
+export const subjectProfileStateSchema = z.enum(SUBJECT_PROFILE_STATES);
+
+export const subjectProfileSchema = z
+  .strictObject({
+    id: uuidSchema,
+    organizationId: uuidSchema,
+    name: z.string().trim().min(1).max(160),
+    slug: z.string().trim().min(1).max(160),
+    description: z.string().trim().min(1).max(2_000).nullable(),
+    tags: assetTagsSchema,
+    namesByScript: namesByScriptSchema,
+    mustNotAppear: subjectExclusionsSchema,
+    illustratedStyle: z.boolean(),
+    state: subjectProfileStateSchema,
+    confirmedBy: uuidSchema.nullable(),
+    confirmedAt: isoTimestampSchema.nullable(),
+    createdBy: uuidSchema,
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    archivedAt: isoTimestampSchema.nullable(),
+  })
+  .superRefine((profile, context) => {
+    if (profile.state === "confirmed") {
+      if (profile.description === null) {
+        context.addIssue({
+          code: "custom",
+          path: ["description"],
+          message: "A confirmed subject must carry the description a human approved.",
+        });
+      }
+      if (profile.confirmedBy === null) {
+        context.addIssue({
+          code: "custom",
+          path: ["confirmedBy"],
+          message: "A confirmed subject must identify its confirmer.",
+        });
+      }
+      if (profile.confirmedAt === null) {
+        context.addIssue({
+          code: "custom",
+          path: ["confirmedAt"],
+          message: "A confirmed subject must record when it was confirmed.",
+        });
+      }
+      return;
+    }
+
+    if (profile.confirmedBy !== null || profile.confirmedAt !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["state"],
+        message: "A draft cannot carry confirmation evidence.",
+      });
+    }
+  });
+
 export const moneySchema = z
   .strictObject({
     amountMinor: z.number().int().nonnegative(),
@@ -87,6 +150,9 @@ export const campaignAssetSchema = z.strictObject({
   /** Required so a screen reader is never handed an unlabelled campaign image. */
   altText: z.string().trim().min(1).max(420),
 });
+
+/** Model output omits truth classification; deterministic code derives it later. */
+export const campaignModelAssetSchema = campaignAssetSchema.omit({ truthClass: true });
 
 /**
  * A public hashtag set for one channel.
@@ -250,6 +316,11 @@ export const campaignBundleManifestSchema = z.strictObject({
 });
 
 type ManifestShape = z.infer<typeof campaignBundleManifestSchema>;
+const campaignBundleModelManifestShapeSchema = campaignBundleManifestSchema.extend({
+  assets: z.array(campaignModelAssetSchema).min(1).max(60),
+});
+type ModelManifestShape = z.infer<typeof campaignBundleModelManifestShapeSchema>;
+type ReviewableManifestShape = ManifestShape | ModelManifestShape;
 
 /**
  * The complete-proposal contract.
@@ -260,7 +331,7 @@ type ManifestShape = z.infer<typeof campaignBundleManifestSchema>;
  * copy and hashtags present for what will actually publish, and spend that
  * cannot exceed what the approval says.
  */
-function checkStructure(manifest: ManifestShape, context: z.RefinementCtx): void {
+function checkStructure(manifest: ReviewableManifestShape, context: z.RefinementCtx): void {
   checkDirections(manifest, context);
   checkAssetGraph(manifest, context);
   checkActionCoverage(manifest, context);
@@ -278,7 +349,7 @@ function checkStructure(manifest: ManifestShape, context: z.RefinementCtx): void
  * direction at its own cap makes the per-direction number the operative limit
  * and leaves the total as an honest backstop.
  */
-function checkGenerationPolicy(manifest: ManifestShape, context: z.RefinementCtx): void {
+function checkGenerationPolicy(manifest: ReviewableManifestShape, context: z.RefinementCtx): void {
   const policy = manifest.generationPolicy;
   const required = policy.maxVariantsPerDirection * manifest.directions.length;
 
@@ -291,7 +362,7 @@ function checkGenerationPolicy(manifest: ManifestShape, context: z.RefinementCtx
   }
 }
 
-function checkDirections(manifest: ManifestShape, context: z.RefinementCtx): void {
+function checkDirections(manifest: ReviewableManifestShape, context: z.RefinementCtx): void {
   for (const kind of CREATIVE_DIRECTION_KINDS) {
     const matching = manifest.directions.filter((direction) => direction.kind === kind);
     if (matching.length !== 1) {
@@ -325,7 +396,7 @@ function checkDirections(manifest: ManifestShape, context: z.RefinementCtx): voi
   });
 }
 
-function checkAssetGraph(manifest: ManifestShape, context: z.RefinementCtx): void {
+function checkAssetGraph(manifest: ReviewableManifestShape, context: z.RefinementCtx): void {
   const declared = new Set(manifest.assets.map((asset) => asset.id));
   const used = new Set<string>();
 
@@ -355,7 +426,7 @@ function checkAssetGraph(manifest: ManifestShape, context: z.RefinementCtx): voi
   });
 }
 
-function checkActionCoverage(manifest: ManifestShape, context: z.RefinementCtx): void {
+function checkActionCoverage(manifest: ReviewableManifestShape, context: z.RefinementCtx): void {
   const directions = new Map(manifest.directions.map((direction) => [direction.id, direction]));
 
   manifest.actions.forEach((action, index) => {
@@ -391,7 +462,7 @@ function checkActionCoverage(manifest: ManifestShape, context: z.RefinementCtx):
   });
 }
 
-function checkSpend(manifest: ManifestShape, context: z.RefinementCtx): void {
+function checkSpend(manifest: ReviewableManifestShape, context: z.RefinementCtx): void {
   const paid = manifest.actions
     .map((action, index) => ({ action, index }))
     .filter((entry) => entry.action.spendCeiling !== null);
@@ -435,8 +506,12 @@ function checkSpend(manifest: ManifestShape, context: z.RefinementCtx): void {
 
 /** The contract every reviewable, approvable bundle must satisfy. */
 export const campaignBundleSchema = campaignBundleManifestSchema.superRefine(checkStructure);
+/** The equally strict shape accepted from the model before truth class derivation. */
+export const campaignBundleModelManifestSchema =
+  campaignBundleModelManifestShapeSchema.superRefine(checkStructure);
 
 export type CampaignBundleManifest = z.infer<typeof campaignBundleManifestSchema>;
+export type CampaignBundleModelManifest = z.infer<typeof campaignBundleModelManifestSchema>;
 export type CampaignCreativeDirection = z.infer<typeof creativeDirectionSchema>;
 export type CampaignChannelAction = z.infer<typeof campaignChannelActionSchema>;
 export type CampaignAsset = z.infer<typeof campaignAssetSchema>;
@@ -449,3 +524,5 @@ export type CampaignChannel = z.infer<typeof campaignChannelSchema>;
 export type CampaignPlacement = z.infer<typeof campaignPlacementSchema>;
 export type CampaignMoney = z.infer<typeof moneySchema>;
 export type CampaignAssetTruthClass = z.infer<typeof assetTruthClassSchema>;
+export type SubjectProfile = z.infer<typeof subjectProfileSchema>;
+export type SubjectProfileState = z.infer<typeof subjectProfileStateSchema>;
