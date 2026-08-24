@@ -49,6 +49,7 @@ const serverEnvSchema = z.object({
   CAMPAIGN_REPAIR_MODEL: optionalNonEmptyString,
   CAMPAIGN_IMAGE_MODEL: optionalNonEmptyString,
   CAMPAIGN_GENERATION_COST_CEILING_MINOR: optionalNonEmptyString,
+  RECOMMENDATION_TEXT_MODEL: optionalNonEmptyString,
   META_APP_ID: optionalNonEmptyString,
   META_APP_SECRET: optionalNonEmptyString,
   /**
@@ -97,6 +98,7 @@ const parsedEnv = serverEnvSchema.safeParse({
   CAMPAIGN_REPAIR_MODEL: process.env.CAMPAIGN_REPAIR_MODEL,
   CAMPAIGN_IMAGE_MODEL: process.env.CAMPAIGN_IMAGE_MODEL,
   CAMPAIGN_GENERATION_COST_CEILING_MINOR: process.env.CAMPAIGN_GENERATION_COST_CEILING_MINOR,
+  RECOMMENDATION_TEXT_MODEL: process.env.RECOMMENDATION_TEXT_MODEL,
   META_APP_ID: process.env.META_APP_ID,
   META_APP_SECRET: process.env.META_APP_SECRET,
   META_WEBHOOK_VERIFY_TOKEN: process.env.META_WEBHOOK_VERIFY_TOKEN,
