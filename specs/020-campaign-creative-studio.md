@@ -132,7 +132,10 @@ specification does not weaken it.
 - A verification pass: text-on-plate detection, face detection, and glyph coverage. Blocking.
 - A studio surface: template choice, per-script preview, annotated editing, refusal states.
 - Re-render reproducibility, and the render digest inside the bundle digest.
-- Replacing the `model-router.ts:245` text prohibition with an absolute one on the plate.
+- ~~Replacing the `model-router.ts:245` text prohibition with an absolute one on the plate.~~
+  **Done 2026-08-24 by the Asset Library, before this specification's first task.** `refineImagePrompt`
+  was deleted outright rather than bypassed, and `reference-prompt.ts:38` carries the absolute rule —
+  *"Do not render text of any kind, in any script."* Do not redo it.
 
 ### 5.2 Out of scope
 
@@ -231,8 +234,17 @@ rendered half-empty.
 
 - Every rendered string is a manifest value that already passed `evaluateContentPolicy` and the
   approval binding. The compositor reads; it does not compose prose.
-- The offer and the price are rendered from the manifest's integer minor units and ISO currency
-  through the existing money formatting, so the poster cannot disagree with the campaign.
+- The offer is rendered from the approved manifest text, so the poster cannot disagree with the
+  campaign.
+
+  **Corrected 2026-08-24, against the live schema.** This clause previously said the offer and price
+  render "from the manifest's integer minor units and ISO currency". They do not exist.
+  `campaign_briefs.offer` is free text bounded at 600 characters and `generationPolicy.lockedOfferRef`
+  is a string reference; `moneySchema` exists but carries **spend ceilings**, which are advertising
+  budget rather than a customer price. Release 1 therefore renders the approved offer *text*, which
+  has still passed `evaluateContentPolicy` and is still bound by the approval. A governed numeric
+  price would be a manifest change and a separate decision, and is recorded here as an open item
+  rather than invented.
 - This is what allows the prohibition in `model-router.ts:245` to change rather than be lifted. The
   concern behind it — a model inventing a discount — is fully answered by the model no longer
   writing any text at all. The prohibition becomes absolute on the plate, and the offer becomes
@@ -287,6 +299,13 @@ specification rests on it.
 - Instructions are operator free text, carried to the model as data in a delimited block, with the
   fixed constraints of spec 019 §7.4 appended after them — no faces, no invented components, no text
   of any kind.
+- **An edit does not run the art-direction blueprint stage.** This specification was written before
+  spec 019 §7.7 existed and was silent on it; the answer is no. A blueprint is direction for a whole
+  image — composition, framing, lighting, palette, focal point — and re-directing all of that during
+  a targeted edit fights the mask the edit is supposed to respect. The operator marked a region and
+  said what should change in it; nothing else was asked for. The fixed constraints still apply, and
+  `campaign_plate_edits` carries no `blueprint` or `plan_model_id` column so the exclusion is
+  structural rather than a convention somebody could drift from.
 - **The returned image is composited back inside the union of the marked regions only.** The
   platform blends the model's output through that union, feathered at the edges to avoid a seam, so
   every pixel outside it is byte-identical to the parent plate. This is a property of the code, not
@@ -346,30 +365,77 @@ Registry, not tenant-owned, mirroring `creative_review_reasons` from spec 019.
 
 ### 8.2 New — `campaign_poster_renders`
 
-One row per render. Append-only.
+One row per render **attempt**, refusals included. Append-only.
 
-`id`, `organization_id`, `campaign_id`, `bundle_version_id`, `plate_asset_id`, `template_key`,
-`template_version`, `script`, `text_values jsonb`, `font_manifest jsonb`, `render_digest`,
-`output_asset_id`, `verification jsonb`, `rendered_at`, `created_at`.
+`id`, `organization_id`, `campaign_id`, `bundle_version_id`, `plate_asset_id`,
+`plate_generation_run_id` nullable, `template_key`, `template_version`, `script`,
+`text_values jsonb`, `font_manifest jsonb`, `render_digest`, `state` in `rendered | refused`,
+`refusal_code` nullable, `refusal_detail jsonb` nullable, `output_storage_path`,
+`output_content_hash`, `output_mime_type`, `output_width_px`, `output_height_px` — all five nullable
+and all present together — `verification jsonb`, `rendered_at`, `created_at`.
 
 Unique `(organization_id, bundle_version_id, template_key, template_version, script, render_digest)`
 so an identical re-render is idempotent rather than duplicated.
+
+**Revised 2026-08-24, during the schema task, on three findings against the live schema.**
+
+- **The output is not a `campaign_assets` row, and an earlier draft of this section said it was.**
+  `campaign_assets` requires a `bundle_version_id` and a not-null `truth_class`, and is written only
+  by `create_campaign_bundle_version`. A poster filed there would have to be labelled
+  `synthetic_composite` — the §7.8 trap exactly — and every render would create a new bundle version,
+  invalidating approval each time somebody rendered. The render therefore holds its own output path,
+  hash, mime type and dimensions, in the existing `campaign-assets` bucket under the same access
+  rules.
+- **There is no `truth_class` column here at all.** Truth class describes the plate and is read
+  through `plate_asset_id`. `deriveGeneratedTruthClass` must not be called for a render: it is typed
+  `Exclude<CampaignAssetTruthClass, "authentic_source">` and throws on `insufficient`, so a poster
+  over a client's own photograph has no path through it. The absence of the column is the fence.
+- **A refusal is a row.** §12 tracks refusal rates by script, which cannot be seen if refusals are
+  discarded. The render digest is a function of the *inputs*, so a refused attempt still has one and
+  is still idempotent. `output_content_hash` is separate, over the produced bytes, so determinism is
+  the observation that one digest always yields one hash.
+- **`plate_generation_run_id` is recorded directly** rather than reached by reverse lookup. A
+  `variants` run succeeds with a null `result_version_id` by constraint, so for a plate produced that
+  way, asset → bundle version → "the run whose `result_version_id` matches" resolves to nothing.
+  Nullable, because a client's own photograph and an edited plate legitimately have no run.
 
 ### 8.3 New — `campaign_plate_edits`
 
 Append-only lineage of masked edits.
 
 `id`, `organization_id`, `campaign_id`, `parent_plate_asset_id`, `child_plate_asset_id`,
-`mask_storage_path`, `mask_content_hash`, `union_coverage_ratio`, `annotations jsonb`, `model_id`,
-`edited_by`, `edited_at`.
+`mask_storage_path`, `mask_content_hash`, `union_coverage_ratio`, `annotations jsonb`,
+`negative_rules jsonb`, `model_id`, `cost_minor` nullable, `idempotency_key`, `edited_by`,
+`edited_at`, `created_at`.
 
 `annotations` is an ordered array of `{ ordinal, bounds, instruction }` — one entry per marked
 region, each instruction bounded at 500 characters, at most 8 regions per edit. The rasterised union
 is stored once at `mask_storage_path`; the per-region bounds and instructions live here so the edit
 is readable and replayable rather than an opaque blob.
 
-Constraints: `union_coverage_ratio` between the declared minimum and maximum; `annotations` non-empty
-and within the region cap; parent and child both belong to this organization; append-only trigger.
+Constraints: `annotations` non-empty and within the region cap, with ordinals exactly `1..n` in order
+so the edit replays as the operator made it; parent and child both belong to this organization and
+are not the same plate; append-only trigger. `union_coverage_ratio` is bounded structurally in the
+database — greater than zero, at most one — while the *declared* minimum and maximum are owned by
+versioned domain code, in the same split the negative-rule caps use. Shape belongs in the table;
+a bound that changes with judgement belongs where changing it is a code review rather than a
+migration against live staging.
+
+**This table is also the edit's receipt, added 2026-08-24.** An edit spends model money and produces
+a new plate version, so it deserves a record like any other generation — but `campaign_generation_runs`
+is shaped around bundle generation, its `kind` vocabulary is `generate | revise | variants`, and that
+constraint was replaced as recently as migration `20260825120000`. So the receipt lives here:
+`model_id`, `cost_minor` (null means not measured; zero would claim the edit was free) and
+`negative_rules`.
+
+It deliberately gains **no** `blueprint` and **no** `plan_model_id`. See §7.6.
+
+`idempotency_key` is unique per organization. Because an edit has no run row, it has no claim token
+and no lease, so this key is the whole write fence rather than a convenience. Note honestly what it
+does and does not do: it makes a duplicate *write* impossible, while preventing a duplicate model
+*call* is the worker's own idempotency key, which Task 8 sets. One row is written per completed
+edit; a failed edit leaves no row, and the parent plate is untouched because nothing is edited in
+place.
 
 ### 8.4 Changed — `campaign_bundle_versions`
 
@@ -598,3 +664,9 @@ module, independent of whichever renderer is chosen.
 3. **Who supplies the legal line?** A promotional flyer in the UAE may need terms, and neither the
    manifest nor Business Memory has a field for them today. If the answer is "nobody yet", the
    field is optional in Release 1 and the templates that require it are simply unavailable.
+4. **Does the campaign need a governed numeric price?** Added 2026-08-24 from §7.4. Nothing in the
+   manifest carries an offer in minor units and an ISO currency; the offer is free text, and the only
+   money-typed fields are spend ceilings, which are budget rather than price. Release 1 renders the
+   approved offer text and is honest about it. Making a price a first-class governed figure is a
+   manifest change with its own approval consequences, and is worth doing only if a client actually
+   wants a price on a poster — which is a question for the pilot, not for this specification.

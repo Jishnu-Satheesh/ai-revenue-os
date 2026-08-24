@@ -40,7 +40,7 @@ select extensions.is(
 );
 select extensions.is(
   (select count(*)::bigint from public.permissions where scope = 'organization'),
-  38::bigint,
+  43::bigint,
   'the organization vocabulary is seeded'
 );
 select extensions.ok(
