@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -25,14 +25,12 @@ import {
  * asserts the live rows, so both ends are covered.
  */
 
-const MIGRATIONS = [
-  "supabase/migrations/20260817141000_permission_catalogue.sql",
-  "supabase/migrations/20260820112520_governed_channel_identity_foundation.sql",
-] as const;
-
-const sql = MIGRATIONS.map((migration) =>
-  readFileSync(resolve(process.cwd(), migration), "utf8"),
-).join("\n");
+const migrationsDirectory = resolve(process.cwd(), "supabase/migrations");
+const sql = readdirSync(migrationsDirectory)
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
+  .map((name) => readFileSync(resolve(migrationsDirectory, name), "utf8"))
+  .join("\n");
 
 /** Reads SQL string literals out of one `(...)` tuple, unescaping `''`. */
 function parseTuple(inner: string): string[] {
