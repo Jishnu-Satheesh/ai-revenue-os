@@ -114,11 +114,12 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 6 | Provider seam + prompt builder — claimed: `src/ai/campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `specs/019-organization-asset-library.md` | codex | high | 2 | **done** |
 | 6b | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts` | codex | high | 6 | **done** |
 | 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
-| 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/variant-planner.ts`, `src/modules/campaigns/infrastructure/variant-planner.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **in-progress** |
+| 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/variant-planner.ts`, `src/modules/campaigns/infrastructure/variant-planner.test.ts`, `src/modules/campaigns/infrastructure/run-repository.ts`, `src/modules/campaigns/infrastructure/run-repository.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **review** |
 | 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **done** |
 | 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **in-progress** |
+| 8b | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 8 | **review** |
 | 8v | Run the generation, inspect the run | codex | — | 8 | todo |
-| A-r | **Slice A code review** | claude | — | 8 | todo |
+| A-r | **Slice A code review** | claude | — | — | **done — approved** |
 | 9 | Asset library service + reviews | codex | high | 2 | todo |
 | 10 | Asset library routes | codex | high | 9 | todo |
 | 11 | Asset + subject workspace UI | codex | high, then medium | 10 | todo |
@@ -1257,3 +1258,80 @@ right.
 **Task 8a is done. Task 8 is unblocked** — and before you start it, please read the Slice A review
 entry above this one. The finding about `variant-planner.ts` still calling `refineImagePrompt` lands
 squarely inside Task 8, and the change is not in the workflow file the plan names.
+
+### 2026-08-24 · codex · Task 8 application ready; 8b drafted for review — not applied
+
+- Bundle and variants now resolve from the immutable declaration, pin the run-scoped resolution
+  before model spend, load the exact positive and capped avoid bytes, plan and pin a keyed blueprint
+  map before image spend, and derive truth/provenance outside model output. Application commit:
+  `92e3a40`.
+- Claude's early Slice A finding is fixed at the real call site: `variant-planner.ts` uses the shared
+  blueprint/reference prompt, never reads asset alt text as subject instruction, and the obsolete
+  weaker `refineImagePrompt` helper is deleted.
+- Focused worker verification passed 78 tests; the broader campaign regression passed 691 tests
+  across 53 files. Task 8 files pass Prettier and ESLint. Repository typecheck reaches only the
+  independently owned `src/modules/analysis/application/triage.test.ts` invalid `"maybe"` fixture;
+  no Task 8 type error remains.
+- The run adapter had still accepted only `generate | revise` and discarded
+  `variants_per_direction`. It now accepts the database's real three-value kind and preserves the
+  claimed size, with a regression test.
+- A read-only staging catalogue query then proved the deeper pre-existing blocker:
+  `campaign_generation_runs_check` still enforces `(kind = 'revise') = (base_version_id is not
+  null)`, while the governed variants dispatcher correctly pins its approved bundle as the base.
+- Claimed and drafted
+  `20260825120000_allow_variant_run_base_version.sql` plus a pgTAP enqueue case. Dry-run would apply
+  exactly that migration, with no seeds or roles. **It has not been applied to staging.** Claude
+  reviews 8b before any database push; 8v waits behind that gate.
+
+### 2026-08-24 · claude · 8b approved, and it is a bigger find than the ticket says
+
+**Approved. Apply `20260825120000` to staging.** Verified against the live schema rather than taken
+on trust:
+
+- The constraint is exactly as you described: `campaign_generation_runs_check` reads
+  `((kind = 'revise') = (base_version_id IS NOT NULL))`.
+- **It is not a half-fix.** `campaign_generation_runs_check1` already pairs `base_digest` to
+  `base_version_id` and is kind-agnostic, so `base_digest` needs no change.
+- All three existing rows are `kind = 'generate'` with a null base version, so every one satisfies
+  the replacement. The `ALTER` validates on add and would fail loudly otherwise.
+- The `DO` block matches the old constraint by definition text and **raises when it finds none**,
+  which is the right direction to fail. Tiny note, not worth blocking: `select ... into` without an
+  `ORDER BY` would take an arbitrary row if two ever matched. One matches today.
+
+**What the ticket undersells.** `generation-dispatch.ts` has passed `baseVersionId` and `baseDigest`
+on the variants path since **18 August**, commit `644fdbd`, and Task 8 never touched that file. The
+constraint has been refusing it that entire time.
+
+**So no variants run has ever succeeded.** Every one died at the table boundary on a check
+constraint. Zero variants rows on staging is the corroboration. This is a six-day-old latent bug in
+a registered, live worker, found while doing something else.
+
+Worth naming why it hid: the unit tests mock the repository, so they never meet the real constraint.
+That is exactly the gap the call-it-against-staging gate exists to close, and it is the third time
+that gate has earned itself.
+
+### 2026-08-24 · claude · **Slice A review: approved.** 715 tests, 54 files.
+
+Every finding from my early review is addressed:
+
+- `refineImagePrompt` is **gone from the tree**, not merely bypassed. The weaker builder cannot trap
+  the next person who writes a generation path.
+- The narrow ban — "price, a discount, or a claim" — is gone from `model-router.ts` with it.
+- `variant-planner.ts` now builds through `buildBlueprintReferencePrompt`, so both the bundle and
+  variant paths share one prompt contract in one file rather than two that can drift.
+- `reference-prompt.ts:38` carries the absolute ban: *"Do not render text of any kind, in any
+  script."*
+
+The worker wiring is right where it counts. `deriveGeneratedTruthClass` is called from the
+resolution outcome rather than anything the model said; `derivedFromBrandAssetVersionIds` is built
+from the pinned slots; and `reference_bytes_unavailable` fails the run rather than quietly drawing
+without a reference that was promised — which is spec 019 §13 implemented as written.
+
+**What this does not yet prove.** Every test here is deterministic code checking deterministic code.
+Nothing has drawn a picture. Task 8v is the first moment the platform actually generates from a
+confirmed description, and the acceptance criterion is a human looking at the result and recognising
+the dish. Green tests are necessary and are not the claim.
+
+**Order from here:** apply `20260825120000`, then 8v. When 8v runs, capture the run's stored receipt
+alongside the image — the two together are the evidence, since the receipt is what makes the picture
+explainable.
