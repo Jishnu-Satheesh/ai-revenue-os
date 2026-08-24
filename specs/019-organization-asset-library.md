@@ -160,9 +160,9 @@ there was no offer to place on a poster in the first place.
 - Subject profiles: the dishes an organization sells, model-drafted and human-confirmed, with names
   per script and a description specific enough to draw from.
 - The synthesis prompt builder and its fixed constraints.
-- Pinning the resolved set, its negative rules, the resolution outcome and the exact confirmed
-  description onto the campaign source snapshot, and populating
-  `derivedFromBrandAssetVersionIds` from it.
+- Keeping the exact confirmed description on the immutable campaign source snapshot, pinning each
+  run's realized reference set, negative rules, resolution outcome and blueprint onto that
+  generation run, and populating `derivedFromBrandAssetVersionIds` from the run receipt.
 - Deriving `truth_class` from the resolution outcome, and removing it from what the model declares.
 - Widening the provider seam so reference bytes reach the image model with per-role instructions.
 - An asset workspace: browse, upload, tag, review, archive; and a subject workspace.
@@ -454,7 +454,7 @@ Derived deterministically at resolution time — no stored rollup, no model:
 - collect the distinct reason codes on this organization's currently-rejected assets;
 - map each through the registry's description;
 - deduplicate, sort by code, cap at 12;
-- record the exact resulting list on the pinned snapshot.
+- record the exact resulting list on the generation run that used it.
 
 So the rules are always reproducible from the reviews that produced them, and a reviewer's rejection
 is visibly in force on the next generation.
@@ -490,8 +490,9 @@ than an instruction the stage might ignore.
 
 Other rules:
 
-- The blueprint is pinned to the snapshot alongside the reference set, so an operator can read why an
-  image looks the way it does, and so a regeneration is explainable after the fact.
+- The blueprint is pinned to the generation run alongside its realized reference set, so an operator
+  can read why an image looks the way it does, and so each regeneration remains independently
+  explainable after the fact.
 - A blueprint that fails to parse gets one bounded repair pass through the existing `repair` slot,
   then the generation fails safely. It never degrades to sending the raw text through.
 - The fixed constraints of §7.4 are appended *after* the blueprint, so nothing the planner writes can
@@ -887,10 +888,11 @@ and is a defect if observed.
 
 ## 16. Migration and rollback
 
-One additive migration: four columns on `organization_brand_assets`, six on
-`campaign_source_snapshots`, three new tables, the reason seed, the permission seed, and the
-security-definer write functions. No column is dropped, no CHECK is narrowed on existing data, and
-both brand-asset tables are empty, so there is no backfill.
+The forward-only migration set is additive: five columns on `organization_brand_assets`, ten on
+`campaign_source_snapshots`, seven on `campaign_generation_runs`, three new tables, the reason and
+permission seeds, the governed functions, and the rejected-candidate reader correction. No column
+is dropped, no existing CHECK is narrowed, and the generation-run columns default safely for prior
+runs, so there is no provenance backfill or retrospective claim.
 
 The one non-additive change is in code, not schema: `truth_class` moves from model-declared to
 derived, and the manifest schema stops asking for it. Existing rows keep the value the model wrote.

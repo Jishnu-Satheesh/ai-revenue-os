@@ -47,7 +47,7 @@ has said what the campaign is about.
 - New security-definer functions with `search_path = ''` and explicit organization checks:
   `record_creative_asset_review`, `upsert_subject_profile`, `confirm_subject_profile`,
   `read_reference_candidates`.
-- Change `create_campaign_with_source` to persist the six new snapshot columns, and
+- Change `create_campaign_with_source` to persist the ten new snapshot columns, and
   `load_campaign_generation_context` to return them.
 - Seed four permissions: `asset.read`, `asset.manage`, `asset.review`, `subject.manage`, and their
   role mappings.
@@ -159,11 +159,11 @@ has said what the campaign is about.
 - `src/modules/campaigns/application/generation-context.ts`: carry the resolution request, replace
   the misleading `brand_constraints` refusal with `no_declared_subject`, and re-scope
   `syntheticAssetsAllowed` to the setting slot only.
-- `src/workflows/campaigns/generate-bundle.ts`: call the resolver, refuse on `insufficient`, pin the
-  outcome and the exact confirmed description onto the snapshot, fetch reference bytes, pass them to
-  the planner, and write the derived truth class.
-- `src/modules/campaigns/infrastructure/generation-readers.ts` and `creation-repository.ts`: read and
-  write the six new snapshot fields.
+- `src/workflows/campaigns/generate-bundle.ts`: call the resolver from the immutable declaration,
+  refuse on `insufficient`, pin the realized resolution receipt onto the claimed run, fetch reference
+  bytes, pass them to the planner, and write the derived truth class.
+- `src/modules/campaigns/infrastructure/generation-readers.ts` reads the immutable snapshot
+  declaration; `creation-repository.ts` writes the run receipt through Task 8a's two-phase RPC.
 - Populate `campaign_assets.provenance.derivedFromBrandAssetVersionIds` from the pinned set.
 - **Pin onto `campaign_generation_runs`, not the snapshot** — amended 2026-08-24. The snapshot is
   immutable by trigger and holds what the brief declared; the run holds what this run actually used.
@@ -251,13 +251,17 @@ has said what the campaign is about.
 
 ## New or changed schemas, migrations, events and public exports
 
-- **Migration:** one, additive, listed in Task 1.
+- **Migrations:** the reviewed forward-only sequence from Task 1, Task 1c and Task 8a; none reaches
+  staging before its board review gate.
 - **New tables:** `creative_review_reasons`, `creative_asset_reviews`,
   `organization_subject_profiles`.
-- **Changed tables:** `organization_brand_assets` (four columns), `campaign_source_snapshots` (six).
-- **Changed functions:** `create_campaign_with_source`, `load_campaign_generation_context`.
+- **Changed tables:** `organization_brand_assets` (five columns), `campaign_source_snapshots` (ten),
+  `campaign_generation_runs` (seven).
+- **Changed functions:** `create_campaign_with_source`, `load_campaign_generation_context`,
+  `read_reference_candidates`.
 - **New functions:** `record_creative_asset_review`, `upsert_subject_profile`,
-  `confirm_subject_profile`, `read_reference_candidates`.
+  `confirm_subject_profile`, `read_reference_candidates`,
+  `pin_campaign_generation_run_reference_context`.
 - **Events:** `asset.version_added`, `asset.reviewed`, `asset.archived`, `subject.confirmed`,
   `campaign.reference_set_pinned`.
 - **Permissions:** `asset.read`, `asset.manage`, `asset.review`, `subject.manage`.

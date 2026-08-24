@@ -39,19 +39,19 @@ select extensions.has_column(
 
 select extensions.has_column(
   'public', 'campaign_source_snapshots', 'reference_slots',
-  'the resolved reference slots are pinned'
+  'the immutable brief declaration can carry proposed reference slots'
 );
 select extensions.has_column(
   'public', 'campaign_source_snapshots', 'negative_rules',
-  'the exact negative rules are pinned'
+  'the immutable brief declaration can carry proposed negative rules'
 );
 select extensions.has_column(
   'public', 'campaign_source_snapshots', 'resolver_version',
-  'the resolver version is pinned'
+  'the immutable brief declaration can carry a proposed resolver version'
 );
 select extensions.has_column(
   'public', 'campaign_source_snapshots', 'resolution_outcome',
-  'the resolution outcome is pinned'
+  'the immutable brief declaration can carry a proposed resolution outcome'
 );
 select extensions.has_column(
   'public', 'campaign_source_snapshots', 'subject_profile_id',
@@ -78,6 +78,35 @@ select extensions.has_column(
   'the operator creative direction is pinned'
 );
 
+select extensions.has_column(
+  'public', 'campaign_generation_runs', 'reference_slots',
+  'each run records the positive reference slots it actually sent'
+);
+select extensions.has_column(
+  'public', 'campaign_generation_runs', 'avoid_reference_version_ids',
+  'each run records its negative references separately'
+);
+select extensions.has_column(
+  'public', 'campaign_generation_runs', 'negative_rules',
+  'each run records the negative rules in force'
+);
+select extensions.has_column(
+  'public', 'campaign_generation_runs', 'resolver_version',
+  'each run records the resolver version it used'
+);
+select extensions.has_column(
+  'public', 'campaign_generation_runs', 'resolution_outcome',
+  'each run records its realized resolution outcome'
+);
+select extensions.has_column(
+  'public', 'campaign_generation_runs', 'blueprint',
+  'each run records the parsed blueprint it actually used'
+);
+select extensions.has_column(
+  'public', 'campaign_generation_runs', 'plan_model_id',
+  'each run records the model that wrote its blueprint'
+);
+
 select extensions.has_function(
   'public', 'record_creative_asset_review', array['uuid', 'jsonb'],
   'the governed review writer exists'
@@ -93,6 +122,10 @@ select extensions.has_function(
 select extensions.has_function(
   'public', 'read_reference_candidates', array['uuid'],
   'the tenant-scoped candidate reader exists'
+);
+select extensions.has_function(
+  'public', 'pin_campaign_generation_run_reference_context', array['uuid', 'jsonb'],
+  'the run-scoped reference receipt writer exists'
 );
 
 select extensions.is(
@@ -209,6 +242,26 @@ select extensions.function_privs_are(
 select extensions.function_privs_are(
   'public', 'read_reference_candidates', array['uuid'],
   'service_role', array['EXECUTE'], 'the worker may read a tenant-scoped reference set'
+);
+select extensions.function_privs_are(
+  'public', 'pin_campaign_generation_run_reference_context', array['uuid', 'jsonb'],
+  'authenticated', array[]::text[], 'a browser session cannot write a worker receipt'
+);
+select extensions.function_privs_are(
+  'public', 'pin_campaign_generation_run_reference_context', array['uuid', 'jsonb'],
+  'service_role', array['EXECUTE'], 'only the worker role may write a run receipt'
+);
+select extensions.ok(
+  (
+    select procedure.prosecdef
+      and procedure.proconfig @> array['search_path=""']
+    from pg_catalog.pg_proc procedure
+    join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = 'pin_campaign_generation_run_reference_context'
+      and procedure.proargtypes = '2950 3802'::pg_catalog.oidvector
+  ),
+  'the receipt writer is a security definer with an empty search path'
 );
 
 -- ---------------------------------------------------------------------------
@@ -870,7 +923,7 @@ select extensions.ok(
       from asset_library_state where key = 'campaign'
     )
   ),
-  'campaign creation pins all ten resolver and art-direction fields without a later mutation'
+  'campaign creation records all ten declared resolver and art-direction fields immutably'
 );
 
 insert into asset_library_state (key, value)
@@ -893,6 +946,29 @@ select 'run', public.enqueue_campaign_generation_run(
 
 reset role;
 reset request.jwt.claim.sub;
+
+set local request.jwt.claim.role = 'service_role';
+select extensions.throws_ok(
+  $$
+    select public.pin_campaign_generation_run_reference_context(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+        'claim_token', 'a5100000-0000-4000-8000-000000000998',
+        'phase', 'resolution',
+        'reference_slots', '[]'::jsonb,
+        'avoid_reference_version_ids', '[]'::jsonb,
+        'negative_rules', '[]'::jsonb,
+        'resolver_version', 1,
+        'resolution_outcome', 'synthesis_permitted'
+      )
+    )
+  $$,
+  '42501', 'campaign_generation_pin_forbidden',
+  'a JWT role claim cannot grant the worker write path without a database role switch'
+);
+reset request.jwt.claim.role;
 
 set local role service_role;
 reset request.jwt.claim.role;
@@ -922,6 +998,236 @@ select 'claim', public.claim_campaign_generation_run(
     'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
     'lease_seconds', 300
   )
+);
+
+select extensions.throws_ok(
+  $$
+    select public.pin_campaign_generation_run_reference_context(
+      'a5100000-0000-4000-8000-000000000102'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000102',
+        'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+        'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+        'phase', 'resolution',
+        'reference_slots', '[]'::jsonb,
+        'avoid_reference_version_ids', '[]'::jsonb,
+        'negative_rules', '[]'::jsonb,
+        'resolver_version', 1,
+        'resolution_outcome', 'synthesis_permitted'
+      )
+    )
+  $$,
+  '42501', 'campaign_generation_run_not_found',
+  'a run receipt cannot be pinned through another organization'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.pin_campaign_generation_run_reference_context(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+        'claim_token', 'a5100000-0000-4000-8000-000000000998',
+        'phase', 'resolution',
+        'reference_slots', '[]'::jsonb,
+        'avoid_reference_version_ids', '[]'::jsonb,
+        'negative_rules', '[]'::jsonb,
+        'resolver_version', 1,
+        'resolution_outcome', 'synthesis_permitted'
+      )
+    )
+  $$,
+  '42501', 'campaign_generation_claim_lost',
+  'a stale worker claim cannot pin a run receipt'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.pin_campaign_generation_run_reference_context(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+        'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+        'phase', 'blueprint',
+        'blueprint', jsonb_build_object('composition', 'Too early'),
+        'plan_model_id', 'gemini-plan-test'
+      )
+    )
+  $$,
+  '22023', 'campaign_generation_resolution_not_pinned',
+  'the blueprint cannot be pinned before the resolution receipt'
+);
+
+insert into asset_library_state (key, value)
+select 'resolution_pin', public.pin_campaign_generation_run_reference_context(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+    'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+    'phase', 'resolution',
+    'reference_slots', jsonb_build_array(
+      jsonb_build_object(
+        'slot', 'subject',
+        'ordinal', 0,
+        'brandAssetVersionId', 'a5100000-0000-4000-8000-000000000301'
+      )
+    ),
+    'avoid_reference_version_ids',
+      jsonb_build_array('a5100000-0000-4000-8000-000000000303'),
+    'negative_rules', jsonb_build_array(
+      jsonb_build_object('code', 'people_shown', 'description', 'Do not show people.')
+    ),
+    'resolver_version', 1,
+    'resolution_outcome', 'resolved'
+  )
+);
+
+select extensions.is(
+  (select value ->> 'replayed' from asset_library_state where key = 'resolution_pin'),
+  'false'::text,
+  'the first resolution receipt is a new pin'
+);
+
+insert into asset_library_state (key, value)
+select 'resolution_replay', public.pin_campaign_generation_run_reference_context(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+    'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+    'phase', 'resolution',
+    'reference_slots', jsonb_build_array(
+      jsonb_build_object(
+        'slot', 'subject',
+        'ordinal', 0,
+        'brandAssetVersionId', 'a5100000-0000-4000-8000-000000000301'
+      )
+    ),
+    'avoid_reference_version_ids',
+      jsonb_build_array('a5100000-0000-4000-8000-000000000303'),
+    'negative_rules', jsonb_build_array(
+      jsonb_build_object('code', 'people_shown', 'description', 'Do not show people.')
+    ),
+    'resolver_version', 1,
+    'resolution_outcome', 'resolved'
+  )
+);
+
+select extensions.ok(
+  (
+    select replay.value ->> 'replayed' = 'true'
+      and jsonb_array_length(run.reference_slots) = 1
+      and run.avoid_reference_version_ids =
+        array['a5100000-0000-4000-8000-000000000303'::uuid]
+      and jsonb_array_length(run.negative_rules) = 1
+      and run.resolver_version = 1
+      and run.resolution_outcome = 'resolved'
+      and run.blueprint is null
+      and run.plan_model_id is null
+    from public.campaign_generation_runs run
+    cross join asset_library_state replay
+    where run.id = (
+      select (value ->> 'run_id')::uuid from asset_library_state where key = 'run'
+    ) and replay.key = 'resolution_replay'
+  ),
+  'an exact resolution replay is a no-op and stage two remains empty'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.pin_campaign_generation_run_reference_context(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+        'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+        'phase', 'resolution',
+        'reference_slots', '[]'::jsonb,
+        'avoid_reference_version_ids', '[]'::jsonb,
+        'negative_rules', '[]'::jsonb,
+        'resolver_version', 1,
+        'resolution_outcome', 'synthesis_permitted'
+      )
+    )
+  $$,
+  '22023', 'campaign_generation_resolution_conflict',
+  'a conflicting resolution replay is refused'
+);
+
+insert into asset_library_state (key, value)
+select 'blueprint_pin', public.pin_campaign_generation_run_reference_context(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+    'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+    'phase', 'blueprint',
+    'blueprint', jsonb_build_object(
+      'composition', 'Centered clay pot with generous negative space',
+      'lighting', 'Warm side light'
+    ),
+    'plan_model_id', 'gemini-plan-test'
+  )
+);
+
+select extensions.is(
+  (select value ->> 'replayed' from asset_library_state where key = 'blueprint_pin'),
+  'false'::text,
+  'the first blueprint receipt is a new pin'
+);
+
+insert into asset_library_state (key, value)
+select 'blueprint_replay', public.pin_campaign_generation_run_reference_context(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+    'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+    'phase', 'blueprint',
+    'blueprint', jsonb_build_object(
+      'composition', 'Centered clay pot with generous negative space',
+      'lighting', 'Warm side light'
+    ),
+    'plan_model_id', 'gemini-plan-test'
+  )
+);
+
+select extensions.ok(
+  (
+    select replay.value ->> 'replayed' = 'true'
+      and run.blueprint = jsonb_build_object(
+        'composition', 'Centered clay pot with generous negative space',
+        'lighting', 'Warm side light'
+      )
+      and run.plan_model_id = 'gemini-plan-test'
+    from public.campaign_generation_runs run
+    cross join asset_library_state replay
+    where run.id = (
+      select (value ->> 'run_id')::uuid from asset_library_state where key = 'run'
+    ) and replay.key = 'blueprint_replay'
+  ),
+  'an exact blueprint replay is a no-op and preserves the first receipt'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.pin_campaign_generation_run_reference_context(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'run_id', (select value ->> 'run_id' from asset_library_state where key = 'run'),
+        'claim_token', (select value ->> 'claim_token' from asset_library_state where key = 'claim'),
+        'phase', 'blueprint',
+        'blueprint', jsonb_build_object('composition', 'Conflicting composition'),
+        'plan_model_id', 'gemini-plan-test'
+      )
+    )
+  $$,
+  '22023', 'campaign_generation_blueprint_conflict',
+  'a conflicting blueprint replay is refused'
 );
 
 insert into asset_library_state (key, value)
@@ -956,10 +1262,23 @@ select extensions.ok(
     from asset_library_state
     where key = 'context'
   ),
-  'the claimed worker context returns all ten pinned resolver and art-direction fields'
+  'the claimed worker context returns all ten immutable declared fields'
 );
 
 reset role;
+
+select extensions.throws_ok(
+  $$
+    update public.campaign_source_snapshots
+    set facts = jsonb_build_object('rewritten', true)
+    where id = (
+      select (value ->> 'source_snapshot_id')::uuid
+      from asset_library_state where key = 'campaign'
+    )
+  $$,
+  '23514', 'campaign_bundle_version_is_immutable',
+  'the source snapshot immutability trigger still refuses an update'
+);
 
 select * from extensions.finish();
 rollback;
