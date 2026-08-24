@@ -84,6 +84,35 @@ export type {
   ScriptCode,
 } from "@/domain/campaigns/asset-library";
 
+export {
+  AVOID_REFERENCE_LIMIT,
+  NEGATIVE_RULE_LIMIT,
+  POSITIVE_REFERENCE_LIMIT,
+  REFERENCE_SLOT_CAPS,
+  RESOLVER_VERSION,
+  TYPOGRAPHY_SCRIPT_LIMIT,
+  ReferenceResolutionError,
+  avoidReferenceSchema,
+  negativeRuleSchema,
+  referenceCandidateSchema,
+  referenceResolutionInputSchema,
+  referenceResolutionRequestSchema,
+  referenceResolutionSchema,
+  resolveReferences,
+  resolvedReferenceSlotSchema,
+  reviewReasonRegistryEntrySchema,
+} from "@/domain/campaigns/reference-resolution";
+export type {
+  AvoidReference,
+  NegativeRule,
+  ReferenceCandidate,
+  ReferenceResolution,
+  ReferenceResolutionErrorCode,
+  ReferenceResolutionInput,
+  ReferenceResolutionRequest,
+  ResolvedReferenceSlot,
+} from "@/domain/campaigns/reference-resolution";
+
 export { bundleDigest, canonicalManifestJson } from "@/domain/campaigns/digest";
 export { normalizeManifest } from "@/domain/campaigns/normalization";
 export { diffManifests } from "@/domain/campaigns/digest";

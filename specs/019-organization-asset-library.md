@@ -553,7 +553,7 @@ a table it did not create is called once against staging before its task is comp
 
 Additive only. Existing rows are unaffected; there are none.
 
-- `conditioning_roles text[] not null default '{}'` — non-empty, elements constrained to the six
+- `conditioning_roles text[] not null default '{}'` — non-empty, elements constrained to the seven
   roles, no duplicates.
 - `tags text[] not null default '{}'` — each 1–60 characters, at most 24 per asset.
 - `scripts text[] not null default '{}'` — ISO 15924 codes. Required non-empty when

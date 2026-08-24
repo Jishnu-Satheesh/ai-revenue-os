@@ -303,7 +303,8 @@ Still open:
   the description appears; no prompt requests rendered text; the description sits in a data block
   with constraints after it.
 - **Provider seam** — parts ordered deterministically; each carries its role instruction; a rejected
-  asset's bytes appear in no request; an unreadable reference fails the run rather than degrading it.
+  asset's bytes appear only in the separately capped `avoid` set with that asset's reason codes and
+  never as a positive reference; an unreadable reference fails the run rather than degrading it.
 - **Application** — a draft profile cannot generate; rejection without a reason is refused; archive
   excludes from resolution; a re-approved asset becomes a candidate again.
 - **Route** — permission enforced per verb; a viewer is refused write; `.../assets/resolve` returns
