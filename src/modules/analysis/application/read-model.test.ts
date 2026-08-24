@@ -582,6 +582,7 @@ describe("buildChannelWorkspaceView", () => {
         analysisRunId: "run-1",
         channelId: CHANNEL,
         branchId: "branch-1",
+        resultDigest: "d".repeat(64),
         label: "recommendation",
         headline: "Close the seventeen uncovered days first",
         detail:

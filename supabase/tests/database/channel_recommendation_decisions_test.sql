@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(38);
+select extensions.plan(42);
 
 -- The human fence: the two RPCs through which a member answers what the
 -- narrator said. Everything here is exercised as real member sessions --
@@ -49,6 +49,19 @@ insert into public.account_memberships (account_id, user_id, account_role, defau
 insert into public.organization_memberships (organization_id, user_id, role) values
   ('fb220000-0000-4000-8000-000000000201'::uuid, 'fb220000-0000-4000-8000-000000000003'::uuid, 'viewer'),
   ('fb220000-0000-4000-8000-000000000201'::uuid, 'fb220000-0000-4000-8000-000000000004'::uuid, 'operator');
+
+-- The owner's profile carries a display name, so the snapshot assertions below
+-- can tell a resolved name from the fallback.
+update public.profiles set display_name = 'Dana AlMansoori'
+where id = 'fb220000-0000-4000-8000-000000000001'::uuid;
+
+-- The actor's name is written beside the answer, resolved inside the triage
+-- function's definer context -- not re-resolved at read time through a session
+-- that cannot see other members' profiles.
+select extensions.has_column('public', 'channel_recommendation_decisions', 'actor_display_name',
+  'every answer carries its actor''s name as it read at answer time');
+select extensions.col_not_null('public', 'channel_recommendation_decisions', 'actor_display_name',
+  'an unnamed answer is not an answer; the fallback is a value, never null');
 
 insert into public.branches (id, organization_id, name, slug, kind, timezone, currency)
 values ('fb220000-0000-4000-8000-000000000301'::uuid, 'fb220000-0000-4000-8000-000000000201'::uuid, 'Dubai outlet', 'decisions-dubai', 'physical', 'Asia/Dubai', 'AED');
@@ -130,6 +143,13 @@ select extensions.is((
     and recommendation_id = 'fb220000-0000-4000-8000-000000000801'::uuid
 ), 1, 'the answer landed in the decision log');
 
+-- An actor with a readable profile is named from it, definer-side.
+select extensions.is((
+  select actor_display_name from public.channel_recommendation_decisions
+  where organization_id = 'fb220000-0000-4000-8000-000000000201'::uuid
+    and recommendation_id = 'fb220000-0000-4000-8000-000000000801'::uuid
+), 'Dana AlMansoori', 'the answer names its actor as their profile read at answer time');
+
 select extensions.is((
   select count(*)::integer from public.audit_events
   where entity_id = 'fb220000-0000-4000-8000-000000000801'::uuid
@@ -184,12 +204,22 @@ select extensions.throws_ok(
   'naming someone else as the actor is refused: the session is the actor');
 
 -- An operator holds the triage tier; a viewer reads but does not answer.
+-- This operator's profile row is gone entirely, which is the fallback case:
+-- the answer still lands, and still names its actor -- as Unknown.
+delete from public.profiles where id = 'fb220000-0000-4000-8000-000000000004'::uuid;
 set local request.jwt.claim.sub = 'fb220000-0000-4000-8000-000000000004';
 select extensions.lives_ok(
   $$ select pg_temp.triage('fb220000-0000-4000-8000-000000000201', 'fb220000-0000-4000-8000-000000000801',
        'dismissed', 'Breakfast delivery is not part of our plan.',
        'fb220000-0000-4000-8000-000000000004') $$,
   'an operator answers too, stating why this one is dismissed');
+
+select extensions.is((
+  select actor_display_name from public.channel_recommendation_decisions
+  where organization_id = 'fb220000-0000-4000-8000-000000000201'::uuid
+    and recommendation_id = 'fb220000-0000-4000-8000-000000000801'::uuid
+    and actor_id = 'fb220000-0000-4000-8000-000000000004'::uuid
+), 'Unknown', 'an actor with no profile row at all is named honestly rather than left blank');
 
 set local request.jwt.claim.sub = 'fb220000-0000-4000-8000-000000000003';
 select extensions.throws_ok(

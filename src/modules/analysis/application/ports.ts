@@ -96,9 +96,9 @@ export type ChannelRecommendationDecisionRecord = {
   reason: string | null;
   actorId: string;
   /**
-   * Read through the caller's own session, where each member may see only
-   * their own profile row. Another actor's name therefore arrives as "Unknown"
-   * rather than through a service-role bypass of that policy.
+   * Snapshotted beside the answer by the database itself, resolved inside the
+   * triage function's definer context at answer time. It does not follow later
+   * profile renames, and reads "Unknown" when no profile row existed.
    */
   actorName: string;
   createdAt: string;
@@ -122,6 +122,8 @@ export type ChannelRecommendationRecord = {
   detail: string;
   supportedActions: readonly string[];
   limitations: readonly string[];
+  /** Binds this item to the exact submission that produced it. */
+  resultDigest: string;
   /** The stored findings this narration was built from, cited by id. */
   citationFindingIds: readonly string[];
   /** Newest first, so the latest answer is also the first stored one. */

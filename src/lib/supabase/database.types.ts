@@ -861,6 +861,11 @@ export type Database = {
           /** Required when the decision dismisses; null for every other answer. */
           dismissal_reason: string | null;
           actor_id: string;
+          /**
+           * Snapshot of the actor's display name, resolved definer-side at
+           * answer time (20260824170000); 'Unknown' without a readable profile.
+           */
+          actor_display_name: string;
           created_at: string;
         };
         Insert: never;

@@ -324,11 +324,12 @@ export function createAuthenticatedChannelAnalysisRepository(
     async loadRecommendationsForRun({ organizationId, analysisRunId, viewerId }) {
       // Only the displayed run's narration, for the same reason findings are
       // read per run: words narrated over another window must not sit above
-      // this window's figures.
+      // this window's figures. Newest first, so each submission's newest item
+      // is also the first row carrying its result digest.
       const { data: rows, error } = await supabase
         .from("channel_recommendations")
         .select(
-          "id, channel_id, branch_id, label, headline, detail, supported_actions, limitations, created_at",
+          "id, channel_id, branch_id, label, headline, detail, supported_actions, limitations, result_digest, created_at",
         )
         .eq("organization_id", organizationId)
         .eq("analysis_run_id", analysisRunId)
@@ -352,26 +353,22 @@ export function createAuthenticatedChannelAnalysisRepository(
       if (citationError) throw new ChannelAnalysisReadError(citationError.code ?? "unknown");
 
       // Every triage answer ever recorded; which one stands is decided by the
-      // view builder from `created_at`, not silently here.
+      // view builder from `created_at`, not silently here. The actor's name
+      // arrives in the row itself, snapshotted definer-side when the answer
+      // was written, so no profiles read happens here -- a session cannot see
+      // another member's profile row, and must not borrow authority to try.
       const { data: decisions, error: decisionError } = await supabase
         .from("channel_recommendation_decisions")
-        .select("id, recommendation_id, decision, dismissal_reason, actor_id, created_at")
+        .select(
+          "id, recommendation_id, decision, dismissal_reason, actor_id, actor_display_name, created_at",
+        )
         .eq("organization_id", organizationId)
         .in("recommendation_id", [...recommendationIds])
         .order("created_at", { ascending: false })
         .limit(MAX_RECOMMENDATION_DECISIONS);
       if (decisionError) throw new ChannelAnalysisReadError(decisionError.code ?? "unknown");
 
-      // Names come through the caller's own session, so RLS -- which shows a
-      // member only their own profile row -- decides whose name is readable.
-      // Nobody else's is fetched behind their back with a service role; an
-      // unreadable name reads as "Unknown" on the page instead.
       const decisionRows = decisions ?? [];
-      const actorIds = [...new Set(decisionRows.map((row) => row.actor_id))];
-      const { data: profiles } = actorIds.length
-        ? await supabase.from("profiles").select("id, display_name").in("id", actorIds)
-        : { data: [] as { id: string; display_name: string | null }[] | null };
-      const nameById = new Map((profiles ?? []).map((row) => [row.id, row.display_name]));
 
       // One vote per actor per recommendation, and the only vote this page can
       // honestly show the reader is their own.
@@ -393,36 +390,55 @@ export function createAuthenticatedChannelAnalysisRepository(
         (feedback ?? []).map((row) => [row.recommendation_id, row.helpful]),
       );
 
-      return recommendationRows.map(
-        (row): ChannelRecommendationRecord => ({
-          id: row.id,
-          analysisRunId: analysisRunId,
-          channelId: row.channel_id,
-          branchId: row.branch_id,
-          label: row.label,
-          headline: row.headline,
-          detail: row.detail,
-          supportedActions: toStringArray(row.supported_actions),
-          limitations: toStringArray(row.limitations),
-          citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
-          decisions: decisionRows.flatMap((entry): ChannelRecommendationDecisionRecord[] =>
-            entry.recommendation_id === row.id
-              ? [
-                  {
-                    recommendationId: entry.recommendation_id,
-                    decision: entry.decision,
-                    reason: entry.dismissal_reason,
-                    actorId: entry.actor_id,
-                    actorName: nameById.get(entry.actor_id) ?? "Unknown",
-                    createdAt: entry.created_at,
-                  },
-                ]
-              : [],
-          ),
-          myFeedback: feedbackByRecommendation.get(row.id) ?? null,
-          createdAt: row.created_at,
-        }),
-      );
+      // A run can be narrated more than once: a re-submission writes new rows
+      // rather than overwriting, and two tellings of one run on one page would
+      // read as two answers to one question. The rows arrive newest-first, so
+      // the first row seen per digest is that submission's newest item -- and
+      // the digest whose newest item is newest overall is the telling the page
+      // shows. Ties keep the first-seen submission, deterministically.
+      const newestByDigest = new Map<string, string>();
+      for (const row of recommendationRows) {
+        if (!newestByDigest.has(row.result_digest)) {
+          newestByDigest.set(row.result_digest, row.created_at);
+        }
+      }
+      const [displayedDigest] = [...newestByDigest.entries()].sort((left, right) =>
+        right[1].localeCompare(left[1]),
+      )[0];
+
+      return recommendationRows
+        .filter((row) => row.result_digest === displayedDigest)
+        .map(
+          (row): ChannelRecommendationRecord => ({
+            id: row.id,
+            analysisRunId: analysisRunId,
+            channelId: row.channel_id,
+            branchId: row.branch_id,
+            label: row.label,
+            headline: row.headline,
+            detail: row.detail,
+            supportedActions: toStringArray(row.supported_actions),
+            limitations: toStringArray(row.limitations),
+            resultDigest: row.result_digest,
+            citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
+            decisions: decisionRows.flatMap((entry): ChannelRecommendationDecisionRecord[] =>
+              entry.recommendation_id === row.id
+                ? [
+                    {
+                      recommendationId: entry.recommendation_id,
+                      decision: entry.decision,
+                      reason: entry.dismissal_reason,
+                      actorId: entry.actor_id,
+                      actorName: entry.actor_display_name,
+                      createdAt: entry.created_at,
+                    },
+                  ]
+                : [],
+            ),
+            myFeedback: feedbackByRecommendation.get(row.id) ?? null,
+            createdAt: row.created_at,
+          }),
+        );
     },
   };
 }
