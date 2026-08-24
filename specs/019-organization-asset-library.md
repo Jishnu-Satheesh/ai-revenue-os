@@ -289,15 +289,20 @@ that fact belongs to that spec.
   `brand_mark_distorted`, `people_shown`, `prohibited_content`, `low_quality`, `off_palette`,
   `not_localised`, `other`.
 - Restaurant Pack codes: `wrong_cuisine`, `alcohol_visible`, `unappetising`, `not_our_plating`.
-- A rejected asset is excluded from resolution permanently unless a later review approves it.
-- A rejected asset's **bytes are never sent to any provider**. Its reason descriptions are.
+- A rejected asset is excluded from every positive reference slot unless a later review approves it.
+  While rejected, it may enter only the separate `avoid` set, capped at two assets, with the reason
+  codes for that asset attached.
+- A rejected asset's bytes may be sent to the image provider only as a bounded `avoid` reference.
+  They may never be presented as inspiration, an exact match, or any other positive reference.
 
 ### 7.3 Resolution
 
 Pure, versioned domain function. `RESOLVER_VERSION` starts at 1. A changed method is a new version,
 never a silent reinterpretation of sets already pinned.
 
-Candidates are usable versions of unarchived assets whose current verdict is not `rejected`.
+Candidates are usable versions of unarchived assets. Approved and unreviewed candidates may fill
+positive slots. Rejected candidates may fill only the separate `avoid` set and never count against
+the positive budget.
 
 The request is a pure function of stated intent and stored data:
 
@@ -839,7 +844,8 @@ and is a defect if observed.
      not performed, and the reference path is proved against the fixture organization instead — the
      weaker evidence is stated, never quietly substituted.
   3. Reject one output with a reason; confirm the next generation's pinned negative rules contain
-     it and that the rejected bytes appear in no request.
+     it, the rejected asset appears only in the capped `avoid` set with its own reason codes, and
+     its bytes are never presented to the provider as a positive reference.
   4. Remove the subject and confirm the run refuses with `no_declared_subject`.
   5. Confirm every generated image contains no rendered text.
 

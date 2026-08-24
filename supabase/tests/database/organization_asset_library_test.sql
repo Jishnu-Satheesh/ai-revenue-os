@@ -634,17 +634,27 @@ select extensions.ok(
       and candidate ->> 'brand_asset_version_id'
         = 'a5100000-0000-4000-8000-000000000301'
       and candidate ->> 'ownership' = 'owned'
+      and candidate ->> 'current_verdict' = 'approved'
+  ) and exists (
+    select 1
+    from asset_library_state state,
+      lateral jsonb_array_elements(state.value -> 'candidates') candidate
+    where state.key = 'candidates'
+      and candidate ->> 'brand_asset_version_id'
+        = 'a5100000-0000-4000-8000-000000000303'
+      and candidate ->> 'current_verdict' = 'rejected'
+      and candidate -> 'current_reason_codes'
+        = jsonb_build_array('wrong_style', 'people_shown')
+      and candidate ->> 'current_reviewed_at' is not null
   ) and not exists (
     select 1
     from asset_library_state state,
       lateral jsonb_array_elements(state.value -> 'candidates') candidate
     where state.key = 'candidates'
-      and candidate ->> 'brand_asset_version_id' in (
-        'a5100000-0000-4000-8000-000000000302',
-        'a5100000-0000-4000-8000-000000000303'
-      )
+      and candidate ->> 'brand_asset_version_id'
+        = 'a5100000-0000-4000-8000-000000000302'
   ),
-  'candidate reads include an approved local version and exclude foreign and rejected versions'
+  'candidate reads include approved and rejected local versions with routing evidence and exclude foreign versions'
 );
 
 select extensions.ok(
@@ -654,7 +664,7 @@ select extensions.ok(
       lateral jsonb_array_elements(state.value -> 'rejected_reasons') reason
     where state.key = 'candidates' and reason ->> 'code' = 'people_shown'
   ),
-  'rejected bytes stay out of candidates while their governed reason remains available'
+  'the governed reason registry remains available for deterministic negative rules'
 );
 
 reset role;
