@@ -1541,6 +1541,102 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      /** Versioned, platform-owned poster layouts. A template version is immutable. */
+      campaign_poster_templates: {
+        Row: {
+          id: string;
+          key: string;
+          version: number;
+          placement: "feed_image" | "image_story";
+          canvas_width_px: number;
+          canvas_height_px: number;
+          layout: Record<string, unknown>;
+          owner_scope: "core" | "pack" | "organization";
+          pack_slug: string | null;
+          organization_id: string | null;
+          state: "active" | "retired";
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * One row per render attempt, refusals included -- a refusal that was never
+       * written down cannot be counted, and the refusal rate per script is what
+       * says whether font coverage is wrong rather than the operator.
+       *
+       * Carries no `truth_class`. That describes the plate and is read through
+       * `plate_asset_id`; `synthetic_composite` means "drawn from the client's
+       * photograph", not "layers composited", and conflating the two mislabels a
+       * truth claim shown to a client.
+       */
+      campaign_poster_renders: {
+        Row: {
+          id: string;
+          organization_id: string;
+          campaign_id: string;
+          bundle_version_id: string;
+          plate_asset_id: string;
+          /** Null for a client photograph and for an edited plate: neither has a run. */
+          plate_generation_run_id: string | null;
+          template_key: string;
+          template_version: number;
+          script: "Latn" | "Mlym" | "Arab";
+          text_values: Record<string, string>;
+          font_manifest: Record<string, unknown>;
+          /** Over the render inputs. Present even when the render was refused. */
+          render_digest: string;
+          state: "rendered" | "refused";
+          refusal_code: string | null;
+          refusal_detail: Record<string, unknown> | null;
+          output_storage_path: string | null;
+          /** Over the produced bytes. One render_digest must always yield one of these. */
+          output_content_hash: string | null;
+          output_mime_type: "image/png" | "image/jpeg" | "image/webp" | null;
+          output_width_px: number | null;
+          output_height_px: number | null;
+          verification: Record<string, unknown>;
+          rendered_at: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * Append-only masked-edit lineage and the edit's own receipt. No blueprint
+       * columns: an edit does not run the art-direction stage, because direction
+       * for a whole image would fight the mask it is supposed to respect.
+       */
+      campaign_plate_edits: {
+        Row: {
+          id: string;
+          organization_id: string;
+          campaign_id: string;
+          parent_plate_asset_id: string;
+          child_plate_asset_id: string;
+          mask_storage_path: string;
+          mask_content_hash: string;
+          union_coverage_ratio: number;
+          annotations: Array<{
+            ordinal: number;
+            bounds: Record<string, number>;
+            instruction: string;
+          }>;
+          negative_rules: string[];
+          model_id: string;
+          /** Null means not measured. Zero would claim the edit was free. */
+          cost_minor: number | null;
+          idempotency_key: string;
+          edited_by: string;
+          edited_at: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       /**
        * The permission vocabulary and its role mapping. Seeded by migration and
        * read-only to every application role, so Insert and Update are `never`.
