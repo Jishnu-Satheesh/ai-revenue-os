@@ -118,7 +118,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **done** |
 | 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **in-progress** |
 | 8b | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 8 | **review** |
-| 8v | Run the generation, inspect the run | codex | — | 8 | todo |
+| 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | in-progress |
 | A-r | **Slice A code review** | claude | — | — | **done — approved** |
 | 9 | Asset library service + reviews | codex | high | 2 | todo |
 | 10 | Asset library routes | codex | high | 9 | todo |
@@ -131,6 +131,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S0 | **Renderer spike** — PASSED all 4 cases; `@napi-rs/canvas` 1.0.8 + `fontkit` | claude | — | — | **done** |
 | S0j | Judge the renderings | user | — | S0 | **done — Malayalam confirmed correct** |
 | S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
+| S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **blocked — awaiting staging apply** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -1375,3 +1376,121 @@ warns about, now with a concrete way to fall into it.
 poster look like this" traverses asset → bundle version → the run whose `result_version_id` matches,
 and only then reaches the pinned resolution and blueprint. It works, but it is a reverse lookup and
 not obvious. `campaign_poster_renders` may want the plate's run id recorded directly.
+
+### 2026-08-24 · claude · Studio Task 2 claimed — schema
+
+- Claimed `supabase/migrations/20260826090000_campaign_creative_studio.sql` (the filename is claimed
+  here **before** the file exists, per rule 2), `supabase/tests/database/campaign_creative_studio_test.sql`,
+  `supabase/tests/database/permission_catalogue_test.sql` (one number), `src/domain/access/permissions.ts`
+  (one key), `src/lib/supabase/database.types.ts` (its own narrow commit), and
+  `specs/020-campaign-creative-studio.md`. Nothing in `src/modules`, `src/components`, `src/workflows`
+  or `src/trigger` is claimed by this task.
+- Verified before claiming: staging records `20260825120000`, so the tree and staging are in sync and
+  a dry-run should report exactly one pending migration. I will re-check at apply time rather than
+  trust this reading.
+- The four Studio-thread corrections from the entry above are folded into this task, not deferred.
+
+**Six decisions this task makes, with the reasons, so review is cheap:**
+
+1. **A poster is not a `campaign_assets` row.** Spec 020 §8.2 said `output_asset_id`. It cannot be:
+   `campaign_assets` requires a `bundle_version_id` and a not-null `truth_class`, and is writable
+   only by `create_campaign_bundle_version`. A poster filed there would have to be labelled
+   `synthetic_composite` — the §7.8 naming trap exactly — and **every render would create a new
+   bundle version, invalidating approval each time somebody rendered.** The render row therefore
+   carries its own output path, hash, mime and dimensions, in the existing `campaign-assets` bucket.
+   Spec §8.2 corrected in this change.
+2. **`campaign_poster_renders` has no `truth_class` column at all**, by reference through
+   `plate_asset_id` instead. `campaign_assets` rows are never updated, so the join cannot rot — and a
+   column named `truth_class` on a poster row is an invitation to fill it in. The absence is the
+   fence, the same way the blueprint schema has no `subject` field.
+3. **Refusals are rows.** §12 wants refusal rates by script and §8.2 had nowhere to put one. The
+   render digest is a function of *inputs*, so a refused attempt still has one: `state` in
+   `rendered | refused`, a `refusal_code`, and nullable output columns. The separate
+   `output_content_hash` is what proves determinism — same digest in, same bytes out.
+4. **Edits are their own receipt**, per the correction above. `campaign_plate_edits` gains
+   `cost_minor` (nullable — zero would claim it was free) and `negative_rules`. It deliberately gains
+   **no** `blueprint` or `plan_model_id`: an edit does not run the blueprint stage, and absent columns
+   say so more durably than a comment. Spec §7.6 now states the exclusion.
+5. **`idempotency_key` on edits is the whole concurrency story, not a convenience.** Because edits get
+   no `campaign_generation_runs` row, they get none of its claim-token and lease machinery. Without
+   the key a retry spends model money twice and writes two plates.
+6. **`campaign_poster_renders.plate_generation_run_id`, nullable.** Not merely to avoid a reverse
+   lookup. `campaign_generation_runs_succeeded_has_result` reads
+   `((status <> 'succeeded') OR (kind = 'variants') OR (result_version_id IS NOT NULL))`, so a
+   **variants run succeeds with a null `result_version_id`** and variants attach their asset to an
+   existing bundle version. For a plate produced that way, asset → bundle version → "the run whose
+   `result_version_id` matches" has nothing to match on. Nullable because a client photograph and an
+   edited plate legitimately have no generation run.
+
+**Two more things found while reading, neither blocking:**
+
+- **`permission_catalogue_test.sql:43` asserts 38 organization permissions; staging holds 42.** Task
+  1's four asset keys landed and the count was never updated — the red the channel-rec agent logged
+  is still open. `poster.render` makes 43, so this task sets it to 43, which clears both at once.
+- **The manifest has no money-typed offer, and spec 020 §7.4 says it does.** `campaign_briefs.offer`
+  is free text and `generationPolicy.lockedOfferRef` is a string; `moneySchema` exists but carries
+  spend ceilings, which are advertising budget rather than a customer price. Release 1 therefore
+  renders the approved offer **text**, which is still governed and still passed content policy. A
+  governed numeric price is a manifest change and a separate decision — flagged, not invented. Does
+  not block this task; it lands in Task 3 where the slots bind.
+
+**Deferred deliberately, on the user's approval:** the `core` template rows are **not** seeded here.
+The table is created now; the seed follows in a small forward migration once Task 4 proves the
+compositor can render a template. A seeded template tells an operator it is available, and one the
+compositor cannot satisfy is a promise that does not work.
+
+### 2026-08-24 · claude · Studio Task 2 written and rehearsed — **not yet applied to staging**
+
+Commits `ce5b2a3` (`database.types.ts`, alone) and `4b9dbd9` (everything else). The migration is
+`20260826090000_campaign_creative_studio.sql`. **It has not been applied.** `pnpm db:migrations:push`
+was refused by this session's permission gate; the user is deciding how the apply happens. Nothing
+reached staging.
+
+**What was proved, and how.** Rather than reason about the SQL, I ran it against staging inside a
+transaction that always rolls back — migration first, then a 22-step behaviour probe, then the pgTAP
+suite. Staging was untouched throughout, and `db:migrations:list` still shows `20260826090000` with
+an empty remote.
+
+- **The migration applies cleanly.** That includes `on delete set null (plate_generation_run_id)`,
+  the PostgreSQL 15+ column-list form, which I did not want to discover was unsupported at apply time.
+- **The pgTAP suite passes 55 of 55** in rehearsal.
+- **The suite is not vacuous, proved two ways.** Run without the migration it fails immediately —
+  the tables genuinely do not exist. And with the reproducibility guard deliberately broken —
+  `if false then` in place of the conflict comparison — **exactly one test failed, and it was the
+  right one**: "one render digest yielding different bytes is refused, not overwritten".
+- One fixture defect the rehearsal caught that review would not have: a version-2 bundle needs a
+  `parent_version_id` (`campaign_bundle_versions_check5`).
+
+**Two behaviours worth naming.**
+
+`record_campaign_poster_render` called as `authenticated` stops at *"permission denied for function"*
+— the grant layer, before the body and before the `current_setting('role')` check. Same two-layer
+ordering as 8av found, and the outer layer wins.
+
+A plate belonging to the right tenant but to a **different version of the same campaign** is refused
+with `campaign_poster_render_plate_not_found`. That is the case I most wanted covered: composing an
+approved version's poster over another version's plate would produce a poster nobody approved,
+assembled from parts that were each approved once.
+
+**Verification, honestly.** 55/55 pgTAP in rehearsal; `database.types.test` 73/73; permission drift
+28/28; focused ESLint and Prettier clean on my TypeScript; `git diff --check` clean. `pnpm typecheck`
+reaches exactly one error and it is not mine —
+`src/modules/analysis/application/triage.test.ts(125,11)`, the `"maybe"` fixture the channel-rec
+agent already logged. Prettier still reports `specs/020-campaign-creative-studio.md` and this board;
+both were already dirty at HEAD, so no shared-document reformat was mixed into this task.
+
+**Spec 020 corrected in four places** (`AGENTS.md` §9), all recorded in the spec itself rather than
+only here: §5.1 crosses off the `model-router.ts:245` item as already done by the Asset Library;
+§7.4 corrects the offer/price claim; §7.6 states that an edit does not run the blueprint stage; §8.2
+and §8.3 carry the render and edit revisions. A fifth open item was added to §18.2 for the governed
+numeric price.
+
+**`permission_catalogue_test.sql` is now 43, not 38.** That clears the red the channel-rec agent
+logged: Task 1's four asset keys took staging to 42 without updating the assertion, and
+`poster.render` makes 43. The number will be right the moment this migration is applied, and wrong
+until then — which is the same state the suite has been in since Task 1, not a new break.
+
+**Still outstanding before Task 2 is done:** apply, then call both writers against staging for real
+and run the suite there. The rehearsal is strong evidence and it is not the gate — the gate is a
+real call on the real database, and this project has been bitten three times by things that only
+fail when actually executed.
