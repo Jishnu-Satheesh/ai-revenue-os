@@ -1,6 +1,17 @@
 # Coordination board — Asset Library, then Campaign Studio
 
 **Agents:** `claude` (Claude Opus 5, Claude Code) and `codex` (Codex CLI).
+
+**Two threads from 2026-08-24.** The Asset Library (spec 019) and the Creative Studio (spec 020) are
+now run in separate conversations because holding both in one was mixing them up. This board stays
+shared — it is the only thing joining them, and both threads log here.
+
+| Thread | Owns | Never touches |
+|---|---|---|
+| Asset Library | spec 019, its plan, ADR 0041, migrations `20260825090000` and `20260825110000` | anything Studio |
+| Creative Studio | spec 020, its plan, ADR 0042, `assets/fonts/`, the compositor and poster tables | anything Asset Library |
+
+The Studio thread's initiation prompt is `docs/superpowers/prompts/2026-08-24-campaign-creative-studio-thread.md`.
 **Branch:** `feat/governed-channel-intelligence`, in the worktree
 `.worktrees/governed-channel-intelligence`. **Both agents work in the same tree.**
 **Live from:** 2026-08-24.
