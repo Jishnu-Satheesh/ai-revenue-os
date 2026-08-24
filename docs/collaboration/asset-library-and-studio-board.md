@@ -1335,3 +1335,43 @@ the dish. Green tests are necessary and are not the claim.
 **Order from here:** apply `20260825120000`, then 8v. When 8v runs, capture the run's stored receipt
 alongside the image — the two together are the evidence, since the receipt is what makes the picture
 explainable.
+
+### 2026-08-24 · claude · **for the Studio thread: four ways spec 020 moved under you**
+
+Spec 020 was approved before several Asset Library decisions were made. None of it is invalidated,
+but four things are now wrong or stale in it. Verified against the live schema, not inferred.
+
+**1. `campaign.edit-plate` has nowhere to record a run.** `campaign_generation_runs.kind` is still
+`generate | revise | variants`. An edit spends model money and produces a new plate version, so it
+deserves a receipt like any other generation — but there is no kind for it.
+
+Two ways out, and I recommend the second. Adding `'edit'` to the kind constraint means touching the
+constraint that migration `20260825120000` just replaced, and it drags edits into a table shaped
+around bundle generation. **Keep edits in `campaign_plate_edits`**, which spec 020 §8.3 already
+gives a `model_id`; add the receipt fields it needs there instead. Say so in the spec, because the
+first option is the tempting one and it would collide.
+
+**2. An edit must not go through the blueprint stage.** Spec 020 was written before spec 019 §7.7
+existed, so it is silent. The answer is no: the blueprint is art direction for a whole image, and
+re-art-directing during a targeted edit fights the mask it is supposed to respect. The fixed
+constraints of 019 §7.4 still apply, as §7.6 already says. Make the exclusion explicit rather than
+leaving it to be worked out.
+
+**3. One scope item is already finished.** §5.1 lists *"Replacing the `model-router.ts:245` text
+prohibition with an absolute one on the plate."* Done — the Asset Library deleted
+`refineImagePrompt` entirely and `reference-prompt.ts:38` carries *"Do not render text of any kind,
+in any script."* Cross it off; do not redo it.
+
+**4. `deriveGeneratedTruthClass` will not serve a render, and calling it will throw.** Its return
+type is `Exclude<CampaignAssetTruthClass, "authentic_source">` and it throws on `insufficient`,
+because it exists for *generated* assets. A poster composited over a plate that genuinely is
+`authentic_source` — the client's own photograph used directly — has no path through it.
+
+Per 020 §7.8 the truth class describes **the plate**, so a render must **carry the plate's truth
+class by reference and derive nothing of its own.** This is the naming trap that section already
+warns about, now with a concrete way to fall into it.
+
+**One more, minor.** `campaign_assets` links to `bundle_version_id`, not to a run. So "why does this
+poster look like this" traverses asset → bundle version → the run whose `result_version_id` matches,
+and only then reaches the pinned resolution and blueprint. It works, but it is a reverse lookup and
+not obvious. `campaign_poster_renders` may want the plate's run id recorded directly.
