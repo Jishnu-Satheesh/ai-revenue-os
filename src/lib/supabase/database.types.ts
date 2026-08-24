@@ -1392,6 +1392,61 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["organization_last_access"]["Insert"]>;
         Relationships: [];
       };
+      /** Platform and Industry Pack vocabulary for human creative verdicts. */
+      creative_review_reasons: {
+        Row: {
+          key: string;
+          description: string;
+          owner_scope: "core" | "pack";
+          pack_slug: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Append-only human verdicts; writes are confined to the governed RPC. */
+      creative_asset_reviews: {
+        Row: {
+          id: string;
+          organization_id: string;
+          subject_kind: "brand_asset_version" | "campaign_asset";
+          subject_id: string;
+          verdict: "approved" | "rejected";
+          reason_codes: string[];
+          note: string | null;
+          reviewed_by: string;
+          reviewed_at: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Confirmed descriptions are the declared-subject fallback when no photo exists. */
+      organization_subject_profiles: {
+        Row: {
+          id: string;
+          organization_id: string;
+          name: string;
+          slug: string;
+          description: string | null;
+          tags: string[];
+          names_by_script: Record<string, string>;
+          must_not_appear: string[];
+          illustrated_style: boolean;
+          state: "draft" | "confirmed";
+          confirmed_by: string | null;
+          confirmed_at: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+          archived_at: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       /**
        * The permission vocabulary and its role mapping. Seeded by migration and
        * read-only to every application role, so Insert and Update are `never`.
