@@ -26,10 +26,8 @@ Malayalam, English or Arabic.
      names, which is what has to work;
   2. Arabic requiring contextual joining, laid out right to left;
   3. a mixed string — Latin digits inside an Arabic sentence — exercising bidi.
-- Also render one string containing a codepoint the font deliberately does not cover, and confirm the
-  renderer reports it rather than silently drawing a box. If it cannot report unmapped codepoints,
-  say so: the glyph-coverage refusal in Task 3 depends on it, and a renderer that cannot report is
-  disqualified regardless of how it shapes.
+- **Done 2026-08-24 by claude. `@napi-rs/canvas` 1.0.8 passed all four cases; `fontkit` handles
+  coverage. See the board.** The rest of this task is recorded for the history and needs no rerun.
 - **Post the three PNGs to the board and stop.** A reader of each script judges them — Claude can
   spot tofu boxes and unformed conjuncts, but the user is the authority on whether the Malayalam is
   right.

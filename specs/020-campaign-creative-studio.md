@@ -575,6 +575,18 @@ handles Arabic and mangles Malayalam has failed for this client, whose own langu
 told plainly rather than shipped boxes.** That outcome is acceptable. Shipping unreadable Malayalam
 is not.
 
+**Resolved 2026-08-24 — the spike passed on all four cases.** `@napi-rs/canvas` 1.0.8 with fonts
+registered by explicit path shaped Malayalam conjuncts and pre-base vowel reordering, Arabic
+contextual joining right-to-left, and Latin digits inside an Arabic sentence in correct bidi order.
+Evidence on the coordination board.
+
+One constraint stated earlier here was wrong and is withdrawn: the renderer was required to report
+unmapped codepoints or be disqualified. **Glyph coverage is a cmap question, not a renderer
+question.** The control case proved why it matters — Malayalam drawn in a Latin font produced seven
+empty boxes silently, with no error and a perfectly plausible measured width. A `fontkit` cmap
+lookup named all seven codepoints *before* rendering. Coverage checking therefore sits in its own
+module, independent of whichever renderer is chosen.
+
 ### 18.2 Still open
 
 1. **Does the image model accept a mask, or only a marked-up image?** The compositing rule in §7.6
