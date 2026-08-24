@@ -109,7 +109,6 @@ const OUTPUT_CONTRACT = [
   "      so any 64-character hex string is acceptable here, but the length and",
   "      alphabet are not negotiable.",
   '    mimeType: "image/jpeg"|"image/png"|"image/webp", widthPx, heightPx: integers,',
-  '    truthClass: "synthetic_generated"|"synthetic_composite"|"authentic_source",',
   "    provenance: an object with EXACTLY these five keys and no others:",
   '      { kind: "generated", modelId: string, promptVersionId: string,',
   "        generationProfile: one of the three profile values,",

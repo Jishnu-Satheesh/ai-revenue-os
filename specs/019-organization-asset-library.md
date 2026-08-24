@@ -882,8 +882,8 @@ reverting it restores the previous permissive outcome, and the duck breast with 
 ## 17. Documentation updates
 
 - ADR 0041 — every generation is anchored to a declared subject; references are resolved
-  deterministically; negative examples are carried as words rather than as images; and truth class
-  is derived rather than declared.
+  deterministically; rejected examples may enter only the capped `avoid` image set with their own
+  reasons attached; and truth class is derived rather than declared.
 - `context/05-module-map.md` — the asset library, subject profiles, and the resolver.
 - `context/04-domain-model.md` — conditioning roles, subject profiles, verdicts, reason codes,
   truth class.

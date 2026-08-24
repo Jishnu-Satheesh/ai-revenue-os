@@ -144,6 +144,18 @@ describe("campaign planner", () => {
     expect(candidate.campaignId).toBe("c0000000-0000-4000-8000-000000000001");
   });
 
+  it("never asks the model to declare an asset truth class", async () => {
+    await planner().plan({
+      context: generationContext(),
+      prompt: "evidence",
+      signal: new AbortController().signal,
+    });
+
+    const call = generatePlan.mock.calls[0]?.[0] as { outputContract: string };
+    expect(call.outputContract).not.toContain("truthClass");
+    expect(call.outputContract).toContain("altText");
+  });
+
   it("names the failures verbatim on a repair pass", async () => {
     await planner().plan({
       context: generationContext(),

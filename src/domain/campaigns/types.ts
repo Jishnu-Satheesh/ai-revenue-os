@@ -116,6 +116,12 @@ export type {
 export { artDirectionBlueprintSchema } from "@/domain/campaigns/art-direction";
 export type { ArtDirectionBlueprint } from "@/domain/campaigns/art-direction";
 
+export {
+  TruthClassDerivationError,
+  deriveGeneratedTruthClass,
+} from "@/domain/campaigns/truth-class";
+export type { GeneratedAssetTruthClass } from "@/domain/campaigns/truth-class";
+
 export { bundleDigest, canonicalManifestJson } from "@/domain/campaigns/digest";
 export { normalizeManifest } from "@/domain/campaigns/normalization";
 export { diffManifests } from "@/domain/campaigns/digest";
