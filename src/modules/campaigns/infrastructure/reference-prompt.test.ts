@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReferenceResolution } from "@/domain/campaigns/reference-resolution";
-import { buildReferencePrompt } from "@/modules/campaigns/infrastructure/reference-prompt";
+import {
+  buildBlueprintReferencePrompt,
+  buildReferencePrompt,
+} from "@/modules/campaigns/infrastructure/reference-prompt";
 
 const SUBJECT_ASSET_ID = "11111111-1111-4111-8111-111111111111";
 const SUBJECT_VERSION_ID = "21111111-1111-4111-8111-111111111111";
@@ -111,5 +114,38 @@ describe("reference prompt", () => {
         hardConstraints: [],
       }),
     ).toThrow("No declared subject is available for image generation.");
+  });
+
+  it("injects the declared subject after a parsed blueprint and keeps fixed fences last", () => {
+    const prompt = buildBlueprintReferencePrompt({
+      operatorCreativeDirection: "A tight overhead crop.",
+      subjectDescription:
+        "Kingfish in brick-red coconut gravy, served in a clay pot with curry leaves.",
+      resolution: {
+        ...resolvedReferences(),
+        outcome: "synthesis_permitted",
+        referenceSlots: [],
+      },
+      hardConstraints: [],
+      blueprint: {
+        composition: "Centered vessel with quiet negative space.",
+        framing: "Tight overhead crop.",
+        lighting: "Soft window light.",
+        cameraTreatment: "Natural 50mm rendering.",
+        palette: ["brick red", "clay"],
+        focalPoint: "The centre of the vessel.",
+        surfaceNotes: ["matte stone"],
+        propNotes: ["neutral linen"],
+        avoid: ["busy props"],
+      },
+    });
+
+    const blueprint = prompt.indexOf("<art_direction_blueprint>");
+    const subject = prompt.indexOf("<declared_subject>");
+    const fixed = prompt.indexOf("<fixed_synthesis_constraints>");
+    expect(blueprint).toBeLessThan(subject);
+    expect(subject).toBeLessThan(fixed);
+    expect(prompt).toContain('"composition":"Centered vessel with quiet negative space."');
+    expect(prompt).toContain("Kingfish in brick-red coconut gravy");
   });
 });

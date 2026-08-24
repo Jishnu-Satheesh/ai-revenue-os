@@ -1,3 +1,5 @@
+import type { PlanPromptPurpose } from "@/ai/model-router";
+
 /**
  * The boundary a model sits behind when it writes campaign creative.
  *
@@ -25,6 +27,9 @@ export type CampaignGenerationInput = {
   prompt: string;
   /** The JSON shape the model is asked to produce, as a description. */
   outputContract: string;
+  /** Optional governed visual context for a multimodal planning call. */
+  references?: readonly CampaignImageReference[];
+  planPurpose?: PlanPromptPurpose;
 };
 
 export type CampaignImageReferenceRole =

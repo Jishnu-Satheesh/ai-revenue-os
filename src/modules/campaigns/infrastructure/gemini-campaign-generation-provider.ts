@@ -6,13 +6,19 @@ import { generateText, type UserContent } from "ai";
 import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
-import { createModelRouter, refinePrompt, type ModelRouter } from "@/ai/model-router";
+import {
+  createModelRouter,
+  refinePrompt,
+  type ModelRouter,
+  type PlanPromptPurpose,
+} from "@/ai/model-router";
 import type {
   CampaignGenerationInput,
   CampaignGenerationProvider,
   CampaignGenerationResult,
   CampaignGenerationUsage,
   CampaignImageGenerationInput,
+  CampaignImageReference,
   CampaignPatchInput,
   GeneratedImage,
 } from "@/ai/campaign-generation-provider";
@@ -26,6 +32,32 @@ const REFERENCE_ROLE_ORDER = {
   typography: 5,
   avoid: 6,
 } as const;
+
+function referenceContent(
+  prompt: string,
+  references: readonly CampaignImageReference[],
+): UserContent {
+  const ordered = [...references].sort(
+    (left, right) =>
+      REFERENCE_ROLE_ORDER[left.role] - REFERENCE_ROLE_ORDER[right.role] ||
+      left.ordinal - right.ordinal,
+  );
+
+  return [
+    { type: "text", text: prompt },
+    ...ordered.flatMap((reference) => [
+      {
+        type: "text" as const,
+        text: `<reference role="${reference.role}" ordinal="${reference.ordinal}">`,
+      },
+      {
+        type: "file" as const,
+        data: reference.bytes,
+        mediaType: reference.mimeType,
+      },
+    ]),
+  ];
+}
 
 /**
  * The configured campaign generation adapter, on Google Gemini.
@@ -116,17 +148,33 @@ export function createGeminiCampaignGenerationProvider(
     body: string,
     outputContract: string,
     repairFailures?: readonly string[],
+    references?: readonly CampaignImageReference[],
+    planPurpose?: PlanPromptPurpose,
   ): Promise<CampaignGenerationResult> {
     // Resolution happens before the try, so an unconfigured model surfaces as
     // the configuration error it is rather than a generic provider failure.
     const route = router.resolve(task);
-    const refined = refinePrompt({ route, role, body, outputContract, repairFailures });
+    const refined = refinePrompt({
+      route,
+      role,
+      body,
+      outputContract,
+      repairFailures,
+      planPurpose,
+    });
 
     try {
+      const promptInput = references?.length
+        ? {
+            messages: [
+              { role: "user" as const, content: referenceContent(refined.prompt, references) },
+            ],
+          }
+        : { prompt: refined.prompt };
       const result = await generateText({
         model: google(route.modelId),
         system: refined.system,
-        prompt: refined.prompt,
+        ...promptInput,
         temperature: route.temperature,
         maxOutputTokens: route.maxOutputTokens,
         abortSignal: AbortSignal.timeout(TIMEOUT_MS),
@@ -150,7 +198,15 @@ export function createGeminiCampaignGenerationProvider(
 
   return {
     generatePlan(input: CampaignGenerationInput) {
-      return callText("plan", input.system, input.prompt, input.outputContract);
+      return callText(
+        "plan",
+        input.system,
+        input.prompt,
+        input.outputContract,
+        undefined,
+        input.references,
+        input.planPurpose,
+      );
     },
 
     generatePatch(input: CampaignPatchInput) {
@@ -215,25 +271,7 @@ export function createGeminiCampaignGenerationProvider(
           "",
           `Compose for a ${input.widthPx}x${input.heightPx} pixel frame.`,
         ].join("\n");
-        const references = [...(input.references ?? [])].sort(
-          (left, right) =>
-            REFERENCE_ROLE_ORDER[left.role] - REFERENCE_ROLE_ORDER[right.role] ||
-            left.ordinal - right.ordinal,
-        );
-        const content: UserContent = [
-          { type: "text", text: framedPrompt },
-          ...references.flatMap((reference) => [
-            {
-              type: "text" as const,
-              text: `<reference role="${reference.role}" ordinal="${reference.ordinal}">`,
-            },
-            {
-              type: "file" as const,
-              data: reference.bytes,
-              mediaType: reference.mimeType,
-            },
-          ]),
-        ];
+        const content = referenceContent(framedPrompt, input.references ?? []);
         const result = await generateText({
           model: google(route.modelId),
           messages: [{ role: "user", content }],

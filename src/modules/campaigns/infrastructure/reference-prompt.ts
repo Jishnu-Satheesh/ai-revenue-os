@@ -1,5 +1,9 @@
 import { DomainError } from "@/lib/errors";
 import {
+  artDirectionBlueprintSchema,
+  type ArtDirectionBlueprint,
+} from "@/domain/campaigns/art-direction";
+import {
   referenceResolutionSchema,
   type ReferenceResolution,
   type ResolvedReferenceSlot,
@@ -42,6 +46,10 @@ export type ReferencePromptInput = {
   hardConstraints: readonly string[];
 };
 
+export type BlueprintReferencePromptInput = ReferencePromptInput & {
+  blueprint: ArtDirectionBlueprint;
+};
+
 /**
  * Builds the deterministic plate instruction around an already-resolved set.
  *
@@ -49,6 +57,17 @@ export type ReferencePromptInput = {
  * those blocks, so an operator cannot close a tag and displace a fixed fence.
  */
 export function buildReferencePrompt(input: ReferencePromptInput): string {
+  return assembleReferencePrompt(input, null);
+}
+
+export function buildBlueprintReferencePrompt(input: BlueprintReferencePromptInput): string {
+  return assembleReferencePrompt(input, artDirectionBlueprintSchema.parse(input.blueprint));
+}
+
+function assembleReferencePrompt(
+  input: ReferencePromptInput,
+  blueprint: ArtDirectionBlueprint | null,
+): string {
   const resolution = referenceResolutionSchema.parse(input.resolution);
   const subjectReferences = resolution.referenceSlots.filter((slot) => slot.role === "subject");
   const description = input.subjectDescription?.trim() || null;
@@ -104,10 +123,6 @@ export function buildReferencePrompt(input: ReferencePromptInput): string {
     escapeData(input.operatorCreativeDirection),
     "</operator_creative_direction>",
     "",
-    "<declared_subject>",
-    subjectData,
-    "</declared_subject>",
-    "",
     "<positive_references>",
     positiveReferences.length === 0 ? "none" : positiveReferences.join("\n\n"),
     "</positive_references>",
@@ -115,6 +130,18 @@ export function buildReferencePrompt(input: ReferencePromptInput): string {
     "<avoid_references>",
     avoidReferences.length === 0 ? "none" : avoidReferences.join("\n\n"),
     "</avoid_references>",
+    ...(blueprint === null
+      ? []
+      : [
+          "",
+          "<art_direction_blueprint>",
+          escapeData(JSON.stringify(blueprint)),
+          "</art_direction_blueprint>",
+        ]),
+    "",
+    "<declared_subject>",
+    subjectData,
+    "</declared_subject>",
     "",
     "<fixed_synthesis_constraints>",
     ...FIXED_SYNTHESIS_CONSTRAINTS.map((constraint) => `- ${constraint}`),

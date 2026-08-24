@@ -113,6 +113,9 @@ export type {
   ResolvedReferenceSlot,
 } from "@/domain/campaigns/reference-resolution";
 
+export { artDirectionBlueprintSchema } from "@/domain/campaigns/art-direction";
+export type { ArtDirectionBlueprint } from "@/domain/campaigns/art-direction";
+
 export { bundleDigest, canonicalManifestJson } from "@/domain/campaigns/digest";
 export { normalizeManifest } from "@/domain/campaigns/normalization";
 export { diffManifests } from "@/domain/campaigns/digest";

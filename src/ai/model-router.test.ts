@@ -121,6 +121,15 @@ describe("prompt refinement", () => {
     expect(refine("plan").system).toContain("genuinely different");
   });
 
+  it("does not apply bundle-specific direction advice to a blueprint plan", () => {
+    const refined = refine("plan", { planPurpose: "art_direction_blueprint" });
+
+    expect(refined.system).not.toContain("three directions");
+    expect(refined.system).not.toContain("cite its source key");
+    expect(refined.system).toContain("Do not add factual claims");
+    expect(refined.system).toContain("Return a single JSON value");
+  });
+
   it("asks a patch for the smallest change that works", () => {
     expect(refine("patch").system).toContain("smallest set of replacements");
   });

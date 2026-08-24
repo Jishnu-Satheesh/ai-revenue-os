@@ -70,6 +70,47 @@ describe("gemini campaign generation provider", () => {
     expect(output).toEqual({ directions: [] });
   });
 
+  it("shows the planning model the same ordered reference files", async () => {
+    const provider = createGeminiCampaignGenerationProvider();
+
+    await provider.generatePlan({
+      context: CONTEXT,
+      system: "You plan visual treatment only.",
+      prompt: "Reference metadata with avoid reasons.",
+      outputContract: "{}",
+      planPurpose: "art_direction_blueprint",
+      references: [
+        {
+          role: "avoid",
+          ordinal: 0,
+          mimeType: "image/png",
+          bytes: new Uint8Array([30]),
+        },
+        {
+          role: "subject",
+          ordinal: 0,
+          mimeType: "image/jpeg",
+          bytes: new Uint8Array([10]),
+        },
+      ],
+    });
+
+    const call = generateText.mock.calls.at(-1)?.[0] as {
+      prompt?: string;
+      messages: Array<{
+        content: Array<
+          { type: "text"; text: string } | { type: "file"; data: Uint8Array; mediaType: string }
+        >;
+      }>;
+    };
+    expect(call.prompt).toBeUndefined();
+    expect((call as unknown as { system: string }).system).not.toContain("three directions");
+    const files = call.messages[0]!.content.filter(
+      (part): part is { type: "file"; data: Uint8Array; mediaType: string } => part.type === "file",
+    );
+    expect(files.map((file) => [...file.data])).toEqual([[10], [30]]);
+  });
+
   it("routes planning and patching to their configured models", async () => {
     const provider = createGeminiCampaignGenerationProvider();
 
