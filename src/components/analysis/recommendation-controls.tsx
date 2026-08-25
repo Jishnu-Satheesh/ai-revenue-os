@@ -51,11 +51,13 @@ export function RecommendationControls({
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [dismissOpen, setDismissOpen] = useState(false);
   const [dismissReason, setDismissReason] = useState("");
 
-  async function answer(body: Record<string, unknown>, path: "decisions" | "feedback") {
+  async function answer(body: Record<string, unknown>, path: "decisions" | "feedback"): Promise<boolean> {
     setPending(true);
+    setError(null);
     try {
       const response = await fetch(
         `/api/organizations/${organizationId}/channel-recommendations/${recommendation.id}/${path}`,
@@ -65,10 +67,22 @@ export function RecommendationControls({
           body: JSON.stringify(body),
         },
       );
-      // The stored answer arrives with the refreshed page; a failure leaves
-      // the controls standing so the member can try again rather than lose
-      // their words to a silent catch.
-      if (response.ok) router.refresh();
+      // The stored answer arrives with the refreshed page. A refusal keeps
+      // every control — and every typed word — exactly where it was, with a
+      // line saying so: a silent failure would read as an answer nobody gave.
+      if (response.ok) {
+        router.refresh();
+        return true;
+      }
+      setError(
+        response.status === 403
+          ? "Your role cannot record this answer."
+          : "The answer could not be recorded just now. It is kept below — try again.",
+      );
+      return false;
+    } catch {
+      setError("The answer could not be recorded just now. It is kept below — try again.");
+      return false;
     } finally {
       setPending(false);
     }
@@ -111,6 +125,12 @@ export function RecommendationControls({
       {recommendation.limitations.length > 0 ? (
         <p className="text-[11px] italic leading-relaxed text-muted-foreground">
           {recommendation.limitations.join(" ")}
+        </p>
+      ) : null}
+
+      {error ? (
+        <p role="alert" className="text-[11px] font-medium text-warning">
+          {error}
         </p>
       ) : null}
 
@@ -206,6 +226,11 @@ export function RecommendationControls({
             onChange={(event) => setDismissReason(event.target.value)}
             placeholder="What makes this wrong or not useful for us?"
           />
+          {error ? (
+            <p role="alert" className="text-[11px] font-medium text-warning">
+              {error}
+            </p>
+          ) : null}
           <DialogFooter>
             <Button
               type="button"
@@ -220,9 +245,13 @@ export function RecommendationControls({
               size="sm"
               disabled={pending || reasonLength < 3}
               onClick={async () => {
-                await decide("dismissed", dismissReason.trim());
-                setDismissOpen(false);
-                setDismissReason("");
+                // The dialog stays open on a refused answer: the member's
+                // words outlive the failure and the reason is shown inline.
+                const recorded = await decide("dismissed", dismissReason.trim());
+                if (recorded) {
+                  setDismissOpen(false);
+                  setDismissReason("");
+                }
               }}
             >
               Dismiss

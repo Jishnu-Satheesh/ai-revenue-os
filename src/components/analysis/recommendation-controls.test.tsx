@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const refresh = vi.fn();
@@ -126,6 +126,31 @@ describe("RecommendationControls", () => {
     const call = vi.mocked(fetch).mock.calls[0]!;
     expect(call[0]).toBe("/api/organizations/org-1/channel-recommendations/rec-1/feedback");
     expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({ helpful: false });
+  });
+
+  it("keeps the dialog open and the words intact when the server refuses the dismissal", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "no" }), { status: 403 }),
+    );
+    render(<RecommendationControls organizationId="org-1" recommendation={recommendation()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    const reason = screen.getByLabelText("Dismissal reason") as HTMLTextAreaElement;
+    fireEvent.change(reason, { target: { value: "not our situation" } });
+    const dialog = screen.getByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: "Dismiss" });
+    fireEvent.click(submit);
+
+    await waitFor(
+      () => expect(screen.getByRole("alert").textContent).toContain("cannot record"),
+      { timeout: 4_000 },
+    );
+    // The refusal keeps both the words and their window.
+    expect((screen.getByLabelText("Dismissal reason") as HTMLTextAreaElement).value).toBe(
+      "not our situation",
+    );
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("never carries the forbidden legacy labels", () => {

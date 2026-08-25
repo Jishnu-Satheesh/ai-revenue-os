@@ -963,25 +963,15 @@ export function ChannelWorkspace({
             </li>
           ))}
       {recommendationsByFindingId.further.length > 0 ? (
-        // Narration whose citations land outside this page's chapters, or on
-        // no finding at all. It renders here rather than vanishing.
-        <section
-          id="further-noted"
-          aria-label="Further noted"
-          className="flex scroll-mt-24 flex-col gap-3 border-t border-border pt-8"
-        >
-          <Kicker>Further noted</Kicker>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {recommendationsByFindingId.further.map((recommendation) => (
-              <RecommendationControls
-                key={recommendation.id}
-                organizationId={organizationId}
-                recommendation={recommendation}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
+            <li>
+              <a
+                href="#further-noted"
+                className="block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                Further noted
+              </a>
+            </li>
+          ) : null}
 
       {deferredChapters.length > 0 ? (
             <li>
@@ -1024,6 +1014,27 @@ export function ChannelWorkspace({
           <div className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
             {view.unplacedFindings.map((finding) => (
               <CompactFindingRow key={finding.id} finding={finding} onInspect={inspect} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {recommendationsByFindingId.further.length > 0 ? (
+        // Narration whose citations land outside this page's chapters, or on
+        // no finding at all. It renders here rather than vanishing.
+        <section
+          id="further-noted"
+          aria-label="Further noted"
+          className="flex scroll-mt-24 flex-col gap-3 border-t border-border pt-8"
+        >
+          <Kicker>Further noted</Kicker>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {recommendationsByFindingId.further.map((recommendation) => (
+              <RecommendationControls
+                key={recommendation.id}
+                organizationId={organizationId}
+                recommendation={recommendation}
+              />
             ))}
           </div>
         </section>

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(75);
+select extensions.plan(73);
 
 -- Storage for the narration slice (ADR 0037) and its judge (ADR 0038): five
 -- tables that any organization member with `report.read` can read and that no
@@ -283,16 +283,20 @@ select extensions.lives_ok(
     'f2000000-0000-4000-8000-000000000001'::uuid, true) $$,
   'a member can vote a recommendation helpful');
 
-select extensions.lives_ok(
+-- Append-only is the database's own promise, not a grants-only convention:
+-- even the table owner may not rewrite or withdraw what a human answered.
+select extensions.throws_ok(
   $$ update public.channel_recommendation_decisions set decision = 'dismissed',
        dismissal_reason = 'Not actionable this quarter.'
      where id = 'f2000000-0000-4000-8000-000000000801'::uuid $$,
-  'a triage answer can change its mind');
+  '55000', 'channel_recommendation_decision_is_append_only',
+  'a triage answer cannot change its mind — history stays as it was written');
 
-select extensions.lives_ok(
+select extensions.throws_ok(
   $$ delete from public.channel_recommendation_decisions
      where id = 'f2000000-0000-4000-8000-000000000802'::uuid $$,
-  'and a mistaken one can be withdrawn');
+  '55000', 'channel_recommendation_decision_is_append_only',
+  'and a mistaken one cannot be withdrawn — it can only be answered again');
 
 -- Audit ---------------------------------------------------------------------------
 
@@ -303,26 +307,14 @@ select extensions.is((
     and payload ->> 'transition' = 'recorded'
 ), 2, 'both triage answers were audited as recorded');
 
+-- Append-only means the `changed` and `removed` audit transitions are dead
+-- branches by construction: a refusal writes nothing, audits included.
 select extensions.is((
   select count(*)::integer from public.audit_events
   where entity_id = 'f2000000-0000-4000-8000-000000000701'::uuid
     and event_name = 'channel_recommendation.triaged'
-    and payload ->> 'transition' = 'changed'
-), 1, 'the change of mind was audited');
-
-select extensions.is((
-  select count(*)::integer from public.audit_events
-  where entity_id = 'f2000000-0000-4000-8000-000000000701'::uuid
-    and event_name = 'channel_recommendation.triaged'
-    and payload ->> 'transition' = 'removed'
-), 1, 'so was the withdrawal');
-
-select extensions.is((
-  select (payload ->> 'priorDecision') || '->' || (payload ->> 'decision')
-  from public.audit_events
-  where entity_id = 'f2000000-0000-4000-8000-000000000701'::uuid
-    and event_name = 'channel_recommendation.triaged' and payload ->> 'transition' = 'changed'
-), 'acknowledged->dismissed', 'the state transition names both sides of the change');
+    and payload ->> 'transition' <> 'recorded'
+), 0, 'no mutation event exists, because no mutation can happen');
 
 select extensions.ok((
   select bool_and(actor_id = 'f2000000-0000-4000-8000-000000000001'::uuid and payload ? 'decisionId')
@@ -488,8 +480,8 @@ select extensions.is((select count(*)::integer from public.channel_recommendatio
   where organization_id = 'f2000000-0000-4000-8000-000000000201'::uuid), 1,
   'its citation');
 select extensions.is((select count(*)::integer from public.channel_recommendation_decisions
-  where organization_id = 'f2000000-0000-4000-8000-000000000201'::uuid), 1,
-  'the surviving triage answer');
+  where organization_id = 'f2000000-0000-4000-8000-000000000201'::uuid), 2,
+  'both triage answers survive — nothing was rewritten or withdrawn');
 select extensions.is((select count(*)::integer from public.channel_recommendation_feedback
   where organization_id = 'f2000000-0000-4000-8000-000000000201'::uuid), 1,
   'the feedback vote');

@@ -94,12 +94,13 @@ function renderWorkspace(input: {
   evidence?: ChannelFindingEvidenceRecord[];
   canRunAnalysis?: boolean;
   evidenceWindows?: ChannelEvidenceWindow[];
+  recommendations?: import("@/modules/analysis/application/ports").ChannelRecommendationRecord[];
 }) {
   const view = buildChannelWorkspaceView({
     runs: input.runs ?? [run()],
     findings: input.findings ?? [],
     evidence: input.evidence ?? [],
-    recommendations: [],
+    recommendations: input.recommendations ?? [],
   });
   render(
     <ChannelWorkspace
@@ -136,6 +137,32 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe("ChannelWorkspace", () => {
+  it("renders narration citing nothing on display in its own Further noted shelf", () => {
+    renderWorkspace({
+      recommendations: [
+        {
+          id: "rec-loose",
+          analysisRunId: "run-1",
+          channelId: CHANNEL.id,
+          branchId: "branch-1",
+          label: "observation",
+          headline: "Nothing here anchors to a chapter",
+          detail: "Its citations name findings this page does not show, and it still reaches the operator.",
+          supportedActions: [],
+          limitations: [],
+          resultDigest: "e".repeat(64),
+          citationFindingIds: ["finding-gone"],
+          decisions: [],
+          myFeedback: null,
+          createdAt: "2026-02-01T00:05:00Z",
+        },
+      ],
+    });
+
+    const shelf = screen.getByRole("region", { name: "Further noted" });
+    expect(within(shelf).getByText(/Nothing here anchors to a chapter/)).toBeTruthy();
+  });
+
   it("keeps an accessible chapter map whose links resolve to rendered sections", () => {
     renderWorkspace({});
 
