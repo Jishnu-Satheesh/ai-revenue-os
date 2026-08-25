@@ -205,6 +205,10 @@ describe("campaign planner", () => {
 
     expect(result.uploads[0]?.contentHash).toMatch(/^[0-9a-f]{64}$/);
     expect(result.uploads[0]?.contentHash).not.toBe(declared);
+    expect(result.uploads[0]).toMatchObject({
+      modelId: "imagen-1",
+      promptVersionId: "campaign-image-prompt-v1",
+    });
   });
 
   it("writes under the tenant's own folder, which is what the storage policy checks", async () => {

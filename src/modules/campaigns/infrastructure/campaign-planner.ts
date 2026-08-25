@@ -23,6 +23,8 @@ import {
 } from "@/modules/campaigns/infrastructure/asset-intake";
 import { buildBlueprintReferencePrompt } from "@/modules/campaigns/infrastructure/reference-prompt";
 
+export const CAMPAIGN_IMAGE_PROMPT_VERSION = "campaign-image-prompt-v1";
+
 /**
  * The planner: pinned evidence in, candidate creative out.
  *
@@ -453,6 +455,8 @@ export function createCampaignPlanner(
           storagePath: path,
           // The hash of what was stored, not what the model said it made.
           contentHash: ingested.contentHash,
+          modelId: generated.image.modelId,
+          promptVersionId: CAMPAIGN_IMAGE_PROMPT_VERSION,
         });
       }
 

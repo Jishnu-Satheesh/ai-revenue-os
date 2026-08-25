@@ -145,6 +145,10 @@ export type GeneratedAssetUpload = {
   assetId: string;
   storagePath: string;
   contentHash: string;
+  /** The provider model that returned the stored bytes, never the planner's claim. */
+  modelId: string;
+  /** The deterministic prompt contract used to request those bytes. */
+  promptVersionId: string;
 };
 
 export type CampaignImageGuidance = {
@@ -539,6 +543,14 @@ export async function generateCampaignBundle(
       assets: manifest.assets.map((asset) => ({
         ...asset,
         contentHash: uploaded.get(asset.id)!.contentHash,
+        provenance:
+          asset.provenance.kind === "generated"
+            ? {
+                ...asset.provenance,
+                modelId: uploaded.get(asset.id)!.modelId,
+                promptVersionId: uploaded.get(asset.id)!.promptVersionId,
+              }
+            : asset.provenance,
       })),
     };
 

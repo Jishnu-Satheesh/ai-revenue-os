@@ -139,6 +139,8 @@ function uploadsFor(manifest: ReturnType<typeof validManifest>) {
     assetId: asset.id,
     storagePath: `${ORGANIZATION_ID}/${CAMPAIGN_ID}/v/${asset.id}.png`,
     contentHash: String(index + 1).repeat(64),
+    modelId: "gemini-image-actual",
+    promptVersionId: "campaign-image-prompt-v1",
   }));
 }
 
@@ -537,6 +539,12 @@ describe("generateCampaignBundle", () => {
     };
     expect(published.manifest.assets[0]?.contentHash).toBe("1".repeat(64));
     expect(published.manifest.assets[0]?.truthClass).toBe("synthetic_composite");
+    expect(published.manifest.assets[0]?.provenance).toMatchObject({
+      kind: "generated",
+      modelId: "gemini-image-actual",
+      promptVersionId: "campaign-image-prompt-v1",
+      generationProfile: "brand_guided",
+    });
     expect(
       published.manifest.assets[0]?.provenance.kind === "generated"
         ? published.manifest.assets[0].provenance.derivedFromBrandAssetVersionIds
