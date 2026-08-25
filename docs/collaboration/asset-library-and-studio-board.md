@@ -121,7 +121,8 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | **done — approved by 8vr** |
 | A-r | **Slice A code review** | claude | — | — | **done — approved** |
 | 8vr | **Review 8v** — re-pull run, assets and bytes from staging; hash and eyeball independently | claude | — | 8v | **done — approved, 5 findings logged** |
-| 9 | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts` | codex | high | 2 | **in-progress** |
+| 9 | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.test.ts`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | high | 2 | **in-progress** |
+| 9m | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | **xhigh** | 9 | **in-progress — draft only, do not apply** |
 | 10 | Asset library routes | codex | high | 9 | todo |
 | 11 | Asset + subject workspace UI | codex | high, then medium | 10 | todo |
 | 12 | Brief picker — **Slice B closes** | codex | high | 5,10 | todo |
@@ -134,7 +135,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
 | S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **done — applied, 55 pgTAP, 17/17 called** |
 | S3 | Studio Task 3: domain — templates, slots, fitting, coverage — claimed: `src/domain/campaigns/poster-template.ts`, `poster-slots.ts`, `text-fitting.ts`, `glyph-coverage.ts` (all new, each with its test), `src/domain/campaigns/schemas.ts`, `schemas.test.ts`, `src/domain/campaigns/types.ts` | claude | — | S2 | **done — 57 new tests** |
-| S4 | Studio Task 4: the compositor — claimed: `src/modules/campaigns/infrastructure/poster-compositor.ts`, `font-registry.ts`, `glyph-coverage-oracle.ts`, `render-digest.ts` (all new, each with its test), `src/modules/campaigns/infrastructure/__golden__/`, `package.json` + `pnpm-lock.yaml` (fontkit, narrow commit), `trigger.config.ts`, `knip.json` | claude | — | S3 | **in-progress** |
+| S4 | Studio Task 4: the compositor — claimed: `src/modules/campaigns/infrastructure/poster-compositor.ts`, `font-registry.ts`, `glyph-coverage-oracle.ts`, `render-digest.ts` (all new, each with its test), `src/modules/campaigns/infrastructure/__golden__/`, `package.json` + `pnpm-lock.yaml` (fontkit, narrow commit), `trigger.config.ts`, `knip.json` | claude | — | S3 | **review — goldens await a Malayalam reader** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -1785,3 +1786,55 @@ asked for it and got it.
 
 **Slice B is cleared.** Task 9 may start. Findings 1–3 are Slice B's to pick up where they land;
 none of them changes what Task 9 builds.
+
+### 2026-08-25 · claude · **Studio Task 4 — the compositor draws.** Commits `81c3ca7`, `cffbe14`
+
+The platform now puts words on a picture. 33 new tests; campaign domain, modules and workflows are
+**809 across 62 files**, all green. `pnpm typecheck` is **fully clean** — the two errors I logged
+earlier belonged to other agents and both are now fixed. ESLint, Prettier and `knip` clean; knip's
+only remaining complaints are the three pre-existing ones (`drizzle-orm`, `drizzle-kit`,
+`@trigger.dev/build`).
+
+**Placement change from my claim, and it is the better home.** `render-digest.ts` went to
+`src/domain/campaigns/`, not infrastructure. It is a pure function of pinned inputs and belongs
+beside `bundleDigest`, not next to the thing that happens to call it.
+
+**Four things measured today that are worth nobody re-deriving.**
+
+1. **`@napi-rs/canvas` loads the host's fonts at import — 336 families on this machine**, before any
+   of our code runs. Not pinned, not approved, not the same on another host. `ensureVendoredFontsRegistered`
+   calls `GlobalFonts.removeAll()` first. To be exact about severity: measured today the library draws
+   **tofu** rather than silently substituting another family, so nothing is known to be broken without
+   the clear. But that is a library behaviour an upgrade could change without telling us, and the
+   clear makes "only approved fonts exist in this process" a property of our code instead. Asserted
+   by test.
+2. **Coverage must ask the face that will actually draw, and only that one.** Answering "yes" when
+   *any* vendored face covers a codepoint would pass more text and then render it as boxes, because
+   `fillText` draws a run with one family. Coverage would report a pass and the render would be
+   broken — worse than refusing, because nobody would still be looking.
+3. **The limit that follows, measured per face.** Latin digits, space, comma and hyphen are in **all
+   three** faces, so prices and numbers render in any script — which is why the spike's mixed-bidi
+   case worked. Latin **letters** are in the Latin face alone. So **a Malayalam poster carrying a
+   Latin word — the restaurant's own name — is refused**, not drawn with boxes. Lifting that needs
+   per-run font selection, which changes how text is *drawn*, not how it is checked. Flagged to the
+   user; it is a product decision, not a defect.
+4. **`fontkit`'s export map serves a browser build to any resolver that skips the `node` condition,
+   and that build has no `openSync`.** Under `moduleResolution: "bundler"` TypeScript already picks
+   it. So the `trigger.config.ts` `external` entry is load-bearing rather than precautionary: without
+   it a bundled worker builds cleanly and dies on the first render.
+
+**Golden images: pixels, not PNG bytes.** An encoder may change compression between versions without
+moving a pixel, and a suite that failed on that would train everyone to regenerate goldens without
+looking — which is exactly how a real shaping regression would then be waved through. On mismatch the
+actual render is written to `node_modules/.cache/poster-golden-actual/` and named in the failure.
+
+**Open gate — this is the S0j pattern again.** Five golden renderings are committed and are now what
+the suite compares against. I can see the Malayalam conjuncts and reordered vowel signs look formed,
+and I measured the RTL anchoring rather than trusting my eye — ink ends at x=556/557 against a box
+edge of 560, so Arabic sits inside its box. **But the user reads Malayalam and is the authority, and
+they have not judged these yet.** If the reader rejects one, the golden is regenerated or the
+compositor fixed — the test is not loosened.
+
+One correction against myself: I first read the Arabic rendering as overflowing its box. Measuring
+the ink showed it does not; the plate simply ends at the same edge. I should have measured before
+saying it.
