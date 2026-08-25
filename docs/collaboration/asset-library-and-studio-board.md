@@ -132,7 +132,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S0j | Judge the renderings | user | — | S0 | **done — Malayalam confirmed correct** |
 | S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
 | S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **done — applied, 55 pgTAP, 17/17 called** |
-| S3 | Studio Task 3: domain — templates, slots, fitting, coverage — claimed: `src/domain/campaigns/poster-template.ts`, `poster-slots.ts`, `text-fitting.ts`, `glyph-coverage.ts` (all new, each with its test), `src/domain/campaigns/schemas.ts`, `schemas.test.ts`, `src/domain/campaigns/types.ts` | claude | — | S2 | **in-progress** |
+| S3 | Studio Task 3: domain — templates, slots, fitting, coverage — claimed: `src/domain/campaigns/poster-template.ts`, `poster-slots.ts`, `text-fitting.ts`, `glyph-coverage.ts` (all new, each with its test), `src/domain/campaigns/schemas.ts`, `schemas.test.ts`, `src/domain/campaigns/types.ts` | claude | — | S2 | **done — 57 new tests** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -1627,3 +1627,65 @@ were dirty at HEAD before I touched them, so no shared-document reformat was mix
   rather than quietly ignored.
 - Verified before claiming: `digest.ts` filters `undefined` before hashing, so an absent `posterPlan`
   leaves every existing V2 digest byte-identical. No backfill, and no approval invalidated.
+
+### 2026-08-24 · claude · **Studio Task 3 done** — commit `492f7a8`
+
+Four pure domain modules plus the optional `posterPlan`. 57 new tests; the campaign domain is
+**279 across 16 files**, and the wider campaign regression (`src/modules/campaigns`,
+`src/workflows/campaigns`, `src/ai`) is **501 across 42 files**, all green. ESLint clean, Prettier
+clean, `git diff --check` clean. Nothing here touches infrastructure, a route, a component or a
+migration.
+
+**`pnpm typecheck` has one error and it is not mine:**
+`src/app/api/.../channel-recommendations/[recommendationId]/feedback/route.ts(57,7)` — `actorId` not
+in `LogContext`, the channel-rec agent's in-flight Task 11.
+
+**Four decisions worth not re-deriving.**
+
+1. **Coverage skips shaping controls, deliberately.** Zero-width joiners are how Malayalam forms a
+   chillu and how Arabic stays joined or is broken apart; bidi isolates are how Latin digits sit
+   inside an Arabic sentence. No cmap maps any of them, so asking would report "missing" for text
+   that is perfectly correct and refuse the client's own language. Over-refusal is a failure too —
+   quieter than an empty box and just as much a broken promise. `SHAPING_CONTROL_CODEPOINTS` is the
+   list, and a test holds it honest in both directions.
+2. **Alignment is `start | center | end`, never left/right.** In Arabic, start is the right-hand
+   edge. A template declaring `left` would mis-align every Arabic poster while looking entirely
+   intentional — exactly the class of error a non-reader cannot see.
+3. **`RENDERABLE_SCRIPTS` is closed and narrower than the asset library's `scriptCodeSchema`.** A
+   typography reference can teach any ISO 15924 script; a *render* needs a vendored font. A test
+   holds the list to `FONT_MANIFEST` in both directions, so vendoring a fourth font without widening
+   this is caught rather than silently unusable.
+4. **`glyph-coverage.ts` is pure and takes an oracle.** `fontkit` is **not installed** — only
+   `@napi-rs/canvas` is — so the dependency belongs in Task 4 where it is used. Same split as Task 1,
+   where the domain holds `verifyFontHashes` and infrastructure reads the disk.
+
+**Two findings for whoever holds Tasks 4, 9 and 10.**
+
+**The naming trap, and it is a live one.** The poster slot called `caption` binds to the manifest's
+**`hook`** — the headline. The manifest *also* has a field called `caption`: the social post caption,
+up to 2,200 characters, never drawn on a poster. Binding those two by name would put an entire
+Instagram caption inside a headline box. `poster-slots.ts` carries the comment and a test.
+
+**The body slot has nothing governed to say, and this is bigger than the price gap I logged in
+Task 2.** I checked every customer-facing string a manifest holds: `hook` (≤200), `caption` (≤2,200,
+the social caption) and `callToAction` (≤120). `generationPolicy.lockedOfferRef` is an **internal
+reference key** — the fixture's value is `lunch-set-menu-2026-09` — not a sentence a customer reads.
+`campaign_briefs.offer` is free text that never reaches the manifest.
+
+So there is no short governed offer line, and Release 1's poster is **headline plus call to action**.
+`body` resolves to `{ value: null, reason: "no_governed_source" }`, and a template requiring it is
+unavailable with the reason shown rather than hidden. I did not improvise a source: borrowing the
+social caption would overflow every box, and letting the operator type it would break the rule that
+every rendered word is a value somebody already approved.
+
+**Ungoverned text is marked in the type.** `extra` returns `governed: false`; every manifest-sourced
+slot returns `governed: true`. Tasks 9 and 10 must run `evaluateContentPolicy` over anything
+ungoverned before it is drawn — a free box that skipped content policy is where "50% off" gets typed
+around the governance.
+
+**A process note against myself.** I twice checked whether a file was Prettier-clean at HEAD by
+writing it to `/tmp` — but Prettier resolves its config by file path, so a file outside the repo is
+checked against defaults and the answer is meaningless. The markdown conclusion happened to survive
+a correct re-check; the TypeScript one did not, and `schemas.ts` and three test files were left
+unformatted until I redid it properly inside the repo. If you need this check, copy to a scratch
+directory **inside** the working tree.
