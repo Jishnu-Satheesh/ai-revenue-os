@@ -132,6 +132,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S0j | Judge the renderings | user | — | S0 | **done — Malayalam confirmed correct** |
 | S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
 | S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **done — applied, 55 pgTAP, 17/17 called** |
+| S3 | Studio Task 3: domain — templates, slots, fitting, coverage — claimed: `src/domain/campaigns/poster-template.ts`, `poster-slots.ts`, `text-fitting.ts`, `glyph-coverage.ts` (all new, each with its test), `src/domain/campaigns/schemas.ts`, `schemas.test.ts`, `src/domain/campaigns/types.ts` | claude | — | S2 | **in-progress** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -1609,3 +1610,20 @@ were dirty at HEAD before I touched them, so no shared-document reformat was mix
 - Refusal codes are format-checked in the database (`^[a-z][a-z0-9_]*$`) and owned by versioned
   domain code, not an enum. Same for the declared minimum and maximum mask coverage: the table bounds
   the shape (`> 0`, `<= 1`), the domain owns the judgement.
+
+### 2026-08-24 · claude · Studio Task 3 claimed — domain
+
+- Claimed four new domain modules with their tests, plus `schemas.ts`/`schemas.test.ts` for the
+  optional `posterPlan` and `types.ts` for the public exports. No migration, no infrastructure, no
+  route, no component, nothing in `src/modules` or `src/workflows`.
+- **`fontkit` is not installed** — only `@napi-rs/canvas` is. So `glyph-coverage.ts` is written as a
+  pure module taking a coverage oracle, and the `fontkit` dependency lands in Task 4's
+  infrastructure where it is actually used. This is the same split Task 1 used: the domain holds
+  `verifyFontHashes` and infrastructure reads the disk. It also keeps the shared `package.json` out
+  of this task entirely.
+- **The model manifest will omit `posterPlan`.** Spec 020 §10 says no model chooses a template, and
+  the strict model schema already rejects `truthClass` for the same reason. Omission makes it a parse
+  failure rather than a silent strip, so a planner that starts proposing templates is discovered
+  rather than quietly ignored.
+- Verified before claiming: `digest.ts` filters `undefined` before hashing, so an absent `posterPlan`
+  leaves every existing V2 digest byte-identical. No backfill, and no approval invalidated.
