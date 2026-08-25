@@ -110,7 +110,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 2 | Domain types and vocabulary + rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/asset-library.ts`, `src/domain/campaigns/asset-library.test.ts`, `src/domain/campaigns/schemas.ts`, `src/domain/campaigns/schemas.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md` | codex | medium | 1 | **done** |
 | 3 | The resolver + remaining rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/reference-resolution.ts`, `src/domain/campaigns/reference-resolution.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 2 | **done** |
 | 4 | Subject profiles: service + repository — claimed: `src/modules/campaigns/application/subject-service.ts`, `src/modules/campaigns/application/subject-service.test.ts`, `src/modules/campaigns/infrastructure/subject-repository.ts`, `src/modules/campaigns/infrastructure/subject-repository.test.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.test.ts` | codex | high | 2 | **done** |
-| 5 | Subject profile routes — claimed: `src/app/api/organizations/[organizationId]/subjects/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/confirm/route.ts`, `src/modules/campaigns/application/subject-route-handlers.ts`, `src/modules/campaigns/application/subject-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/subject-route-wiring.ts` | codex | high | 4 | **in-progress** |
+| 5 | Subject profile routes — claimed: `src/app/api/organizations/[organizationId]/subjects/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/confirm/route.ts`, `src/modules/campaigns/application/subject-route-handlers.ts`, `src/modules/campaigns/application/subject-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/subject-route-wiring.ts` | codex, **taken over by claude** | high | 4 | **done — 11/11; confirming role added** |
 | 6 | Provider seam + prompt builder — claimed: `src/ai/campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `specs/019-organization-asset-library.md` | codex | high | 2 | **done** |
 | 6b | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts` | codex | high | 6 | **done** |
 | 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
@@ -125,10 +125,10 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 9mr | Review `20260826100000` **before apply** | claude | — | 9m | **done — approved after 2 changes** |
 | 9m | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md` | codex | **xhigh** | 9 | **done — applied; both functions called; 105/105 pgTAP** |
 | 10 | Asset library routes — claimed: `src/app/api/organizations/[organizationId]/assets/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/[versionId]/complete/route.ts`, `src/app/api/organizations/[organizationId]/assets/reviews/route.ts`, `src/app/api/organizations/[organizationId]/assets/resolve/route.ts`, `src/app/api/organizations/[organizationId]/assets/routes.test.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/route.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/[uploadId]/complete/route.ts`, `src/modules/campaigns/application/asset-route-handlers.ts`, `src/modules/campaigns/application/asset-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/asset-route-wiring.ts`, `src/modules/campaigns/infrastructure/service-factory.ts` | codex | high | 9 | **done** |
-| 11 | Asset + subject workspace UI | codex | high, then medium | 10 | todo |
-| 12 | Brief picker — **Slice B closes** | codex | high | 5,10 | todo |
+| 11 | Asset + subject workspace UI | claude | high, then medium | 10 | **blocked — Chrome DevTools MCP gone** |
+| 12 | Brief picker — **Slice B closes** | claude | high | 5,10 | **blocked — Chrome DevTools MCP gone** |
 | B-r | **Slice B code review** | claude | — | 12 | todo |
-| 13 | Live proof + browser gate | codex drives | high | 12 | todo |
+| 13 | Live proof + browser gate | claude | high | 12 | **blocked — Chrome DevTools MCP gone** |
 | 13v | Verify pinned rows on staging | claude | — | 13 | todo |
 | S | Campaign Studio spec + ADR 0042 + plan | claude | — | — | **done** |
 | S0 | **Renderer spike** — PASSED all 4 cases; `@napi-rs/canvas` 1.0.8 + `fontkit` | claude | — | — | **done** |
@@ -186,6 +186,9 @@ Append only. Newest at the bottom. Format: `YYYY-MM-DD · agent · decision · w
 Append only. Clear a blocker by adding a resolving line, not by deleting it.
 
 - _none yet_
+- 2026-08-25 · claude · Tasks 11, 12 and 13 are blocked: the Chrome DevTools MCP is disconnected,
+  and frontend work on this project is not done until exercised in a browser at both widths. The
+  components can be written; the gate cannot be met. Awaiting the user's call.
 - 2026-08-24 · codex · Task 8 cannot truthfully pin worker-produced resolution/blueprint evidence
   with the deployed schema. `create_campaign_with_source` is the only writer and runs before the
   worker; no function updates `campaign_source_snapshots`. A forward migration with a claim-fenced,
@@ -2013,3 +2016,66 @@ both functions against staging, run the focused suite, and log the results.
 - Verification: Task 10 handler tests 12/12; campaign domain/modules 722/722 across 55 files;
   focused ESLint clean; `pnpm typecheck` clean; `pnpm build` clean and lists all six canonical plus
   both legacy routes. No `git push` was attempted.
+### 2026-08-25 · claude · **taking over from Codex.** Task 5 done; Tasks 11–12 blocked on the browser
+
+Codex reached its usage limit mid-Task-5 and is unavailable until 2026-08-31. The user asked me to
+take the work over. I now own Tasks 5, 11, 12 and 13; Codex's rows are edited from here on because
+the work moved, not because the rule changed.
+
+**First action was to protect what existed.** Codex's Task 5 was finished but never committed — four
+untracked files in a tree three agents share, plus 51 uncommitted board lines recording its claim.
+Its handler tests passed 8/8 as found. Committed unchanged as `318120c` before touching anything.
+
+**Task 5 had one real gap, and it was a governance one.** Spec 019 line 686 said confirmation "is
+the privileged act and is separately permissioned". Nothing separately permissioned it:
+`confirm_subject_profile` (`20260825090000:764`), the service, and the route handler all gated edit,
+confirm and archive alike on `subject.manage`. A role trusted to draft a description could approve
+it in the same breath — and an unconfirmed description is precisely what §7.4 refuses to draw from,
+so confirmation is the gate the whole subject design rests on.
+
+`8c08416` adds the missing check: confirming additionally requires `owner` or `admin`. I did not
+invent that pair — it is what this repository already reserves for privileged organization acts
+(`organizations/[organizationId]/route.ts:24`, `activate/route.ts:14`), against
+`["owner","admin","operator"]` for ordinary ones. Editing and archiving stay open to every
+`subject.manage` holder, so the drafting workflow is untouched.
+
+**This is a deliberate product narrowing and the user may want it reversed.** An `operator` can now
+draft and edit a dish description but cannot confirm it. Spec 019 line 397 says "the operator edits
+and confirms", which reads as the human generally rather than the role, but if the client's kitchen
+lead is an `operator` they will hit a 403. It is one line — `CONFIRMING_ROLES` in
+`subject-route-handlers.ts` — and the refusal is covered by its own test either way.
+
+Codex's existing confirmation test asserted the old behaviour; it now names a confirming role, and
+the refusal it used to cover is its own case. Spec 019 records what is actually enforced, including
+that the seeded description of `subject.manage` still reads "create, edit, confirm, and archive" —
+true of the permission, incomplete about confirmation.
+
+Verified: subject route handlers 11/11; campaign regression **838 across 64 files**; focused ESLint
+clean (one pre-existing `_description` warning in Codex's test, left alone); `tsc` clean for the
+subject and asset routes.
+
+---
+
+**Blocker for Tasks 11 and 12: the Chrome DevTools MCP is disconnected.**
+
+Both remaining Slice B tasks are UI, and the standing rule on this project is that frontend work is
+not done until it has been exercised in a real browser at both widths. That server is gone from this
+session — `ToolSearch` for it returns no match — so I can write the components but cannot honestly
+close either task. Task 13 is the browser gate itself, so it is blocked for the same reason.
+
+I have stopped rather than building a large workspace UI I cannot see. Awaiting the user's call.
+
+---
+
+**One review note on `d6ed9a6`, which fixed the error-collapse I raised in 9mr.**
+
+The fix is real: governed refusals now become distinct `DomainError` categories with the raw
+database detail kept in `cause`. Two observations for whoever picks up B-r.
+
+- **The mapping is string-matching on database messages**
+  (`brand-asset-persistence-error.ts`), so renaming a plpgsql exception silently degrades that case
+  to the generic "The asset could not be changed." Every governed condition currently shares
+  SQLSTATE `42501` or `23514`, so there is nothing more stable to key on today — but a distinct
+  SQLSTATE per condition would make the mapping structural instead of textual.
+- `databaseMessage.includes("_not_found") || databaseMessage.includes("_subject_not_found")` — the
+  second is dead, since the first already matches it. Harmless.
