@@ -24,6 +24,10 @@ export default defineConfig({
     // reason. It is listed here before anything imports it deliberately: the
     // failure mode of forgetting is a worker that builds cleanly and dies on the
     // first render, which is discovered far later and much more expensively.
-    external: ["sharp", "@napi-rs/canvas"],
+    // `fontkit` answers glyph coverage. It is not native, but it is ESM-only,
+    // parses binary tables, and opens the vendored font files from disk by path
+    // at runtime. Bundling it risks the same shape of failure as the two above:
+    // a build that succeeds and a worker that dies on the first render.
+    external: ["sharp", "@napi-rs/canvas", "fontkit"],
   },
 });
