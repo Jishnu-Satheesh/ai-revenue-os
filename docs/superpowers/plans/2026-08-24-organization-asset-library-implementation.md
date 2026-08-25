@@ -203,7 +203,7 @@ has said what the campaign is about.
   Task 1: classification is accepted atomically by `create_brand_asset_version`, and a new
   `update_brand_asset_metadata` RPC changes roles, tags, scripts and archival state. Both remain
   session-user operations guarded by `asset.manage`; browser roles retain select-only table grants.
-  The migration also emits the already-specified identifier-only `asset.version_added` and
+  The migration also emits the identifier-only `asset.version_added`, `asset.updated` and
   `asset.archived` audit events. Draft it, have it reviewed, and call both changed/new plpgsql paths
   against staging before Task 9 is done.
 - Rejection without at least one reason code is refused in domain code, in the service, and by a
@@ -269,7 +269,7 @@ has said what the campaign is about.
 - **New functions:** `record_creative_asset_review`, `upsert_subject_profile`,
   `confirm_subject_profile`, `read_reference_candidates`,
   `pin_campaign_generation_run_reference_context`.
-- **Events:** `asset.version_added`, `asset.reviewed`, `asset.archived`, `subject.confirmed`,
+- **Events:** `asset.version_added`, `asset.updated`, `asset.reviewed`, `asset.archived`, `subject.confirmed`,
   `campaign.reference_set_pinned`.
 - **Permissions:** `asset.read`, `asset.manage`, `asset.review`, `subject.manage`.
 - **Changed public export:** `CampaignImageGenerationInput` gains an optional `references` field.

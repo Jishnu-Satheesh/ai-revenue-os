@@ -16,7 +16,7 @@ set search_path = ''
 as $$
 #variable_conflict use_column
 declare
-  asset_id uuid := nullif(input_asset ->> 'brand_asset_id', '')::uuid;
+  asset_id uuid;
   version_id uuid := pg_catalog.gen_random_uuid();
   next_version integer;
   storage_path text;
@@ -40,6 +40,8 @@ begin
   then
     raise exception 'brand_asset_forbidden' using errcode = '42501';
   end if;
+
+  asset_id := nullif(input_asset ->> 'brand_asset_id', '')::uuid;
 
   if (
     input_asset ? 'conditioning_roles'
@@ -193,16 +195,13 @@ set search_path = ''
 as $$
 #variable_conflict use_column
 declare
-  target_asset_id uuid := nullif(input_metadata ->> 'brand_asset_id', '')::uuid;
+  target_asset_id uuid;
   existing_asset public.organization_brand_assets;
   saved_asset public.organization_brand_assets;
   next_conditioning_roles text[];
   next_tags text[];
   next_scripts text[];
-  requested_archived boolean := case
-    when input_metadata ? 'archived' then (input_metadata ->> 'archived')::boolean
-    else null
-  end;
+  requested_archived boolean;
   supplied_classification boolean := input_metadata ? 'conditioning_roles'
     or input_metadata ? 'tags'
     or input_metadata ? 'scripts';
@@ -218,6 +217,8 @@ begin
   then
     raise exception 'brand_asset_metadata_forbidden' using errcode = '42501';
   end if;
+
+  target_asset_id := nullif(input_metadata ->> 'brand_asset_id', '')::uuid;
 
   if target_asset_id is null
     or (not supplied_classification and not (input_metadata ? 'archived'))
@@ -240,6 +241,11 @@ begin
   then
     raise exception 'brand_asset_metadata_invalid' using errcode = '23514';
   end if;
+
+  requested_archived := case
+    when input_metadata ? 'archived' then (input_metadata ->> 'archived')::boolean
+    else null
+  end;
 
   select asset.* into existing_asset
   from public.organization_brand_assets asset
@@ -318,7 +324,7 @@ revoke all on function public.update_brand_asset_metadata(uuid, jsonb)
   from public, anon, authenticated, service_role;
 grant execute on function public.update_brand_asset_metadata(uuid, jsonb) to authenticated;
 
--- Audit the two events the specification promises without placing labels,
+-- Audit the three events the specification promises without placing labels,
 -- tags, notes, or any other customer-authored text in the audit payload.
 create function private.audit_brand_asset_change()
 returns trigger
@@ -349,13 +355,11 @@ begin
       new.conditioning_roles,
       new.tags,
       new.scripts,
-      new.ownership,
       new.archived_at
     ) is not distinct from (
       old.conditioning_roles,
       old.tags,
       old.scripts,
-      old.ownership,
       old.archived_at
     ) then
       return new;

@@ -582,6 +582,32 @@ select 'classified_reservation', public.create_brand_asset_version(
   )
 );
 
+insert into asset_library_state (key, value)
+select 'legacy_reservation', public.create_brand_asset_version(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'brand_asset_id', null,
+    'label', 'Legacy unclassified upload',
+    'asset_role', 'other'
+  )
+);
+
+select extensions.ok(
+  (
+    select conditioning_roles = '{}'::text[]
+      and tags = '{}'::text[]
+      and scripts = '{}'::text[]
+      and ownership = 'third_party'
+    from public.organization_brand_assets
+    where id = (
+      select (value ->> 'brand_asset_id')::uuid
+      from asset_library_state where key = 'legacy_reservation'
+    )
+  ),
+  'the existing upload route may still reserve a new asset without classification'
+);
+
 select extensions.ok(
   (
     select conditioning_roles = array['brand_mark', 'typography']::text[]
@@ -671,6 +697,103 @@ select extensions.ok(
       and event.actor_id = 'a5100000-0000-4000-8000-000000000001'::uuid
   ),
   'archival emits the identifier-only asset-archived audit event'
+);
+
+select public.update_brand_asset_metadata(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'brand_asset_id', (
+      select value ->> 'brand_asset_id'
+      from asset_library_state where key = 'classified_reservation'
+    ),
+    'archived', false
+  )
+);
+
+select extensions.ok(
+  (
+    select archived_at is null
+    from public.organization_brand_assets
+    where id = (
+      select (value ->> 'brand_asset_id')::uuid
+      from asset_library_state where key = 'classified_reservation'
+    )
+  ),
+  'an archived asset can be restored without rewriting its versions'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from public.audit_events event
+    where event.organization_id = 'a5100000-0000-4000-8000-000000000101'::uuid
+      and event.event_name = 'asset.updated'
+      and event.entity_id = (
+        select (value ->> 'brand_asset_id')::uuid
+        from asset_library_state where key = 'classified_reservation'
+      )
+      and event.actor_id = 'a5100000-0000-4000-8000-000000000001'::uuid
+  ),
+  'restoring an asset emits the declared identifier-only asset-updated event'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.create_brand_asset_version(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'brand_asset_id', null,
+        'label', 'Empty classification',
+        'asset_role', 'product',
+        'conditioning_roles', '[]'::jsonb,
+        'tags', '[]'::jsonb,
+        'scripts', '[]'::jsonb,
+        'ownership', 'owned'
+      )
+    )
+  $$,
+  '23514', 'brand_asset_classification_required',
+  'a supplied classification must declare at least one conditioning role'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.create_brand_asset_version(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'brand_asset_id', null,
+        'label', 'Duplicate tags',
+        'asset_role', 'product',
+        'conditioning_roles', jsonb_build_array('subject'),
+        'tags', jsonb_build_array('Café', 'Café'),
+        'scripts', '[]'::jsonb,
+        'ownership', 'owned'
+      )
+    )
+  $$,
+  '23514', 'brand_asset_tags_duplicate',
+  'normalized case-folded tags cannot be duplicated'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.create_brand_asset_version(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'brand_asset_id', (
+          select value ->> 'brand_asset_id'
+          from asset_library_state where key = 'classified_reservation'
+        ),
+        'conditioning_roles', jsonb_build_array('subject')
+      )
+    )
+  $$,
+  '23514', 'brand_asset_existing_classification_forbidden',
+  'reserving another version cannot rewrite an existing asset classification'
 );
 
 select extensions.throws_ok(
@@ -965,6 +1088,33 @@ select extensions.throws_ok(
   $$,
   '42501', 'brand_asset_metadata_forbidden',
   'a viewer cannot classify or archive a brand asset'
+);
+select extensions.throws_ok(
+  $$
+    select public.update_brand_asset_metadata(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'brand_asset_id', 'not-a-uuid',
+        'archived', 'maybe'
+      )
+    )
+  $$,
+  '42501', 'brand_asset_metadata_forbidden',
+  'authorization runs before metadata values are parsed'
+);
+select extensions.throws_ok(
+  $$
+    select public.create_brand_asset_version(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'brand_asset_id', 'not-a-uuid'
+      )
+    )
+  $$,
+  '42501', 'brand_asset_forbidden',
+  'reservation authorization also runs before an existing asset id is parsed'
 );
 
 set local request.jwt.claim.sub = 'a5100000-0000-4000-8000-000000000002';

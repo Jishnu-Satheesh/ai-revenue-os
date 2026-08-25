@@ -692,8 +692,8 @@ handlers so nothing already deployed breaks.
 New permissions, seeded as data per ADR 0023: `asset.read`, `asset.manage`, `asset.review`,
 `subject.manage`.
 
-Events, past tense, identifier-only payloads: `asset.version_added`, `asset.reviewed`,
-`asset.archived`, `subject.confirmed`, `campaign.reference_set_pinned`.
+Events, past tense, identifier-only payloads: `asset.version_added`, `asset.updated`,
+`asset.reviewed`, `asset.archived`, `subject.confirmed`, `campaign.reference_set_pinned`.
 
 ## 10. AI behavior
 
