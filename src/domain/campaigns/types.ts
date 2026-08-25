@@ -79,6 +79,7 @@ export type {
   ConditioningRole,
   CreativeAssetReview,
   CreativeReviewReasonCode,
+  CreativeReviewSubjectKind,
   CreativeReviewVerdict,
   ReferenceMode,
   ReferenceResolutionOutcome,

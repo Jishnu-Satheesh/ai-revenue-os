@@ -163,6 +163,7 @@ export type ScriptCode = z.infer<typeof scriptCodeSchema>;
 export type AssetOwnership = z.infer<typeof assetOwnershipSchema>;
 export type ReferenceMode = z.infer<typeof referenceModeSchema>;
 export type CreativeReviewVerdict = z.infer<typeof creativeReviewVerdictSchema>;
+export type CreativeReviewSubjectKind = z.infer<typeof creativeReviewSubjectKindSchema>;
 export type CreativeReviewReasonCode = z.infer<typeof creativeReviewReasonCodeSchema>;
 export type CreativeAssetReview = z.infer<typeof creativeAssetReviewSchema>;
 export type ReferenceResolutionOutcome = z.infer<typeof referenceResolutionOutcomeSchema>;
