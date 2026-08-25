@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { FindingCard } from "@/components/analysis/finding-card";
+import { RecommendationControls } from "@/components/analysis/recommendation-controls";
 import { figureToneClass, findingValueLabel, formatCount, formatMoney, formatSignedMoney, formatWindow } from "@/components/analysis/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ import type {
   SummaryTileView,
   WorkspaceChapterView,
   WorkspaceFindingView,
+  WorkspaceRecommendationView,
   WorkspaceRunView,
   WorkspaceValueView,
 } from "@/modules/analysis/application/read-model";
@@ -785,6 +787,34 @@ export function ChannelWorkspace({
     [view.chapters],
   );
 
+  // Narration attaches where its first cited finding is displayed; a
+  // recommendation citing nothing on this page still reaches the operator
+  // through the Further noted shelf, because dropping one would be indistinguishable from it never existing.
+  const recommendationsByFindingId = useMemo(() => {
+    const displayed = new Set(allFindings.map((finding) => finding.id));
+    const byFinding = new Map<string, WorkspaceRecommendationView[]>();
+    const further: WorkspaceRecommendationView[] = [];
+    for (const recommendation of view.recommendations) {
+      const firstCited = recommendation.citationFindingIds.find((id) => displayed.has(id));
+      if (firstCited) {
+        const existing = byFinding.get(firstCited);
+        if (existing) existing.push(recommendation);
+        else byFinding.set(firstCited, [recommendation]);
+      } else {
+        further.push(recommendation);
+      }
+    }
+    return { byFinding, further };
+  }, [allFindings, view.recommendations]);
+
+  const chapterRecommendations = useCallback(
+    (chapter: WorkspaceChapterView) =>
+      chapter.findings.flatMap(
+        (finding) => recommendationsByFindingId.byFinding.get(finding.id) ?? [],
+      ),
+    [recommendationsByFindingId],
+  );
+
   const trustChapter = view.chapters.find((chapter) => chapter.id === "trust");
   const coverageFinding = trustChapter?.findings.find(
     (finding) => finding.detectorKey === "evidence.period_coverage",
@@ -932,7 +962,28 @@ export function ChannelWorkspace({
               </a>
             </li>
           ))}
-          {deferredChapters.length > 0 ? (
+      {recommendationsByFindingId.further.length > 0 ? (
+        // Narration whose citations land outside this page's chapters, or on
+        // no finding at all. It renders here rather than vanishing.
+        <section
+          id="further-noted"
+          aria-label="Further noted"
+          className="flex scroll-mt-24 flex-col gap-3 border-t border-border pt-8"
+        >
+          <Kicker>Further noted</Kicker>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {recommendationsByFindingId.further.map((recommendation) => (
+              <RecommendationControls
+                key={recommendation.id}
+                organizationId={organizationId}
+                recommendation={recommendation}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {deferredChapters.length > 0 ? (
             <li>
               <a
                 href="#awaiting-other-reports"
@@ -954,6 +1005,8 @@ export function ChannelWorkspace({
             heldFinding={chapter.id === "trust" ? (heldFinding ?? null) : null}
             coverageFinding={chapter.id === "trust" ? (coverageFinding ?? null) : null}
             onInspect={inspect}
+            recommendations={chapterRecommendations(chapter)}
+            organizationId={organizationId}
           />
         ))}
       </section>
@@ -1060,12 +1113,16 @@ function ChapterShell({
   heldFinding,
   coverageFinding,
   onInspect,
+  recommendations,
+  organizationId,
 }: {
   chapter: WorkspaceChapterView;
   number: number;
   heldFinding: WorkspaceFindingView | null;
   coverageFinding: WorkspaceFindingView | null;
   onInspect: (findingId: string) => void;
+  recommendations: readonly WorkspaceRecommendationView[];
+  organizationId: string;
 }) {
   const coverageRatio =
     coverageFinding && coverageFinding.kind !== "needs_data" ? ratioOf(coverageFinding) : null;
@@ -1132,6 +1189,17 @@ function ChapterShell({
         {chapter.findings.length > 0 ? (
           <>
             <FindingCard finding={chapter.findings[0]} onInspect={onInspect} />
+            {recommendations.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                {recommendations.map((recommendation) => (
+                  <RecommendationControls
+                    key={recommendation.id}
+                    organizationId={organizationId}
+                    recommendation={recommendation}
+                  />
+                ))}
+              </div>
+            ) : null}
             {chapter.findings.length > 1 ? (
               <div className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
                 {chapter.findings.slice(1).map((finding) => (
