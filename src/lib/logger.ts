@@ -18,6 +18,10 @@ type LogContext = {
   dataSourceId?: string;
   /** An organization-owned channel. Opaque, and not a provider connection. */
   channelId?: string;
+  /** A recommendation the narrator produced. Opaque. */
+  recommendationId?: string;
+  /** Which answer a member gave. Bounded vocabulary, never their reason text. */
+  decisionKind?: "acknowledged" | "dismissed" | "planned";
   runId?: string;
   workerId?: string;
   durationMs?: number;
