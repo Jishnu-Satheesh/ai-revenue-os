@@ -926,6 +926,72 @@ select extensions.ok(
   'campaign creation records all ten declared resolver and art-direction fields immutably'
 );
 
+-- A variants run is derived from an approved bundle version. The run must be
+-- allowed to pin that input; the original revise-only constraint rejected this
+-- correctly formed enqueue before a worker could ever claim it.
+reset role;
+
+insert into public.campaign_bundle_versions (
+  id, organization_id, campaign_id, version, source_snapshot_id, manifest, digest,
+  generation_profile, execution_mode
+)
+select
+  'a5100000-0000-4000-8000-000000000703'::uuid,
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  (value ->> 'campaign_id')::uuid,
+  1,
+  (value ->> 'source_snapshot_id')::uuid,
+  jsonb_build_object(
+    'schemaVersion', 2,
+    'campaignId', value ->> 'campaign_id',
+    'version', 1,
+    'generationProfile', 'brand_guided',
+    'executionMode', 'best_effort',
+    'generationPolicy', jsonb_build_object(
+      'maxVariantsPerDirection', 2,
+      'maxVariantsTotal', 2,
+      'policyExpiresAt', '2026-12-01T00:00:00.000Z',
+      'lockedOfferRef', null,
+      'lockedAssertionKeys', '[]'::jsonb
+    ),
+    'directions', '[]'::jsonb,
+    'actions', '[]'::jsonb,
+    'assets', '[]'::jsonb
+  ),
+  pg_catalog.repeat('e', 64),
+  'brand_guided',
+  'best_effort'
+from asset_library_state
+where key = 'campaign';
+
+set local role authenticated;
+set local request.jwt.claim.sub = 'a5100000-0000-4000-8000-000000000001';
+
+select extensions.ok(
+  (
+    public.enqueue_campaign_generation_run(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'campaign_id', (
+          select value ->> 'campaign_id' from asset_library_state where key = 'campaign'
+        ),
+        'source_snapshot_id', (
+          select value ->> 'source_snapshot_id' from asset_library_state where key = 'campaign'
+        ),
+        'kind', 'variants',
+        'idempotency_key', 'asset-library-variants-1',
+        'request_digest', pg_catalog.repeat('a', 64),
+        'correlation_id', 'a5100000-0000-4000-8000-000000000997',
+        'base_version_id', 'a5100000-0000-4000-8000-000000000703',
+        'base_digest', pg_catalog.repeat('e', 64),
+        'variants_per_direction', 2
+      )
+    ) ->> 'run_id'
+  ) is not null,
+  'a variants run may pin the approved bundle version it derives from'
+);
+
 insert into asset_library_state (key, value)
 select 'run', public.enqueue_campaign_generation_run(
   'a5100000-0000-4000-8000-000000000101'::uuid,
