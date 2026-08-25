@@ -168,6 +168,9 @@ export type {
   PosterTextValue,
 } from "@/domain/campaigns/glyph-coverage";
 
+export { renderDigest } from "@/domain/campaigns/render-digest";
+export type { RenderInputs } from "@/domain/campaigns/render-digest";
+
 export { bundleDigest, canonicalManifestJson } from "@/domain/campaigns/digest";
 export { normalizeManifest } from "@/domain/campaigns/normalization";
 export { diffManifests } from "@/domain/campaigns/digest";
