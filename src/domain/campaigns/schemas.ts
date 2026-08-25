@@ -5,6 +5,7 @@ import {
   namesByScriptSchema,
   subjectExclusionsSchema,
 } from "@/domain/campaigns/asset-library";
+import { renderableScriptSchema } from "@/domain/campaigns/poster-template";
 
 /**
  * The Campaign Bundle manifest.
@@ -298,6 +299,61 @@ export const campaignSourceSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("decision_opportunity"), sourceId: uuidSchema }),
 ]);
 
+/**
+ * Which template renders which placement, and in which scripts.
+ *
+ * Inside the manifest, therefore inside the digest, therefore inside the
+ * approval binding — the same treatment ADR 0020 gave the generation policy.
+ * Choosing a different template is a material change to what publishes, so it
+ * creates a new version and invalidates the old approval, exactly as changing
+ * the offer would.
+ *
+ * Optional, and absent from every manifest written before spec 020. `digest.ts`
+ * drops `undefined` before hashing, so an existing version's digest is
+ * unchanged and no backfill exists. A version without a poster plan renders
+ * nothing, which is the honest reading of "nobody chose a template".
+ */
+export const posterPlanSchema = z
+  .strictObject({
+    placements: z
+      .array(
+        z.strictObject({
+          placement: campaignPlacementSchema,
+          templateKey: z.string().regex(/^[a-z][a-z0-9_]*$/, "A template key is lower snake case."),
+          /**
+           * Pinned, not floating. A template version is immutable, so an
+           * approved plan keeps rendering what was approved even after the
+           * template is retired — retirement stops new selections, it does not
+           * rewrite an agreed plan.
+           */
+          templateVersion: z.number().int().positive(),
+        }),
+      )
+      .min(1)
+      .max(8),
+    scripts: z.array(renderableScriptSchema).min(1).max(3),
+  })
+  .superRefine((plan, context) => {
+    const placements = plan.placements.map((entry) => entry.placement);
+    if (new Set(placements).size !== placements.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["placements"],
+        message: "Two templates for one placement leaves the render ambiguous.",
+      });
+    }
+
+    if (new Set(plan.scripts).size !== plan.scripts.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scripts"],
+        message: "A repeated script would render the same poster twice.",
+      });
+    }
+  });
+
+export type CampaignPosterPlan = z.infer<typeof posterPlanSchema>;
+
 export const campaignBundleManifestSchema = z.strictObject({
   schemaVersion: z.literal(2),
   campaignId: uuidSchema,
@@ -313,12 +369,25 @@ export const campaignBundleManifestSchema = z.strictObject({
   measurementPlan: campaignMeasurementPlanSchema,
   executionMode: z.enum(["best_effort", "all_channels_required"]),
   totalSpendCeiling: moneySchema.nullable(),
+  /** Absent on every version written before spec 020, and valid that way. */
+  posterPlan: posterPlanSchema.optional(),
 });
 
 type ManifestShape = z.infer<typeof campaignBundleManifestSchema>;
-const campaignBundleModelManifestShapeSchema = campaignBundleManifestSchema.extend({
-  assets: z.array(campaignModelAssetSchema).min(1).max(60),
-});
+/**
+ * What a model is allowed to hand back.
+ *
+ * `posterPlan` is omitted for the same reason `truthClass` is: spec 020 section 10
+ * says no model chooses a template, a font, a size or a colour. Omitting it from
+ * a strict object makes a planner that starts proposing templates a **parse
+ * failure** rather than a silent strip, so the misbehaviour is discovered
+ * instead of quietly discarded.
+ */
+const campaignBundleModelManifestShapeSchema = campaignBundleManifestSchema
+  .omit({ posterPlan: true })
+  .extend({
+    assets: z.array(campaignModelAssetSchema).min(1).max(60),
+  });
 type ModelManifestShape = z.infer<typeof campaignBundleModelManifestShapeSchema>;
 type ReviewableManifestShape = ManifestShape | ModelManifestShape;
 

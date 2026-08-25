@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { bundleDigest } from "@/domain/campaigns/digest";
 import {
+  campaignBundleManifestSchema,
   campaignBundleModelManifestSchema,
   campaignBundleSchema,
+  posterPlanSchema,
   subjectProfileSchema,
 } from "@/domain/campaigns/schemas";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
@@ -204,6 +207,91 @@ describe("campaignBundleModelManifestSchema", () => {
     });
 
     expect(campaignBundleModelManifestSchema.safeParse(manifest).success).toBe(true);
+  });
+});
+
+describe("posterPlan", () => {
+  const plan = {
+    placements: [{ placement: "feed_image", templateKey: "kerala_feed", templateVersion: 1 }],
+    scripts: ["Mlym", "Latn"],
+  };
+
+  it("accepts a plan naming a template version and its scripts", () => {
+    expect(posterPlanSchema.parse(plan).placements[0]?.templateVersion).toBe(1);
+  });
+
+  /**
+   * A poster can only be drawn in a script we vendored a font for. Catching a
+   * script with no font here, at the manifest boundary, beats catching it in the
+   * worker -- or not catching it, which is the empty-box failure arriving by a
+   * different door.
+   */
+  it("refuses a script no vendored font covers", () => {
+    expect(posterPlanSchema.safeParse({ ...plan, scripts: ["Deva"] }).success).toBe(false);
+  });
+
+  it("refuses two templates for one placement", () => {
+    const ambiguous = {
+      ...plan,
+      placements: [
+        { placement: "feed_image", templateKey: "a_template", templateVersion: 1 },
+        { placement: "feed_image", templateKey: "b_template", templateVersion: 1 },
+      ],
+    };
+
+    expect(posterPlanSchema.safeParse(ambiguous).success).toBe(false);
+  });
+
+  it("refuses a repeated script, which would render the same poster twice", () => {
+    expect(posterPlanSchema.safeParse({ ...plan, scripts: ["Latn", "Latn"] }).success).toBe(false);
+  });
+
+  it("refuses a floating template reference with no version", () => {
+    const floating = {
+      ...plan,
+      placements: [{ placement: "feed_image", templateKey: "kerala_feed" }],
+    };
+
+    expect(posterPlanSchema.safeParse(floating).success).toBe(false);
+  });
+
+  it("is optional, so every manifest written before spec 020 stays valid", () => {
+    expect(campaignBundleSchema.safeParse(validManifest()).success).toBe(true);
+  });
+
+  /**
+   * Approval binds to a digest of the manifest. Choosing a template changes what
+   * publishes, so it must change the digest -- and an absent plan must leave
+   * every existing version's digest exactly as it was, or Task 2 would have
+   * invalidated approvals that were never touched.
+   */
+  it("leaves an existing digest unchanged when absent, and changes it when present", () => {
+    const without = validManifest();
+    const before = bundleDigest(without);
+
+    const parsedWithout = campaignBundleManifestSchema.parse(without);
+    expect(parsedWithout.posterPlan).toBeUndefined();
+    expect(bundleDigest(parsedWithout)).toBe(before);
+
+    const withPlan = { ...without, posterPlan: posterPlanSchema.parse(plan) };
+    expect(bundleDigest(withPlan)).not.toBe(before);
+  });
+
+  /**
+   * Spec 020 section 10: no model chooses a template. Omitting the field from a
+   * strict object makes a planner that proposes one fail to parse, rather than
+   * having its proposal silently dropped where nobody would learn of it.
+   */
+  it("cannot be supplied by a model", () => {
+    const manifest = validManifest() as unknown as Record<string, unknown>;
+    manifest.assets = (manifest.assets as Array<Record<string, unknown>>).map((asset) => {
+      const modelAsset = { ...asset };
+      delete modelAsset.truthClass;
+      return modelAsset;
+    });
+    manifest.posterPlan = plan;
+
+    expect(campaignBundleModelManifestSchema.safeParse(manifest).success).toBe(false);
   });
 });
 

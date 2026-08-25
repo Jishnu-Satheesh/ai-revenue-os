@@ -20,6 +20,7 @@ export {
   campaignMeasurementPlanSchema,
   creativeDirectionSchema,
   moneySchema,
+  posterPlanSchema,
   subjectProfileSchema,
 } from "@/domain/campaigns/schemas";
 
@@ -37,6 +38,7 @@ export type {
   CampaignMeasurementPlan,
   CampaignMoney,
   CampaignPlacement,
+  CampaignPosterPlan,
   CreativeDirectionKind,
   SubjectProfile,
   SubjectProfileState,
@@ -121,6 +123,50 @@ export {
   deriveGeneratedTruthClass,
 } from "@/domain/campaigns/truth-class";
 export type { GeneratedAssetTruthClass } from "@/domain/campaigns/truth-class";
+
+export {
+  POSTER_TEMPLATE_OWNER_SCOPES,
+  POSTER_TEMPLATE_STATES,
+  POSTER_TEXT_ALIGNMENTS,
+  POSTER_TEXT_SLOTS,
+  RENDERABLE_SCRIPTS,
+  posterLayoutSchema,
+  posterTemplateSchema,
+  posterTextBoxSchema,
+  renderableScriptSchema,
+} from "@/domain/campaigns/poster-template";
+export type {
+  PosterLayout,
+  PosterTemplate,
+  PosterTextAlignment,
+  PosterTextBox,
+  PosterTextSlot,
+  RenderableScript,
+} from "@/domain/campaigns/poster-template";
+
+export { resolvePosterSlots, templateAvailability } from "@/domain/campaigns/poster-slots";
+export type {
+  PosterSlotAbsenceReason,
+  PosterSlotInput,
+  PosterSlotResolution,
+  PosterSlotSource,
+  PosterTemplateAvailability,
+  ResolvedPosterSlot,
+} from "@/domain/campaigns/poster-slots";
+
+export { candidateFontSizes, fitTextToBox } from "@/domain/campaigns/text-fitting";
+export type { TextFitOutcome, TextMeasure } from "@/domain/campaigns/text-fitting";
+
+export {
+  SHAPING_CONTROL_CODEPOINTS,
+  describeCodepoint,
+  findUncoveredGlyphs,
+} from "@/domain/campaigns/glyph-coverage";
+export type {
+  GlyphCoverageOracle,
+  GlyphCoverageProblem,
+  PosterTextValue,
+} from "@/domain/campaigns/glyph-coverage";
 
 export { bundleDigest, canonicalManifestJson } from "@/domain/campaigns/digest";
 export { normalizeManifest } from "@/domain/campaigns/normalization";
