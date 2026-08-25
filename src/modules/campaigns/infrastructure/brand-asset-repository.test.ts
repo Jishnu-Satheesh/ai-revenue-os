@@ -4,7 +4,6 @@ import {
   createBrandAssetStore,
   type BrandAssetPersistence,
 } from "@/modules/campaigns/infrastructure/brand-asset-repository";
-import { DomainError } from "@/lib/errors";
 
 const ORGANIZATION_ID = "10000000-0000-4000-8000-000000000001";
 const ASSET_ID = "20000000-0000-4000-8000-000000000002";
@@ -121,7 +120,7 @@ describe("brand asset governed persistence", () => {
         classification: null,
       });
 
-      await expect(operation).rejects.toMatchObject<Partial<DomainError>>({
+      await expect(operation).rejects.toMatchObject({
         name: "DomainError",
         code: expectedCode,
         message: expectedMessage,

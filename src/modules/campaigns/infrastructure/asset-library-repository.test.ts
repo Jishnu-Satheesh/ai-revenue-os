@@ -4,7 +4,6 @@ import {
   createAssetLibraryRepository,
   type AssetLibraryPersistence,
 } from "@/modules/campaigns/infrastructure/asset-library-repository";
-import { DomainError } from "@/lib/errors";
 
 const ORGANIZATION_ID = "10000000-0000-4000-8000-000000000001";
 const ASSET_ID = "20000000-0000-4000-8000-000000000002";
@@ -289,7 +288,7 @@ describe("asset library governed writes", () => {
         archived: true,
       });
 
-      await expect(operation).rejects.toMatchObject<Partial<DomainError>>({
+      await expect(operation).rejects.toMatchObject({
         name: "DomainError",
         code: expectedCode,
         message: expectedMessage,
@@ -309,7 +308,7 @@ describe("asset library governed writes", () => {
       archived: true,
     });
 
-    await expect(operation).rejects.toMatchObject<Partial<DomainError>>({
+    await expect(operation).rejects.toMatchObject({
       name: "DomainError",
       code: "VALIDATION_ERROR",
       message: "Please check the asset metadata.",
