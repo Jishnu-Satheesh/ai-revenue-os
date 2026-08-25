@@ -499,6 +499,20 @@ export async function runReportPackageProjection(
         differenceMinorUnits: error.differenceMinorUnits,
         toleranceMinorUnits: error.toleranceMinorUnits,
       });
+    } else if (!(error instanceof ReportProjectionFailure)) {
+      // An unexpected exception reached the boundary. Flattening it into the
+      // generic code without recording what it was would make every such run
+      // unexplainable after the fact — identifiers and the error's own name
+      // and message only; never workbook content.
+      console.error("report projection failed unexpectedly", {
+        organizationId: payload.organizationId,
+        packageId: payload.packageId,
+        projectionRunId: payload.projectionRunId,
+        correlationId: payload.correlationId,
+        errorName: error instanceof Error ? error.name : "unknown",
+        errorMessage: error instanceof Error ? error.message.slice(0, 300) : String(error),
+        stackTop: error instanceof Error ? error.stack?.split("\n").slice(1, 4).join(" | ").slice(0, 400) : undefined,
+      });
     }
     await dependencies.fail({
       organizationId: payload.organizationId,
