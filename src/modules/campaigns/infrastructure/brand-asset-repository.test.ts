@@ -4,6 +4,7 @@ import {
   createBrandAssetStore,
   type BrandAssetPersistence,
 } from "@/modules/campaigns/infrastructure/brand-asset-repository";
+import { DomainError } from "@/lib/errors";
 
 const ORGANIZATION_ID = "10000000-0000-4000-8000-000000000001";
 const ASSET_ID = "20000000-0000-4000-8000-000000000002";
@@ -93,4 +94,38 @@ describe("brand asset governed persistence", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it.each([
+    {
+      code: "23514",
+      databaseMessage: "brand_asset_tags_duplicate",
+      expectedCode: "VALIDATION_ERROR",
+      expectedMessage: "Asset tags must be unique.",
+    },
+    {
+      code: "42501",
+      databaseMessage: "brand_asset_forbidden",
+      expectedCode: "AUTHORIZATION_ERROR",
+      expectedMessage: "You do not have permission to change this asset.",
+    },
+  ])(
+    "preserves the governed $databaseMessage reservation refusal",
+    async ({ code, databaseMessage, expectedCode, expectedMessage }) => {
+      rpc.mockResolvedValue({ data: null, error: { code, message: databaseMessage } });
+
+      const operation = createBrandAssetStore({ rpc } as BrandAssetPersistence).reserve({
+        organizationId: ORGANIZATION_ID,
+        brandAssetId: null,
+        label: "Refused upload",
+        assetRole: "product",
+        classification: null,
+      });
+
+      await expect(operation).rejects.toMatchObject<Partial<DomainError>>({
+        name: "DomainError",
+        code: expectedCode,
+        message: expectedMessage,
+      });
+    },
+  );
 });

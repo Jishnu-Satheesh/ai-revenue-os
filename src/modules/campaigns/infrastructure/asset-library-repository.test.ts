@@ -4,6 +4,7 @@ import {
   createAssetLibraryRepository,
   type AssetLibraryPersistence,
 } from "@/modules/campaigns/infrastructure/asset-library-repository";
+import { DomainError } from "@/lib/errors";
 
 const ORGANIZATION_ID = "10000000-0000-4000-8000-000000000001";
 const ASSET_ID = "20000000-0000-4000-8000-000000000002";
@@ -253,5 +254,65 @@ describe("asset library governed writes", () => {
         note: null,
       }),
     ).rejects.toThrow();
+  });
+
+  it.each([
+    {
+      databaseCode: "42501",
+      databaseMessage: "brand_asset_metadata_forbidden",
+      expectedCode: "AUTHORIZATION_ERROR",
+      expectedMessage: "You do not have permission to change this asset.",
+    },
+    {
+      databaseCode: "42501",
+      databaseMessage: "brand_asset_metadata_not_found",
+      expectedCode: "TENANT_SCOPE_ERROR",
+      expectedMessage: "That asset is not available.",
+    },
+    {
+      databaseCode: "23514",
+      databaseMessage: "brand_asset_tags_duplicate",
+      expectedCode: "VALIDATION_ERROR",
+      expectedMessage: "Asset tags must be unique.",
+    },
+  ])(
+    "preserves the governed $databaseMessage refusal at the application boundary",
+    async ({ databaseCode, databaseMessage, expectedCode, expectedMessage }) => {
+      rpc.mockResolvedValue({
+        data: null,
+        error: { code: databaseCode, message: databaseMessage },
+      });
+
+      const operation = createAssetLibraryRepository(persistence()).updateMetadata({
+        organizationId: ORGANIZATION_ID,
+        brandAssetId: ASSET_ID,
+        archived: true,
+      });
+
+      await expect(operation).rejects.toMatchObject<Partial<DomainError>>({
+        name: "DomainError",
+        code: expectedCode,
+        message: expectedMessage,
+      });
+    },
+  );
+
+  it("reports malformed database input as validation rather than an unknown persistence failure", async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: "22P02", message: "invalid input syntax for type boolean" },
+    });
+
+    const operation = createAssetLibraryRepository(persistence()).updateMetadata({
+      organizationId: ORGANIZATION_ID,
+      brandAssetId: ASSET_ID,
+      archived: true,
+    });
+
+    await expect(operation).rejects.toMatchObject<Partial<DomainError>>({
+      name: "DomainError",
+      code: "VALIDATION_ERROR",
+      message: "Please check the asset metadata.",
+    });
   });
 });

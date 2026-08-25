@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import { DomainError } from "@/lib/errors";
+import {
+  type BrandAssetPersistenceFailure,
+  throwBrandAssetMutationError,
+} from "@/modules/campaigns/infrastructure/brand-asset-persistence-error";
 import {
   assetLibraryReferenceSchema,
   assetMetadataMutationResultSchema,
@@ -8,7 +13,7 @@ import {
   type AssetLibraryStore,
 } from "@/modules/campaigns/application/asset-library-service";
 
-type PersistenceResult<T> = { data: T | null; error: { code?: string } | null };
+type PersistenceResult<T> = { data: T | null; error: BrandAssetPersistenceFailure | null };
 
 type AssetLibraryQuery = {
   select(columns: string): AssetLibraryQuery;
@@ -105,8 +110,8 @@ const REVIEW_COLUMNS = [
   "reviewed_at",
 ].join(",");
 
-function persistenceError(): never {
-  throw new Error("The asset library could not be read or changed.");
+function persistenceError(cause?: unknown): never {
+  throw new DomainError("DOMAIN_ERROR", "The asset library could not be read or changed.", cause);
 }
 
 function canonicalUtc(value: unknown): unknown {
@@ -146,7 +151,9 @@ export function createAssetLibraryRepository(
           .eq("subject_kind", "brand_asset_version")
           .order("reviewed_at", { ascending: false }),
       ]);
-      if (assetsResult.error || versionsResult.error || reviewsResult.error) persistenceError();
+      if (assetsResult.error || versionsResult.error || reviewsResult.error) {
+        persistenceError(assetsResult.error ?? versionsResult.error ?? reviewsResult.error);
+      }
 
       const assets = parseRows(brandAssetRowSchema, assetsResult.data);
       const versions = parseRows(brandAssetVersionRowSchema, versionsResult.data);
@@ -219,7 +226,8 @@ export function createAssetLibraryRepository(
         target_organization_id: input.organizationId,
         input_metadata: inputMetadata,
       });
-      if (error || !data) persistenceError();
+      if (error) throwBrandAssetMutationError(error);
+      if (!data) persistenceError();
       const row = data as Record<string, unknown>;
       const parsed = assetMetadataMutationResultSchema.safeParse({
         brandAssetId: row.brand_asset_id,
@@ -241,7 +249,8 @@ export function createAssetLibraryRepository(
           note: input.note,
         },
       });
-      if (error || !data) persistenceError();
+      if (error) throwBrandAssetMutationError(error);
+      if (!data) persistenceError();
       const row = data as Record<string, unknown>;
       const parsed = creativeReviewMutationResultSchema.safeParse({
         reviewId: row.review_id,
@@ -257,7 +266,7 @@ export function createAssetLibraryRepository(
         .from("creative_review_reasons")
         .select("key,description,owner_scope,pack_slug")
         .order("key", { ascending: true });
-      if (error) persistenceError();
+      if (error) persistenceError(error);
       return parseRows(reviewReasonRowSchema, data).map((row) => {
         const parsed = creativeReviewReasonEntrySchema.safeParse({
           code: row.key,
