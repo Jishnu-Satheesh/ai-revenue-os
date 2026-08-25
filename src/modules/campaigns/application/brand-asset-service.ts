@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { DomainError } from "@/lib/errors";
+import { brandAssetClassificationWithOwnershipSchema } from "@/modules/campaigns/application/asset-library-service";
 import type { AssetIntakeResult } from "@/modules/campaigns/infrastructure/asset-intake";
 
 /**
@@ -30,6 +31,7 @@ export type BrandAssetStore = {
     brandAssetId: string | null;
     label: string | null;
     assetRole: string | null;
+    classification: BrandAssetClassification | null;
   }): Promise<BrandAssetReservation>;
   finalize(input: {
     organizationId: string;
@@ -49,6 +51,8 @@ export type BrandAssetObjectStore = {
 
 export type BrandAssetIntake = (input: { bytes: Buffer }) => Promise<AssetIntakeResult>;
 
+export type BrandAssetClassification = z.infer<typeof brandAssetClassificationWithOwnershipSchema>;
+
 export type BrandAssetServiceDependencies = {
   store: BrandAssetStore;
   objects: BrandAssetObjectStore;
@@ -67,18 +71,30 @@ export function createBrandAssetService(dependencies: BrandAssetServiceDependenc
       brandAssetId?: string;
       label?: string;
       assetRole?: string;
+      classification?: z.input<typeof brandAssetClassificationWithOwnershipSchema>;
     }): Promise<BrandAssetReservation> {
       // Either an existing asset gets a new version, or a new asset is named.
       // Neither-nor would create an unlabelled asset nobody can identify later.
       if (!input.brandAssetId && (!input.label || !input.assetRole)) {
         throw new DomainError("VALIDATION_ERROR", "A new brand asset needs a label and a role.");
       }
+      if (input.brandAssetId && input.classification) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "Classify an existing asset through its metadata update.",
+        );
+      }
+
+      const classification = input.classification
+        ? brandAssetClassificationWithOwnershipSchema.parse(input.classification)
+        : null;
 
       return dependencies.store.reserve({
         organizationId: input.organizationId,
         brandAssetId: input.brandAssetId ?? null,
         label: input.label ?? null,
         assetRole: input.assetRole ?? null,
+        classification,
       });
     },
 

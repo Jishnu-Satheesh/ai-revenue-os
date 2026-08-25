@@ -34,6 +34,14 @@ export function createBrandAssetStore(persistence: BrandAssetPersistence): Brand
           brand_asset_id: input.brandAssetId,
           label: input.label,
           asset_role: input.assetRole,
+          ...(input.classification === null
+            ? {}
+            : {
+                conditioning_roles: input.classification.conditioningRoles,
+                tags: input.classification.tags,
+                scripts: input.classification.scripts,
+                ownership: input.classification.ownership,
+              }),
         },
       });
       if (error || !data) brandAssetError();

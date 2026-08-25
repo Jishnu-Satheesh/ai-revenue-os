@@ -71,6 +71,60 @@ describe("reserving an upload slot", () => {
 
     expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ brandAssetId: ASSET_ID }));
   });
+
+  it("carries complete classification atomically when reserving a new reference", async () => {
+    await service().reserve({
+      organizationId: ORGANIZATION_ID,
+      label: "Malayalam wordmark",
+      assetRole: "logo",
+      classification: {
+        conditioningRoles: ["brand_mark", "typography"],
+        tags: [" CAFE\u0301 ", "മലയാളം"],
+        scripts: ["Latn", "Mlym"],
+        ownership: "owned",
+      },
+    });
+
+    expect(reserve).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      brandAssetId: null,
+      label: "Malayalam wordmark",
+      assetRole: "logo",
+      classification: {
+        conditioningRoles: ["brand_mark", "typography"],
+        tags: ["CAFÉ", "മലയാളം"],
+        scripts: ["Latn", "Mlym"],
+        ownership: "owned",
+      },
+    });
+  });
+
+  it("keeps the deployed legacy reservation shape working without classification", async () => {
+    await service().reserve({
+      organizationId: ORGANIZATION_ID,
+      label: "Legacy upload",
+      assetRole: "product",
+    });
+
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ classification: null }));
+  });
+
+  it("refuses partial or invalid classification before a row is reserved", async () => {
+    await expect(
+      service().reserve({
+        organizationId: ORGANIZATION_ID,
+        label: "Missing script",
+        assetRole: "other",
+        classification: {
+          conditioningRoles: ["typography"],
+          tags: [],
+          scripts: [],
+          ownership: "third_party",
+        },
+      }),
+    ).rejects.toThrow();
+    expect(reserve).not.toHaveBeenCalled();
+  });
 });
 
 describe("completing an upload decides from the bytes alone", () => {
