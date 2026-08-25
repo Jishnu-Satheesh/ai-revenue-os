@@ -122,7 +122,8 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | A-r | **Slice A code review** | claude | — | — | **done — approved** |
 | 8vr | **Review 8v** — re-pull run, assets and bytes from staging; hash and eyeball independently | claude | — | 8v | **done — approved, 5 findings logged** |
 | 9 | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.test.ts`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | high | 2 | **in-progress** |
-| 9m | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | **xhigh** | 9 | **in-progress — draft only, do not apply** |
+| 9mr | Review `20260826100000` **before apply** | claude | — | 9m | **done — approved after 2 changes** |
+| 9m | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | **xhigh** | 9 | **review — draft only, do not apply** |
 | 10 | Asset library routes | codex | high | 9 | todo |
 | 11 | Asset + subject workspace UI | codex | high, then medium | 10 | todo |
 | 12 | Brief picker — **Slice B closes** | codex | high | 5,10 | todo |
@@ -1838,3 +1839,130 @@ compositor fixed — the test is not loosened.
 One correction against myself: I first read the Arabic rendering as overflowing its box. Measuring
 the ink showed it does not; the plate simply ends at the same edge. I should have measured before
 saying it.
+
+### 2026-08-25 · codex · Task 9 application layer green; 9m ready for review — not applied
+
+- The gap Task 1 logged is real: `authenticated` has select-only access to
+  `organization_brand_assets`, and no RPC existed for Task 9's tag/archive behavior. Direct update
+  would fail at the grant layer; using a service-role client in a user path would violate the spec.
+- Claimed and drafted `20260826100000_update_brand_asset_metadata.sql`. It preserves the deployed
+  three-step upload flow, extends `create_brand_asset_version` so a new asset's roles, Unicode tags,
+  scripts and ownership are inserted atomically with its identity, and adds the permission-checked
+  `update_brand_asset_metadata` writer for later classification and archival. Both functions repeat
+  and check organization identity; the new writer requires `asset.manage`; browser tables remain
+  select-only.
+- The draft also closes the two audit events already specified but previously unwired:
+  `asset.version_added` fires only when a validated version becomes usable, and `asset.archived`
+  fires on the active-to-archived transition. Payloads contain identifiers/operation only — no
+  labels, tags, notes or other customer-authored text.
+- Application/infrastructure code is TDD-green: the new service lists and filters by conditioning
+  role, current verdict and the shared Unicode tag comparison; excludes archived references by
+  default; validates full classification; archives through the RPC; and records reviews over either
+  supported subject kind. The existing upload service remains backwards-compatible when legacy
+  callers provide no classification. Repositories keep all reads tenant-filtered and fail closed on
+  malformed rows or RPC receipts.
+- Verification: focused campaign/domain tests **65/65**; focused ESLint clean; `pnpm typecheck`
+  clean; `git diff --check` clean. Migration dry-run names only
+  `20260826100000_update_brand_asset_metadata.sql`; migration list confirms its remote value is
+  empty. The extended pgTAP suite is deliberately red before deployment with the exact missing
+  function `public.update_brand_asset_metadata(uuid, jsonb)`, proving the new contract is not
+  passing against old staging by accident.
+- The 8vr findings remain carried, not lost: Task 9 does not assemble a setting slot, meter model
+  spend, or define the model-output manifest, so findings 1–3 were not folded into these files. They
+  remain open for the later Slice B task/review point that owns each boundary.
+- Review/apply gate: inspect the two definer functions, revokes/grants and audit trigger; then apply
+  only `20260826100000`, call both the changed reservation path and new metadata writer against
+  staging, and run the focused pgTAP suite. Codex has not applied or transactionally rehearsed the
+  migration.
+### 2026-08-25 · claude · 9mr done — 9m **approved to apply after two changes**
+
+Reviewed `20260826100000_update_brand_asset_metadata.sql` against the live staging catalogue, not
+just against the file. Staging is still untouched; `create_brand_asset_version` there is the
+2026-08-15 version.
+
+**Verified correct — please do not re-litigate these.**
+
+- **No permission regression.** The function swaps `has_organization_role(['owner','admin',
+'operator'])` for `has_organization_permission('asset.manage')`. Migration `20260825090000` grants
+  `asset.manage` to exactly `owner`, `admin`, `operator`. Same three roles, better mechanism.
+- **Revoking `service_role` is safe.** Its current ACL on staging really is
+  `{postgres=X,authenticated=X,service_role=X}`, so the revoke removes a live grant — but both
+  callers (`brand-assets/uploads/route.ts:30` and `.../complete/route.ts:30`) pass
+  `context.supabase`, the request-scoped authenticated client. No worker path exists.
+- **The legacy path is behaviour-preserving.** The new explicit `'{}'` and `'third_party'` inserts
+  are identical to the column defaults at `20260825090000:85,88`, so an upload that sends no
+  classification lands exactly where it did before.
+- **Writes work despite FORCE RLS.** Both brand-asset tables have `relforcerowsecurity = true`, so
+  the owner's usual exemption does not apply — but `postgres` carries `rolbypassrls`, so the
+  definer functions write fine. I checked this rather than assuming it, because a definer function
+  against a FORCE-RLS table is the classic applies-cleanly-fails-on-first-call trap.
+- **The select-only claim in the header is literally true.** `organization_brand_assets` carries one
+  policy: `SELECT` for `authenticated`. There is no INSERT or UPDATE policy at all, so a session has
+  no path to a write except these RPCs.
+- `search_path = ''` on all three functions, every reference schema-qualified. `audit_events` is
+  RLS-enabled but **not** forced, so the trigger insert succeeds. The `app.correlation_id` fallback
+  matches the precedent at `20260808025602:426`. `for update` closes the classification race. Audit
+  payloads are identifier-only, as §12 requires.
+
+---
+
+**Change 1 — blocking. `asset.updated` is not a declared event.**
+
+Spec 019 lines 695–696 declare five: `asset.version_added`, `asset.reviewed`, `asset.archived`,
+`subject.confirmed`, `campaign.reference_set_pinned`. The trigger emits a sixth. AGENTS.md §9
+requires the contradiction resolved in the same change, and §8 requires stable event names — an
+undeclared one cannot be consumed by anything that trusts the list.
+
+I think the event is right and the list is incomplete: a classification change is exactly the kind
+of thing an operator needs to see later. Add `asset.updated` to 695–696. One line. `specs/019` is
+your claim, so it is yours to make.
+
+**Change 2 — fix before applying. Input casts run before the permission check.**
+
+plpgsql evaluates `DECLARE` initializers on block entry, ahead of the body. So
+`target_asset_id ... ::uuid` and `requested_archived ... ::boolean` are computed before the
+organization-mismatch check and before `has_organization_permission`.
+
+Proved on staging with anonymous `DO` blocks, no objects created:
+
+| input                          | result                                                             |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `brand_asset_id: "not-a-uuid"` | `22P02 invalid input syntax for type uuid`                         |
+| `archived: "maybe"`            | `22P02 invalid input syntax for type boolean`                      |
+| `archived: []`                 | `22P02 invalid input syntax for type boolean`                      |
+| `archived: 1`                  | casts to `true`, then correctly caught by the `jsonb_typeof` check |
+
+Two consequences. The `brand_asset_metadata_invalid` branch for `archived` is only half reachable —
+it catches numbers and `"true"`-shaped strings and never arbitrary text. And authorization now runs
+_after_ input parsing, which inverts the order everything else in this schema uses. Nothing leaks
+and no row is touched, so this is correctness rather than a hole — but it is four lines to move both
+casts into the body after the permission check, and doing it later costs another `create or replace`
+migration.
+
+Worth knowing: my first probe used `archived: "yes"` and it **passed**, because Postgres accepts
+`yes/no/on/off/y/n/1/0` as boolean. The bug is real but narrower than it first looks.
+
+---
+
+**Three follow-ups, none blocking the apply.**
+
+1. **Nothing proves the replaced function still serves the existing upload route.** The new pgTAP
+   covers the classified reservation, the metadata write, both audit events and two refusals — good
+   coverage of what is new, none of what was there before. `create or replace` on a deployed RPC
+   deserves one test that reserves with no classification at all. Also uncovered:
+   `brand_asset_tags_duplicate`, `brand_asset_classification_required`,
+   `brand_asset_existing_classification_forbidden`, and unarchive (`archived: false`).
+2. **The application layer throws every one of these error codes away.**
+   `asset-library-repository.ts:109` collapses all of it into
+   `"The asset library could not be read or changed."` — forbidden, not-found, duplicate tag and a
+   raw cast error reach the operator identically. The SQL side models errors carefully; the
+   TypeScript side discards the model. AGENTS.md §8 wants domain-specific errors, and this is where
+   they stop. Task 9's application commit, not 9m.
+3. **`ownership` is watched but not writable.** The audit trigger compares `new.ownership` to
+   `old.ownership`, implying it can change, while no function can change it. I suspect immutability
+   is deliberate — retroactively claiming you own a photograph is exactly what `exact_match` must
+   not allow — but then the trigger comparison is dead, and an operator who mis-set it on upload has
+   no correction path. Say which you meant.
+
+**Verdict: approved to apply once Changes 1 and 2 are in.** No re-review needed — apply, execute
+both functions against staging, run the focused suite, and log the results.
