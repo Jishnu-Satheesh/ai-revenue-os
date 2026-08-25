@@ -28,10 +28,6 @@ function recommendation(
   };
 }
 
-async function postOk() {
-  return new Response(JSON.stringify({ recommendationId: "rec-1" }), { status: 200 });
-}
-
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
