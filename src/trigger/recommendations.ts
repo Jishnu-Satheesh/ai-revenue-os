@@ -1,4 +1,5 @@
 import { logger, schedules, schemaTask } from "@trigger.dev/sdk";
+import { z } from "zod";
 
 import { findingHeadline, needsDataSentence } from "@/domain/analysis/copy";
 import { DomainError } from "@/lib/errors";
@@ -6,6 +7,7 @@ import { env } from "@/lib/env";
 import type { Database } from "@/lib/supabase/database.types";
 import { createAnalysisWorkerServiceClient } from "@/lib/supabase/service";
 import { createRecommendationGenerationProvider } from "@/modules/analysis/infrastructure/recommendation-generation-provider";
+import { createRecommendationJudgeProvider } from "@/modules/analysis/infrastructure/recommendation-judge-provider";
 import type { NarrationPromptFinding } from "@/workflows/analysis/recommendation-prompt";
 import {
   channelRecommendationsTaskSchema,
@@ -13,6 +15,10 @@ import {
   type ChannelRecommendationsClaim,
   type ChannelRecommendationWindow,
 } from "@/workflows/analysis/run-channel-recommendations";
+import {
+  runChannelRecommendationEvaluations,
+  type UnjudgedRecommendation,
+} from "@/workflows/analysis/run-recommendation-evaluations";
 
 /**
  * The narrator's Trigger wiring.
@@ -32,6 +38,68 @@ const retry = {
   maxTimeoutInMs: 30_000,
   factor: 2,
 } as const;
+
+/**
+ * What the judge's loader accepts back from the database. The shape is the
+ * workflow's `UnjudgedRecommendation` before its citations are flattened;
+ * parsing here keeps a schema drift from reaching the judge as prose.
+ */
+const unjudgedRecommendationShape = z.object({
+  id: z.string().uuid(),
+  organization_id: z.string().uuid(),
+  label: z.enum(["observation", "recommendation", "needs_data"]),
+  headline: z.string(),
+  detail: z.string(),
+  limitations: z.array(z.string()),
+  prompt_version: z.number().int().min(1),
+  channel_recommendation_citations: z.array(
+    z.object({
+      finding_id: z.string().uuid(),
+      channel_findings: z
+        .object({
+          detector_key: z.string().nullable(),
+          kind: z.string().nullable(),
+          headline: z.string().nullable(),
+          needs_data_reason: z.string().nullable(),
+          monetary_impact_minor_units: z.number().nullable(),
+          currency: z.string().nullable(),
+        })
+        .array()
+        .nullable(),
+    }),
+  ),
+});
+
+function toUnjudged(row: z.infer<typeof unjudgedRecommendationShape>): UnjudgedRecommendation {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    label: row.label,
+    headline: row.headline,
+    detail: row.detail,
+    limitations: row.limitations,
+    promptVersion: row.prompt_version,
+    citations: row.channel_recommendation_citations.map((citation) => {
+      const finding = Array.isArray(citation.channel_findings)
+        ? citation.channel_findings[0]
+        : citation.channel_findings;
+      return {
+        findingId: citation.finding_id,
+        detectorKey: finding?.detector_key ?? null,
+        kind: finding?.kind ?? null,
+        headline: finding?.headline ?? null,
+        detail: finding?.needs_data_reason ?? null,
+        // The stored money, stated in minor units exactly as recorded. The
+        // judge checks claims against figures; it needs the figure itself.
+        valueSummary:
+          finding?.monetary_impact_minor_units !== null &&
+          finding?.monetary_impact_minor_units !== undefined
+            ? `${finding.currency ?? ""} ${finding.monetary_impact_minor_units} (minor units) declared impact`.trim()
+            : null,
+      };
+    }),
+  };
+}
 
 export { channelRecommendationsTaskSchema };
 
@@ -202,9 +270,11 @@ export const channelRecommendationsTask = schemaTask({
 /**
  * The quality judge's slot (ADR 0038), every forty-eight hours at 03:00 UTC.
  *
- * Task 13 ships the evaluation workflow this delegates to; until it lands the
- * schedule fires into an honest refusal rather than a silent success. The body
- * stays thin so wiring Task 13 in is swapping one import.
+ * It picks up every recommendation not yet judged — oldest first, two hundred
+ * at most — reads each against its own cited findings, and files verdicts
+ * through the fenced admission RPC, one call per organization. Verdicts are
+ * internal quality evidence for human prompt iteration; nothing here edits a
+ * recommendation, a prompt, or a rule.
  *
  * `schedules.task` rather than `schemaTask`: the cron payload is fixed by
  * Trigger.dev, so there is no caller-supplied payload to validate.
@@ -216,8 +286,78 @@ export const evaluateRecommendationsTask = schedules.task({
   maxDuration: 300,
   queue: { concurrencyLimit: 1 },
   run: async () => {
-    throw new Error(
-      "NOT_IMPLEMENTED: channel-recommendation evaluations arrive with Task 13 (runChannelRecommendationEvaluations).",
+    const supabase = createAnalysisWorkerServiceClient();
+    const judgeProvider = createRecommendationJudgeProvider({
+      modelId: env.RECOMMENDATION_JUDGE_MODEL ?? "",
+    });
+
+    const result = await runChannelRecommendationEvaluations(
+      { providerName: judgeProvider.providerName, modelId: judgeProvider.modelId },
+      {
+        async loadUnjudged(limit) {
+          // Oldest first so a backlog drains in order. Already-judged ids are
+          // resolved first and excluded, because the cursor is simply the
+          // absence of an evaluation row. The citations ride along with their
+          // findings' stored words and figures: that is the judge's whole
+          // folder, and deliberately nothing more.
+          const judged = await supabase
+            .from("channel_recommendation_evaluations")
+            .select("recommendation_id");
+          if (judged.error) {
+            throw new Error(`Judged recommendations load failed: ${judged.error.code}`);
+          }
+          const judgedIds = (judged.data ?? []).map((row) => row.recommendation_id);
+
+          const select =
+            `id, organization_id, label, headline, detail, limitations, prompt_version,
+             channel_recommendation_citations (
+               finding_id,
+               channel_findings ( detector_key, kind, headline, needs_data_reason, monetary_impact_minor_units, currency )
+             )`;
+          const base = () =>
+            supabase
+              .from("channel_recommendations")
+              .select(select)
+              .order("created_at", { ascending: true })
+              .limit(limit);
+
+          // Two branches rather than one reassigned builder: the client's
+          // response typing does not survive a conditional chain, so the
+          // awaited shape is stated here.
+          const response = (await (
+            judgedIds.length > 0
+              ? base().not("id", "in", `(${judgedIds.join(",")})`)
+              : base()
+          )) as { data: (z.infer<typeof unjudgedRecommendationShape>)[] | null; error: { code: string } | null };
+          const { data, error } = response;
+          if (error) throw new Error(`Unjudged recommendations load failed: ${error.code}`);
+
+          return (data ?? []).map((row) => toUnjudged(unjudgedRecommendationShape.parse(row)));
+        },
+        judge(system, user) {
+          return judgeProvider.generate(system, user);
+        },
+        async admit(input) {
+          const { error } = await supabase.rpc("admit_channel_recommendation_evaluations", {
+            p_organization_id: input.organizationId,
+            p_batch_id: input.batchId,
+            p_judge_provider: input.providerName,
+            p_judge_model: input.modelId,
+            p_judge_prompt_version: input.promptVersion,
+            p_judge_prompt_digest: input.promptDigest,
+            p_judge_output_digest: input.outputDigest,
+            p_evaluations: input.verdicts,
+          });
+          if (error) throw new Error(`Evaluation admission failed: ${error.code}`);
+        },
+      },
     );
+
+    logger.info("channel_recommendations.evaluations_completed", {
+      batchId: result.batchId,
+      evaluatedCount: result.evaluatedCount,
+      refusedCount: result.refusedCount,
+    });
+    return result;
   },
 });

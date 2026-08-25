@@ -2071,6 +2071,19 @@ export type Database = {
         };
         Returns: undefined;
       };
+      admit_channel_recommendation_evaluations: {
+        Args: {
+          p_organization_id: string;
+          p_batch_id: string;
+          p_judge_provider: string;
+          p_judge_model: string;
+          p_judge_prompt_version: number;
+          p_judge_prompt_digest: string;
+          p_judge_output_digest: string;
+          p_evaluations: unknown;
+        };
+        Returns: unknown;
+      };
       resolve_governed_report_projection_overlap: {
         Args: {
           p_organization_id: string;
