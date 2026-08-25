@@ -110,7 +110,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 2 | Domain types and vocabulary + rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/asset-library.ts`, `src/domain/campaigns/asset-library.test.ts`, `src/domain/campaigns/schemas.ts`, `src/domain/campaigns/schemas.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md` | codex | medium | 1 | **done** |
 | 3 | The resolver + remaining rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/reference-resolution.ts`, `src/domain/campaigns/reference-resolution.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 2 | **done** |
 | 4 | Subject profiles: service + repository — claimed: `src/modules/campaigns/application/subject-service.ts`, `src/modules/campaigns/application/subject-service.test.ts`, `src/modules/campaigns/infrastructure/subject-repository.ts`, `src/modules/campaigns/infrastructure/subject-repository.test.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.test.ts` | codex | high | 2 | **done** |
-| 5 | Subject profile routes | codex | high | 4 | todo |
+| 5 | Subject profile routes — claimed: `src/app/api/organizations/[organizationId]/subjects/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/confirm/route.ts`, `src/modules/campaigns/application/subject-route-handlers.ts`, `src/modules/campaigns/application/subject-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/subject-route-wiring.ts` | codex | high | 4 | **in-progress** |
 | 6 | Provider seam + prompt builder — claimed: `src/ai/campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `specs/019-organization-asset-library.md` | codex | high | 2 | **done** |
 | 6b | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts` | codex | high | 6 | **done** |
 | 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
@@ -121,10 +121,10 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | **done — approved by 8vr** |
 | A-r | **Slice A code review** | claude | — | — | **done — approved** |
 | 8vr | **Review 8v** — re-pull run, assets and bytes from staging; hash and eyeball independently | claude | — | 8v | **done — approved, 5 findings logged** |
-| 9 | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.test.ts`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | high | 2 | **in-progress** |
+| 9 | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-persistence-error.ts`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | high | 2 | **done** |
 | 9mr | Review `20260826100000` **before apply** | claude | — | 9m | **done — approved after 2 changes** |
-| 9m | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | **xhigh** | 9 | **review — draft only, do not apply** |
-| 10 | Asset library routes | codex | high | 9 | todo |
+| 9m | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md` | codex | **xhigh** | 9 | **done — applied; both functions called; 105/105 pgTAP** |
+| 10 | Asset library routes — claimed: `src/app/api/organizations/[organizationId]/assets/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/[versionId]/complete/route.ts`, `src/app/api/organizations/[organizationId]/assets/reviews/route.ts`, `src/app/api/organizations/[organizationId]/assets/resolve/route.ts`, `src/app/api/organizations/[organizationId]/assets/routes.test.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/route.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/[uploadId]/complete/route.ts`, `src/modules/campaigns/application/asset-route-handlers.ts`, `src/modules/campaigns/application/asset-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/asset-route-wiring.ts`, `src/modules/campaigns/infrastructure/service-factory.ts` | codex | high | 9 | **done** |
 | 11 | Asset + subject workspace UI | codex | high, then medium | 10 | todo |
 | 12 | Brief picker — **Slice B closes** | codex | high | 5,10 | todo |
 | B-r | **Slice B code review** | claude | — | 12 | todo |
@@ -1966,3 +1966,50 @@ Worth knowing: my first probe used `archived: "yes"` and it **passed**, because 
 
 **Verdict: approved to apply once Changes 1 and 2 are in.** No re-review needed — apply, execute
 both functions against staging, run the focused suite, and log the results.
+
+### 2026-08-25 · codex · Task 9 and 9m done — applied, called, 105/105
+
+- Commit `6f41fdc` moves every UUID/boolean cast in the two changed functions behind the
+  organization and `asset.manage` checks, declares `asset.updated` in spec 019 and the approved
+  plan, and removes immutable `ownership` from the metadata trigger's mutable-field comparison.
+  Ownership is deliberately asserted only on initial reservation; the PATCH contract remains
+  roles, tags, scripts and archive state.
+- The pgTAP additions cover the deployed unclassified upload path, normalized duplicate tags,
+  empty classification, existing-asset classification refusal, unarchive, `asset.updated`, and
+  authorization before malformed UUID/boolean parsing for both changed functions.
+- Commit `d6ed9a6` preserves governed database refusals in both asset repositories as safe
+  `DomainError` categories: authorization, tenant-unavailable or validation. Raw database details
+  remain in `cause`, not in the operator message.
+- Applied only `20260826100000_update_brand_asset_metadata.sql` to staging. A concurrent agent
+  applied the later untracked `20260826110000` between the first list and dry-run; the apply was
+  paused until a fresh dry-run named only 9m. The final dry-run reports staging up to date.
+- First-call gate: the replaced reservation function and new metadata writer both executed as an
+  authenticated Al Noor asset manager in one rollback-only transaction. Archive and restore
+  receipts were correct; `asset.archived` and `asset.updated` were observed; no fixture remains.
+  The first verification query itself used nonexistent `audit_events.created_at`, rolled back, and
+  was corrected to the schema's `occurred_at` before evidence was accepted.
+- Verification: focused TypeScript tests 71/71, focused ESLint clean, `pnpm typecheck` clean,
+  focused staging pgTAP 105/105, `git diff --check` clean. No `git push` was attempted.
+
+### 2026-08-25 · codex · Task 10 done — one governed API, legacy URLs retained
+
+- Commit `d11ce64` adds the six canonical Asset Library routes: list/create, metadata PATCH,
+  further-version reserve, version completion, review, and deterministic resolve preview.
+- `asset-route-handlers.ts` owns strict request/query validation and calls context before parsing a
+  write. `asset-route-wiring.ts` is the server-only composition over the caller's session client;
+  `asset.read`, `asset.manage`, and `asset.review` select roles from the shared permission mirror,
+  then the existing campaign rollout gate runs after membership.
+- Resolution accepts repeated Unicode-safe query keys (`subjectTag`, `settingTag`, `occasionTag`,
+  `styleTag`, `script`) plus optional `subjectDescription`, and calls the exact
+  `resolveReferences` domain function over session-visible references and governed reason text.
+  Unknown query fields are refused rather than ignored.
+- The two deployed `campaigns/brand-assets/uploads` URLs now delegate to the same reserve and
+  completion handlers. Their legacy unclassified request shape and response statuses remain
+  unchanged; the canonical create route requires full classification including deliberate
+  ownership.
+- The pure-handler/server-wiring split was found by the first test: eager production wiring made
+  the handler import `server-only` and prevented isolated tests. The split keeps service behavior
+  testable without mocking Next or Supabase.
+- Verification: Task 10 handler tests 12/12; campaign domain/modules 722/722 across 55 files;
+  focused ESLint clean; `pnpm typecheck` clean; `pnpm build` clean and lists all six canonical plus
+  both legacy routes. No `git push` was attempted.
