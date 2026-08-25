@@ -684,7 +684,12 @@ user-facing path.
 - `POST /organizations/:id/subjects` — create a subject, optionally requesting a drafted
   description.
 - `PATCH /organizations/:id/subjects/:subjectId` — edit, confirm, archive. Confirming is the
-  privileged act and is separately permissioned.
+  privileged act. `subject.manage` admits all three, and confirmation additionally requires a
+  confirming role — `owner` or `admin`, matching the roles this repository already reserves for
+  privileged organization acts. A holder of `subject.manage` may therefore draft and edit a
+  description without being able to approve it. The seeded description of `subject.manage` still
+  reads "create, edit, confirm, and archive", which is true of the permission and incomplete about
+  confirmation; the role check is the separate gate.
 
 The two existing `campaigns/brand-assets/uploads` routes are retained and delegate to the new
 handlers so nothing already deployed breaks.

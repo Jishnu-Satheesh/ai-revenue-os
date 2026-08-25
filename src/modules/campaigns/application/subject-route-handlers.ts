@@ -41,6 +41,17 @@ const subjectPatchSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("archive") }),
 ]);
 
+/**
+ * Confirming is the privileged act, per spec 019 §11.
+ *
+ * `subject.manage` lets a role write a draft; it does not by itself let a role
+ * approve one. Confirmation is the moment a sentence stops being a proposal and
+ * becomes the thing the platform will draw and publish, so it takes the same
+ * roles the repository already reserves for privileged organization acts.
+ * Editing and archiving stay open to everyone holding `subject.manage`.
+ */
+const CONFIRMING_ROLES: readonly OrganizationRole[] = ["owner", "admin"];
+
 function apiErrorResponse(error: unknown) {
   const publicError = toPublicError(error);
   const status =
@@ -101,9 +112,9 @@ export function createSubjectRouteHandlers(dependencies: SubjectRouteHandlerDepe
       try {
         const context = await dependencies.context(params, "subject.manage");
         const correlationId = correlation.parseAfterAuthorization();
-        const body = z.union([draftedCreateSchema, manualCreateSchema]).parse(
-          await parseJsonBody(request),
-        );
+        const body = z
+          .union([draftedCreateSchema, manualCreateSchema])
+          .parse(await parseJsonBody(request));
         const service = dependencies.serviceFor(context);
         const result =
           body.draftDescription === true
@@ -142,6 +153,12 @@ export function createSubjectRouteHandlers(dependencies: SubjectRouteHandlerDepe
         const routeParams = await params;
         const subjectProfileId = subjectIdFrom(routeParams);
         const body = subjectPatchSchema.parse(await parseJsonBody(request));
+        if (body.action === "confirm" && !CONFIRMING_ROLES.includes(context.membership.role)) {
+          throw new DomainError(
+            "AUTHORIZATION_ERROR",
+            "Confirming a subject description is reserved for an owner or admin.",
+          );
+        }
         const service = dependencies.serviceFor(context);
         const target = { organizationId: context.organizationId, subjectProfileId };
         const result =

@@ -169,6 +169,15 @@ describe("subject profile changes", () => {
   });
 
   it("uses the distinct confirmation operation", async () => {
+    // Confirming is separately permissioned, so this case needs a confirming
+    // role. The refusal for a merely managing role is covered below.
+    context.mockResolvedValue({
+      organizationId: ORGANIZATION_ID,
+      user: { id: "user-1" },
+      supabase: {},
+      membership: { role: "owner" },
+    });
+
     const response = await createSubjectRouteHandlers(dependencies()).update(
       jsonRequest("PATCH", { action: "confirm" }),
       params({ subjectId: SUBJECT_ID }),
@@ -203,5 +212,63 @@ describe("subject profile changes", () => {
 
     expect(response.status).toBe(400);
     expect(confirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("confirmation is the privileged act", () => {
+  it("refuses to confirm for a role that may still draft and edit", async () => {
+    context.mockResolvedValue({
+      organizationId: ORGANIZATION_ID,
+      user: { id: "user-1" },
+      supabase: {},
+      membership: { role: "operator" },
+    });
+
+    const response = await createSubjectRouteHandlers(dependencies()).update(
+      jsonRequest("PATCH", { action: "confirm" }, `/subjects/${SUBJECT_ID}`),
+      params({ subjectId: SUBJECT_ID }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(response.headers.get("x-correlation-id")).toBe(CORRELATION_ID);
+  });
+
+  it("still lets that same role edit and archive", async () => {
+    const handlers = createSubjectRouteHandlers(dependencies());
+
+    const edited = await handlers.update(
+      jsonRequest("PATCH", { action: "edit", ...content }, `/subjects/${SUBJECT_ID}`),
+      params({ subjectId: SUBJECT_ID }),
+    );
+    const archived = await handlers.update(
+      jsonRequest("PATCH", { action: "archive" }, `/subjects/${SUBJECT_ID}`),
+      params({ subjectId: SUBJECT_ID }),
+    );
+
+    expect(edited.status).toBe(200);
+    expect(archived.status).toBe(200);
+    expect(edit).toHaveBeenCalledOnce();
+    expect(archive).toHaveBeenCalledOnce();
+  });
+
+  it("confirms for a role the organization trusts with the privileged act", async () => {
+    context.mockResolvedValue({
+      organizationId: ORGANIZATION_ID,
+      user: { id: "user-1" },
+      supabase: {},
+      membership: { role: "admin" },
+    });
+
+    const response = await createSubjectRouteHandlers(dependencies()).update(
+      jsonRequest("PATCH", { action: "confirm" }, `/subjects/${SUBJECT_ID}`),
+      params({ subjectId: SUBJECT_ID }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(confirm).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      subjectProfileId: SUBJECT_ID,
+    });
   });
 });
