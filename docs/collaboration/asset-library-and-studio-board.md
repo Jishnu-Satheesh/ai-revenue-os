@@ -105,7 +105,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 |---|---|---|---|---|---|
 | 1 | Schema, seeds, write functions — claimed: `supabase/migrations/20260825090000_organization_asset_library.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `src/lib/supabase/database.types.ts`, `src/domain/access/permissions.ts`, `src/domain/access/permissions.drift.test.ts` | codex | **xhigh** | — | **done** |
 | 1r | Review migration SQL **before push** | claude | — | — | **done** |
-| 1v | Call every new/changed plpgsql function against staging | claude | — | 1 pushed | **in-progress** |
+| 1v | Call every new/changed plpgsql function against staging | claude | — | 1 pushed | **done — 6/6 execute** |
 | 1c | Forward correction: expose rejected candidates only for resolver `avoid` routing — claimed: `supabase/migrations/20260825100000_include_rejected_avoid_reference_candidates.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 1 | **review** |
 | 2 | Domain types and vocabulary + rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/asset-library.ts`, `src/domain/campaigns/asset-library.test.ts`, `src/domain/campaigns/schemas.ts`, `src/domain/campaigns/schemas.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md` | codex | medium | 1 | **done** |
 | 3 | The resolver + remaining rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/reference-resolution.ts`, `src/domain/campaigns/reference-resolution.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 2 | **done** |
@@ -116,11 +116,12 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
 | 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/variant-planner.ts`, `src/modules/campaigns/infrastructure/variant-planner.test.ts`, `src/modules/campaigns/infrastructure/run-repository.ts`, `src/modules/campaigns/infrastructure/run-repository.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **review** |
 | 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **done** |
-| 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **in-progress** |
+| 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **done — 10/10** |
 | 8b | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 8 | **done** |
 | 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | **review** |
 | A-r | **Slice A code review** | claude | — | — | **done — approved** |
-| 9 | Asset library service + reviews | codex | high | 2 | todo |
+| 8vr | **Review 8v** — re-pull run, assets and bytes from staging; hash and eyeball independently | claude | — | 8v | **done — approved, 5 findings logged** |
+| 9 | Asset library service + reviews | codex | high | 2 | **todo — cleared to start (8vr)** |
 | 10 | Asset library routes | codex | high | 9 | todo |
 | 11 | Asset + subject workspace UI | codex | high, then medium | 10 | todo |
 | 12 | Brief picker — **Slice B closes** | codex | high | 5,10 | todo |
@@ -1689,3 +1690,97 @@ checked against defaults and the answer is meaningless. The markdown conclusion 
 a correct re-check; the TypeScript one did not, and `schemas.ts` and three test files were left
 unformatted until I redid it properly inside the repo. If you need this check, copy to a scratch
 directory **inside** the working tree.
+
+### 2026-08-25 · claude · **8vr done — 8v approved.** Slice B is cleared to start
+
+Codex's `/tmp/ai-revenue-os-8v/` was not readable from my session, so none of this rests on that
+export. I pulled run `54806228`, bundle version `37b0b4d4`, its three `campaign_assets` rows and the
+private-bucket bytes from staging myself, hashed them myself, and looked at all three images.
+
+**Confirmed, independently:**
+
+- All three SHA-256 hashes match `campaign_assets.content_hash`. 229,702 / 197,500 / 165,228 bytes.
+- The run pins `resolution_outcome: synthesis_permitted`, `resolver_version: 1`, empty reference
+  slots / avoids / negative rules, a per-asset blueprint under `blueprint.byAssetId`, and
+  `plan_model_id: gemini-2.5-flash`.
+- All three assets are `synthetic_generated` and record `gemini-3.1-flash-image` with
+  `campaign-image-prompt-v1`. The manifest inside bundle version 2 agrees with the rows.
+- The confirmed description is pinned on `campaign_source_snapshots.subject_description` and matches
+  `facts.facts[0].value` byte for byte. Per §8.5/§8.6 that is the right table: declared on the
+  snapshot, actual on the run. Four runs share this one snapshot with no conflict.
+- No rendered text in any of the three. Verified by looking, not by trusting the prompt.
+- **718 tests across 54 files** green over `src/domain/campaigns`, `src/modules/campaigns`,
+  `src/workflows/campaigns` — wider than the 55 in the 8v report. I did not re-run pgTAP; the 87/87
+  is Codex's.
+
+The provenance fix in `d1d3ad5` is correct and minimal: `generated.image.modelId` overwrites the
+planner's claim in `generate-bundle.ts` before the digest is taken, mirroring what `contentHash`
+already did.
+
+---
+
+**Five findings. None blocks Slice B. Four want a ticket; one is a question for the user.**
+
+**1. Spec 019 §12's `syntheticAssetsAllowed` acceptance criterion is currently unfalsifiable.**
+
+The criterion reads: _"affects only the setting slot and cannot cause a subject to be invented."_
+
+The second half is implemented and provable — `reference-resolution.ts:306-309` keys the outcome
+solely off `subjectDescription`, and the resolver's input schema (`reference-resolution.ts:118`, a
+`strictObject`) does not carry the flag at all, so it structurally cannot.
+
+The first half has no implementation. The flag is read at `generation-readers.ts:139`, carried into
+the context at `generation-context.ts:148`, and never read again anywhere in
+`src/modules/campaigns` or `src/workflows/campaigns`. It does not reach the prompt text. So a
+`false` does not constrain the setting slot, or anything else.
+
+This 8v brief has `syntheticAssetsAllowed: false`, and the run still produced three
+`synthetic_generated` images. **That is correct per the re-scope** — the subject was operator-
+confirmed and the setting came from the operator's own `creative_direction` and `softConventions`,
+not invented. But it is correct for a reason that does not depend on the flag. Nothing here would
+have failed if the flag were wired backwards.
+
+Not a Slice A defect; a spec-019 criterion with neither code nor test. It belongs with the asset
+library service, which is where a setting slot is actually filled.
+
+**2. Six real image calls, zero recorded spend.** `cost_minor` is null on both successful runs
+(`0ccf2e52`, `54806228`) and on both failures. The column exists; `runs.fail()` passes
+`costMinor: null` explicitly. `total_spend_ceiling_minor` is null on the bundle version and every
+action's `spendCeiling` is null. Nothing enforces a ceiling it cannot measure, and a platform whose
+stated purpose is measurable gross profit cannot currently answer what a campaign cost to make.
+
+**3. The planner is still asked to author `provenance.modelId`.** The overwrite is right, but the
+manifest schema still requires the field, so a text model invents a value on every run that is then
+discarded — and any future path that skips the overwrite reinstates the invented value silently.
+The established fence in this codebase is `art-direction.ts`: the field a model must not decide is
+**absent** from its strict schema, so a stray value is a parse failure rather than something to
+remember to overwrite. Same treatment is available here.
+
+**4. The `dalle3` rows are still live on staging.** Bundle version `b68c2e73` (version 1) holds
+three assets naming a model that has never run in this system, and bundle versions are immutable, so
+they cannot be corrected in place. Low stakes — campaign `5f2292f5` is titled _"8v
+confirmed-description generation proof"_, plainly scratch — but it sits inside Al Noor Kitchen next
+to real data. **I have not deleted anything.** Either drop the proof campaign or leave this entry as
+the reason nobody should cite version 1 as evidence.
+
+**5. The blueprint stage cannot currently use a reasoning model.** `TIMEOUT_MS = 90_000` at
+`gemini-campaign-generation-provider.ts:80` governs both the plan call (line 180) and repair (line
+359); images get their own 300s budget. The comment above it shows the budget was sized as
+text-versus-image, before spec 019 §7.7 put a reasoning step on the text side. `gemini-3.7-flash`
+exceeded it twice and hard-failed both runs, which is honest behaviour — but it means the stage
+whose entire purpose is deliberation is capped at 90 seconds. The blueprints `gemini-2.5-flash`
+produced are genuinely detailed, so this is not urgent; it is a ceiling somebody should choose
+deliberately rather than inherit.
+
+---
+
+**Judgement on the images themselves, for the record.** The human recognition gate is the user's and
+is still open. My read: image `…a6b7` is the strongest — thick steaks with the central cavity of a
+real cross-cut, mustard seeds and dried chilli visible in the gravy, manchatti, curry leaf sprig.
+`…a6b8` reads as battered/fried rather than simmered. `…a6b9` is weakest on the named dish: pale
+flesh flaking like a firm white fillet, gravy thinner and more orange than brick-red. All three left
+generous negative space on the left, which is what the Studio's text layer needs — the blueprint
+asked for it and got it.
+
+**Slice B is cleared.** Task 9 may start. Findings 1–3 are Slice B's to pick up where they land;
+none of them changes what Task 9 builds.
