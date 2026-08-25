@@ -118,10 +118,10 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **done** |
 | 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **done — 10/10** |
 | 8b | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 8 | **done** |
-| 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | **review** |
+| 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | **done — approved by 8vr** |
 | A-r | **Slice A code review** | claude | — | — | **done — approved** |
 | 8vr | **Review 8v** — re-pull run, assets and bytes from staging; hash and eyeball independently | claude | — | 8v | **done — approved, 5 findings logged** |
-| 9 | Asset library service + reviews | codex | high | 2 | **todo — cleared to start (8vr)** |
+| 9 | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts` | codex | high | 2 | **in-progress** |
 | 10 | Asset library routes | codex | high | 9 | todo |
 | 11 | Asset + subject workspace UI | codex | high, then medium | 10 | todo |
 | 12 | Brief picker — **Slice B closes** | codex | high | 5,10 | todo |
@@ -134,6 +134,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
 | S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **done — applied, 55 pgTAP, 17/17 called** |
 | S3 | Studio Task 3: domain — templates, slots, fitting, coverage — claimed: `src/domain/campaigns/poster-template.ts`, `poster-slots.ts`, `text-fitting.ts`, `glyph-coverage.ts` (all new, each with its test), `src/domain/campaigns/schemas.ts`, `schemas.test.ts`, `src/domain/campaigns/types.ts` | claude | — | S2 | **done — 57 new tests** |
+| S4 | Studio Task 4: the compositor — claimed: `src/modules/campaigns/infrastructure/poster-compositor.ts`, `font-registry.ts`, `glyph-coverage-oracle.ts`, `render-digest.ts` (all new, each with its test), `src/modules/campaigns/infrastructure/__golden__/`, `package.json` + `pnpm-lock.yaml` (fontkit, narrow commit), `trigger.config.ts`, `knip.json` | claude | — | S3 | **in-progress** |
 
 ### Why the xhigh tasks are xhigh
 
