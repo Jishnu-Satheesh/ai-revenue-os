@@ -117,8 +117,8 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/variant-planner.ts`, `src/modules/campaigns/infrastructure/variant-planner.test.ts`, `src/modules/campaigns/infrastructure/run-repository.ts`, `src/modules/campaigns/infrastructure/run-repository.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **review** |
 | 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **done** |
 | 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **in-progress** |
-| 8b | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 8 | **review** |
-| 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | in-progress |
+| 8b | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 8 | **done** |
+| 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | **review** |
 | A-r | **Slice A code review** | claude | — | — | **done — approved** |
 | 9 | Asset library service + reviews | codex | high | 2 | todo |
 | 10 | Asset library routes | codex | high | 9 | todo |
@@ -131,7 +131,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S0 | **Renderer spike** — PASSED all 4 cases; `@napi-rs/canvas` 1.0.8 + `fontkit` | claude | — | — | **done** |
 | S0j | Judge the renderings | user | — | S0 | **done — Malayalam confirmed correct** |
 | S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
-| S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **blocked — awaiting staging apply** |
+| S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **done — applied, 55 pgTAP, 17/17 called** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -1494,3 +1494,118 @@ until then — which is the same state the suite has been in since Task 1, not a
 and run the suite there. The rehearsal is strong evidence and it is not the gate — the gate is a
 real call on the real database, and this project has been bitten three times by things that only
 fail when actually executed.
+
+### 2026-08-24 · channel-rec agent · Task 11 claimed (decisions and feedback routes)
+
+- Claiming: `src/modules/analysis/application/triage.ts` and `triage.test.ts` (already drafted
+  untracked from this feature's earlier session; finishing them), new route tests
+  `src/app/api/organizations/[organizationId]/channel-recommendations/[recommendationId]/decisions/route.test.ts`
+  and `.../feedback/route.test.ts`, the two route handlers themselves, and
+  `.superpowers/sdd/2026-08-24-channel-recommendations/task-11-report.md`. No migrations, no
+  `database.types.ts`.
+- Noted codex's report of a typecheck error in `triage.test.ts(125)` — my file; fixing it here.
+
+### 2026-08-25 · codex · 8b applied; 8v reached human review with truthful receipt
+
+- Applied only `20260825120000_allow_variant_run_base_version.sql` to hosted staging after the
+  approved dry run. The focused organization Asset Library pgTAP suite passed 87/87, including the
+  real variants enqueue. The fixture needed the existing `generationPolicy` fields because the
+  bundle projection trigger derives non-null policy columns from that manifest.
+- The first two 8v runs pinned `synthesis_permitted` correctly but failed before image spend because
+  `gemini-3.7-flash` exceeded the provider's 90-second plan timeout. A minimal provider probe
+  reproduced the timeout; `gemini-2.5-flash` answered with the same credential. The verification
+  worker therefore used `gemini-2.5-flash` for plan and repair only. The image model remained the
+  Release 1 model of record, `gemini-3.1-flash-image`.
+- The first successful draw exposed a receipt defect: the immutable asset provenance preserved the
+  planning model's invented `modelId` (`dalle3`) rather than the model that returned the bytes.
+  The correction now carries the actual image model and deterministic prompt-contract version from
+  materialization into the reconciled manifest before its digest and immutable version are written.
+- Corrected staging evidence: run `54806228-e141-4318-beb5-1492e12cfce9`, Trigger run
+  `run_06g38vm2m7rvrh1l6mgdeges01`, bundle version
+  `37b0b4d4-ab69-4ba7-9496-366567d833b2` (version 2). Status is `succeeded`; outcome is
+  `synthesis_permitted`; resolver version is 1; references, avoids and negative rules are empty;
+  the blueprint is pinned; plan model is `gemini-2.5-flash`; all three assets are
+  `synthetic_generated` and record `gemini-3.1-flash-image` with
+  `campaign-image-prompt-v1`.
+- `/tmp/ai-revenue-os-8v/receipt.json` is the stored receipt export. `image-1.jpg` through
+  `image-3.jpg` are the exact private-bucket bytes; every downloaded SHA-256 matches its stored
+  `content_hash`. Visual inspection found no rendered text and found clay-pot fish curry with
+  brick-red gravy and curry leaves. A Malayali/human reviewer still owns the named-dish recognition
+  acceptance decision.
+- Receipt-correction tests pass 55/55 and focused ESLint has zero errors. The broad suite reached
+  two unrelated existing slow-test timeouts (`pdf-text-layer.integration.test.ts` and
+  `memory/review-tab.test.tsx`); the changed campaign tests were green. Repository typecheck reached
+  the other agent's claimed `src/modules/analysis/application/triage.test.ts` error and was not
+  repaired here.
+
+### 2026-08-24 · claude · **Studio Task 2 done — applied to staging and called for real**
+
+The user applied `20260826090000_campaign_creative_studio.sql` themselves. Verified after, not
+assumed: `schema_migrations` records `20260826090000`; all three tables exist; organization
+permissions are **43**; `poster.render` maps to owner, admin and operator and **not** viewer; the
+private `campaign-masks` bucket exists; both writers are present; and `campaign_poster_templates`
+holds **zero** rows, which is the deferred seed working as intended.
+
+**The gate: both writers called for real, 17 of 17.** Every branch executed against the deployed
+functions inside a transaction that was rolled back. Staging is confirmed clean afterwards — zero
+renders, zero edits, zero templates, zero studio audit events.
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | render writer as `authenticated` | `permission denied for function` |
+| 2 | organization mismatch | `campaign_poster_render_organization_mismatch` |
+| 3 | plate from another bundle version | `campaign_poster_render_plate_not_found` |
+| 4 | refused render written | `replayed: false`, state `refused` |
+| 5 | rendered render written | `replayed: false`, state `rendered` |
+| 6 | identical replay | `replayed: true`, same render id |
+| 7 | same digest, different output bytes | `campaign_poster_render_conflict` |
+| 8 | Malayalam text values | byte-identical: `കേരള മീൻ കറി` |
+| 9 | Arabic with Arabic-Indic digits | byte-identical: `عرض خاص ٤٩ درهم` |
+| 10 | edit writer as `authenticated` | `permission denied for function` |
+| 11 | edit written | `replayed: false` |
+| 12 | edit replay | `replayed: true`, same edit id |
+| 13 | one key naming different plates | `campaign_plate_edit_conflict` |
+| 14 | mask under another tenant's prefix | `campaign_plate_edit_mask_path_foreign` |
+| 15 | render UPDATE | `campaign_poster_renders is append-only` |
+| 16 | edit DELETE | `campaign_plate_edits is append-only` |
+| 17 | audit | all three events emitted |
+
+**Cases 1 and 10 refuse at the grant layer**, before the function body and before the
+`current_setting('role')` check — the same two-layer ordering 8av found, outer layer winning.
+
+**Case 3 is the one worth keeping.** A plate belonging to the right tenant but to a *different
+version of the same campaign* is refused. Composing an approved version's poster over another
+version's plate would produce a poster nobody approved, assembled from parts that were each approved
+once — and it would have looked entirely legitimate.
+
+**Cases 8 and 9 matter more than they look.** The whole specification exists because text gets
+mangled. Proving the strings survive insert, RPC and read unchanged closes the database half of that
+before any renderer is involved.
+
+**Test state, honestly.** `pnpm db:test` **passes whole: 50 suites, exit 0, zero failing
+assertions** — the studio suite contributes 55. **The permission catalogue is green again**: it
+asserted 38 while staging held 42 from Task 1's keys, and `poster.render` plus the corrected
+assertion brings both to 43. That clears the blocker the channel-rec agent logged and nobody had
+picked up.
+
+`database.types.test` 73/73 and permission drift 28/28 (86 together). `pnpm typecheck` has exactly
+one error and it is not mine —
+`src/app/api/.../channel-recommendations/[recommendationId]/feedback/route.ts(57,7)`, `actorId` not
+in `LogContext`, in the channel-rec agent's in-flight Task 11. Their earlier `triage.test.ts(125)`
+error is fixed. Prettier still reports this board and `specs/020-campaign-creative-studio.md`; both
+were dirty at HEAD before I touched them, so no shared-document reformat was mixed in.
+
+**For Task 3, which is next and does not wait on spec 019:**
+
+- `posterPlan` was **deliberately not added to `campaignBundleManifestSchema` in this task.** The
+  manifest is plain jsonb with only four generated-column checks, so it needs no migration; and the
+  field points at a template key and version whose shape Task 3 defines. Adding it here would have
+  fixed a shape before the thing it references existed. It is Task 3's first job.
+- The named slot vocabulary is already database-enforced: `caption | body | footer | extra`, one box
+  per slot. Task 3's Zod schema must agree with `private.poster_template_layout_valid`, and a
+  template seeded later that disagrees will be refused at insert rather than at render.
+- **Templates are still unseeded, on the user's approval.** The seed is a small forward migration
+  after Task 4 proves the compositor can render one. Do not seed a row you cannot yet draw.
+- Refusal codes are format-checked in the database (`^[a-z][a-z0-9_]*$`) and owned by versioned
+  domain code, not an enum. Same for the declared minimum and maximum mask coverage: the table bounds
+  the shape (`> 0`, `<= 1`), the domain owns the judgement.
