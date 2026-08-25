@@ -124,6 +124,10 @@ select extensions.has_function(
   'the tenant-scoped candidate reader exists'
 );
 select extensions.has_function(
+  'public', 'update_brand_asset_metadata', array['uuid', 'jsonb'],
+  'brand-asset classification and archival have a governed writer'
+);
+select extensions.has_function(
   'public', 'pin_campaign_generation_run_reference_context', array['uuid', 'jsonb'],
   'the run-scoped reference receipt writer exists'
 );
@@ -232,6 +236,14 @@ select extensions.function_privs_are(
   'service_role', array[]::text[], 'the worker role cannot impersonate a human reviewer'
 );
 select extensions.function_privs_are(
+  'public', 'update_brand_asset_metadata', array['uuid', 'jsonb'],
+  'authenticated', array['EXECUTE'], 'authenticated may use the governed metadata writer'
+);
+select extensions.function_privs_are(
+  'public', 'update_brand_asset_metadata', array['uuid', 'jsonb'],
+  'service_role', array[]::text[], 'the worker role cannot classify or archive human assets'
+);
+select extensions.function_privs_are(
   'public', 'upsert_subject_profile', array['uuid', 'jsonb'],
   'authenticated', array['EXECUTE'], 'authenticated may use the governed subject writer'
 );
@@ -262,6 +274,18 @@ select extensions.ok(
       and procedure.proargtypes = '2950 3802'::pg_catalog.oidvector
   ),
   'the receipt writer is a security definer with an empty search path'
+);
+select extensions.ok(
+  (
+    select procedure.prosecdef
+      and procedure.proconfig @> array['search_path=""']
+    from pg_catalog.pg_proc procedure
+    join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+    where namespace.nspname = 'public'
+      and procedure.proname = 'update_brand_asset_metadata'
+      and procedure.proargtypes = '2950 3802'::pg_catalog.oidvector
+  ),
+  'the metadata writer is a security definer with an empty search path'
 );
 
 -- ---------------------------------------------------------------------------
@@ -544,6 +568,127 @@ set local role authenticated;
 set local request.jwt.claim.sub = 'a5100000-0000-4000-8000-000000000001';
 
 insert into asset_library_state (key, value)
+select 'classified_reservation', public.create_brand_asset_version(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'brand_asset_id', null,
+    'label', 'Malayalam wordmark',
+    'asset_role', 'logo',
+    'conditioning_roles', jsonb_build_array('brand_mark', 'typography'),
+    'tags', jsonb_build_array('Café', 'മലയാളം'),
+    'scripts', jsonb_build_array('Latn', 'Mlym'),
+    'ownership', 'owned'
+  )
+);
+
+select extensions.ok(
+  (
+    select conditioning_roles = array['brand_mark', 'typography']::text[]
+      and tags = array['Café', 'മലയാളം']::text[]
+      and scripts = array['Latn', 'Mlym']::text[]
+      and ownership = 'owned'
+    from public.organization_brand_assets
+    where id = (
+      select (value ->> 'brand_asset_id')::uuid
+      from asset_library_state where key = 'classified_reservation'
+    )
+  ),
+  'a new reference reserves its normalized classification atomically'
+);
+
+select public.finalize_brand_asset_version(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'version_id', (
+      select value ->> 'version_id'
+      from asset_library_state where key = 'classified_reservation'
+    ),
+    'content_hash', pg_catalog.repeat('f', 64),
+    'mime_type', 'image/png',
+    'byte_size', 1000,
+    'width_px', 800,
+    'height_px', 800
+  )
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from public.audit_events event
+    where event.organization_id = 'a5100000-0000-4000-8000-000000000101'::uuid
+      and event.event_name = 'asset.version_added'
+      and event.entity_id = (
+        select (value ->> 'version_id')::uuid
+        from asset_library_state where key = 'classified_reservation'
+      )
+      and event.actor_id = 'a5100000-0000-4000-8000-000000000001'::uuid
+  ),
+  'finalizing validated bytes emits the identifier-only version-added audit event'
+);
+
+insert into asset_library_state (key, value)
+select 'classified_metadata', public.update_brand_asset_metadata(
+  'a5100000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'a5100000-0000-4000-8000-000000000101',
+    'brand_asset_id', (
+      select value ->> 'brand_asset_id'
+      from asset_library_state where key = 'classified_reservation'
+    ),
+    'conditioning_roles', jsonb_build_array('typography'),
+    'tags', jsonb_build_array('Café', 'عرض'),
+    'scripts', jsonb_build_array('Latn', 'Arab'),
+    'archived', true
+  )
+);
+
+select extensions.ok(
+  (
+    select asset.tags = array['Café', 'عرض']::text[]
+      and asset.archived_at is not null
+      and state.value ->> 'archived_at' is not null
+    from public.organization_brand_assets asset
+    join asset_library_state state on state.key = 'classified_metadata'
+    where asset.id = (
+      select (value ->> 'brand_asset_id')::uuid
+      from asset_library_state where key = 'classified_reservation'
+    )
+  ),
+  'the metadata writer normalizes tags and archives without deleting the asset'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from public.audit_events event
+    where event.organization_id = 'a5100000-0000-4000-8000-000000000101'::uuid
+      and event.event_name = 'asset.archived'
+      and event.entity_id = (
+        select (value ->> 'brand_asset_id')::uuid
+        from asset_library_state where key = 'classified_reservation'
+      )
+      and event.actor_id = 'a5100000-0000-4000-8000-000000000001'::uuid
+  ),
+  'archival emits the identifier-only asset-archived audit event'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.update_brand_asset_metadata(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'brand_asset_id', 'a5100000-0000-4000-8000-000000000202',
+        'archived', true
+      )
+    )
+  $$,
+  '42501', 'brand_asset_metadata_not_found',
+  'the metadata writer refuses an existing asset from another tenant'
+);
+
+insert into asset_library_state (key, value)
 select 'subject', public.upsert_subject_profile(
   'a5100000-0000-4000-8000-000000000101'::uuid,
   jsonb_build_object(
@@ -806,6 +951,20 @@ select extensions.throws_ok(
   $$,
   '42501', 'creative_asset_review_forbidden',
   'a viewer cannot review an asset'
+);
+select extensions.throws_ok(
+  $$
+    select public.update_brand_asset_metadata(
+      'a5100000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'organization_id', 'a5100000-0000-4000-8000-000000000101',
+        'brand_asset_id', 'a5100000-0000-4000-8000-000000000201',
+        'archived', true
+      )
+    )
+  $$,
+  '42501', 'brand_asset_metadata_forbidden',
+  'a viewer cannot classify or archive a brand asset'
 );
 
 set local request.jwt.claim.sub = 'a5100000-0000-4000-8000-000000000002';

@@ -199,6 +199,13 @@ has said what the campaign is about.
   record a review over either subject kind.
 - Extend `brand-asset-service.ts` rather than replacing it. The three-step reserve, upload,
   read-back-and-re-encode flow is retained unchanged; it is the part that already works.
+- Forward migration `20260826100000_update_brand_asset_metadata.sql` closes the writer gap left by
+  Task 1: classification is accepted atomically by `create_brand_asset_version`, and a new
+  `update_brand_asset_metadata` RPC changes roles, tags, scripts and archival state. Both remain
+  session-user operations guarded by `asset.manage`; browser roles retain select-only table grants.
+  The migration also emits the already-specified identifier-only `asset.version_added` and
+  `asset.archived` audit events. Draft it, have it reviewed, and call both changed/new plpgsql paths
+  against staging before Task 9 is done.
 - Rejection without at least one reason code is refused in domain code, in the service, and by a
   database CHECK. Three layers, because this is the only channel through which human judgement
   reaches the next generation.
