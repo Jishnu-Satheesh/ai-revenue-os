@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(45);
+select extensions.plan(46);
 
 select extensions.has_table('public', 'report_projection_reconciliations', 'reconciliation evidence is retained separately from workbook data');
 select extensions.has_function('public', 'resolve_governed_report_projection_overlap', 'owner/admin overlap resolution is database-owned');
@@ -90,12 +90,34 @@ from (values
   ('f3000000-0000-4000-8000-000000000504', 'f3000000-0000-4000-8000-000000000804', 'f3000000-0000-4000-8000-000000000624'),
   ('f3000000-0000-4000-8000-000000000505', 'f3000000-0000-4000-8000-000000000805', 'f3000000-0000-4000-8000-000000000625')
 ) as valueset(package_id, validation_id, correlation_id);
+
+-- Reproduce the production drift state directly: a still-running ledger and
+-- lease whose package was left awaiting projection. Normal package transitions
+-- correctly reject moving a healthy projecting package backwards.
+insert into public.integration_report_projection_runs (
+  id, organization_id, report_package_id, report_contract_version_id, report_contract_binding_id,
+  report_projection_version_id, report_projection_binding_id, validation_run_id, calculation_version,
+  input_digest, status, correlation_id
+) values (
+  'f3000000-0000-4000-8000-000000000905'::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid,
+  'f3000000-0000-4000-8000-000000000505'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid,
+  'f3000000-0000-4000-8000-000000000703'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid,
+  'f3000000-0000-4000-8000-000000000705'::uuid, 'f3000000-0000-4000-8000-000000000805'::uuid,
+  1, repeat('1', 64), 'running', 'f3000000-0000-4000-8000-000000000635'::uuid
+);
+insert into private.integration_report_projection_operations (
+  organization_id, report_package_id, idempotency_key, input_digest,
+  projection_run_id, claim_token, lease_expires_at
+) values (
+  'f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000505'::uuid,
+  'reconciliation-projection-run-0005', repeat('1', 64), 'f3000000-0000-4000-8000-000000000905'::uuid,
+  'f3000000-0000-4000-8000-000000000a05'::uuid, now() + interval '20 minutes'
+);
 set local role service_role;
 select extensions.is((public.claim_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000501'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000901'::uuid, 'reconciliation-projection-run-0001', 'f3000000-0000-4000-8000-000000000a01'::uuid, 'f3000000-0000-4000-8000-000000000631'::uuid) ->> 'outcome'), 'acquired', 'first package receives a worker lease through the fenced claim RPC');
 select extensions.is((public.claim_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000502'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000902'::uuid, 'reconciliation-projection-run-0002', 'f3000000-0000-4000-8000-000000000a02'::uuid, 'f3000000-0000-4000-8000-000000000632'::uuid) ->> 'outcome'), 'acquired', 'duplicate package receives an independent worker lease');
 select extensions.is((public.claim_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000503'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000903'::uuid, 'reconciliation-projection-run-0003', 'f3000000-0000-4000-8000-000000000a03'::uuid, 'f3000000-0000-4000-8000-000000000633'::uuid) ->> 'outcome'), 'acquired', 'non-overlap package receives a worker lease');
 select extensions.is((public.claim_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000504'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000904'::uuid, 'reconciliation-projection-run-0004', 'f3000000-0000-4000-8000-000000000a04'::uuid, 'f3000000-0000-4000-8000-000000000634'::uuid) ->> 'outcome'), 'acquired', 'corrected package receives a worker lease');
-select extensions.is((public.claim_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000505'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000905'::uuid, 'reconciliation-projection-run-0005', 'f3000000-0000-4000-8000-000000000a05'::uuid, 'f3000000-0000-4000-8000-000000000635'::uuid) ->> 'outcome'), 'acquired', 'retry fixture receives a worker lease');
 select extensions.lives_ok($$ select public.complete_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000501'::uuid, 'f3000000-0000-4000-8000-000000000901'::uuid, 'f3000000-0000-4000-8000-000000000a01'::uuid, repeat('1', 64), '{"status":"projected","qualityState":"complete","completenessState":"complete","errorCodes":[],"warningCodes":[]}'::jsonb, jsonb_build_array(jsonb_build_object('key','gross_revenue','metricKey','revenue.gross','metricDefinitionId',(select id::text from public.metric_definitions where key = 'revenue.gross' and organization_id is null),'valueKind','money','valueNumerator','1300','currency','AED','normalizedSheetName','csv','canonicalField','net_sales','sourceColumnOrdinal',1,'firstDataRow',2,'lastDataRow',2,'contributorCount',1,'sourceDigest',repeat('9',64)))) $$, 'first exact range creates current projection evidence');
 select extensions.is((select reconciliation_state from public.exact_range_metric_observations where report_package_id = 'f3000000-0000-4000-8000-000000000501'::uuid), 'current', 'first exact range is current');
 select extensions.is((select count(*)::integer from public.report_projection_lineage where report_package_id = 'f3000000-0000-4000-8000-000000000501'::uuid), 1, 'first exact range has one lineage record');
@@ -127,9 +149,18 @@ select extensions.is((public.resolve_governed_report_projection_overlap('f300000
 select extensions.is((select count(*)::integer from public.report_projection_reconciliations r where r.organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid and to_jsonb(r)::text like '%1300%'), 0, 'reconciliation evidence does not persist raw aggregate values');
 select extensions.ok(not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name in ('report_projection_reconciliations', 'report_projection_reconciliation_resolutions') and column_name in ('value_numerator', 'raw_row', 'raw_cell', 'formula', 'signed_url', 'prompt', 'model_output', 'original_filename')), 'reconciliation tables contain safe evidence fields only');
 set local role service_role;
+set local request.jwt.claim.sub = '';
 select extensions.is((public.claim_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000505'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000905'::uuid, 'reconciliation-projection-run-0005', 'f3000000-0000-4000-8000-000000000a15'::uuid, 'f3000000-0000-4000-8000-000000000644'::uuid) ->> 'outcome'), 'in_progress', 'active worker lease deterministically fences a duplicate retry');
 select extensions.ok(pg_get_functiondef('public.claim_governed_report_package_projection(uuid,uuid,uuid,uuid,uuid,text,uuid,uuid)'::regprocedure) ~ E'operation\\.lease_expires_at > now\\(\\)', 'only an unexpired worker lease fences a retry');
 select extensions.ok(pg_get_functiondef('public.claim_governed_report_package_projection(uuid,uuid,uuid,uuid,uuid,text,uuid,uuid)'::regprocedure) ~ E'attempt_count = attempt_count \\+ 1', 'expired-lease recovery records a bounded retry attempt');
+reset role;
+update private.integration_report_projection_operations
+set lease_expires_at = now() - interval '1 minute'
+where organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid
+  and report_package_id = 'f3000000-0000-4000-8000-000000000505'::uuid;
+set local role service_role;
+select extensions.is((public.claim_governed_report_package_projection('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000505'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000905'::uuid, 'reconciliation-projection-run-0005', 'f3000000-0000-4000-8000-000000000a25'::uuid, 'f3000000-0000-4000-8000-000000000645'::uuid) ->> 'outcome'), 'acquired', 'an expired lease may be taken over under the same run identity');
+select extensions.is((select status from public.integration_report_packages where id = 'f3000000-0000-4000-8000-000000000505'::uuid), 'projecting', 'a takeover restores the package state expected by completion');
 reset role;
 set local role authenticated;
 set local request.jwt.claim.sub = 'f3000000-0000-4000-8000-000000000001';

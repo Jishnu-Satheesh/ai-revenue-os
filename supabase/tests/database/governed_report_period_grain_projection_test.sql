@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(53);
+select extensions.plan(56);
 
 -- The fenced write path for a daily, weekly, or monthly series. Exercised
 -- against a real package with a real lease, because everything interesting
@@ -45,7 +45,8 @@ select 'governed-report-packages',
   jsonb_build_object('size', 42, 'mimetype', 'text/csv'), 'series-' || ordinal
 from (values
   ('e5000000-0000-4000-8000-000000000501', 1), ('e5000000-0000-4000-8000-000000000502', 2),
-  ('e5000000-0000-4000-8000-000000000503', 3), ('e5000000-0000-4000-8000-000000000504', 4)
+  ('e5000000-0000-4000-8000-000000000503', 3), ('e5000000-0000-4000-8000-000000000504', 4),
+  ('e5000000-0000-4000-8000-000000000505', 5)
 ) as packages(package_id, ordinal);
 
 insert into public.integration_report_packages (
@@ -63,7 +64,8 @@ from (values
   ('e5000000-0000-4000-8000-000000000501', 'performance_daily', repeat('a', 64), 'e5000000-0000-4000-8000-000000000601'),
   ('e5000000-0000-4000-8000-000000000502', 'performance_daily', repeat('a', 64), 'e5000000-0000-4000-8000-000000000602'),
   ('e5000000-0000-4000-8000-000000000503', 'settlement_total', repeat('c', 64), 'e5000000-0000-4000-8000-000000000603'),
-  ('e5000000-0000-4000-8000-000000000504', 'settlement_total', repeat('d', 64), 'e5000000-0000-4000-8000-000000000604')
+  ('e5000000-0000-4000-8000-000000000504', 'settlement_total', repeat('d', 64), 'e5000000-0000-4000-8000-000000000604'),
+  ('e5000000-0000-4000-8000-000000000505', 'performance_daily', repeat('e', 64), 'e5000000-0000-4000-8000-000000000605')
 ) as p(package_id, report_type, content_sha256, correlation_id)
 join storage.objects o on o.bucket_id = 'governed-report-packages'
   and o.name = 'e5000000-0000-4000-8000-000000000201/e5000000-0000-4000-8000-000000000401/' || p.package_id || '/1/original/report.csv';
@@ -87,7 +89,8 @@ insert into public.report_contract_versions (
        'normalizedSheetName', 'csv', 'headerRow', 1, 'dataStartRow', 2, 'allowFormula', false, 'allowMergedCells', false,
        'fields', jsonb_build_array(
          jsonb_build_object('canonicalField', 'business_date', 'sourceHeader', 'business_date', 'parser', 'local_date', 'required', true, 'dateEncoding', 'iso_date'),
-         jsonb_build_object('canonicalField', 'net_sales', 'sourceHeader', 'net_sales', 'parser', 'money', 'financialSign', 'positive', 'required', false))))),
+         jsonb_build_object('canonicalField', 'net_sales', 'sourceHeader', 'net_sales', 'parser', 'money', 'financialSign', 'positive', 'required', false),
+         jsonb_build_object('canonicalField', 'closed_minutes', 'sourceHeader', 'closed_minutes', 'parser', 'decimal', 'required', false))))),
    repeat('c', 64), 'AED', '[]'::jsonb, '[]'::jsonb, 'reviewed_ignore', 'human', 'e5000000-0000-4000-8000-000000000001'::uuid, 'e5000000-0000-4000-8000-000000000606'::uuid),
   ('e5000000-0000-4000-8000-000000000712'::uuid, 'e5000000-0000-4000-8000-000000000201'::uuid, 'e5000000-0000-4000-8000-000000000711'::uuid,
    'e5000000-0000-4000-8000-000000000503'::uuid, 1, repeat('b', 64), 1, 3,
@@ -112,7 +115,7 @@ values
 insert into public.report_projection_versions (id, organization_id, report_contract_version_id, version, projection_document, projection_digest, calculation_version, proposal_source, created_by, correlation_id)
 values
   ('e5000000-0000-4000-8000-000000000704'::uuid, 'e5000000-0000-4000-8000-000000000201'::uuid, 'e5000000-0000-4000-8000-000000000702'::uuid, 1,
-   '{"schemaVersion":1,"outputKind":"period_grain","grain":"day","periodKey":{"normalizedSheetName":"csv","canonicalField":"business_date"},"outputs":[{"key":"gross_revenue","metricKey":"revenue.gross","valueKind":"money","aggregation":"sum","normalizedSheetName":"csv","canonicalField":"net_sales"}],"controlTotals":[]}'::jsonb,
+   '{"schemaVersion":1,"outputKind":"period_grain","grain":"day","periodKey":{"normalizedSheetName":"csv","canonicalField":"business_date"},"outputs":[{"key":"gross_revenue","metricKey":"revenue.gross","valueKind":"money","aggregation":"sum","normalizedSheetName":"csv","canonicalField":"net_sales"},{"key":"closed_minutes","metricKey":"operations.closed_minutes","valueKind":"count","aggregation":"sum","normalizedSheetName":"csv","canonicalField":"closed_minutes"}],"controlTotals":[]}'::jsonb,
    repeat('d', 64), 1, 'human', 'e5000000-0000-4000-8000-000000000001'::uuid, 'e5000000-0000-4000-8000-000000000609'::uuid),
   ('e5000000-0000-4000-8000-000000000714'::uuid, 'e5000000-0000-4000-8000-000000000201'::uuid, 'e5000000-0000-4000-8000-000000000712'::uuid, 1,
    '{"schemaVersion":1,"outputKind":"exact_range","outputs":[{"key":"gross_revenue","metricKey":"revenue.gross","valueKind":"money","aggregation":"sum","normalizedSheetName":"csv","canonicalField":"net_sales"}],"controlTotals":[]}'::jsonb,
@@ -134,7 +137,8 @@ from (values
   ('e5000000-0000-4000-8000-000000000501', 'e5000000-0000-4000-8000-000000000801', 'e5000000-0000-4000-8000-000000000702', 'e5000000-0000-4000-8000-000000000703', 'e5000000-0000-4000-8000-000000000631'),
   ('e5000000-0000-4000-8000-000000000502', 'e5000000-0000-4000-8000-000000000802', 'e5000000-0000-4000-8000-000000000702', 'e5000000-0000-4000-8000-000000000703', 'e5000000-0000-4000-8000-000000000632'),
   ('e5000000-0000-4000-8000-000000000503', 'e5000000-0000-4000-8000-000000000803', 'e5000000-0000-4000-8000-000000000712', 'e5000000-0000-4000-8000-000000000713', 'e5000000-0000-4000-8000-000000000633'),
-  ('e5000000-0000-4000-8000-000000000504', 'e5000000-0000-4000-8000-000000000804', 'e5000000-0000-4000-8000-000000000712', 'e5000000-0000-4000-8000-000000000713', 'e5000000-0000-4000-8000-000000000634')
+  ('e5000000-0000-4000-8000-000000000504', 'e5000000-0000-4000-8000-000000000804', 'e5000000-0000-4000-8000-000000000712', 'e5000000-0000-4000-8000-000000000713', 'e5000000-0000-4000-8000-000000000634'),
+  ('e5000000-0000-4000-8000-000000000505', 'e5000000-0000-4000-8000-000000000805', 'e5000000-0000-4000-8000-000000000702', 'e5000000-0000-4000-8000-000000000703', 'e5000000-0000-4000-8000-000000000635')
 ) as valueset(package_id, validation_id, contract_version_id, contract_binding_id, correlation_id);
 
 -- One day's evidence, built so a wrong field can be swapped in for a refusal.
@@ -147,6 +151,17 @@ returns jsonb language sql immutable as $$
     'periodStart', p_start, 'periodEnd', p_start,
     'normalizedSheetName', 'csv', 'canonicalField', 'net_sales',
     'sourceColumnOrdinal', 2, 'contributorCount', 1, 'sourceDigest', p_digest);
+$$;
+
+create or replace function pg_temp.quantity_day(p_start text, p_value text, p_digest text)
+returns jsonb language sql immutable as $$
+  select jsonb_build_object(
+    'key', 'closed_minutes', 'metricKey', 'operations.closed_minutes',
+    'metricDefinitionId', (select id::text from public.metric_definitions where key = 'operations.closed_minutes' and organization_id is null),
+    'valueKind', 'count', 'valueNumerator', p_value, 'currency', null,
+    'periodStart', p_start, 'periodEnd', p_start,
+    'normalizedSheetName', 'csv', 'canonicalField', 'closed_minutes',
+    'sourceColumnOrdinal', 3, 'contributorCount', 1, 'sourceDigest', p_digest);
 $$;
 
 create or replace function pg_temp.complete_series(p_package uuid, p_run uuid, p_token uuid, p_digest text, p_observations jsonb, p_absent integer)
@@ -248,6 +263,14 @@ select extensions.lives_ok(
   'identical evidence replays safely');
 select extensions.is((select count(*)::integer from public.normalized_metrics where organization_id = 'e5000000-0000-4000-8000-000000000201'::uuid), 2, 'a replay creates no duplicate observation');
 select extensions.is((select count(*)::integer from public.report_projection_reconciliations where report_package_id = 'e5000000-0000-4000-8000-000000000502'::uuid and classification = 'exact_duplicate'), 2, 'and is classified as the duplicate it is');
+
+-- Continuous quantities keep their exact decimal value --------------------------
+
+select extensions.is((public.claim_governed_report_package_projection('e5000000-0000-4000-8000-000000000201'::uuid, 'e5000000-0000-4000-8000-000000000505'::uuid, 'e5000000-0000-4000-8000-000000000702'::uuid, 'e5000000-0000-4000-8000-000000000704'::uuid, 'e5000000-0000-4000-8000-000000000905'::uuid, 'series-projection-run-000005', 'e5000000-0000-4000-8000-000000000a05'::uuid, 'e5000000-0000-4000-8000-000000000645'::uuid) ->> 'outcome'), 'acquired', 'a fractional availability package receives a worker lease');
+select extensions.lives_ok(
+  $$ select pg_temp.complete_series('e5000000-0000-4000-8000-000000000505'::uuid, 'e5000000-0000-4000-8000-000000000905'::uuid, 'e5000000-0000-4000-8000-000000000a05'::uuid, repeat('5', 64), jsonb_build_array(pg_temp.quantity_day('2026-01-31', '355.6', repeat('6', 64))), 0) $$,
+  'a non-money continuous quantity retains its exact decimal numerator');
+select extensions.is((select m.value_numerator::text from public.normalized_metrics m join public.report_projection_lineage l on l.normalized_metric_id = m.id where l.report_package_id = 'e5000000-0000-4000-8000-000000000505'::uuid), '355.6', 'fractional availability minutes land without rounding or truncation');
 
 -- A total laid over the same days is an owner decision ----------------------------
 

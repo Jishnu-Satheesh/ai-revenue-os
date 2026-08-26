@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(25);
+select extensions.plan(26);
 
 select extensions.has_table('public', 'report_projection_versions', 'immutable projection declarations are versioned');
 select extensions.has_table('public', 'report_projection_decisions', 'owner decisions are append-only');
@@ -25,6 +25,12 @@ select extensions.lives_ok(
   $$ select public.claim_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000701'::uuid, 'f2000000-0000-4000-8000-000000000702'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'report-projection-runtime-0001', 'f2000000-0000-4000-8000-000000000802'::uuid, 'f2000000-0000-4000-8000-000000000803'::uuid) $$,
   'claim function executes safely for an absent package'
 );
+set local request.jwt.claim.sub = 'f2000000-0000-4000-8000-000000000001';
+select extensions.throws_ok(
+  $$ select public.claim_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000701'::uuid, 'f2000000-0000-4000-8000-000000000702'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'report-projection-runtime-0001', 'f2000000-0000-4000-8000-000000000802'::uuid, 'f2000000-0000-4000-8000-000000000803'::uuid) $$,
+  '42501', 'report projection claim is worker-only', 'claim function rejects a service-role request carrying an end-user identity'
+);
+set local request.jwt.claim.sub = '';
 select extensions.lives_ok(
   $$ select public.complete_governed_report_package_projection('f2000000-0000-4000-8000-000000000201'::uuid, 'f2000000-0000-4000-8000-000000000501'::uuid, 'f2000000-0000-4000-8000-000000000801'::uuid, 'f2000000-0000-4000-8000-000000000802'::uuid, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '{"status":"failed","qualityState":"failed","completenessState":"unavailable","errorCodes":[],"warningCodes":[]}'::jsonb, '[]'::jsonb) $$,
   'completion function executes safely without an active lease'

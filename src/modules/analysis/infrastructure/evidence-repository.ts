@@ -35,6 +35,8 @@ type AnalysisClient = SupabaseClient<Database>;
 
 /** Bounds every read. A run that would exceed one is a failure, not a shorter answer. */
 const MAX_LINEAGE_ROWS = 10_000;
+/** Keeps the encoded PostgREST filter below the gateway's request-line ceiling. */
+const LINEAGE_ID_BATCH_SIZE = 200;
 const MAX_HELD_ROWS = 2_000;
 const MAX_RECONCILIATION_ROWS = 5_000;
 
@@ -126,21 +128,25 @@ async function loadLineage(
   const byMetricId = new Map<string, string>();
   if (observations.length === 0) return byMetricId;
 
-  const { data, error } = await supabase
-    .from("report_projection_lineage")
-    .select("normalized_metric_id, projection_run_id")
-    .eq("organization_id", organizationId)
-    .in(
-      "normalized_metric_id",
-      observations.map((observation) => observation.id),
-    )
-    .limit(MAX_LINEAGE_ROWS);
+  const observationIds = observations.map((observation) => observation.id);
+  let lineageRowCount = 0;
+  for (let offset = 0; offset < observationIds.length; offset += LINEAGE_ID_BATCH_SIZE) {
+    const batch = observationIds.slice(offset, offset + LINEAGE_ID_BATCH_SIZE);
+    const { data, error } = await supabase
+      .from("report_projection_lineage")
+      .select("normalized_metric_id, projection_run_id")
+      .eq("organization_id", organizationId)
+      .in("normalized_metric_id", batch)
+      .limit(LINEAGE_ID_BATCH_SIZE + 1);
 
-  if (error) throw new ChannelAnalysisEvidenceError(error.code ?? "lineage read failed");
-  assertNotTruncated(data ?? [], MAX_LINEAGE_ROWS, "projection lineage");
+    if (error) throw new ChannelAnalysisEvidenceError(error.code ?? "lineage read failed");
+    lineageRowCount += (data ?? []).length;
+    if (lineageRowCount >= MAX_LINEAGE_ROWS)
+      throw new ChannelAnalysisEvidenceError("projection lineage exceeded its row budget");
 
-  for (const row of data ?? []) {
-    if (row.normalized_metric_id) byMetricId.set(row.normalized_metric_id, row.projection_run_id);
+    for (const row of data ?? []) {
+      if (row.normalized_metric_id) byMetricId.set(row.normalized_metric_id, row.projection_run_id);
+    }
   }
   return byMetricId;
 }

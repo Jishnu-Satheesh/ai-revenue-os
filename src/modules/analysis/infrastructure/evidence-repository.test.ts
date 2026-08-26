@@ -35,6 +35,28 @@ function stubQuery(result: QueryResult) {
   return builder;
 }
 
+function stubQueryFromInValues(
+  result: (values: readonly string[]) => QueryResult,
+) {
+  let inValues: readonly string[] = [];
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    in: (_column: string, values: readonly string[]) => {
+      inValues = values;
+      return builder;
+    },
+    lte: () => builder,
+    gte: () => builder,
+    limit: () => builder,
+    then: (
+      onFulfilled: (value: QueryResult) => unknown,
+      onRejected?: (reason: unknown) => unknown,
+    ) => Promise.resolve(result(inValues)).then(onFulfilled, onRejected),
+  };
+  return builder;
+}
+
 function observation(
   overrides: Partial<GovernedMetricObservation> = {},
 ): GovernedMetricObservation {
@@ -135,5 +157,57 @@ describe("the channel analysis evidence loader", () => {
     // A figure without a category carries no dimensions, which is not the
     // same as dimensions nobody has read yet.
     expect(loaded.points[0].dimensions).toEqual({});
+  });
+
+  it("batches lineage IDs so a complete governed window fits through PostgREST", async () => {
+    const observations = Array.from({ length: 401 }, (_, index) =>
+      observation({ id: `metric-${index}` }),
+    );
+    const lineageBatches: string[][] = [];
+    const governedWindow: GovernedMetricWindowPort = {
+      async loadGovernedWindow(query) {
+        return query.reconciliationState === "blocked_overlap" ? [] : observations;
+      },
+    };
+    const supabase = {
+      from(table: string) {
+        if (table === "report_projection_lineage") {
+          return stubQueryFromInValues((values) => {
+            lineageBatches.push([...values]);
+            return {
+              data: values.map((normalizedMetricId) => ({
+                normalized_metric_id: normalizedMetricId,
+                projection_run_id: "projection-run-1",
+              })),
+              error: null,
+            };
+          });
+        }
+        if (table === "integration_report_projection_runs") {
+          return stubQuery({
+            data: [{ id: "projection-run-1", absent_row_count: 468 }],
+            error: null,
+          });
+        }
+        return stubQuery({ data: [], error: null });
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    const loaded = await createChannelAnalysisEvidenceRepository(supabase, governedWindow).load({
+      window: {
+        organizationId: "org-1",
+        channelId: "channel-1",
+        branchId: "branch-1",
+        windowStart: "2026-01-01",
+        windowEnd: "2026-01-31",
+        grain: "day",
+        timeZone: "Asia/Dubai",
+      },
+      metricKeys: ["operations.closed_days"],
+    });
+
+    expect(lineageBatches.map((batch) => batch.length)).toEqual([200, 200, 1]);
+    expect(loaded.points).toHaveLength(401);
+    expect(loaded.points.every((point) => point.projectionRunId === "projection-run-1")).toBe(true);
   });
 });
