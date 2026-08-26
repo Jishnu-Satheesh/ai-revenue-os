@@ -17,7 +17,11 @@ import { env } from "@/lib/env";
  * boundary has been broken.
  */
 
-const TIMEOUT_MS = 90_000;
+// Gemini 3.7 Flash's default reasoning pass exceeded the former 90-second
+// deadline on a bounded twelve-finding narration. Keep the provider bounded,
+// but leave enough room inside the task's existing 300-second ceiling for the
+// model response and the database admission round-trip.
+export const RECOMMENDATION_GENERATION_TIMEOUT_MS = 180_000;
 
 /**
  * Never let a provider message escape.
@@ -94,7 +98,7 @@ export function createRecommendationGenerationProvider(config: {
           model: google(config.modelId),
           system,
           prompt: user,
-          abortSignal: AbortSignal.timeout(TIMEOUT_MS),
+          abortSignal: AbortSignal.timeout(RECOMMENDATION_GENERATION_TIMEOUT_MS),
         });
         return extractJsonText(result.text);
       } catch (error) {

@@ -23,6 +23,7 @@ vi.mock("@/lib/env", () => ({
 import {
   createRecommendationGenerationProvider,
   extractJsonText,
+  RECOMMENDATION_GENERATION_TIMEOUT_MS,
 } from "@/modules/analysis/infrastructure/recommendation-generation-provider";
 
 function lastTextCall() {
@@ -94,6 +95,7 @@ describe("recommendation generation provider", () => {
     expect(call.system).toBe("You narrate results.");
     expect(call.prompt).toBe("Some evidence.");
     expect(call.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(RECOMMENDATION_GENERATION_TIMEOUT_MS).toBe(180_000);
   });
 
   it("unwraps a fenced JSON answer from the model", async () => {

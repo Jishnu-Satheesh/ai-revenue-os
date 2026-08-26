@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(58);
+select extensions.plan(60);
 
 -- The fenced write path for deterministic channel findings. Exercised against
 -- real runs with real leases, because everything worth checking here -- the
@@ -183,7 +183,7 @@ select extensions.is((select count(*)::integer from public.channel_findings wher
 
 select extensions.lives_ok(
   $$ select pg_temp.complete('f1000000-0000-4000-8000-000000000601', 'f1000000-0000-4000-8000-000000000801', jsonb_build_array(
-    pg_temp.finding(),
+    pg_temp.finding('{"valueNumerator":"34216.93333333327","valueDenominator":"70798.99999999983"}'::jsonb),
     pg_temp.finding('{"detectorKey":"evidence.reconciliation_blocked","kind":"finding","code":"EVIDENCE_HELD_FOR_DECISION","severity":"high","priority":10,"valueKind":"count","valueNumerator":"1","valueDenominator":null,"calculationDigest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","evidence":[]}'::jsonb),
     pg_temp.finding('{"kind":"needs_data","code":"REVENUE_PERIOD_MOVEMENT_UNAVAILABLE","needsDataReason":"PRIOR_PERIOD_ABSENT","valueKind":null,"valueNumerator":null,"valueDenominator":null,"calculationDigest":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","evidence":[]}'::jsonb)
   )) $$,
@@ -194,6 +194,8 @@ select extensions.is((select finding_count from public.channel_analysis_runs whe
 select extensions.is((select observation_count from public.channel_analysis_runs where id = 'f1000000-0000-4000-8000-000000000601'::uuid), 1, 'from authoritative observations');
 select extensions.is((select needs_data_count from public.channel_analysis_runs where id = 'f1000000-0000-4000-8000-000000000601'::uuid), 1, 'and from the outcomes that needed data, which are recorded rather than left silent');
 select extensions.is((select count(*)::integer from public.channel_findings where analysis_run_id = 'f1000000-0000-4000-8000-000000000601'::uuid), 3, 'every outcome is stored');
+select extensions.is((select value_numerator::text from public.channel_findings where analysis_run_id = 'f1000000-0000-4000-8000-000000000601'::uuid and code = 'PERIOD_COVERAGE_INCOMPLETE'), '34216.93333333327', 'a provider-measured decimal ratio numerator is preserved exactly');
+select extensions.is((select value_denominator::text from public.channel_findings where analysis_run_id = 'f1000000-0000-4000-8000-000000000601'::uuid and code = 'PERIOD_COVERAGE_INCOMPLETE'), '70798.99999999983', 'and its provider-measured decimal denominator is preserved exactly');
 select extensions.is((select severity from public.channel_findings where analysis_run_id = 'f1000000-0000-4000-8000-000000000601'::uuid and kind = 'observation'), null, 'an observation carries no severity');
 select extensions.is((select count(*)::integer from public.channel_finding_evidence e join public.channel_findings f on f.id = e.finding_id where f.analysis_run_id = 'f1000000-0000-4000-8000-000000000601'::uuid), 1, 'and every cited figure resolves to the row it came from');
 select extensions.is((select count(*)::integer from public.audit_events where entity_id = 'f1000000-0000-4000-8000-000000000601'::uuid and event_name = 'channel_analysis.completed'), 1, 'the completed analysis is audited');
