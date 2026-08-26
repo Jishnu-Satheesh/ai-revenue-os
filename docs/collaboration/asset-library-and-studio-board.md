@@ -2274,3 +2274,31 @@ database detail kept in `cause`. Two observations for whoever picks up B-r.
   pre-existing warnings elsewhere), Prettier clean, `pnpm build` green, desktop/mobile browser
   check passed. Spec 021 and the L2 plan doc updated. P5 (motion) remains an approved fast-follow.
 - Nothing pushed. `git push` is the user's step.
+
+### 2026-08-26 · codex-takeover · decimal analysis denominator repair claimed
+
+- Claimed `supabase/migrations/20260826190000_channel_analysis_admits_decimal_ratio_denominators.sql`
+  and `supabase/tests/database/governed_channel_analysis_test.sql`. Production analysis version
+  `20260826.5` now reads all projected evidence, but the completion fence rejects the exact
+  availability ratio because its denominator is fractional provider-measured minutes. The repair
+  will admit bounded decimal ratio denominators while keeping money integer-only, rehearse the
+  rewritten function on staging, and rerun the hosted pgTAP suite before another production run.
+- Claimed `src/modules/analysis/infrastructure/recommendation-generation-provider.ts` and its test
+  after the chained production narrator ended at its exact 90-second provider deadline with
+  `MODEL_PROVIDER_UNAVAILABLE`. The model id is the documented GA id and the production credential
+  is present. The bounded repair is to allow 180 seconds inside the task's existing 300-second cap,
+  then redeploy and resume the same fenced narration operation.
+
+### 2026-08-26 · codex-takeover · production Analysis proved
+
+- Applied the targeted decimal-denominator migration to hosted staging and executed its rewritten
+  completion function through the 60-assertion analysis suite. Production analysis run
+  `27b2ecd6-7594-4eea-b0ef-68aca82555d8` completed on Trigger version `20260826.5`: one finding,
+  eleven observations, no `needs_data`, and typed citations on every stored output.
+- The stored values match the governed Talabat evidence, including the full funnel, cancellation
+  count and provider-reported loss, availability ratio, closure reasons, and held-overlap count.
+  This proves the Channel Workspace Analysis can consume the data projected from Integrations.
+- The chained narrator failed safely at its exact 90-second provider deadline and wrote no prose.
+  Its tested 180-second deadline stays inside the task cap. Two normal remote builds timed out; an
+  alternate native build accepted the upload but remained queued throughout the monitoring window,
+  so promotion is not yet verified.

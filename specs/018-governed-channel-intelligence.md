@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved. The user approved ADR 0026, the comparison-led landing direction, and the chapter-indexed channel-workspace direction on 2026-08-20. Implementation is in progress; this document remains the source of truth for the release gates that are not yet complete.
+Approved. The user approved ADR 0026, the comparison-led landing direction, and the chapter-indexed channel-workspace direction on 2026-08-20. Intake, deterministic Talabat projection, detector findings, and the recommendation control plane are implemented on the feature branch. Release 1 remains in progress: production analysis is now proven against the recovered Talabat projection, while the longer narration deadline still needs promotion and a successful chained retry, and the refined channel workspace still needs authenticated desktop and mobile browser acceptance.
 
 This is a large Tier-3 program. ADR 0026 records the durable architecture decision. The
 Superdesign comparison required by section 18 is a separate approval gate before production TSX.
@@ -212,6 +212,39 @@ no AI narration, no provider or campaign actions, no OCR, and no model-read valu
 - Money, Items, Promotions, and Customer Voice stay awaiting-other-reports, collapsed into one muted
   row naming the report each needs, because the Talabat performance export holds no commission or
   payout columns, no per-item rows, no promotion funding detail, and no ratings.
+
+#### Staging proof and recommendation completion (2026-08-26)
+
+- The approved contract-v2 projection was recovered through forward-only claim, revision, and
+  decimal-quantity repairs. Its successful retry wrote 653 governed observations and recorded 468
+  absent source rows. Twenty observations overlap prior governed evidence and remain
+  `blocked_overlap`; 633 are current, so the package truthfully finishes
+  `reconciliation_required` rather than pretending the overlap is resolved.
+- The recommendation storage, same-run citation fence, append-only human decision log,
+  helpful/not-helpful vote, second narration worker, and advisory forty-eight-hour judge are
+  implemented. Production worker environment contains both recommendation model keys.
+- The staging figures prove 18,294 impressions, 949 menu views, 59 add-to-cart events, 24 placed
+  orders, AED 553.00 gross revenue over 20 of 59 days, AED 357.00 provider-reported rejection loss,
+  25 new and one returning order, ten avoidable cancellations, and 34,217 of 70,799 scheduled
+  minutes closed (about 48.3%). Closure reasons are `CHECK_IN_REQUIRED` on 39 days and
+  `UNREACHABLE` on 20 days. Five cited days are genuine zero-trading days — 2026-01-11,
+  2026-01-22, 2026-01-23, 2026-01-29, and 2026-02-03 — and remain distinct from the 468 absent
+  source rows.
+- The approved contract does **not** bind a cancellation-reason field. Therefore neither the
+  detector, narration, nor UI may claim `ITEM_UNAVAILABLE`, even though the approved visual draft
+  used that label. A later contract version and explicit human approval are required before that
+  root cause can become governed evidence.
+- Production Trigger version `20260826.5` promoted the bounded lineage reads. Analysis run
+  `27b2ecd6-7594-4eea-b0ef-68aca82555d8` completed over the projected Talabat window with one
+  finding, eleven observations, no `needs_data` outcomes, and citation rows for every result. The
+  database had required one further forward-only repair: exact provider-measured availability
+  minutes made the ratio denominator fractional, so migration `20260826190000` now admits a
+  bounded decimal denominator for ratios while preserving integer-only money.
+- The automatically chained narrator reached its exact 90-second provider deadline and failed
+  safely with `MODEL_PROVIDER_UNAVAILABLE`; it wrote no uncited prose. Its bounded deadline is now
+  180 seconds inside the existing 300-second task cap. Promotion has been delayed by Trigger's
+  remote build network, so successful narration remains a release gate independent of the now
+  proven deterministic Analysis result.
 
 ### 4.2 Release 2
 
@@ -828,6 +861,12 @@ and uncertainty honesty, and files it into `channel_recommendation_evaluations` 
 worker-only RPC with digests and judge-model metadata. Verdicts are internal quality evidence for human prompt iteration; they never render on a
 client-facing surface and never change a recommendation, a prompt, or a rule by themselves.
 
+**Shipped on the feature branch.** All five recommendation tables force RLS; narration and judge
+writes enter only through fenced `service_role` RPCs; member triage and feedback enter only through
+authenticated definer functions that explicitly revoke `service_role`. The judge selection is a
+database anti-join capped at 200, so its request does not grow with all prior verdicts, and an
+invalid judge reply is logged by recommendation id with no provider text or business figure.
+
 ### 11.4 Narrative constraints
 
 AI may translate a deterministic finding into plain language, group related findings, and suggest
@@ -884,7 +923,7 @@ proxies bytes through the application.
 Read models use discriminated unions for trusted, partial, indicative, insufficient, stale,
 ambiguous-overlap, and currency-mismatch states. An unavailable value is absent, not zero.
 
-**Shipped.** One route so far: `POST /api/organizations/:organizationId/channels/:channelId/analysis`
+**Shipped.** `POST /api/organizations/:organizationId/channels/:channelId/analysis`
 starts a deterministic analysis over a declared window. It carries `windowStart`, `windowEnd`,
 `periodGrain`, and an optional `branchId`; it is gated on `report.retry` and on the governed channel
 analysis flag; and it returns `202` with the run id it created. The window is supplied and never
@@ -892,6 +931,13 @@ inferred — a window derived from whatever evidence exists cannot report a gap 
 route decides nothing: the claim RPC re-resolves the channel, the branch timezone, and the metric
 vocabulary, and refuses what it cannot bind. A dispatch that did not happen is reported as a failure
 rather than as a success nobody got.
+
+The two recommendation mutation routes above are also implemented. Decisions require
+`recommendation.triage`; feedback requires organization membership. Both use the signed-in
+session all the way through the database fence, return safe errors, and log identifiers only. A
+request-level idempotency key is still a named follow-up: feedback is naturally one upserted vote,
+but retrying a triage request can append the same human answer twice until that operation ledger is
+added without breaking the currently deployed RPC signature.
 
 Findings themselves have no read route yet. They are read server-side through the caller's own
 session, so RLS decides what is visible rather than application code deciding for it.
@@ -1118,6 +1164,15 @@ decision log; a helpful/not-helpful hook sits apart from triage; and a scheduled
 recommendation against its own citations every forty-eight hours as advisory quality evidence for
 human prompt iteration (ADR 0038). Findings remain visible without narration, which section 11.4
 already requires as the fallback.
+
+The refined operations chapter now includes a cited day calendar for closed-versus-scheduled
+minutes, bars for the provider reason dimensions the detector actually cited, cancellation count
+and provider-reported rejection-loss treatments, and compact bars for the Also measured rail. A
+dashed calendar cell means that this finding did not cite a closed/scheduled pair for that day; it
+never means zero. The cancellation panel explicitly says its root-cause breakdown is unavailable
+under the approved contract instead of copying the draft's unsupported `ITEM_UNAVAILABLE` label.
+Failed projection cards expose the existing governed request-and-dispatch path as **Retry
+projection**, including when the package state lags but its latest projection run is failed.
 
 ## 18. Superdesign approval gate
 
