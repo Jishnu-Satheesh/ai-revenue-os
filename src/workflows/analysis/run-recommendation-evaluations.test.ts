@@ -25,6 +25,7 @@ function unjudged(overrides: Partial<UnjudgedRecommendation> = {}): UnjudgedReco
         headline: "10 of 26 orders cancelled",
         detail: "Every cancellation was ITEM_UNAVAILABLE.",
         valueSummary: "AED 357.00 reported loss",
+        limitations: ["Twenty of fifty-nine days carried evidence."],
       },
     ],
     ...overrides,
@@ -46,6 +47,7 @@ function deps(overrides: Partial<ChannelRecommendationEvaluationDependencies> = 
     loadUnjudged: vi.fn(async () => [unjudged()]),
     judge: vi.fn(async () => ({ ...validVerdict })),
     admit: vi.fn(async () => undefined),
+    reportRefusal: vi.fn(),
     ...overrides,
   };
 }
@@ -62,6 +64,10 @@ describe("runChannelRecommendationEvaluations", () => {
     expect(call.organizationId).toBe("fb230000-0000-4000-8000-000000000201");
     expect(call.verdicts).toHaveLength(1);
     expect(call.verdicts[0]).toMatchObject({ ...validVerdict, recommendationId: unjudged().id });
+    expect(d.judge).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("Stored limitations: Twenty of fifty-nine days carried evidence."),
+    );
   });
 
   it("splits a mixed batch into one fenced admit per organization", async () => {
@@ -87,6 +93,10 @@ describe("runChannelRecommendationEvaluations", () => {
     expect(outcome.evaluatedCount).toBe(0);
     expect(outcome.refusedCount).toBe(1);
     expect(d.admit).not.toHaveBeenCalled();
+    expect(d.reportRefusal).toHaveBeenCalledWith({
+      recommendationId: unjudged().id,
+      errorCode: "JUDGE_VERDICT_REFUSED",
+    });
   });
 
   it("keeps judging siblings when one reply is garbage", async () => {

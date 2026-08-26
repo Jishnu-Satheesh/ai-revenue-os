@@ -98,13 +98,22 @@ describe("channel recommendations Trigger registration", () => {
     expect(source).toMatch(/schedules\.task\(\{[\s\S]*?cron: "0 3 \*\/2 \* \*"/);
     // A string cron runs in UTC by Trigger.dev contract; no timezone override
     // may drift the judge off the plan's Global Constraints.
-    expect(source).not.toContain('timezone:');
+    expect(source).not.toContain("timezone:");
+  });
+
+  it("lets Postgres anti-join the bounded judge cursor and logs refused ids", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/recommendations.ts"), "utf8");
+
+    expect(source).toContain("channel_recommendation_evaluations!left()");
+    expect(source).toContain('.is("channel_recommendation_evaluations.recommendation_id", null)');
+    expect(source).toContain('logger.warn("channel_recommendations.evaluation_refused"');
+    expect(source).not.toContain('.select("recommendation_id")');
   });
 
   it("chains the narrator only behind a completed detector run, without failing it", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/analysis.ts"), "utf8");
 
-    expect(source).toContain('import type { channelRecommendationsTask }');
+    expect(source).toContain("import type { channelRecommendationsTask }");
     expect(source).toContain(
       'tasks.trigger<typeof channelRecommendationsTask>("channel-recommendations.generate"',
     );

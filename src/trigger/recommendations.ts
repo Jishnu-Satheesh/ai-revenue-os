@@ -59,10 +59,14 @@ const unjudgedRecommendationShape = z.object({
         .object({
           detector_key: z.string().nullable(),
           kind: z.string().nullable(),
-          headline: z.string().nullable(),
+          code: z.string(),
           needs_data_reason: z.string().nullable(),
+          value_kind: z.enum(["money", "count", "ratio"]).nullable(),
+          value_numerator: z.number().nullable(),
+          value_denominator: z.number().nullable(),
           monetary_impact_minor_units: z.number().nullable(),
           currency: z.string().nullable(),
+          limitations: z.unknown(),
         })
         .array()
         .nullable(),
@@ -87,15 +91,10 @@ function toUnjudged(row: z.infer<typeof unjudgedRecommendationShape>): UnjudgedR
         findingId: citation.finding_id,
         detectorKey: finding?.detector_key ?? null,
         kind: finding?.kind ?? null,
-        headline: finding?.headline ?? null,
-        detail: finding?.needs_data_reason ?? null,
-        // The stored money, stated in minor units exactly as recorded. The
-        // judge checks claims against figures; it needs the figure itself.
-        valueSummary:
-          finding?.monetary_impact_minor_units !== null &&
-          finding?.monetary_impact_minor_units !== undefined
-            ? `${finding.currency ?? ""} ${finding.monetary_impact_minor_units} (minor units) declared impact`.trim()
-            : null,
+        headline: finding ? findingHeadline(finding.code) : null,
+        detail: finding?.needs_data_reason ? needsDataSentence(finding.needs_data_reason) : null,
+        valueSummary: finding ? findingValueSummary(finding) : null,
+        limitations: toStringArray(finding?.limitations),
       };
     }),
   };
@@ -107,6 +106,35 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
+}
+
+function findingValueSummary(finding: {
+  value_kind: "money" | "count" | "ratio" | null;
+  value_numerator: number | null;
+  value_denominator: number | null;
+  monetary_impact_minor_units: number | null;
+  currency: string | null;
+}): string | null {
+  const stored: string[] = [];
+  if (finding.value_numerator !== null) {
+    if (finding.value_kind === "ratio" && finding.value_denominator !== null) {
+      stored.push(
+        `stored ratio numerator ${finding.value_numerator}; denominator ${finding.value_denominator}`,
+      );
+    } else if (finding.value_kind === "money") {
+      stored.push(
+        `stored money ${finding.currency ?? "currency unspecified"} ${finding.value_numerator} minor units`,
+      );
+    } else if (finding.value_kind === "count") {
+      stored.push(`stored count ${finding.value_numerator}`);
+    }
+  }
+  if (finding.monetary_impact_minor_units !== null) {
+    stored.push(
+      `stored monetary impact ${finding.currency ?? "currency unspecified"} ${finding.monetary_impact_minor_units} minor units`,
+    );
+  }
+  return stored.length ? stored.join("; ") : null;
 }
 
 /**
@@ -295,40 +323,29 @@ export const evaluateRecommendationsTask = schedules.task({
       { providerName: judgeProvider.providerName, modelId: judgeProvider.modelId },
       {
         async loadUnjudged(limit) {
-          // Oldest first so a backlog drains in order. Already-judged ids are
-          // resolved first and excluded, because the cursor is simply the
-          // absence of an evaluation row. The citations ride along with their
-          // findings' stored words and figures: that is the judge's whole
-          // folder, and deliberately nothing more.
-          const judged = await supabase
-            .from("channel_recommendation_evaluations")
-            .select("recommendation_id");
-          if (judged.error) {
-            throw new Error(`Judged recommendations load failed: ${judged.error.code}`);
-          }
-          const judgedIds = (judged.data ?? []).map((row) => row.recommendation_id);
-
-          const select =
-            `id, organization_id, label, headline, detail, limitations, prompt_version,
+          // Oldest first so a backlog drains in order. Postgres performs the
+          // anti-join before the 200-row limit: the worker never downloads an
+          // ever-growing history of judged ids or puts them in a request URL.
+          // The citations ride with their findings' stored words and figures;
+          // that is the judge's whole folder, and deliberately nothing more.
+          const select = `id, organization_id, label, headline, detail, limitations, prompt_version,
              channel_recommendation_citations (
-               finding_id,
-               channel_findings ( detector_key, kind, headline, needs_data_reason, monetary_impact_minor_units, currency )
-             )`;
-          const base = () =>
-            supabase
-              .from("channel_recommendations")
-              .select(select)
-              .order("created_at", { ascending: true })
-              .limit(limit);
-
-          // Two branches rather than one reassigned builder: the client's
-          // response typing does not survive a conditional chain, so the
-          // awaited shape is stated here.
-          const response = (await (
-            judgedIds.length > 0
-              ? base().not("id", "in", `(${judgedIds.join(",")})`)
-              : base()
-          )) as { data: (z.infer<typeof unjudgedRecommendationShape>)[] | null; error: { code: string } | null };
+                finding_id,
+                channel_findings (
+                  detector_key, kind, code, needs_data_reason, value_kind, value_numerator,
+                  value_denominator, monetary_impact_minor_units, currency, limitations
+                )
+             ),
+             channel_recommendation_evaluations!left()`;
+          const response = (await supabase
+            .from("channel_recommendations")
+            .select(select)
+            .is("channel_recommendation_evaluations.recommendation_id", null)
+            .order("created_at", { ascending: true })
+            .limit(limit)) as {
+            data: z.infer<typeof unjudgedRecommendationShape>[] | null;
+            error: { code: string } | null;
+          };
           const { data, error } = response;
           if (error) throw new Error(`Unjudged recommendations load failed: ${error.code}`);
 
@@ -336,6 +353,9 @@ export const evaluateRecommendationsTask = schedules.task({
         },
         judge(system, user) {
           return judgeProvider.generate(system, user);
+        },
+        reportRefusal(input) {
+          logger.warn("channel_recommendations.evaluation_refused", input);
         },
         async admit(input) {
           const { error } = await supabase.rpc("admit_channel_recommendation_evaluations", {

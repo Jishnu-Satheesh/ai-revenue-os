@@ -33,8 +33,9 @@ export type UnjudgedRecommendation = {
     kind: string | null;
     headline: string | null;
     detail: string | null;
-    /** The stored money in minor units, so claims can be checked against figures. */
+    /** Exact stored count, ratio parts, and/or money in minor units. */
     valueSummary: string | null;
+    limitations: string[];
   }[];
 };
 
@@ -49,6 +50,7 @@ export type JudgeMeta = { providerName: string; modelId: string };
 export type ChannelRecommendationEvaluationDependencies = {
   loadUnjudged(limit: number): Promise<UnjudgedRecommendation[]>;
   judge(system: string, user: string): Promise<unknown>;
+  reportRefusal(input: { recommendationId: string; errorCode: "JUDGE_VERDICT_REFUSED" }): void;
   admit(input: {
     organizationId: string;
     batchId: string;
@@ -100,6 +102,7 @@ function buildJudgeUser(item: UnjudgedRecommendation): string {
           (finding) =>
             `<finding id="${finding.findingId}" detector="${finding.detectorKey ?? ""}" kind="${finding.kind ?? ""}">\n` +
             `${finding.headline ?? ""}\n${finding.detail ?? ""}\n${finding.valueSummary ?? ""}\n` +
+            `${finding.limitations.length ? `Stored limitations: ${finding.limitations.join(" ")}` : ""}\n` +
             `</finding>`,
         )
         .join("\n")
@@ -164,8 +167,13 @@ export async function runChannelRecommendationEvaluations(
         outputDigest: sha256Hex(canonicalJson(reply)),
       });
     } catch {
-      // Counted and attributable by id in the caller's logs; a bad reply never
-      // reaches storage and never blocks its batch siblings from being judged.
+      // A bad reply never reaches storage and never blocks its batch siblings
+      // from being judged. The identifier is safe operational evidence; the
+      // provider's reply and error text are deliberately absent from the log.
+      deps.reportRefusal({
+        recommendationId: item.id,
+        errorCode: "JUDGE_VERDICT_REFUSED",
+      });
       refusedCount += 1;
     }
   }
@@ -193,7 +201,10 @@ export async function runChannelRecommendationEvaluations(
       promptVersion: JUDGE_PROMPT_VERSION,
       promptDigest,
       outputDigest: sha256Hex(canonicalJson(entries.map((e) => e.verdict))),
-      verdicts: entries.map((entry) => ({ ...entry.verdict, recommendationId: entry.recommendationId })),
+      verdicts: entries.map((entry) => ({
+        ...entry.verdict,
+        recommendationId: entry.recommendationId,
+      })),
     });
   }
 
