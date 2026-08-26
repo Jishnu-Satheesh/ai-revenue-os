@@ -181,9 +181,7 @@ function approvedProjectionSources(
  * blank screen.
  */
 function toSnapshotView(data: ReportPackageSnapshot | undefined): ReportPackageSnapshot {
-  const list = <TKey extends keyof ReportPackageSnapshot>(
-    key: TKey,
-  ): ReportPackageSnapshot[TKey] =>
+  const list = <TKey extends keyof ReportPackageSnapshot>(key: TKey): ReportPackageSnapshot[TKey] =>
     (Array.isArray(data?.[key]) ? data[key] : []) as ReportPackageSnapshot[TKey];
 
   return {
@@ -556,8 +554,7 @@ export function ReportPackageUpload({
             <CardDescription>
               Upload one declared CSV, XLSX, or PDF report directly to private storage. A PDF is
               read only where its figures are already text; a scan is refused rather than guessed
-              at. Files are
-              structurally checked before any future contract review.
+              at. Files are structurally checked before any future contract review.
             </CardDescription>
           </div>
           <Badge variant="outline">
@@ -703,6 +700,13 @@ export function ReportPackageUpload({
               const latestProjection = view.projectionRuns.find(
                 (run) => run.report_package_id === reportPackage.id,
               );
+              const projectionFailed =
+                reportPackage.status === "projection_failed" ||
+                latestProjection?.status === "failed";
+              const canRequestProjection =
+                reportPackage.status === "validated" ||
+                reportPackage.status === "partially_validated" ||
+                projectionFailed;
               const reconciliations = view.reconciliations.filter(
                 (item) => item.report_package_id === reportPackage.id,
               );
@@ -757,17 +761,19 @@ export function ReportPackageUpload({
                             : "Retry validation"}
                         </Button>
                       ) : null}
-                      {(reportPackage.status === "validated" ||
-                        reportPackage.status === "partially_validated" ||
-                        reportPackage.status === "projection_failed") &&
-                      canRetry ? (
+                      {canRequestProjection && canRetry ? (
                         <Button
                           size="sm"
                           variant="outline"
                           disabled={requestProjection.isPending}
                           onClick={() => requestProjection.mutate(reportPackage.id)}
                         >
-                          <ShieldCheck data-icon="inline-start" /> Project safely
+                          {projectionFailed ? (
+                            <RotateCcw data-icon="inline-start" />
+                          ) : (
+                            <ShieldCheck data-icon="inline-start" />
+                          )}
+                          {projectionFailed ? "Retry projection" : "Project safely"}
                         </Button>
                       ) : null}
                     </div>
@@ -1254,8 +1260,8 @@ export function ReportPackageUpload({
               amount.
             </li>
             <li className="flex gap-2">
-              <UserCheck className="mt-0.5 size-4 shrink-0" />
-              A person approves twice before any figure is recorded, and both decisions are kept.
+              <UserCheck className="mt-0.5 size-4 shrink-0" />A person approves twice before any
+              figure is recorded, and both decisions are kept.
             </li>
             <li className="flex gap-2">
               <Calculator className="mt-0.5 size-4 shrink-0" />

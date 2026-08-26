@@ -76,6 +76,30 @@ function finding(overrides: Partial<ChannelFindingRecord> = {}): ChannelFindingR
   };
 }
 
+function metricEvidence(
+  findingId: string,
+  referenceId: string,
+  role: ChannelFindingEvidenceRecord["evidenceRole"],
+  input: {
+    periodStart: string;
+    numerator: number;
+    dimensions?: Record<string, string>;
+  },
+): ChannelFindingEvidenceRecord {
+  return {
+    findingId,
+    evidenceKind: "normalized_metric",
+    evidenceRole: role,
+    referenceId,
+    metric: {
+      periodStart: input.periodStart,
+      periodEnd: input.periodStart,
+      numerator: input.numerator,
+      dimensions: input.dimensions ?? {},
+    },
+  } as ChannelFindingEvidenceRecord;
+}
+
 const EVIDENCE_WINDOW: ChannelEvidenceWindow = {
   packageId: "package-1",
   channelId: CHANNEL.id,
@@ -147,7 +171,8 @@ describe("ChannelWorkspace", () => {
           branchId: "branch-1",
           label: "observation",
           headline: "Nothing here anchors to a chapter",
-          detail: "Its citations name findings this page does not show, and it still reaches the operator.",
+          detail:
+            "Its citations name findings this page does not show, and it still reaches the operator.",
           supportedActions: [],
           limitations: [],
           resultDigest: "e".repeat(64),
@@ -355,6 +380,101 @@ describe("ChannelWorkspace", () => {
     ).toBeTruthy();
   });
 
+  it("draws the approved operations visuals only from stored findings and their citations", () => {
+    renderWorkspace({
+      findings: [
+        finding({
+          id: "cancellation",
+          detectorKey: "orders.cancellation_loss",
+          code: "ORDER_CANCELLATION_LOSS",
+          valueKind: "count",
+          valueNumerator: 10,
+          valueDenominator: null,
+          currency: "AED",
+          monetaryImpactMinorUnits: 35_700,
+        }),
+        finding({
+          id: "closed-share",
+          detectorKey: "operations.closed_share",
+          code: "OPERATIONS_CLOSED_SHARE",
+          metricKey: "operations.closed_minutes",
+          valueKind: "ratio",
+          valueNumerator: 355.6,
+          valueDenominator: 720,
+        }),
+        finding({
+          id: "check-in-days",
+          detectorKey: "operations.closed_share",
+          code: "OPERATIONS_CLOSED_DAYS",
+          metricKey: "operations.closed_days",
+          valueKind: "count",
+          valueNumerator: 1,
+          valueDenominator: null,
+        }),
+        finding({
+          id: "unreachable-days",
+          detectorKey: "operations.closed_share",
+          code: "OPERATIONS_CLOSED_DAYS",
+          metricKey: "operations.closed_days",
+          valueKind: "count",
+          valueNumerator: 1,
+          valueDenominator: null,
+        }),
+        finding({
+          id: "customer-mix",
+          detectorKey: "customer.new_share",
+          code: "CUSTOMER_REPEAT_SHARE",
+          valueKind: "ratio",
+          valueNumerator: 1,
+          valueDenominator: 26,
+        }),
+      ],
+      evidence: [
+        metricEvidence("closed-share", "closed-jan-06", "component", {
+          periodStart: "2026-01-06",
+          numerator: 355.6,
+        }),
+        metricEvidence("closed-share", "scheduled-jan-06", "denominator", {
+          periodStart: "2026-01-06",
+          numerator: 720,
+        }),
+        metricEvidence("check-in-days", "check-in-jan-06", "component", {
+          periodStart: "2026-01-06",
+          numerator: 1,
+          dimensions: { reason_code: "CHECK_IN_REQUIRED" },
+        }),
+        metricEvidence("unreachable-days", "unreachable-jan-07", "component", {
+          periodStart: "2026-01-07",
+          numerator: 1,
+          dimensions: { reason_code: "UNREACHABLE" },
+        }),
+      ],
+    });
+
+    const heatmap = screen.getByRole("region", { name: "Availability heatmap" });
+    expect(
+      within(heatmap).getByRole("img", {
+        name: "2026-01-06: 355.6 closed minutes of 720 scheduled minutes.",
+      }),
+    ).toBeTruthy();
+    expect(
+      within(heatmap).getByRole("img", {
+        name: "CHECK_IN_REQUIRED: 1 of 2 cited closed days.",
+      }),
+    ).toBeTruthy();
+
+    const cancellations = screen.getByRole("region", {
+      name: "Cancellation financial impact",
+    });
+    expect(within(cancellations).getByText(/AED 357\.00/)).toBeTruthy();
+    expect(
+      within(cancellations).getByRole("img", {
+        name: "10 avoidable cancellations out of 26 recorded orders.",
+      }),
+    ).toBeTruthy();
+    expect(within(cancellations).getByText(/root-cause breakdown is unavailable/i)).toBeTruthy();
+  });
+
   it("lands findings outside every chapter in the Also measured band", () => {
     renderWorkspace({
       findings: [
@@ -371,6 +491,11 @@ describe("ChannelWorkspace", () => {
     const alsoMeasured = screen.getByRole("region", { name: "Also measured" });
     expect(within(alsoMeasured).getByText("REVIEW_THEME_TOP")).toBeTruthy();
     expect(within(alsoMeasured).getByText("7")).toBeTruthy();
+    expect(
+      within(alsoMeasured).getByRole("img", {
+        name: "Evidence coverage: 14 of 31 periods.",
+      }),
+    ).toBeTruthy();
   });
 
   it("renders an em-dash and a reason for every figure it cannot state", () => {

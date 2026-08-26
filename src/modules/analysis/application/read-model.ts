@@ -46,6 +46,7 @@ export type WorkspaceEvidenceView = {
   kind: ChannelFindingEvidenceRecord["evidenceKind"];
   role: ChannelFindingEvidenceRecord["evidenceRole"];
   referenceId: string;
+  metric?: NonNullable<ChannelFindingEvidenceRecord["metric"]>;
 };
 
 export type WorkspaceFindingView = {
@@ -236,6 +237,7 @@ function toFindingView(
         kind: row.evidenceKind,
         role: row.evidenceRole,
         referenceId: row.referenceId,
+        ...(row.metric ? { metric: row.metric } : {}),
       })),
   };
 }

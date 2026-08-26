@@ -80,6 +80,18 @@ export type ChannelFindingEvidenceRecord = {
     | "held_evidence"
     | "gap_count";
   referenceId: string;
+  /**
+   * Display-safe fields from a cited governed metric, when this reference is
+   * one. The finding remains the analytical answer; these fields only place
+   * its receipt on a calendar or name the provider dimension beside it.
+   */
+  metric?: {
+    /** Inclusive local dates already resolved in the metric's recorded timezone. */
+    periodStart: string;
+    periodEnd: string;
+    numerator: number;
+    dimensions: Readonly<Record<string, string>>;
+  };
 };
 
 /**

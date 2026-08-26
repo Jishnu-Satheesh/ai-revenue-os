@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
+import { toCalendarDate } from "@/domain/metrics/periods";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
   ChannelAnalysisReadPort,
@@ -30,6 +31,8 @@ type AnalysisClient = SupabaseClient<Database>;
 const MAX_RUNS = 10;
 const MAX_FINDINGS = 500;
 const MAX_EVIDENCE = 5_000;
+/** UUID filters above this size exceed common gateway request-line limits. */
+const EVIDENCE_METRIC_BATCH_SIZE = 200;
 /** A picker an operator can read, not every package they ever uploaded. */
 const MAX_EVIDENCE_WINDOWS = 24;
 const MAX_LINEAGE = 10_000;
@@ -82,6 +85,15 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
+}
+
+function toDimensionRecord(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  const dimensions: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string") dimensions[key] = entry;
+  }
+  return dimensions;
 }
 
 function toDetectorVersions(value: unknown): { key: string; calculationVersion: number }[] {
@@ -300,7 +312,7 @@ export function createAuthenticatedChannelAnalysisRepository(
 
       if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
 
-      return (data ?? []).flatMap((row): ChannelFindingEvidenceRecord[] => {
+      const evidence = (data ?? []).flatMap((row): ChannelFindingEvidenceRecord[] => {
         // Exactly one of the four columns is set, guaranteed by a check
         // constraint. Resolving it here keeps the union out of the view layer.
         const referenceId =
@@ -318,6 +330,50 @@ export function createAuthenticatedChannelAnalysisRepository(
               },
             ]
           : [];
+      });
+
+      const metricIds = [
+        ...new Set(
+          evidence
+            .filter((row) => row.evidenceKind === "normalized_metric")
+            .map((row) => row.referenceId),
+        ),
+      ];
+      if (metricIds.length === 0) return evidence;
+
+      const metricById = new Map<string, NonNullable<ChannelFindingEvidenceRecord["metric"]>>();
+      for (let offset = 0; offset < metricIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
+        const batch = metricIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
+        const { data: metrics, error: metricError } = await supabase
+          .from("normalized_metrics")
+          .select("id, period_start, period_end, period_timezone, value_numerator, dimensions")
+          .eq("organization_id", organizationId)
+          .in("id", batch)
+          .limit(EVIDENCE_METRIC_BATCH_SIZE + 1);
+
+        if (metricError) throw new ChannelAnalysisReadError(metricError.code ?? "unknown");
+        if ((metrics ?? []).length > batch.length)
+          throw new ChannelAnalysisReadError("EVIDENCE_DETAIL_NOT_BOUNDED");
+
+        for (const metric of metrics ?? []) {
+          const numerator = toExactQuantity(metric.value_numerator);
+          if (numerator === null) throw new ChannelAnalysisReadError("VALUE_NOT_EXACT");
+          metricById.set(metric.id, {
+            periodStart: toCalendarDate(new Date(metric.period_start), metric.period_timezone),
+            periodEnd: toCalendarDate(
+              new Date(Date.parse(metric.period_end) - 1),
+              metric.period_timezone,
+            ),
+            numerator,
+            dimensions: toDimensionRecord(metric.dimensions),
+          });
+        }
+      }
+
+      return evidence.map((row) => {
+        const metric =
+          row.evidenceKind === "normalized_metric" ? metricById.get(row.referenceId) : undefined;
+        return metric ? { ...row, metric } : row;
       });
     },
 

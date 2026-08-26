@@ -13,4 +13,10 @@ describe("ReportPackageUpload client boundary", () => {
     expect(componentSource).not.toContain('from "@/domain/reports/reconciliation"');
     expect(componentSource).toContain('from "@/domain/reports/reconciliation-copy"');
   });
+
+  it("names failed projection actions as retries and recognises a failed run", () => {
+    expect(componentSource).toContain('latestProjection?.status === "failed"');
+    expect(componentSource).toContain('reportPackage.status === "projection_failed"');
+    expect(componentSource).toContain('"Retry projection"');
+  });
 });

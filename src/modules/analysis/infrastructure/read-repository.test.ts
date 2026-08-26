@@ -188,3 +188,84 @@ describe("loadRecommendationsForRun", () => {
     expect(loaded).toEqual([]);
   });
 });
+
+describe("loadEvidence", () => {
+  it("loads cited metric display details in bounded PostgREST batches", async () => {
+    const evidenceRows = Array.from({ length: 401 }, (_, index) => ({
+      finding_id: "finding-1",
+      evidence_kind: "normalized_metric",
+      evidence_role: index % 2 === 0 ? "component" : "denominator",
+      normalized_metric_id: `metric-${index}`,
+      exact_range_metric_observation_id: null,
+      reconciliation_id: null,
+      projection_run_id: null,
+    }));
+    const metricBatches: string[][] = [];
+
+    const supabase = {
+      from(table: string) {
+        let ids: readonly string[] = [];
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          in: (_column: string, values: readonly string[]) => {
+            ids = values;
+            return builder;
+          },
+          limit: () => builder,
+          then: (
+            onFulfilled: (value: QueryResult) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => {
+            const result: QueryResult =
+              table === "channel_finding_evidence"
+                ? { data: evidenceRows, error: null }
+                : table === "normalized_metrics"
+                  ? (() => {
+                      metricBatches.push([...ids]);
+                      return {
+                        data: ids.map((id, index) => ({
+                          id,
+                          period_start: "2026-01-05T20:00:00.000Z",
+                          period_end: "2026-01-06T20:00:00.000Z",
+                          period_timezone: "Asia/Dubai",
+                          value_kind: "count",
+                          value_numerator: index === 0 ? "355.6" : "720",
+                          dimensions: { reason_code: "CHECK_IN_REQUIRED" },
+                        })),
+                        error: null,
+                      };
+                    })()
+                  : { data: [], error: null };
+            return Promise.resolve(result).then(onFulfilled, onRejected);
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(supabase).loadEvidence({
+      organizationId: "org-1",
+      findingIds: ["finding-1"],
+    });
+
+    expect(metricBatches.map((batch) => batch.length)).toEqual([200, 200, 1]);
+    expect(
+      (
+        loaded[0] as unknown as {
+          metric: {
+            periodStart: string;
+            periodEnd: string;
+            numerator: number;
+            dimensions: Record<string, string>;
+          };
+        }
+      ).metric,
+    ).toEqual({
+      periodStart: "2026-01-06",
+      periodEnd: "2026-01-06",
+      numerator: 355.6,
+      dimensions: { reason_code: "CHECK_IN_REQUIRED" },
+    });
+  });
+});

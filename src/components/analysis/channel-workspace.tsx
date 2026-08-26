@@ -15,17 +15,19 @@ import {
 } from "lucide-react";
 
 import { FindingCard } from "@/components/analysis/finding-card";
+import { OperationsVisual } from "@/components/analysis/operations-visuals";
 import { RecommendationControls } from "@/components/analysis/recommendation-controls";
-import { figureToneClass, findingValueLabel, formatCount, formatMoney, formatSignedMoney, formatWindow } from "@/components/analysis/format";
+import {
+  figureToneClass,
+  findingValueLabel,
+  formatCount,
+  formatMoney,
+  formatSignedMoney,
+  formatWindow,
+} from "@/components/analysis/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -127,9 +129,7 @@ function vizLabel(finding: WorkspaceFindingView): string {
 }
 
 /** A ratio whose denominator was actually recorded, and is dividable. */
-function ratioOf(
-  finding: WorkspaceFindingView,
-): { numerator: number; denominator: number } | null {
+function ratioOf(finding: WorkspaceFindingView): { numerator: number; denominator: number } | null {
   // The guard mirrors the read model's own: a ratio with no recorded
   // denominator states no fraction, and reading its numerator alone would
   // invent the base it was measured over.
@@ -278,13 +278,7 @@ function RatioSplitBar({
  * height is geometry, and printing a subtracted "new" figure next to it would
  * be arithmetic the detector never declared.
  */
-function RepeatMixColumns({
-  numerator,
-  denominator,
-}: {
-  numerator: number;
-  denominator: number;
-}) {
+function RepeatMixColumns({ numerator, denominator }: { numerator: number; denominator: number }) {
   const returningPercent = Math.max(Math.round((numerator / denominator) * 100), 4);
   return (
     <div
@@ -333,8 +327,13 @@ function RepeatMixColumns({
 function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] }) {
   const stages = findings
     .map((finding) => ({ finding, ratio: ratioOf(finding) }))
-    .filter((stage): stage is { finding: WorkspaceFindingView; ratio: { numerator: number; denominator: number } } =>
-      Boolean(stage.ratio),
+    .filter(
+      (
+        stage,
+      ): stage is {
+        finding: WorkspaceFindingView;
+        ratio: { numerator: number; denominator: number };
+      } => Boolean(stage.ratio),
     )
     .sort((left, right) => right.ratio.denominator - left.ratio.denominator);
   if (stages.length === 0) return null;
@@ -382,15 +381,32 @@ function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] 
  * ratio render nothing here -- the rail already shows their figures, and an
  * empty decorated box would imply measurement that did not happen.
  */
-function ChapterVisual({ chapter }: { chapter: WorkspaceChapterView }) {
+function ChapterVisual({
+  chapter,
+  allFindings,
+  run,
+}: {
+  chapter: WorkspaceChapterView;
+  allFindings: readonly WorkspaceFindingView[];
+  run: WorkspaceRunView | null;
+}) {
   if (chapter.id === "funnel") return <FunnelStages findings={chapter.findings} />;
+  if (chapter.id === "operations") {
+    return <OperationsVisual chapter={chapter} allFindings={allFindings} run={run} />;
+  }
 
   const blocks: React.ReactNode[] = [];
   for (const finding of chapter.findings) {
     if (finding.code === "CUSTOMER_REPEAT_SHARE") {
       const ratio = ratioOf(finding);
       if (ratio)
-        blocks.push(<RepeatMixColumns key={finding.id} numerator={ratio.numerator} denominator={ratio.denominator} />);
+        blocks.push(
+          <RepeatMixColumns
+            key={finding.id}
+            numerator={ratio.numerator}
+            denominator={ratio.denominator}
+          />,
+        );
       continue;
     }
     if (finding.detectorKey === "revenue.period_movement") {
@@ -401,7 +417,12 @@ function ChapterVisual({ chapter }: { chapter: WorkspaceChapterView }) {
     const ratio = ratioOf(finding);
     if (ratio)
       blocks.push(
-        <RatioSplitBar key={finding.id} label={vizLabel(finding)} numerator={ratio.numerator} denominator={ratio.denominator} />,
+        <RatioSplitBar
+          key={finding.id}
+          label={vizLabel(finding)}
+          numerator={ratio.numerator}
+          denominator={ratio.denominator}
+        />,
       );
   }
   if (blocks.length === 0) return null;
@@ -425,7 +446,7 @@ function BriefingRow({
   onInspect: (findingId: string) => void;
 }) {
   return (
-   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold text-foreground">{tile.label}</span>
         {tile.findingId ? (
@@ -559,10 +580,7 @@ function VerdictBand({
           <div className="mt-auto flex flex-col gap-2">
             {evidenceWindows.length > 0 ? (
               <>
-                <Select
-                  value={selectedWindowId ?? undefined}
-                  onValueChange={onSelectWindow}
-                >
+                <Select value={selectedWindowId ?? undefined} onValueChange={onSelectWindow}>
                   <SelectTrigger
                     aria-label="Window to analyse"
                     className="h-9 w-full rounded-full border-border bg-card pl-3.5 pr-3 text-xs font-semibold shadow-sm lg:w-auto lg:min-w-64"
@@ -583,13 +601,21 @@ function VerdictBand({
                 </Select>
                 {selectedWindow ? (
                   <p className="text-[11px] leading-snug text-muted-foreground">
-                    {selectedWindow.sourceFilename ? `From ${selectedWindow.sourceFilename}. ` : null}
+                    {selectedWindow.sourceFilename
+                      ? `From ${selectedWindow.sourceFilename}. `
+                      : null}
                     The window an approved report declared, in {selectedWindow.timeZone}. Days the
                     provider left blank are counted as absent, not as zero.
                   </p>
                 ) : null}
                 {canRunAnalysis ? (
-                  <Button type="button" size="sm" className="self-start" disabled={pending} onClick={onRunAnalysis}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="self-start"
+                    disabled={pending}
+                    onClick={onRunAnalysis}
+                  >
                     {pending ? "Starting…" : "Run analysis"}
                   </Button>
                 ) : null}
@@ -598,8 +624,8 @@ function VerdictBand({
               // Not a disabled button. An operator staring at one cannot tell
               // whether the platform is busy, broken, or waiting on them.
               <p className="text-[11px] leading-snug text-muted-foreground">
-                There is no window to analyse yet. An approved report has to write governed
-                evidence for this channel before an analysis has anything to run over.
+                There is no window to analyse yet. An approved report has to write governed evidence
+                for this channel before an analysis has anything to run over.
               </p>
             )}
           </div>
@@ -688,25 +714,61 @@ function CompactFindingRow({
 }) {
   const value = findingValueLabel(finding);
   const reason =
-    finding.detail ??
-    (value || finding.value ? null : "This outcome states no figure.");
+    finding.detail ?? (value || finding.value ? null : "This outcome states no figure.");
+  const storedRatio = ratioOf(finding);
+  const bar = storedRatio
+    ? {
+        numerator: storedRatio.numerator,
+        denominator: storedRatio.denominator,
+        label: `Measured ratio: ${storedRatio.numerator} of ${storedRatio.denominator}.`,
+      }
+    : finding.coverage && finding.coverage.expected > 0
+      ? {
+          numerator: finding.coverage.observed,
+          denominator: finding.coverage.expected,
+          label: `Evidence coverage: ${finding.coverage.observed} of ${finding.coverage.expected} periods.`,
+        }
+      : null;
+  const barPercent = bar
+    ? Math.min(Math.max((bar.numerator / bar.denominator) * 100, 0), 100)
+    : null;
   return (
     <button
       type="button"
       onClick={() => onInspect(finding.id)}
-      className="flex w-full flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
+      className="grid w-full grid-cols-1 gap-2 rounded-lg px-4 py-3 text-left transition-colors hover:bg-muted/50 sm:grid-cols-[minmax(0,1fr)_8rem_auto] sm:items-center"
     >
-      <span className="flex items-baseline justify-between gap-3">
+      <span className="flex min-w-0 flex-col gap-0.5">
         <span className="truncate text-xs font-semibold">{finding.headline}</span>
-        {value ? (
-          <span className={`shrink-0 text-xs font-semibold tabular-nums ${figureToneClass(finding)}`}>
-            {value}
-          </span>
-        ) : (
-          <span className="shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">—</span>
-        )}
+        {reason ? (
+          <span className="text-[11px] leading-snug text-muted-foreground">{reason}</span>
+        ) : null}
       </span>
-      {reason ? <span className="text-[11px] leading-snug text-muted-foreground">{reason}</span> : null}
+      {bar && barPercent !== null ? (
+        <span
+          role="img"
+          aria-label={bar.label}
+          className="h-2 overflow-hidden rounded-full bg-muted"
+        >
+          <span
+            aria-hidden="true"
+            className="block h-full rounded-full bg-chart-2"
+            style={{ width: `${barPercent}%` }}
+          />
+        </span>
+      ) : (
+        <span
+          aria-hidden="true"
+          className="hidden h-2 rounded-full border border-dashed border-border sm:block"
+        />
+      )}
+      {value ? (
+        <span className={`shrink-0 text-xs font-semibold tabular-nums ${figureToneClass(finding)}`}>
+          {value}
+        </span>
+      ) : (
+        <span className="shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">—</span>
+      )}
     </button>
   );
 }
@@ -826,7 +888,8 @@ export function ChannelWorkspace({
   // Coverage speaks in the grain the run actually analysed; without a
   // completed run there is no grain to speak in, so the chip falls back to the
   // verdict's own sentence about coverage being unreported.
-  const coverageRatio = coverageFinding && coverageFinding.kind !== "needs_data" ? ratioOf(coverageFinding) : null;
+  const coverageRatio =
+    coverageFinding && coverageFinding.kind !== "needs_data" ? ratioOf(coverageFinding) : null;
   const coverageUnit = view.run ? GRAIN_UNIT[view.run.periodGrain] : "periods";
   const coverageChip = coverageRatio
     ? `${coverageRatio.numerator} of ${coverageRatio.denominator} ${coverageUnit} carry evidence`
@@ -962,7 +1025,7 @@ export function ChannelWorkspace({
               </a>
             </li>
           ))}
-      {recommendationsByFindingId.further.length > 0 ? (
+          {recommendationsByFindingId.further.length > 0 ? (
             <li>
               <a
                 href="#further-noted"
@@ -973,7 +1036,7 @@ export function ChannelWorkspace({
             </li>
           ) : null}
 
-      {deferredChapters.length > 0 ? (
+          {deferredChapters.length > 0 ? (
             <li>
               <a
                 href="#awaiting-other-reports"
@@ -997,6 +1060,8 @@ export function ChannelWorkspace({
             onInspect={inspect}
             recommendations={chapterRecommendations(chapter)}
             organizationId={organizationId}
+            allFindings={allFindings}
+            run={view.run}
           />
         ))}
       </section>
@@ -1126,6 +1191,8 @@ function ChapterShell({
   onInspect,
   recommendations,
   organizationId,
+  allFindings,
+  run,
 }: {
   chapter: WorkspaceChapterView;
   number: number;
@@ -1134,6 +1201,8 @@ function ChapterShell({
   onInspect: (findingId: string) => void;
   recommendations: readonly WorkspaceRecommendationView[];
   organizationId: string;
+  allFindings: readonly WorkspaceFindingView[];
+  run: WorkspaceRunView | null;
 }) {
   const coverageRatio =
     coverageFinding && coverageFinding.kind !== "needs_data" ? ratioOf(coverageFinding) : null;
@@ -1171,7 +1240,7 @@ function ChapterShell({
             </div>
           ) : null}
           {chapter.findings.length > 0 ? (
-            <ChapterVisual chapter={chapter} />
+            <ChapterVisual chapter={chapter} allFindings={allFindings} run={run} />
           ) : (
             <ChapterUnavailableBody chapter={chapter} />
           )}
@@ -1262,9 +1331,7 @@ const EVIDENCE_KIND_LABEL: Readonly<
 function SheetRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
       <div className="text-[13px] leading-relaxed">{children}</div>
     </div>
   );
@@ -1347,10 +1414,16 @@ function EvidenceSheet({
               <ul className="space-y-1.5">
                 {finding.evidence.map((reference) => (
                   <li key={`${reference.kind}:${reference.referenceId}`} className="flex gap-2">
-                    <FileText aria-hidden="true" className="mt-0.5 size-3 shrink-0 text-muted-foreground/60" />
+                    <FileText
+                      aria-hidden="true"
+                      className="mt-0.5 size-3 shrink-0 text-muted-foreground/60"
+                    />
                     <span>
                       {EVIDENCE_KIND_LABEL[reference.kind]}
-                      <span className="text-muted-foreground"> — {EVIDENCE_ROLE_LABEL[reference.role]}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        — {EVIDENCE_ROLE_LABEL[reference.role]}
+                      </span>
                       <span className="block font-mono text-[10px] text-muted-foreground/70">
                         {reference.referenceId}
                       </span>
