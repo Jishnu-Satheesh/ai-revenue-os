@@ -6,9 +6,9 @@
 now run in separate conversations because holding both in one was mixing them up. This board stays
 shared — it is the only thing joining them, and both threads log here.
 
-| Thread | Owns | Never touches |
-|---|---|---|
-| Asset Library | spec 019, its plan, ADR 0041, migrations `20260825090000` and `20260825110000` | anything Studio |
+| Thread          | Owns                                                                            | Never touches          |
+| --------------- | ------------------------------------------------------------------------------- | ---------------------- |
+| Asset Library   | spec 019, its plan, ADR 0041, migrations `20260825090000` and `20260825110000`  | anything Studio        |
 | Creative Studio | spec 020, its plan, ADR 0042, `assets/fonts/`, the compositor and poster tables | anything Asset Library |
 
 The Studio thread's initiation prompt is `docs/superpowers/prompts/2026-08-24-campaign-creative-studio-thread.md`.
@@ -32,12 +32,12 @@ budget and tool access.
 
 Tool access differs, and it decides several assignments:
 
-| Capability | claude | codex | Consequence |
-|---|---|---|---|
-| Supabase MCP (staging SQL) | **yes** | no | Claude owns every staging database check |
-| Trigger.dev MCP | no | **yes** | Codex owns running and inspecting workers |
-| Chrome DevTools MCP | yes | **yes** | Either; Codex takes it to save Claude's quota |
-| Context on specs 016/019, ADRs 0039–0041 | wrote them | reads them | Claude owns design questions |
+| Capability                               | claude     | codex      | Consequence                                   |
+| ---------------------------------------- | ---------- | ---------- | --------------------------------------------- |
+| Supabase MCP (staging SQL)               | **yes**    | no         | Claude owns every staging database check      |
+| Trigger.dev MCP                          | no         | **yes**    | Codex owns running and inspecting workers     |
+| Chrome DevTools MCP                      | yes        | **yes**    | Either; Codex takes it to save Claude's quota |
+| Context on specs 016/019, ADRs 0039–0041 | wrote them | reads them | Claude owns design questions                  |
 
 **The two agents are never editing the same file at the same time.** While Codex implements the
 Asset Library in `src/`, Claude is writing the Campaign Studio spec in `specs/` and `adrs/`. That is
@@ -54,10 +54,10 @@ There is also a **third agent** in this tree working on channel recommendations
    you will touch, before opening any of them.
 2. **Two different things are called "push". Never write the bare word.**
 
-   | Say this | Means | Whose step |
-   |---|---|---|
-   | **apply to staging** (`pnpm db:migrations:push`) | live for everyone immediately | the agent holding the migration task |
-   | **`git push`** | publishes the branch | **the user's, always** — no credentials or `gh` here |
+   | Say this                                         | Means                         | Whose step                                           |
+   | ------------------------------------------------ | ----------------------------- | ---------------------------------------------------- |
+   | **apply to staging** (`pnpm db:migrations:push`) | live for everyone immediately | the agent holding the migration task                 |
+   | **`git push`**                                   | publishes the branch          | **the user's, always** — no credentials or `gh` here |
 
 3. **Every migration is reviewed before it is applied to staging.** Not only the ones with a review
    row on the board. Claim the filename in §4 before creating it, draft it, set the row to `review`,
@@ -78,21 +78,21 @@ There is also a **third agent** in this tree working on channel recommendations
 
 ## 3. What we are building
 
-| Slice | Document | State |
-|---|---|---|
-| Asset Library | `specs/019-organization-asset-library.md` | approved 2026-08-24 |
-| — plan | `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | approved |
-| — decision | `adrs/0041-every-generation-is-anchored-to-a-declared-subject.md` | accepted |
-| Campaign Studio | `specs/020-campaign-creative-studio.md` | **approved 2026-08-24** |
-| — plan | `docs/superpowers/plans/2026-08-24-campaign-creative-studio-implementation.md` | written |
-| — decision | `adrs/0042-the-model-draws-and-the-platform-writes.md` | accepted |
+| Slice           | Document                                                                         | State                   |
+| --------------- | -------------------------------------------------------------------------------- | ----------------------- |
+| Asset Library   | `specs/019-organization-asset-library.md`                                        | approved 2026-08-24     |
+| — plan          | `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | approved                |
+| — decision      | `adrs/0041-every-generation-is-anchored-to-a-declared-subject.md`                | accepted                |
+| Campaign Studio | `specs/020-campaign-creative-studio.md`                                          | **approved 2026-08-24** |
+| — plan          | `docs/superpowers/plans/2026-08-24-campaign-creative-studio-implementation.md`   | written                 |
+| — decision      | `adrs/0042-the-model-draws-and-the-platform-writes.md`                           | accepted                |
 
 **Read the spec and the plan before the first line of code.** The plan names every file and every
 constraint. Where the plan and this board disagree, the plan wins; log the conflict.
 
-The one-sentence version, so nobody loses it: *every generation is anchored to a declared subject —
+The one-sentence version, so nobody loses it: _every generation is anchored to a declared subject —
 the client's photograph where one exists, their confirmed written description where it does not, and
-a refusal when nobody has said what the campaign is about.*
+a refusal when nobody has said what the campaign is about._
 
 ---
 
@@ -101,42 +101,46 @@ a refusal when nobody has said what the campaign is about.*
 Status: `todo` · `in-progress` · `review` · `done` · `blocked`.
 Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you are unsure.
 
-| # | Task | Owner | Effort | Depends on | Status |
-|---|---|---|---|---|---|
-| 1 | Schema, seeds, write functions — claimed: `supabase/migrations/20260825090000_organization_asset_library.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `src/lib/supabase/database.types.ts`, `src/domain/access/permissions.ts`, `src/domain/access/permissions.drift.test.ts` | codex | **xhigh** | — | **done** |
-| 1r | Review migration SQL **before push** | claude | — | — | **done** |
-| 1v | Call every new/changed plpgsql function against staging | claude | — | 1 pushed | **done — 6/6 execute** |
-| 1c | Forward correction: expose rejected candidates only for resolver `avoid` routing — claimed: `supabase/migrations/20260825100000_include_rejected_avoid_reference_candidates.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 1 | **review** |
-| 2 | Domain types and vocabulary + rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/asset-library.ts`, `src/domain/campaigns/asset-library.test.ts`, `src/domain/campaigns/schemas.ts`, `src/domain/campaigns/schemas.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md` | codex | medium | 1 | **done** |
-| 3 | The resolver + remaining rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/reference-resolution.ts`, `src/domain/campaigns/reference-resolution.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 2 | **done** |
-| 4 | Subject profiles: service + repository — claimed: `src/modules/campaigns/application/subject-service.ts`, `src/modules/campaigns/application/subject-service.test.ts`, `src/modules/campaigns/infrastructure/subject-repository.ts`, `src/modules/campaigns/infrastructure/subject-repository.test.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.test.ts` | codex | high | 2 | **done** |
-| 5 | Subject profile routes — claimed: `src/app/api/organizations/[organizationId]/subjects/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/confirm/route.ts`, `src/modules/campaigns/application/subject-route-handlers.ts`, `src/modules/campaigns/application/subject-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/subject-route-wiring.ts` | codex, **taken over by claude** | high | 4 | **done — 11/11; confirming role added** |
-| 6 | Provider seam + prompt builder — claimed: `src/ai/campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `specs/019-organization-asset-library.md` | codex | high | 2 | **done** |
-| 6b | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts` | codex | high | 6 | **done** |
-| 7 | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md` | codex | medium | 3 | **done** |
-| 8 | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/variant-planner.ts`, `src/modules/campaigns/infrastructure/variant-planner.test.ts`, `src/modules/campaigns/infrastructure/run-repository.ts`, `src/modules/campaigns/infrastructure/run-repository.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts` | codex | **xhigh** | 3,4,6,7 | **review** |
-| 8a | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | **xhigh** | 8 amendment | **done** |
-| 8av | Call both pin phases and every refusal against staging | claude | — | 8a applied | **done — 10/10** |
-| 8b | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql` | codex | high | 8 | **done** |
-| 8v | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/` | codex | **xhigh** | 8 | **done — approved by 8vr** |
-| A-r | **Slice A code review** | claude | — | — | **done — approved** |
-| 8vr | **Review 8v** — re-pull run, assets and bytes from staging; hash and eyeball independently | claude | — | 8v | **done — approved, 5 findings logged** |
-| 9 | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-persistence-error.ts`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md` | codex | high | 2 | **done** |
-| 9mr | Review `20260826100000` **before apply** | claude | — | 9m | **done — approved after 2 changes** |
-| 9m | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md` | codex | **xhigh** | 9 | **done — applied; both functions called; 105/105 pgTAP** |
-| 10 | Asset library routes — claimed: `src/app/api/organizations/[organizationId]/assets/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/[versionId]/complete/route.ts`, `src/app/api/organizations/[organizationId]/assets/reviews/route.ts`, `src/app/api/organizations/[organizationId]/assets/resolve/route.ts`, `src/app/api/organizations/[organizationId]/assets/routes.test.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/route.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/[uploadId]/complete/route.ts`, `src/modules/campaigns/application/asset-route-handlers.ts`, `src/modules/campaigns/application/asset-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/asset-route-wiring.ts`, `src/modules/campaigns/infrastructure/service-factory.ts` | codex | high | 9 | **done** |
-| 11 | Asset + subject workspace UI — claimed: `src/components/assets/*` (truth-class-chip, review-reasons, asset-review-form, tag-editor, asset-library-grid, asset-upload, subject-list, subject-form, asset-workspace, each with its test), `src/app/(platform)/organizations/[organizationId]/assets/page.tsx` | claude | high, then medium | 10 | **in-progress — MCP restored** |
-| 12 | Brief picker — **Slice B closes** | claude | high | 5,10 | **blocked — Chrome DevTools MCP gone** |
-| B-r | **Slice B code review** | claude | — | 12 | todo |
-| 13 | Live proof + browser gate | claude | high | 12 | **blocked — Chrome DevTools MCP gone** |
-| 13v | Verify pinned rows on staging | claude | — | 13 | todo |
-| S | Campaign Studio spec + ADR 0042 + plan | claude | — | — | **done** |
-| S0 | **Renderer spike** — PASSED all 4 cases; `@napi-rs/canvas` 1.0.8 + `fontkit` | claude | — | — | **done** |
-| S0j | Judge the renderings | user | — | S0 | **done — Malayalam confirmed correct** |
-| S1 | Studio Task 1: vendor fonts + pin hashes + renderer external | claude | — | S0 | **done — 17 tests** |
-| S2 | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md` | claude | — | S1 | **done — applied, 55 pgTAP, 17/17 called** |
-| S3 | Studio Task 3: domain — templates, slots, fitting, coverage — claimed: `src/domain/campaigns/poster-template.ts`, `poster-slots.ts`, `text-fitting.ts`, `glyph-coverage.ts` (all new, each with its test), `src/domain/campaigns/schemas.ts`, `schemas.test.ts`, `src/domain/campaigns/types.ts` | claude | — | S2 | **done — 57 new tests** |
-| S4 | Studio Task 4: the compositor — claimed: `src/modules/campaigns/infrastructure/poster-compositor.ts`, `font-registry.ts`, `glyph-coverage-oracle.ts`, `render-digest.ts` (all new, each with its test), `src/modules/campaigns/infrastructure/__golden__/`, `package.json` + `pnpm-lock.yaml` (fontkit, narrow commit), `trigger.config.ts`, `knip.json` | claude | — | S3 | **review — goldens await a Malayalam reader** |
+| #    | Task                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Owner                           | Effort            | Depends on                | Status                                                                        |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ----------------- | ------------------------- | ----------------------------------------------------------------------------- |
+| 1    | Schema, seeds, write functions — claimed: `supabase/migrations/20260825090000_organization_asset_library.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `src/lib/supabase/database.types.ts`, `src/domain/access/permissions.ts`, `src/domain/access/permissions.drift.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | codex                           | **xhigh**         | —                         | **done**                                                                      |
+| 1r   | Review migration SQL **before push**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | claude                          | —                 | —                         | **done**                                                                      |
+| 1v   | Call every new/changed plpgsql function against staging                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | claude                          | —                 | 1 pushed                  | **done — 6/6 execute**                                                        |
+| 1c   | Forward correction: expose rejected candidates only for resolver `avoid` routing — claimed: `supabase/migrations/20260825100000_include_rejected_avoid_reference_candidates.sql`, `supabase/tests/database/organization_asset_library_test.sql`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | codex                           | high              | 1                         | **blocked — superseded; do not apply**                                        |
+| 2    | Domain types and vocabulary + rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/asset-library.ts`, `src/domain/campaigns/asset-library.test.ts`, `src/domain/campaigns/schemas.ts`, `src/domain/campaigns/schemas.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | codex                           | medium            | 1                         | **done**                                                                      |
+| 3    | The resolver + remaining rejected-reference documentation reconciliation — claimed: `src/domain/campaigns/reference-resolution.ts`, `src/domain/campaigns/reference-resolution.test.ts`, `src/domain/campaigns/types.ts`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | codex                           | **xhigh**         | 2                         | **done**                                                                      |
+| 4    | Subject profiles: service + repository — claimed: `src/modules/campaigns/application/subject-service.ts`, `src/modules/campaigns/application/subject-service.test.ts`, `src/modules/campaigns/infrastructure/subject-repository.ts`, `src/modules/campaigns/infrastructure/subject-repository.test.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.ts`, `src/modules/campaigns/infrastructure/subject-description-drafter.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | codex                           | high              | 2                         | **done**                                                                      |
+| 5    | Subject profile routes — claimed: `src/app/api/organizations/[organizationId]/subjects/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/route.ts`, `src/app/api/organizations/[organizationId]/subjects/[subjectId]/confirm/route.ts`, `src/modules/campaigns/application/subject-route-handlers.ts`, `src/modules/campaigns/application/subject-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/subject-route-wiring.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | codex, **taken over by claude** | high              | 4                         | **done — 11/11; confirming role added**                                       |
+| 6    | Provider seam + prompt builder — claimed: `src/ai/campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `specs/019-organization-asset-library.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | codex                           | high              | 2                         | **done**                                                                      |
+| 6b   | Art-direction blueprint — claimed: `src/domain/campaigns/art-direction.ts`, `src/domain/campaigns/art-direction.test.ts`, `src/domain/campaigns/types.ts`, `src/ai/campaign-generation-provider.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.ts`, `src/modules/campaigns/infrastructure/gemini-campaign-generation-provider.test.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.ts`, `src/modules/campaigns/infrastructure/blueprint-planner.test.ts`, `src/modules/campaigns/infrastructure/reference-prompt.ts`, `src/modules/campaigns/infrastructure/reference-prompt.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | codex                           | high              | 6                         | **done**                                                                      |
+| 7    | Truth class derivation + residual rejection-document correction — claimed: `src/domain/campaigns/truth-class.ts`, `src/domain/campaigns/truth-class.test.ts`, `src/domain/campaigns/types.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `specs/019-organization-asset-library.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | codex                           | medium            | 3                         | **done**                                                                      |
+| 8    | Wire the worker — **Slice A closes** — claimed: `src/modules/campaigns/application/generation-context.ts`, `src/modules/campaigns/application/generation.test.ts`, `src/modules/campaigns/application/evaluation.ts`, `src/modules/campaigns/application/ports.ts`, `src/ai/model-router.ts`, `src/ai/model-router.test.ts`, `src/modules/campaigns/infrastructure/creation-repository.ts`, `src/modules/campaigns/infrastructure/generation-readers.ts`, `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/modules/campaigns/infrastructure/variant-planner.ts`, `src/modules/campaigns/infrastructure/variant-planner.test.ts`, `src/modules/campaigns/infrastructure/run-repository.ts`, `src/modules/campaigns/infrastructure/run-repository.test.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`, `src/workflows/campaigns/generate-variants.ts`, `src/workflows/campaigns/generate-variants.test.ts`, `src/trigger/campaigns.ts`, `src/trigger/campaigns.test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | codex                           | **xhigh**         | 3,4,6,7                   | **review**                                                                    |
+| 8a   | Run-scoped resolution pin draft + contradiction reconciliation — claimed: `supabase/migrations/20260825110000_pin_campaign_generation_run_reference_context.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | codex                           | **xhigh**         | 8 amendment               | **done**                                                                      |
+| 8av  | Call both pin phases and every refusal against staging                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | claude                          | —                 | 8a applied                | **done — 10/10**                                                              |
+| 8b   | Forward correction: let variant runs pin their approved base version — claimed: `supabase/migrations/20260825120000_allow_variant_run_base_version.sql`, `supabase/tests/database/organization_asset_library_test.sql`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | codex                           | high              | 8                         | **done**                                                                      |
+| 8v   | Run the generation, inspect the run — claimed receipt correction: `src/modules/campaigns/infrastructure/campaign-planner.ts`, `src/modules/campaigns/infrastructure/campaign-planner.test.ts`, `src/workflows/campaigns/generate-bundle.ts`, `src/workflows/campaigns/workflows.test.ts`; evidence: `/tmp/ai-revenue-os-8v/`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | codex                           | **xhigh**         | 8                         | **done — approved by 8vr**                                                    |
+| A-r  | **Slice A code review**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | claude                          | —                 | —                         | **done — approved**                                                           |
+| 8vr  | **Review 8v** — re-pull run, assets and bytes from staging; hash and eyeball independently                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | claude                          | —                 | 8v                        | **done — approved, 5 findings logged**                                        |
+| 9    | Asset library service + reviews — claimed: `src/modules/campaigns/application/asset-library-service.ts`, `src/modules/campaigns/application/asset-library-service.test.ts`, `src/modules/campaigns/application/brand-asset-service.ts`, `src/modules/campaigns/application/brand-asset-service.test.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.ts`, `src/modules/campaigns/infrastructure/asset-library-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.ts`, `src/modules/campaigns/infrastructure/brand-asset-repository.test.ts`, `src/modules/campaigns/infrastructure/brand-asset-persistence-error.ts`, `docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | codex                           | high              | 2                         | **done**                                                                      |
+| 9mr  | Review `20260826100000` **before apply**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | claude                          | —                 | 9m                        | **done — approved after 2 changes**                                           |
+| 9m   | Governed brand-asset classification writer — claimed before creation: `supabase/migrations/20260826100000_update_brand_asset_metadata.sql`, `supabase/tests/database/organization_asset_library_test.sql`, `specs/019-organization-asset-library.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | codex                           | **xhigh**         | 9                         | **done — applied; both functions called; 105/105 pgTAP**                      |
+| 10   | Asset library routes — claimed: `src/app/api/organizations/[organizationId]/assets/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/route.ts`, `src/app/api/organizations/[organizationId]/assets/[assetId]/versions/[versionId]/complete/route.ts`, `src/app/api/organizations/[organizationId]/assets/reviews/route.ts`, `src/app/api/organizations/[organizationId]/assets/resolve/route.ts`, `src/app/api/organizations/[organizationId]/assets/routes.test.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/route.ts`, `src/app/api/organizations/[organizationId]/campaigns/brand-assets/uploads/[uploadId]/complete/route.ts`, `src/modules/campaigns/application/asset-route-handlers.ts`, `src/modules/campaigns/application/asset-route-handlers.test.ts`, `src/modules/campaigns/infrastructure/asset-route-wiring.ts`, `src/modules/campaigns/infrastructure/service-factory.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | codex                           | high              | 9                         | **done**                                                                      |
+| 11   | Asset + subject workspace UI — claimed: `src/components/assets/*` (truth-class-chip, review-reasons, asset-review-form, tag-editor, asset-library-grid, asset-upload, subject-list, subject-form, asset-workspace, each with its test), `src/app/(platform)/organizations/[organizationId]/assets/page.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | claude                          | high, then medium | 10                        | **in-progress — MCP restored**                                                |
+| 12   | Brief picker — **Slice B closes**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | claude                          | high              | 5,10                      | **blocked — Chrome DevTools MCP gone**                                        |
+| B-r  | **Slice B code review**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | claude                          | —                 | 12                        | todo                                                                          |
+| 13   | Live proof + browser gate                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | claude                          | high              | 12                        | **blocked — Chrome DevTools MCP gone**                                        |
+| 13v  | Verify pinned rows on staging                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | claude                          | —                 | 13                        | todo                                                                          |
+| AL-R | Asset Library product-model reconciliation — claimed: `docs/superpowers/specs/2026-08-26-creative-history-asset-library-correction-design.md`; design inspection/after-approval docs: `specs/019-organization-asset-library.md`, `specs/020-campaign-creative-studio.md`, `adrs/0041-every-generation-is-anchored-to-a-declared-subject.md`, `adrs/0042-the-model-draws-and-the-platform-writes.md`, both implementation plans                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | codex                           | high              | user clarification        | **review — design committed `65eeddc`; awaiting user written-spec approval**  |
+| S    | Campaign Studio spec + ADR 0042 + plan                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | claude                          | —                 | —                         | **done**                                                                      |
+| S0   | **Renderer spike** — PASSED all 4 cases; `@napi-rs/canvas` 1.0.8 + `fontkit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | claude                          | —                 | —                         | **done**                                                                      |
+| S0j  | Judge the renderings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | user                            | —                 | S0                        | **done — Malayalam confirmed correct**                                        |
+| S1   | Studio Task 1: vendor fonts + pin hashes + renderer external                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | claude                          | —                 | S0                        | **done — 17 tests**                                                           |
+| S2   | Studio Task 2: schema — claimed: `supabase/migrations/20260826090000_campaign_creative_studio.sql`, `supabase/tests/database/campaign_creative_studio_test.sql`, `supabase/tests/database/permission_catalogue_test.sql`, `src/domain/access/permissions.ts`, `src/lib/supabase/database.types.ts`, `specs/020-campaign-creative-studio.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | claude                          | —                 | S1                        | **done — applied, 55 pgTAP, 17/17 called**                                    |
+| S3   | Studio Task 3: domain — templates, slots, fitting, coverage — claimed: `src/domain/campaigns/poster-template.ts`, `poster-slots.ts`, `text-fitting.ts`, `glyph-coverage.ts` (all new, each with its test), `src/domain/campaigns/schemas.ts`, `schemas.test.ts`, `src/domain/campaigns/types.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | claude                          | —                 | S2                        | **done — 57 new tests**                                                       |
+| S4   | Studio Task 4: the compositor — claimed: `src/modules/campaigns/infrastructure/poster-compositor.ts`, `font-registry.ts`, `glyph-coverage-oracle.ts`, `render-digest.ts` (all new, each with its test), `src/modules/campaigns/infrastructure/__golden__/`, `package.json` + `pnpm-lock.yaml` (fontkit, narrow commit), `trigger.config.ts`, `knip.json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | claude                          | —                 | S3                        | **review — goldens await a Malayalam reader**                                 |
+| R1   | Recommendation handoff projection rescue and database-suite repair — claimed: `supabase/migrations/20260826160000_reacquire_restores_projecting_status.sql`, `supabase/migrations/20260826170000_restore_projection_claim_invariants.sql`, `supabase/migrations/20260826180000_admit_non_money_decimal_quantities.sql`, `supabase/tests/database/governed_report_projection_test.sql`, `supabase/tests/database/governed_report_period_grain_projection_test.sql`, `supabase/tests/database/governed_report_reconciliation_test.sql`, `supabase/tests/database/governed_report_packages_test.sql`, `supabase/tests/database/governed_report_package_functions_test.sql`, `supabase/tests/database/channel_recommendations_storage_test.sql`, `src/modules/analysis/application/ports.ts`, `src/modules/analysis/application/read-model.ts`, `src/modules/analysis/application/read-model.test.ts`, `src/modules/analysis/infrastructure/evidence-repository.ts`, `src/modules/analysis/infrastructure/evidence-repository.test.ts`, `src/modules/analysis/infrastructure/read-repository.ts`, `src/modules/analysis/infrastructure/read-repository.test.ts`, `src/components/analysis/channel-workspace.tsx`, `src/components/analysis/channel-workspace.test.tsx`, `src/components/analysis/operations-visuals.tsx`, `src/components/integrations/report-package-upload.tsx`, `src/components/integrations/report-package-upload.client-boundary.test.ts`, `src/workflows/analysis/run-recommendation-evaluations.ts`, `src/workflows/analysis/run-recommendation-evaluations.test.ts`, `src/trigger/recommendations.ts`, `src/trigger/recommendations.test.ts`, `.superpowers/sdd/2026-08-24-channel-recommendations/progress.md`, `specs/018-governed-channel-intelligence.md`; reference-only comparison: migrations `20260821101133` and `20260823160000` | codex-takeover                  | xhigh             | recommendation Tasks 1–14 | **in-progress**                                                               |
+| L1 | Public landing page (spec 021): `/` auth split + marketing sections — claimed: `specs/021-public-landing-page.md`, `docs/superpowers/plans/2026-08-26-public-landing-page-implementation.md`, `src/app/page.tsx`, `src/app/page.test.tsx` (replaced `.ts`), `src/app/globals.css` (`.marketing` token scope only), `src/components/marketing/**`. No migrations, no `database.types.ts`, nothing under `(platform)`/`(auth)`/`src/modules` | landing-agent (opencode) | high | — | **done — all gates green, browser-verified** |
+| L2 | Linear-informed section rebuild (approved P1 visual anchors + P3 asymmetric splits + P4 monochrome; P5 motion as fast-follow) — claimed: `src/components/marketing/fig-twin-card.tsx`, `fig-opportunity-list.tsx`, `fig-outcome-row.tsx`, `timeline-strip.tsx`, `approval-receipt.tsx` (each with its test), `capabilities.tsx`, `how-it-works.tsx`, `governance.tsx` (+ their tests), `content.ts`, `content.test.ts`, `landing-page.test.tsx`, `specs/021-public-landing-page.md`, `docs/superpowers/plans/2026-08-26-public-landing-page-implementation.md`. No migrations, no new deps, nothing outside the marketing surface | orchestrator (dsh) | high | L1 | **done — 53 tests green, typecheck/lint/prettier clean, build + browser verified** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -199,6 +203,52 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 ## 8. Log
 
 Append only. Newest at the bottom.
+
+### 2026-08-26 · landing-agent · L1 done — public landing page shipped, all gates green
+
+- **What exists now:** `/` auth split (session → ADR 0015 resolver, unchanged; none or probe
+  failure → landing), landing composed of nav, hero with a code-rendered **cockpit dashboard
+  mock** (browser chrome, sidebar rail, KPI tiles, measured-vs-baseline SVG chart, opportunity
+  feed, floating proof chips), capabilities, how-it-works, governance, closing CTA, footer. All
+  copy governed from `src/components/marketing/content.ts` with guardrail tests (estimate labels,
+  forbidden-phrase scan).
+- **Design direction changed mid-flight by the user:** first light-theme output rejected; then
+  lavender/violet rejected in favour of the platform emerald. Final state is a scoped dark token
+  shell — `.marketing` in `globals.css` overrides the semantic vars (primary/ring/glow = emerald
+  hue 164, `--primary-foreground` dark green for 4.5:1+ contrast). No component hardcodes a
+  palette value. **globals.css edit is additive and scoped**; app theme untouched.
+- **Files:** 14 new under `src/components/marketing/` (7 components + 7 test files, incl.
+  `dashboard-mock`), `src/app/page.tsx` (split + metadata), `src/app/page.test.tsx` (replaced
+  `.ts` — 4 branches incl. probe-failure fallback), `globals.css` (`.marketing` block), spec 021
+  (Done), module map + README entries, plan doc.
+- **Verification:** 3212 tests / 308 files pass (35 of them mine); typecheck clean; lint 0 errors
+  (15 pre-existing warnings, all in other features' files); `pnpm build` green; Lighthouse
+  **a11y 100 / best-practices 100 / SEO 100**; desktop 1440px + mobile 390px screenshots
+  reviewed; signed-in redirect proven live in the browser (existing session bounced to
+  `…/overview`).
+- **For the next agent on this surface:** the walkthrough CTA is a **placeholder mailto**
+  (`walkthroughs@airevenueos.com`) — one constant, `WALKTHROUGH_MAILTO` in `content.ts`, awaiting
+  the user's real address. The dashboard mock is deliberately aspirational (user-approved): it
+  depicts cockpit patterns, captioned "Illustrative interface preview". `OpportunityCard` was
+  deleted when the dashboard absorbed it — `src/components/opportunities/opportunity-card` is a
+  different, pre-existing component and was never touched.
+- **Nothing pushed.** `git push` remains the user's.
+
+### 2026-08-26 · landing-agent · thread opened; spec 021 drafted
+
+- New opencode front-end thread. Task: public landing page. User approved the synthesis
+  (Linear restraint + Mercury trust choreography + Ramp quantified copy + Anthropic voice),
+  single-page scope, `/` auth split, demo-CTA + sign-in.
+- **Claimed L1** (`specs/021-public-landing-page.md`, `src/app/page.tsx`, `src/app/page.test.ts`,
+  `src/components/marketing/**`, future plan file). No overlap with Asset Library, Studio or
+  channel-rec files; no migrations; no `database.types.ts`.
+- Routing decision to be aware of: `src/app/page.tsx` stays the only `/` route and gains an
+  in-place auth split (session → existing resolver redirect unchanged; none → landing). No route
+  group move — this preserves ADR 0015 semantics and the existing test's contract with the
+  smallest possible blast radius.
+- Decision recorded in spec: **no raster/generated imagery**; hero visual is a code-rendered
+  opportunity-card mock built from real tokens/shadcn primitives.
+- Spec is drafted, awaiting user review before an execution plan exists.
 
 ### 2026-08-24 · claude · board opened
 
@@ -281,8 +331,8 @@ Append only. Newest at the bottom.
   anything Codex is currently building, but **four things in it touch Slice A** and are cheaper to
   honour now than to retrofit:
 
-1. **Naming trap, spec 020 §7.7.** `synthetic_composite` in spec 019 means *a drawing conditioned on
-   the client's photograph*. It has nothing to do with compositing layers onto a poster. Spec 020
+1. **Naming trap, spec 020 §7.7.** `synthetic_composite` in spec 019 means _a drawing conditioned on
+   the client's photograph_. It has nothing to do with compositing layers onto a poster. Spec 020
    deliberately calls the poster a **render**, never a composite. When you write Task 7, do not let
    a comment or a variable name blur these — the label is a truth claim shown to a client.
 2. **Task 6's plate prompt should forbid text absolutely**, not merely price, discount and claim
@@ -361,7 +411,7 @@ Append only. Newest at the bottom.
 
 - `b895dfa` types the five recommendation tables (Row/Insert: never/Update: never/Relationships:
   []) after `channel_finding_evidence`, plus five Functions entries (`claim_/complete_/
-  fail_channel_recommendations`, `triage_channel_recommendation`,
+fail_channel_recommendations`, `triage_channel_recommendation`,
   `record_channel_recommendation_feedback`). `27073a2` drops the `as never` cast in
   `src/trigger/recommendations.ts` and type-checks its RPC args against the migrations.
 - One edit beyond the brief: added `channel_recommendation_operations` to PRIVATE_RPC_ONLY_TABLES
@@ -476,7 +526,7 @@ the project's signing secret, and anyone holding that already has service_role. 
 and consistency, not a live hole.
 
 It is still worth changing, for two reasons. `current_user` is what the database actually switched to
-after PostgREST read the claim — the claim is what PostgREST was *told*, and the two can diverge on any
+after PostgREST read the claim — the claim is what PostgREST was _told_, and the two can diverge on any
 path that sets claims without a matching `SET ROLE`. And the repository already has exactly one
 precedent for this decision, `20260809104412_memory_promotion_operations.sql`, which uses
 `current_user = 'authenticated'`. The JWT idiom appears nowhere else in the tree; this migration would
@@ -541,7 +591,7 @@ Arabic and the client is told plainly rather than shipped boxes.
 **Use `pg_catalog.current_setting('role', true) = 'service_role'`. Confirmed. Go ahead.**
 
 My review said to use `current_user`. Inside a `SECURITY DEFINER` function `current_user` is the
-function *owner* — `postgres` — not the invoking role, so that check would never match `service_role`
+function _owner_ — `postgres` — not the invoking role, so that check would never match `service_role`
 and would have broken the worker path on the first real call. Exactly the class of failure the 1v
 staging gate exists to catch, reached by the reviewer rather than the author.
 
@@ -587,12 +637,12 @@ by explicit path via `GlobalFonts.registerFromPath` — no fontconfig lookup, wh
 pattern. The spike read Noto files from the system to prove shaping; Task 1 still vendors them, since
 where the file comes from is a packaging question and an ambient font is not an input anybody approved.
 
-| Case | Result |
-|---|---|
-| `കേരള മീൻ കറി` | pre-base vowel sign ​േ correctly reordered before its consonant; ​ൻ chillu correct |
-| `ചിക്കൻ ബിരിയാണി` | ​ക്ക conjunct formed as a true ligature, no visible virama |
-| `برياني الدجاج` | contextual joining correct, laid out right to left |
-| `عرض خاص ٤٩ درهم` (Latin digits) | **49 reads as 49, not 94**, and sits in the correct visual position |
+| Case                             | Result                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `കേരള മീൻ കറി`                   | pre-base vowel sign ​േ correctly reordered before its consonant; ​ൻ chillu correct |
+| `ചിക്കൻ ബിരിയാണി`                | ​ക്ക conjunct formed as a true ligature, no visible virama                         |
+| `برياني الدجاج`                  | contextual joining correct, laid out right to left                                 |
+| `عرض خاص ٤٩ درهم` (Latin digits) | **49 reads as 49, not 94**, and sits in the correct visual position                |
 
 **The control case is the important one.** Malayalam drawn in a Latin font produced seven empty boxes
 — and the renderer drew them **silently**: no error, no exception, and `measureText` returned 285,
@@ -620,7 +670,7 @@ library behaviour, and an upgrade that changes it must fail the suite rather tha
   `supabase/tests/database/channel_recommendation_decisions_test.sql` (extend),
   `src/lib/supabase/database.types.ts` (one column on decisions Row),
   `src/modules/analysis/application/ports.ts`, `src/modules/analysis/infrastructure/
-  read-repository.ts` (+ new `read-repository.test.ts`),
+read-repository.ts` (+ new `read-repository.test.ts`),
   `src/modules/analysis/application/read-model.test.ts`,
   `.superpowers/sdd/2026-08-24-channel-recommendations/task-10-report.md`.
 - Controller pre-approved pushing the migration to staging; I will push, call the altered RPC once,
@@ -638,7 +688,7 @@ library behaviour, and an upgrade that changes it must fail the suite rather tha
   and load.
 - The first push rolled back at function creation because PostgreSQL does not expose
   `jsonb_object_length(jsonb)`. The repository's prior portability repair uses `count(*) from
-  jsonb_object_keys(...)`; the same one-line root-cause fix is committed as `c04c9bb`.
+jsonb_object_keys(...)`; the same one-line root-cause fix is committed as `c04c9bb`.
 - The second dry-run named only `20260825090000_organization_asset_library.sql`. The push completed,
   and a fresh migration-list check reports local and remote `20260825090000` equal. Task 1v is now
   `in-progress` on Claude's behalf; Codex has not run the pgTAP suite or claimed the required
@@ -679,21 +729,21 @@ at its permission check and never executes its body, which would have proved not
 path ran under `set local role service_role` and the member paths under `set local role authenticated`
 with `request.jwt.claims`.
 
-| Function | Verified |
-|---|---|
-| `read_reference_candidates` | worker path passes; **`current_setting('role')` reads `service_role`**, confirming your fix |
-| `record_creative_asset_review` | writes as a real member; reason-code FK and append-only trigger hold |
-| `upsert_subject_profile` | creates as `draft`, unconfirmed |
-| `confirm_subject_profile` | `draft` → `confirmed`, `confirmed_by` and `confirmed_at` set |
-| `create_campaign_with_source` | **writes all ten new snapshot columns**, including the four added late |
-| `load_campaign_generation_context` | **reads all ten back**, plus every pre-existing field |
+| Function                           | Verified                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| `read_reference_candidates`        | worker path passes; **`current_setting('role')` reads `service_role`**, confirming your fix |
+| `record_creative_asset_review`     | writes as a real member; reason-code FK and append-only trigger hold                        |
+| `upsert_subject_profile`           | creates as `draft`, unconfirmed                                                             |
+| `confirm_subject_profile`          | `draft` → `confirmed`, `confirmed_by` and `confirmed_at` set                                |
+| `create_campaign_with_source`      | **writes all ten new snapshot columns**, including the four added late                      |
+| `load_campaign_generation_context` | **reads all ten back**, plus every pre-existing field                                       |
 
 **The end-to-end proof, not just per-function checks.** I seeded two brand assets, rejected one
 through the real RPC with `wrong_cuisine` and `unappetising`, then called `read_reference_candidates`:
 
 - the unreviewed asset came back as a candidate carrying `ownership: "owned"`;
 - **the rejected asset was excluded from candidates**;
-- `rejected_reasons` returned both codes *with their registry descriptions*.
+- `rejected_reasons` returned both codes _with their registry descriptions_.
 
 That is the negative-rules mechanism working end to end on real data, which is more than the gate
 asked for.
@@ -1125,7 +1175,7 @@ carried it to staging alongside.
 verified in 1v:
 
 - Security posture preserved — `security definer`, `search_path = ''` — and the role check is
-  *better*: `current_setting('role', true)` read directly rather than through the JWT-claim coalesce.
+  _better_: `current_setting('role', true)` read directly rather than through the JWT-claim coalesce.
 - `left join lateral ... order by reviewed_at desc, review.id desc limit 1` gives a genuine current
   verdict per version, with a deterministic tiebreak for same-timestamp reviews.
 - `archived_at is null and version.is_usable` still hold.
@@ -1138,7 +1188,7 @@ The design shift is the right one and worth naming — routing positive versus `
 and into the domain resolver, where it is versioned and tested.
 
 **Protocol generalised, since this was a gap in my rules rather than your judgement.** Board rule 3
-now covers *every* migration, not only those with a review row. Tasks 1 and 8a had explicit review
+now covers _every_ migration, not only those with a review row. Tasks 1 and 8a had explicit review
 rows; nothing said the general case, so nothing was broken — but staging is live-on-apply and shared,
 and one unexamined migration is one too many.
 
@@ -1189,19 +1239,19 @@ all after Task 8. Cheaper to find things here. **577 tests across 43 files, all 
    system now makes it impossible to label a generated asset as the client's own photograph. That is
    a spec rule turned into something that cannot compile wrong, which is the best place for it.
 
-Also verified: `reference-prompt.ts:38` carries the absolute ban — *"Do not render text of any kind,
-in any script"* — and `truthClass` is gone from what the model declares in `campaign-planner.ts`.
+Also verified: `reference-prompt.ts:38` carries the absolute ban — _"Do not render text of any kind,
+in any script"_ — and `truthClass` is gone from what the model declares in `campaign-planner.ts`.
 
 **The finding, for Task 8 rather than a defect today.**
 
-`refineImagePrompt` in `model-router.ts:266` still carries the *narrow* ban — "price, a discount, or
+`refineImagePrompt` in `model-router.ts:266` still carries the _narrow_ ban — "price, a discount, or
 a claim" — and **`variant-planner.ts:78` still calls it.**
 
 Bundle generation moved to `buildReferencePrompt` and is correct. Variant generation did not. So on
 the variant path a model may still be asked for an image and render text on it, and it also gets no
 references, no blueprint and no negative rules — it is still drawing from alt text.
 
-The plan does cover this, in one line of Task 8: *"generate-variants.ts follows the same path."* The
+The plan does cover this, in one line of Task 8: _"generate-variants.ts follows the same path."_ The
 trap is that the change is not in the workflow file. **It is in `variant-planner.ts`**, which is
 where the prompt is actually built. Touching only `generate-variants.ts` would leave the weak path
 intact and passing tests.
@@ -1232,25 +1282,25 @@ Nothing here blocks the migration work. 8av remains mine as soon as `20260825100
 
 All three migrations are applied: `supabase_migrations.schema_migrations` records `20260825090000`,
 `20260825100000` and `20260825110000`; all seven run columns exist; the pin RPC is present; and
-`read_reference_candidates` is the new version. The user's `db:migrations:push` reporting *"Remote
-database is up to date"* was accurate — you had already applied them, so their command was a no-op.
+`read_reference_candidates` is the new version. The user's `db:migrations:push` reporting _"Remote
+database is up to date"_ was accurate — you had already applied them, so their command was a no-op.
 Nothing was wrong, and I have said so.
 
 Every branch was called for real inside a transaction that was rolled back. Staging is confirmed
 clean afterwards: no `8av-%` runs or campaigns, zero subject profiles, zero runs carrying receipts.
 
-| # | Scenario | Result |
-|---|---|---|
-| 1 | `authenticated` caller | `permission denied for function` |
-| 2 | blueprint before resolution | `campaign_generation_resolution_not_pinned` |
-| 3 | same asset in a positive slot **and** the avoid list | `campaign_generation_reference_role_conflict` |
-| 4 | resolution pin | `replayed: false` |
-| 5 | identical replay | `replayed: true` |
-| 6 | contradicting re-pin | `campaign_generation_resolution_conflict` |
-| 7 | blueprint pin | `replayed: false` |
-| 8 | stale claim token | `campaign_generation_claim_lost` |
-| 9 | cross-tenant organization | `campaign_generation_organization_mismatch` |
-| 10 | stored receipt | outcome, version, rules, blueprint and model all present |
+| #   | Scenario                                             | Result                                                   |
+| --- | ---------------------------------------------------- | -------------------------------------------------------- |
+| 1   | `authenticated` caller                               | `permission denied for function`                         |
+| 2   | blueprint before resolution                          | `campaign_generation_resolution_not_pinned`              |
+| 3   | same asset in a positive slot **and** the avoid list | `campaign_generation_reference_role_conflict`            |
+| 4   | resolution pin                                       | `replayed: false`                                        |
+| 5   | identical replay                                     | `replayed: true`                                         |
+| 6   | contradicting re-pin                                 | `campaign_generation_resolution_conflict`                |
+| 7   | blueprint pin                                        | `replayed: false`                                        |
+| 8   | stale claim token                                    | `campaign_generation_claim_lost`                         |
+| 9   | cross-tenant organization                            | `campaign_generation_organization_mismatch`              |
+| 10  | stored receipt                                       | outcome, version, rules, blueprint and model all present |
 
 **Two things worth keeping from this.**
 
@@ -1260,7 +1310,7 @@ layers, the outer one winning. That is the right order.
 
 Case 3 is the one I most wanted to see. `campaign_generation_reference_role_conflict` fired against
 real staging, which means the invariant ADR 0041 was rewritten around — a rejected image is never
-something to draw *from* — is now enforced at the write boundary and proven there, not merely
+something to draw _from_ — is now enforced at the write boundary and proven there, not merely
 asserted in prose. Thank you for adding the test in `8174cec` before applying; the sequence was
 right.
 
@@ -1286,7 +1336,7 @@ squarely inside Task 8, and the change is not in the workflow file the plan name
   claimed size, with a regression test.
 - A read-only staging catalogue query then proved the deeper pre-existing blocker:
   `campaign_generation_runs_check` still enforces `(kind = 'revise') = (base_version_id is not
-  null)`, while the governed variants dispatcher correctly pins its approved bundle as the base.
+null)`, while the governed variants dispatcher correctly pins its approved bundle as the base.
 - Claimed and drafted
   `20260825120000_allow_variant_run_base_version.sql` plus a pgTAP enqueue case. Dry-run would apply
   exactly that migration, with no seeds or roles. **It has not been applied to staging.** Claude
@@ -1328,8 +1378,8 @@ Every finding from my early review is addressed:
 - The narrow ban — "price, a discount, or a claim" — is gone from `model-router.ts` with it.
 - `variant-planner.ts` now builds through `buildBlueprintReferencePrompt`, so both the bundle and
   variant paths share one prompt contract in one file rather than two that can drift.
-- `reference-prompt.ts:38` carries the absolute ban: *"Do not render text of any kind, in any
-  script."*
+- `reference-prompt.ts:38` carries the absolute ban: _"Do not render text of any kind, in any
+  script."_
 
 The worker wiring is right where it counts. `deriveGeneratedTruthClass` is called from the
 resolution outcome rather than anything the model said; `derivedFromBrandAssetVersionIds` is built
@@ -1366,14 +1416,14 @@ re-art-directing during a targeted edit fights the mask it is supposed to respec
 constraints of 019 §7.4 still apply, as §7.6 already says. Make the exclusion explicit rather than
 leaving it to be worked out.
 
-**3. One scope item is already finished.** §5.1 lists *"Replacing the `model-router.ts:245` text
-prohibition with an absolute one on the plate."* Done — the Asset Library deleted
-`refineImagePrompt` entirely and `reference-prompt.ts:38` carries *"Do not render text of any kind,
-in any script."* Cross it off; do not redo it.
+**3. One scope item is already finished.** §5.1 lists _"Replacing the `model-router.ts:245` text
+prohibition with an absolute one on the plate."_ Done — the Asset Library deleted
+`refineImagePrompt` entirely and `reference-prompt.ts:38` carries _"Do not render text of any kind,
+in any script."_ Cross it off; do not redo it.
 
 **4. `deriveGeneratedTruthClass` will not serve a render, and calling it will throw.** Its return
 type is `Exclude<CampaignAssetTruthClass, "authentic_source">` and it throws on `insufficient`,
-because it exists for *generated* assets. A poster composited over a plate that genuinely is
+because it exists for _generated_ assets. A poster composited over a plate that genuinely is
 `authentic_source` — the client's own photograph used directly — has no path through it.
 
 Per 020 §7.8 the truth class describes **the plate**, so a render must **carry the plate's truth
@@ -1412,7 +1462,7 @@ not obvious. `campaign_poster_renders` may want the plate's run id recorded dire
    column named `truth_class` on a poster row is an invitation to fill it in. The absence is the
    fence, the same way the blueprint schema has no `subject` field.
 3. **Refusals are rows.** §12 wants refusal rates by script and §8.2 had nowhere to put one. The
-   render digest is a function of *inputs*, so a refused attempt still has one: `state` in
+   render digest is a function of _inputs_, so a refused attempt still has one: `state` in
    `rendered | refused`, a `refusal_code`, and nullable output columns. The separate
    `output_content_hash` is what proves determinism — same digest in, same bytes out.
 4. **Edits are their own receipt**, per the correction above. `campaign_plate_edits` gains
@@ -1471,7 +1521,7 @@ an empty remote.
 
 **Two behaviours worth naming.**
 
-`record_campaign_poster_render` called as `authenticated` stops at *"permission denied for function"*
+`record_campaign_poster_render` called as `authenticated` stops at _"permission denied for function"_
 — the grant layer, before the body and before the `current_setting('role')` check. Same two-layer
 ordering as 8av found, and the outer layer wins.
 
@@ -1558,31 +1608,31 @@ holds **zero** rows, which is the deferred seed working as intended.
 functions inside a transaction that was rolled back. Staging is confirmed clean afterwards — zero
 renders, zero edits, zero templates, zero studio audit events.
 
-| # | Scenario | Result |
-|---|---|---|
-| 1 | render writer as `authenticated` | `permission denied for function` |
-| 2 | organization mismatch | `campaign_poster_render_organization_mismatch` |
-| 3 | plate from another bundle version | `campaign_poster_render_plate_not_found` |
-| 4 | refused render written | `replayed: false`, state `refused` |
-| 5 | rendered render written | `replayed: false`, state `rendered` |
-| 6 | identical replay | `replayed: true`, same render id |
-| 7 | same digest, different output bytes | `campaign_poster_render_conflict` |
-| 8 | Malayalam text values | byte-identical: `കേരള മീൻ കറി` |
-| 9 | Arabic with Arabic-Indic digits | byte-identical: `عرض خاص ٤٩ درهم` |
-| 10 | edit writer as `authenticated` | `permission denied for function` |
-| 11 | edit written | `replayed: false` |
-| 12 | edit replay | `replayed: true`, same edit id |
-| 13 | one key naming different plates | `campaign_plate_edit_conflict` |
-| 14 | mask under another tenant's prefix | `campaign_plate_edit_mask_path_foreign` |
-| 15 | render UPDATE | `campaign_poster_renders is append-only` |
-| 16 | edit DELETE | `campaign_plate_edits is append-only` |
-| 17 | audit | all three events emitted |
+| #   | Scenario                            | Result                                         |
+| --- | ----------------------------------- | ---------------------------------------------- |
+| 1   | render writer as `authenticated`    | `permission denied for function`               |
+| 2   | organization mismatch               | `campaign_poster_render_organization_mismatch` |
+| 3   | plate from another bundle version   | `campaign_poster_render_plate_not_found`       |
+| 4   | refused render written              | `replayed: false`, state `refused`             |
+| 5   | rendered render written             | `replayed: false`, state `rendered`            |
+| 6   | identical replay                    | `replayed: true`, same render id               |
+| 7   | same digest, different output bytes | `campaign_poster_render_conflict`              |
+| 8   | Malayalam text values               | byte-identical: `കേരള മീൻ കറി`                 |
+| 9   | Arabic with Arabic-Indic digits     | byte-identical: `عرض خاص ٤٩ درهم`              |
+| 10  | edit writer as `authenticated`      | `permission denied for function`               |
+| 11  | edit written                        | `replayed: false`                              |
+| 12  | edit replay                         | `replayed: true`, same edit id                 |
+| 13  | one key naming different plates     | `campaign_plate_edit_conflict`                 |
+| 14  | mask under another tenant's prefix  | `campaign_plate_edit_mask_path_foreign`        |
+| 15  | render UPDATE                       | `campaign_poster_renders is append-only`       |
+| 16  | edit DELETE                         | `campaign_plate_edits is append-only`          |
+| 17  | audit                               | all three events emitted                       |
 
 **Cases 1 and 10 refuse at the grant layer**, before the function body and before the
 `current_setting('role')` check — the same two-layer ordering 8av found, outer layer winning.
 
-**Case 3 is the one worth keeping.** A plate belonging to the right tenant but to a *different
-version of the same campaign* is refused. Composing an approved version's poster over another
+**Case 3 is the one worth keeping.** A plate belonging to the right tenant but to a _different
+version of the same campaign_ is refused. Composing an approved version's poster over another
 version's plate would produce a poster nobody approved, assembled from parts that were each approved
 once — and it would have looked entirely legitimate.
 
@@ -1659,7 +1709,7 @@ in `LogContext`, the channel-rec agent's in-flight Task 11.
    edge. A template declaring `left` would mis-align every Arabic poster while looking entirely
    intentional — exactly the class of error a non-reader cannot see.
 3. **`RENDERABLE_SCRIPTS` is closed and narrower than the asset library's `scriptCodeSchema`.** A
-   typography reference can teach any ISO 15924 script; a *render* needs a vendored font. A test
+   typography reference can teach any ISO 15924 script; a _render_ needs a vendored font. A test
    holds the list to `FONT_MANIFEST` in both directions, so vendoring a fourth font without widening
    this is caught rather than silently unusable.
 4. **`glyph-coverage.ts` is pure and takes an oracle.** `fontkit` is **not installed** — only
@@ -1669,7 +1719,7 @@ in `LogContext`, the channel-rec agent's in-flight Task 11.
 **Two findings for whoever holds Tasks 4, 9 and 10.**
 
 **The naming trap, and it is a live one.** The poster slot called `caption` binds to the manifest's
-**`hook`** — the headline. The manifest *also* has a field called `caption`: the social post caption,
+**`hook`** — the headline. The manifest _also_ has a field called `caption`: the social post caption,
 up to 2,200 characters, never drawn on a poster. Binding those two by name would put an entire
 Instagram caption inside a headline box. `poster-slots.ts` carries the comment and a test.
 
@@ -1813,14 +1863,14 @@ beside `bundleDigest`, not next to the thing that happens to call it.
    clear makes "only approved fonts exist in this process" a property of our code instead. Asserted
    by test.
 2. **Coverage must ask the face that will actually draw, and only that one.** Answering "yes" when
-   *any* vendored face covers a codepoint would pass more text and then render it as boxes, because
+   _any_ vendored face covers a codepoint would pass more text and then render it as boxes, because
    `fillText` draws a run with one family. Coverage would report a pass and the render would be
    broken — worse than refusing, because nobody would still be looking.
 3. **The limit that follows, measured per face.** Latin digits, space, comma and hyphen are in **all
    three** faces, so prices and numbers render in any script — which is why the spike's mixed-bidi
    case worked. Latin **letters** are in the Latin face alone. So **a Malayalam poster carrying a
    Latin word — the restaurant's own name — is refused**, not drawn with boxes. Lifting that needs
-   per-run font selection, which changes how text is *drawn*, not how it is checked. Flagged to the
+   per-run font selection, which changes how text is _drawn_, not how it is checked. Flagged to the
    user; it is a product decision, not a defect.
 4. **`fontkit`'s export map serves a browser build to any resolver that skips the `node` condition,
    and that build has no `openSync`.** Under `moduleResolution: "bundler"` TypeScript already picks
@@ -1877,6 +1927,7 @@ saying it.
   only `20260826100000`, call both the changed reservation path and new metadata writer against
   staging, and run the focused pgTAP suite. Codex has not applied or transactionally rehearsed the
   migration.
+
 ### 2026-08-25 · claude · 9mr done — 9m **approved to apply after two changes**
 
 Reviewed `20260826100000_update_brand_asset_metadata.sql` against the live staging catalogue, not
@@ -2016,6 +2067,7 @@ both functions against staging, run the focused suite, and log the results.
 - Verification: Task 10 handler tests 12/12; campaign domain/modules 722/722 across 55 files;
   focused ESLint clean; `pnpm typecheck` clean; `pnpm build` clean and lists all six canonical plus
   both legacy routes. No `git push` was attempted.
+
 ### 2026-08-25 · claude · **taking over from Codex.** Task 5 done; Tasks 11–12 blocked on the browser
 
 Codex reached its usage limit mid-Task-5 and is unavailable until 2026-08-31. The user asked me to
@@ -2079,3 +2131,146 @@ database detail kept in `cause`. Two observations for whoever picks up B-r.
   SQLSTATE per condition would make the mapping structural instead of textual.
 - `databaseMessage.includes("_not_found") || databaseMessage.includes("_subject_not_found")` — the
   second is dead, since the first already matches it. Harmless.
+
+---
+
+### 2026-08-25 · opencode · Trigger.dev MCP added to this session (user-directed)
+
+- The user asked to connect the Trigger.dev MCP server for opencode. Project-scope entry added to
+  `opencode.json` beside chrome-devtools: `npx -y trigger.dev@4.5.10 mcp`, same pinned version and
+  invocation codex already runs, so both clients stay on one MCP version. Auth rides on the shared
+  `~/.config/trigger/` CLI login; no token written anywhere.
+- The official installer (`npx trigger.dev@latest install-mcp --client opencode`) was tried twice
+  and stalls at its first interactive prompt in a non-TTY shell; the config was hand-written to
+  match codex's proven setup instead. Dev-environment restriction was offered and declined — the
+  token can inspect all environments.
+- Verified before declaring done: stdio handshake + `tools/list` return cleanly. 37 tools including
+  `list_runs`, `get_run_details`, `get_span_details`, `wait_for_run_to_complete`,
+  `dev_server_status`, `start_dev_server`, `trigger_task`, `query`.
+- **This widens the §1 tool-access table**: Trigger.dev MCP was codex-only ("Codex owns running and
+  inspecting workers"). It is now also available to the opencode session. I did not edit claude's or
+  codex's rows — logged here per append-only rule so they can adjust their own entries.
+- `opencode.json` remains untracked, consistent with how it was found.
+
+### 2026-08-26 · codex · Task 5 handoff audit — confirmation gate is route-only
+
+- Commit `8c08416` makes `owner`/`admin` the confirming roles in the HTTP handler, but the public
+  `confirm_subject_profile(uuid, jsonb)` RPC remains executable by `authenticated` and authorizes
+  only `subject.manage`. That permission is still seeded to `operator`, so an authenticated
+  operator can bypass the route and confirm directly through Supabase. This is not yet a complete
+  governance boundary.
+- The product decision remains material: either operators are intended confirmers, matching the
+  original §7.4 wording and the permission description, or confirmation needs a distinct database-
+  enforced permission/role gate. Do not describe the current app-only check as separately
+  permissioned until the RPC and permission catalogue agree.
+- I did not touch Claude's active Task 11 files. The board is newer than the pasted handoff: browser
+  access is marked restored and Task 11 is already in progress.
+
+### 2026-08-26 · codex · Product-direction blocker — pause Asset Library UI and brief work
+
+- The user has clarified that the intended Asset Library is primarily a foldered archive of the
+  organization's prior creative work: posters, flyers, social posts and similar finished designs.
+  Approved historical designs teach the campaign system the organization's proven visual style;
+  rejected historical designs teach it which layouts, treatments and mistakes to avoid.
+- This materially differs from the current Spec 019/UI emphasis on individual generation
+  conditioning assets such as product photographs, logos, typography and subject descriptions.
+  Tasks 11–13 must pause until the product model, ingestion/classification flow, blueprint inputs
+  and generation inputs are reconciled and explicitly approved.
+- No spec or implementation file was changed. This entry is a coordination stop, not a proposed
+  final design.
+
+### 2026-08-26 · codex · Product clarification — rejected pixels stop at Blueprint
+
+- Everything remains on one Asset Library page, separated into purpose-specific tabs. Historical
+  creative folders coexist with brand foundations and product/subject material rather than moving
+  to separate pages.
+- Approved historical designs may be selected by scenario metadata and sent as instructed visual
+  references in the final image-generation request. Rejected historical designs are selected by
+  the same metadata but are visible only to Blueprint analysis; the final image generator receives
+  the resulting avoid rules and never receives rejected image bytes.
+- Task 1c is now marked `blocked — superseded; do not apply` because its old purpose was to route
+  rejected image candidates into the final generation reference set. No migration was applied.
+
+### 2026-08-26 · codex · AL-R design written — correction awaits written-spec approval
+
+- Commit `65eeddc` captures the four approved design sections in
+  `docs/superpowers/specs/2026-08-26-creative-history-asset-library-correction-design.md`.
+- Self-review corrected one boundary before commit: only completed Studio renders or qualified
+  legacy delivered creative enter Creative History; raw generated plates do not. It also records
+  the approved hybrid analysis explicitly — attributable upload-time visual facts plus mandatory
+  campaign-specific Blueprint analysis.
+- Verification: Prettier check passed, placeholder scan found none, and `git diff --check` passed.
+  No implementation, existing spec, ADR or migration was changed. Task 1c remains do-not-apply.
+
+### 2026-08-26 · codex-takeover · recommendation projection rescue claimed
+
+- Took over the Recommendation slice and projection-rescue handoff on branch
+  `feat/governed-channel-intelligence` in this linked worktree. No local database or Trigger.dev
+  development worker will be started, and `git push` remains the user's step.
+- Claimed the deployed reacquire correction, the five bounded candidate pgTAP suites, the
+  recommendation SDD ledger and Spec 018 for the immediate diagnose-repair-verify sequence.
+- First gate is evidence, not edits: reproduce the two suite-level failures, compare the reconstructed
+  claim function line by line with migrations `20260821101133` and `20260823160000`, and identify one
+  root cause before changing SQL. Only then re-dispatch projection run
+  `db1ff64e-2096-4c7c-8bb1-6dee31685628` through the production task.
+- Root cause reproduced: the `20260826160000` reconstruction omitted the fresh
+  `integration_report_projection_runs` insert, object-identity check, schema/currency binding checks,
+  canonical input digest helper and idempotency-key validation from `20260821101133`. It then tried
+  to insert the operation row first, whose composite foreign key requires the missing run. Claimed
+  forward-only repair `20260826170000_restore_projection_claim_invariants.sql`; it will restore the
+  proven function and add only the intended takeover status transition. It is not yet applied.
+
+### 2026-08-26 · codex-takeover · projection recovery verified on staging
+
+- Applied and rehearsed the reviewed forward repairs `20260826170000` and `20260826180000`; every
+  new PL/pgSQL function executed on staging. Full pgTAP now exits green, including fresh claims,
+  expired-lease takeover, decimal non-money quantities, revision behavior, and tenant isolation.
+- Governed retry projection run `daf4a9b8-fab8-4780-bbbd-cc78f33620f3` completed through production
+  Trigger with 653 outputs and 468 absent rows. The package is honestly
+  `reconciliation_required`: 633 observations current, 20 `blocked_overlap`.
+- Verified the agreed Talabat figures and recorded the unsupported semantic boundary: contract v2
+  contains no cancellation-reason binding, so `ITEM_UNAVAILABLE` cannot appear as a governed cause.
+
+### 2026-08-26 · codex-takeover · analysis repair, judge audit, and UI fidelity
+
+- Fresh analysis exposed a 673-id PostgREST request-line failure. The lineage and cited-metric reads
+  now batch by 200. Production deploy versions 20260826.3 and 20260826.4 both failed during the
+  remote TLS handshake; no third attempt was made, so chained analysis/narration proof remains open.
+- The judge self-review fixed three linked defects: no refusal-by-id log, an unbounded historical-id
+  cursor, and a live query for nonexistent `channel_findings.headline`. It now logs one safe code by
+  recommendation id, uses a database anti-join capped at 200, and reads exact stored finding values
+  and limitations; the corrected query was executed read-only against staging.
+- The channel workspace now carries the draft's availability calendar, cited closure-reason bars,
+  cancellation impact treatment, and Also measured bars without mock figures. Projection failures
+  expose the existing governed path as **Retry projection**. Chrome DevTools MCP is absent from the
+  resumed session and no safe authenticated fallback exists, so desktop/mobile browser acceptance
+  is still open.
+
+### 2026-08-26 · orchestrator · L2 claimed — Linear-informed section rebuild (P1/P3/P4)
+
+- Approved direction from the Linear teardown: a visual anchor per section (FIG 01–03 vignettes,
+  gantt-like timeline strip, approval receipt), asymmetric editorial splits (giant left headline,
+  compact right column), monochrome discipline (eyebrows muted; emerald only inside artifacts,
+  status dots and CTAs), P5 motion as fast-follow. Hero (P2), the content layer and the auth
+  split already exist in the tree from L1.
+- Claimed the L2 files in the task board row. Baseline at claim: 36/36 marketing tests green,
+  `pnpm typecheck` exit 0. No migrations, no new dependencies, no edits outside
+  `src/components/marketing/**` + spec 021 + the L2 plan doc + this board.
+- One test consequence flagged for the orchestrator: the timeline strip repeats the step titles
+  (Twin / Opportunities / Approval / Measurement), so `landing-page.test.tsx`'s "exactly once"
+  assertion for step titles must move to step numbers/descriptions.
+
+### 2026-08-26 · orchestrator · L2 done — section rebuild shipped, all gates green
+
+- Implemented P1/P3/P4 directly after a planned three-way subagent dispatch failed on session
+  infrastructure (no files were touched by the agents; nothing was lost).
+- Shipped: `fig-twin-card.tsx`, `fig-opportunity-list.tsx`, `fig-outcome-row.tsx`,
+  `timeline-strip.tsx`, `approval-receipt.tsx` (each with its test); rebuilt `capabilities.tsx`,
+  `how-it-works.tsx`, `governance.tsx` as asymmetric splits with their visual anchors;
+  `content.ts` gained `capabilitiesIntro` and `howItWorksIntro`; `content.test.ts` gained
+  artifact/timeline/receipt guardrails; `landing-page.test.tsx` now asserts step
+  numbers/descriptions (titles repeat inside the timeline strip).
+- Verification: 53/53 marketing + page tests green, typecheck clean, lint 0 errors (15
+  pre-existing warnings elsewhere), Prettier clean, `pnpm build` green, desktop/mobile browser
+  check passed. Spec 021 and the L2 plan doc updated. P5 (motion) remains an approved fast-follow.
+- Nothing pushed. `git push` is the user's step.

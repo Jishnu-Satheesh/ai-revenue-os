@@ -118,6 +118,13 @@ Human-readable history of observations, decisions, approvals, executions, failur
 
 ## Experience
 
+### Public Landing Page
+
+The signed-out face of the product at `/`: hero with an illustrative cockpit preview, capabilities,
+how-it-works, governance, and walkthrough CTA. Signed-in users are redirected by the ADR 0015
+resolver instead. Lives in `src/components/marketing/` with its own dark token scope in
+`globals.css` (`.marketing`).
+
 ### Agency Portfolio
 
 Cross-client health, readiness, opportunities, blocked actions, run failures, and incremental impact.

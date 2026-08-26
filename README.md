@@ -132,6 +132,13 @@ Set `E2E_INTEGRATION_ORGANIZATION_ID`, `E2E_OTHER_ORGANIZATION_ID`, and the `E2E
 `E2E_VIEWER_*` credentials from `.env.example`; without them those scenarios skip and only the
 unauthenticated boundary scenarios run.
 
+## Public landing page
+
+`/` serves a public landing page (`src/components/marketing/`) to signed-out visitors; signed-in
+users keep the ADR 0015 resolver redirect. The page renders inside a scoped dark token shell
+(`.marketing` in `src/app/globals.css`) and makes no backend calls beyond the session probe.
+Specified in `specs/021-public-landing-page.md`.
+
 ## Foundation boundaries
 
 - `src/app` is the presentation layer and route composition.
