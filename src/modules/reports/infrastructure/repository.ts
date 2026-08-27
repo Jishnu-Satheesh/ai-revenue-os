@@ -136,9 +136,7 @@ export function createAuthenticatedReportPackageRepository(
         projectionDecisions,
         projectionBindings,
         projectionRuns,
-        reconciliations,
-        reconciliationResolutions,
-        exactRangeObservations,
+        reconciliationGroups,
         channels,
         branches,
       ] = await Promise.all([
@@ -214,26 +212,9 @@ export function createAuthenticatedReportPackageRepository(
           .eq("organization_id", organizationId)
           .order("created_at", { ascending: false })
           .limit(30),
-        supabase
-          .from("report_projection_reconciliations")
-          .select("*")
-          .eq("organization_id", organizationId)
-          .order("created_at", { ascending: false })
-          .limit(100),
-        supabase
-          .from("report_projection_reconciliation_resolutions")
-          .select("*")
-          .eq("organization_id", organizationId)
-          .order("created_at", { ascending: false })
-          .limit(100),
-        supabase
-          .from("exact_range_metric_observations")
-          .select(
-            "id, report_package_id, projection_output_key, period_start, period_end, period_timezone, currency, quality_state, completeness_state, revision, reconciliation_state, reconciliation_digest, superseded_by_id, created_at",
-          )
-          .eq("organization_id", organizationId)
-          .order("created_at", { ascending: false })
-          .limit(100),
+        supabase.rpc("list_governed_report_projection_reconciliation_groups", {
+          p_organization_id: organizationId,
+        }),
         supabase
           .from("organization_channels")
           .select("id, display_name, key, status")
@@ -261,9 +242,7 @@ export function createAuthenticatedReportPackageRepository(
         projectionDecisions,
         projectionBindings,
         projectionRuns,
-        reconciliations,
-        reconciliationResolutions,
-        exactRangeObservations,
+        reconciliationGroups,
         channels,
         branches,
       ].find((result) => result.error)?.error;
@@ -282,9 +261,7 @@ export function createAuthenticatedReportPackageRepository(
         projectionDecisions: projectionDecisions.data ?? [],
         projectionBindings: projectionBindings.data ?? [],
         projectionRuns: projectionRuns.data ?? [],
-        reconciliations: reconciliations.data ?? [],
-        reconciliationResolutions: reconciliationResolutions.data ?? [],
-        exactRangeObservations: exactRangeObservations.data ?? [],
+        reconciliationGroups: reconciliationGroups.data ?? [],
         channels: channels.data ?? [],
         branches: branches.data ?? [],
       };
@@ -520,6 +497,29 @@ export function createAuthenticatedReportPackageRepository(
         p_idempotency_key: idempotencyKey,
         p_correlation_id: correlationId,
       });
+      if (error || !data) persistenceFailure(reportOverlapResolutionFailureMessage(error), error);
+      return data;
+    },
+
+    async resolveProjectionOverlapGroup({
+      organizationId,
+      actorId,
+      reconciliationId,
+      resolution,
+      idempotencyKey,
+      correlationId,
+    }) {
+      const { data, error } = await supabase.rpc(
+        "resolve_governed_report_projection_overlap_group",
+        {
+          p_organization_id: organizationId,
+          p_actor_id: actorId,
+          p_reconciliation_id: reconciliationId,
+          p_resolution: resolution,
+          p_idempotency_key: idempotencyKey,
+          p_correlation_id: correlationId,
+        },
+      );
       if (error || !data) persistenceFailure(reportOverlapResolutionFailureMessage(error), error);
       return data;
     },

@@ -328,5 +328,22 @@ export function createReportPackageService(repository: ReportPackageRepository) 
         correlationId: context.correlationId,
       });
     },
+
+    async resolveProjectionOverlapGroup(
+      context: AuthenticatedReportContext,
+      reconciliationId: string,
+      resolution: "accept_correction" | "keep_existing",
+      idempotencyKey: string,
+    ) {
+      assertPermission(context, "report.contract_approve");
+      return repository.resolveProjectionOverlapGroup({
+        organizationId: context.organizationId,
+        actorId: context.actorId,
+        reconciliationId: packageIdSchema.parse(reconciliationId),
+        resolution,
+        idempotencyKey,
+        correlationId: context.correlationId,
+      });
+    },
   };
 }

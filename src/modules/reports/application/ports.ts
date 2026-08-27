@@ -44,27 +44,28 @@ export type ReportProjectionBindingRow =
   Database["public"]["Tables"]["report_projection_bindings"]["Row"];
 export type ReportProjectionRunRow =
   Database["public"]["Tables"]["integration_report_projection_runs"]["Row"];
-export type ReportProjectionReconciliationRow =
-  Database["public"]["Tables"]["report_projection_reconciliations"]["Row"];
-export type ReportProjectionReconciliationResolutionRow =
-  Database["public"]["Tables"]["report_projection_reconciliation_resolutions"]["Row"];
-export type ReportExactRangeObservationSummary = Pick<
-  Database["public"]["Tables"]["exact_range_metric_observations"]["Row"],
-  | "id"
-  | "report_package_id"
-  | "projection_output_key"
-  | "period_start"
-  | "period_end"
-  | "period_timezone"
-  | "currency"
-  | "quality_state"
-  | "completeness_state"
-  | "revision"
-  | "reconciliation_state"
-  | "reconciliation_digest"
-  | "superseded_by_id"
-  | "created_at"
->;
+export type ReportProjectionReconciliationGroup = {
+  representative_reconciliation_id: string;
+  organization_id: string;
+  report_package_id: string;
+  projection_run_id: string;
+  projection_output_key: string;
+  projection_target: "exact_range" | "period_grain";
+  metric_key: string | null;
+  normalized_sheet_name: string | null;
+  canonical_field: string | null;
+  source_header: string | null;
+  affected_record_count: number;
+  matching_record_count: number;
+  affected_dates: string[];
+  affected_dates_truncated: boolean;
+  first_period: string | null;
+  last_period: string | null;
+  prior_upload_count: number;
+  prior_report_type: string | null;
+  prior_period_start: string | null;
+  prior_period_end: string | null;
+};
 export type ReportChannelChoice = Pick<
   Database["public"]["Tables"]["organization_channels"]["Row"],
   "id" | "display_name" | "key" | "status"
@@ -88,9 +89,7 @@ export type ReportPackageSnapshot = {
   projectionDecisions: ReportProjectionDecisionRow[];
   projectionBindings: ReportProjectionBindingRow[];
   projectionRuns: ReportProjectionRunRow[];
-  reconciliations: ReportProjectionReconciliationRow[];
-  reconciliationResolutions: ReportProjectionReconciliationResolutionRow[];
-  exactRangeObservations: ReportExactRangeObservationSummary[];
+  reconciliationGroups: ReportProjectionReconciliationGroup[];
   channels: ReportChannelChoice[];
   branches: ReportBranchChoice[];
 };
@@ -202,6 +201,14 @@ export type ReportPackageRepository = {
     contractVersionId: string;
   }>;
   resolveProjectionOverlap(input: {
+    organizationId: string;
+    actorId: string;
+    reconciliationId: string;
+    resolution: "accept_correction" | "keep_existing";
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<Record<string, unknown>>;
+  resolveProjectionOverlapGroup(input: {
     organizationId: string;
     actorId: string;
     reconciliationId: string;

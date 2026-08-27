@@ -11,7 +11,7 @@ const componentSource = readFileSync(
 describe("ReportPackageUpload client boundary", () => {
   it("does not import the Node-hashed reconciliation module into the browser bundle", () => {
     expect(componentSource).not.toContain('from "@/domain/reports/reconciliation"');
-    expect(componentSource).toContain('from "@/domain/reports/reconciliation-copy"');
+    expect(componentSource).not.toContain('from "@/domain/reports/reconciliation-copy"');
   });
 
   it("names failed projection actions as retries and recognises a failed run", () => {

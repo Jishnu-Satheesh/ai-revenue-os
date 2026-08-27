@@ -269,3 +269,82 @@ describe("loadEvidence", () => {
     });
   });
 });
+
+describe("loadEvidenceWindows", () => {
+  it("reads current projected metrics in gateway-safe batches", async () => {
+    // A complete report can produce hundreds of governed rows. Sending every
+    // UUID in one PostgREST `in` filter exceeds the gateway request-line limit
+    // before RLS or the database can answer it.
+    const metricIds = Array.from({ length: 401 }, (_, index) => `metric-${index}`);
+    const metricBatches: string[][] = [];
+    const supabase = {
+      from(table: string) {
+        let ids: readonly string[] = [];
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          is: () => builder,
+          not: () => builder,
+          in: (_column: string, values: readonly string[]) => {
+            ids = values;
+            return builder;
+          },
+          order: () => builder,
+          limit: () => builder,
+          then: (
+            onFulfilled: (value: QueryResult) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => {
+            const result: QueryResult =
+              table === "integration_report_packages"
+                ? {
+                    data: [
+                      {
+                        id: "package-1",
+                        channel_id: "channel-1",
+                        branch_id: "branch-1",
+                        declared_period_start: "2026-01-01",
+                        declared_period_end: "2026-01-31",
+                        period_timezone: "Asia/Dubai",
+                        original_filename: "January.xlsx",
+                        uploaded_at: "2026-02-01T00:00:00Z",
+                      },
+                    ],
+                    error: null,
+                  }
+                : table === "integration_report_projection_runs"
+                  ? { data: [{ id: "run-1", report_package_id: "package-1" }], error: null }
+                  : table === "report_projection_lineage"
+                    ? {
+                        data: metricIds.map((normalizedMetricId) => ({
+                          normalized_metric_id: normalizedMetricId,
+                          projection_run_id: "run-1",
+                        })),
+                        error: null,
+                      }
+                    : table === "normalized_metrics"
+                      ? (() => {
+                          metricBatches.push([...ids]);
+                          return {
+                            data: ids.map((id) => ({ id, period_grain: "day" })),
+                            error: null,
+                          };
+                        })()
+                      : { data: [], error: null };
+            return Promise.resolve(result).then(onFulfilled, onRejected);
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    const windows = await createAuthenticatedChannelAnalysisRepository(supabase).loadEvidenceWindows({
+      organizationId: "org-1",
+      channelId: "channel-1",
+      limit: 24,
+    });
+
+    expect(metricBatches.map((batch) => batch.length)).toEqual([200, 200, 1]);
+    expect(windows).toMatchObject([{ packageId: "package-1", governedRowCount: 401, grain: "day" }]);
+  });
+});

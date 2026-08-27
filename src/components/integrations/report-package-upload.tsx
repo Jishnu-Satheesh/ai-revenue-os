@@ -6,11 +6,13 @@ import { useMemo, useState } from "react";
 import {
   Banknote,
   Calculator,
+  ChevronDown,
   FileSpreadsheet,
   Lock,
   RotateCcw,
   ScanLine,
   ShieldCheck,
+  TriangleAlert,
   UploadCloud,
   UserCheck,
 } from "lucide-react";
@@ -20,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -35,14 +38,17 @@ import {
 import { currencyOptions } from "@/domain/reference/currencies";
 import { REPORT_PACKAGE_LIMITS, type ReportPackageStatus } from "@/domain/reports/types";
 import { hasReportPermission } from "@/domain/reports/permissions";
-import { getReconciliationNextStep } from "@/domain/reports/reconciliation-copy";
 import {
   explainReportValidationCode,
   parserLabel,
   summarizeReportContract,
 } from "@/domain/reports/validation-copy";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import type { ReportPackageSnapshot, ReportPackageRow } from "@/modules/reports/application/ports";
+import type {
+  ReportPackageSnapshot,
+  ReportPackageRow,
+  ReportProjectionReconciliationGroup,
+} from "@/modules/reports/application/ports";
 
 type UploadIntentResponse = {
   reportPackage: ReportPackageRow;
@@ -50,6 +56,10 @@ type UploadIntentResponse = {
 };
 
 type UploadCompleteResponse = { reportPackage: ReportPackageRow; profilingQueued: boolean };
+
+type ResolveOverlapGroupResponse = {
+  resolution: { outcome?: unknown };
+};
 
 function reportPackagesPath(organizationId: string): string {
   return `/api/organizations/${organizationId}/report-packages`;
@@ -73,6 +83,153 @@ async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T
 
 function operationKey(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`;
+}
+
+function humanizeProjectionKey(key: string): string {
+  const words = key.replaceAll("_", " ");
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+function reconciliationDecisionSubject(group: ReportProjectionReconciliationGroup): string {
+  if (group.metric_key?.startsWith("revenue.") || group.projection_output_key.includes("revenue")) {
+    return "revenue";
+  }
+  return humanizeProjectionKey(group.projection_output_key).toLowerCase();
+}
+
+function formatReportDate(value: string | null): string | null {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00Z`));
+}
+
+function ReconciliationAction({
+  group,
+  canResolve,
+  pending,
+  onResolve,
+}: Readonly<{
+  group: ReportProjectionReconciliationGroup;
+  canResolve: boolean;
+  pending: boolean;
+  onResolve: (input: {
+    reconciliationId: string;
+    resolution: "accept_correction" | "keep_existing";
+  }) => void;
+}>) {
+  const fieldLabel = humanizeProjectionKey(group.projection_output_key);
+  const decisionSubject = reconciliationDecisionSubject(group);
+  const sourceField = group.source_header ?? group.canonical_field ?? "Approved mapped field";
+  const firstPeriod = formatReportDate(group.first_period);
+  const lastPeriod = formatReportDate(group.last_period);
+  const priorStart = formatReportDate(group.prior_period_start);
+  const priorEnd = formatReportDate(group.prior_period_end);
+  const priorUpload =
+    group.prior_upload_count === 1
+      ? `an earlier ${group.prior_report_type ?? "report"} upload`
+      : `${group.prior_upload_count} earlier uploads`;
+
+  return (
+    <Alert
+      role="region"
+      aria-label={`${fieldLabel} overlap`}
+      className="mt-3 border-warning/40 bg-warning/5 px-3 py-3"
+    >
+      <TriangleAlert aria-hidden="true" className="text-warning" />
+      <AlertTitle>
+        {group.affected_record_count} daily {fieldLabel} record
+        {group.affected_record_count === 1 ? "" : "s"} need a decision
+      </AlertTitle>
+      <AlertDescription className="mt-2 grid gap-3 text-pretty">
+        <p>
+          This upload and {priorUpload} both contain {fieldLabel.toLowerCase()} for the same{" "}
+          {group.affected_record_count} day{group.affected_record_count === 1 ? "" : "s"}. Choose
+          which upload Analysis should use for those dates.
+        </p>
+        <dl className="grid gap-2 rounded-md border bg-background/80 p-3 sm:grid-cols-3">
+          <div>
+            <dt className="text-xs font-medium text-foreground">Source field: {sourceField}</dt>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-foreground">Affected dates</dt>
+            <dd className="mt-0.5 text-xs">
+              {firstPeriod && lastPeriod ? `${firstPeriod} – ${lastPeriod}` : "Dates unavailable"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-foreground">Earlier upload period</dt>
+            <dd className="mt-0.5 text-xs">
+              {priorStart && priorEnd ? `${priorStart} – ${priorEnd}` : "Period unavailable"}
+            </dd>
+          </div>
+        </dl>
+        {group.affected_dates.length > 0 ? (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="h-auto w-fit px-0">
+                <ChevronDown data-icon="inline-start" /> View affected dates
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <p className="rounded-md bg-muted/60 p-2 text-xs">
+                {group.affected_dates.map((date) => formatReportDate(date)).join(" · ")}
+                {group.affected_dates_truncated ? " · More dates are retained in the ledger." : ""}
+              </p>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
+        {canResolve ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 rounded-md border bg-background p-3">
+              <p className="text-xs">
+                Replaces {group.matching_record_count} existing record
+                {group.matching_record_count === 1 ? "" : "s"}. Their history stays available.
+              </p>
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() =>
+                  onResolve({
+                    reconciliationId: group.representative_reconciliation_id,
+                    resolution: "accept_correction",
+                  })
+                }
+              >
+                Use this upload&apos;s {decisionSubject}
+              </Button>
+            </div>
+            <div className="grid gap-2 rounded-md border bg-background p-3">
+              <p className="text-xs">
+                Keeps the existing records. These {group.affected_record_count} incoming records
+                stay out of Analysis.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() =>
+                  onResolve({
+                    reconciliationId: group.representative_reconciliation_id,
+                    resolution: "keep_existing",
+                  })
+                }
+              >
+                Keep existing {decisionSubject}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs font-medium text-foreground">
+            An organization owner or admin must choose which upload Analysis should use.
+          </p>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
 }
 
 function stateLabel(status: ReportPackageStatus): string {
@@ -198,9 +355,7 @@ function toSnapshotView(data: ReportPackageSnapshot | undefined): ReportPackageS
     projectionDecisions: list("projectionDecisions"),
     projectionBindings: list("projectionBindings"),
     projectionRuns: list("projectionRuns"),
-    reconciliations: list("reconciliations"),
-    reconciliationResolutions: list("reconciliationResolutions"),
-    exactRangeObservations: list("exactRangeObservations"),
+    reconciliationGroups: list("reconciliationGroups"),
     channels: list("channels"),
     branches: list("branches"),
   };
@@ -516,31 +671,36 @@ export function ReportPackageUpload({
       ),
   });
 
-  const resolveOverlap = useMutation({
-    mutationFn: ({
+  const resolveOverlapGroup = useMutation({
+    mutationFn: async ({
       reconciliationId,
       resolution,
     }: {
       reconciliationId: string;
       resolution: "accept_correction" | "keep_existing";
-    }) =>
-      requestJson(
-        `/api/organizations/${organizationId}/report-reconciliations/${reconciliationId}/resolve`,
+    }) => {
+      const response = await requestJson<ResolveOverlapGroupResponse>(
+        `/api/organizations/${organizationId}/report-reconciliations/${reconciliationId}/resolve-group`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             resolution,
-            idempotencyKey: operationKey("report-overlap-resolution"),
+            idempotencyKey: operationKey("report-overlap-group-resolution"),
           }),
         },
-      ),
+      );
+      if (response.resolution.outcome !== "resolved" && response.resolution.outcome !== "completed") {
+        throw new Error("This field was already resolved differently. Refresh to see the recorded choice.");
+      }
+      return response;
+    },
     onSuccess: () => {
-      toast.success("Overlap resolution recorded. Historical evidence remains available.");
+      toast.success("The field decision was recorded. Historical evidence remains available.");
       invalidate();
     },
     onError: (error) =>
-      toast.error(error instanceof Error ? error.message : "Overlap resolution failed."),
+      toast.error(error instanceof Error ? error.message : "The field decision could not be saved."),
   });
 
   return (
@@ -707,12 +867,18 @@ export function ReportPackageUpload({
                 reportPackage.status === "validated" ||
                 reportPackage.status === "partially_validated" ||
                 projectionFailed;
-              const reconciliations = view.reconciliations.filter(
-                (item) => item.report_package_id === reportPackage.id,
+              const reconciliationGroups = view.reconciliationGroups.filter(
+                (group) => group.report_package_id === reportPackage.id,
               );
-              const exactRangeObservations = view.exactRangeObservations.filter(
-                (item) => item.report_package_id === reportPackage.id,
+              const affectedRecordCount = reconciliationGroups.reduce(
+                (total, group) => total + group.affected_record_count,
+                0,
               );
+              const readyRecordCount = Math.max(
+                0,
+                (latestProjection?.output_count ?? 0) - affectedRecordCount,
+              );
+              const absentRowCount = latestProjection?.absent_row_count ?? 0;
               return (
                 <div key={reportPackage.id} className="rounded-lg border p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -778,6 +944,15 @@ export function ReportPackageUpload({
                       ) : null}
                     </div>
                   </div>
+                  {reconciliationGroups.map((group) => (
+                    <ReconciliationAction
+                      key={`${group.projection_run_id}:${group.projection_output_key}`}
+                      group={group}
+                      canResolve={canApproveContract}
+                      pending={resolveOverlapGroup.isPending}
+                      onResolve={(input) => resolveOverlapGroup.mutate(input)}
+                    />
+                  ))}
                   {latestValidation ? (
                     <div className="mt-2 space-y-2">
                       <p className="text-xs text-muted-foreground">
@@ -844,12 +1019,14 @@ export function ReportPackageUpload({
                       checks.
                     </p>
                   ) : null}
-                  {latestProjection ? (
+                  {latestProjection && typeof latestProjection.output_count === "number" ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Projection {latestProjection.status.replaceAll("_", " ")} ·{" "}
-                      {latestProjection.output_count} aggregate output(s)
-                      {latestProjection.result_digest
-                        ? ` · evidence ${latestProjection.result_digest.slice(0, 12)}…`
+                      {latestProjection.output_count} records checked
+                      {affectedRecordCount > 0
+                        ? ` · ${readyRecordCount} ready for Analysis · ${affectedRecordCount} need review`
+                        : ""}
+                      {absentRowCount > 0
+                        ? ` · ${absentRowCount} source rows had no reported value and stayed missing`
                         : ""}
                     </p>
                   ) : reportPackage.status === "awaiting_projection" ? (
@@ -858,85 +1035,6 @@ export function ReportPackageUpload({
                       this rollout is enabled.
                     </p>
                   ) : null}
-                  {exactRangeObservations.map((observation) => (
-                    <div
-                      key={observation.id}
-                      className="mt-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground"
-                    >
-                      <p>
-                        {observation.reconciliation_state === "current"
-                          ? "Current exact-range evidence"
-                          : observation.reconciliation_state === "superseded"
-                            ? "Superseded history"
-                            : observation.reconciliation_state === "blocked_overlap"
-                              ? "Held outside the current rollup"
-                              : "Excluded from the current rollup"}
-                        {" · "}
-                        {observation.projection_output_key.replaceAll("_", " ")} · revision{" "}
-                        {observation.revision}
-                      </p>
-                      <p className="mt-1">
-                        {observation.period_start} to {observation.period_end} ·{" "}
-                        {observation.period_timezone}
-                        {observation.currency ? ` · ${observation.currency}` : ""}
-                        {observation.reconciliation_digest
-                          ? ` · evidence ${observation.reconciliation_digest.slice(0, 12)}…`
-                          : ""}
-                      </p>
-                    </div>
-                  ))}
-                  {reconciliations.map((reconciliation) => {
-                    const resolved =
-                      view.reconciliationResolutions.some(
-                        (item) => item.reconciliation_id === reconciliation.id,
-                      ) ?? false;
-                    const needsReview =
-                      reconciliation.classification === "ambiguous_overlap" && !resolved;
-                    return (
-                      <div
-                        key={reconciliation.id}
-                        className="mt-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground"
-                      >
-                        <p>
-                          Evidence {reconciliation.reconciliation_digest.slice(0, 12)}… ·{" "}
-                          {reconciliation.classification.replaceAll("_", " ")} ·{" "}
-                          {reconciliation.candidate_count} matching record(s)
-                        </p>
-                        <p className="mt-1">
-                          {getReconciliationNextStep(reconciliation.classification, resolved)}
-                        </p>
-                        {needsReview && canApproveContract ? (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              disabled={resolveOverlap.isPending}
-                              onClick={() =>
-                                resolveOverlap.mutate({
-                                  reconciliationId: reconciliation.id,
-                                  resolution: "accept_correction",
-                                })
-                              }
-                            >
-                              Accept correction
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={resolveOverlap.isPending}
-                              onClick={() =>
-                                resolveOverlap.mutate({
-                                  reconciliationId: reconciliation.id,
-                                  resolution: "keep_existing",
-                                })
-                              }
-                            >
-                              Keep current evidence
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
                 </div>
               );
             })

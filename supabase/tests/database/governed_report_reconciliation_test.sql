@@ -2,16 +2,20 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(46);
+select extensions.plan(67);
 
 select extensions.has_table('public', 'report_projection_reconciliations', 'reconciliation evidence is retained separately from workbook data');
 select extensions.has_function('public', 'resolve_governed_report_projection_overlap', 'owner/admin overlap resolution is database-owned');
+select extensions.has_function('public', 'list_governed_report_projection_reconciliation_groups', 'the client reads grouped unresolved overlap actions');
+select extensions.has_function('public', 'resolve_governed_report_projection_overlap_group', 'one owner decision resolves a safe overlap group atomically');
 select extensions.ok((select relrowsecurity from pg_catalog.pg_class where oid = 'public.report_projection_reconciliations'::regclass), 'reconciliation evidence enforces RLS');
 select extensions.ok((select relforcerowsecurity from pg_catalog.pg_class where oid = 'public.report_projection_reconciliations'::regclass), 'reconciliation evidence forces RLS');
 select extensions.ok(not pg_catalog.has_table_privilege('authenticated', 'public.report_projection_reconciliations', 'insert'), 'members cannot write reconciliation evidence directly');
 select extensions.ok(not pg_catalog.has_function_privilege('authenticated', 'public.complete_governed_report_package_projection(uuid,uuid,uuid,uuid,text,jsonb,jsonb)', 'execute'), 'members cannot complete projection evidence');
 select extensions.ok(pg_catalog.has_function_privilege('service_role', 'public.complete_governed_report_package_projection(uuid,uuid,uuid,uuid,text,jsonb,jsonb)', 'execute'), 'service workers retain the fenced projection completion path');
 select extensions.ok(not pg_catalog.has_function_privilege('anon', 'public.resolve_governed_report_projection_overlap(uuid,uuid,uuid,text,text,uuid)', 'execute'), 'anonymous callers cannot resolve overlaps');
+select extensions.ok(not pg_catalog.has_function_privilege('anon', 'public.list_governed_report_projection_reconciliation_groups(uuid)', 'execute'), 'anonymous callers cannot list grouped overlap actions');
+select extensions.ok(not pg_catalog.has_function_privilege('anon', 'public.resolve_governed_report_projection_overlap_group(uuid,uuid,uuid,text,text,uuid)', 'execute'), 'anonymous callers cannot resolve grouped overlaps');
 
 insert into auth.users (id) values
   ('f3000000-0000-4000-8000-000000000001'::uuid),
@@ -65,7 +69,7 @@ insert into public.report_contract_versions (
 ) values (
   'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000701'::uuid,
   'f3000000-0000-4000-8000-000000000501'::uuid, 1, repeat('b', 64), 1, 1,
-  '{"schemaVersion":1,"currency":"AED","outletGrain":"branch","sheets":[],"controls":[],"unmappedFieldDisposition":"reviewed_ignore"}'::jsonb,
+  '{"schemaVersion":1,"currency":"AED","outletGrain":"branch","sheets":[{"normalizedSheetName":"csv","headerRow":1,"dataStartRow":2,"allowFormula":false,"allowMergedCells":false,"fields":[{"canonicalField":"net_sales","sourceHeader":"gross_sales","parser":"money","required":true,"financialSign":"positive"},{"canonicalField":"orders","sourceHeader":"orders","parser":"integer","required":true}]}],"controls":[],"unmappedFieldDisposition":"reviewed_ignore"}'::jsonb,
   repeat('c', 64), 'AED', '[]'::jsonb, '[]'::jsonb, 'reviewed_ignore', 'human', 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000606'::uuid
 );
 insert into public.report_contract_decisions (organization_id, report_contract_version_id, decision, mapping_digest, decided_by, correlation_id)
@@ -74,7 +78,7 @@ insert into public.report_contract_bindings (id, organization_id, report_contrac
 values ('f3000000-0000-4000-8000-000000000703'::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000701'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 'f3000000-0000-4000-8000-000000000401'::uuid, 'Settlement', repeat('b', 64), 'AED', 'branch', 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000608'::uuid);
 insert into public.report_projection_versions (id, organization_id, report_contract_version_id, version, projection_document, projection_digest, calculation_version, proposal_source, created_by, correlation_id)
 values ('f3000000-0000-4000-8000-000000000704'::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid, 1,
-  '{"schemaVersion":1,"outputs":[{"key":"gross_revenue","metricKey":"revenue.gross","valueKind":"money","normalizedSheetName":"csv","canonicalField":"net_sales"}]}'::jsonb,
+  '{"schemaVersion":1,"outputKind":"exact_range","outputs":[{"key":"gross_revenue","metricKey":"revenue.gross","valueKind":"money","aggregation":"sum","normalizedSheetName":"csv","canonicalField":"net_sales"},{"key":"orders","metricKey":"transactions.count","valueKind":"count","aggregation":"sum","normalizedSheetName":"csv","canonicalField":"orders"}],"controlTotals":[]}'::jsonb,
   repeat('d', 64), 1, 'human', 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000609'::uuid);
 insert into public.report_projection_decisions (organization_id, report_projection_version_id, decision, projection_digest, decided_by, correlation_id)
 values ('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000704'::uuid, 'approved', repeat('d', 64), 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000610'::uuid);
@@ -135,17 +139,99 @@ select extensions.is((select reconciliation_state from public.exact_range_metric
 select extensions.is((select classification from public.report_projection_reconciliations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid), 'ambiguous_overlap', 'ambiguous overlap requires owner or admin resolution');
 select extensions.ok(exists (select 1 from public.audit_events where event_name = 'report_projection.overlap_blocked' and organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 'blocked overlap emits immutable audit evidence');
 reset role;
-select extensions.throws_ok($$ select public.resolve_governed_report_projection_overlap('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, (select id from public.report_projection_reconciliations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid), 'accept_correction', 'reconciliation-resolution-0001', 'f3000000-0000-4000-8000-000000000641'::uuid) $$, '42501', 'report overlap resolution is not authorized', 'unauthenticated callers cannot resolve overlap');
+
+-- Two independent daily corrections for one approved output reproduce the
+-- real client case: the person chooses which upload governs the field once,
+-- while the ledger retains one immutable decision per affected day.
+insert into public.normalized_metrics (
+  id, organization_id, branch_id, metric_definition_id, value_kind, channel, channel_id,
+  dimensions, period_grain, period_start, period_end, period_timezone, value_numerator,
+  quality_tier, revision, reconciliation_state, reconciliation_digest, observed_at
+)
+select metric_id::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid,
+  'f3000000-0000-4000-8000-000000000301'::uuid,
+  (select id from public.metric_definitions where key = 'transactions.count' and organization_id is null),
+  'count', 'reconciliation-channel', 'f3000000-0000-4000-8000-000000000401'::uuid,
+  '{}'::jsonb, 'day', period_start, period_start + interval '1 day', 'Asia/Dubai', metric_value,
+  'measured', revision, reconciliation_state, reconciliation_digest, period_start
+from (values
+  ('f3000000-0000-4000-8000-000000000b01', timestamptz '2026-08-01 00:00:00+04', 10, 1, 'current', repeat('1', 64)),
+  ('f3000000-0000-4000-8000-000000000b11', timestamptz '2026-08-01 00:00:00+04', 11, 2, 'blocked_overlap', repeat('2', 64)),
+  ('f3000000-0000-4000-8000-000000000b02', timestamptz '2026-08-02 00:00:00+04', 12, 1, 'current', repeat('3', 64)),
+  ('f3000000-0000-4000-8000-000000000b12', timestamptz '2026-08-02 00:00:00+04', 13, 2, 'blocked_overlap', repeat('4', 64)),
+  ('f3000000-0000-4000-8000-000000000b13', timestamptz '2026-08-03 00:00:00+04', 14, 1, 'current', repeat('b', 64))
+) as metrics(metric_id, period_start, metric_value, revision, reconciliation_state, reconciliation_digest);
+
+insert into public.report_projection_lineage (
+  organization_id, normalized_metric_id, report_package_id, validation_run_id, projection_run_id,
+  report_contract_version_id, report_projection_version_id, normalized_sheet_name, canonical_field,
+  source_column_ordinal, contributor_count, calculation_version, source_digest,
+  quality_state, completeness_state
+)
+select 'f3000000-0000-4000-8000-000000000201'::uuid, metric_id::uuid, package_id::uuid,
+  validation_run_id::uuid, projection_run_id::uuid, 'f3000000-0000-4000-8000-000000000702'::uuid,
+  'f3000000-0000-4000-8000-000000000704'::uuid, 'csv', 'orders', 2, 1, 1,
+  source_digest, 'complete', 'complete'
+from (values
+  ('f3000000-0000-4000-8000-000000000b01', 'f3000000-0000-4000-8000-000000000501', 'f3000000-0000-4000-8000-000000000801', 'f3000000-0000-4000-8000-000000000901', repeat('5', 64)),
+  ('f3000000-0000-4000-8000-000000000b02', 'f3000000-0000-4000-8000-000000000501', 'f3000000-0000-4000-8000-000000000801', 'f3000000-0000-4000-8000-000000000901', repeat('6', 64)),
+  ('f3000000-0000-4000-8000-000000000b11', 'f3000000-0000-4000-8000-000000000504', 'f3000000-0000-4000-8000-000000000804', 'f3000000-0000-4000-8000-000000000904', repeat('7', 64)),
+  ('f3000000-0000-4000-8000-000000000b12', 'f3000000-0000-4000-8000-000000000504', 'f3000000-0000-4000-8000-000000000804', 'f3000000-0000-4000-8000-000000000904', repeat('8', 64)),
+  ('f3000000-0000-4000-8000-000000000b13', 'f3000000-0000-4000-8000-000000000504', 'f3000000-0000-4000-8000-000000000804', 'f3000000-0000-4000-8000-000000000904', repeat('b', 64))
+) as lineage(metric_id, package_id, validation_run_id, projection_run_id, source_digest);
+
+insert into public.report_projection_reconciliations (
+  id, organization_id, report_package_id, projection_run_id, projection_output_key,
+  projection_target, period_start, period_end, classification, reconciliation_digest,
+  prior_normalized_metric_id, result_normalized_metric_id, candidate_count,
+  quality_state, completeness_state, calculation_version, correlation_id
+)
+values
+  ('f3000000-0000-4000-8000-000000000c01'::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid,
+   'f3000000-0000-4000-8000-000000000504'::uuid, 'f3000000-0000-4000-8000-000000000904'::uuid,
+   'orders', 'period_grain', date '2026-08-01', date '2026-08-01', 'ambiguous_overlap', repeat('9', 64),
+   'f3000000-0000-4000-8000-000000000b01'::uuid, 'f3000000-0000-4000-8000-000000000b11'::uuid,
+   1, 'complete', 'complete', 1, 'f3000000-0000-4000-8000-000000000651'::uuid),
+  ('f3000000-0000-4000-8000-000000000c02'::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid,
+   'f3000000-0000-4000-8000-000000000504'::uuid, 'f3000000-0000-4000-8000-000000000904'::uuid,
+   'orders', 'period_grain', date '2026-08-02', date '2026-08-02', 'ambiguous_overlap', repeat('a', 64),
+   'f3000000-0000-4000-8000-000000000b02'::uuid, 'f3000000-0000-4000-8000-000000000b12'::uuid,
+   1, 'complete', 'complete', 1, 'f3000000-0000-4000-8000-000000000652'::uuid),
+  ('f3000000-0000-4000-8000-000000000c03'::uuid, 'f3000000-0000-4000-8000-000000000201'::uuid,
+   'f3000000-0000-4000-8000-000000000504'::uuid, 'f3000000-0000-4000-8000-000000000904'::uuid,
+   'orders', 'period_grain', date '2026-08-03', date '2026-08-03', 'non_overlapping', repeat('b', 64),
+   null, 'f3000000-0000-4000-8000-000000000b13'::uuid,
+   0, 'complete', 'complete', 1, 'f3000000-0000-4000-8000-000000000656'::uuid);
+
+select extensions.throws_ok($$ select public.resolve_governed_report_projection_overlap('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, (select id from public.report_projection_reconciliations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid and projection_output_key = 'gross_revenue'), 'accept_correction', 'reconciliation-resolution-0001', 'f3000000-0000-4000-8000-000000000641'::uuid) $$, '42501', 'report overlap resolution is not authorized', 'unauthenticated callers cannot resolve overlap');
+select extensions.throws_ok($$ select public.resolve_governed_report_projection_overlap_group('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000c01'::uuid, 'accept_correction', 'reconciliation-group-resolution-0001', 'f3000000-0000-4000-8000-000000000653'::uuid) $$, '42501', 'report overlap resolution is not authorized', 'unauthenticated callers cannot resolve an overlap group');
 set local role authenticated;
 set local request.jwt.claim.sub = 'f3000000-0000-4000-8000-000000000001';
-select extensions.lives_ok($$ select public.resolve_governed_report_projection_overlap('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, (select id from public.report_projection_reconciliations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid), 'accept_correction', 'reconciliation-resolution-0001', 'f3000000-0000-4000-8000-000000000642'::uuid) $$, 'owner can accept an approved correction');
+select extensions.is((select affected_record_count from public.list_governed_report_projection_reconciliation_groups('f3000000-0000-4000-8000-000000000201'::uuid) where projection_output_key = 'orders'), 2, 'the action list groups two affected daily records under one field');
+select extensions.is((select matching_record_count from public.list_governed_report_projection_reconciliation_groups('f3000000-0000-4000-8000-000000000201'::uuid) where projection_output_key = 'orders'), 2, 'the grouped action counts the two existing records it would replace');
+select extensions.is((select source_header from public.list_governed_report_projection_reconciliation_groups('f3000000-0000-4000-8000-000000000201'::uuid) where projection_output_key = 'orders'), 'orders', 'the grouped action names the approved source field instead of an evidence id');
+select extensions.is((select count(*)::integer from public.list_governed_report_projection_reconciliation_groups('f3000000-0000-4000-8000-000000000201'::uuid) where projection_output_key = 'gross_revenue' and affected_record_count = 1), 1, 'only unresolved ambiguous evidence becomes an action; non-overlap history stays hidden');
+savepoint keep_existing_group;
+select extensions.is((public.resolve_governed_report_projection_overlap_group('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000c01'::uuid, 'keep_existing', 'reconciliation-group-resolution-keep-existing', 'f3000000-0000-4000-8000-000000000657'::uuid) ->> 'resolvedCount'), '2', 'keeping existing evidence resolves both daily conflicts atomically');
+select extensions.is((select count(*)::integer from public.normalized_metrics where id in ('f3000000-0000-4000-8000-000000000b11'::uuid, 'f3000000-0000-4000-8000-000000000b12'::uuid) and reconciliation_state = 'excluded'), 2, 'keeping existing evidence excludes only the two incoming conflicting records');
+select extensions.is((select reconciliation_state from public.normalized_metrics where id = 'f3000000-0000-4000-8000-000000000b13'::uuid), 'current', 'keeping existing evidence leaves a same-field non-overlap record untouched');
+rollback to savepoint keep_existing_group;
+select extensions.is((public.resolve_governed_report_projection_overlap_group('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000c01'::uuid, 'accept_correction', 'reconciliation-group-resolution-0001', 'f3000000-0000-4000-8000-000000000654'::uuid) ->> 'resolvedCount'), '2', 'one owner choice resolves both daily conflicts atomically');
+select extensions.is((select count(*)::integer from public.report_projection_reconciliation_resolutions where reconciliation_id in ('f3000000-0000-4000-8000-000000000c01'::uuid, 'f3000000-0000-4000-8000-000000000c02'::uuid)), 2, 'the grouped choice retains one immutable resolution per affected day');
+select extensions.is((select count(*)::integer from public.normalized_metrics where id in ('f3000000-0000-4000-8000-000000000b11'::uuid, 'f3000000-0000-4000-8000-000000000b12'::uuid) and reconciliation_state = 'current'), 2, 'accepting the grouped correction promotes both incoming daily records');
+select extensions.is((select count(*)::integer from public.normalized_metrics where id in ('f3000000-0000-4000-8000-000000000b01'::uuid, 'f3000000-0000-4000-8000-000000000b02'::uuid) and superseded_by_id is not null), 2, 'accepting the grouped correction retains both prior records as superseded history');
+select extensions.is((select reconciliation_state from public.normalized_metrics where id = 'f3000000-0000-4000-8000-000000000b13'::uuid), 'current', 'the grouped choice leaves a same-field non-overlap record untouched');
+select extensions.ok(exists (select 1 from public.audit_events where event_name = 'report_projection.overlap_group_resolved' and organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 'the single grouped user decision emits its own audit event');
+select extensions.is((public.resolve_governed_report_projection_overlap_group('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000c01'::uuid, 'accept_correction', 'reconciliation-group-resolution-0001', 'f3000000-0000-4000-8000-000000000655'::uuid) ->> 'outcome'), 'completed', 'a grouped decision safely replays after every member is resolved');
+select extensions.is((public.resolve_governed_report_projection_overlap_group('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, 'f3000000-0000-4000-8000-000000000c01'::uuid, 'keep_existing', 'reconciliation-group-resolution-conflict', 'f3000000-0000-4000-8000-000000000658'::uuid) ->> 'outcome'), 'conflict', 'an opposite choice never masquerades as a successful idempotent replay');
+select extensions.lives_ok($$ select public.resolve_governed_report_projection_overlap('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, (select id from public.report_projection_reconciliations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid and projection_output_key = 'gross_revenue'), 'accept_correction', 'reconciliation-resolution-0001', 'f3000000-0000-4000-8000-000000000642'::uuid) $$, 'owner can accept an approved correction');
 select extensions.ok(exists (select 1 from public.exact_range_metric_observations where report_package_id = 'f3000000-0000-4000-8000-000000000501'::uuid and reconciliation_state = 'superseded'), 'prior revision remains readable as superseded history');
 select extensions.is((select revision from public.exact_range_metric_observations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid), 2, 'accepted correction creates a new observation revision');
-select extensions.is((select outcome_classification from public.report_projection_reconciliation_resolutions r join public.report_projection_reconciliations c on c.id = r.reconciliation_id where c.report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid), 'approved_correction', 'resolution records approved correction classification');
+select extensions.is((select outcome_classification from public.report_projection_reconciliation_resolutions r join public.report_projection_reconciliations c on c.id = r.reconciliation_id where c.report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid and c.projection_output_key = 'gross_revenue'), 'approved_correction', 'resolution records approved correction classification');
 select extensions.ok(exists (select 1 from public.audit_events where event_name = 'report_projection.correction_accepted' and organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 'accepted correction emits immutable audit evidence');
 select extensions.ok(exists (select 1 from public.audit_events where event_name = 'exact_range_metric_observation.superseded' and organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 'supersession emits immutable audit evidence');
 select extensions.ok(exists (select 1 from public.audit_events where event_name = 'report_projection.overlap_resolved' and organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 'overlap resolution emits immutable audit evidence');
-select extensions.is((public.resolve_governed_report_projection_overlap('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, (select id from public.report_projection_reconciliations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid), 'accept_correction', 'reconciliation-resolution-0001', 'f3000000-0000-4000-8000-000000000643'::uuid) ->> 'outcome'), 'completed', 'resolution retry safely replays the append-only outcome');
+select extensions.is((public.resolve_governed_report_projection_overlap('f3000000-0000-4000-8000-000000000201'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid, (select id from public.report_projection_reconciliations where report_package_id = 'f3000000-0000-4000-8000-000000000504'::uuid and projection_output_key = 'gross_revenue'), 'accept_correction', 'reconciliation-resolution-0001', 'f3000000-0000-4000-8000-000000000643'::uuid) ->> 'outcome'), 'completed', 'resolution retry safely replays the append-only outcome');
 select extensions.is((select count(*)::integer from public.report_projection_reconciliations r where r.organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid and to_jsonb(r)::text like '%1300%'), 0, 'reconciliation evidence does not persist raw aggregate values');
 select extensions.ok(not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name in ('report_projection_reconciliations', 'report_projection_reconciliation_resolutions') and column_name in ('value_numerator', 'raw_row', 'raw_cell', 'formula', 'signed_url', 'prompt', 'model_output', 'original_filename')), 'reconciliation tables contain safe evidence fields only');
 set local role service_role;
@@ -164,9 +250,10 @@ select extensions.is((select status from public.integration_report_packages wher
 reset role;
 set local role authenticated;
 set local request.jwt.claim.sub = 'f3000000-0000-4000-8000-000000000001';
-select extensions.is((select count(*)::integer from public.report_projection_reconciliations where organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 4, 'authorized owner can read safe reconciliation history');
+select extensions.is((select count(*)::integer from public.report_projection_reconciliations where organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 7, 'authorized owner can read safe reconciliation history');
 set local request.jwt.claim.sub = 'f3000000-0000-4000-8000-000000000002';
 select extensions.is((select count(*)::integer from public.report_projection_reconciliations where organization_id = 'f3000000-0000-4000-8000-000000000201'::uuid), 0, 'unrelated tenant user cannot read reconciliation evidence');
+select extensions.is((select count(*)::integer from public.list_governed_report_projection_reconciliation_groups('f3000000-0000-4000-8000-000000000201'::uuid)), 0, 'unrelated tenant user cannot read grouped reconciliation actions');
 
 select * from extensions.finish();
 

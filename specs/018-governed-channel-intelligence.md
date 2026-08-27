@@ -102,7 +102,11 @@ computes the business results.
 - A matching package context and reconciliation digest replays as `exact_duplicate`: it records safe audit evidence but creates neither a second observation nor another lineage row. A non-overlapping exact range remains independently current.
 - A changed digest for an intersecting active exact range becomes `ambiguous_overlap`. Its observation is retained as `blocked_overlap`, does not enter the current rollup, and moves the package to `reconciliation_required` until an owner/admin resolves it.
 - Accepting an approved correction makes the candidate the next observation revision and marks the prior current observation `superseded`; keeping existing evidence marks the candidate `excluded`. Both preserve readable history and write only identifiers, digests, counts, states, versions, and timestamps to reconciliation evidence.
-- The Integration Hub shows current exact-range evidence, superseded history, duplicate replay, blocked overlap, and the next safe owner/admin step. It does not show workbook rows, cells, aggregate values, formulas, URLs, prompts, model output, or calculations.
+- The immutable ledger retains current evidence, superseded history, duplicate replay, and every
+  overlap row. The Integration Hub does not turn that audit trail into a client task list: it shows
+  only unresolved ambiguous overlaps, grouped by projected field, and names the approved source
+  field, earlier upload, affected dates, and consequence of each owner/admin choice. Non-overlap,
+  duplicate, resolved, and technical evidence identifiers remain off this action surface.
 - This remains a deterministic control slice only: it does not infer calendar grains, prorate, sum overlaps, write Channel Economics, run detectors, make benchmarks/recommendations, narrate with AI, or trigger provider/campaign actions.
 
 ### 4.1.5 Planned operator-usable ingestion slice
@@ -220,6 +224,14 @@ no AI narration, no provider or campaign actions, no OCR, and no model-read valu
   absent source rows. Twenty observations overlap prior governed evidence and remain
   `blocked_overlap`; 633 are current, so the package truthfully finishes
   `reconciliation_required` rather than pretending the overlap is resolved.
+- The Integration Hub now presents those twenty held observations as one gross-revenue decision at
+  the top of the package card. It identifies the approved `gross_sales` source field, the earlier
+  Performance upload, and the affected range from 2026-01-01 through 2026-02-15. The 633
+  non-overlapping rows and all technical evidence identifiers stay in the audit ledger rather than
+  filling the user-facing page. One owner/admin choice resolves all twenty dates atomically.
+- A replay is successful only when it repeats the same field-level decision. A contrary choice
+  returns a conflict and the UI asks the operator to refresh, so an immutable first decision is
+  never misrepresented as a later successful change.
 - The recommendation storage, same-run citation fence, append-only human decision log,
   helpful/not-helpful vote, second narration worker, and advisory forty-eight-hour judge are
   implemented. Production worker environment contains both recommendation model keys.
@@ -683,6 +695,11 @@ untrusted rather than silently displayed as verified.
   `excluded`, because a supersession pointer cannot cross tables. Held evidence carries
   `reconciliation_state = 'blocked_overlap'` in whichever ledger it landed in and is excluded from
   every current read. See ADR 0030.
+- The operator resolves one package/run/output group, not one ledger row at a time. Postgres locks
+  the complete group and applies the choice in one transaction; either every affected observation
+  changes state and receives an immutable resolution record, or none does. The tenant-scoped read
+  model lists only unresolved `ambiguous_overlap` groups from the thirty recent packages and caps
+  the action list at fifty groups.
 
 ## 11. Detector and analysis catalogue
 

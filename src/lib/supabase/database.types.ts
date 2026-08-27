@@ -2095,6 +2095,44 @@ export type Database = {
         };
         Returns: Record<string, unknown> | null;
       };
+      list_governed_report_projection_reconciliation_groups: {
+        Args: {
+          p_organization_id: string;
+        };
+        Returns: Array<{
+          representative_reconciliation_id: string;
+          organization_id: string;
+          report_package_id: string;
+          projection_run_id: string;
+          projection_output_key: string;
+          projection_target: "exact_range" | "period_grain";
+          metric_key: string | null;
+          normalized_sheet_name: string | null;
+          canonical_field: string | null;
+          source_header: string | null;
+          affected_record_count: number;
+          matching_record_count: number;
+          affected_dates: string[];
+          affected_dates_truncated: boolean;
+          first_period: string | null;
+          last_period: string | null;
+          prior_upload_count: number;
+          prior_report_type: string | null;
+          prior_period_start: string | null;
+          prior_period_end: string | null;
+        }>;
+      };
+      resolve_governed_report_projection_overlap_group: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_reconciliation_id: string;
+          p_resolution: "accept_correction" | "keep_existing";
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
       create_organization_with_owner: {
         Args: {
           input_name: string;

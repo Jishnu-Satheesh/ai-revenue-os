@@ -251,21 +251,29 @@ export function createAuthenticatedChannelAnalysisRepository(
       }
       if (runByMetricId.size === 0) return [];
 
-      const { data: metrics, error: metricError } = await supabase
-        .from("normalized_metrics")
-        .select("id, period_grain")
-        .eq("organization_id", organizationId)
-        .in("id", [...runByMetricId.keys()])
-        .eq("reconciliation_state", "current")
-        .is("superseded_by_id", null)
-        .limit(MAX_LINEAGE);
-      if (metricError) throw new ChannelAnalysisReadError(metricError.code ?? "unknown");
+      const metrics: { id: string; period_grain: string }[] = [];
+      const metricIds = [...runByMetricId.keys()];
+      for (let offset = 0; offset < metricIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
+        const batch = metricIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
+        const { data, error: metricError } = await supabase
+          .from("normalized_metrics")
+          .select("id, period_grain")
+          .eq("organization_id", organizationId)
+          .in("id", batch)
+          .eq("reconciliation_state", "current")
+          .is("superseded_by_id", null)
+          .limit(EVIDENCE_METRIC_BATCH_SIZE + 1);
+        if (metricError) throw new ChannelAnalysisReadError(metricError.code ?? "unknown");
+        if ((data ?? []).length > batch.length)
+          throw new ChannelAnalysisReadError("EVIDENCE_DETAIL_NOT_BOUNDED");
+        metrics.push(...(data ?? []));
+      }
 
       // One package can only be offered at the grain its projection wrote. Two
       // grains from one package would be two windows an operator cannot tell
       // apart, so the grain with the most current rows is the one offered.
       const grainCounts = new Map<string, Map<string, number>>();
-      for (const row of metrics ?? []) {
+      for (const row of metrics) {
         const runId = runByMetricId.get(row.id);
         const packageId = runId ? packageByRun.get(runId) : undefined;
         if (!packageId) continue;

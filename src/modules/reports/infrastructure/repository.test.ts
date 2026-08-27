@@ -121,4 +121,33 @@ describe("report package repository", () => {
       }),
     ).rejects.toThrow("You do not have permission to resolve this overlap. Ask an organization owner or admin to review it.");
   });
+
+  it("sends one owner decision to the atomic overlap-group RPC", async () => {
+    rpc.mockResolvedValue({
+      data: { outcome: "resolved", resolvedCount: 20 },
+      error: null,
+    });
+
+    const repository = createAuthenticatedReportPackageRepository({ rpc } as never);
+
+    await expect(
+      repository.resolveProjectionOverlapGroup({
+        organizationId: "33333333-3333-4333-8333-333333333333",
+        actorId: "44444444-4444-4444-8444-444444444444",
+        reconciliationId: "66666666-6666-4666-8666-666666666666",
+        resolution: "accept_correction",
+        idempotencyKey: "report-overlap-group-resolution-test",
+        correlationId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).resolves.toEqual({ outcome: "resolved", resolvedCount: 20 });
+
+    expect(rpc).toHaveBeenCalledWith("resolve_governed_report_projection_overlap_group", {
+      p_organization_id: "33333333-3333-4333-8333-333333333333",
+      p_actor_id: "44444444-4444-4444-8444-444444444444",
+      p_reconciliation_id: "66666666-6666-4666-8666-666666666666",
+      p_resolution: "accept_correction",
+      p_idempotency_key: "report-overlap-group-resolution-test",
+      p_correlation_id: "55555555-5555-4555-8555-555555555555",
+    });
+  });
 });

@@ -1,0 +1,243 @@
+// @vitest-environment jsdom
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+
+vi.mock("sonner", () => ({ toast: toastMocks }));
+
+import { ReportPackageUpload } from "@/components/integrations/report-package-upload";
+import type { ReportPackageSnapshot } from "@/modules/reports/application/ports";
+
+const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
+const PACKAGE_ID = "22222222-2222-4222-8222-222222222222";
+const RUN_ID = "33333333-3333-4333-8333-333333333333";
+const RECONCILIATION_ID = "44444444-4444-4444-8444-444444444444";
+const CONTRACT_VERSION_ID = "55555555-5555-4555-8555-555555555555";
+const PROJECTION_VERSION_ID = "66666666-6666-4666-8666-666666666666";
+
+const snapshot = {
+  packages: [
+    {
+      id: PACKAGE_ID,
+      organization_id: ORGANIZATION_ID,
+      channel_id: "77777777-7777-4777-8777-777777777777",
+      branch_id: "88888888-8888-4888-8888-888888888888",
+      report_type: "Performance",
+      declared_period_start: "2026-01-01",
+      declared_period_end: "2026-02-28",
+      declared_currency: "AED",
+      period_timezone: "Asia/Dubai",
+      file_kind: "xlsx",
+      original_filename: "performance.xlsx",
+      declared_content_type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      declared_content_length: 1_024,
+      storage_bucket_id: "governed-report-packages",
+      storage_path: `${ORGANIZATION_ID}/performance.xlsx`,
+      storage_object_id: "99999999-9999-4999-8999-999999999999",
+      storage_object_version: "1",
+      content_sha256: "a".repeat(64),
+      parser_version: 1,
+      fingerprint_version: 2,
+      schema_fingerprint: "b".repeat(64),
+      status: "reconciliation_required",
+      safe_failure_code: null,
+      safe_failure_at: null,
+      upload_expires_at: "2026-01-01T01:00:00.000Z",
+      uploaded_at: "2026-01-01T00:01:00.000Z",
+      profiled_at: "2026-01-01T00:02:00.000Z",
+      retained_until: "2027-01-01T00:00:00.000Z",
+      created_by: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      correlation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:03:00.000Z",
+    },
+  ],
+  sheetManifests: [],
+  contracts: [],
+  contractVersions: [],
+  contractDecisions: [],
+  contractBindings: [],
+  validationRuns: [],
+  validationSheetResults: [],
+  validationControlResults: [],
+  projectionVersions: [],
+  projectionDecisions: [],
+  projectionBindings: [],
+  projectionRuns: [
+    {
+      id: RUN_ID,
+      organization_id: ORGANIZATION_ID,
+      report_package_id: PACKAGE_ID,
+      report_contract_version_id: CONTRACT_VERSION_ID,
+      report_contract_binding_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      report_projection_version_id: PROJECTION_VERSION_ID,
+      report_projection_binding_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      validation_run_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      calculation_version: 1,
+      input_digest: "c".repeat(64),
+      result_digest: "d".repeat(64),
+      status: "projected",
+      quality_state: "complete",
+      completeness_state: "partial",
+      output_count: 653,
+      absent_row_count: 468,
+      error_codes: [],
+      warning_codes: [],
+      correlation_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      started_at: "2026-03-01T00:00:00.000Z",
+      completed_at: "2026-03-01T00:01:00.000Z",
+      created_at: "2026-03-01T00:00:00.000Z",
+    },
+  ],
+  reconciliationGroups: [
+    {
+      representative_reconciliation_id: RECONCILIATION_ID,
+      organization_id: ORGANIZATION_ID,
+      report_package_id: PACKAGE_ID,
+      projection_run_id: RUN_ID,
+      projection_output_key: "gross_revenue",
+      projection_target: "period_grain",
+      metric_key: "revenue.gross",
+      normalized_sheet_name: "performance",
+      canonical_field: "gross_sales",
+      source_header: "gross_sales",
+      affected_record_count: 20,
+      matching_record_count: 20,
+      affected_dates: ["2026-01-01", "2026-01-02", "2026-02-15"],
+      affected_dates_truncated: false,
+      first_period: "2026-01-01",
+      last_period: "2026-02-15",
+      prior_upload_count: 1,
+      prior_report_type: "Performance",
+      prior_period_start: "2026-01-01",
+      prior_period_end: "2026-02-28",
+    },
+  ],
+  channels: [],
+  branches: [],
+} as unknown as ReportPackageSnapshot;
+
+function renderUpload() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ReportPackageUpload organizationId={ORGANIZATION_ID} role="owner" timeZone="Asia/Dubai" />
+    </QueryClientProvider>,
+  );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal("crypto", { ...globalThis.crypto, randomUUID: () => "fixed-operation-key" });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ resolution: { outcome: "resolved" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(snapshot), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("ReportPackageUpload reconciliation actions", () => {
+  it("shows one meaningful action before the compact projection summary and hides audit noise", async () => {
+    renderUpload();
+
+    const action = await screen.findByRole("region", { name: "Gross revenue overlap" });
+    expect(within(action).getByText(/20 daily Gross revenue records/i)).toBeInTheDocument();
+    expect(within(action).getByText(/source field/i)).toHaveTextContent("gross_sales");
+    expect(within(action).getByText(/earlier Performance upload/i)).toBeInTheDocument();
+    expect(within(action).getByText("1 Jan 2026 – 15 Feb 2026")).toBeInTheDocument();
+    expect(within(action).getByRole("button", { name: /use this upload's revenue/i })).toBeEnabled();
+    expect(within(action).getByRole("button", { name: /keep existing revenue/i })).toBeEnabled();
+
+    const projectionSummary = screen.getByText(/653 records checked/i);
+    expect(action.compareDocumentPosition(projectionSummary)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByText(/non overlapping/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/matching record/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/evidence eeeee/i)).not.toBeInTheDocument();
+  });
+
+  it("sends one grouped decision through the atomic resolution route", async () => {
+    renderUpload();
+    const action = await screen.findByRole("region", { name: "Gross revenue overlap" });
+    fireEvent.click(within(action).getByRole("button", { name: /use this upload's revenue/i }));
+
+    await waitFor(() => {
+      const fetchMock = vi.mocked(fetch);
+      const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(post?.[0]).toBe(
+        `/api/organizations/${ORGANIZATION_ID}/report-reconciliations/${RECONCILIATION_ID}/resolve-group`,
+      );
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        resolution: "accept_correction",
+        idempotencyKey: "report-overlap-group-resolution:fixed-operation-key",
+      });
+    });
+  });
+
+  it("does not report success when another operator already chose the opposite field source", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return new Response(JSON.stringify({ resolution: { outcome: "conflict" } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify(snapshot), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    renderUpload();
+    const action = await screen.findByRole("region", { name: "Gross revenue overlap" });
+    fireEvent.click(within(action).getByRole("button", { name: /keep existing revenue/i }));
+
+    await waitFor(() =>
+      expect(toastMocks.error).toHaveBeenCalledWith(
+        "This field was already resolved differently. Refresh to see the recorded choice.",
+      ),
+    );
+    expect(toastMocks.success).not.toHaveBeenCalled();
+  });
+
+  it("does not print a null record count while projection is still incomplete", async () => {
+    const snapshotWithoutCount = {
+      ...snapshot,
+      projectionRuns: snapshot.projectionRuns.map((run) => ({ ...run, output_count: null })),
+    } as unknown as ReportPackageSnapshot;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify(snapshotWithoutCount), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })),
+    );
+
+    renderUpload();
+
+    await screen.findByText(/Performance · 2026-01-01 to 2026-02-28/i);
+    expect(document.body).not.toHaveTextContent("records checked");
+  });
+});
