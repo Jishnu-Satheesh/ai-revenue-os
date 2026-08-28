@@ -270,6 +270,106 @@ describe("loadEvidence", () => {
   });
 });
 
+const ORGANIZATION = "org-1";
+
+/**
+ * Records every `.from(table)` call and the `eq` filters chained onto it, so
+ * a test can assert what one query actually asked for without threading a
+ * bespoke stub through every method. `dataByTable` supplies the rows each
+ * table should answer with; a table not named there answers empty.
+ */
+function supabaseStub(dataByTable: Record<string, unknown[]> = {}) {
+  const queries: { table: string; filters: [string, unknown][] }[] = [];
+  const from = (table: string) => {
+    const filters: [string, unknown][] = [];
+    queries.push({ table, filters });
+    const builder = {
+      select: () => builder,
+      eq: (column: string, value: unknown) => {
+        filters.push([column, value]);
+        return builder;
+      },
+      not: () => builder,
+      in: () => builder,
+      order: () => builder,
+      limit: () => builder,
+      then: (
+        onFulfilled: (value: QueryResult) => unknown,
+        onRejected?: (reason: unknown) => unknown,
+      ) =>
+        Promise.resolve({ data: dataByTable[table] ?? [], error: null } as QueryResult).then(
+          onFulfilled,
+          onRejected,
+        ),
+    };
+    return builder;
+  };
+  return { from, queries } as unknown as SupabaseClient<Database> & { queries: typeof queries };
+}
+
+describe("loadChannelBandsForWindow", () => {
+  it("reads the latest completed run per channel for one declared window", async () => {
+    const supabase = supabaseStub();
+    const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+
+    await repository.loadChannelBandsForWindow({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-02-28",
+      grain: "day",
+    });
+
+    const runsQuery = supabase.queries.find((query) => query.table === "channel_analysis_runs");
+    expect(runsQuery).toBeDefined();
+    // Scoped to the tenant, to the exact declared window, and to runs that
+    // actually finished. A running or failed run has no figures to band.
+    expect(runsQuery?.filters).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(runsQuery?.filters).toContainEqual(["window_start", "2026-01-01"]);
+    expect(runsQuery?.filters).toContainEqual(["window_end", "2026-02-28"]);
+    expect(runsQuery?.filters).toContainEqual(["period_grain", "day"]);
+    expect(runsQuery?.filters).toContainEqual(["status", "completed"]);
+  });
+});
+
+describe("loadAnalysedWindowKeys", () => {
+  it("scopes to the organization and to completed runs", async () => {
+    const supabase = supabaseStub();
+    const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+
+    await repository.loadAnalysedWindowKeys({ organizationId: ORGANIZATION });
+
+    const runsQuery = supabase.queries.find((query) => query.table === "channel_analysis_runs");
+    expect(runsQuery).toBeDefined();
+    // A running or failed run says nothing a page can open on, and another
+    // tenant's windows must never leak into this picker.
+    expect(runsQuery?.filters).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(runsQuery?.filters).toContainEqual(["status", "completed"]);
+  });
+
+  it("deduplicates repeated window keys and returns them newest-first", async () => {
+    // The query itself orders by window_end descending; these rows arrive
+    // exactly as it would return them, so the method's own dedup logic --
+    // keep the first occurrence per key -- is what this test exercises.
+    const supabase = supabaseStub({
+      channel_analysis_runs: [
+        // Two channels analysed over the same window: one row per completed
+        // run, but only one window key belongs on the picker.
+        { window_start: "2026-02-01", window_end: "2026-02-28", period_grain: "day" },
+        { window_start: "2026-02-01", window_end: "2026-02-28", period_grain: "day" },
+        { window_start: "2026-01-01", window_end: "2026-01-31", period_grain: "day" },
+      ],
+    });
+    const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+
+    const keys = await repository.loadAnalysedWindowKeys({ organizationId: ORGANIZATION });
+
+    expect(keys).toEqual([
+      { windowStart: "2026-02-01", windowEnd: "2026-02-28", grain: "day" },
+      { windowStart: "2026-01-01", windowEnd: "2026-01-31", grain: "day" },
+    ]);
+  });
+});
+
 describe("loadEvidenceWindows", () => {
   it("reads current projected metrics in gateway-safe batches", async () => {
     // A complete report can produce hundreds of governed rows. Sending every

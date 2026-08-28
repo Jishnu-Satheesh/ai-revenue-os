@@ -6,8 +6,10 @@ import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/anal
 import { toCalendarDate } from "@/domain/metrics/periods";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
+  AnalysedWindowKey,
   ChannelAnalysisReadPort,
   ChannelAnalysisRunRecord,
+  ChannelBandRecord,
   ChannelEvidenceWindow,
   ChannelFindingEvidenceRecord,
   ChannelFindingRecord,
@@ -44,6 +46,14 @@ const MAX_LINEAGE = 10_000;
 const MAX_RECOMMENDATIONS = 60;
 const MAX_CITATIONS = 600;
 const MAX_RECOMMENDATION_DECISIONS = 1_000;
+/** The two codes the money band reads, and nothing else. */
+const BAND_CODES = ["WINDOW_GROSS_REVENUE", "ORDER_CANCELLATION_LOSS"] as const;
+/**
+ * A picker an operator can open a window from, not every window an
+ * organization has ever analysed. An organization with a very long analysis
+ * history must not be able to make this query unbounded.
+ */
+const MAX_ANALYSED_WINDOW_ROWS = 500;
 
 export class ChannelAnalysisReadError extends Error {
   constructor(public readonly code: string) {
@@ -107,6 +117,75 @@ function toDetectorVersions(value: unknown): { key: string; calculationVersion: 
   });
 }
 
+/** The finding columns both `loadFindingsForRun` and the money band read. */
+const CHANNEL_FINDING_COLUMNS =
+  "id, analysis_run_id, channel_id, branch_id, detector_key, detector_version, kind, code, severity, priority, metric_key, period_start, period_end, value_kind, value_numerator, value_denominator, currency, monetary_impact_minor_units, expected_period_count, observed_period_count, absent_period_count, quality_state, needs_data_reason, limitations, calculation_digest, created_at";
+
+type ChannelFindingRow = {
+  id: string;
+  analysis_run_id: string;
+  channel_id: string | null;
+  branch_id: string | null;
+  detector_key: string;
+  detector_version: number;
+  kind: string;
+  code: string;
+  severity: string | null;
+  priority: number | null;
+  metric_key: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  value_kind: "money" | "count" | "ratio" | null;
+  value_numerator: number | string | null;
+  value_denominator: number | string | null;
+  currency: string | null;
+  monetary_impact_minor_units: number | string | null;
+  expected_period_count: number | null;
+  observed_period_count: number | null;
+  absent_period_count: number | null;
+  quality_state: "complete" | "partial";
+  needs_data_reason: string | null;
+  limitations: unknown;
+  calculation_digest: string;
+  created_at: string;
+};
+
+/**
+ * Maps one finding row identically wherever it is read, so a caller reading a
+ * whole run's findings and a caller reading two codes for a money band never
+ * disagree about what one stored row means.
+ */
+function toFindingRecord(row: ChannelFindingRow): ChannelFindingRecord {
+  return {
+    id: row.id,
+    analysisRunId: row.analysis_run_id,
+    channelId: row.channel_id,
+    branchId: row.branch_id,
+    detectorKey: row.detector_key,
+    detectorVersion: row.detector_version,
+    kind: row.kind as FindingKind,
+    code: row.code,
+    severity: row.severity as DetectorSeverity | null,
+    priority: row.priority,
+    metricKey: row.metric_key,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    valueKind: row.value_kind,
+    valueNumerator: toExactQuantity(row.value_numerator),
+    valueDenominator: toExactQuantity(row.value_denominator),
+    currency: row.currency,
+    monetaryImpactMinorUnits: toExactInteger(row.monetary_impact_minor_units),
+    expectedPeriodCount: row.expected_period_count,
+    observedPeriodCount: row.observed_period_count,
+    absentPeriodCount: row.absent_period_count,
+    qualityState: row.quality_state,
+    needsDataReason: row.needs_data_reason,
+    limitations: toStringArray(row.limitations),
+    calculationDigest: row.calculation_digest,
+    createdAt: row.created_at,
+  };
+}
+
 export function createAuthenticatedChannelAnalysisRepository(
   supabase: AnalysisClient,
 ): ChannelAnalysisReadPort {
@@ -149,9 +228,7 @@ export function createAuthenticatedChannelAnalysisRepository(
     async loadFindingsForRun({ organizationId, analysisRunId }) {
       const { data, error } = await supabase
         .from("channel_findings")
-        .select(
-          "id, analysis_run_id, channel_id, branch_id, detector_key, detector_version, kind, code, severity, priority, metric_key, period_start, period_end, value_kind, value_numerator, value_denominator, currency, monetary_impact_minor_units, expected_period_count, observed_period_count, absent_period_count, quality_state, needs_data_reason, limitations, calculation_digest, created_at",
-        )
+        .select(CHANNEL_FINDING_COLUMNS)
         .eq("organization_id", organizationId)
         // One run, so every figure on the page was computed for the window the
         // page names. Reading by channel instead mixes windows: the header
@@ -165,36 +242,7 @@ export function createAuthenticatedChannelAnalysisRepository(
 
       if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
 
-      return (data ?? []).map(
-        (row): ChannelFindingRecord => ({
-          id: row.id,
-          analysisRunId: row.analysis_run_id,
-          channelId: row.channel_id,
-          branchId: row.branch_id,
-          detectorKey: row.detector_key,
-          detectorVersion: row.detector_version,
-          kind: row.kind as FindingKind,
-          code: row.code,
-          severity: row.severity as DetectorSeverity | null,
-          priority: row.priority,
-          metricKey: row.metric_key,
-          periodStart: row.period_start,
-          periodEnd: row.period_end,
-          valueKind: row.value_kind,
-          valueNumerator: toExactQuantity(row.value_numerator),
-          valueDenominator: toExactQuantity(row.value_denominator),
-          currency: row.currency,
-          monetaryImpactMinorUnits: toExactInteger(row.monetary_impact_minor_units),
-          expectedPeriodCount: row.expected_period_count,
-          observedPeriodCount: row.observed_period_count,
-          absentPeriodCount: row.absent_period_count,
-          qualityState: row.quality_state,
-          needsDataReason: row.needs_data_reason,
-          limitations: toStringArray(row.limitations),
-          calculationDigest: row.calculation_digest,
-          createdAt: row.created_at,
-        }),
-      );
+      return (data ?? []).map(toFindingRecord);
     },
 
     async loadEvidenceWindows({ organizationId, channelId, limit }) {
@@ -307,6 +355,78 @@ export function createAuthenticatedChannelAnalysisRepository(
           },
         ];
       });
+    },
+
+    async loadChannelBandsForWindow({ organizationId, windowStart, windowEnd, grain }) {
+      const { data: runs, error: runError } = await supabase
+        .from("channel_analysis_runs")
+        .select("id, channel_id, completed_at")
+        .eq("organization_id", organizationId)
+        .eq("window_start", windowStart)
+        .eq("window_end", windowEnd)
+        .eq("period_grain", grain)
+        .eq("status", "completed")
+        .not("channel_id", "is", null)
+        .order("completed_at", { ascending: false });
+      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+
+      // Newest first, so the first run seen for a channel is the one that
+      // stands. A channel re-analysed over the same window has two completed
+      // runs, and the later answer is the current one.
+      const latestByChannel = new Map<string, string>();
+      for (const row of runs ?? []) {
+        const channelId = row.channel_id as string;
+        if (!latestByChannel.has(channelId)) latestByChannel.set(channelId, row.id);
+      }
+      if (latestByChannel.size === 0) return [];
+
+      const { data: findings, error: findingError } = await supabase
+        .from("channel_findings")
+        .select(CHANNEL_FINDING_COLUMNS)
+        .eq("organization_id", organizationId)
+        .in("analysis_run_id", [...latestByChannel.values()])
+        .in("code", [...BAND_CODES]);
+      if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
+
+      const byRun = new Map<string, ChannelFindingRecord[]>();
+      for (const row of findings ?? []) {
+        const mapped = toFindingRecord(row);
+        const group = byRun.get(mapped.analysisRunId) ?? [];
+        group.push(mapped);
+        byRun.set(mapped.analysisRunId, group);
+      }
+
+      return [...latestByChannel.entries()].map(
+        ([channelId, analysisRunId]): ChannelBandRecord => ({
+          channelId,
+          analysisRunId,
+          findings: byRun.get(analysisRunId) ?? [],
+        }),
+      );
+    },
+
+    async loadAnalysedWindowKeys({ organizationId }) {
+      const { data, error } = await supabase
+        .from("channel_analysis_runs")
+        .select("window_start, window_end, period_grain")
+        .eq("organization_id", organizationId)
+        .eq("status", "completed")
+        .not("channel_id", "is", null)
+        .order("window_end", { ascending: false })
+        .limit(MAX_ANALYSED_WINDOW_ROWS);
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      const seen = new Set<string>();
+      const keys: AnalysedWindowKey[] = [];
+      for (const row of data ?? []) {
+        const grain = row.period_grain;
+        if (grain !== "day" && grain !== "week" && grain !== "month") continue;
+        const key = `${row.window_start}|${row.window_end}|${grain}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        keys.push({ windowStart: row.window_start, windowEnd: row.window_end, grain });
+      }
+      return keys;
     },
 
     async loadEvidence({ organizationId, findingIds }) {

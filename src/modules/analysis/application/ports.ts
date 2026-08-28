@@ -172,6 +172,25 @@ export type ChannelEvidenceWindow = {
   sourceFilename: string | null;
 };
 
+/**
+ * One channel's contribution to the organization roll-up.
+ *
+ * Carries only the findings the money band reads, because the roll-up states
+ * two figures and has no business loading a whole run's findings to do it.
+ */
+export type ChannelBandRecord = {
+  channelId: string;
+  analysisRunId: string;
+  findings: readonly ChannelFindingRecord[];
+};
+
+/** A window some channel has a completed analysis for. */
+export type AnalysedWindowKey = {
+  windowStart: string;
+  windowEnd: string;
+  grain: AnalysisGrain;
+};
+
 export type ChannelAnalysisReadPort = {
   /** Most recent first. Includes running and failed runs, so the page can say so. */
   loadRuns(input: {
@@ -229,4 +248,28 @@ export type ChannelAnalysisReadPort = {
     channelId: string | null;
     limit: number;
   }): Promise<ChannelEvidenceWindow[]>;
+
+  /**
+   * The latest completed run per channel for exactly one declared window.
+   *
+   * Scoped to a window rather than to "the latest run per channel" for the
+   * reason `loadFindingsForRun` is scoped to a run: two channels analysed over
+   * different windows are two answers to different questions, and summing them
+   * under one window's header states a total nobody computed.
+   */
+  loadChannelBandsForWindow(input: {
+    organizationId: string;
+    windowStart: string;
+    windowEnd: string;
+    grain: AnalysisGrain;
+  }): Promise<ChannelBandRecord[]>;
+
+  /**
+   * The distinct windows this organization has a completed analysis for,
+   * newest first.
+   *
+   * Three columns, so the merged page can open on a window that can say
+   * something without loading every window's findings to discover which can.
+   */
+  loadAnalysedWindowKeys(input: { organizationId: string }): Promise<AnalysedWindowKey[]>;
 };
