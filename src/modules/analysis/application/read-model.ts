@@ -9,6 +9,7 @@ import {
   type VerdictView,
   type WorkspaceChapterId,
 } from "@/domain/analysis/copy";
+import { splitEarnedLostPotential } from "@/domain/analysis/money-split";
 import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
 import type {
   ChannelAnalysisRunRecord,
@@ -52,6 +53,8 @@ export type WorkspaceEvidenceView = {
 export type WorkspaceFindingView = {
   id: string;
   detectorKey: string;
+  /** The metric the detector bound, when it bound one -- names a funnel stage. */
+  metricKey: string | null;
   detectorVersion: number;
   kind: FindingKind;
   kindLabel: string;
@@ -151,6 +154,20 @@ export type ChannelWorkspaceView = {
   recommendations: readonly WorkspaceRecommendationView[];
 };
 
+/**
+ * Findings whose home is the verdict band and never a chapter card. The
+ * channel-scoped gross-revenue observation is the figure the band draws as
+ * "potential", and the period movement is the prior-vs-current comparison the
+ * approved draft deliberately drops. Both are placed so neither surfaces as an
+ * unplaced "Also measured" row. The cross-channel share remains placed for
+ * organization-scope readers, but is never substituted for this channel view.
+ */
+const BAND_DETECTOR_KEYS = new Set([
+  "revenue.channel_share",
+  "revenue.period_movement",
+  "revenue.window_gross",
+]);
+
 const MONEY_DEFERRED_REASON =
   "Contribution margin needs every variable cost for this channel. No approved report writes those inputs yet, so the figure would be a guess.";
 
@@ -202,6 +219,7 @@ function toFindingView(
   return {
     id: finding.id,
     detectorKey: finding.detectorKey,
+    metricKey: finding.metricKey,
     detectorVersion: finding.detectorVersion,
     kind: finding.kind,
     kindLabel: KIND_LABEL[finding.kind],
@@ -333,16 +351,15 @@ function summaryTiles(
   findings: readonly WorkspaceFindingView[],
   hasCompletedRun: boolean,
 ): SummaryTileView[] {
-  // The one gross figure this slice can state honestly: the channel's own
-  // numerator from the cross-channel share, which is the sum of its governed
-  // revenue observations over the window, cited row by row.
-  const share = findings.find((finding) => finding.code === "CHANNEL_REVENUE_SHARE");
+  // The one gross figure this channel view can state honestly: its own stored
+  // revenue-window observation, which cites the governed rows it summed.
+  const windowGross = findings.find((finding) => finding.code === "WINDOW_GROSS_REVENUE");
   const grossValue: WorkspaceValueView | null =
-    share?.value?.kind === "ratio" && share.value.currency
+    windowGross?.value?.kind === "money"
       ? {
           kind: "money",
-          minorUnits: share.value.numerator,
-          currency: share.value.currency,
+          minorUnits: windowGross.value.minorUnits,
+          currency: windowGross.value.currency,
           base: null,
         }
       : null;
@@ -354,10 +371,10 @@ function summaryTiles(
       unavailableReason: grossValue
         ? null
         : hasCompletedRun
-          ? "A cross-channel analysis has not produced a gross figure for this channel in the window it covered."
+          ? "This channel analysis has not produced a governed gross-revenue figure for the window it covered."
           : "No analysis has run for this channel yet.",
-      findingId: grossValue ? (share?.id ?? null) : null,
-      coverage: grossValue ? (share?.coverage ?? null) : null,
+      findingId: grossValue ? (windowGross?.id ?? null) : null,
+      coverage: grossValue ? (windowGross?.coverage ?? null) : null,
     },
     {
       label: "Contribution margin",
@@ -381,17 +398,25 @@ function summaryTiles(
  *
  * Each input is present only when a detector actually reported it, so the band
  * can never speak about a figure this run did not store. No number is derived
- * here either: the gross figure is the share's own numerator, the movement's
+ * here either: the gross figure is the channel's own stored observation, the movement's
  * direction is the code the detector chose, and coverage is the stored pair of
  * counts.
+ *
+ * The one deliberate, user-directed exception is the earned/lost/potential
+ * split. `potential` is the channel's gross revenue (the window detector's stored
+ * numerator), `lost` is the provider's own rejection loss (the cancellation
+ * detector's declared monetary impact), and `earned` is potential minus lost.
+ * It is a stated relationship between two already-cited figures rather than a
+ * new measurement, so it is surfaced in the verdict band with the arithmetic
+ * visible and labelled as a derived split.
  */
 function verdictInputs(
   findings: readonly WorkspaceFindingView[],
 ): Parameters<typeof buildVerdictView>[0] {
-  const share = findings.find((finding) => finding.code === "CHANNEL_REVENUE_SHARE");
+  const windowGross = findings.find((finding) => finding.code === "WINDOW_GROSS_REVENUE");
   const grossMoney =
-    share?.value?.kind === "ratio" && share.value.currency
-      ? { minorUnits: share.value.numerator, currency: share.value.currency }
+    windowGross?.value?.kind === "money"
+      ? { minorUnits: windowGross.value.minorUnits, currency: windowGross.value.currency }
       : null;
 
   const movement = findings.find(
@@ -427,7 +452,21 @@ function verdictInputs(
     };
   }
 
-  return { grossMoney, movement: direction, coverage };
+  const cancellation = findings.find((finding) => finding.code === "ORDER_CANCELLATION_LOSS");
+  const lost = cancellation?.monetaryImpact
+    ? {
+        minorUnits: cancellation.monetaryImpact.minorUnits,
+        currency: cancellation.monetaryImpact.currency,
+      }
+    : null;
+  const earnedLostPotential = splitEarnedLostPotential({ potential: grossMoney, lost });
+
+  return {
+    grossMoney,
+    movement: direction,
+    coverage,
+    earnedLostPotential,
+  };
 }
 
 export function buildChannelWorkspaceView(input: {
@@ -469,6 +508,13 @@ export function buildChannelWorkspaceView(input: {
       findings: own,
     };
   });
+
+  // Findings the verdict band (or evidence section) renders are placed even
+  // though they belong to no numbered chapter, so they are not duplicated as an
+  // "Also measured" row.
+  for (const finding of findingViews) {
+    if (BAND_DETECTOR_KEYS.has(finding.detectorKey)) placed.add(finding.id);
+  }
 
   return {
     run: completed,
