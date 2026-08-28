@@ -347,4 +347,45 @@ describe("loadEvidenceWindows", () => {
     expect(metricBatches.map((batch) => batch.length)).toEqual([200, 200, 1]);
     expect(windows).toMatchObject([{ packageId: "package-1", governedRowCount: 401, grain: "day" }]);
   });
+
+  it("reads evidence windows across every channel when no channel is named", async () => {
+    // The merged Channels page offers one window control over the whole
+    // organization, so the channel filter has to be optional rather than
+    // fanned out into one query per channel.
+    const queries: { table: string; filters: [string, unknown][] }[] = [];
+    const supabase = {
+      from(table: string) {
+        const filters: [string, unknown][] = [];
+        queries.push({ table, filters });
+        const builder = {
+          select: () => builder,
+          eq: (column: string, value: unknown) => {
+            filters.push([column, value]);
+            return builder;
+          },
+          is: () => builder,
+          not: () => builder,
+          in: () => builder,
+          order: () => builder,
+          limit: () => builder,
+          then: (
+            onFulfilled: (value: QueryResult) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => Promise.resolve({ data: [], error: null } as QueryResult).then(onFulfilled, onRejected),
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    await createAuthenticatedChannelAnalysisRepository(supabase).loadEvidenceWindows({
+      organizationId: "org-1",
+      channelId: null,
+      limit: 24,
+    });
+
+    const packagesQuery = queries.find((query) => query.table === "integration_report_packages");
+    expect(packagesQuery).toBeDefined();
+    expect(packagesQuery?.filters).toContainEqual(["organization_id", "org-1"]);
+    expect(packagesQuery?.filters.some(([column]) => column === "channel_id")).toBe(false);
+  });
 });

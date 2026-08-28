@@ -202,16 +202,19 @@ export function createAuthenticatedChannelAnalysisRepository(
       // analysis must use. Deriving one from the evidence instead would move
       // the edges inward onto the first and last day that happen to carry a
       // figure, and a window cannot report a gap at its own edge.
-      const { data: packages, error: packageError } = await supabase
+      const packagesBase = supabase
         .from("integration_report_packages")
         .select(
           "id, channel_id, branch_id, declared_period_start, declared_period_end, period_timezone, original_filename, uploaded_at",
         )
         .eq("organization_id", organizationId)
-        .eq("channel_id", channelId)
         .eq("status", "projected")
         .not("declared_period_start", "is", null)
-        .not("declared_period_end", "is", null)
+        .not("declared_period_end", "is", null);
+
+      const { data: packages, error: packageError } = await (
+        channelId === null ? packagesBase : packagesBase.eq("channel_id", channelId)
+      )
         .order("declared_period_end", { ascending: false })
         .limit(Math.min(limit, MAX_EVIDENCE_WINDOWS));
 

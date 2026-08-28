@@ -215,15 +215,18 @@ export type ChannelAnalysisReadPort = {
   }): Promise<ChannelRecommendationRecord[]>;
 
   /**
-   * Every window this channel has governed evidence for, newest first.
+   * Every window this organization has governed evidence for, newest first.
    *
    * Derived from what the organization actually imported rather than counted
    * back from today: evidence arrives as uploaded reports covering past
    * periods, so a window measured from now reaches it only by coincidence.
+   *
+   * `channelId` is `null` for the organization-wide read the merged Channels
+   * page makes; each returned window still names the channel it belongs to.
    */
   loadEvidenceWindows(input: {
     organizationId: string;
-    channelId: string;
+    channelId: string | null;
     limit: number;
   }): Promise<ChannelEvidenceWindow[]>;
 };
