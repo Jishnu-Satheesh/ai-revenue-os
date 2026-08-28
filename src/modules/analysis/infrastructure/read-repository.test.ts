@@ -329,6 +329,59 @@ describe("loadChannelBandsForWindow", () => {
     expect(runsQuery?.filters).toContainEqual(["period_grain", "day"]);
     expect(runsQuery?.filters).toContainEqual(["status", "completed"]);
   });
+
+  it("batches the findings read so one window's run ids never exceed a gateway-safe filter", async () => {
+    // 401 channels, each with one completed run over this window: more than
+    // one gateway-safe batch, and specific enough that a bug collapsing every
+    // batch into a single `.in()` filter would not be masked by a shorter list.
+    const runRows = Array.from({ length: 401 }, (_, index) => ({
+      id: `run-${index}`,
+      channel_id: `channel-${index}`,
+      completed_at: "2026-02-01T00:00:00Z",
+    }));
+    const findingBatches: string[][] = [];
+    const supabase = {
+      from(table: string) {
+        let runIds: readonly string[] = [];
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          not: () => builder,
+          in: (column: string, values: readonly string[]) => {
+            if (column === "analysis_run_id") runIds = values;
+            return builder;
+          },
+          order: () => builder,
+          limit: () => builder,
+          then: (
+            onFulfilled: (value: QueryResult) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => {
+            const result: QueryResult =
+              table === "channel_analysis_runs"
+                ? { data: runRows, error: null }
+                : table === "channel_findings"
+                  ? (() => {
+                      findingBatches.push([...runIds]);
+                      return { data: [], error: null };
+                    })()
+                  : { data: [], error: null };
+            return Promise.resolve(result).then(onFulfilled, onRejected);
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    await createAuthenticatedChannelAnalysisRepository(supabase).loadChannelBandsForWindow({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-02-28",
+      grain: "day",
+    });
+
+    expect(findingBatches.map((batch) => batch.length)).toEqual([200, 200, 1]);
+  });
 });
 
 describe("loadAnalysedWindowKeys", () => {

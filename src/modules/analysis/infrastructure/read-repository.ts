@@ -49,6 +49,17 @@ const MAX_RECOMMENDATION_DECISIONS = 1_000;
 /** The two codes the money band reads, and nothing else. */
 const BAND_CODES = ["WINDOW_GROSS_REVENUE", "ORDER_CANCELLATION_LOSS"] as const;
 /**
+ * Completed runs for one declared window, across every channel in the
+ * organization. Not one row per channel: re-running an analysis over the same
+ * window does not delete the previous completed run, it adds another one, so
+ * this count grows with re-analysis history, not with channel count alone.
+ * 2,000 is chosen to comfortably outlast that: an organization would need
+ * hundreds of channels each re-analysed many times over the very same window
+ * before approaching it, which is far beyond any real portfolio here, while
+ * still being a real, finite cap rather than an unbounded read.
+ */
+const MAX_CHANNEL_BAND_RUNS = 2_000;
+/**
  * A picker an operator can open a window from, not every window an
  * organization has ever analysed. An organization with a very long analysis
  * history must not be able to make this query unbounded.
@@ -367,7 +378,8 @@ export function createAuthenticatedChannelAnalysisRepository(
         .eq("period_grain", grain)
         .eq("status", "completed")
         .not("channel_id", "is", null)
-        .order("completed_at", { ascending: false });
+        .order("completed_at", { ascending: false })
+        .limit(MAX_CHANNEL_BAND_RUNS);
       if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
 
       // Newest first, so the first run seen for a channel is the one that
@@ -380,20 +392,34 @@ export function createAuthenticatedChannelAnalysisRepository(
       }
       if (latestByChannel.size === 0) return [];
 
-      const { data: findings, error: findingError } = await supabase
-        .from("channel_findings")
-        .select(CHANNEL_FINDING_COLUMNS)
-        .eq("organization_id", organizationId)
-        .in("analysis_run_id", [...latestByChannel.values()])
-        .in("code", [...BAND_CODES]);
-      if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
-
+      // Batched for the same reason loadEvidenceWindows batches its metric
+      // reads: PostgREST folds an `.in()` filter's values into the request
+      // line, and one filter naming every channel's run id can exceed a
+      // common gateway's request-line limit before RLS or the database ever
+      // sees the query.
+      const runIds = [...latestByChannel.values()];
       const byRun = new Map<string, ChannelFindingRecord[]>();
-      for (const row of findings ?? []) {
-        const mapped = toFindingRecord(row);
-        const group = byRun.get(mapped.analysisRunId) ?? [];
-        group.push(mapped);
-        byRun.set(mapped.analysisRunId, group);
+      for (let offset = 0; offset < runIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
+        const batch = runIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
+        const { data, error: findingError } = await supabase
+          .from("channel_findings")
+          .select(CHANNEL_FINDING_COLUMNS)
+          .eq("organization_id", organizationId)
+          .in("analysis_run_id", batch)
+          .in("code", [...BAND_CODES])
+          // Each detector writes at most one finding per code per run, so two
+          // band codes read means at most two rows per run id in the batch.
+          .limit(batch.length * BAND_CODES.length + 1);
+        if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
+        if ((data ?? []).length > batch.length * BAND_CODES.length)
+          throw new ChannelAnalysisReadError("BAND_FINDINGS_NOT_BOUNDED");
+
+        for (const row of data ?? []) {
+          const mapped = toFindingRecord(row);
+          const group = byRun.get(mapped.analysisRunId) ?? [];
+          group.push(mapped);
+          byRun.set(mapped.analysisRunId, group);
+        }
       }
 
       return [...latestByChannel.entries()].map(
