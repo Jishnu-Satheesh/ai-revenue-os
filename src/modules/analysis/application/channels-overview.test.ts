@@ -154,6 +154,27 @@ describe("buildChannelsOverviewView", () => {
     });
   });
 
+  it("refuses the total rather than asserting a currency when an assessed band's currency code is unusable", () => {
+    // A finding's currency is typed `string`, and nothing in that type
+    // forbids "". This is a real, type-legal input -- not a cast -- so the
+    // module must handle it as its own branch rather than assume the first
+    // currency in a non-empty set always exists.
+    const view = buildChannelsOverviewView({
+      channels: CHANNELS,
+      bands: [
+        band({ channelId: "ch-talabat", grossMinorUnits: 55300, lostMinorUnits: 35700, currency: "" }),
+      ],
+      evidenceWindows: [window_()],
+      selected: SELECTED,
+    });
+
+    expect(view.coverage.assessedCount).toBe(1);
+    expect(view.total).toEqual({ potential: null, lost: null, earned: null });
+    expect(view.refusalReason).toBe(
+      "An assessed channel's band did not carry a usable currency code, so no total can be stated.",
+    );
+  });
+
   it("states a reason rather than a zero when no channel was analysed", () => {
     const view = buildChannelsOverviewView({
       channels: CHANNELS,

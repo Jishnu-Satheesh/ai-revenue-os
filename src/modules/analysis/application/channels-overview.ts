@@ -61,6 +61,8 @@ const MIXED_CURRENCY_REASON =
   "These channels reported in more than one currency, so no single total can be stated.";
 const NOTHING_ANALYSED_REASON =
   "No channel has a completed analysis for this window, so nothing has been measured.";
+const UNRESOLVED_CURRENCY_REASON =
+  "An assessed channel's band did not carry a usable currency code, so no total can be stated.";
 
 const REFUSED: EarnedLostPotential = { potential: null, lost: null, earned: null };
 
@@ -187,14 +189,23 @@ export function buildChannelsOverviewView(input: {
   } else if (currencies.size > 1) {
     refusalReason = MIXED_CURRENCY_REASON;
   } else {
-    const currency = [...currencies][0]!;
-    const sum = (pick: (band: EarnedLostPotential) => AnalysisMoney | null) =>
-      assessedRows.reduce((running, row) => running + (pick(row.band)?.minorUnits ?? 0), 0);
-    total = {
-      potential: { minorUnits: sum((band) => band.potential), currency },
-      lost: { minorUnits: sum((band) => band.lost), currency },
-      earned: { minorUnits: sum((band) => band.earned), currency },
-    };
+    // `currencies` is built by filtering out falsy currency codes, so its
+    // size can be 0 even though `assessedRows` is non-empty and `size > 1`
+    // is false -- an assessed band's currency is typed `string`, and nothing
+    // in that type forbids "". Destructure and check for real rather than
+    // asserting the first element exists.
+    const [currency] = currencies;
+    if (currency === undefined) {
+      refusalReason = UNRESOLVED_CURRENCY_REASON;
+    } else {
+      const sum = (pick: (band: EarnedLostPotential) => AnalysisMoney | null) =>
+        assessedRows.reduce((running, row) => running + (pick(row.band)?.minorUnits ?? 0), 0);
+      total = {
+        potential: { minorUnits: sum((band) => band.potential), currency },
+        lost: { minorUnits: sum((band) => band.lost), currency },
+        earned: { minorUnits: sum((band) => band.earned), currency },
+      };
+    }
   }
 
   return {
