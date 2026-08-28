@@ -382,6 +382,105 @@ describe("loadChannelBandsForWindow", () => {
 
     expect(findingBatches.map((batch) => batch.length)).toEqual([200, 200, 1]);
   });
+
+  it("excludes a superseded finding a later run replaced", async () => {
+    // One run carries both an open WINDOW_GROSS_REVENUE finding and the
+    // superseded one a later run left behind. If this query did not filter
+    // to open findings, the band would carry both -- and the organization
+    // roll-up could then state a figure the channel's own page (which reads
+    // through the status-filtered loadFindingsForRun) does not show.
+    //
+    // Unlike the other stubs in this file, this one actually applies the
+    // `status` filter it was given rather than ignoring it: the point of
+    // this test is that removing `.eq("status", "open")` from the
+    // implementation must make it fail, not merely that the happy path
+    // passes.
+    const bandFindingRow = (overrides: Record<string, unknown> = {}) => ({
+      id: "finding-open",
+      analysis_run_id: "run-1",
+      channel_id: "channel-1",
+      branch_id: null,
+      detector_key: "revenue-window-gross",
+      detector_version: 1,
+      kind: "finding",
+      code: "WINDOW_GROSS_REVENUE",
+      severity: null,
+      priority: null,
+      metric_key: "revenue.window_gross",
+      period_start: "2026-01-01",
+      period_end: "2026-02-28",
+      value_kind: "money",
+      value_numerator: 10000,
+      value_denominator: null,
+      currency: "AED",
+      monetary_impact_minor_units: 10000,
+      expected_period_count: 59,
+      observed_period_count: 59,
+      absent_period_count: 0,
+      quality_state: "complete",
+      needs_data_reason: null,
+      limitations: [],
+      calculation_digest: "d".repeat(64),
+      created_at: "2026-03-01T00:00:00Z",
+      status: "open",
+      ...overrides,
+    });
+    const findingRows = [
+      bandFindingRow({ id: "finding-open", status: "open" }),
+      bandFindingRow({ id: "finding-superseded", status: "superseded" }),
+    ];
+
+    const supabase = {
+      from(table: string) {
+        const filters: [string, unknown][] = [];
+        const builder = {
+          select: () => builder,
+          eq: (column: string, value: unknown) => {
+            filters.push([column, value]);
+            return builder;
+          },
+          not: () => builder,
+          in: () => builder,
+          order: () => builder,
+          limit: () => builder,
+          then: (
+            onFulfilled: (value: QueryResult) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => {
+            let data: unknown[] = [];
+            if (table === "channel_analysis_runs") {
+              data = [{ id: "run-1", channel_id: "channel-1", completed_at: "2026-03-01T00:00:00Z" }];
+            } else if (table === "channel_findings") {
+              // Apply the status filter the way PostgREST would, so a query
+              // that omits it sees every row and a query that includes it
+              // sees only the matching one.
+              const statusFilter = filters.find(([column]) => column === "status")?.[1];
+              data = findingRows.filter(
+                (row) => statusFilter === undefined || row.status === statusFilter,
+              );
+            }
+            return Promise.resolve({ data, error: null } as QueryResult).then(
+              onFulfilled,
+              onRejected,
+            );
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    const bands = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadChannelBandsForWindow({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-02-28",
+      grain: "day",
+    });
+
+    expect(bands).toHaveLength(1);
+    expect(bands[0].findings.map((finding) => finding.id)).toEqual(["finding-open"]);
+  });
 });
 
 describe("loadAnalysedWindowKeys", () => {

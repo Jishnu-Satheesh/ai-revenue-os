@@ -407,8 +407,14 @@ export function createAuthenticatedChannelAnalysisRepository(
           .eq("organization_id", organizationId)
           .in("analysis_run_id", batch)
           .in("code", [...BAND_CODES])
-          // Each detector writes at most one finding per code per run, so two
-          // band codes read means at most two rows per run id in the batch.
+          // A superseded finding is the answer a later run replaced. Two
+          // figures for one question on one page is worse than one figure --
+          // the same reason loadFindingsForRun filters to open findings, and
+          // this band must never disagree with that page over the same run.
+          .eq("status", "open")
+          // Each detector writes at most one open finding per code per run,
+          // so two band codes read means at most two rows per run id in the
+          // batch.
           .limit(batch.length * BAND_CODES.length + 1);
         if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
         if ((data ?? []).length > batch.length * BAND_CODES.length)
