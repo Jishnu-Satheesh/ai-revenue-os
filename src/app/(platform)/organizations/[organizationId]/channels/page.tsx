@@ -15,7 +15,9 @@ import { createChannelService } from "@/modules/channels/application/service";
 import { createAuthenticatedChannelRepository } from "@/modules/channels/infrastructure/repository";
 import { isGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
 
-const GRAINS = new Set<AnalysisGrain>(["day", "week", "month"]);
+function isAnalysisGrain(value: string): value is AnalysisGrain {
+  return value === "day" || value === "week" || value === "month";
+}
 
 /** `start..end..grain`, the one shape the window control emits. */
 function parseWindow(
@@ -24,8 +26,8 @@ function parseWindow(
   if (!value) return null;
   const [windowStart, windowEnd, grain] = value.split("..");
   if (!windowStart || !windowEnd || !grain) return null;
-  if (!GRAINS.has(grain as AnalysisGrain)) return null;
-  return { windowStart, windowEnd, grain: grain as AnalysisGrain };
+  if (!isAnalysisGrain(grain)) return null;
+  return { windowStart, windowEnd, grain };
 }
 
 export default async function ChannelsPage({
