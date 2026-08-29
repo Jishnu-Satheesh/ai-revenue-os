@@ -4,7 +4,6 @@ import { useState, type FormEvent } from "react";
 import {
   ArchiveIcon,
   CirclePlusIcon,
-  MapPinIcon,
   PencilIcon,
   ShieldCheckIcon,
   TagsIcon,
@@ -271,43 +270,52 @@ function responseMessage(body: unknown, fallback: string) {
   return fallback;
 }
 
-function ChannelMappingsDialog({
+/**
+ * The setup surface for one channel: identity, branch mappings and source
+ * labels, and archive. These used to be dialogs over the register grid, which
+ * had nowhere to put them; a channel with its own page has room for sections.
+ *
+ * `canManage` gates identity edits and archive; `canMapBranches` gates
+ * mappings and source labels. Missing either renders that part read-only
+ * rather than hiding it, so every member keeps visibility into how a channel
+ * is configured.
+ */
+export function ChannelSetupPanel({
   organizationId,
   channel,
   branches,
-  mappings,
+  branchMappings,
   aliases,
-  onComplete,
+  canManage,
+  canMapBranches,
 }: {
   organizationId: string;
   channel: OrganizationChannelRow;
-  branches: readonly OrganizationBranchRow[];
-  mappings: readonly OrganizationChannelBranchRow[];
-  aliases: readonly ChannelSourceAliasRow[];
-  onComplete: () => void;
+  branches?: readonly OrganizationBranchRow[];
+  branchMappings?: readonly OrganizationChannelBranchRow[];
+  aliases?: readonly ChannelSourceAliasRow[];
+  canManage: boolean;
+  canMapBranches?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const [branchId, setBranchId] = useState(branches[0]?.id ?? "");
-  const [applicability, setApplicability] = useState<BranchMappingStatus>("active");
-  const [sourceScope, setSourceScope] = useState<AliasSourceScope>("manual");
-  const [pending, setPending] = useState<"branch" | "alias" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const channelMappings = mappings.filter((mapping) => mapping.channel_id === channel.id);
-  const channelAliases = aliases.filter((alias) => alias.channel_id === channel.id);
+  const router = useRouter();
+  const availableBranches = branches ?? [];
+  const channelMappings = (branchMappings ?? []).filter(
+    (mapping) => mapping.channel_id === channel.id,
+  );
+  const channelAliases = (aliases ?? []).filter((alias) => alias.channel_id === channel.id);
+  const currentMapping = channelMappings.find((mapping) =>
+    availableBranches.some((branch) => branch.id === mapping.branch_id),
+  );
 
-  function handleOpenChange(nextOpen: boolean) {
-    if (nextOpen) {
-      const currentMapping = channelMappings.find((mapping) =>
-        branches.some((branch) => branch.id === mapping.branch_id),
-      );
-      if (currentMapping) {
-        setBranchId(currentMapping.branch_id);
-        setApplicability(currentMapping.status);
-      }
-      setError(null);
-    }
-    setOpen(nextOpen);
-  }
+  const [branchId, setBranchId] = useState(
+    currentMapping?.branch_id ?? availableBranches[0]?.id ?? "",
+  );
+  const [applicability, setApplicability] = useState<BranchMappingStatus>(
+    currentMapping?.status ?? "active",
+  );
+  const [sourceScope, setSourceScope] = useState<AliasSourceScope>("manual");
+  const [pending, setPending] = useState<"branch" | "alias" | "archive" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function saveBranchMapping(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -338,8 +346,8 @@ function ChannelMappingsDialog({
       setPending(null);
       return;
     }
-    setOpen(false);
-    onComplete();
+    setPending(null);
+    router.refresh();
   }
 
   async function saveAlias(event: FormEvent<HTMLFormElement>) {
@@ -370,204 +378,277 @@ function ChannelMappingsDialog({
       setPending(null);
       return;
     }
-    setOpen(false);
-    onComplete();
+    setPending(null);
+    router.refresh();
+  }
+
+  async function toggleArchive() {
+    setPending("archive");
+    setError(null);
+    const response = await fetch(`/api/organizations/${organizationId}/channels/${channel.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: channel.status === "active" ? "archived" : "active" }),
+    });
+    if (!response.ok) {
+      setError(
+        responseMessage(
+          await response.json().catch(() => null),
+          "The channel status could not be changed. Please try again.",
+        ),
+      );
+      setPending(null);
+      return;
+    }
+    setPending(null);
+    router.refresh();
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <MapPinIcon data-icon="inline-start" />
-          Manage mappings
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-h-[min(44rem,calc(100vh-2rem))] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Mappings for {channel.display_name}</DialogTitle>
-          <DialogDescription>
-            Match this business channel to applicable outlets and the labels that appear in source
-            reports. These mappings never create provider access.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-6">
-          <section className="grid gap-3" aria-labelledby={`branch-mappings-${channel.id}`}>
-            <div>
-              <h3 id={`branch-mappings-${channel.id}`} className="font-medium">
-                Branch applicability
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Use inactive when a channel no longer applies to an outlet; its prior evidence stays
-                intact.
-              </p>
+    <div className="grid gap-6">
+      <section className="grid gap-3" aria-labelledby={`channel-identity-${channel.id}`}>
+        <div>
+          <h3 id={`channel-identity-${channel.id}`} className="font-medium">
+            Channel identity
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            The name, category, and provider hint used across reporting. Never a credential or a
+            campaign permission.
+          </p>
+        </div>
+        {canManage ? (
+          <div className="rounded-lg border p-4">
+            <ChannelForm
+              organizationId={organizationId}
+              channel={channel}
+              onComplete={() => router.refresh()}
+            />
+          </div>
+        ) : (
+          <div className="grid gap-2 rounded-lg border px-3 py-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Display name</span>
+              <span>{channel.display_name}</span>
             </div>
-            {channelMappings.length > 0 ? (
-              <div className="grid gap-2">
-                {channelMappings.map((mapping) => {
-                  const branch = branches.find((item) => item.id === mapping.branch_id);
-                  return (
-                    <div
-                      key={mapping.id}
-                      className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-sm"
-                    >
-                      <span>{branch?.name ?? "Historical outlet"}</span>
-                      <Badge variant={mapping.status === "active" ? "outline" : "secondary"}>
-                        {mapping.status}
-                      </Badge>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                No outlet mappings yet.
-              </p>
-            )}
-            {branches.length > 0 ? (
-              <form className="grid gap-3 rounded-lg border p-4" onSubmit={saveBranchMapping}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel>Outlet</FieldLabel>
-                    <Select value={branchId} onValueChange={setBranchId}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Choose an outlet" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {branches.map((branch) => (
-                            <SelectItem key={branch.id} value={branch.id}>
-                              {branch.name}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field>
-                    <FieldLabel>Applicability</FieldLabel>
-                    <Select
-                      value={applicability}
-                      onValueChange={(value) => setApplicability(value as BranchMappingStatus)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          <SelectItem value="active">Active</SelectItem>
-                          <SelectItem value="inactive">Inactive</SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor={`mapping-from-${channel.id}`}>Effective from</FieldLabel>
-                      <Input id={`mapping-from-${channel.id}`} name="effectiveFrom" type="date" />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={`mapping-to-${channel.id}`}>Effective to</FieldLabel>
-                      <Input id={`mapping-to-${channel.id}`} name="effectiveTo" type="date" />
-                    </Field>
-                  </div>
-                </FieldGroup>
-                <div className="flex justify-end">
-                  <Button type="submit" disabled={pending !== null}>
-                    {pending === "branch" ? "Saving…" : "Save outlet mapping"}
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                Add an active branch in organization settings before mapping this channel.
-              </p>
-            )}
-          </section>
-
-          <section className="grid gap-3" aria-labelledby={`source-labels-${channel.id}`}>
-            <div>
-              <h3 id={`source-labels-${channel.id}`} className="font-medium">
-                Source labels
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Add exact labels seen in onboarding, imports, or reports so the platform can match
-                evidence to this channel safely.
-              </p>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Stable key</span>
+              <span>{channel.key}</span>
             </div>
-            {channelAliases.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {channelAliases.map((alias) => (
-                  <Badge key={alias.id} variant="secondary">
-                    <TagsIcon data-icon="inline-start" />
-                    {alias.alias} · {alias.source_scope.replace(/_/g, " ")}
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Category</span>
+              <span>{labelForCategory(channel.category)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Provider hint</span>
+              <span>{channel.template_key ?? "None"}</span>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="grid gap-3" aria-labelledby={`branch-mappings-${channel.id}`}>
+        <div>
+          <h3 id={`branch-mappings-${channel.id}`} className="font-medium">
+            Branch applicability
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Use inactive when a channel no longer applies to an outlet; its prior evidence stays
+            intact.
+          </p>
+        </div>
+        {channelMappings.length > 0 ? (
+          <div className="grid gap-2">
+            {channelMappings.map((mapping) => {
+              const branch = availableBranches.find((item) => item.id === mapping.branch_id);
+              return (
+                <div
+                  key={mapping.id}
+                  className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-sm"
+                >
+                  <span>{branch?.name ?? "Historical outlet"}</span>
+                  <Badge variant={mapping.status === "active" ? "outline" : "secondary"}>
+                    {mapping.status}
                   </Badge>
-                ))}
-              </div>
-            ) : (
-              <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                No source labels yet.
-              </p>
-            )}
-            <form className="grid gap-3 rounded-lg border p-4" onSubmit={saveAlias}>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+            No outlet mappings yet.
+          </p>
+        )}
+        {canMapBranches ? (
+          availableBranches.length > 0 ? (
+            <form className="grid gap-3 rounded-lg border p-4" onSubmit={saveBranchMapping}>
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor={`alias-${channel.id}`}>Exact source label</FieldLabel>
-                  <Input
-                    id={`alias-${channel.id}`}
-                    name="alias"
-                    required
-                    placeholder="e.g. Smile (Easy Eats)"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel>Where did this label come from?</FieldLabel>
-                  <Select
-                    value={sourceScope}
-                    onValueChange={(value) => setSourceScope(value as AliasSourceScope)}
-                  >
+                  <FieldLabel>Outlet</FieldLabel>
+                  <Select value={branchId} onValueChange={setBranchId}>
                     <SelectTrigger className="w-full">
-                      <SelectValue />
+                      <SelectValue placeholder="Choose an outlet" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {aliasSourceScopes.map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {label}
+                        {availableBranches.map((branch) => (
+                          <SelectItem key={branch.id} value={branch.id}>
+                            {branch.name}
                           </SelectItem>
                         ))}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                 </Field>
+                <Field>
+                  <FieldLabel>Applicability</FieldLabel>
+                  <Select
+                    value={applicability}
+                    onValueChange={(value) => setApplicability(value as BranchMappingStatus)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field>
-                    <FieldLabel htmlFor={`alias-from-${channel.id}`}>Effective from</FieldLabel>
-                    <Input id={`alias-from-${channel.id}`} name="effectiveFrom" type="date" />
+                    <FieldLabel htmlFor={`mapping-from-${channel.id}`}>Effective from</FieldLabel>
+                    <Input id={`mapping-from-${channel.id}`} name="effectiveFrom" type="date" />
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor={`alias-to-${channel.id}`}>Effective to</FieldLabel>
-                    <Input id={`alias-to-${channel.id}`} name="effectiveTo" type="date" />
+                    <FieldLabel htmlFor={`mapping-to-${channel.id}`}>Effective to</FieldLabel>
+                    <Input id={`mapping-to-${channel.id}`} name="effectiveTo" type="date" />
                   </Field>
                 </div>
               </FieldGroup>
               <div className="flex justify-end">
                 <Button type="submit" disabled={pending !== null}>
-                  {pending === "alias" ? "Saving…" : "Save source label"}
+                  {pending === "branch" ? "Saving…" : "Save outlet mapping"}
                 </Button>
               </div>
             </form>
-          </section>
+          ) : (
+            <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              Add an active branch in organization settings before mapping this channel.
+            </p>
+          )
+        ) : null}
+      </section>
 
-          {error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Mapping was not saved</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
+      <section className="grid gap-3" aria-labelledby={`source-labels-${channel.id}`}>
+        <div>
+          <h3 id={`source-labels-${channel.id}`} className="font-medium">
+            Source labels
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Add exact labels seen in onboarding, imports, or reports so the platform can match
+            evidence to this channel safely.
+          </p>
         </div>
-      </DialogContent>
-    </Dialog>
+        {channelAliases.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {channelAliases.map((alias) => (
+              <Badge key={alias.id} variant="secondary">
+                <TagsIcon data-icon="inline-start" />
+                {alias.alias} · {alias.source_scope.replace(/_/g, " ")}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+            No source labels yet.
+          </p>
+        )}
+        {canMapBranches ? (
+          <form className="grid gap-3 rounded-lg border p-4" onSubmit={saveAlias}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={`alias-${channel.id}`}>Exact source label</FieldLabel>
+                <Input
+                  id={`alias-${channel.id}`}
+                  name="alias"
+                  required
+                  placeholder="e.g. Smile (Easy Eats)"
+                />
+              </Field>
+              <Field>
+                <FieldLabel>Where did this label come from?</FieldLabel>
+                <Select
+                  value={sourceScope}
+                  onValueChange={(value) => setSourceScope(value as AliasSourceScope)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {aliasSourceScopes.map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor={`alias-from-${channel.id}`}>Effective from</FieldLabel>
+                  <Input id={`alias-from-${channel.id}`} name="effectiveFrom" type="date" />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor={`alias-to-${channel.id}`}>Effective to</FieldLabel>
+                  <Input id={`alias-to-${channel.id}`} name="effectiveTo" type="date" />
+                </Field>
+              </div>
+            </FieldGroup>
+            <div className="flex justify-end">
+              <Button type="submit" disabled={pending !== null}>
+                {pending === "alias" ? "Saving…" : "Save source label"}
+              </Button>
+            </div>
+          </form>
+        ) : null}
+      </section>
+
+      {canManage ? (
+        <section className="grid gap-3" aria-labelledby={`channel-archive-${channel.id}`}>
+          <div>
+            <h3 id={`channel-archive-${channel.id}`} className="font-medium">
+              {channel.status === "active" ? "Archive channel" : "Restore channel"}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {channel.status === "active"
+                ? "Archiving keeps every mapping, source label, and historical evidence intact; it only stops the channel from accepting new activity."
+                : "Restoring returns this channel to active use with its history unchanged."}
+            </p>
+          </div>
+          <div>
+            <Button variant="outline" size="sm" onClick={toggleArchive} disabled={pending !== null}>
+              <ArchiveIcon data-icon="inline-start" />
+              {pending === "archive"
+                ? "Saving…"
+                : channel.status === "active"
+                  ? "Archive channel"
+                  : "Restore channel"}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTitle>Setup change was not saved</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
   );
 }
 
@@ -575,16 +656,18 @@ export function ChannelsManagement({
   organizationId,
   organizationName,
   channels,
-  branches,
   branchMappings,
   aliases,
   canManage,
-  canMapBranches = false,
   workspaceEnabled = false,
 }: {
   organizationId: string;
   organizationName: string;
   channels: readonly OrganizationChannelRow[];
+  // `branches` and `canMapBranches` stay part of the contract: Task 6's page
+  // passes a fixed prop set, and the mapping setup itself now lives on the
+  // channel's own page (`ChannelSetupPanel`), which is where these two are
+  // actually read.
   branches?: readonly OrganizationBranchRow[];
   branchMappings?: readonly OrganizationChannelBranchRow[];
   aliases?: readonly ChannelSourceAliasRow[];
@@ -596,7 +679,6 @@ export function ChannelsManagement({
   const router = useRouter();
   const activeChannels = channels.filter((channel) => channel.status === "active");
   const archivedChannels = channels.length - activeChannels.length;
-  const availableBranches = branches ?? [];
   const availableMappings = branchMappings ?? [];
   const availableAliases = aliases ?? [];
 
@@ -692,25 +774,13 @@ export function ChannelsManagement({
                 <CardTitle>{channel.display_name}</CardTitle>
                 <CardDescription>{channel.key}</CardDescription>
                 <CardAction>
-                  <div className="flex items-center gap-1">
-                    {canMapBranches ? (
-                      <ChannelMappingsDialog
-                        organizationId={organizationId}
-                        channel={channel}
-                        branches={availableBranches}
-                        mappings={availableMappings}
-                        aliases={availableAliases}
-                        onComplete={() => router.refresh()}
-                      />
-                    ) : null}
-                    {canManage ? (
-                      <ChannelDialog
-                        organizationId={organizationId}
-                        channel={channel}
-                        onComplete={() => router.refresh()}
-                      />
-                    ) : null}
-                  </div>
+                  {canManage ? (
+                    <ChannelDialog
+                      organizationId={organizationId}
+                      channel={channel}
+                      onComplete={() => router.refresh()}
+                    />
+                  ) : null}
                 </CardAction>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-2">

@@ -91,7 +91,10 @@ describe("ChannelsManagement", () => {
     expect(screen.getByText("No channels yet")).toBeInTheDocument();
   });
 
-  it("gives an operator access to map a channel without identity-edit access", () => {
+  it("does not render mapping or identity-edit actions on the card, regardless of canMapBranches", () => {
+    // Mapping setup moved to the channel's own Setup tab (ChannelSetupPanel).
+    // The register card keeps only the read-only counts and, when canManage,
+    // the identity Edit action.
     render(
       <ChannelsManagement
         organizationId={organizationId}
@@ -102,7 +105,7 @@ describe("ChannelsManagement", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Manage mappings" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage mappings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
