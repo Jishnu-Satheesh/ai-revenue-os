@@ -31,12 +31,16 @@ describe("keeta restaurant daily definition", () => {
     expect(metricKeys.has("listing.cart_additions")).toBe(true);
   });
 
-  it("leaves the last funnel stage unbound until columns can be added together", () => {
-    // The honest source for "placed orders" is
-    // `order_customers_in_restaurant` + `order_customers_out_of_restaurant`,
-    // and a projection output reads exactly one column. `checkout_customers`
-    // would fit the schema and overstate the stage, so nothing is bound.
-    expect(metricKeys.has("listing.placed_orders")).toBe(false);
+  it("builds the last funnel stage from both halves the export splits it into", () => {
+    // Keeta reports placed orders as customers who ordered inside the
+    // restaurant and customers who ordered outside it. `checkout_customers`
+    // would fit in one column and overstate the stage, because it counts
+    // people who reached checkout and never ordered.
+    const placed = projection.outputs.find(
+      (output) => output.metricKey === "listing.placed_orders",
+    );
+    expect(placed?.canonicalField).toBe("order_customers_in_restaurant");
+    expect(placed?.sumWith).toEqual(["order_customers_out_of_restaurant"]);
   });
 
   it("counts orders and cancellations without claiming fault", () => {

@@ -19,13 +19,15 @@ import type { ProviderReportDefinition } from "@/domain/reports/provider-library
  * billing report instead. Commission and delivery fee stay bound for validation
  * until the economics vocabulary is separately approved.
  *
- * Two things the export states are deliberately still unread. `placed orders`
- * is `order_customers_in_restaurant` plus `order_customers_out_of_restaurant`,
- * and a projection output reads exactly one column, so the funnel's last stage
- * waits for a declaration that can add two columns together rather than being
- * approximated by `checkout_customers`. And `cancelled_orders` is a count with
- * no fault attached: Keeta never says whose fault a cancellation was, so it is
- * recorded as `order.cancelled_count` and never as an avoidable one.
+ * The funnel's last stage is the one figure this export splits in two, so it is
+ * declared as `order_customers_in_restaurant` summed with
+ * `order_customers_out_of_restaurant`. `checkout_customers` would have fitted a
+ * single column and overstated the stage, because it counts people who reached
+ * checkout and never ordered.
+ *
+ * `cancelled_orders` is a count with no fault attached: Keeta never says whose
+ * fault a cancellation was, so it is recorded as `order.cancelled_count` and
+ * never as an avoidable one.
  */
 export const keetaRestaurantDaily: ProviderReportDefinition = {
   key: "keeta.restaurant.daily",
@@ -104,6 +106,20 @@ export const keetaRestaurantDaily: ProviderReportDefinition = {
             absentMarkers: ["-"],
             required: false,
           },
+          {
+            canonicalField: "order_customers_in_restaurant",
+            sourceHeader: "order_customers_in_restaurant",
+            parser: "integer",
+            absentMarkers: ["-"],
+            required: false,
+          },
+          {
+            canonicalField: "order_customers_out_of_restaurant",
+            sourceHeader: "order_customers_out_of_restaurant",
+            parser: "integer",
+            absentMarkers: ["-"],
+            required: false,
+          },
         ],
       },
     ],
@@ -170,6 +186,18 @@ export const keetaRestaurantDaily: ProviderReportDefinition = {
         normalizedSheetName: "sheet_0",
         canonicalField: "cancelled_orders",
         metricKey: "order.cancelled_count",
+        valueKind: "count",
+        aggregation: "sum",
+      },
+      {
+        key: "listing_placed_orders",
+        normalizedSheetName: "sheet_0",
+        canonicalField: "order_customers_in_restaurant",
+        // Keeta splits the funnel's last stage in two, and neither half is the
+        // stage. `checkout_customers` would fit in one column and overstate it,
+        // because it counts people who reached checkout and never ordered.
+        sumWith: ["order_customers_out_of_restaurant"],
+        metricKey: "listing.placed_orders",
         valueKind: "count",
         aggregation: "sum",
       },
