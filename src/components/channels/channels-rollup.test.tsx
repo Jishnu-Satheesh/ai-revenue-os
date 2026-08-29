@@ -89,6 +89,32 @@ describe("ChannelsRollup", () => {
     expect(screen.queryByText(/reported revenue but no recorded loss/)).toBeNull();
   });
 
+  it("still names a revenue-only channel when the total itself refuses", () => {
+    // Keeta on staging: revenue measured for 28 of 31 January days, no
+    // cancellation data, and nothing else analysed in that window. The refusal
+    // replaced the coverage line wholesale, so the one channel that did report
+    // a figure vanished from the page that exists to show it.
+    render(
+      <ChannelsRollup
+        view={view({
+          total: { potential: null, lost: null, earned: null },
+          coverage: {
+            assessedCount: 0,
+            channelCount: 4,
+            revenueOnlyNames: ["Keeta"],
+            unassessedNames: ["noon", "deliveroo", "talabat"],
+          },
+          refusalReason:
+            "No channel has both a revenue figure and a recorded loss for this window, so no earned total can be stated.",
+        })}
+        organizationId="org-1"
+      />,
+    );
+
+    expect(screen.getByText(/no earned total can be stated/)).toBeTruthy();
+    expect(screen.getByText(/Keeta reported revenue but no recorded loss/)).toBeTruthy();
+  });
+
   it("shows the refusal reason instead of a zero when nothing was measured", () => {
     render(
       <ChannelsRollup

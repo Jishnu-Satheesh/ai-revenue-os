@@ -92,26 +92,27 @@ export function ChannelsRollup({
         ) : null}
       </div>
 
-      {view.refusalReason ? (
-        <p className="text-[15px] leading-relaxed text-muted-foreground">{view.refusalReason}</p>
-      ) : (
-        <p className="text-[15px] leading-relaxed text-muted-foreground">
-          {`Across ${view.coverage.assessedCount} of ${view.coverage.channelCount} channels.`}
-          {/* Two different gaps, so two different sentences. A channel that
-              reported revenue needs a report that records cancellations; a
-              channel with no analysis needs any report at all. */}
-          {view.coverage.revenueOnlyNames.length > 0
-            ? ` ${listNames(view.coverage.revenueOnlyNames)} reported revenue but no recorded loss, so ${
-                view.coverage.revenueOnlyNames.length === 1 ? "it is" : "they are"
-              } not in this total.`
-            : ""}
-          {view.coverage.unassessedNames.length > 0
-            ? ` ${listNames(view.coverage.unassessedNames)} ${
-                view.coverage.unassessedNames.length === 1 ? "has" : "have"
-              } no analysis for this window.`
-            : ""}
-        </p>
-      )}
+      <p className="text-[15px] leading-relaxed text-muted-foreground">
+        {/* Either the count or the reason opens the line, but the names always
+            follow. A refusal used to replace this sentence wholesale, which hid
+            the one channel that had actually reported a figure -- the very
+            thing the revenue-only state exists to show. */}
+        {view.refusalReason ??
+          `Across ${view.coverage.assessedCount} of ${view.coverage.channelCount} channels.`}
+        {/* Two different gaps, so two different sentences. A channel that
+            reported revenue needs a report that records cancellations; a
+            channel with no analysis needs any report at all. */}
+        {view.coverage.revenueOnlyNames.length > 0
+          ? ` ${listNames(view.coverage.revenueOnlyNames)} reported revenue but no recorded loss, so ${
+              view.coverage.revenueOnlyNames.length === 1 ? "it is" : "they are"
+            } not in this total.`
+          : ""}
+        {view.coverage.unassessedNames.length > 0
+          ? ` ${listNames(view.coverage.unassessedNames)} ${
+              view.coverage.unassessedNames.length === 1 ? "has" : "have"
+            } no analysis for this window.`
+          : ""}
+      </p>
     </section>
   );
 }
