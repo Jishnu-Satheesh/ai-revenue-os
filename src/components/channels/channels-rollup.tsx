@@ -12,6 +12,17 @@ import {
 } from "@/components/ui/select";
 import type { ChannelsOverviewView } from "@/modules/analysis/application/channels-overview";
 
+/**
+ * Channel names as a person would say them: "Noon, Deliveroo and Keeta".
+ *
+ * A bare comma-join reads as a machine listing rows, and this sentence is the
+ * one that tells an operator what to go and do next.
+ */
+function listNames(names: readonly string[]): string {
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 /** The small uppercase section label the channel workspace uses for every band and card. */
 function Kicker({ children }: { children: React.ReactNode }) {
   return (
@@ -86,8 +97,16 @@ export function ChannelsRollup({
       ) : (
         <p className="text-[15px] leading-relaxed text-muted-foreground">
           {`Across ${view.coverage.assessedCount} of ${view.coverage.channelCount} channels.`}
+          {/* Two different gaps, so two different sentences. A channel that
+              reported revenue needs a report that records cancellations; a
+              channel with no analysis needs any report at all. */}
+          {view.coverage.revenueOnlyNames.length > 0
+            ? ` ${listNames(view.coverage.revenueOnlyNames)} reported revenue but no recorded loss, so ${
+                view.coverage.revenueOnlyNames.length === 1 ? "it is" : "they are"
+              } not in this total.`
+            : ""}
           {view.coverage.unassessedNames.length > 0
-            ? ` ${view.coverage.unassessedNames.join(", ")} ${
+            ? ` ${listNames(view.coverage.unassessedNames)} ${
                 view.coverage.unassessedNames.length === 1 ? "has" : "have"
               } no analysis for this window.`
             : ""}

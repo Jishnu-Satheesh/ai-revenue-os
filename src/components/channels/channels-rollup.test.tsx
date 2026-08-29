@@ -30,7 +30,12 @@ function view(overrides: Partial<ChannelsOverviewView> = {}): ChannelsOverviewVi
       lost: { minorUnits: 35700, currency: "AED" },
       earned: { minorUnits: 19600, currency: "AED" },
     },
-    coverage: { assessedCount: 1, channelCount: 4, unassessedNames: ["noon", "deliveroo"] },
+    coverage: {
+      assessedCount: 1,
+      channelCount: 4,
+      revenueOnlyNames: [],
+      unassessedNames: ["noon", "deliveroo"],
+    },
     refusalReason: null,
     rows: [],
     ...overrides,
@@ -55,12 +60,46 @@ describe("ChannelsRollup", () => {
     expect(coverage.textContent).toContain("deliveroo");
   });
 
+  it("separates a channel that reported revenue from the ones nobody has read", () => {
+    // The two gaps need different next actions: Keeta needs a report that
+    // records cancellations, while noon needs any report at all. One sentence
+    // covering both would send the operator looking for the wrong file.
+    render(
+      <ChannelsRollup
+        view={view({
+          coverage: {
+            assessedCount: 1,
+            channelCount: 4,
+            revenueOnlyNames: ["Keeta"],
+            unassessedNames: ["noon"],
+          },
+        })}
+        organizationId="org-1"
+      />,
+    );
+
+    const coverage = screen.getByText(/Across 1 of 4 channels/);
+    expect(coverage.textContent).toContain("Keeta reported revenue but no recorded loss");
+    expect(coverage.textContent).toContain("noon has no analysis for this window");
+  });
+
+  it("says nothing about revenue-only channels when there are none", () => {
+    render(<ChannelsRollup view={view()} organizationId="org-1" />);
+
+    expect(screen.queryByText(/reported revenue but no recorded loss/)).toBeNull();
+  });
+
   it("shows the refusal reason instead of a zero when nothing was measured", () => {
     render(
       <ChannelsRollup
         view={view({
           total: { potential: null, lost: null, earned: null },
-          coverage: { assessedCount: 0, channelCount: 4, unassessedNames: [] },
+          coverage: {
+            assessedCount: 0,
+            channelCount: 4,
+            revenueOnlyNames: [],
+            unassessedNames: [],
+          },
           refusalReason:
             "No channel has a completed analysis for this window, so nothing has been measured.",
         })}
@@ -80,7 +119,12 @@ describe("ChannelsRollup", () => {
           windows: [],
           selectedWindow: null,
           total: { potential: null, lost: null, earned: null },
-          coverage: { assessedCount: 0, channelCount: 4, unassessedNames: [] },
+          coverage: {
+            assessedCount: 0,
+            channelCount: 4,
+            revenueOnlyNames: [],
+            unassessedNames: [],
+          },
           refusalReason:
             "No channel has a completed analysis for this window, so nothing has been measured.",
         })}

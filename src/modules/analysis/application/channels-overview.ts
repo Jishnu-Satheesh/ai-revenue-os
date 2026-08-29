@@ -1,6 +1,7 @@
 import {
-  splitEarnedLostPotential,
+  describeChannelMoney,
   type AnalysisMoney,
+  type ChannelMoney,
   type EarnedLostPotential,
 } from "@/domain/analysis/money-split";
 import type { AnalysisGrain } from "@/domain/analysis/types";
@@ -38,7 +39,7 @@ export type ChannelsOverviewRow = {
   channelId: string;
   displayName: string;
   status: string;
-  band: EarnedLostPotential;
+  band: ChannelMoney;
   /** True only when this channel contributed a complete band to the sum. */
   assessed: boolean;
 };
@@ -50,6 +51,13 @@ export type ChannelsOverviewView = {
   coverage: {
     assessedCount: number;
     channelCount: number;
+    /**
+     * Channels that were analysed and reported revenue, but whose provider
+     * recorded no loss to subtract from it. Named apart from the channels
+     * below because the two gaps need different next actions: one needs a
+     * report that records cancellations, the other needs any report at all.
+     */
+    revenueOnlyNames: readonly string[];
     unassessedNames: readonly string[];
   };
   /** Why no total is stated. Null whenever `total.earned` is present. */
@@ -61,6 +69,8 @@ const MIXED_CURRENCY_REASON =
   "These channels reported in more than one currency, so no single total can be stated.";
 const NOTHING_ANALYSED_REASON =
   "No channel has a completed analysis for this window, so nothing has been measured.";
+const NO_COMPLETE_BAND_REASON =
+  "No channel has both a revenue figure and a recorded loss for this window, so no earned total can be stated.";
 const UNRESOLVED_CURRENCY_REASON =
   "An assessed channel's band did not carry a usable currency code, so no total can be stated.";
 
@@ -81,11 +91,13 @@ function moneyOf(
   return minorUnits === null ? null : { minorUnits, currency: finding.currency };
 }
 
-function bandOf(record: ChannelBandRecord | undefined): EarnedLostPotential {
-  if (!record) return REFUSED;
+function bandOf(record: ChannelBandRecord | undefined): ChannelMoney {
+  // No record at all is a channel nothing has analysed, which is a different
+  // thing from a channel whose analysis could not complete a band.
+  if (!record) return { ...REFUSED, state: "refused" };
   const gross = record.findings.find((finding) => finding.code === "WINDOW_GROSS_REVENUE");
   const loss = record.findings.find((finding) => finding.code === "ORDER_CANCELLATION_LOSS");
-  return splitEarnedLostPotential({
+  return describeChannelMoney({
     potential: moneyOf(gross, "value"),
     lost: moneyOf(loss, "impact"),
   });
@@ -159,9 +171,10 @@ export function buildChannelsOverviewView(input: {
       displayName: channel.display_name,
       status: channel.status,
       band,
-      // A refused band is not an assessment. Counting it would let a channel
-      // that stated nothing inflate the coverage the total claims.
-      assessed: band.earned !== null,
+      // Only a complete band is an assessment. A revenue-only channel is
+      // covered -- it is named as such below -- but it contributes nothing to
+      // the sum, because there is no earned figure to contribute.
+      assessed: band.state === "complete",
     };
   });
 
@@ -181,6 +194,7 @@ export function buildChannelsOverviewView(input: {
       : null) ?? null;
 
   const assessedRows = rows.filter((row) => row.assessed);
+  const revenueOnlyRows = rows.filter((row) => row.band.state === "revenue_only");
   const currencies = new Set(
     assessedRows.map((row) => row.band.earned?.currency).filter((code): code is string => !!code),
   );
@@ -188,7 +202,10 @@ export function buildChannelsOverviewView(input: {
   let total: EarnedLostPotential = REFUSED;
   let refusalReason: string | null = null;
   if (assessedRows.length === 0) {
-    refusalReason = NOTHING_ANALYSED_REASON;
+    // Saying "nothing has been measured" over a channel that reported its
+    // revenue is false, and it is the exact sentence that made a successful
+    // import look like a failed one.
+    refusalReason = revenueOnlyRows.length > 0 ? NO_COMPLETE_BAND_REASON : NOTHING_ANALYSED_REASON;
   } else if (currencies.size > 1) {
     refusalReason = MIXED_CURRENCY_REASON;
   } else {
@@ -218,7 +235,10 @@ export function buildChannelsOverviewView(input: {
     coverage: {
       assessedCount: assessedRows.length,
       channelCount: rows.length,
-      unassessedNames: rows.filter((row) => !row.assessed).map((row) => row.displayName),
+      revenueOnlyNames: revenueOnlyRows.map((row) => row.displayName),
+      unassessedNames: rows
+        .filter((row) => row.band.state === "refused")
+        .map((row) => row.displayName),
     },
     refusalReason,
     rows,

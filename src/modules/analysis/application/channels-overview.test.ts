@@ -162,7 +162,12 @@ describe("buildChannelsOverviewView", () => {
     const view = buildChannelsOverviewView({
       channels: CHANNELS,
       bands: [
-        band({ channelId: "ch-talabat", grossMinorUnits: 55300, lostMinorUnits: 35700, currency: "" }),
+        band({
+          channelId: "ch-talabat",
+          grossMinorUnits: 55300,
+          lostMinorUnits: 35700,
+          currency: "",
+        }),
       ],
       evidenceWindows: [window_()],
       selected: SELECTED,
@@ -190,9 +195,9 @@ describe("buildChannelsOverviewView", () => {
     );
   });
 
-  it("excludes a channel whose band refused, and does not count it as assessed", () => {
-    // Gross without a recorded loss cannot be split, so the channel states no
-    // band. It must not silently enter the sum as its gross alone.
+  it("keeps a channel that reported revenue but no loss out of the sum", () => {
+    // Gross without a recorded loss cannot be split, so this channel states no
+    // earned figure. It must not silently enter the sum as its gross alone.
     const view = buildChannelsOverviewView({
       channels: CHANNELS,
       bands: [band({ channelId: "ch-talabat", grossMinorUnits: 55300 })],
@@ -201,8 +206,80 @@ describe("buildChannelsOverviewView", () => {
     });
 
     expect(view.coverage.assessedCount).toBe(0);
-    expect(view.coverage.unassessedNames).toContain("talabat");
     expect(view.total.earned).toBeNull();
+  });
+
+  it("counts a revenue-only channel as covered rather than as unread", () => {
+    // Keeta's export reports what was sold and says nothing about what was
+    // lost. Listing it beside the channels nobody has uploaded anything for
+    // tells the operator their import achieved nothing, which is false.
+    const view = buildChannelsOverviewView({
+      channels: CHANNELS,
+      bands: [
+        band({ channelId: "ch-talabat", grossMinorUnits: 55300, lostMinorUnits: 35700 }),
+        band({ channelId: "ch-keeta", grossMinorUnits: 40000 }),
+      ],
+      evidenceWindows: [window_()],
+      selected: SELECTED,
+    });
+
+    expect(view.coverage.revenueOnlyNames).toEqual(["Keeta"]);
+    expect(view.coverage.unassessedNames).toEqual(["noon", "deliveroo"]);
+    expect(view.coverage.channelCount).toBe(4);
+  });
+
+  it("states a revenue-only channel's own revenue without inventing its loss", () => {
+    const view = buildChannelsOverviewView({
+      channels: CHANNELS,
+      bands: [band({ channelId: "ch-keeta", grossMinorUnits: 40000 })],
+      evidenceWindows: [window_()],
+      selected: SELECTED,
+    });
+
+    const keeta = view.rows.find((row) => row.channelId === "ch-keeta");
+    expect(keeta?.band).toEqual({
+      state: "revenue_only",
+      potential: { minorUnits: 40000, currency: "AED" },
+      lost: null,
+      earned: null,
+    });
+    expect(keeta?.assessed).toBe(false);
+  });
+
+  it("never adds a revenue-only channel's revenue into the total it cannot complete", () => {
+    // The three figures in the total must keep reconciling: potential minus
+    // lost equals earned. Folding in a revenue nobody can subtract from would
+    // break that quietly, which is worse than leaving it out loudly.
+    const view = buildChannelsOverviewView({
+      channels: CHANNELS,
+      bands: [
+        band({ channelId: "ch-talabat", grossMinorUnits: 55300, lostMinorUnits: 35700 }),
+        band({ channelId: "ch-keeta", grossMinorUnits: 40000 }),
+      ],
+      evidenceWindows: [window_()],
+      selected: SELECTED,
+    });
+
+    expect(view.total).toEqual({
+      potential: { minorUnits: 55300, currency: "AED" },
+      lost: { minorUnits: 35700, currency: "AED" },
+      earned: { minorUnits: 19600, currency: "AED" },
+    });
+    expect(view.coverage.assessedCount).toBe(1);
+  });
+
+  it("does not claim nothing was measured when a revenue-only channel was", () => {
+    const view = buildChannelsOverviewView({
+      channels: CHANNELS,
+      bands: [band({ channelId: "ch-keeta", grossMinorUnits: 40000 })],
+      evidenceWindows: [window_()],
+      selected: SELECTED,
+    });
+
+    expect(view.total.earned).toBeNull();
+    expect(view.refusalReason).toBe(
+      "No channel has both a revenue figure and a recorded loss for this window, so no earned total can be stated.",
+    );
   });
 
   it("offers each declared window once, newest first", () => {
