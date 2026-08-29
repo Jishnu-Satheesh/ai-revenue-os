@@ -14,7 +14,12 @@ const mapping = {
       allowFormula: false,
       allowMergedCells: false,
       fields: [
-        { canonicalField: "period_date", sourceHeader: "order_date", parser: "local_date", required: true },
+        {
+          canonicalField: "period_date",
+          sourceHeader: "order_date",
+          parser: "local_date",
+          required: true,
+        },
         {
           canonicalField: "gross_sales",
           sourceHeader: "total_sales",
@@ -22,7 +27,12 @@ const mapping = {
           financialSign: "positive",
           required: true,
         },
-        { canonicalField: "order_count", sourceHeader: "total_orders", parser: "integer", required: true },
+        {
+          canonicalField: "order_count",
+          sourceHeader: "total_orders",
+          parser: "integer",
+          required: true,
+        },
       ],
     },
   ],
@@ -57,6 +67,28 @@ const daily = {
 };
 
 describe("saying what a declaration will record", () => {
+  it("names every column a summed figure reads, not just the first", () => {
+    // The approval screen is the whole point of the gate: an owner approving
+    // a figure built from two columns while the copy names one of them is
+    // approving something the screen under-describes.
+    const summed = {
+      schemaVersion: 1,
+      outputKind: "period_grain",
+      grain: "day",
+      periodKey: { normalizedSheetName: "csv", canonicalField: "period_date" },
+      outputs: [
+        {
+          ...output("placed", "gross_sales", "listing.placed_orders", "money"),
+          sumWith: ["order_count"],
+        },
+      ],
+    };
+
+    expect(summarizeReportProjection(summed, mapping)?.entries).toEqual([
+      { label: "orders placed from the listing", sourceColumn: "total sales and total orders" },
+    ]);
+  });
+
   it("names each figure and the column it comes from, in the operator's words", () => {
     // Not "revenue.gross from gross_sales".
     expect(summarizeReportProjection(exactRange, mapping)?.entries).toEqual([

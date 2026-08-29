@@ -58,10 +58,23 @@ export function summarizeReportProjection(
     return field ? columnLabel(field.sourceHeader) : null;
   };
 
-  const entries = document.outputs.map((output) => ({
-    label: describeMetric(output.metricKey),
-    sourceColumn: sourceColumnFor(output.normalizedSheetName, output.canonicalField),
-  }));
+  const entries = document.outputs.map((output) => {
+    // A figure built from several columns has to name all of them here. This
+    // screen is the approval: an owner told only the first column is agreeing
+    // to something narrower than what will actually be read.
+    const columns = [output.canonicalField, ...(output.sumWith ?? [])]
+      .map((canonicalField) => sourceColumnFor(output.normalizedSheetName, canonicalField))
+      .filter((column): column is string => column !== null);
+    return {
+      label: describeMetric(output.metricKey),
+      sourceColumn:
+        columns.length === 0
+          ? null
+          : columns.length === 1
+            ? (columns[0] as string)
+            : `${columns.slice(0, -1).join(", ")} and ${columns[columns.length - 1]}`,
+    };
+  });
 
   const control = document.controlTotals[0];
   const checkedAgainst = control
