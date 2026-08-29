@@ -617,18 +617,24 @@ export function ChannelSetupPanel({
         ) : null}
       </section>
 
-      {canManage ? (
-        <section className="grid gap-3" aria-labelledby={`channel-archive-${channel.id}`}>
-          <div>
-            <h3 id={`channel-archive-${channel.id}`} className="font-medium">
-              {channel.status === "active" ? "Archive channel" : "Restore channel"}
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              {channel.status === "active"
+      <section className="grid gap-3" aria-labelledby={`channel-archive-${channel.id}`}>
+        <div>
+          <h3 id={`channel-archive-${channel.id}`} className="font-medium">
+            {canManage
+              ? channel.status === "active"
+                ? "Archive channel"
+                : "Restore channel"
+              : "Channel status"}
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            {canManage
+              ? channel.status === "active"
                 ? "Archiving keeps every mapping, source label, and historical evidence intact; it only stops the channel from accepting new activity."
-                : "Restoring returns this channel to active use with its history unchanged."}
-            </p>
-          </div>
+                : "Restoring returns this channel to active use with its history unchanged."
+              : "Only a channel manager can archive or restore this channel."}
+          </p>
+        </div>
+        {canManage ? (
           <div>
             <Button variant="outline" size="sm" onClick={toggleArchive} disabled={pending !== null}>
               <ArchiveIcon data-icon="inline-start" />
@@ -639,8 +645,15 @@ export function ChannelSetupPanel({
                   : "Restore channel"}
             </Button>
           </div>
-        </section>
-      ) : null}
+        ) : (
+          <div className="grid gap-2 rounded-lg border px-3 py-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Status</span>
+              <span>{channel.status === "active" ? "Active" : "Archived"}</span>
+            </div>
+          </div>
+        )}
+      </section>
 
       {error ? (
         <Alert variant="destructive">
@@ -659,15 +672,16 @@ export function ChannelsManagement({
   branchMappings,
   aliases,
   canManage,
-  workspaceEnabled = false,
 }: {
   organizationId: string;
   organizationName: string;
   channels: readonly OrganizationChannelRow[];
-  // `branches` and `canMapBranches` stay part of the contract: Task 6's page
-  // passes a fixed prop set, and the mapping setup itself now lives on the
-  // channel's own page (`ChannelSetupPanel`), which is where these two are
-  // actually read.
+  // `branches`, `canMapBranches` and `workspaceEnabled` stay part of the
+  // contract: Task 6's page passes a fixed prop set. The mapping setup that
+  // used to read the first two now lives on the channel's own page
+  // (`ChannelSetupPanel`), and every channel's card now links to that page
+  // unconditionally, so `workspaceEnabled` no longer decides whether the
+  // link renders -- the page itself decides what to draw once you're there.
   branches?: readonly OrganizationBranchRow[];
   branchMappings?: readonly OrganizationChannelBranchRow[];
   aliases?: readonly ChannelSourceAliasRow[];
@@ -822,18 +836,15 @@ export function ChannelsManagement({
               <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
                 <span>Evidence and financial reports are governed separately.</span>
                 <div className="flex items-center gap-2">
-                  {/* Only for a channel that still trades. An archived channel's
-                      workspace would invite an analysis of a channel nobody is
-                      importing for any more. */}
-                  {workspaceEnabled && channel.status === "active" ? (
-                    <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
-                      <Link
-                        href={`/organizations/${organizationId}/economics/channels/${channel.id}`}
-                      >
-                        Open workspace
-                      </Link>
-                    </Button>
-                  ) : null}
+                  {/* Every channel has its own page now -- Analysis when
+                      available, Setup always -- so the card links there
+                      unconditionally. The page itself decides which tabs to
+                      draw; the card does not need to guess in advance. */}
+                  <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+                    <Link href={`/organizations/${organizationId}/channels/${channel.id}`}>
+                      Open channel
+                    </Link>
+                  </Button>
                   {channel.status === "archived" ? <ArchiveIcon aria-label="Archived" /> : null}
                 </div>
               </CardFooter>

@@ -109,6 +109,38 @@ describe("ChannelsManagement", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
+  it("links every channel card to its own page, including an archived one", () => {
+    // The channel page is the only place Setup lives now, and Setup is what
+    // an archived channel needs (its Restore control lives there). The card
+    // must not gate this link on workspace availability or channel status.
+    const archivedChannel: OrganizationChannelRow = {
+      ...channel,
+      id: "66666666-6666-4666-8666-666666666666",
+      status: "archived",
+      archived_by: channel.created_by,
+      archived_at: "2026-08-25T00:00:00.000Z",
+    };
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel, archivedChannel]}
+        canManage={false}
+      />,
+    );
+
+    const links = screen.getAllByRole("link", { name: "Open channel" });
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/channels/${channel.id}`,
+    );
+    expect(links[1]).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/channels/${archivedChannel.id}`,
+    );
+  });
+
   it("keeps inactive outlet mappings visible as historical evidence", () => {
     render(
       <ChannelsManagement
