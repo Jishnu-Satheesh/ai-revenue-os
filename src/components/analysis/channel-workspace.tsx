@@ -1003,10 +1003,12 @@ export function ChannelWorkspace({
         {view.runs.some((run) => run.status === "running") ? (
           <StatusBadge label="A run is in progress" tone="warning" />
         ) : null}
-        {view.runs.find((run) => run.status === "failed") ? (
+        {/* The newest run, not the newest failure. Searching the list for any
+            failed run left this warning on screen forever once a channel had
+            failed even once, contradicting the figures printed beside it. */}
+        {view.runs[0]?.status === "failed" ? (
           <span className="text-warning">
-            The last attempt failed:{" "}
-            {view.runs.find((run) => run.status === "failed")?.safeFailureCode}
+            The last attempt failed: {view.runs[0]?.safeFailureCode}
           </span>
         ) : null}
       </div>

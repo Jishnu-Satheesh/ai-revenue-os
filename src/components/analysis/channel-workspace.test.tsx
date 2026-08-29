@@ -543,6 +543,19 @@ describe("ChannelWorkspace", () => {
     expect(screen.getByText(/last attempt failed: EVIDENCE_UNAVAILABLE/i)).toBeTruthy();
   });
 
+  it("stops warning about a failure once a later run has succeeded", () => {
+    // Talabat on staging: one ANALYSIS_PROCESSING_FAILED run on 26 Aug, then
+    // six completed runs over the two days after it. The banner searched the
+    // list for any failed run rather than reading the newest one, so it told
+    // the operator their analysis was broken while the figures beside it came
+    // from a run that had succeeded that morning.
+    renderWorkspace({
+      runs: [
+        run({ id: "run-new", status: "completed" }),
+        run({ id: "run-old", status: "failed", safeFailureCode: "ANALYSIS_PROCESSING_FAILED" }),
+      ],
+    });
+
   it("hides the run control from a member who may not start one", () => {
     renderWorkspace({ canRunAnalysis: false });
 
