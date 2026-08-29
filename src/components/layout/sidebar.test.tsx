@@ -33,7 +33,7 @@ describe("Sidebar", () => {
   afterEach(() => cleanup());
 
   it("renders the workspace entries in order for an organization route", () => {
-    renderSidebar(`/organizations/${organizationId}/economics`);
+    renderSidebar(`/organizations/${organizationId}/channels`);
 
     const labels = screen
       .getAllByTestId("workspace-entry")
@@ -44,7 +44,6 @@ describe("Sidebar", () => {
       "Campaigns",
       "Business Memory",
       "Channels",
-      "Channel economics",
       "Integration Hub",
       "Guided onboarding",
       "Agents",
@@ -65,12 +64,9 @@ describe("Sidebar", () => {
   });
 
   it("marks the active entry and never activates or links an unbuilt one", () => {
-    renderSidebar(`/organizations/${organizationId}/economics`);
+    renderSidebar(`/organizations/${organizationId}/channels`);
 
-    expect(screen.getByRole("link", { name: /Channel economics/ })).toHaveAttribute(
-      "data-active",
-      "true",
-    );
+    expect(screen.getByRole("link", { name: /^Channels$/ })).toHaveAttribute("data-active", "true");
     expect(screen.getByRole("link", { name: /Campaigns/ })).toHaveAttribute(
       "href",
       `/organizations/${organizationId}/campaigns`,
