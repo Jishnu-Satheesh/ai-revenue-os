@@ -67,7 +67,10 @@ const UNRESOLVED_CURRENCY_REASON =
 const REFUSED: EarnedLostPotential = { potential: null, lost: null, earned: null };
 
 /** The money a finding states, or nothing. Never a rounded or coerced value. */
-function moneyOf(finding: ChannelFindingRecord | undefined, from: "value" | "impact"): AnalysisMoney | null {
+function moneyOf(
+  finding: ChannelFindingRecord | undefined,
+  from: "value" | "impact",
+): AnalysisMoney | null {
   if (!finding || finding.currency === null) return null;
   const minorUnits =
     from === "value"
