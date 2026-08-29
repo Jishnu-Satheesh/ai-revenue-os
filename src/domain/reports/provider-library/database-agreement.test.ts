@@ -128,3 +128,69 @@ describe("the database admits every contract the platform can propose", () => {
     expect(unknownKeys(guidedContract)).toEqual([]);
   });
 });
+
+/**
+ * The same agreement, for the declaration that says what gets recorded.
+ *
+ * The guard above was written after an unknown contract key closed the intake
+ * path for every mapping at once. The projection document had no equivalent,
+ * so a key added to `reportProjectionOutputSchema` and not to
+ * `private.assert_report_projection_document` reproduced the identical failure
+ * one step later: every test green, and Postgres refusing the approval.
+ */
+const PROJECTION_VALIDATOR = "create or replace function private.assert_report_projection_document";
+
+function liveProjectionValidatorSource(): string {
+  const owning = readdirSync(MIGRATIONS)
+    .filter((name) => name.endsWith(".sql"))
+    .filter((name) => readFileSync(join(MIGRATIONS, name), "utf8").includes(PROJECTION_VALIDATOR))
+    .sort();
+  expect(owning.length).toBeGreaterThan(0);
+  return readFileSync(join(MIGRATIONS, owning[owning.length - 1] as string), "utf8");
+}
+
+const projectionLists = allowLists(liveProjectionValidatorSource());
+// Matched on keys only these lists can hold. `metricKey` alone is ambiguous:
+// the completion fence in the same migration checks an emitted observation,
+// which carries `metricKey` and `canonicalField` too.
+const outputKeys = listContaining(projectionLists, "aggregation");
+const categoricalKeys = listContaining(projectionLists, "collectInjectedValues");
+
+function unknownProjectionKeys(document: unknown): string[] {
+  const projection = document as {
+    outputs: Array<Record<string, unknown> & { categorical?: Record<string, unknown> }>;
+  };
+  const rejected: string[] = [];
+  for (const output of projection.outputs) {
+    for (const key of Object.keys(output)) {
+      if (!outputKeys.has(key)) rejected.push(`output.${key}`);
+    }
+    if (output.categorical) {
+      for (const key of Object.keys(output.categorical)) {
+        if (!categoricalKeys.has(key)) rejected.push(`categorical.${key}`);
+      }
+    }
+  }
+  return [...new Set(rejected)];
+}
+
+describe("the database admits every projection the platform can propose", () => {
+  it("reads an allow-list for the output and its categorical block", () => {
+    expect(outputKeys.has("canonicalField")).toBe(true);
+    expect(categoricalKeys.has("allowedValues")).toBe(true);
+  });
+
+  it("admits every key an output may carry, including the ones nothing uses yet", () => {
+    // Checking only the shipped definitions would pass while a capability sat
+    // unusable, because a definition that has not adopted a key cannot reveal
+    // that the database would refuse it.
+    expect(outputKeys.has("sumWith")).toBe(true);
+  });
+
+  it.each(PROVIDER_REPORT_DEFINITIONS.map((definition) => [definition.key, definition] as const))(
+    "%s projects with no key the database would refuse",
+    (_key, definition) => {
+      expect(unknownProjectionKeys(definition.projection)).toEqual([]);
+    },
+  );
+});

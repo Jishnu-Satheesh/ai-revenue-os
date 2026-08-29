@@ -5,11 +5,7 @@ import {
   normalizeReportStructureIdentifier,
   type ReportContractDocument,
 } from "@/domain/reports/contracts";
-import {
-  parsePeriodKey,
-  periodStartFor,
-  type PeriodKeyContext,
-} from "@/domain/reports/period-key";
+import { parsePeriodKey, periodStartFor, type PeriodKeyContext } from "@/domain/reports/period-key";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
@@ -30,6 +26,22 @@ const reportProjectionOutputSchema = z
     metricKey: metricKeySchema,
     valueKind: z.enum(["money", "count"]),
     aggregation: z.literal("sum"),
+    /**
+     * Further columns on the same sheet whose values are added to this
+     * output's own before it is recorded.
+     *
+     * One governed figure is sometimes reported across several columns: Keeta
+     * splits placed orders into customers who ordered inside the restaurant and
+     * customers who ordered outside it, and neither column is the funnel's last
+     * stage on its own. Without this, the choice is to approximate the stage
+     * with a column that means something else or to leave a chapter empty over
+     * data the file already states.
+     *
+     * It is addition and nothing else. There is no expression, no subtraction,
+     * no scaling, and no column from another sheet, because each of those is a
+     * different claim needing its own approval.
+     */
+    sumWith: z.array(normalizedIdentifierSchema).min(1).max(4).optional(),
     /**
      * A categorical output: the source column carries provider category labels
      * rather than figures, and each label becomes its own observation tagged
@@ -87,7 +99,10 @@ const projectionControlTotalSchema = z
      */
     source: z.enum(["operator_stated", "sheet_totals_row"]).default("operator_stated"),
     /** Minor units of the declaration's currency, signed. Operator-stated only. */
-    statedTotalMinorUnits: z.string().regex(/^-?(0|[1-9]\d{0,17})$/).optional(),
+    statedTotalMinorUnits: z
+      .string()
+      .regex(/^-?(0|[1-9]\d{0,17})$/)
+      .optional(),
     /** Minor units. Zero means the figures have to agree exactly. */
     toleranceMinorUnits: z.number().int().min(0).max(100_000_000),
     /** Which statement the figure was read from. Operator-stated only. */
@@ -96,7 +111,10 @@ const projectionControlTotalSchema = z
   .strict()
   .superRefine((control, context) => {
     const stated = control.source === "operator_stated";
-    if (stated && (control.statedTotalMinorUnits === undefined || control.statedSource === undefined)) {
+    if (
+      stated &&
+      (control.statedTotalMinorUnits === undefined || control.statedSource === undefined)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["statedTotalMinorUnits"],
@@ -105,7 +123,10 @@ const projectionControlTotalSchema = z
         message: "An operator-stated total needs both the figure and the statement it came from.",
       });
     }
-    if (!stated && (control.statedTotalMinorUnits !== undefined || control.statedSource !== undefined)) {
+    if (
+      !stated &&
+      (control.statedTotalMinorUnits !== undefined || control.statedSource !== undefined)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["statedTotalMinorUnits"],
@@ -171,7 +192,9 @@ export const reportProjectionDocumentSchema = z
         });
       }
       const collides = document.outputs.some(
-        (output) => output.canonicalField === document.periodKey.canonicalField,
+        (output) =>
+          output.canonicalField === document.periodKey.canonicalField ||
+          (output.sumWith ?? []).includes(document.periodKey.canonicalField),
       );
       if (collides) {
         context.addIssue({
@@ -189,13 +212,45 @@ export const reportProjectionDocumentSchema = z
     for (const output of document.outputs) {
       const source = `${output.normalizedSheetName}:${output.canonicalField}`;
       if (outputKeys.has(output.key)) {
-        context.addIssue({ code: "custom", path: ["outputs"], message: "Projection output keys must be unique." });
+        context.addIssue({
+          code: "custom",
+          path: ["outputs"],
+          message: "Projection output keys must be unique.",
+        });
       }
       if (metricKeys.has(output.metricKey)) {
-        context.addIssue({ code: "custom", path: ["outputs"], message: "A projection may emit each metric key once." });
+        context.addIssue({
+          code: "custom",
+          path: ["outputs"],
+          message: "A projection may emit each metric key once.",
+        });
       }
       if (sourceFields.has(source)) {
-        context.addIssue({ code: "custom", path: ["outputs"], message: "A source field may feed one exact-range metric." });
+        context.addIssue({
+          code: "custom",
+          path: ["outputs"],
+          message: "A source field may feed one exact-range metric.",
+        });
+      }
+      if (output.sumWith) {
+        // Naming the output's own column again, or naming one twice, doubles
+        // the figure and looks like a clean import.
+        const contributors = [output.canonicalField, ...output.sumWith];
+        if (new Set(contributors).size !== contributors.length) {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs"],
+            message: "Each column added into an output may be named once.",
+          });
+        }
+        // A categorical output counts labels. There is no arithmetic to extend.
+        if (output.categorical) {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs"],
+            message: "A categorical output counts labels, so it cannot add columns together.",
+          });
+        }
       }
       if (output.categorical) {
         if (output.valueKind !== "count") {
@@ -205,7 +260,9 @@ export const reportProjectionDocumentSchema = z
             message: "A categorical output counts occurrences, so its value kind must be count.",
           });
         }
-        if (new Set(output.categorical.allowedValues).size !== output.categorical.allowedValues.length) {
+        if (
+          new Set(output.categorical.allowedValues).size !== output.categorical.allowedValues.length
+        ) {
           context.addIssue({
             code: "custom",
             path: ["outputs"],
@@ -439,10 +496,17 @@ function addIntegerStrings(left: string, right: string): string {
   }
   const comparison = compareAbsolute(leftAbsolute, rightAbsolute);
   if (comparison === 0) return "0";
-  const difference = comparison > 0
-    ? subtractAbsolute(leftAbsolute, rightAbsolute)
-    : subtractAbsolute(rightAbsolute, leftAbsolute);
-  return comparison > 0 ? (leftNegative ? `-${difference}` : difference) : rightNegative ? `-${difference}` : difference;
+  const difference =
+    comparison > 0
+      ? subtractAbsolute(leftAbsolute, rightAbsolute)
+      : subtractAbsolute(rightAbsolute, leftAbsolute);
+  return comparison > 0
+    ? leftNegative
+      ? `-${difference}`
+      : difference
+    : rightNegative
+      ? `-${difference}`
+      : difference;
 }
 
 function moneyMinorUnits(value: unknown, currency: string): string {
@@ -507,7 +571,10 @@ function addDecimals(left: string, right: string): string {
   const unsignedSum = sum.replace("-", "");
   const whole = unsignedSum.slice(0, unsignedSum.length - scale) || "0";
   const fraction = scale > 0 ? unsignedSum.slice(-scale).replace(/0+$/, "") : "";
-  const joined = fraction.length > 0 ? `${whole.replace(/^0+(?=\d)/, "")}.${fraction}` : whole.replace(/^0+(?=\d)/, "") || "0";
+  const joined =
+    fraction.length > 0
+      ? `${whole.replace(/^0+(?=\d)/, "")}.${fraction}`
+      : whole.replace(/^0+(?=\d)/, "") || "0";
   return negative && joined !== "0" ? `-${joined}` : joined;
 }
 
@@ -621,7 +688,9 @@ function findSourceField(
     (candidate) => candidate.normalizedSheetName === output.normalizedSheetName,
   );
   if (!sheet) throw new ReportProjectionError("PROJECTION_SHEET_NOT_DECLARED");
-  const field = sheet.fields.find((candidate) => candidate.canonicalField === output.canonicalField);
+  const field = sheet.fields.find(
+    (candidate) => candidate.canonicalField === output.canonicalField,
+  );
   if (!field) throw new ReportProjectionError("PROJECTION_FIELD_NOT_DECLARED");
   if (everyRowRequired && !field.required) {
     throw new ReportProjectionError("PROJECTION_FIELD_NOT_REQUIRED");
@@ -664,7 +733,8 @@ export function projectExactRangeMetrics(input: {
     if (!header) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
     const headers = sourceHeaderMap(header);
     const columnIndex = headers.get(field.sourceHeader);
-    if (columnIndex === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
+    if (columnIndex === undefined)
+      throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
     if (output.categorical) {
       throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
     }
@@ -687,9 +757,8 @@ export function projectExactRangeMetrics(input: {
       // rows it totals would double the figure and look like a clean import.
       if (rowIndex === totalsRowIndex) continue;
       const row = source.rows[rowIndex];
-      const value = row?.[
-        columnInRow(columnIndex, rowShift(row ?? [], ragged, headerLastPopulated), ragged)
-      ];
+      const value =
+        row?.[columnInRow(columnIndex, rowShift(row ?? [], ragged, headerLastPopulated), ragged)];
       // An exact-range sum covers the whole declared period, so a row that said
       // nothing leaves the total unknowable rather than merely smaller.
       if (isAbsentValue(value, field.absentMarkers)) {
@@ -697,7 +766,9 @@ export function projectExactRangeMetrics(input: {
       }
       total = addIntegerStrings(
         total,
-        output.valueKind === "money" ? moneyMinorUnits(value, input.declaredCurrency) : integer(value),
+        output.valueKind === "money"
+          ? moneyMinorUnits(value, input.declaredCurrency)
+          : integer(value),
       );
       contributorCount += 1;
     }
@@ -833,10 +904,39 @@ export function projectPeriodGrainMetrics(input: {
   const headerLastPopulated = ragged ? lastPopulatedIndex(header) : -1;
 
   const columns = input.document.outputs.map((output) => {
-    const { field } = findSourceField(input.contract, output, false);
+    const { sheet: outputSheet, field } = findSourceField(input.contract, output, false);
     const index = headers.get(field.sourceHeader);
     if (index === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
-    return { output, index, absentMarkers: field.absentMarkers, parser: field.parser };
+    // One governed figure the provider reports across several columns. Each
+    // extra column is resolved and value-kind checked exactly like the first,
+    // so an output cannot quietly add a column the contract never bound or a
+    // column measuring something else.
+    const extras = (output.sumWith ?? []).map((canonicalField) => {
+      const extra = outputSheet.fields.find(
+        (candidate) => candidate.canonicalField === canonicalField,
+      );
+      if (!extra) throw new ReportProjectionError("PROJECTION_FIELD_NOT_DECLARED");
+      if (
+        (output.valueKind === "money" && extra.parser !== "money") ||
+        (output.valueKind === "count" && extra.parser !== "integer" && extra.parser !== "decimal")
+      ) {
+        throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
+      }
+      const extraIndex = headers.get(extra.sourceHeader);
+      if (extraIndex === undefined)
+        throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
+      return { index: extraIndex, absentMarkers: extra.absentMarkers, parser: extra.parser };
+    });
+    return {
+      output,
+      index,
+      absentMarkers: field.absentMarkers,
+      parser: field.parser,
+      contributors: [
+        { index, absentMarkers: field.absentMarkers, parser: field.parser },
+        ...extras,
+      ],
+    };
   });
 
   const totalsRowIndex = resolveTotalsRowIndex(rule, source.rows);
@@ -845,8 +945,7 @@ export function projectPeriodGrainMetrics(input: {
     const totalsShift = rowShift(source.rows[totalsRowIndex] ?? [], ragged, headerLastPopulated);
     for (const { output, index } of columns) {
       if (output.categorical || output.valueKind !== "money") continue;
-      const stated =
-        source.rows[totalsRowIndex]?.[columnInRow(index, totalsShift, ragged)];
+      const stated = source.rows[totalsRowIndex]?.[columnInRow(index, totalsShift, ragged)];
       if (isAbsentValue(stated, [])) continue;
       sheetTotals.set(output.key, moneyMinorUnits(stated, input.declaredCurrency));
     }
@@ -882,7 +981,7 @@ export function projectPeriodGrainMetrics(input: {
     const byCategory = categoryCounts.get(periodStart) ?? new Map();
     categoryCounts.set(periodStart, byCategory);
 
-    for (const { output, index, absentMarkers, parser } of columns) {
+    for (const { output, index, contributors } of columns) {
       if (output.categorical) {
         const base = columnInRow(index, shift, ragged);
         const cells = [row[base]];
@@ -894,30 +993,51 @@ export function projectPeriodGrainMetrics(input: {
         ) {
           // The injected region begins where the shiftable columns begin; every
           // displaced slot is one cell this provider inserted ahead of them.
-          for (let offset = ragged.injectedFromColumnIndex; offset < ragged.injectedFromColumnIndex + shift; offset += 1) {
+          for (
+            let offset = ragged.injectedFromColumnIndex;
+            offset < ragged.injectedFromColumnIndex + shift;
+            offset += 1
+          ) {
             cells.push(row[offset]);
           }
         }
         for (const cell of cells) {
           const label = categoryLabel(cell, output.categorical.allowedValues);
           if (label === null) continue;
-          byCategory.set(`${output.key}\u0000${label}`, (byCategory.get(`${output.key}\u0000${label}`) ?? 0) + 1);
+          byCategory.set(
+            `${output.key}\u0000${label}`,
+            (byCategory.get(`${output.key}\u0000${label}`) ?? 0) + 1,
+          );
         }
         continue;
       }
-      const value = row[columnInRow(index, shift, ragged)];
-      if (isAbsentValue(value, absentMarkers)) {
+      // A sum is only as stated as its parts. Where any contributing column
+      // says nothing for this row, the figure is unknown rather than smaller,
+      // so the whole output stays absent for the day instead of silently
+      // reporting the half that was written down.
+      const cells = contributors.map((contributor) => ({
+        contributor,
+        value: row[columnInRow(contributor.index, shift, ragged)],
+      }));
+      if (cells.some((cell) => isAbsentValue(cell.value, cell.contributor.absentMarkers))) {
         absentRowCount += 1;
         continue;
       }
-      const amount =
-        output.valueKind === "money"
-          ? moneyMinorUnits(value, input.declaredCurrency)
-          : // A decimal column is a quantity measured in fractions, kept exact
-            // through fixed-point addition; an integer column stays integral.
-            parser === "decimal"
-            ? decimalQuantity(value)
-            : integer(value);
+      const amount = cells.reduce(
+        (running, cell) =>
+          addDecimals(
+            running,
+            output.valueKind === "money"
+              ? moneyMinorUnits(cell.value, input.declaredCurrency)
+              : // A decimal column is a quantity measured in fractions, kept
+                // exact through fixed-point addition; an integer column stays
+                // integral.
+                cell.contributor.parser === "decimal"
+                ? decimalQuantity(cell.value)
+                : integer(cell.value),
+          ),
+        "0",
+      );
       const running = byOutput.get(output.key) ?? { total: "0", contributors: 0 };
       byOutput.set(output.key, {
         total: addDecimals(running.total, amount),
