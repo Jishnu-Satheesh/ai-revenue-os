@@ -43,6 +43,22 @@ const reportProjectionOutputSchema = z
      */
     sumWith: z.array(normalizedIdentifierSchema).min(1).max(4).optional(),
     /**
+     * The unit the provider measured in, converted to the one the registry
+     * records in, after every column is added together.
+     *
+     * Keeta reports open and closed time in hours; the availability detector
+     * reads `operations.closed_minutes` and `operations.scheduled_minutes`.
+     * Storing hours under a key that says minutes is a lie with a units label
+     * on it.
+     *
+     * A named conversion rather than a multiplier, on purpose. A free
+     * `scale: 60` says nothing about why, cannot be reviewed, and is one step
+     * from the arbitrary expression this language deliberately does not have.
+     * An operator approving "hours to minutes" is approving something they can
+     * read.
+     */
+    convert: z.enum(["hours_to_minutes"]).optional(),
+    /**
      * A categorical output: the source column carries provider category labels
      * rather than figures, and each label becomes its own observation tagged
      * with a dimension, so a question like "how many days closed for each
@@ -231,6 +247,24 @@ export const reportProjectionDocumentSchema = z
           path: ["outputs"],
           message: "A source field may feed one exact-range metric.",
         });
+      }
+      if (output.convert) {
+        // Hours into minutes is a duration idea. Multiplying money by sixty is
+        // never what anyone meant, and a category has no magnitude to convert.
+        if (output.valueKind !== "count") {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs"],
+            message: "Only a counted quantity can be converted between units.",
+          });
+        }
+        if (output.categorical) {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs"],
+            message: "A categorical output counts labels, so it has no unit to convert.",
+          });
+        }
       }
       if (output.sumWith) {
         // Naming the output's own column again, or naming one twice, doubles
@@ -669,6 +703,33 @@ function resolveTotalsRowIndex(
   throw new ReportProjectionError("TOTALS_ROW_NOT_RESOLVED");
 }
 
+/**
+ * The named unit conversions a declaration may apply, as exact fixed-point
+ * multiplication. One tenth of an hour is six whole minutes, so the arithmetic
+ * has to land there rather than near it.
+ */
+const UNIT_CONVERSION_FACTOR: Readonly<Record<string, number>> = {
+  hours_to_minutes: 60,
+};
+
+function convertUnits(total: string, convert: string | undefined): string {
+  if (!convert) return total;
+  const factor = UNIT_CONVERSION_FACTOR[convert];
+  // Unreachable through the schema, which admits only the names above. Kept as
+  // a refusal rather than a silent passthrough: a conversion nobody can perform
+  // must not quietly record the provider's own unit under the registry's name.
+  if (factor === undefined) throw new ReportProjectionError("PROJECTION_UNIT_CONVERSION_UNKNOWN");
+  const negative = total.startsWith("-");
+  const [whole, fraction = ""] = (negative ? total.slice(1) : total).split(".");
+  // Shift to an integer, multiply exactly, then shift back.
+  const scaled = BigInt(`${whole}${fraction}`) * BigInt(factor);
+  const digits = scaled.toString().padStart(fraction.length + 1, "0");
+  const cut = digits.length - fraction.length;
+  const head = digits.slice(0, cut) || "0";
+  const tail = fraction.length > 0 ? digits.slice(cut).replace(/0+$/, "") : "";
+  return `${negative ? "-" : ""}${head}${tail ? `.${tail}` : ""}`;
+}
+
 function findSourceField(
   contract: ReportContractDocument,
   output: ReportProjectionDocument["outputs"][number],
@@ -1040,7 +1101,9 @@ export function projectPeriodGrainMetrics(input: {
       );
       const running = byOutput.get(output.key) ?? { total: "0", contributors: 0 };
       byOutput.set(output.key, {
-        total: addDecimals(running.total, amount),
+        // Converted once, after the row's columns are added, so adding then
+        // converting and converting then adding cannot disagree.
+        total: addDecimals(running.total, convertUnits(amount, output.convert)),
         contributors: running.contributors + 1,
       });
     }

@@ -43,6 +43,25 @@ describe("keeta restaurant daily definition", () => {
     expect(placed?.sumWith).toEqual(["order_customers_out_of_restaurant"]);
   });
 
+  it("records availability in the minutes the registry keeps, not the hours Keeta wrote", () => {
+    // Storing hours under a key that says minutes would be a lie with a units
+    // label on it. Closed time is the platform's own closures plus the store's:
+    // either half alone is not the day's closure.
+    const scheduled = projection.outputs.find(
+      (output) => output.metricKey === "operations.scheduled_minutes",
+    );
+    expect(scheduled?.canonicalField).toBe("total_open_duration_h");
+    expect(scheduled?.convert).toBe("hours_to_minutes");
+    expect(scheduled?.sumWith).toBeUndefined();
+
+    const closed = projection.outputs.find(
+      (output) => output.metricKey === "operations.closed_minutes",
+    );
+    expect(closed?.canonicalField).toBe("platform_closure_duration_h");
+    expect(closed?.sumWith).toEqual(["manual_closure_duration_h"]);
+    expect(closed?.convert).toBe("hours_to_minutes");
+  });
+
   it("counts orders and cancellations without claiming fault", () => {
     expect(metricKeys.has("order.total_count")).toBe(true);
     expect(metricKeys.has("order.cancelled_count")).toBe(true);

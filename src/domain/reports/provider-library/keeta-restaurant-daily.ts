@@ -120,6 +120,28 @@ export const keetaRestaurantDaily: ProviderReportDefinition = {
             absentMarkers: ["-"],
             required: false,
           },
+          // Durations, written in hours to one decimal place.
+          {
+            canonicalField: "total_open_duration_h",
+            sourceHeader: "total_open_duration_h",
+            parser: "decimal",
+            absentMarkers: ["-"],
+            required: false,
+          },
+          {
+            canonicalField: "platform_closure_duration_h",
+            sourceHeader: "platform_closure_duration_h",
+            parser: "decimal",
+            absentMarkers: ["-"],
+            required: false,
+          },
+          {
+            canonicalField: "manual_closure_duration_h",
+            sourceHeader: "manual_closure_duration_h",
+            parser: "decimal",
+            absentMarkers: ["-"],
+            required: false,
+          },
         ],
       },
     ],
@@ -188,6 +210,27 @@ export const keetaRestaurantDaily: ProviderReportDefinition = {
         metricKey: "order.cancelled_count",
         valueKind: "count",
         aggregation: "sum",
+      },
+      {
+        key: "operations_scheduled_minutes",
+        normalizedSheetName: "sheet_0",
+        canonicalField: "total_open_duration_h",
+        metricKey: "operations.scheduled_minutes",
+        valueKind: "count",
+        aggregation: "sum",
+        convert: "hours_to_minutes",
+      },
+      {
+        key: "operations_closed_minutes",
+        normalizedSheetName: "sheet_0",
+        canonicalField: "platform_closure_duration_h",
+        // Closed time is what the platform shut plus what the store shut. One
+        // without the other is not the day's closure.
+        sumWith: ["manual_closure_duration_h"],
+        metricKey: "operations.closed_minutes",
+        valueKind: "count",
+        aggregation: "sum",
+        convert: "hours_to_minutes",
       },
       {
         key: "listing_placed_orders",
