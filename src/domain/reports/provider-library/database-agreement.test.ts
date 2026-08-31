@@ -186,6 +186,7 @@ describe("the database admits every projection the platform can propose", () => 
     // that the database would refuse it.
     expect(outputKeys.has("sumWith")).toBe(true);
     expect(outputKeys.has("convert")).toBe(true);
+    expect(outputKeys.has("signConvention")).toBe(true);
   });
 
   it.each(PROVIDER_REPORT_DEFINITIONS.map((definition) => [definition.key, definition] as const))(

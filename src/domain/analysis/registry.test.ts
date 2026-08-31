@@ -12,9 +12,10 @@ import { PROVIDER_REPORT_DEFINITIONS } from "@/domain/reports/provider-library";
 import { evidence, point, window } from "@/domain/analysis/test-fixtures";
 
 describe("the detector registry", () => {
-  it("registers exactly the ten detectors shipped so far", () => {
+  it("registers exactly the eleven detectors shipped so far", () => {
     expect(channelAnalysisDetectors.map((detector) => detector.key).sort()).toEqual([
       "customer.new_share",
+      "economics.channel_cost_load",
       "economics.commission_share",
       "evidence.period_coverage",
       "evidence.reconciliation_blocked",
@@ -25,7 +26,7 @@ describe("the detector registry", () => {
       "revenue.period_movement",
       "revenue.window_gross",
     ]);
-    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(6);
+    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(7);
   });
 
   it("binds only the detectors that can answer without periods at the span grain", () => {
@@ -43,7 +44,7 @@ describe("the detector registry", () => {
   it("still binds the full channel catalogue at a repeating grain", () => {
     // The span grain is additive. A day window must bind exactly what it bound
     // before, which is what keeps talabat and Keeta unchanged.
-    expect(selectDetectors({ scope: "channel", grain: "day" }).length).toBe(9);
+    expect(selectDetectors({ scope: "channel", grain: "day" }).length).toBe(10);
   });
 
   it("declares every field section 11.1 requires, with no empty prose", () => {
@@ -122,6 +123,7 @@ describe("the detector registry", () => {
       "operations.closed_share",
       "customer.new_share",
       "economics.commission_share",
+      "economics.channel_cost_load",
     ]);
     expect(organizationScoped).toEqual(["revenue.channel_share"]);
   });
@@ -129,6 +131,8 @@ describe("the detector registry", () => {
   it("asks for only the vocabulary the bound detectors need", () => {
     expect(requiredMetricKeys(selectDetectors({ scope: "channel", grain: "day" }))).toEqual([
       "cost.commission",
+      "cost.equipment_fee",
+      "cost.payment_processing",
       "customer.new_order_count",
       "customer.returning_order_count",
       "listing.cart_additions",
@@ -140,6 +144,7 @@ describe("the detector registry", () => {
       "operations.scheduled_minutes",
       "order.avoidable_cancellation_count",
       "order.avoidable_cancellation_reason",
+      "promotion.funding",
       "revenue.gross",
       "revenue.rejection_loss",
     ]);
@@ -164,6 +169,7 @@ describe("the detector registry", () => {
       "operations.closed_share",
       "customer.new_share",
       "economics.commission_share",
+      "economics.channel_cost_load",
     ]);
   });
 

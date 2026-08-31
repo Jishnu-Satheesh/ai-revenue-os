@@ -59,6 +59,28 @@ const reportProjectionOutputSchema = z
      */
     convert: z.enum(["hours_to_minutes"]).optional(),
     /**
+     * Whose sign convention the recorded figure follows.
+     *
+     * `financialSign` on the contract field asserts what the file contains; it
+     * does not change it. That is right for validation and wrong for a cost:
+     * Keeta writes commission as a positive in its order export and as a
+     * negative in its billing report, and the same metric cannot hold both and
+     * still be summable. Something has to say which way a deduction is
+     * recorded, out loud, in the document an operator approves.
+     *
+     * `deduction_as_cost` records what the provider subtracted as the cost it
+     * was. It is admitted only where the contract already declares the column
+     * negative, so it can restate a deduction and can never quietly invert a
+     * revenue column into a cost. Applied per row, before anything is added, so
+     * every total, control total and stated total downstream is in one
+     * convention rather than two.
+     *
+     * A named convention rather than a multiplier, for the reason `convert`
+     * gives: an operator approving "a deduction, recorded as a cost" is
+     * approving something they can read.
+     */
+    signConvention: z.enum(["as_reported", "deduction_as_cost"]).optional(),
+    /**
      * A categorical output: the source column carries provider category labels
      * rather than figures, and each label becomes its own observation tagged
      * with a dimension, so a question like "how many days closed for each
@@ -263,6 +285,17 @@ export const reportProjectionDocumentSchema = z
             code: "custom",
             path: ["outputs"],
             message: "A categorical output counts labels, so it has no unit to convert.",
+          });
+        }
+      }
+      if (output.signConvention === "deduction_as_cost") {
+        // A count has no deduction to restate, and a category has no magnitude
+        // at all. Only money is ever written as something taken away.
+        if (output.valueKind !== "money") {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs"],
+            message: "Only a money figure can be recorded as a deduction.",
           });
         }
       }
@@ -773,7 +806,26 @@ function findSourceField(
   ) {
     throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
   }
+  // Restating a deduction as a cost is only honest where the provider wrote a
+  // deduction. Without this, the convention would be a sign flip that any
+  // output could claim, and a revenue column could be recorded as a cost.
+  if (output.signConvention === "deduction_as_cost" && field.financialSign !== "negative") {
+    throw new ReportProjectionError("PROJECTION_SIGN_CONVENTION_MISMATCH");
+  }
   return { sheet, field };
+}
+
+/**
+ * The recorded figure for a value the provider wrote as a deduction.
+ *
+ * Applied per row rather than per total, so a partial sum can never be read in
+ * one convention and finished in the other.
+ */
+function applySignConvention(
+  value: string,
+  signConvention: ReportProjectionDocument["outputs"][number]["signConvention"],
+): string {
+  return signConvention === "deduction_as_cost" ? negateDecimalString(value) : value;
 }
 
 export function projectExactRangeMetrics(input: {
@@ -827,9 +879,12 @@ export function projectExactRangeMetrics(input: {
       }
       total = addIntegerStrings(
         total,
-        output.valueKind === "money"
-          ? moneyMinorUnits(value, input.declaredCurrency)
-          : integer(value),
+        applySignConvention(
+          output.valueKind === "money"
+            ? moneyMinorUnits(value, input.declaredCurrency)
+            : integer(value),
+          output.signConvention,
+        ),
       );
       contributorCount += 1;
     }
@@ -837,7 +892,13 @@ export function projectExactRangeMetrics(input: {
     if (totalsRowIndex !== null && output.valueKind === "money") {
       const stated = source.rows[totalsRowIndex]?.[columnIndex];
       if (!isAbsentValue(stated, field.absentMarkers)) {
-        sheetTotals.set(output.key, moneyMinorUnits(stated, input.declaredCurrency));
+        sheetTotals.set(
+          output.key,
+          applySignConvention(
+            moneyMinorUnits(stated, input.declaredCurrency),
+            output.signConvention,
+          ),
+        );
       }
     }
 
@@ -1103,7 +1164,10 @@ export function projectPeriodGrainMetrics(input: {
       byOutput.set(output.key, {
         // Converted once, after the row's columns are added, so adding then
         // converting and converting then adding cannot disagree.
-        total: addDecimals(running.total, convertUnits(amount, output.convert)),
+        total: addDecimals(
+          running.total,
+          convertUnits(applySignConvention(amount, output.signConvention), output.convert),
+        ),
         contributors: running.contributors + 1,
       });
     }

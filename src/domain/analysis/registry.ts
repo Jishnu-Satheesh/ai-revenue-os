@@ -1,4 +1,5 @@
 import { customerNewShareDetector } from "@/domain/analysis/detectors/customer-new-share";
+import { economicsChannelCostLoadDetector } from "@/domain/analysis/detectors/economics-channel-cost-load";
 import { economicsCommissionShareDetector } from "@/domain/analysis/detectors/economics-commission-share";
 import { funnelStageConversionDetector } from "@/domain/analysis/detectors/funnel-stage-conversion";
 import { operationsClosedShareDetector } from "@/domain/analysis/detectors/operations-closed-share";
@@ -42,7 +43,12 @@ import type {
 // 6: the first detector that reads a cost. Keeta's order export states the
 // commission the marketplace charged, so what a channel costs to sell through
 // can be stated from evidence instead of estimated from a configured rate.
-export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 6;
+// 7: commission was never the whole bill. Keeta's billing report also states
+// bank charges and POS machine fees, and reconciling a client's own statement
+// of account showed commission to be about half of what the marketplace
+// actually charged. `economics.channel_cost_load` reads every merchant-borne
+// deduction rather than the largest one.
+export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 7;
 
 export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   periodCoverageDetector,
@@ -55,6 +61,7 @@ export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   operationsClosedShareDetector,
   customerNewShareDetector,
   economicsCommissionShareDetector,
+  economicsChannelCostLoadDetector,
 ];
 
 /**

@@ -15,6 +15,10 @@ const METRIC_LABELS: Readonly<Record<string, string>> = {
   // Adding them would overstate the spend and hide the contribution.
   "promotion.provider_subsidy": "promotion funded by the marketplace",
   "cost.commission": "commission charged",
+  // Keeta's own words for its bank charge: a transaction fee covering payment
+  // processor and bank fees. A cost of being paid, not a cost of selling.
+  "cost.payment_processing": "payment processing charged",
+  "cost.equipment_fee": "POS and equipment fees",
   "listing.impressions": "times your listing was seen",
   "listing.menu_views": "menu views",
   "listing.cart_additions": "add-to-cart events",
