@@ -688,6 +688,8 @@ export type Database = {
           calculation_version: number;
           correlation_id: string;
           created_at: string;
+          withdrawn_at: string | null;
+          withdrawn_reason: "package_reprojection_requested" | null;
         };
         Insert: never;
         Update: never;

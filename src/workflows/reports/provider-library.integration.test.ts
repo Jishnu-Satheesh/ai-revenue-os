@@ -67,14 +67,15 @@ describe("every checked-in provider definition", () => {
 /**
  * Files the client exports that no definition claims, and none should.
  *
- * Three of Keeta's data exports carry order-level and item-level detail with no
- * aggregate to project. EatEasily's customer-wise report carries names and
- * phone numbers. Its day-orders report heads the value column with the branch
- * name, so a second branch would change every heading.
+ * Keeta's item export carries per-item detail with no subject the declaration
+ * language can address, and its promotions export heads two different columns
+ * "Valid orders", which contract binding by name cannot tell apart. EatEasily's
+ * customer-wise report carries names and phone numbers. Its day-orders report
+ * heads the value column with the branch name, so a second branch would change
+ * every heading.
  */
 const UNCLAIMED = [
   "Keeta/Keeta-Jan-Feb-2026-Item-Data.xlsx",
-  "Keeta/Keeta-Jan-Feb-2026-Orders-Data.xlsx",
   "Keeta/Keeta-Jan-Feb-2026-Promotions-Data.xlsx",
   "EatEasily-Smile/Jan_feb_2026_Customer_wise_EatEasily.xlsx",
   "EatEasily-Smile/Jan_feb_2026_day_orders_EatEasily.xlsx",

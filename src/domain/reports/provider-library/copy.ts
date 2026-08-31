@@ -11,12 +11,17 @@ const METRIC_LABELS: Readonly<Record<string, string>> = {
   "transactions.count": "orders",
   "units.count": "items sold",
   "promotion.funding": "promotion spend",
+  // What the marketplace funded, kept separate from what the restaurant funded.
+  // Adding them would overstate the spend and hide the contribution.
+  "promotion.provider_subsidy": "promotion funded by the marketplace",
+  "cost.commission": "commission charged",
   "listing.impressions": "times your listing was seen",
   "listing.menu_views": "menu views",
   "listing.cart_additions": "add-to-cart events",
   "listing.placed_orders": "orders placed from the listing",
   "operations.scheduled_minutes": "scheduled open minutes",
   "operations.closed_minutes": "unavailable minutes",
+  "operations.preparation_minutes": "preparation minutes",
   "operations.closed_days": "days unavailable",
   "order.total_count": "orders placed",
   "order.cancelled_count": "orders cancelled",

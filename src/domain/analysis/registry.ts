@@ -1,4 +1,5 @@
 import { customerNewShareDetector } from "@/domain/analysis/detectors/customer-new-share";
+import { economicsCommissionShareDetector } from "@/domain/analysis/detectors/economics-commission-share";
 import { funnelStageConversionDetector } from "@/domain/analysis/detectors/funnel-stage-conversion";
 import { operationsClosedShareDetector } from "@/domain/analysis/detectors/operations-closed-share";
 import { ordersCancellationLossDetector } from "@/domain/analysis/detectors/orders-cancellation-loss";
@@ -38,7 +39,10 @@ import type {
 // 5: a span is a grain a run can be claimed at, so the span total from 4 is
 // reachable. Only the two detectors that can honestly answer without periods
 // bind there; the rest are not bound at all, rather than bound and refusing.
-export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 5;
+// 6: the first detector that reads a cost. Keeta's order export states the
+// commission the marketplace charged, so what a channel costs to sell through
+// can be stated from evidence instead of estimated from a configured rate.
+export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 6;
 
 export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   periodCoverageDetector,
@@ -50,6 +54,7 @@ export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   ordersCancellationLossDetector,
   operationsClosedShareDetector,
   customerNewShareDetector,
+  economicsCommissionShareDetector,
 ];
 
 /**

@@ -1,5 +1,6 @@
 import { eatEasilyBranchSales } from "@/domain/reports/provider-library/eateasily-branch-sales";
 import { keetaBillingSummary } from "@/domain/reports/provider-library/keeta-billing-summary";
+import { keetaOrders } from "@/domain/reports/provider-library/keeta-orders";
 import { keetaRestaurantDaily } from "@/domain/reports/provider-library/keeta-restaurant-daily";
 import { noonSalesSummary } from "@/domain/reports/provider-library/noon-sales-summary";
 import { talabatPerformance } from "@/domain/reports/provider-library/talabat-performance";
@@ -21,6 +22,7 @@ export type { ProviderReportDefinition };
 export const PROVIDER_REPORT_DEFINITIONS: readonly ProviderReportDefinition[] = [
   talabatPerformance,
   keetaBillingSummary,
+  keetaOrders,
   keetaRestaurantDaily,
   noonSalesSummary,
   eatEasilyBranchSales,

@@ -56,8 +56,9 @@ describe("runChannelAnalysis", () => {
 
     expect(deps.claim).toHaveBeenCalledWith(
       expect.objectContaining({
-        registryVersion: 5,
+        registryVersion: 6,
         metricKeys: [
+          "cost.commission",
           "customer.new_order_count",
           "customer.returning_order_count",
           "listing.cart_additions",
@@ -81,6 +82,7 @@ describe("runChannelAnalysis", () => {
           { key: "orders.cancellation_loss", calculationVersion: 1 },
           { key: "operations.closed_share", calculationVersion: 1 },
           { key: "customer.new_share", calculationVersion: 1 },
+          { key: "economics.commission_share", calculationVersion: 1 },
         ],
       }),
     );
@@ -113,6 +115,7 @@ describe("runChannelAnalysis", () => {
       "orders.cancellation_loss:needs_data",
       "operations.closed_share:needs_data",
       "customer.new_share:needs_data",
+      "economics.commission_share:needs_data",
     ]);
     expect(call.findings.every((finding) => finding.calculationDigest.length === 64)).toBe(true);
   });
@@ -137,7 +140,7 @@ describe("runChannelAnalysis", () => {
       outcome: "completed",
       findingCount: 0,
       observationCount: 1,
-      needsDataCount: 7,
+      needsDataCount: 8,
     });
   });
 

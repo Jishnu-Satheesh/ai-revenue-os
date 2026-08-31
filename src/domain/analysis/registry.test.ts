@@ -8,12 +8,14 @@ import {
   selectDetectors,
 } from "@/domain/analysis/registry";
 import { createFindingCalculationDigest } from "@/domain/analysis/digest";
+import { PROVIDER_REPORT_DEFINITIONS } from "@/domain/reports/provider-library";
 import { evidence, point, window } from "@/domain/analysis/test-fixtures";
 
 describe("the detector registry", () => {
-  it("registers exactly the nine detectors shipped so far", () => {
+  it("registers exactly the ten detectors shipped so far", () => {
     expect(channelAnalysisDetectors.map((detector) => detector.key).sort()).toEqual([
       "customer.new_share",
+      "economics.commission_share",
       "evidence.period_coverage",
       "evidence.reconciliation_blocked",
       "funnel.stage_conversion",
@@ -23,7 +25,7 @@ describe("the detector registry", () => {
       "revenue.period_movement",
       "revenue.window_gross",
     ]);
-    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(5);
+    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(6);
   });
 
   it("binds only the detectors that can answer without periods at the span grain", () => {
@@ -41,7 +43,7 @@ describe("the detector registry", () => {
   it("still binds the full channel catalogue at a repeating grain", () => {
     // The span grain is additive. A day window must bind exactly what it bound
     // before, which is what keeps talabat and Keeta unchanged.
-    expect(selectDetectors({ scope: "channel", grain: "day" }).length).toBe(8);
+    expect(selectDetectors({ scope: "channel", grain: "day" }).length).toBe(9);
   });
 
   it("declares every field section 11.1 requires, with no empty prose", () => {
@@ -58,24 +60,23 @@ describe("the detector registry", () => {
   });
 
   it("registers nothing against metric vocabulary no governed report writes", () => {
-    // The vocabulary the Talabat performance projection seeds (ADR 0034 and
-    // ADR 0036), which is what registry version 2's detectors read.
-    const written = new Set([
-      "revenue.gross",
-      "revenue.rejection_loss",
-      "listing.impressions",
-      "listing.menu_views",
-      "listing.cart_additions",
-      "listing.placed_orders",
-      "operations.closed_minutes",
-      "operations.scheduled_minutes",
-      "operations.closed_days",
-      "order.avoidable_cancellation_count",
-      "customer.new_order_count",
-      "customer.returning_order_count",
-    ]);
+    // Derived from the provider library rather than copied from it. A hand-kept
+    // list drifts: it silently stops testing the moment a projection changes,
+    // and the failure it was written to catch -- a detector reading a metric
+    // nothing produces, answering `needs_data` forever -- is exactly the failure
+    // a stale copy stops catching. See ADR 0031.
+    const written = new Set(
+      PROVIDER_REPORT_DEFINITIONS.flatMap((definition) =>
+        definition.projection.outputs.map((output) => output.metricKey),
+      ),
+    );
     for (const detector of channelAnalysisDetectors) {
-      for (const key of detector.requiredMetricKeys) expect(written.has(key)).toBe(true);
+      for (const key of detector.requiredMetricKeys) {
+        expect(
+          written.has(key),
+          `${detector.key} requires ${key}, which no approved report projection writes`,
+        ).toBe(true);
+      }
     }
   });
 
@@ -120,12 +121,14 @@ describe("the detector registry", () => {
       "orders.cancellation_loss",
       "operations.closed_share",
       "customer.new_share",
+      "economics.commission_share",
     ]);
     expect(organizationScoped).toEqual(["revenue.channel_share"]);
   });
 
   it("asks for only the vocabulary the bound detectors need", () => {
     expect(requiredMetricKeys(selectDetectors({ scope: "channel", grain: "day" }))).toEqual([
+      "cost.commission",
       "customer.new_order_count",
       "customer.returning_order_count",
       "listing.cart_additions",
@@ -160,6 +163,7 @@ describe("the detector registry", () => {
       "orders.cancellation_loss",
       "operations.closed_share",
       "customer.new_share",
+      "economics.commission_share",
     ]);
   });
 
