@@ -152,6 +152,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI2 | Growth Intelligence implementation planning — claimed: `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Planning only: map the approved spec into four independently releasable increments with exact ownership, interfaces, migrations, RLS, workers, tests, rollout, and rollback. No production code, migrations, Trigger tasks, staging changes, or currently claimed implementation files. | codex-root | high | approved spec 022 and ADR 0044 | **done — 24-task execution plan approved 2026-08-31** |
 | GI3 | Growth Intelligence Task 1 pure domain contracts — claimed: new `src/domain/growth-intelligence/types.ts`, `schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `evidence-quality.ts`, `evidence-quality.test.ts`, `geography.ts`, `geography.test.ts`, `material-change.ts`, `material-change.test.ts`, `errors.ts`, and `index.ts`; tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Database-free TDD checkpoint; no migrations, RLS, Trigger tasks, APIs, staging changes, or files under active analysis/report claims. | codex-root | high | approved Growth Intelligence plan Task 1 | **done — 65 focused tests, typecheck, slice lint, and formatting verified; no staging change** |
 | GI4 | Growth Intelligence Task 2 rollout and permission mirror — claimed: `src/lib/env.ts`, new `src/modules/growth-intelligence/application/feature-access.ts` and `feature-access.test.ts`, `src/domain/access/permissions.ts`, `permissions.test.ts`, `permissions.drift.test.ts`, `supabase/migrations/20260831145236_growth_intelligence_permissions.sql`, `supabase/tests/database/permission_catalogue_test.sql`, and tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. No `database.types.ts`, RLS, Trigger, or other staging mutation is in scope. The migration was CLI-generated only after `20260831200000` and `20260831210000` both appeared on hosted staging and local/remote history matched. | codex-root | high | approved Growth Intelligence plan Task 2 | **done — applied to staging; 38 focused tests, typecheck, slice lint/format, and 27/27 live pgTAP verified** |
+| GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed now: migration slug `growth_intelligence_profiles_and_requests`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. `src/lib/supabase/database.types.ts` and its drift test are required later in this task but are not claimed while another session has staged changes there; no edit will occur until that shared-file ownership clears. | codex-root | high | approved Growth Intelligence plan Task 3 | **in-progress — schema precedent review and pgTAP RED first** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -3493,3 +3494,59 @@ key. That is a clean design and it is the projection contract's backbone. It wan
 the end of an afternoon.
 
 Committed in `0228dd4`. All 51 pgTAP suites pass; index typechecks clean in isolation.
+
+### 2026-08-31 · claude · Keeta orders ingested — the first governed report that states a cost
+
+Committed in `69887ec`. Trigger deploy `20260831.3`. Registry **6**.
+
+**The money chapter's premise is gone.** It has been telling operators that commission and fee
+detectors "need cost inputs that no approved report writes yet". Keeta's order export writes them.
+
+- Package `b023bee8`, `orders_detail`, Keeta / Al Barsha, 2026-01-01 → 2026-02-28.
+- Recognised from structure alone as `keeta.orders.detail`; validation read **157 rows, 780 field
+  values, 0 failures**; projected **132 outputs = 44 trading days × 3 metrics**, with **no
+  reconciliation at all**, because these metric keys had no prior evidence to overlap.
+- Order-level rows needed no new machinery. The projector already accumulates per period, so 156
+  orders collapse into 44 days carrying contributor counts.
+
+**New vocabulary:** `cost.commission`, `promotion.provider_subsidy`, `operations.preparation_minutes`.
+The subsidy is deliberately separate from the existing `promotion.funding`: Keeta says what the
+restaurant funded and what Keeta funded, and adding them would overstate the spend while hiding the
+contribution. Preparation minutes are summable here only because the export states minutes *per
+order* — Talabat's daily *average* stays unprojected, since summing averages means nothing.
+
+**`economics.commission_share` (registry 6) exists to refuse a plausible wrong answer.** Keeta's
+commission runs 1 Jan – 23 Feb; its gross revenue covers January alone, from the billing report.
+Dividing the whole of one by part of the other reports a rate about **one and a half times the truth**
+from two figures that are each individually correct. The detector intersects the series and says so on
+the finding itself — staging reads *"the 27 day(s) carrying both figures, out of 45 day(s) carrying
+either"* — with **54 citations, 27 a side**, so the ratio can be recomputed rather than trusted.
+It is an observation with no severity and no monetary impact: a deduction already applied is not a
+gain or loss this analysis found.
+
+**Four columns left unread on purpose.** Promotion expense is already projected from the restaurant
+export — reading it again would manufacture an overlap decision for a figure that would not change.
+Delivery fee stays bound but unprojected because the export never says whether the customer paid it or
+the restaurant was charged it. "Reason for order cancellation" is an image URL on the three rows that
+have one. Review score is three values across the whole file.
+
+**One real loss, and the next thing worth doing here.** `Cancellation type` carries the fault
+attribution — merchant, customer service, Keeta — but its labels are prose and the language matches
+categorical labels against upper-case codes with no spaces. Fault attribution needs a **label-mapping
+capability** the declaration language does not have. Small and well-shaped; approximating it would
+have been worse than waiting.
+
+**The registry's vocabulary guard is now real.** It compared detector requirements against a
+hand-copied list of metric keys — which silently stops testing the moment a projection changes, and a
+detector reading a metric nothing writes is exactly what it exists to catch. It derives the written set
+from the provider library now.
+
+**Still unread in Keeta:** Promotions-Data (needs a duplicate-header decision — `Valid orders` appears
+twice), Item-Data (11,233 rows, needs a per-item subject the language cannot address), and four PDFs.
+All four PDFs have real text layers — 341, 341, 1,241 and 88 text items — so they are readable today;
+what they need is a decision about reconciling reported revenue against settled.
+
+**Note on committing here:** another agent had their own work staged in the shared index while this
+landed. It was committed with an explicit path list (`git commit -- <paths>`) so nothing of theirs was
+swept, and verified by building HEAD-plus-my-paths in a temporary index rather than the working tree.
+They committed theirs separately as `cbf5301`.
