@@ -2,10 +2,10 @@
 
 ## Status
 
-Draft. The product and architecture were approved section by section on 2026-08-31. This written
-specification awaits review before an implementation plan is produced.
+Approved on 2026-08-31. The product, architecture, and written specification were approved before
+implementation planning began.
 
-Governed by proposed ADR 0044. Extends specs 005, 007, 016, and 018; ADRs 0026, 0037, 0039, 0040,
+Governed by accepted ADR 0044. Extends specs 005, 007, 016, and 018; ADRs 0026, 0037, 0039, 0040,
 and 0043 remain in force except where ADR 0044 explicitly changes release sequencing.
 
 This is a large Tier-3 feature. It introduces recurring public-market research, new tenant-owned

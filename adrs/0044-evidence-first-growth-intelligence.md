@@ -2,8 +2,7 @@
 
 ## Status
 
-Proposed. The architecture was approved section by section on 2026-08-31; acceptance waits for
-review of `specs/022-growth-intelligence.md`.
+Accepted on 2026-08-31 after approval of `specs/022-growth-intelligence.md`.
 
 ## Context
 
