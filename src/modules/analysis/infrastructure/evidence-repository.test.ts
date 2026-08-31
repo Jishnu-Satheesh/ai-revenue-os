@@ -24,6 +24,7 @@ function stubQuery(result: QueryResult) {
     select: () => builder,
     eq: () => builder,
     in: () => builder,
+    is: () => builder,
     lte: () => builder,
     gte: () => builder,
     limit: () => builder,
@@ -35,13 +36,12 @@ function stubQuery(result: QueryResult) {
   return builder;
 }
 
-function stubQueryFromInValues(
-  result: (values: readonly string[]) => QueryResult,
-) {
+function stubQueryFromInValues(result: (values: readonly string[]) => QueryResult) {
   let inValues: readonly string[] = [];
   const builder = {
     select: () => builder,
     eq: () => builder,
+    is: () => builder,
     in: (_column: string, values: readonly string[]) => {
       inValues = values;
       return builder;

@@ -6,6 +6,7 @@ import { periodCoverageDetector } from "@/domain/analysis/detectors/period-cover
 import { reconciliationBlockedDetector } from "@/domain/analysis/detectors/reconciliation-blocked";
 import { revenueChannelShareDetector } from "@/domain/analysis/detectors/revenue-channel-share";
 import { revenuePeriodMovementDetector } from "@/domain/analysis/detectors/revenue-period-movement";
+import { revenueWindowGrossDetector } from "@/domain/analysis/detectors/revenue-window-gross";
 import type {
   AnalysisEvidence,
   AnalysisGrain,
@@ -30,13 +31,18 @@ import type {
 
 // 2: funnel stage conversion, cancellation loss, closed share, and customer mix
 // join the four detectors of the first shipped slice.
-export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 2;
+// 3: channel-scoped reported gross revenue supplies the cited VerdictBand base
+// without asking an organization-scoped share detector to answer a channel run.
+// 4: reported gross revenue can answer from a provider's own span total, so a
+// channel that states one figure per export is analysable at all.
+export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 4;
 
 export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   periodCoverageDetector,
   reconciliationBlockedDetector,
   revenuePeriodMovementDetector,
   revenueChannelShareDetector,
+  revenueWindowGrossDetector,
   funnelStageConversionDetector,
   ordersCancellationLossDetector,
   operationsClosedShareDetector,

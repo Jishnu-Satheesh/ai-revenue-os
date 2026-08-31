@@ -11,7 +11,7 @@ import { createFindingCalculationDigest } from "@/domain/analysis/digest";
 import { evidence, point, window } from "@/domain/analysis/test-fixtures";
 
 describe("the detector registry", () => {
-  it("registers exactly the eight detectors shipped so far", () => {
+  it("registers exactly the nine detectors shipped so far", () => {
     expect(channelAnalysisDetectors.map((detector) => detector.key).sort()).toEqual([
       "customer.new_share",
       "evidence.period_coverage",
@@ -21,8 +21,9 @@ describe("the detector registry", () => {
       "orders.cancellation_loss",
       "revenue.channel_share",
       "revenue.period_movement",
+      "revenue.window_gross",
     ]);
-    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(2);
+    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(4);
   });
 
   it("declares every field section 11.1 requires, with no empty prose", () => {
@@ -96,6 +97,7 @@ describe("the detector registry", () => {
       "evidence.period_coverage",
       "evidence.reconciliation_blocked",
       "revenue.period_movement",
+      "revenue.window_gross",
       "funnel.stage_conversion",
       "orders.cancellation_loss",
       "operations.closed_share",
@@ -116,6 +118,7 @@ describe("the detector registry", () => {
       "operations.closed_minutes",
       "operations.scheduled_minutes",
       "order.avoidable_cancellation_count",
+      "order.avoidable_cancellation_reason",
       "revenue.gross",
       "revenue.rejection_loss",
     ]);
@@ -134,6 +137,7 @@ describe("the detector registry", () => {
       "evidence.period_coverage",
       "evidence.reconciliation_blocked",
       "revenue.period_movement",
+      "revenue.window_gross",
       "funnel.stage_conversion",
       "orders.cancellation_loss",
       "operations.closed_share",

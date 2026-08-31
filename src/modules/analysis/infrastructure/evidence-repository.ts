@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { addLocalDays } from "@/domain/analysis/calendar";
 import type {
+  AnalysisExactRangePoint,
   AnalysisHeldEvidence,
   AnalysisProjectionRun,
   AnalysisSeriesPoint,
@@ -38,6 +39,12 @@ const MAX_LINEAGE_ROWS = 10_000;
 /** Keeps the encoded PostgREST filter below the gateway's request-line ceiling. */
 const LINEAGE_ID_BATCH_SIZE = 200;
 const MAX_HELD_ROWS = 2_000;
+/**
+ * Span totals are one row per metric per export, so a window can only hold a
+ * handful. The cap is a fence against a mapping that has gone wrong, not a page
+ * size: reaching it means something is producing rows nobody expected.
+ */
+const MAX_EXACT_RANGE_ROWS = 500;
 const MAX_RECONCILIATION_ROWS = 5_000;
 
 /**
@@ -113,6 +120,7 @@ export function createChannelAnalysisEvidenceRepository(
         // only place that knows what comparability means for its own question.
         incomparablePointCount: 0,
         projectionRuns,
+        exactRangePoints: await loadCurrentExactRangePoints(supabase, window, metricKeys),
         heldEvidence: await loadHeldEvidence(supabase, metrics, window, metricKeys),
       };
     },
@@ -192,6 +200,71 @@ type HeldLedgerRow = {
  * decision sets aside every day it covered, and reporting thirty-one waiting
  * decisions would misdescribe one waiting question as thirty-one.
  */
+/**
+ * Totals a provider stated for a whole span, admitted as current fact.
+ *
+ * Kept separate from the held read above because the two carry different
+ * authority: held rows are a decision waiting to be made, and these are
+ * evidence a detector may cite. Sharing one query would make it easy to widen
+ * the wrong one.
+ *
+ * The dates are read as they were declared and never trimmed to the window. A
+ * detector that wants a span has to find its exact dates; narrowing one here
+ * would be proration performed by a loader.
+ */
+async function loadCurrentExactRangePoints(
+  supabase: AnalysisClient,
+  window: AnalysisWindow,
+  metricKeys: readonly string[],
+): Promise<AnalysisExactRangePoint[]> {
+  if (metricKeys.length === 0) return [];
+
+  let request = supabase
+    .from("exact_range_metric_observations")
+    .select(
+      "id, channel_id, branch_id, period_start, period_end, period_timezone, value_kind, value_numerator, currency, quality_state, completeness_state, projection_run_id, metric_definitions!inner(key)",
+    )
+    .eq("organization_id", window.organizationId)
+    .eq("reconciliation_state", "current")
+    .is("superseded_by_id", null)
+    .in("metric_definitions.key", metricKeys)
+    .lte("period_start", window.windowEnd)
+    .gte("period_end", window.windowStart)
+    .limit(MAX_EXACT_RANGE_ROWS);
+  if (window.channelId) request = request.eq("channel_id", window.channelId);
+  if (window.branchId) request = request.eq("branch_id", window.branchId);
+
+  const { data, error } = await request;
+  if (error)
+    throw new ChannelAnalysisEvidenceError(error.code ?? "current exact range read failed");
+  assertNotTruncated(data ?? [], MAX_EXACT_RANGE_ROWS, "current exact range evidence");
+
+  return (data ?? []).map((row) => {
+    const numerator = Number(row.value_numerator);
+    // A figure that cannot survive being read is not a smaller figure. Refusing
+    // loudly beats filing a rounded one nobody can trace.
+    if (!Number.isFinite(numerator) || !Number.isSafeInteger(numerator)) {
+      throw new ChannelAnalysisEvidenceError("exact range value out of safe range");
+    }
+    const definition = row.metric_definitions as unknown as { key: string } | null;
+    return {
+      exactRangeMetricObservationId: row.id as string,
+      channelId: row.channel_id as string,
+      branchId: row.branch_id as string | null,
+      metricKey: definition?.key ?? "",
+      periodStart: row.period_start as string,
+      periodEnd: row.period_end as string,
+      periodTimezone: row.period_timezone as string,
+      valueKind: row.value_kind as "money" | "count",
+      numerator,
+      currency: row.currency as string | null,
+      qualityState: row.quality_state as "complete" | "partial",
+      completenessState: row.completeness_state as "complete" | "partial",
+      projectionRunId: row.projection_run_id as string | null,
+    };
+  });
+}
+
 async function loadHeldEvidence(
   supabase: AnalysisClient,
   metrics: GovernedMetricWindowPort,

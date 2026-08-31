@@ -16,6 +16,7 @@ import {
 } from "@/domain/analysis/registry";
 import type {
   AnalysisEvidence,
+  AnalysisExactRangePoint,
   AnalysisHeldEvidence,
   AnalysisProjectionRun,
   AnalysisSeriesPoint,
@@ -69,6 +70,11 @@ export class ChannelAnalysisFailure extends Error {
 
 export type ChannelAnalysisEvidenceLoad = {
   points: readonly AnalysisSeriesPoint[];
+  /**
+   * Totals covering a whole declared span, from providers that report one
+   * figure per export rather than one per day. Empty for most of them.
+   */
+  exactRangePoints: readonly AnalysisExactRangePoint[];
   incomparablePointCount: number;
   projectionRuns: readonly AnalysisProjectionRun[];
   heldEvidence: readonly AnalysisHeldEvidence[];
@@ -218,7 +224,12 @@ function toFindingPayload(window: AnalysisWindow, attributed: AttributedOutcome)
 export async function runChannelAnalysis(
   input: unknown,
   dependencies: ChannelAnalysisDependencies,
-): Promise<{ outcome: string; findingCount?: number; needsDataCount?: number }> {
+): Promise<{
+  outcome: string;
+  findingCount?: number;
+  observationCount?: number;
+  needsDataCount?: number;
+}> {
   const payload = channelAnalysisTaskSchema.parse(input);
   if (payload.windowEnd < payload.windowStart) throw new ChannelAnalysisError("INVALID_WINDOW");
 
@@ -298,9 +309,15 @@ export async function runChannelAnalysis(
       findings,
     });
 
+    // All three kinds, because a detector can return any of them and the run
+    // summary is the only thing an operator reads before opening the workspace.
+    // Counting two of three made a run that filed twelve observations report
+    // zero of everything, which reads as "nothing was analysed" (staging run
+    // cb8d3675). `channel_analysis_runs.observation_count` always held it.
     return {
       outcome: "completed",
       findingCount: findings.filter((finding) => finding.kind === "finding").length,
+      observationCount: findings.filter((finding) => finding.kind === "observation").length,
       needsDataCount: findings.filter((finding) => finding.kind === "needs_data").length,
     };
   } catch (error) {

@@ -108,9 +108,43 @@ export type AnalysisHeldEvidence = {
   candidateCount: number;
 };
 
+/**
+ * One governed figure covering an inclusive span, rather than one per period.
+ *
+ * Noon and EatEasily do not report a row per day. They state a total for the
+ * range their export covers, and that is a different kind of fact from a
+ * series: it can answer "what did this window earn" and it can never answer
+ * "which day was worst", because the days were never written down.
+ *
+ * Kept apart from `points` for exactly that reason. A total quietly appended to
+ * a series would be counted again by every detector that sums periods, and a
+ * trend drawn through a single span is a shape nobody reported.
+ */
+export type AnalysisExactRangePoint = {
+  exactRangeMetricObservationId: string;
+  channelId: string;
+  branchId: string | null;
+  metricKey: string;
+  /** The inclusive local dates the provider's own total covers. */
+  periodStart: string;
+  periodEnd: string;
+  periodTimezone: string;
+  valueKind: "money" | "count";
+  numerator: number;
+  currency: string | null;
+  qualityState: "complete" | "partial";
+  completenessState: "complete" | "partial";
+  projectionRunId: string | null;
+};
+
 export type AnalysisEvidence = {
   window: AnalysisWindow;
   points: readonly AnalysisSeriesPoint[];
+  /**
+   * Totals covering a whole declared span. Empty for every provider that
+   * reports per period, which is most of them.
+   */
+  exactRangePoints: readonly AnalysisExactRangePoint[];
   /**
    * Rows the loader found but could not offer, because their grain or their
    * recorded zone does not match the window. Counted rather than dropped

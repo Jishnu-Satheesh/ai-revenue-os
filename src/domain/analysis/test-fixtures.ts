@@ -1,5 +1,6 @@
 import type {
   AnalysisEvidence,
+  AnalysisExactRangePoint,
   AnalysisHeldEvidence,
   AnalysisSeriesPoint,
   AnalysisWindow,
@@ -56,6 +57,31 @@ export function point(
   };
 }
 
+/** A provider's own total for an inclusive span, as the ledger records it. */
+export function exactRangePoint(
+  overrides: Partial<AnalysisExactRangePoint> = {},
+): AnalysisExactRangePoint {
+  return {
+    exactRangeMetricObservationId: `exact-${overrides.metricKey ?? "revenue.gross"}-${CHANNEL}`,
+    channelId: CHANNEL,
+    // The window names a branch, so its evidence has to be that branch's. An
+    // organization-wide total answering a branch question would attribute
+    // every outlet's trade to one of them.
+    branchId: BRANCH,
+    metricKey: "revenue.gross",
+    periodStart: "2026-01-01",
+    periodEnd: "2026-01-05",
+    periodTimezone: "Asia/Dubai",
+    valueKind: "money",
+    numerator: 91_000,
+    currency: "AED",
+    qualityState: "complete",
+    completenessState: "complete",
+    projectionRunId: PROJECTION_RUN,
+    ...overrides,
+  };
+}
+
 export function held(overrides: Partial<AnalysisHeldEvidence> = {}): AnalysisHeldEvidence {
   return {
     reconciliationId: "00000000-0000-4000-8000-000000000040",
@@ -73,6 +99,7 @@ export function evidence(overrides: Partial<AnalysisEvidence> = {}): AnalysisEvi
   return {
     window: window(),
     points: [],
+    exactRangePoints: [],
     incomparablePointCount: 0,
     projectionRuns: [{ projectionRunId: PROJECTION_RUN, absentRowCount: 0 }],
     heldEvidence: [],
