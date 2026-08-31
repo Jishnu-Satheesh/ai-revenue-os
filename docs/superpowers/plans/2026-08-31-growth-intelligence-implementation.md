@@ -110,14 +110,14 @@
   - Produce every stable pure interface named in the Stable Interfaces section except Campaign eligibility.
   - Keep Zod documents strict, versioned, bounded, and able to represent explicit `unknown` without silently defaulting a fact.
 - **Steps:**
-  - [ ] Write failing schema tests for valid/invalid profile documents, normalized competitors and geography, source exclusions, disclosure limits, cadence, unknown fields, collection caps, URL/domain normalization, and immutable schema version.
-  - [ ] Write failing property tests proving profile and request digests are stable under key order and invalidated by every bound semantic change.
-  - [ ] Write failing evidence tests for source hierarchy, corroboration, contradiction, freshness registry, expiry, excluded sources, geographic compatibility, and material-change suppression.
-  - [ ] Run `PATH=/home/spy/.local/node/bin:$PATH pnpm exec vitest run src/domain/growth-intelligence` and verify failure because the contracts are absent.
-  - [ ] Implement only deterministic domain logic; do not import Supabase, Trigger.dev, a model SDK, or Next.js.
-  - [ ] Add redacted Dubai trade-area/city/country fixtures that contain no client identity or private business values.
-  - [ ] Re-run the focused suite and verify every contract passes, including mixed geography and stale/conflicted refusal cases.
-  - [ ] Commit only these files as `feat(growth-intelligence): define governed market evidence contracts`.
+  - [x] Write failing schema tests for valid/invalid profile documents, normalized competitors and geography, source exclusions, disclosure limits, cadence, unknown fields, collection caps, URL/domain normalization, and immutable schema version.
+  - [x] Write failing property tests proving profile and request digests are stable under key order and invalidated by every bound semantic change.
+  - [x] Write failing evidence tests for source hierarchy, corroboration, contradiction, freshness registry, expiry, excluded sources, geographic compatibility, and material-change suppression.
+  - [x] Run `PATH=/home/spy/.local/node/bin:$PATH pnpm exec vitest run src/domain/growth-intelligence` and verify failure because the contracts are absent.
+  - [x] Implement only deterministic domain logic; do not import Supabase, Trigger.dev, a model SDK, or Next.js.
+  - [x] Add redacted Dubai trade-area/city/country fixtures that contain no client identity or private business values.
+  - [x] Re-run the focused suite and verify every contract passes, including mixed geography and stale/conflicted refusal cases.
+  - [x] Commit only these files as `feat(growth-intelligence): define governed market evidence contracts`.
 
 ### Task 2: Add rollout access and Growth Intelligence permissions
 
@@ -684,6 +684,6 @@
 
 ## Implementation Approval Gate
 
-- [ ] The user approves this Execution Plan before Task 1 starts.
+- [x] The user approves this Execution Plan before Task 1 starts.
 - [ ] The executing agent rechecks the board and current implementation before each task because active claims and staging schema can change.
 - [ ] A material change to scope, ownership, permission, persistence, provider, or control/execution boundary stops execution for renewed approval.
