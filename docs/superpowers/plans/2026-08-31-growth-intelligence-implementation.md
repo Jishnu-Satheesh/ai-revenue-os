@@ -132,14 +132,14 @@
   - Add `growth_intelligence.read` to viewer and above and `growth_intelligence.manage` to operator and above.
   - Preserve `recommendation.triage`, `campaign.create`, `campaign.approve`, and `opportunity.approve` as separate permissions.
 - **Steps:**
-  - [ ] Write failing tests for empty and duplicate allowlist entries, case-normalized UUIDs, increment separation, and membership-before-rollout route ordering.
-  - [ ] Write failing permission tests proving role nesting and the exact new read/manage matrix.
-  - [ ] Implement environment parsing and the application-side rollout mirror.
-  - [ ] Generate and review the permission migration; seed the catalogue and role mappings without widening any existing permission.
-  - [ ] Run migration dry-run, push as the migration owner, run the focused permission pgTAP suite, and verify direct unauthorized permission use fails.
-  - [ ] Update the handwritten database types only if the migration changes typed RPCs or tables.
-  - [ ] Run focused Vitest, typecheck, lint, and `git diff --check`.
-  - [ ] Commit as `feat(access): govern Growth Intelligence rollout and roles`.
+  - [x] Write failing tests for empty and duplicate allowlist entries, case-normalized UUIDs, and increment separation.
+  - [x] Write failing permission tests proving role nesting and the exact new read/manage matrix.
+  - [x] Implement environment parsing and the application-side rollout mirror.
+  - [x] Generate and review the permission migration; seed the catalogue and role mappings without widening any existing permission.
+  - [x] Run migration dry-run, push as the migration owner, run the focused permission pgTAP suite, and verify direct unauthorized permission use fails.
+  - [x] Update the handwritten database types only if the migration changes typed RPCs or tables; no type change was required for catalogue rows.
+  - [x] Run focused Vitest, typecheck, lint, and `git diff --check`.
+  - [x] Commit as `feat(access): govern Growth Intelligence rollout and roles`.
 
 ### Task 3: Persist Market Profiles and the durable request ledger
 
@@ -179,7 +179,7 @@
   - `MarketProfileService.propose` reads confirmed Digital Twin facts, performs one bounded discovery request, validates the candidate, and persists a proposal only.
   - `MarketProfileService.decide` accepts `confirmed`, `rejected`, or `disabled`, exact version/digest, bounded reason, and correlation ID; confirmation supersedes the prior current version and enqueues recurring or evidence-reassessment work.
 - **Steps:**
-  - [ ] Write failing service and route tests for membership, rollout, read/manage permission, bounded discovery input, malformed model output, one repair attempt, replay, stale version decision, automatic supersession, source exclusion revision, disablement, and safe public errors.
+  - [ ] Write failing service and route tests for membership-before-rollout ordering, read/manage permission, bounded discovery input, malformed model output, one repair attempt, replay, stale version decision, automatic supersession, source exclusion revision, disablement, and safe public errors.
   - [ ] Prove in tests that a proposal cannot start research, change the current profile, or create visible Market Evidence.
   - [ ] Implement the signed-in repository and strict model provider; pass only confirmed public identity, niche, location, and topics and exclude raw business evidence.
   - [ ] Implement routes in the order membership, rollout, permission, Zod parse, service call.

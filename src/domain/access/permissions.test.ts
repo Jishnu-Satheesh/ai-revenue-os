@@ -74,6 +74,21 @@ describe("organization role permissions", () => {
     }
   });
 
+  it("lets every organization member read Growth Intelligence", () => {
+    for (const role of organizationRolesByRank) {
+      expect(hasOrganizationPermission(role, "growth_intelligence.read")).toBe(true);
+    }
+  });
+
+  it("lets operators manage intelligence without granting Campaign approval", () => {
+    expect(hasOrganizationPermission("viewer", "growth_intelligence.manage")).toBe(false);
+    for (const role of ["operator", "admin", "owner"] as const) {
+      expect(hasOrganizationPermission(role, "growth_intelligence.manage")).toBe(true);
+    }
+    expect(hasOrganizationPermission("operator", "campaign.create")).toBe(true);
+    expect(hasOrganizationPermission("operator", "campaign.approve")).toBe(false);
+  });
+
   it("keeps sensitive memory above the operator line", () => {
     expect(hasOrganizationPermission("operator", "memory.read_sensitive")).toBe(false);
     expect(hasOrganizationPermission("viewer", "memory.read_sensitive")).toBe(false);

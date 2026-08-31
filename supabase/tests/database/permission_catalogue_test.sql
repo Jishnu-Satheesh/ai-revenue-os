@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(24);
+select extensions.plan(27);
 
 -- Structure -----------------------------------------------------------------
 
@@ -40,7 +40,7 @@ select extensions.is(
 );
 select extensions.is(
   (select count(*)::bigint from public.permissions where scope = 'organization'),
-  43::bigint,
+  45::bigint,
   'the organization vocabulary is seeded'
 );
 select extensions.ok(
@@ -74,6 +74,25 @@ select extensions.ok(
     select permission_key from public.organization_role_permissions where organization_role = 'owner'
   ),
   'an owner holds everything an admin holds'
+);
+
+select extensions.is(
+  (
+    select pg_catalog.array_agg(organization_role::text order by organization_role::text)
+    from public.organization_role_permissions
+    where permission_key = 'growth_intelligence.read'
+  ),
+  array['admin', 'operator', 'owner', 'viewer']::text[],
+  'every organization role can read Growth Intelligence'
+);
+select extensions.is(
+  (
+    select pg_catalog.array_agg(organization_role::text order by organization_role::text)
+    from public.organization_role_permissions
+    where permission_key = 'growth_intelligence.manage'
+  ),
+  array['admin', 'operator', 'owner']::text[],
+  'only operator and above can manage Growth Intelligence'
 );
 
 -- The specific boundaries the product depends on.
@@ -157,6 +176,15 @@ values
   ('bc000000-0000-4000-8000-000000000b00'::uuid, 'bc000000-0000-4000-8000-0000000000b1'::uuid, 'owner', null);
 
 set local role authenticated;
+
+select extensions.throws_ok(
+  $$
+    insert into public.permissions (key, description, scope)
+    values ('growth_intelligence.self_grant', 'A forbidden self-grant probe.', 'organization')
+  $$,
+  '42501', null,
+  'an authenticated user cannot add a permission directly'
+);
 
 -- An account member whose default role is operator.
 set local request.jwt.claim.sub = 'bc000000-0000-4000-8000-0000000000a2';

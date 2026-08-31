@@ -48,6 +48,8 @@ export const organizationPermissions = [
   "report.contract_approve",
   "report.download_sensitive",
   "recommendation.triage",
+  "growth_intelligence.read",
+  "growth_intelligence.manage",
   "benchmark.read",
   "benchmark.approve",
   "benchmark.contribute",
@@ -110,6 +112,9 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "report.contract_approve": "Approve report contracts and financial semantics.",
   "report.download_sensitive": "Download an original sensitive report workbook.",
   "recommendation.triage": "Acknowledge, dismiss, or plan a channel recommendation.",
+  "growth_intelligence.read": "Read governed business and market intelligence.",
+  "growth_intelligence.manage":
+    "Confirm market scope and triage governed intelligence for this organization.",
   "benchmark.read": "Read approved benchmark evidence.",
   "benchmark.approve": "Approve benchmark evidence for client visibility.",
   "benchmark.contribute": "Change peer benchmark contribution consent.",
@@ -188,6 +193,7 @@ const viewerPermissions = [
   "economics.read",
   "policy.read",
   "audit.read",
+  "growth_intelligence.read",
 ] as const satisfies readonly OrganizationPermission[];
 
 const operatorPermissions = [
@@ -196,6 +202,7 @@ const operatorPermissions = [
   "report.upload",
   "report.retry",
   "recommendation.triage",
+  "growth_intelligence.manage",
   "onboarding.manage",
   "memory.write",
   "memory.verify",
