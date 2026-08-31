@@ -76,7 +76,21 @@ export type WorkspaceFindingView = {
   evidence: readonly WorkspaceEvidenceView[];
 };
 
-export type WorkspaceChapterState = "reported" | "needs_data" | "deferred" | "not_run";
+export type WorkspaceChapterState =
+  | "reported"
+  | "needs_data"
+  | "deferred"
+  /**
+   * A run completed, and this chapter's detectors were not part of it.
+   *
+   * Distinct from `not_run`, which means no analysis has completed at all.
+   * A channel reporting one figure for its whole window binds only the
+   * detectors that can answer without periods, so the rest produce nothing --
+   * and telling an operator "no analysis has completed" when one just did is a
+   * false statement about their own data.
+   */
+  | "not_applicable"
+  | "not_run";
 
 export type WorkspaceChapterView = {
   id: WorkspaceChapterId;
@@ -491,10 +505,15 @@ export function buildChannelWorkspaceView(input: {
 
     // Four states, because an empty frame cannot tell them apart and an
     // operator reads "empty" as "nothing wrong here".
+    // A bound detector always answers -- with a finding, an observation, or a
+    // named refusal -- so a chapter with nothing in it after a completed run is
+    // a chapter whose detectors were never bound, not one that was skipped.
     const state: WorkspaceChapterState = deferred
       ? "deferred"
       : own.length === 0
-        ? "not_run"
+        ? completed === null
+          ? "not_run"
+          : "not_applicable"
         : own.every((finding) => finding.kind === "needs_data")
           ? "needs_data"
           : "reported";

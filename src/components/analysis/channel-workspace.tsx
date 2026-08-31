@@ -673,6 +673,8 @@ function VerdictBand({
 function StateChip({ chapter }: { chapter: WorkspaceChapterView }) {
   if (chapter.state === "needs_data") return <StatusBadge label="Needs data" tone="warning" />;
   if (chapter.state === "not_run") return <StatusBadge label="Not analysed" tone="neutral" />;
+  if (chapter.state === "not_applicable")
+    return <StatusBadge label="Does not apply" tone="neutral" />;
   const featured = chapter.findings[0];
   if (featured?.severity) {
     return <StatusBadge label={featured.severity} tone={featured.severityTone ?? "neutral"} />;
@@ -700,14 +702,18 @@ function ChapterUnavailableBody({ chapter }: { chapter: WorkspaceChapterView }) 
         aria-hidden="true"
         className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground"
       >
-        {chapter.state === "not_run" ? (
+        {chapter.state === "not_run" || chapter.state === "not_applicable" ? (
           <Database className="size-4" />
         ) : (
           <CircleDashed className="size-4" />
         )}
       </span>
       <p className="text-sm font-semibold">
-        {chapter.state === "not_run" ? "Not analysed yet" : "Waiting on evidence"}
+        {chapter.state === "not_run"
+          ? "Not analysed yet"
+          : chapter.state === "not_applicable"
+            ? "Does not apply to this channel"
+            : "Waiting on evidence"}
       </p>
       {reasons.length > 0 ? (
         reasons.map((reason) => (
@@ -719,7 +725,9 @@ function ChapterUnavailableBody({ chapter }: { chapter: WorkspaceChapterView }) 
         <p className="max-w-md text-xs leading-relaxed text-muted-foreground">
           {chapter.state === "not_run"
             ? "No analysis has completed for this channel, so this chapter has nothing to report."
-            : "The detectors for this chapter had no evidence to work with."}
+            : chapter.state === "not_applicable"
+              ? "This provider reports one figure for the whole window rather than a figure per period, so the checks behind this chapter have nothing to measure against. It is not missing data; it is a question this export cannot answer."
+              : "The detectors for this chapter had no evidence to work with."}
         </p>
       )}
     </div>

@@ -147,15 +147,40 @@ describe("buildChannelWorkspaceView", () => {
     expect(needsData.chapters.find((chapter) => chapter.id === "trust")?.state).toBe("needs_data");
   });
 
+  it("separates a chapter its run never bound from one nobody analysed", () => {
+    // A channel reporting one figure for its whole window binds only the two
+    // detectors that can answer without periods. The remaining chapters used to
+    // read "No analysis has completed for this channel" while one had just
+    // completed -- a false statement about the operator's own data.
+    const boundNothing = buildChannelWorkspaceView({
+      runs: [run()],
+      findings: [],
+      evidence: [],
+      recommendations: [],
+    });
+    expect(boundNothing.chapters.find((chapter) => chapter.id === "funnel")?.state).toBe(
+      "not_applicable",
+    );
+
+    // And the genuine case still reads as itself.
+    const neverRan = buildChannelWorkspaceView({
+      runs: [],
+      findings: [],
+      evidence: [],
+      recommendations: [],
+    });
+    expect(neverRan.chapters.find((chapter) => chapter.id === "funnel")?.state).toBe("not_run");
+  });
+
   it("renders a needs_data outcome as a sentence and never as a number", () => {
     const view = buildChannelWorkspaceView({
       runs: [run()],
       findings: [
         finding({
           kind: "needs_data",
-          code: "REVENUE_PERIOD_MOVEMENT_UNAVAILABLE",
-          detectorKey: "revenue.period_movement",
-          needsDataReason: "PRIOR_PERIOD_ABSENT",
+          code: "FUNNEL_STAGE_CONVERSION_UNAVAILABLE",
+          detectorKey: "funnel.stage_conversion",
+          needsDataReason: "STAGE_SERIES_ABSENT",
           valueKind: null,
           valueNumerator: null,
           valueDenominator: null,
