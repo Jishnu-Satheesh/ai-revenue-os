@@ -3448,3 +3448,46 @@ semantics for every client, not just this cleanup.**
    larger change and adds another round of reconciliation rows.
 
 Fix 1 is a migration to R2's lineage; fix 2 touches the package state machine. Either needs its owner.
+
+### 2026-08-31 · claude · Keeta queue cleared to zero; the re-projection door is open only where it works
+
+**The queue is empty. 601 → 0 open questions.** 436 resolved as `accept_correction`, 165 withdrawn.
+All four Keeta packages are `projected`. 582 current evidence rows, every metric with exactly one
+source. Keeta's audit reports the full funnel, operating availability, revenue movement and window
+gross revenue.
+
+**Three guards had to fall for the re-read, and the third only showed up after the first two shipped.**
+Worth internalising, because it is the same shape as the analysis grain earlier today:
+
+1. `request_governed_report_package_projection` — eligible statuses.
+2. `private.prevent_report_package_mutation` — its own transition table, which had
+   `reconciliation_required` going only to `projected`/`partially_projected`.
+3. `claim_governed_report_package_projection` — returns `completed` when a finished run exists for the
+   same package, contract version and projection version. **A package projects once per mapping**, and
+   that is what makes a retried dispatch safe.
+
+With (1) and (2) shipped and (3) unknown, the package moved to `awaiting_projection` and nothing would
+ever claim it — **worse than the status it left**, which at least said truthfully that a person was
+needed. `20260831190000` closes that: the door is admitted only where a re-read can actually run.
+Approving a revised mapping changes the projection version and the claim proceeds; asking again under
+the same mapping is refused rather than parked. Verified against staging — the predicate returns true
+for exactly the package that stalled.
+
+**Withdrawal, not resolution.** The resolutions table carries exactly one prior and one result and
+means "a person chose between these two figures". Retracting a question nobody answered does not
+belong there, so reconciliations carry `withdrawn_at` / `withdrawn_reason` instead.
+
+**One hand-edit, recorded plainly.** `1b36f856` was left in `awaiting_projection` by the incomplete
+attempt and was walked back to `projected` through the legal edges
+(`awaiting_projection → projecting → projected`) with a direct update, since no RPC reaches that
+status. Its run had completed as `projected` with 554 outputs and no error codes; only the overlaps
+held it, and those are withdrawn. This is the sole place today where governed state was changed
+outside an RPC, and it was to undo a state this session created.
+
+**Left alone on purpose: the once-per-version rule.** Letting a file be re-read under the same mapping
+means defining what separates a re-read from a replay — plausibly a `request` write-operation recorded
+after the run it replaces, which a retried dispatch would not create because it reuses its idempotency
+key. That is a clean design and it is the projection contract's backbone. It wants its own plan, not
+the end of an afternoon.
+
+Committed in `0228dd4`. All 51 pgTAP suites pass; index typechecks clean in isolation.
