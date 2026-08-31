@@ -33,7 +33,7 @@ const bodySchema = z
   .object({
     windowStart: localDate,
     windowEnd: localDate,
-    periodGrain: z.enum(["day", "week", "month"]),
+    periodGrain: z.enum(["day", "week", "month", "span"]),
     /** Optional: absent analyses every branch this channel trades through. */
     branchId: z.string().uuid().nullable().default(null),
   })

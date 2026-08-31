@@ -35,7 +35,10 @@ import type {
 // without asking an organization-scoped share detector to answer a channel run.
 // 4: reported gross revenue can answer from a provider's own span total, so a
 // channel that states one figure per export is analysable at all.
-export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 4;
+// 5: a span is a grain a run can be claimed at, so the span total from 4 is
+// reachable. Only the two detectors that can honestly answer without periods
+// bind there; the rest are not bound at all, rather than bound and refusing.
+export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 5;
 
 export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   periodCoverageDetector,

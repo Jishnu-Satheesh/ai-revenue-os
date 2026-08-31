@@ -723,7 +723,7 @@ export type Database = {
           /** Inclusive local calendar dates in `window_timezone`. */
           window_start: string;
           window_end: string;
-          period_grain: "day" | "week" | "month";
+          period_grain: "day" | "week" | "month" | "span";
           window_timezone: string;
           registry_version: number;
           /** `[{ key, calculationVersion }]` -- what actually ran. */
@@ -824,7 +824,7 @@ export type Database = {
           /** Inclusive local calendar dates copied from the analysed run's window. */
           window_start: string;
           window_end: string;
-          period_grain: "day" | "week" | "month";
+          period_grain: "day" | "week" | "month" | "span";
           label: "observation" | "recommendation" | "needs_data";
           headline: string;
           detail: string;
@@ -1987,7 +1987,7 @@ export type Database = {
           p_branch_id: string | null;
           p_window_start: string;
           p_window_end: string;
-          p_period_grain: "day" | "week" | "month";
+          p_period_grain: "day" | "week" | "month" | "span";
           p_analysis_run_id: string;
           p_registry_version: number;
           p_detectors: unknown;

@@ -300,18 +300,26 @@ export function createAuthenticatedChannelAnalysisRepository(
 
       const { data: lineage, error: lineageError } = await supabase
         .from("report_projection_lineage")
-        .select("projection_run_id, normalized_metric_id")
+        .select("projection_run_id, normalized_metric_id, exact_range_metric_observation_id")
         .eq("organization_id", organizationId)
         .in("projection_run_id", [...packageByRun.keys()])
         .limit(MAX_LINEAGE);
       if (lineageError) throw new ChannelAnalysisReadError(lineageError.code ?? "unknown");
 
+      // A projection writes one shape or the other, and lineage records which:
+      // a period-grain row carries `normalized_metric_id`, an exact-range row
+      // carries `exact_range_metric_observation_id`. Following only the first
+      // left a provider that states one figure per export with no window at
+      // all, so its evidence sat in the ledger unreadable by any run.
       const runByMetricId = new Map<string, string>();
+      const runByObservationId = new Map<string, string>();
       for (const row of lineage ?? []) {
         if (row.normalized_metric_id)
           runByMetricId.set(row.normalized_metric_id, row.projection_run_id);
+        if (row.exact_range_metric_observation_id)
+          runByObservationId.set(row.exact_range_metric_observation_id, row.projection_run_id);
       }
-      if (runByMetricId.size === 0) return [];
+      if (runByMetricId.size === 0 && runByObservationId.size === 0) return [];
 
       const metrics: { id: string; period_grain: string }[] = [];
       const metricIds = [...runByMetricId.keys()];
@@ -331,6 +339,27 @@ export function createAuthenticatedChannelAnalysisRepository(
         metrics.push(...(data ?? []));
       }
 
+      // The same question for the exact-range ledger: which of this package's
+      // span observations still stand. A superseded or held span is no more
+      // analysable than a superseded day.
+      const spans: { id: string }[] = [];
+      const observationIds = [...runByObservationId.keys()];
+      for (let offset = 0; offset < observationIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
+        const batch = observationIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
+        const { data, error: spanError } = await supabase
+          .from("exact_range_metric_observations")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .in("id", batch)
+          .eq("reconciliation_state", "current")
+          .is("superseded_by_id", null)
+          .limit(EVIDENCE_METRIC_BATCH_SIZE + 1);
+        if (spanError) throw new ChannelAnalysisReadError(spanError.code ?? "unknown");
+        if ((data ?? []).length > batch.length)
+          throw new ChannelAnalysisReadError("EVIDENCE_DETAIL_NOT_BOUNDED");
+        spans.push(...(data ?? []));
+      }
+
       // One package can only be offered at the grain its projection wrote. Two
       // grains from one package would be two windows an operator cannot tell
       // apart, so the grain with the most current rows is the one offered.
@@ -343,6 +372,14 @@ export function createAuthenticatedChannelAnalysisRepository(
         byGrain.set(row.period_grain, (byGrain.get(row.period_grain) ?? 0) + 1);
         grainCounts.set(packageId, byGrain);
       }
+      for (const row of spans) {
+        const runId = runByObservationId.get(row.id);
+        const packageId = runId ? packageByRun.get(runId) : undefined;
+        if (!packageId) continue;
+        const byGrain = grainCounts.get(packageId) ?? new Map<string, number>();
+        byGrain.set("span", (byGrain.get("span") ?? 0) + 1);
+        grainCounts.set(packageId, byGrain);
+      }
 
       return packageRows.flatMap((row): ChannelEvidenceWindow[] => {
         const byGrain = grainCounts.get(row.id);
@@ -351,7 +388,7 @@ export function createAuthenticatedChannelAnalysisRepository(
           (left, right) => right[1] - left[1] || left[0].localeCompare(right[0]),
         )[0];
         // A grain the analysis registry cannot bind is not a window to offer.
-        if (grain !== "day" && grain !== "week" && grain !== "month") return [];
+        if (grain !== "day" && grain !== "week" && grain !== "month" && grain !== "span") return [];
         return [
           {
             packageId: row.id,

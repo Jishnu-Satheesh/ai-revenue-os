@@ -86,6 +86,8 @@ const GRAIN_LABEL: Readonly<Record<AnalysisGrain, string>> = {
   day: "daily",
   week: "weekly",
   month: "monthly",
+  // Not a length. This provider reported one figure for the whole window.
+  span: "whole period",
 };
 
 /** The plural unit a coverage count is spoken in, matching the analysed grain. */
@@ -93,7 +95,31 @@ const GRAIN_UNIT: Readonly<Record<AnalysisGrain, string>> = {
   day: "days",
   week: "weeks",
   month: "months",
+  span: "periods",
 };
+
+/**
+ * How a run describes the grain it analysed.
+ *
+ * Every other grain reads naturally as "daily periods". A span does not: it is
+ * one figure for the window, so "span periods" would both misname it and imply
+ * a count the evidence never carried.
+ */
+function grainPhrase(grain: AnalysisGrain): string {
+  return grain === "span" ? "one figure for the whole window" : `${grain} periods`;
+}
+
+/**
+ * The four numbered findings the approved draft leads with. Only these render
+ * with an ordinal; the summary, evidence and deferred chapters read as
+ * supporting context rather than part of the numbered story.
+ */
+const FINDING_CHAPTER_IDS: ReadonlySet<string> = new Set([
+  "cancellations",
+  "availability",
+  "funnel",
+  "retention",
+]);
 
 /**
  * What one window choice is called.
@@ -989,7 +1015,7 @@ export function ChannelWorkspace({
             <span className="text-muted-foreground">
               analysis of{" "}
               {formatWindow(view.run.windowStart, view.run.windowEnd, view.run.windowTimezone)} ·{" "}
-              {view.run.periodGrain} periods
+              {grainPhrase(view.run.periodGrain)}
             </span>
           </>
         ) : (
@@ -1387,7 +1413,7 @@ function EvidenceSheet({
           <SheetRow label="Recorded in">
             {run ? (
               <span>
-                {run.windowTimezone} · {run.periodGrain} periods · registry version{" "}
+                {run.windowTimezone} · {grainPhrase(run.periodGrain)} · registry version{" "}
                 {run.registryVersion}
               </span>
             ) : (

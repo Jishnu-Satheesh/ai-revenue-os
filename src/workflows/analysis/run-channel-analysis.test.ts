@@ -56,7 +56,7 @@ describe("runChannelAnalysis", () => {
 
     expect(deps.claim).toHaveBeenCalledWith(
       expect.objectContaining({
-        registryVersion: 4,
+        registryVersion: 5,
         metricKeys: [
           "customer.new_order_count",
           "customer.returning_order_count",

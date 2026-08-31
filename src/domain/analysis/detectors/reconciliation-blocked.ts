@@ -1,4 +1,4 @@
-import { enumerateLocalPeriodStarts, localPeriodEnd } from "@/domain/analysis/calendar";
+import { enumerateLocalPeriodStarts, localPeriodEndInWindow } from "@/domain/analysis/calendar";
 import { selectComparablePoints } from "@/domain/analysis/evidence";
 import type {
   AnalysisEvidence,
@@ -33,7 +33,9 @@ export const reconciliationBlockedDetector: DetectorDeclaration = {
   calculationVersion: 1,
   owner: "core",
   scope: "channel",
-  compatibleGrains: ["day", "week", "month"],
+  // Evidence held for review is worth saying whatever the grain, and a held
+  // span is exactly as unreportable as a held day.
+  compatibleGrains: ["day", "week", "month", "span"],
   // A held exact-range total is exactly what this detector exists to surface,
   // and it is cited through the reconciliation record rather than as a figure.
   exactRangeEvidence: "cited",
@@ -101,7 +103,7 @@ export const reconciliationBlockedDetector: DetectorDeclaration = {
     const covered = new Set(accepted.map((point) => point.periodStart));
     const uncovered = expected.filter((start) => !covered.has(start));
     const blocksUncoveredPeriod = held.some((record) =>
-      uncovered.some((start) => coversPeriod(record, start, localPeriodEnd(start, window.grain))),
+      uncovered.some((start) => coversPeriod(record, start, localPeriodEndInWindow(start, window.grain, window.windowEnd))),
     );
 
     const starts = held.map((record) => record.periodStart).sort();

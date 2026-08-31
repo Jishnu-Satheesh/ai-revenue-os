@@ -11,8 +11,23 @@
 
 import type { MetricPeriodGrain, MetricQualityTier } from "@/domain/metrics/types";
 
-/** The grains a governed report projection can currently write. */
-export type AnalysisGrain = Extract<MetricPeriodGrain, "day" | "week" | "month">;
+/**
+ * The grains a governed report projection can currently write.
+ *
+ * `span` is not a period length. It is the shape a provider uses when it states
+ * one figure for its whole export and never breaks it into periods -- Noon and
+ * EatEasily both do. It is named here rather than folded into `day` because a
+ * two-month total is not a day, and a run that claimed it was would bind
+ * detectors that count periods to evidence that has none.
+ */
+export type AnalysisGrain = Extract<MetricPeriodGrain, "day" | "week" | "month"> | "span";
+
+/**
+ * The grains that describe a repeating period, and so the only ones period
+ * arithmetic accepts. A span has no period start, end or successor, and asking
+ * the calendar for one would invent a boundary nobody reported.
+ */
+export type PeriodAnalysisGrain = Exclude<AnalysisGrain, "span">;
 
 /**
  * A run answers a question about one channel, or about how the channels compare

@@ -1,5 +1,5 @@
 import { ChannelAnalysisError } from "@/domain/analysis/errors";
-import type { AnalysisGrain } from "@/domain/analysis/types";
+import type { AnalysisGrain, PeriodAnalysisGrain } from "@/domain/analysis/types";
 import { periodStartFor } from "@/domain/reports/period-key";
 
 /**
@@ -54,24 +54,40 @@ export function localDaysBetween(from: string, to: string): number {
 }
 
 /** The start of the period containing `date`, at the given grain. */
-export function localPeriodStart(date: string, grain: AnalysisGrain): string {
+export function localPeriodStart(date: string, grain: PeriodAnalysisGrain): string {
   toUtc(date);
   return periodStartFor(date, grain);
 }
 
+/**
+ * The last day of the period beginning at `start`, bounded by the window it
+ * came from.
+ *
+ * Only the window can close a span. `localPeriodEnd` derives an end from a
+ * start and a repeating length, and a span has no length to repeat -- its end
+ * is wherever the provider's export stopped, which is the window end.
+ */
+export function localPeriodEndInWindow(
+  start: string,
+  grain: AnalysisGrain,
+  windowEnd: string,
+): string {
+  return grain === "span" ? windowEnd : localPeriodEnd(start, grain);
+}
+
 /** The last day of the period beginning at `start`, inclusive. */
-export function localPeriodEnd(start: string, grain: AnalysisGrain): string {
+export function localPeriodEnd(start: string, grain: PeriodAnalysisGrain): string {
   if (grain === "day") return start;
   if (grain === "week") return addLocalDays(start, 6);
   const instant = toUtc(start);
   return fromUtc(new Date(Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth() + 1, 0)));
 }
 
-export function nextLocalPeriodStart(start: string, grain: AnalysisGrain): string {
+export function nextLocalPeriodStart(start: string, grain: PeriodAnalysisGrain): string {
   return addLocalDays(localPeriodEnd(start, grain), 1);
 }
 
-export function previousLocalPeriodStart(start: string, grain: AnalysisGrain): string {
+export function previousLocalPeriodStart(start: string, grain: PeriodAnalysisGrain): string {
   return localPeriodStart(addLocalDays(start, -1), grain);
 }
 
@@ -91,6 +107,13 @@ export function enumerateLocalPeriodStarts(
   if (localDaysBetween(windowStart, windowEnd) < 0) {
     throw new ChannelAnalysisError("INVALID_WINDOW");
   }
+
+  // A span is one period, and that period is the window. This is not a rounding
+  // convenience: the provider reported exactly one figure for exactly this
+  // range, so there is one period and it starts where the window starts. The
+  // period-boundary helpers stay narrowed to the repeating grains, because a
+  // span's end cannot be derived from its start -- only the window knows it.
+  if (grain === "span") return [windowStart];
 
   const starts: string[] = [];
   let cursor = localPeriodStart(windowStart, grain);

@@ -40,7 +40,10 @@ export const revenueWindowGrossDetector: DetectorDeclaration = {
   calculationVersion: 2,
   owner: "core",
   scope: "channel",
-  compatibleGrains: ["day", "week", "month"],
+  // `span` is the grain of a provider that never breaks its export into
+  // periods. The span branch below already answers that shape; before registry
+  // 5 there was simply no window to offer it.
+  compatibleGrains: ["day", "week", "month", "span"],
   exactRangeEvidence: "cited",
   requiredMetricKeys: [METRIC_KEY],
   optionalMetricKeys: [],

@@ -23,7 +23,25 @@ describe("the detector registry", () => {
       "revenue.period_movement",
       "revenue.window_gross",
     ]);
-    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(4);
+    expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(5);
+  });
+
+  it("binds only the detectors that can answer without periods at the span grain", () => {
+    // A span is one figure for the whole window. Every detector that counts
+    // periods, compares one against the previous, or reports coverage has
+    // nothing to say about it, so it is not bound at all rather than bound and
+    // refusing seven times over.
+    expect(
+      selectDetectors({ scope: "channel", grain: "span" })
+        .map((detector) => detector.key)
+        .sort(),
+    ).toEqual(["evidence.reconciliation_blocked", "revenue.window_gross"]);
+  });
+
+  it("still binds the full channel catalogue at a repeating grain", () => {
+    // The span grain is additive. A day window must bind exactly what it bound
+    // before, which is what keeps talabat and Keeta unchanged.
+    expect(selectDetectors({ scope: "channel", grain: "day" }).length).toBe(8);
   });
 
   it("declares every field section 11.1 requires, with no empty prose", () => {

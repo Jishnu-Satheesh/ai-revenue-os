@@ -600,6 +600,151 @@ describe("loadEvidenceWindows", () => {
     expect(windows).toMatchObject([{ packageId: "package-1", governedRowCount: 401, grain: "day" }]);
   });
 
+  it("offers a span window for a package whose projection wrote exact-range evidence", async () => {
+    // The bug this guards: lineage was followed only through
+    // `normalized_metric_id`, so a provider that states one figure for its whole
+    // export -- Noon does -- had its evidence written correctly and then offered
+    // as no window at all, leaving the channel permanently unanalysable.
+    const supabase = {
+      from(table: string) {
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          is: () => builder,
+          not: () => builder,
+          in: () => builder,
+          order: () => builder,
+          limit: () => builder,
+          then: (
+            onFulfilled: (value: QueryResult) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => {
+            const result: QueryResult =
+              table === "integration_report_packages"
+                ? {
+                    data: [
+                      {
+                        id: "package-span",
+                        channel_id: "channel-noon",
+                        branch_id: "branch-1",
+                        declared_period_start: "2026-01-01",
+                        declared_period_end: "2026-02-28",
+                        period_timezone: "Asia/Dubai",
+                        original_filename: "Noon.xlsx",
+                        uploaded_at: "2026-03-01T00:00:00Z",
+                      },
+                    ],
+                    error: null,
+                  }
+                : table === "integration_report_projection_runs"
+                  ? { data: [{ id: "run-span", report_package_id: "package-span" }], error: null }
+                  : table === "report_projection_lineage"
+                    ? {
+                        data: [
+                          {
+                            normalized_metric_id: null,
+                            exact_range_metric_observation_id: "span-1",
+                            projection_run_id: "run-span",
+                          },
+                          {
+                            normalized_metric_id: null,
+                            exact_range_metric_observation_id: "span-2",
+                            projection_run_id: "run-span",
+                          },
+                        ],
+                        error: null,
+                      }
+                    : table === "exact_range_metric_observations"
+                      ? { data: [{ id: "span-1" }, { id: "span-2" }], error: null }
+                      : { data: [], error: null };
+            return Promise.resolve(result).then(onFulfilled, onRejected);
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    const windows = await createAuthenticatedChannelAnalysisRepository(supabase).loadEvidenceWindows({
+      organizationId: "org-1",
+      channelId: "channel-noon",
+      limit: 24,
+    });
+
+    expect(windows).toMatchObject([
+      {
+        packageId: "package-span",
+        grain: "span",
+        governedRowCount: 2,
+        windowStart: "2026-01-01",
+        windowEnd: "2026-02-28",
+      },
+    ]);
+  });
+
+  it("drops an exact-range package whose only span observations were superseded", async () => {
+    // A superseded span is no more analysable than a superseded day, so the
+    // package must not be offered as an empty window.
+    const supabase = {
+      from(table: string) {
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          is: () => builder,
+          not: () => builder,
+          in: () => builder,
+          order: () => builder,
+          limit: () => builder,
+          then: (
+            onFulfilled: (value: QueryResult) => unknown,
+            onRejected?: (reason: unknown) => unknown,
+          ) => {
+            const result: QueryResult =
+              table === "integration_report_packages"
+                ? {
+                    data: [
+                      {
+                        id: "package-span",
+                        channel_id: "channel-noon",
+                        branch_id: null,
+                        declared_period_start: "2026-01-01",
+                        declared_period_end: "2026-02-28",
+                        period_timezone: "Asia/Dubai",
+                        original_filename: "Noon.xlsx",
+                        uploaded_at: "2026-03-01T00:00:00Z",
+                      },
+                    ],
+                    error: null,
+                  }
+                : table === "integration_report_projection_runs"
+                  ? { data: [{ id: "run-span", report_package_id: "package-span" }], error: null }
+                  : table === "report_projection_lineage"
+                    ? {
+                        data: [
+                          {
+                            normalized_metric_id: null,
+                            exact_range_metric_observation_id: "span-1",
+                            projection_run_id: "run-span",
+                          },
+                        ],
+                        error: null,
+                      }
+                    : { data: [], error: null };
+            return Promise.resolve(result).then(onFulfilled, onRejected);
+          },
+        };
+        return builder;
+      },
+    } as unknown as SupabaseClient<Database>;
+
+    expect(
+      await createAuthenticatedChannelAnalysisRepository(supabase).loadEvidenceWindows({
+        organizationId: "org-1",
+        channelId: "channel-noon",
+        limit: 24,
+      }),
+    ).toEqual([]);
+  });
+
   it("reads evidence windows across every channel when no channel is named", async () => {
     // The merged Channels page offers one window control over the whole
     // organization, so the channel filter has to be optional rather than

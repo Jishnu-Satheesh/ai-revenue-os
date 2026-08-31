@@ -45,7 +45,8 @@ export const channelAnalysisTaskSchema = z
     /** Inclusive local dates. Supplied by the caller, never inferred. */
     windowStart: localDate,
     windowEnd: localDate,
-    periodGrain: z.enum(["day", "week", "month"]),
+    // `span` is a provider that states one figure for its whole export.
+    periodGrain: z.enum(["day", "week", "month", "span"]),
     analysisRunId: z.string().uuid(),
     correlationId: z.string().uuid(),
     idempotencyKey: z.string().trim().min(16).max(200),
@@ -115,7 +116,7 @@ export type ChannelAnalysisDependencies = {
     branchId: string | null;
     windowStart: string;
     windowEnd: string;
-    periodGrain: "day" | "week" | "month";
+    periodGrain: "day" | "week" | "month" | "span";
     analysisRunId: string;
     registryVersion: number;
     detectors: readonly { key: string; calculationVersion: number }[];

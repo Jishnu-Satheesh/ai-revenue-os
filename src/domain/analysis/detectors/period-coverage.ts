@@ -1,4 +1,4 @@
-import { enumerateLocalPeriodStarts, localPeriodEnd } from "@/domain/analysis/calendar";
+import { enumerateLocalPeriodStarts, localPeriodEndInWindow } from "@/domain/analysis/calendar";
 import { selectComparablePoints } from "@/domain/analysis/evidence";
 import type {
   AnalysisEvidence,
@@ -178,7 +178,7 @@ export const periodCoverageDetector: DetectorDeclaration = {
         periodStart: expected[0],
         // Every enumerated period lies wholly inside the window, so the last
         // one's own end is already within it and needs no clamping.
-        periodEnd: localPeriodEnd(expected[expected.length - 1], window.grain),
+        periodEnd: localPeriodEndInWindow(expected[expected.length - 1], window.grain, window.windowEnd),
         // Both parts of the fraction, never the quotient: a share stored as a
         // decimal cannot be re-aggregated over a wider window.
         measurement: {

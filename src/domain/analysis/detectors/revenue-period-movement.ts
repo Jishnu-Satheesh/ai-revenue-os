@@ -130,6 +130,17 @@ export const revenuePeriodMovementDetector: DetectorDeclaration = {
     if (currency === "mixed") return [refuse(evidence, "MIXED_CURRENCY")];
     if (currency === null) return [refuse(evidence, "CURRENCY_UNAVAILABLE")];
 
+    // A span is one figure for the whole window, so it has no period before it
+    // to move from. The registry does not bind this detector at that grain, and
+    // saying so plainly is better than asserting the case away.
+    if (window.grain === "span") {
+      return [
+        refuse(evidence, "PRIOR_PERIOD_ABSENT", [
+          "This channel reports one figure for the whole window rather than a figure per period, so there is no earlier period to compare it against.",
+        ]),
+      ];
+    }
+
     const ordered = [...accepted].sort((left, right) =>
       left.periodStart.localeCompare(right.periodStart),
     );
