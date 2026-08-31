@@ -3392,3 +3392,58 @@ about what we ship. Before committing anything that touches a file another agent
 `git checkout-index -a --prefix=<scratch>/`, symlink `node_modules`, run `tsc` and `vitest` there.
 And never extract hunks from a working-tree diff to apply to the index — git matches context loosely
 enough to apply and silently drops lines, which is exactly how `11b6a4c` lost a closing brace.
+
+### 2026-08-31 · claude · Keeta reconciliation queue: 601 → 165, and a dead end in the state machine
+
+Worked with the user's explicit authority. **Decision taken: `accept_correction` on all groups**, and
+the basis for it was checked first rather than assumed.
+
+**Why adopting was safe.** All three Keeta `restaurant_daily` uploads share one `content_sha256` — the
+same file, re-uploaded to widen the mapping (v1 → v2 → v3). I compared every one of the **601** pairs
+on numerator, denominator, currency and period: **zero differing fields, no missing rows on either
+side.** The "conflict" was never a disagreement about the data; it was the same figure read twice.
+Adopting aligns current evidence with the newest human-approved mapping and changes no number.
+
+**Result: 8 of 11 groups resolved, 436 rows. `4170e05e` is now `projected`.** Keeta's ledger is
+complete and unambiguous — every metric has exactly one current source, no duplicates, no gaps:
+impressions, promotion funding and transactions from v2; cart additions, menu views, placed orders,
+closed and scheduled minutes, cancelled and total orders from v3; gross revenue from the billing
+summary. Analysis reads by metric and window, not by package, so the split provenance costs nothing.
+
+**Keeta's audit is whole again.** A fresh run reports **8 observations and 1 finding**: the full funnel
+including end-to-end conversion, operating closed share, revenue period movement, window gross revenue
+and period coverage. Only customer mix and cancellation loss remain `needs_data`, and both are
+genuinely absent from Keeta's export.
+
+---
+
+**⚠ Product defect, proven, not fixed: a three-way overlap strands one branch with no way out.**
+
+The same file uploaded three times makes v2 **and** v3 both name v1's rows as their prior. Resolving
+either branch supersedes that shared prior, and the other branch's reconciliations then reference a
+row that is no longer current. Both resolvers refuse it — correctly, by the guard at line 163 of
+`resolve_governed_report_projection_overlap_group`, which rejects a group whose prior is superseded.
+Order does not help: whichever branch goes second is stranded.
+
+**165 rows are now permanently unresolvable**, and `1b36f856` is stuck at `reconciliation_required`
+forever, because the exits from that status are only those two resolvers —
+`request_governed_report_package_projection` accepts `validated`, `partially_validated`,
+`projection_failed` and `awaiting_projection`, and no others. There is no re-projection path back.
+The operator sees three cards that fail every time they are clicked.
+
+The system is at least honest about it: `evidence.reconciliation_blocked` now reports
+`EVIDENCE_HELD_FOR_DECISION` on every Keeta run, which is exactly these 165.
+
+**Two candidate fixes, and I deliberately did not choose between them — this changes governance
+semantics for every client, not just this cleanup.**
+
+1. **Admit `keep_existing` when the prior is already superseded.** "Do not adopt this upload's row" is
+   well-defined whatever happened to the prior; only `accept_correction` needs a live row to
+   supersede. Smallest change. The catch: if the prior was superseded by a figure with a *different*
+   value, the operator's "keep existing" would silently keep a figure they never saw. Here the values
+   are provably identical, but the rule would apply everywhere.
+2. **Allow re-projection from `reconciliation_required`**, so stale reconciliations are recomputed
+   against current evidence. Truer to the model and it fixes the state machine's dead end, but it is a
+   larger change and adds another round of reconciliation rows.
+
+Fix 1 is a migration to R2's lineage; fix 2 touches the package state machine. Either needs its owner.
