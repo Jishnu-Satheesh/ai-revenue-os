@@ -71,6 +71,64 @@ const TRUTH_RULES = [
 ].join("\n");
 
 /**
+ * Where the fence actually belongs (ADR 0039).
+ *
+ * The prohibitions above are about claims — what happened, why, and what it
+ * earned. They were being read as a ban on advice as well, and the narrator
+ * retreated to repeating each figure back at the operator. That is the failure
+ * the ADR names: withholding useful advice is not rigour. An action grounded in
+ * a cited finding is exactly what this platform exists to produce, so the two
+ * are separated here in as few words as they can be put.
+ */
+const ADVICE_MANDATE = [
+  "You may advise an action the cited findings support. Advice is what this report is for.",
+  "You may not state why something happened, what an action will earn, or what a figure means beyond what the finding says. Those are claims, and claims need evidence you do not have.",
+  'File a "recommendation" for every cited finding that supports an action. This is the default, not the exception.',
+  'Choosing "observation" asserts that nothing can be done about this evidence. That is a strong claim and it is usually wrong: a rate that can move, a loss that recurs, or a gap in service all support an action even when the finding names no cause. Do not reach for it because it feels safer.',
+  'Use "observation" only when the finding genuinely leaves nothing to act on — a total that is simply the total, or a mix nobody controls.',
+  "Restating a figure the operator can already see is not an item. The figure is printed beside your words; repeating it wastes the only space you get.",
+  "The operator will read the number for themselves. What they cannot do for themselves is decide what to change on Monday. Write that.",
+].join("\n");
+
+/**
+ * One worked contrast, because the rules above describe a shape the model has
+ * to recognise and a single example teaches it faster than another paragraph.
+ * Deliberately built on a metric no detector in this registry emits, so it can
+ * never be mistaken for evidence about this run and copied into an answer.
+ */
+const ADVICE_EXAMPLE = [
+  "<worked_example>",
+  "Suppose a finding states: 40 of 120 delivery orders arrived late this window.",
+  "",
+  "Wrong — an observation that repeats the finding:",
+  '{"label":"observation","headline":"Late deliveries were recorded this window.","detail":"The report shows orders arriving after their promised time."}',
+  "",
+  "Wrong — a recommendation that invents the cause:",
+  '{"label":"recommendation","headline":"Hire another driver, because understaffing caused the delays."}',
+  "Nothing cited says why the orders were late, and nothing cited prices a new driver.",
+  "",
+  "Right — an action the finding supports, with no invented cause:",
+  '{"label":"recommendation","headline":"Widen the promised delivery time on the third of orders arriving late.","detail":"A promise the kitchen can keep costs nothing and stops the lateness being counted against the store."}',
+  "</worked_example>",
+].join("\n");
+
+/**
+ * How the advice should read. A recommendation is advice a non-technical owner
+ * can act on in one breath, not a restatement of the arithmetic. The three
+ * rules here are what separate a cited insight from a cited number, and the
+ * last one is what keeps the block calm instead of crowded.
+ */
+const ADVICE_RULES = [
+  "Write for an owner who does not read code or statistics. Use short, plain sentences. No metric names, ids, detector codes, or jargon.",
+  "Lead each 'recommendation' with the single highest-leverage action the cited findings support, and name the concrete lever (the audience, the timing, the item set) rather than describing the metric.",
+  "Never quote the detector's limitation or calculation text as if it were insight. Show the figure as a figure and the advice as an action.",
+  "One idea per item. A recommendation is one sentence of advice on one lever; put any second lever in its own item or leave it out.",
+  "Write the headline as the instruction itself, in the imperative, so it can be read and acted on in one breath.",
+  "Use 'detail' to say what changes if they act, or what to watch — never to repeat the headline in longer words.",
+  "Where a cited finding names a breakdown, a label, or a category, let it choose the lever. That is what makes the advice about this business rather than any business.",
+].join("\n");
+
+/**
  * The shape of the reply, matching `narrationSubmissionSchema` exactly. It is
  * placed into the system prompt twice: once as part of the framing, and again
  * as the last thing the model reads. Recency measurably improves contract
@@ -79,11 +137,12 @@ const TRUTH_RULES = [
  */
 const OUTPUT_CONTRACT = [
   "Return one JSON object and nothing else, shaped exactly like this:",
-  '{"items":[{"label":"observation","headline":"string up to 200 characters","detail":"string up to 1000 characters","supportedActions":["short imperative"],"limitations":["short note"],"citations":["<finding id>"]}]}',
-  `"label" is "observation", "recommendation", or "needs_data".`,
+  '{"items":[{"label":"recommendation","headline":"string up to 200 characters","detail":"string up to 1000 characters","supportedActions":["short imperative"],"limitations":["short note"],"citations":["<finding id>"]}]}',
+  `"label" is "recommendation" where the evidence supports an action, "observation" where it does not, and "needs_data" where the finding says an input was missing.`,
   `There are between 1 and ${MAX_RECOMMENDATIONS_PER_RUN} items in total.`,
   'Every item lists at least one finding id from this run in "citations".',
-  '"supportedActions" and "limitations" each hold at most 5 non-empty strings.',
+  'Keep each "headline" to at most one plain sentence, and keep "detail" to one or two short sentences. Do not restate the findings arithmetic.',
+  '"supportedActions" and "limitations" each hold at most 5 non-empty strings; prefer leaving them empty when the headline already says the action.',
   "No field outside this shape, no commentary, no code fence.",
 ].join("\n");
 
@@ -131,11 +190,23 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     "",
     TRUTH_RULES,
     "",
+    ADVICE_MANDATE,
+    "",
+    ADVICE_RULES,
+    "",
+    ADVICE_EXAMPLE,
+    "",
     ...OUTPUT_CONTRACT_BLOCK,
     "",
     "The same contract again, because it should be the last thing you hold onto:",
     "",
     ...OUTPUT_CONTRACT_BLOCK,
+    "",
+    // Recency again, on the one rule the earlier prompt versions lost to the
+    // wall of prohibitions above it.
+    "Before you answer, read back your items. If most of them are labelled",
+    '"observation", you have described the window instead of advising on it.',
+    "Go back and give the operator the action each finding supports.",
   ].join("\n");
 
   const user = [

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -10,6 +10,7 @@ import type {
   OrganizationChannelBranchRow,
   OrganizationChannelRow,
 } from "@/modules/channels/application/ports";
+import type { ChannelsOverviewRow } from "@/modules/analysis/application/channels-overview";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const channel: OrganizationChannelRow = {
@@ -57,8 +58,66 @@ const inactiveMapping: OrganizationChannelBranchRow = {
   updated_at: "2026-08-20T00:00:00.000Z",
 };
 
+const measuredRow: ChannelsOverviewRow = {
+  channelId: channel.id,
+  displayName: channel.display_name,
+  status: "active",
+  assessed: true,
+  band: {
+    state: "complete",
+    potential: { minorUnits: 55300, currency: "AED" },
+    lost: { minorUnits: 35700, currency: "AED" },
+    earned: { minorUnits: 19600, currency: "AED" },
+  },
+};
+
 describe("ChannelsManagement", () => {
   afterEach(() => cleanup());
+
+  it("makes governed analysis visible in the channel directory", () => {
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel]}
+        analysisRows={[measuredRow]}
+        workspaceEnabled
+        canManage={false}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Channel directory" })).toBeInTheDocument();
+    expect(screen.getByText(/AED\s*196\.00 earned/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Measured" })).toBeInTheDocument();
+  });
+
+  it("filters the directory by the actionable analysis state", () => {
+    const unassessedChannel: OrganizationChannelRow = {
+      ...channel,
+      id: "77777777-7777-4777-8777-777777777777",
+      key: "noon",
+      display_name: "Noon",
+    };
+
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel, unassessedChannel]}
+        analysisRows={[measuredRow]}
+        workspaceEnabled
+        canManage={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Measured" }));
+    expect(screen.getByRole("heading", { name: "Keeta" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Noon" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Needs attention" }));
+    expect(screen.queryByRole("heading", { name: "Keeta" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Noon" })).toBeInTheDocument();
+  });
 
   it("explains the capability boundary and gives an authorized manager an empty-state action", () => {
     render(
@@ -74,7 +133,7 @@ describe("ChannelsManagement", () => {
       screen.getByText("Channel identity is separate from provider access"),
     ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Add channel/ })).toHaveLength(2);
-    expect(screen.getByText("Not assessed")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Channel directory" })).toBeInTheDocument();
   });
 
   it("does not render mutation controls for a read-only member", () => {

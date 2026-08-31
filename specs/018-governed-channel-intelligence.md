@@ -205,6 +205,10 @@ no AI narration, no provider or campaign actions, no OCR, and no model-read valu
   `orders.cancellation_loss`, `operations.closed_share`, and `customer.new_share`; see section 11.2.
   `orders.cancellation_loss` is the second detector with a declared computable monetary impact,
   alongside `revenue.period_movement`. See ADR 0035.
+- Registry version 3 adds `revenue.window_gross` to channel-scoped runs. It stores the selected
+  channel's reported gross revenue, every contributing citation, and observed-versus-expected period
+  coverage without substituting the organization-scoped `revenue.channel_share` detector. The
+  VerdictBand may use that stored amount as Potential beside the provider-reported cancellation loss.
 - Recommendation generation and triage ship behind
   `GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS`. The model reads the run's findings and writes a
   schema-validated explanation citing the findings it used; operators Acknowledge, Mark planned, or
@@ -827,6 +831,22 @@ through decimal-parser bindings (ADR 0036):
 - `customer.new_share` — the provider-reported share of orders from first-time customers over a
   window.
 
+#### Registry version 3
+
+Registry version 3 appends one core-owned channel detector:
+
+- `revenue.window_gross` — the selected channel's reported `revenue.gross` over the analysed window,
+  summed only from current comparable period-grain rows in one currency. It cites every contributing
+  row and carries observed-versus-expected coverage; missing periods remain absent rather than zero.
+  It refuses no evidence, mixed currency, or an unnamed currency. It is an observation, not a
+  monetary-impact calculation, payout, margin, or realized-profit claim.
+
+The channel VerdictBand reads Potential from this observation and Lost from
+`orders.cancellation_loss`'s provider-reported monetary impact. Earned is the explicitly labelled
+derived split `Potential − Lost`, shown only when both stored amounts share a currency and potential
+is not smaller than lost. This does not depend on a model-written recommendation or on the
+organization-scoped `revenue.channel_share` detector.
+
 ### 11.3 Analysis records
 
 `channel_analysis_runs` binds one organization/channel/branch/window to exact metric, economics,
@@ -863,6 +883,13 @@ analysis may supersede a recommendation but may not erase the human's prior deci
 `channel_recommendation_feedback` stores the helpful / not-helpful review hook: one vote per actor
 per recommendation, replaceable, stored apart from triage decisions so a statement about usefulness
 is never mistaken for a statement about action.
+
+**Approved, not yet implemented — monthly analysis reuse.** ADR 0043 replaces the proposed
+free-range calendar with one server-resolved `YYYY-MM` selection inside the channel's contiguous
+declared-package timeline. It will add immutable evidence/cache digests to the analysis run, so an
+identical current evidence set can reuse a completed run while any correction, reconciliation,
+supersession, projection, or detector/metric-version change creates a new one. Run-id idempotency
+remains an operation concern; it is not the cache identity.
 
 Generation is a second fenced worker, not a phase of the detector run (ADR 0037). It claims a
 completed analysis run through a security-definer RPC, reads that run's findings alone with no tools
@@ -958,6 +985,13 @@ added without breaking the currently deployed RPC signature.
 
 Findings themselves have no read route yet. They are read server-side through the caller's own
 session, so RLS decides what is visible rather than application code deciding for it.
+
+**Approved, not yet implemented — monthly request contract.** ADR 0043 changes the route to accept
+only a canonical `month` (`YYYY-MM`). The server resolves the known declared timeline, local bounds,
+timezone, branch scope, grain and exact evidence/cache digest; callers cannot provide dates, grain or
+branch to bypass that fence. It returns a safe `cached` disposition and existing run id only when the
+authenticated server-side cache key is exact, otherwise `queued` with the new run id; a queued worker
+recomputes the key under its lease before reuse or completion.
 
 ### 12.4 Release-2 benchmarks
 
@@ -1158,16 +1192,15 @@ showing the detector key, its calculation version, the window, the quality state
 the detector itself recorded, every cited row, and the calculation digest. The earlier dark floating
 Evidence Node rail is gone; `.superdesign/design-system.md` forbids it by name.
 
-The window control is a free-range calendar per ADR 0033, which supersedes ADR 0032's
-declared-package picker: any start and end can be chosen, the grain is derived from the range's
-length (thirty-one days or fewer daily, six months or fewer weekly, longer monthly), and every day
-is shaded by governed-evidence density on the chart emerald ramp, so the operator sees where
-evidence lives while choosing rather than being told after a run that a window reached nothing. A
-zero-evidence range stays runnable, and the page states coverage honestly afterwards — including at
-the window's own edges, which is why ADR 0032 offered the declared range rather than the occupied
-extent. The false "no evidence" that picker prevented is now prevented by visibility instead of by
-restricting choice. A channel with no governed evidence at all sees an unshaded calendar and a
-coverage statement that says so in words; the control is not hidden from them.
+**Approved, not yet implemented.** ADR 0043 replaces the package picker and ADR 0033's proposed
+free-range calendar with adjacent Month and Year controls. The selectable pairs cover every month
+from the earliest to latest projected package declaration, including empty internal months; edge-year
+months outside that horizon are unavailable. The selected `YYYY-MM` maps to the full local calendar
+month, while the server derives its actual evidence grain. A blank month stays selectable and the
+VerdictBand states that no governed evidence was recorded; it is not rendered as zero or a broken
+control. The detail URL chooses the corresponding run, so no month selection can sit above another
+month's figures. A cache cue appears only for a completed run whose recomputed evidence digest and
+versioned input key match exactly.
 
 The page reads the findings of the one run it displays, so the window in the header and every figure
 beneath it come from the same analysis. Reading every open finding for the channel put two runs'
@@ -1261,6 +1294,10 @@ and detector expectations pass.
 - Money signs, integer minor units, currency conversion lineage, ratio pairing, aggregation, exact
   ranges, duplicates, overlaps, corrections, and revisions.
 - Detector eligibility, calculations, quality thresholds, quantified-impact gates, and `needs_data`.
+- Canonical month parsing, leap-year bounds, known-timeline expansion including empty internal months,
+  edge-month availability, server grain resolution, and URL/run alignment.
+- Content-addressed reuse: exact-evidence hit; misses after a metric revision/reconciliation/package
+  declaration/detector or registry-version change; and an explicit empty-month cache shape.
 - Narrative citation coverage and rejection of invented values, causes, confidence, or benchmarks.
 - Benchmark comparability, expiry, influence cap, minimum-ten suppression, and consent.
 
@@ -1272,6 +1309,8 @@ and detector expectations pass.
 - Permission matrix, including direct API and direct-RPC misuse.
 - Worker-only writes, lease and claim fencing, cancellation, idempotent replay, and terminal-state
   preservation.
+- Monthly analysis cache lookup/index/RLS isolation, cache invalidation under a changed governed row,
+  and first staging invocation of every new claim/resolver function.
 - Approval binding to exact version/fingerprint/digest/currency/sign/control semantics.
 - Archive-with-history behavior and no hard-delete path.
 - Metric/economics/package revisions, supersession, duplicate and overlap behavior.
@@ -1287,6 +1326,8 @@ and detector expectations pass.
 - Idempotent retry after each stage and cleanup after pre-finalization failure.
 - Reconciliation, retention, purge retry, legal hold, correction, and supersession.
 - No raw cells, workbook prompts, customer PII, or signed URLs in logs and events.
+- Month-only analysis request validation, `report.retry` permission, no raw window/grain/branch bypass,
+  safe cached-versus-queued responses, and deterministic findings when recommendation narration fails.
 
 ### 20.5 End-to-end acceptance
 
@@ -1433,7 +1474,8 @@ These inputs are required before their corresponding production slices can be ac
 
 - ADR 0026: governed declarative report contracts and stable organization channel identity
 - ADR 0031: the first shipped detector slice
-- ADR 0033: free-range windows shaded by evidence density
+- ADR 0033: superseded free-range windows shaded by evidence density
+- ADR 0043: month-and-year evidence windows use content-addressed analysis reuse
 - ADR 0034: reason codes are metric-row dimensions
 - ADR 0035: findings rank by declared money first
 - ADR 0036: ragged rows are a declared contract capability

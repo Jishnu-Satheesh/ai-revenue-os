@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -20,6 +20,20 @@ import { readWorkbookRows } from "@/workflows/reports/project-report-package";
  */
 
 const FIXTURE = "fixtures/raw/Talabat-Jan-Feb-2026-Performance-Report.xlsx";
+
+/**
+ * The client's real export is deliberately not in the repository -- `.gitignore`
+ * excludes `fixtures/raw/` so customer data never lands in git. That makes this
+ * suite conditional by design: it runs where the file has been placed and skips
+ * where it has not, rather than failing seven times on a fresh clone and
+ * teaching everyone to ignore a red suite.
+ *
+ * Skipping is honest here only because the assertions are not merely slow or
+ * awkward to run -- they cannot be evaluated at all without the file. Anything
+ * checkable from the scrubbed fixtures in `fixtures/providers/` belongs in a
+ * suite that always runs.
+ */
+const hasRealExport = existsSync(FIXTURE);
 
 const DECLARED_PERIOD = {
   periodStart: "2026-01-01",
@@ -50,7 +64,7 @@ function sumByMetric(
     .reduce((total, observation) => total + Number(observation.valueNumerator), 0);
 }
 
-describe("talabat performance projection over the real export", () => {
+describe.skipIf(!hasRealExport)("talabat performance projection over the real export", () => {
   it("reads every funnel stage exactly as the provider states them", async () => {
     const result = await projectFixture();
     expect(sumByMetric(result.observations, "listing.impressions")).toBe(18_294);
@@ -109,6 +123,29 @@ describe("talabat performance projection over the real export", () => {
     expect(total(checkIn)).toBe(39);
     expect(total(unreachable)).toBe(20);
     expect(total(checkIn) + total(unreachable)).toBe(59);
+  });
+
+  it("attributes every avoidable cancellation to its declared reason", async () => {
+    const result = await projectFixture();
+    // The provider tags every rejectable order with one reason. Across the
+    // window every label present is ITEM_UNAVAILABLE (the import refuses a
+    // label outside the declared vocabulary), so the attribution is counted
+    // evidence and not prose.
+    const reasonDays = result.observations.filter(
+      (observation) =>
+        observation.metricKey === "order.avoidable_cancellation_reason" &&
+        observation.dimensions?.reason_code === "ITEM_UNAVAILABLE",
+    );
+    const total = reasonDays.reduce(
+      (sum, observation) => sum + Number(observation.valueNumerator),
+      0,
+    );
+    // Nine days across the window carry a declared cancel reason, all of them
+    // ITEM_UNAVAILABLE. (This is a day count, distinct from the ten avoidable
+    // *orders*; the projection counts the days the provider tagged a reason,
+    // because reasons label days, and every one of those days reads as the
+    // single label the import admitted.)
+    expect(total).toBe(9);
   });
 
   it("keeps a day that genuinely traded zero distinct from an absent day", async () => {

@@ -135,6 +135,7 @@ export const channelAnalysisTask = schemaTask({
       correlationId: payload.correlationId,
       outcome: result.outcome,
       findingCount: result.findingCount,
+      observationCount: result.observationCount,
       needsDataCount: result.needsDataCount,
     });
     return result;

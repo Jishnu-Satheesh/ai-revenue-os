@@ -25,6 +25,22 @@ export function formatMoney(minorUnits: number, currency: string): string {
   return formatter.format(minorUnits / 10 ** exponent);
 }
 
+/**
+ * Money at whole-unit precision, for the big headline figures the draft shows
+ * as "AED 553" rather than "AED 553.00". Still divides by the currency's own
+ * minor-unit exponent, so a dinar keeps three places and a yen keeps none.
+ */
+export function formatWholeMoney(minorUnits: number, currency: string): string {
+  const base = new Intl.NumberFormat("en-AE", { style: "currency", currency });
+  const exponent = base.resolvedOptions().maximumFractionDigits ?? 2;
+  const whole = new Intl.NumberFormat("en-AE", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  });
+  return whole.format(minorUnits / 10 ** exponent);
+}
+
 export function formatSignedMoney(minorUnits: number, currency: string): string {
   const formatted = formatMoney(Math.abs(minorUnits), currency);
   if (minorUnits > 0) return `+${formatted}`;
@@ -39,6 +55,12 @@ export function formatCount(value: number): string {
 export function formatPercent(numerator: number, denominator: number): string {
   if (denominator === 0) return "—";
   return `${new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 }).format((numerator / denominator) * 100)}%`;
+}
+
+/** Percent to two places, for the small headline figures the draft shows as "0.13%". */
+export function formatPercentPrecise(numerator: number, denominator: number): string {
+  if (denominator === 0) return "—";
+  return `${new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 }).format((numerator / denominator) * 100)}%`;
 }
 
 /** Exact dates as recorded, never a month name. See the readiness panel. */

@@ -2,6 +2,7 @@ import { addLocalDays, localDaysBetween } from "@/domain/analysis/calendar";
 import { formatCount, formatMoney, formatPercent } from "@/components/analysis/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type {
   WorkspaceChapterView,
   WorkspaceFindingView,
@@ -185,7 +186,7 @@ function AvailabilityReasons({ chapter }: { chapter: WorkspaceChapterView }) {
   );
 }
 
-function AvailabilityVisual({
+export function AvailabilityVisual({
   chapter,
   run,
 }: {
@@ -243,7 +244,7 @@ function AvailabilityVisual({
   );
 }
 
-function CancellationImpact({
+export function CancellationImpact({
   chapter,
   allFindings,
 }: {
@@ -336,19 +337,118 @@ function CancellationImpact({
   );
 }
 
-export function OperationsVisual({
+/**
+ * The Customer Mix & Retention chapter visual: the new-versus-returning
+ * acquisition mix over the window, and the pace new orders arrive at. Returning
+ * and totals come straight off the stored ratio; the per-period points are the
+ * cited rows summed by period, so the velocity line is the window's own recorded
+ * order tempo and never an interpolated series.
+ */
+export function RetentionVisual({
   chapter,
-  allFindings,
   run,
 }: {
   chapter: WorkspaceChapterView;
-  allFindings: readonly WorkspaceFindingView[];
   run: WorkspaceRunView | null;
 }) {
+  const finding = chapter.findings.find(
+    (entry) => entry.code === "CUSTOMER_REPEAT_SHARE" && entry.value?.kind === "ratio",
+  );
+  if (!finding || finding.value?.kind !== "ratio") return null;
+
+  const returning = finding.value.numerator;
+  const total = finding.value.denominator;
+  const fresh = total >= returning ? total - returning : 0;
+  const returningPercent = total > 0 ? Math.round((returning / total) * 100) : 0;
+
+  // Per-period order tempo from the cited rows. Both the fresh and returning
+  // series are cited per period, so summing their numerators by period gives the
+  // window's own order count for that period.
+  const byPeriod = new Map<string, number>();
+  for (const citation of finding.evidence) {
+    if (!citation.metric) continue;
+    const current = byPeriod.get(citation.metric.periodStart) ?? 0;
+    byPeriod.set(citation.metric.periodStart, current + citation.metric.numerator);
+  }
+  const velocity = [...byPeriod.entries()]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([periodStart, count]) => ({ periodStart, count }));
+  const average = velocity.length > 0 ? total / velocity.length : null;
+  const periodUnit = run?.periodGrain ?? "period";
+
   return (
-    <div className="flex flex-col gap-8">
-      <CancellationImpact chapter={chapter} allFindings={allFindings} />
-      <AvailabilityVisual chapter={chapter} run={run} />
-    </div>
+    <section aria-label="Customer mix and retention" className="flex flex-col gap-8">
+      {/* Acquisition mix: two columns sized by the stored share. */}
+      <div className="flex flex-col gap-2">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          Customer acquisition mix
+        </p>
+        <div className="flex items-end gap-3">
+          <div className="flex flex-1 flex-col items-center gap-2">
+            <span className="text-lg font-mono font-bold tabular-nums">{formatCount(fresh)}</span>
+            <div className="flex h-28 w-full items-end">
+              <div className="w-full rounded-t-md bg-slate-200" style={{ height: "100%" }} />
+            </div>
+            <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+              New
+            </span>
+          </div>
+          <div className="flex flex-1 flex-col items-center gap-2">
+            <span className="text-lg font-mono font-bold tabular-nums text-emerald-600">
+              {formatCount(returning)}
+            </span>
+            <div className="flex h-28 w-full items-end">
+              <div
+                className="w-full rounded-t-md bg-emerald-500"
+                style={{ height: `${Math.max(returningPercent, 2)}%` }}
+              />
+            </div>
+            <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-700">
+              Return
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+          <span>{formatCount(fresh)} new</span>
+          <span>{formatCount(returning)} returning</span>
+        </div>
+      </div>
+
+      {/* New-customer velocity, drawn from the cited per-period orders. */}
+      {velocity.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              New customer velocity
+            </p>
+            {average !== null ? (
+              <p className="text-[10px] font-mono font-semibold tabular-nums text-muted-foreground">
+                AVG {average.toFixed(2)} {periodUnit}/day
+              </p>
+            ) : null}
+          </div>
+          <div className="h-32 w-full rounded-lg border border-border bg-slate-50 p-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={velocity} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="periodStart" hide />
+                <YAxis hide domain={["dataMin", "dataMax"]} />
+                <Tooltip
+                  formatter={(value) => [`${formatCount(Number(value))} orders`, "Orders"]}
+                  labelFormatter={(label) => String(label)}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="count"
+                  stroke="var(--color-chart-4)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }

@@ -282,7 +282,8 @@ export const channelRecommendationsTask = schemaTask({
       },
     });
 
-    // Counts and identifiers only. No figure and no cited row travels to a log.
+    // Counts, identifiers, and the fence's own failure vocabulary. No figure
+    // and no cited row travels to a log.
     logger.info("channel_recommendations.run_completed", {
       organizationId: payload.organizationId,
       channelId: payload.channelId,
@@ -290,7 +291,23 @@ export const channelRecommendationsTask = schemaTask({
       correlationId: payload.correlationId,
       outcome: result.outcome,
       recommendationCount: result.recommendationCount,
+      failureCode: result.failureCode,
     });
+
+    // A narration that could not be produced is not a successful run. Returning
+    // normally here made the fence record MODEL_PROVIDER_UNAVAILABLE while the
+    // dashboard showed COMPLETED, so this task's own `maxAttempts` never fired
+    // and a provider outage looked green (staging run
+    // run_06g4ea6s6md5t1i1eu3eeqle01). The fence has already released the lease
+    // and banked the reason, so a retry re-claims cleanly under the same
+    // correlation id. `skipped` still returns: nothing was attempted, and the
+    // analysis run keeps its findings either way.
+    if (result.outcome === "failed") {
+      throw new DomainError(
+        "INTEGRATION_ERROR",
+        `Channel narration failed: ${result.failureCode ?? "unknown"}`,
+      );
+    }
     return result;
   },
 });

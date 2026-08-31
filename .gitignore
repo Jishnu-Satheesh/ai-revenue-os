@@ -31,3 +31,5 @@ coverage
 # committed; the scrubbed fixtures derived from them live in fixtures/providers/.
 fixtures/raw/
 !fixtures/raw/README.md
+
+/screenshots

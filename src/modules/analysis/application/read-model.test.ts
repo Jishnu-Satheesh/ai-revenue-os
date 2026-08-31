@@ -85,13 +85,13 @@ describe("buildChannelWorkspaceView", () => {
       recommendations: [],
     });
 
-    const summary = view.chapters.find((chapter) => chapter.id === "summary");
     const trust = view.chapters.find((chapter) => chapter.id === "trust");
-    expect(summary?.findings.map((f) => f.detectorKey)).toContain("revenue.period_movement");
     expect(trust?.findings.map((f) => f.detectorKey)).toEqual([
       "evidence.period_coverage",
       "evidence.reconciliation_blocked",
     ]);
+    // The movement and share findings are placed in the verdict band rather
+    // than a chapter, so nothing leaks into "Also measured".
     expect(view.unplacedFindings).toHaveLength(0);
   });
 
@@ -124,7 +124,7 @@ describe("buildChannelWorkspaceView", () => {
       evidence: [],
       recommendations: [],
     });
-    expect(notRun.chapters.find((chapter) => chapter.id === "summary")?.state).toBe("not_run");
+    expect(notRun.chapters.find((chapter) => chapter.id === "funnel")?.state).toBe("not_run");
 
     const needsData = buildChannelWorkspaceView({
       runs: [run()],
@@ -190,9 +190,9 @@ describe("buildChannelWorkspaceView", () => {
       recommendations: [],
     });
 
-    const outcome = view.chapters.find((chapter) => chapter.id === "summary")?.findings[0];
+    const outcome = view.chapters.find((chapter) => chapter.id === "funnel")?.findings[0];
     expect(outcome?.value).toBeNull();
-    expect(outcome?.detail).toContain("carries no evidence");
+    expect(outcome?.detail).toContain("carries no figures");
     expect(outcome?.severity).toBeNull();
   });
 
@@ -210,21 +210,21 @@ describe("buildChannelWorkspaceView", () => {
     }
   });
 
-  it("fills gross revenue only from a cross-channel share that actually reported", () => {
+  it("fills gross revenue from the channel-scoped window observation", () => {
     const view = buildChannelWorkspaceView({
       runs: [run()],
       findings: [
         finding({
-          id: "share",
-          detectorKey: "revenue.channel_share",
-          code: "CHANNEL_REVENUE_SHARE",
-          valueKind: "ratio",
-          valueNumerator: 120_000,
-          valueDenominator: 300_000,
+          id: "window-gross",
+          detectorKey: "revenue.window_gross",
+          code: "WINDOW_GROSS_REVENUE",
+          valueKind: "money",
+          valueNumerator: 91_000,
+          valueDenominator: null,
           currency: "AED",
-          expectedPeriodCount: 31,
-          observedPeriodCount: 20,
-          absentPeriodCount: 11,
+          expectedPeriodCount: 5,
+          observedPeriodCount: 2,
+          absentPeriodCount: 3,
         }),
       ],
       evidence: [],
@@ -234,14 +234,14 @@ describe("buildChannelWorkspaceView", () => {
     const gross = view.summaryTiles[0];
     expect(gross.value).toEqual({
       kind: "money",
-      minorUnits: 120_000,
+      minorUnits: 91_000,
       currency: "AED",
       base: null,
     });
-    // The coverage travels with the figure, so a share of twenty days is never
-    // read as a share of the month.
-    expect(gross.coverage).toEqual({ expected: 31, observed: 20, absent: 11 });
-    expect(gross.findingId).toBe("share");
+    // The coverage travels with the figure, so two reported days are never
+    // read as a five-day revenue total.
+    expect(gross.coverage).toEqual({ expected: 5, observed: 2, absent: 3 });
+    expect(gross.findingId).toBe("window-gross");
   });
 
   it("keeps contribution margin blank because no report writes its inputs", () => {
@@ -475,7 +475,7 @@ describe("buildChannelWorkspaceView", () => {
       ]);
     });
 
-    it("breaks a full tie by detector key ascending", () => {
+    it("splits cancellations and availability into their own chapters", () => {
       const view = buildChannelWorkspaceView({
         runs: [run()],
         findings: [
@@ -494,28 +494,126 @@ describe("buildChannelWorkspaceView", () => {
         recommendations: [],
       });
 
-      // Same kind, no money on either, and no severity or priority: the stored
-      // keys decide, and both live in the operations chapter.
-      const operations = view.chapters.find((chapter) => chapter.id === "operations");
-      expect(operations?.findings.map((entry) => entry.id)).toEqual([
-        "closed-share",
-        "cancellation",
-      ]);
+      // The approved draft separates the two questions: cancellations and the
+      // provider's rejection loss live in their own chapter, and closed time
+      // lives in the availability heatmap chapter. Neither is merged under one
+      // "operations" card.
+      const cancellations = view.chapters.find((chapter) => chapter.id === "cancellations");
+      const availability = view.chapters.find((chapter) => chapter.id === "availability");
+      expect(cancellations?.findings.map((entry) => entry.id)).toEqual(["cancellation"]);
+      expect(availability?.findings.map((entry) => entry.id)).toEqual(["closed-share"]);
     });
   });
 
   describe("the verdict band", () => {
+    it("builds the earned, lost, and potential split from channel-scoped evidence", () => {
+      const view = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [
+          finding({
+            id: "window-gross",
+            detectorKey: "revenue.window_gross",
+            code: "WINDOW_GROSS_REVENUE",
+            valueKind: "money",
+            valueNumerator: 91_000,
+            valueDenominator: null,
+            currency: "AED",
+          }),
+          finding({
+            id: "cancellation-loss",
+            detectorKey: "orders.cancellation_loss",
+            code: "ORDER_CANCELLATION_LOSS",
+            valueKind: "count",
+            valueNumerator: 7,
+            valueDenominator: null,
+            currency: "AED",
+            monetaryImpactMinorUnits: 35_700,
+          }),
+        ],
+        evidence: [],
+        recommendations: [],
+      });
+
+      expect(view.verdict.verdictFigures).toEqual({
+        potential: { minorUnits: 91_000, currency: "AED" },
+        lost: { minorUnits: 35_700, currency: "AED" },
+        earned: { minorUnits: 55_300, currency: "AED" },
+      });
+      expect(view.unplacedFindings).toHaveLength(0);
+    });
+
+    it("withholds the entire split when the stored amounts cannot be compared", () => {
+      const baseFindings = [
+        finding({
+          id: "window-gross",
+          detectorKey: "revenue.window_gross",
+          code: "WINDOW_GROSS_REVENUE",
+          valueKind: "money",
+          valueNumerator: 91_000,
+          valueDenominator: null,
+          currency: "AED",
+        }),
+      ];
+      const mismatchedCurrency = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [
+          ...baseFindings,
+          finding({
+            id: "cancellation-usd",
+            detectorKey: "orders.cancellation_loss",
+            code: "ORDER_CANCELLATION_LOSS",
+            valueKind: "count",
+            valueNumerator: 7,
+            valueDenominator: null,
+            currency: "USD",
+            monetaryImpactMinorUnits: 35_700,
+          }),
+        ],
+        evidence: [],
+        recommendations: [],
+      });
+      const lossAbovePotential = buildChannelWorkspaceView({
+        runs: [run()],
+        findings: [
+          ...baseFindings,
+          finding({
+            id: "cancellation-too-large",
+            detectorKey: "orders.cancellation_loss",
+            code: "ORDER_CANCELLATION_LOSS",
+            valueKind: "count",
+            valueNumerator: 7,
+            valueDenominator: null,
+            currency: "AED",
+            monetaryImpactMinorUnits: 91_001,
+          }),
+        ],
+        evidence: [],
+        recommendations: [],
+      });
+
+      expect(mismatchedCurrency.verdict.verdictFigures).toEqual({
+        potential: null,
+        lost: null,
+        earned: null,
+      });
+      expect(lossAbovePotential.verdict.verdictFigures).toEqual({
+        potential: null,
+        lost: null,
+        earned: null,
+      });
+    });
+
     it("speaks directionally from stored findings and states nothing else", () => {
       const view = buildChannelWorkspaceView({
         runs: [run()],
         findings: [
           finding({
-            id: "share",
-            detectorKey: "revenue.channel_share",
-            code: "CHANNEL_REVENUE_SHARE",
-            valueKind: "ratio",
+            id: "window-gross",
+            detectorKey: "revenue.window_gross",
+            code: "WINDOW_GROSS_REVENUE",
+            valueKind: "money",
             valueNumerator: 120_000,
-            valueDenominator: 300_000,
+            valueDenominator: null,
             currency: "AED",
             expectedPeriodCount: 31,
             observedPeriodCount: 31,

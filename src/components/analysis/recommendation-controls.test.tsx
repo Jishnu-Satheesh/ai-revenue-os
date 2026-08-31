@@ -40,10 +40,10 @@ afterEach(() => {
 });
 
 describe("RecommendationControls", () => {
-  it("renders the narration with its label and limitations", () => {
+  it("renders the narration and its limitations", () => {
     render(<RecommendationControls organizationId="org-1" recommendation={recommendation()} />);
-    expect(screen.getByText("Recommendation")).toBeTruthy();
     expect(screen.getByText(/Mark items out of stock before service/)).toBeTruthy();
+    expect(screen.getByText(/Every cancellation in this window was ITEM_UNAVAILABLE/)).toBeTruthy();
     expect(screen.getByText(/Twenty of fifty-nine days carried evidence/)).toBeTruthy();
   });
 

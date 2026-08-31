@@ -106,10 +106,7 @@ describe("runChannelRecommendations", () => {
   });
 
   it("retries generation once when the first reply is unusable, then files the good one", async () => {
-    const generate = vi
-      .fn()
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce(validReply());
+    const generate = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce(validReply());
     const deps = dependencies({ generator: { providerName: "google", modelId: "m", generate } });
 
     const result = await runChannelRecommendations(payload, deps);
@@ -126,13 +123,32 @@ describe("runChannelRecommendations", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", recommendationCount: 0 });
+    expect(result).toEqual({
+      outcome: "failed",
+      recommendationCount: 0,
+      failureCode: "NARRATION_VALIDATION_FAILED",
+    });
     expect(generate).toHaveBeenCalledTimes(2);
     expect(deps.complete).not.toHaveBeenCalled();
     expect(deps.fail).toHaveBeenCalledTimes(1);
     const fail = vi.mocked(deps.fail).mock.calls[0][0];
     expect(fail.code).toBe("NARRATION_VALIDATION_FAILED");
     expect(fail.resultDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("retries raw provider text as a format miss rather than calling it an outage", async () => {
+    // The provider hands back the answer it could not parse as JSON instead of
+    // throwing, so the one designed retry actually runs. Before this, an
+    // unusable reply was reported as MODEL_PROVIDER_UNAVAILABLE and the retry
+    // was unreachable in production.
+    const generate = vi.fn(async () => "I could not do that.");
+    const deps = dependencies({ generator: { providerName: "google", modelId: "m", generate } });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.failureCode).toBe("NARRATION_VALIDATION_FAILED");
+    expect(vi.mocked(deps.fail).mock.calls[0][0].code).toBe("NARRATION_VALIDATION_FAILED");
   });
 
   it("rejects a bare scalar reply defensively, without handing it to the schema", async () => {
@@ -203,7 +219,11 @@ describe("runChannelRecommendations", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", recommendationCount: 0 });
+    expect(result).toEqual({
+      outcome: "failed",
+      recommendationCount: 0,
+      failureCode: "MODEL_PROVIDER_UNAVAILABLE",
+    });
     expect(generate).toHaveBeenCalledTimes(1);
     expect(deps.complete).not.toHaveBeenCalled();
     expect(vi.mocked(deps.fail).mock.calls[0][0].code).toBe("MODEL_PROVIDER_UNAVAILABLE");

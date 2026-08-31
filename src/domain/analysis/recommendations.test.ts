@@ -48,7 +48,9 @@ function talabatLossItem(): NarratedItem {
       "Review preparation times for the items most often rejected",
       "Check menu availability windows against closed minutes",
     ],
-    limitations: ["Loss is the provider's reported figure rather than an independent recomputation"],
+    limitations: [
+      "Loss is the provider's reported figure rather than an independent recomputation",
+    ],
     citations: [LOSS_FINDING_ID],
   };
 }
@@ -67,7 +69,18 @@ function verdictInput(): EvaluationVerdict {
 
 describe("the recommendation narration contracts", () => {
   it("pins the prompt versions and bounds the brief fixes", () => {
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(1);
+    // v4: advice became the default rather than the exception. v1-v3 told the
+    // narrator what it must never claim and never told it to advise, so every
+    // run came back labelled `observation`, repeating each figure back at the
+    // operator. ADR 0039 puts the fence on claims about cause and realized
+    // result, never on the advice itself.
+    // v3: narration prompt gained the one-idea-per-item and keep-it-short rules
+    // so a recommendation reads as one plain sentence of advice an owner can
+    // act on, never as a crowded restatement of the findings.
+    // v2: narration prompt gained the plain-language, highest-leverage advice
+    // rules so a recommendation reads as advice a non-technical owner can act
+    // on, never as a restatement of the arithmetic.
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(4);
     expect(JUDGE_PROMPT_VERSION).toBe(1);
     expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(6);
     expect(MAX_EVALUATION_BATCH).toBe(200);

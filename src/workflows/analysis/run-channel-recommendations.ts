@@ -170,7 +170,13 @@ async function generateOnce(
 export async function runChannelRecommendations(
   input: unknown,
   dependencies: ChannelRecommendationsDependencies,
-): Promise<{ outcome: "completed" | "failed" | "skipped"; recommendationCount: number }> {
+): Promise<{
+  outcome: "completed" | "failed" | "skipped";
+  recommendationCount: number;
+  /** Present only on `failed`. The same code the fence recorded, so the caller
+   * can name the reason without reading `private.channel_recommendation_operations`. */
+  failureCode?: ChannelRecommendationFailureCode;
+}> {
   const payload = channelRecommendationsTaskSchema.parse(input);
   const claimToken = crypto.randomUUID();
   const claim = await dependencies.claim({
@@ -240,9 +246,7 @@ export async function runChannelRecommendations(
     return { outcome: "completed", recommendationCount: submission.items.length };
   } catch (error) {
     const code: ChannelRecommendationFailureCode =
-      error instanceof ChannelRecommendationsFailure
-        ? error.code
-        : "NARRATION_PROCESSING_FAILED";
+      error instanceof ChannelRecommendationsFailure ? error.code : "NARRATION_PROCESSING_FAILED";
     await dependencies.fail({
       organizationId: payload.organizationId,
       analysisRunId: payload.analysisRunId,
@@ -250,6 +254,6 @@ export async function runChannelRecommendations(
       code,
       resultDigest: failureDigest(code),
     });
-    return { outcome: "failed", recommendationCount: 0 };
+    return { outcome: "failed", recommendationCount: 0, failureCode: code };
   }
 }

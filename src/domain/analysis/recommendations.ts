@@ -16,8 +16,15 @@ import { z } from "zod";
  * 11.3 and 11.4, ADR 0037 for narration and ADR 0038 for the judge.
  */
 
-/** Bumped only when the narration prompt's instructions change. */
-export const RECOMMENDATION_PROMPT_VERSION = 1;
+/**
+ * Bumped only when the narration prompt's instructions change.
+ *
+ * 4: advice became the default rather than the exception. Versions 1-3 read
+ * their own prohibitions as a ban on advising anything, and filed observations
+ * that repeated each figure back at the operator. ADR 0039 puts the fence on
+ * claims about cause and realized result, never on the advice itself.
+ */
+export const RECOMMENDATION_PROMPT_VERSION = 4;
 
 /** Bumped only when the judge prompt's instructions change. */
 export const JUDGE_PROMPT_VERSION = 1;
@@ -31,11 +38,7 @@ export const MAX_RECOMMENDATIONS_PER_RUN = 6;
 /** How many not-yet-judged recommendations one judge batch may receive. */
 export const MAX_EVALUATION_BATCH = 200;
 
-export const recommendationLabelSchema = z.enum([
-  "observation",
-  "recommendation",
-  "needs_data",
-]);
+export const recommendationLabelSchema = z.enum(["observation", "recommendation", "needs_data"]);
 
 export type RecommendationLabel = z.output<typeof recommendationLabelSchema>;
 

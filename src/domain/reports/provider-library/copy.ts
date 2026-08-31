@@ -21,6 +21,7 @@ const METRIC_LABELS: Readonly<Record<string, string>> = {
   "order.total_count": "orders placed",
   "order.cancelled_count": "orders cancelled",
   "order.avoidable_cancellation_count": "avoidable cancellations",
+  "order.avoidable_cancellation_reason": "avoidable cancellations by reason",
   "customer.new_order_count": "orders from new customers",
   "customer.returning_order_count": "orders from returning customers",
   "revenue.online_sales": "online sales",

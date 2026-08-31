@@ -148,6 +148,17 @@ export const talabatPerformance: ProviderReportDefinition = {
             required: false,
           },
           {
+            // The provider labels each rejectable order with a cancel reason.
+            // It is categorical rather than numeric, so the projection counts
+            // the days carrying each declared label into dimension-tagged
+            // observations -- "every cancellation this window was ITEM_UNAVAILABLE"
+            // is counted evidence, not prose in a cell.
+            canonicalField: "avoidable_cancellation_reason",
+            sourceHeader: "avoidable_cancellation_reason",
+            parser: "text",
+            required: false,
+          },
+          {
             canonicalField: "rejection_revenue_loss",
             sourceHeader: "revenue_loss_from_rejections",
             parser: "money",
@@ -334,6 +345,23 @@ export const talabatPerformance: ProviderReportDefinition = {
         metricKey: "order.avoidable_cancellation_count",
         valueKind: "count",
         aggregation: "sum",
+      },
+      {
+        // One observation per declared cancel-reason label, counted per day the
+        // provider tagged. The reasons are the provider's own vocabulary; an
+        // unknown label is refused by the import rather than folded into an
+        // "other" that would read as complete.
+        key: "avoidable_cancel_reason",
+        normalizedSheetName: "performance",
+        canonicalField: "avoidable_cancellation_reason",
+        metricKey: "order.avoidable_cancellation_reason",
+        valueKind: "count",
+        aggregation: "sum",
+        categorical: {
+          dimensionKey: "reason_code",
+          allowedValues: ["ITEM_UNAVAILABLE"],
+          collectInjectedValues: false,
+        },
       },
       {
         key: "new_customer_orders",

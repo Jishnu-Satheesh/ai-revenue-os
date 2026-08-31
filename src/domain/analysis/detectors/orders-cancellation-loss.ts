@@ -1,9 +1,11 @@
 import { selectComparablePoints, singleCurrency, sumNumerators } from "@/domain/analysis/evidence";
 import type {
   AnalysisEvidence,
+  AnalysisSeriesPoint,
   DetectorDeclaration,
   DetectorNeedsData,
   DetectorOutcome,
+  FindingEvidenceReference,
 } from "@/domain/analysis/types";
 
 /**
@@ -22,6 +24,10 @@ import type {
 
 const AVOIDABLE_CANCELLATIONS = "order.avoidable_cancellation_count";
 const REJECTION_LOSS = "revenue.rejection_loss";
+/** Why the rejectable orders were lost, as the provider labels them (ADR 0034). */
+const CANCELLATION_REASON = "order.avoidable_cancellation_reason";
+/** The one dimension key the cancellation-reason grouping reads, per the contract. */
+const REASON_DIMENSION = "reason_code";
 
 function refuse(
   evidence: AnalysisEvidence,
@@ -51,12 +57,13 @@ export const ordersCancellationLossDetector: DetectorDeclaration = {
   compatibleGrains: ["day", "week", "month"],
   exactRangeEvidence: "refused",
   requiredMetricKeys: [AVOIDABLE_CANCELLATIONS, REJECTION_LOSS],
-  optionalMetricKeys: [],
+  optionalMetricKeys: [CANCELLATION_REASON],
   minimumQualityTier: "derived",
   acceptedReconciliationStates: ["current"],
   evidenceContract: [
     "Current period-grain observations of order.avoidable_cancellation_count in the window.",
     "Current period-grain observations of revenue.rejection_loss in the window, in one shared currency.",
+    "Optionally, current observations of order.avoidable_cancellation_reason carrying a reason_code dimension value (ADR 0034).",
   ],
   severityRules: [
     "None. How many avoidable cancellations occurred, and what the provider recorded losing to rejections, are facts; no agreed threshold turns either into a problem of a given severity.",
@@ -120,7 +127,7 @@ export const ordersCancellationLossDetector: DetectorDeclaration = {
     const avoidableCount = sumNumerators(cancellations.accepted);
     const rejectionLossMinorUnits = sumNumerators(losses.accepted);
 
-    return [
+    const outcomes: DetectorOutcome[] = [
       {
         kind: "observation",
         code: "ORDER_CANCELLATION_LOSS",
@@ -154,5 +161,59 @@ export const ordersCancellationLossDetector: DetectorDeclaration = {
         ],
       },
     ];
+
+    // One observation per cancel-reason label present, so an operator reads
+    // "every avoidable cancellation this window was ITEM_UNAVAILABLE" as
+    // counted evidence rather than as prose. Grouping by a dimension value is a
+    // read-time concern (ADR 0034); nothing here switches on which label it is,
+    // and a label outside the approved vocabulary cannot occur -- the import
+    // refused it.
+    const reasons = selectComparablePoints(evidence, {
+      metricKey: CANCELLATION_REASON,
+      minimumQualityTier: ordersCancellationLossDetector.minimumQualityTier,
+    });
+    const byReason = new Map<string, AnalysisSeriesPoint[]>();
+    for (const row of reasons.accepted) {
+      const reason = row.dimensions[REASON_DIMENSION];
+      // A reason row without the declared dimension carries no grouping this
+      // detector may read, so its days stay out of every reason group.
+      if (!reason) continue;
+      const group = byReason.get(reason) ?? [];
+      group.push(row);
+      byReason.set(reason, group);
+    }
+
+    const reasonSetAsideCount = reasons.setAsideCount;
+    for (const reason of [...byReason.keys()].sort()) {
+      const rows = byReason.get(reason) ?? [];
+      const citations: FindingEvidenceReference[] = rows.map((row) => ({
+        kind: "normalized_metric" as const,
+        role: "component" as const,
+        id: row.normalizedMetricId,
+      }));
+      const reasonLimitations: string[] = [
+        `Days the provider marked ${reason}. The labels are the provider's own vocabulary, counted as it wrote them.`,
+      ];
+      if (reasonSetAsideCount > 0) {
+        reasonLimitations.push(
+          "Some rows for this metric were set aside as incomparable and are not counted here.",
+        );
+      }
+      outcomes.push({
+        kind: "observation",
+        code: "ORDER_CANCELLATION_REASON",
+        channelId: window.channelId ?? undefined,
+        branchId: window.branchId ?? undefined,
+        metricKey: CANCELLATION_REASON,
+        periodStart: window.windowStart,
+        periodEnd: window.windowEnd,
+        measurement: { valueKind: "count", numerator: sumNumerators(rows) },
+        qualityState: reasonSetAsideCount > 0 ? "partial" : "complete",
+        limitations: reasonLimitations,
+        evidence: citations,
+      });
+    }
+
+    return outcomes;
   },
 };

@@ -17,10 +17,13 @@ import { env } from "@/lib/env";
  * boundary has been broken.
  */
 
-// Gemini 3.7 Flash's default reasoning pass exceeded the former 90-second
-// deadline on a bounded twelve-finding narration. Keep the provider bounded,
-// but leave enough room inside the task's existing 300-second ceiling for the
-// model response and the database admission round-trip.
+// Raised from 90 seconds when a bounded twelve-finding narration kept hitting
+// the deadline. That was misread as a slow reasoning pass; the model was in
+// fact answering 503 and the AI SDK was retrying underneath until the budget
+// ran out. The wider budget is kept anyway — a reasoning model does need room
+// inside the task's 300-second ceiling for the response and the database
+// admission round-trip — but a deadline is not the remedy for an unavailable
+// model. See the D2 board entry, 2026-08-28.
 export const RECOMMENDATION_GENERATION_TIMEOUT_MS = 180_000;
 
 /**
@@ -100,7 +103,16 @@ export function createRecommendationGenerationProvider(config: {
           prompt: user,
           abortSignal: AbortSignal.timeout(RECOMMENDATION_GENERATION_TIMEOUT_MS),
         });
-        return extractJsonText(result.text);
+        try {
+          return extractJsonText(result.text);
+        } catch {
+          // A reply that is not JSON is the model missing the output contract,
+          // not the provider being unreachable. Returning the raw answer keeps
+          // those two apart for the caller: the narration workflow refuses a
+          // non-object and spends its one retry on the format, where throwing
+          // here reported an outage and skipped that retry entirely.
+          return result.text;
+        }
       } catch (error) {
         if (error instanceof DomainError) throw error;
         providerFailure(error);

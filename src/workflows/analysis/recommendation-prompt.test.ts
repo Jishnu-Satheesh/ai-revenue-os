@@ -69,6 +69,51 @@ describe("buildNarrationPrompt", () => {
     expect(system).toMatch(/never invent/i);
   });
 
+  it("requires an action, not a restatement, wherever the evidence supports one", () => {
+    // ADR 0039: the platform exists to do the analysis the client cannot.
+    // Withholding advice because it feels safer is the failure this rule
+    // closes -- the narrator was filing observations that repeated the figure
+    // back to the operator and calling that rigour.
+    const { system } = buildNarrationPrompt(input);
+
+    expect(system).toContain(
+      'File a "recommendation" for every cited finding that supports an action',
+    );
+    expect(system).toContain("Restating a figure the operator can already see is not an item");
+    expect(system).toContain(
+      'Choosing "observation" asserts that nothing can be done about this evidence',
+    );
+  });
+
+  it("carries a worked contrast built on a metric no detector emits", () => {
+    // The example teaches the shape faster than another paragraph of rules,
+    // and its subject sits deliberately outside this registry, so it can never
+    // be mistaken for evidence about the run and copied into an answer.
+    const { system } = buildNarrationPrompt(input);
+
+    expect(system).toContain("<worked_example>");
+    expect(system).toContain("Wrong — a recommendation that invents the cause:");
+    expect(system).toContain("Right — an action the finding supports, with no invented cause:");
+  });
+
+  it("separates advising an action from asserting a cause", () => {
+    const { system } = buildNarrationPrompt(input);
+
+    // The fence belongs on claims about what happened and what it earned --
+    // never on the advice itself.
+    expect(system).toContain("You may advise an action the cited findings support.");
+    expect(system).toContain("You may not state why something happened");
+  });
+
+  it("shows a recommendation, not an observation, in the output example", () => {
+    // The worked example anchors the model harder than any prose rule. It
+    // showed label \"observation\", and every run came back observations.
+    const { system } = buildNarrationPrompt(input);
+
+    const example = system.slice(system.indexOf('{"items":['));
+    expect(example.slice(0, 200)).toContain('"label":"recommendation"');
+  });
+
   it("forbids converting needs_data findings into recommendations", () => {
     const { system } = buildNarrationPrompt(input);
 

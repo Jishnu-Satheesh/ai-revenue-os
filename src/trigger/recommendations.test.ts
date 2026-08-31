@@ -127,6 +127,26 @@ describe("channel recommendations Trigger registration", () => {
   });
 });
 
+describe("a failed narration must not report success", () => {
+  // Staging run run_06g4ea6s6md5t1i1eu3eeqle01 recorded
+  // MODEL_PROVIDER_UNAVAILABLE in the fence and still finished COMPLETED on
+  // the dashboard, because the task returned normally. The task's own
+  // maxAttempts never fired and the outage looked green.
+  it("throws on a failed outcome so Trigger marks the run failed and retries", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/recommendations.ts"), "utf8");
+
+    const body = source.slice(source.indexOf("channel_recommendations.run_completed"));
+    expect(body).toContain('result.outcome === "failed"');
+    expect(body).toMatch(/throw new/);
+  });
+
+  it("logs the fence's failure code, so the reason is legible without a database read", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/recommendations.ts"), "utf8");
+
+    expect(source).toContain("failureCode: result.failureCode");
+  });
+});
+
 describe("task bodies stay thin", () => {
   it("delegates everything to the workflow module, which owns the behaviour tests", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/recommendations.ts"), "utf8");

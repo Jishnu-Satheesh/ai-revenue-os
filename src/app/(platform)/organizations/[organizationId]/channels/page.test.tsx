@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -58,9 +60,15 @@ vi.mock("@/modules/integrations/application/feature-access", () => ({
 
 vi.mock("@/components/layout/route-context", () => ({ RegisterRouteLabel: () => null }));
 vi.mock("@/components/channels/channels-management", () => ({
-  ChannelsManagement: () => null,
+  ChannelsManagement: ({ portfolio }: { portfolio?: ReactNode }) => (
+    <div data-testid="management-shell">
+      {portfolio ? <div data-testid="management-portfolio">{portfolio}</div> : null}
+    </div>
+  ),
 }));
-vi.mock("@/components/channels/channels-rollup", () => ({ ChannelsRollup: () => null }));
+vi.mock("@/components/channels/channels-rollup", () => ({
+  ChannelsRollup: () => <div>Portfolio outcome</div>,
+}));
 
 import ChannelsPage from "@/app/(platform)/organizations/[organizationId]/channels/page";
 
@@ -86,6 +94,17 @@ beforeEach(() => {
 });
 
 describe("ChannelsPage", () => {
+  it("places the portfolio outcome inside the channels management shell", async () => {
+    const page = await ChannelsPage({
+      params: Promise.resolve({ organizationId: ORGANIZATION }),
+      searchParams: Promise.resolve({}),
+    });
+
+    render(page);
+
+    expect(screen.getByTestId("management-portfolio")).toHaveTextContent("Portfolio outcome");
+  });
+
   it("does not read analysis at all when the slice is off for the organization", async () => {
     // The flag is enforced in the read, not in navigation, so a flag-off
     // organization pays for nothing and has nothing to leak through a

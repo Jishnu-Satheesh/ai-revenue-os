@@ -14,15 +14,20 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { FindingCard } from "@/components/analysis/finding-card";
-import { OperationsVisual } from "@/components/analysis/operations-visuals";
+import {
+  AvailabilityVisual,
+  CancellationImpact,
+  RetentionVisual,
+} from "@/components/analysis/operations-visuals";
 import { RecommendationControls } from "@/components/analysis/recommendation-controls";
 import {
   figureToneClass,
   findingValueLabel,
   formatCount,
   formatMoney,
-  formatSignedMoney,
+  formatPercent,
+  formatPercentPrecise,
+  formatWholeMoney,
   formatWindow,
 } from "@/components/analysis/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -47,12 +52,10 @@ import type { AnalysisGrain } from "@/domain/analysis/types";
 import type { ChannelEvidenceWindow } from "@/modules/analysis/application/ports";
 import type {
   ChannelWorkspaceView,
-  SummaryTileView,
   WorkspaceChapterView,
   WorkspaceFindingView,
   WorkspaceRecommendationView,
   WorkspaceRunView,
-  WorkspaceValueView,
 } from "@/modules/analysis/application/read-model";
 
 /**
@@ -164,8 +167,6 @@ function ratioOf(finding: WorkspaceFindingView): { numerator: number; denominato
     : null;
 }
 
-type MoneyValue = Extract<WorkspaceValueView, { kind: "money" }>;
-
 /** The small uppercase section label the draft uses for every band and card. */
 function Kicker({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -182,65 +183,91 @@ function Kicker({ children, className = "" }: { children: React.ReactNode; class
 // ---------------------------------------------------------------------------
 
 /**
- * Prior-versus-movement comparison bars, drawn only when the detector recorded
- * a base. The prior bar is the stored base itself; the movement bar's length is
- * the stored delta against it, capped so an outlier cannot leave the frame.
- * Only stored amounts are ever printed: the current total is deliberately NOT
- * printed next to the bars, because no detector stored one and adding base and
- * delta for display would put an uncited figure on the page.
+ * The verdict band's Potential / Lost / Earned scale, drawn from the stored
+ * split. Each bar's height is the amount's own share of the potential, so a
+ * larger bar always means a larger stated amount. No bar is drawn when the
+ * split cannot be stated, because a scale with one empty column would read as a
+ * measurement failure rather than an honest absence.
  */
-function MovementComparisonBars({ value }: { value: MoneyValue }) {
-  const base = value.base;
-  // Without a positive recorded base there is nothing to compare against --
-  // proportions of zero are how fabricated trends start.
-  if (base === null || base <= 0) return null;
-  const delta = value.minorUnits;
-  const direction = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
-  const movementWidth =
-    direction === "flat" ? 100 : Math.min(Math.round((Math.abs(delta) / base) * 100), 100);
+function PotentialLostEarnedScale({
+  figures,
+}: {
+  figures: {
+    earned: { minorUnits: number; currency: string } | null;
+    lost: { minorUnits: number; currency: string } | null;
+    potential: { minorUnits: number; currency: string } | null;
+  };
+}) {
+  const potential = figures.potential;
+  if (potential === null || potential.minorUnits <= 0) {
+    return (
+      <div
+        role="img"
+        aria-label="No earned, lost and potential split can be stated for this window."
+        className="flex min-h-24 items-center rounded-lg border border-dashed border-border bg-card/60 px-4 text-xs leading-relaxed text-muted-foreground"
+      >
+        The earned / lost / potential split cannot be stated for this window yet.
+      </div>
+    );
+  }
+
+  const bars: {
+    label: string;
+    value: { minorUnits: number; currency: string } | null;
+    tone: "neutral" | "danger" | "success";
+  }[] = [
+    { label: "Potential", value: potential, tone: "neutral" },
+    { label: "Lost", value: figures.lost, tone: "danger" },
+    { label: "Earned", value: figures.earned, tone: "success" },
+  ];
 
   return (
     <div
       role="img"
-      aria-label={`Prior period ${formatMoney(base, value.currency)}; movement ${formatSignedMoney(delta, value.currency)}.`}
-      className="flex flex-col gap-4"
+      aria-label={`Potential ${formatMoney(potential.minorUnits, potential.currency)}${
+        figures.lost ? `; lost ${formatMoney(figures.lost.minorUnits, figures.lost.currency)}` : ""
+      }${figures.earned ? `; earned ${formatMoney(figures.earned.minorUnits, figures.earned.currency)}` : ""}.`}
+      className="relative flex h-56 w-full items-end gap-3 px-6 pb-4"
     >
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            Prior period
-          </span>
-          <span className="text-xs font-semibold tabular-nums">
-            {formatMoney(base, value.currency)}
-          </span>
-        </div>
-        {/* Chart-token tint: a measured series, solid, per the chart grammar. */}
-        <div className="h-3 w-full rounded-sm bg-chart-1" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            {direction === "down" ? "Lost since" : direction === "up" ? "Gained since" : "Change"}
-          </span>
-          <span
-            className={`text-xs font-semibold tabular-nums ${
-              direction === "down" ? "text-destructive" : direction === "up" ? "text-primary" : ""
-            }`}
-          >
-            {formatSignedMoney(delta, value.currency)}
-          </span>
-        </div>
-        {direction === "flat" ? (
-          // Level reads as a full-length quiet bar, not a zero-width sliver
-          // that could be mistaken for a rendering failure.
-          <div className="h-3 w-full rounded-sm border border-dashed border-border bg-muted" />
-        ) : (
-          <div
-            className={`h-3 rounded-sm ${direction === "down" ? "bg-destructive" : "bg-chart-4"}`}
-            style={{ width: `${movementWidth}%` }}
-          />
-        )}
-      </div>
+      <span aria-hidden="true" className="absolute bottom-8 left-0 right-0 h-px bg-border" />
+      {bars.map((bar) => {
+        const share =
+          bar.value === null || potential.minorUnits <= 0
+            ? 0
+            : Math.min(Math.round((bar.value.minorUnits / potential.minorUnits) * 100), 100);
+        return (
+          <div key={bar.label} className="flex flex-1 flex-col items-center gap-3">
+            <span
+              className={`text-sm font-mono font-bold ${
+                bar.tone === "danger"
+                  ? "text-destructive"
+                  : bar.tone === "success"
+                    ? "text-emerald-600"
+                    : "text-foreground"
+              }`}
+            >
+              {bar.value ? formatWholeMoney(bar.value.minorUnits, bar.value.currency) : "—"}
+            </span>
+            {/* Fixed-height track so the bar's percentage resolves against a
+                real pixel height instead of an auto-sized flex column. */}
+            <div className="flex h-40 w-full items-end">
+              <div
+                className={`w-full rounded-t-[2px] ${
+                  bar.tone === "danger"
+                    ? "bg-destructive"
+                    : bar.tone === "success"
+                      ? "bg-emerald-500"
+                      : "bg-slate-200"
+                }`}
+                style={{ height: `${share}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              {bar.label}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -299,104 +326,107 @@ function RatioSplitBar({
 }
 
 /**
- * Retention as a pair of columns sized by the stored share. Only the returning
- * count is printed -- it is the number the detector stored. The remainder's
- * height is geometry, and printing a subtracted "new" figure next to it would
- * be arithmetic the detector never declared.
- */
-function RepeatMixColumns({ numerator, denominator }: { numerator: number; denominator: number }) {
-  const returningPercent = Math.max(Math.round((numerator / denominator) * 100), 4);
-  return (
-    <div
-      role="img"
-      aria-label={`${numerator} of ${denominator} orders came from returning customers.`}
-      className="flex flex-col gap-2"
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-          Returning vs new orders
-        </span>
-        <span className="text-[11px] font-semibold tabular-nums">
-          {formatCount(numerator)} of {formatCount(denominator)}
-        </span>
-      </div>
-      <div className="flex h-28 items-end gap-2">
-        <div className="flex h-full flex-1 flex-col justify-end rounded-t-sm bg-muted">
-          <div
-            className="flex items-start justify-center bg-chart-2 pt-1.5"
-            style={{ height: `${returningPercent}%` }}
-          >
-            <span className="text-[10px] font-bold tabular-nums text-white">
-              {formatCount(numerator)}
-            </span>
-          </div>
-        </div>
-        <span className="self-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-          Returning
-        </span>
-        <div className="h-full flex-1 self-end rounded-t-sm border border-border bg-background" />
-        <span className="self-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-          New
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Funnel stages drawn from the stored stage-pair ratios alone. Each block's
- * width is its recorded denominator against the widest recorded one, and the
- * fill inside is the recorded conversion. Stage names are not stored anywhere,
- * so the rows are ordinal rather than named -- naming them would fabricate
- * vocabulary the provider never wrote.
+ * The conversion funnel, drawn as a vertical set of bars that shrink as the
+ * stage moves toward the order. Stage names come from the metric key the funnel
+ * detector hung on each pair, so a bar is named for the stage it counts rather
+ * than read as an anonymous ordinal. The counts are the stored numerators and
+ * denominators of the stage-pair findings, read here for display and never
+ * recomputed: impressions is the top pair's denominator, and each later stage is
+ * the previous pair's numerator. A width is always a stored amount's share of
+ * the window's impressions, never an invented intermediate figure.
  */
 function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] }) {
-  const stages = findings
-    .map((finding) => ({ finding, ratio: ratioOf(finding) }))
-    .filter(
-      (
-        stage,
-      ): stage is {
-        finding: WorkspaceFindingView;
-        ratio: { numerator: number; denominator: number };
-      } => Boolean(stage.ratio),
-    )
-    .sort((left, right) => right.ratio.denominator - left.ratio.denominator);
-  if (stages.length === 0) return null;
-  const widest = stages[0].ratio.denominator;
+  const pairs = findings.filter((finding) => finding.code === "FUNNEL_STAGE_CONVERSION");
+  const endToEnd = findings.find(
+    (finding) => finding.code === "FUNNEL_STAGE_CONVERSION_END_TO_END",
+  );
+  const endRatio = endToEnd ? ratioOf(endToEnd) : null;
+
+  // Funnel order, named by the metric the stage counts. The denominator of the
+  // first pair is the top of the funnel; each later stage's count is the prior
+  // pair's numerator, so nothing here invents a step.
+  const stageMeta: readonly { metricKey: string; label: string }[] = [
+    { metricKey: "listing.menu_views", label: "Menu Views" },
+    { metricKey: "listing.cart_additions", label: "Add-to-Cart" },
+    { metricKey: "listing.placed_orders", label: "Orders" },
+  ];
+
+  const firstPair = pairs.find((finding) => finding.metricKey === "listing.menu_views");
+  const firstRatio = firstPair ? ratioOf(firstPair) : null;
+  const impressions = firstRatio?.denominator ?? endRatio?.denominator ?? null;
+  if (impressions === null || impressions <= 0) return null;
+
+  const stages: {
+    label: string;
+    count: number;
+    fromPrevious: number | null;
+    findingId: string | null;
+  }[] = [
+    {
+      label: "Impressions",
+      count: impressions,
+      fromPrevious: null,
+      findingId: firstPair?.id ?? null,
+    },
+  ];
+
+  for (const meta of stageMeta) {
+    const pair = pairs.find((finding) => finding.metricKey === meta.metricKey);
+    if (!pair) continue;
+    const ratio = ratioOf(pair);
+    if (!ratio) continue;
+    stages.push({
+      label: meta.label,
+      count: ratio.numerator,
+      fromPrevious:
+        ratio.denominator > 0 ? Math.round((ratio.numerator / ratio.denominator) * 100) : null,
+      findingId: pair.id,
+    });
+  }
+
+  const overall =
+    endRatio && endRatio.denominator > 0
+      ? Math.round((endRatio.numerator / endRatio.denominator) * 100)
+      : null;
 
   return (
-    <div className="flex flex-col gap-3">
-      {stages.map(({ finding, ratio }, index) => {
-        const widthPercent = Math.max(Math.round((ratio.denominator / widest) * 100), 12);
-        const conversion = Math.round((ratio.numerator / ratio.denominator) * 100);
-        const isEndToEnd = finding.code === "FUNNEL_STAGE_CONVERSION_END_TO_END";
-        return (
-          <div key={finding.id} className="flex flex-col gap-1">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                {isEndToEnd ? "Impression to order" : `Stage pair ${index + 1}`}
-              </span>
-              <span className="text-[11px] font-semibold tabular-nums">
-                {formatCount(ratio.numerator)} of {formatCount(ratio.denominator)}
-              </span>
-            </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex items-end gap-3">
+        {stages.map((stage) => {
+          const heightPercent = Math.max(Math.round((stage.count / impressions) * 100), 4);
+          return (
             <div
-              role="img"
-              aria-label={`${isEndToEnd ? "End to end" : `Stage pair ${index + 1}`}: ${conversion} percent.`}
-              className="h-9 overflow-hidden rounded-lg bg-muted"
-              style={{ width: `${widthPercent}%` }}
+              key={stage.label}
+              className="flex flex-1 flex-col items-center gap-2"
+              title={`${stage.count} ${stage.label}`}
             >
-              <div
-                className={`flex h-full items-center px-3 ${isEndToEnd ? "bg-chart-4" : "bg-chart-2"}`}
-                style={{ width: `${Math.max(conversion, 6)}%` }}
-              >
-                <span className="text-[10px] font-bold tabular-nums text-white">{conversion}%</span>
+              <span className="text-sm font-mono font-bold tabular-nums">
+                {formatCount(stage.count)}
+              </span>
+              {/* Fixed-height track so the bar shrinks in real pixels toward
+                  the order stage instead of collapsing in an auto column. */}
+              <div className="flex h-40 w-full items-end">
+                <div
+                  role="img"
+                  aria-label={`${stage.label}: ${formatCount(stage.count)}.`}
+                  className="w-full rounded-t-md bg-emerald-100"
+                  style={{ height: `${heightPercent}%` }}
+                />
               </div>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-700">
+                {stage.label}
+              </span>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+
+      {overall !== null ? (
+        <div className="flex items-center justify-between rounded-lg bg-emerald-500 px-4 py-2 text-white shadow-card">
+          <span className="text-[10px] font-bold uppercase tracking-wider">Overall conversion</span>
+          <span className="text-xs font-mono font-bold tabular-nums">{overall}%</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -417,29 +447,13 @@ function ChapterVisual({
   run: WorkspaceRunView | null;
 }) {
   if (chapter.id === "funnel") return <FunnelStages findings={chapter.findings} />;
-  if (chapter.id === "operations") {
-    return <OperationsVisual chapter={chapter} allFindings={allFindings} run={run} />;
-  }
+  if (chapter.id === "cancellations")
+    return <CancellationImpact chapter={chapter} allFindings={allFindings} />;
+  if (chapter.id === "availability") return <AvailabilityVisual chapter={chapter} run={run} />;
+  if (chapter.id === "retention") return <RetentionVisual chapter={chapter} run={run} />;
 
   const blocks: React.ReactNode[] = [];
   for (const finding of chapter.findings) {
-    if (finding.code === "CUSTOMER_REPEAT_SHARE") {
-      const ratio = ratioOf(finding);
-      if (ratio)
-        blocks.push(
-          <RepeatMixColumns
-            key={finding.id}
-            numerator={ratio.numerator}
-            denominator={ratio.denominator}
-          />,
-        );
-      continue;
-    }
-    if (finding.detectorKey === "revenue.period_movement") {
-      // The movement is drawn once, in the verdict band, where the window's
-      // headline lives; drawing it again here would duplicate a figure.
-      continue;
-    }
     const ratio = ratioOf(finding);
     if (ratio)
       blocks.push(
@@ -459,60 +473,6 @@ function ChapterVisual({
 // Verdict band
 // ---------------------------------------------------------------------------
 
-/**
- * One briefing figure row: the stored amount, or the em-dash and the reason it
- * cannot be stated. This row is where the platform keeps its promise that an
- * unavailable figure is explained rather than silently blank or zero.
- */
-function BriefingRow({
-  tile,
-  onInspect,
-}: {
-  tile: SummaryTileView;
-  onInspect: (findingId: string) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-foreground">{tile.label}</span>
-        {tile.findingId ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={`Inspect the evidence behind ${tile.label.toLowerCase()}`}
-            className="size-6 text-muted-foreground hover:text-foreground"
-            onClick={() => onInspect(tile.findingId as string)}
-          >
-            <Fingerprint aria-hidden="true" className="size-3.5" />
-          </Button>
-        ) : null}
-      </div>
-      {tile.value?.kind === "money" ? (
-        // Emerald marks a primary earned fact, per the design system; the
-        // figure itself is formatted exactly as `formatMoney` states it.
-        <span className="text-xl font-semibold tabular-nums text-primary">
-          {formatMoney(tile.value.minorUnits, tile.value.currency)}
-        </span>
-      ) : (
-        <span className="flex flex-wrap items-baseline gap-2">
-          <span aria-hidden="true" className="text-xl font-semibold text-muted-foreground">
-            —
-          </span>
-          <span className="max-w-sm text-[11px] leading-snug text-muted-foreground">
-            {tile.unavailableReason}
-          </span>
-        </span>
-      )}
-      {tile.value?.kind === "money" && tile.coverage ? (
-        <span className="w-full text-right text-[11px] tabular-nums text-muted-foreground">
-          over {tile.coverage.observed} of {tile.coverage.expected} periods
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
 function VerdictBand({
   view,
   coverageChip,
@@ -523,7 +483,6 @@ function VerdictBand({
   pending,
   onRunAnalysis,
   selectedWindow,
-  onInspect,
 }: {
   view: ChannelWorkspaceView;
   coverageChip: string | null;
@@ -534,46 +493,46 @@ function VerdictBand({
   pending: boolean;
   onRunAnalysis: () => void;
   selectedWindow: ChannelEvidenceWindow | null;
-  onInspect: (findingId: string) => void;
 }) {
-  const movement = view.chapters
-    .flatMap((chapter) => chapter.findings)
-    .find((finding) => finding.detectorKey === "revenue.period_movement");
-  const movementValue = movement?.value?.kind === "money" ? movement.value : null;
-  // The bars exist only when the detector recorded a base; otherwise the band
-  // says plainly that no comparison is available, rather than drawing one bar
-  // and leaving the reader to guess what it was measured against.
-  const movementBase = movementValue?.base ?? null;
-  const hasComparison = movementBase !== null && movementBase > 0;
-
   return (
     <section
       aria-label="Marketplace audit verdict"
-      // The one background emphasis the design system allows, spent here on
-      // the band the whole page answers to.
-      className="rounded-xl border border-border bg-primary/[0.03] p-6 lg:p-8"
+      // Full-bleed: negative margins escape the shell's horizontal padding so
+      // the tint runs edge to edge, with its own padding re-applied inside.
+      className="-mx-4 border-b border-border bg-emerald-50/40 px-4 py-14 sm:-mx-8 sm:px-8 lg:py-16"
     >
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
         <div className="flex flex-col gap-6 lg:col-span-7">
           <div className="flex items-center gap-2.5">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
               <ShieldCheck aria-hidden="true" className="size-4" />
             </span>
             <Kicker>Marketplace audit verdict</Kicker>
           </div>
 
-          <p className="max-w-2xl text-2xl font-semibold leading-snug tracking-tight lg:text-[28px]">
-            {view.verdict.headlineSentence}
+          <p className="max-w-2xl text-3xl font-bold leading-[1.1] tracking-[-0.03em] lg:text-[42px]">
+            {view.verdict.verdictFigures.earned && view.verdict.verdictFigures.lost ? (
+              <>
+                You earned{" "}
+                <span className="font-mono font-bold text-emerald-600">
+                  {formatWholeMoney(
+                    view.verdict.verdictFigures.earned.minorUnits,
+                    view.verdict.verdictFigures.earned.currency,
+                  )}
+                </span>{" "}
+                and lost{" "}
+                <span className="font-mono font-bold text-destructive">
+                  {formatWholeMoney(
+                    view.verdict.verdictFigures.lost.minorUnits,
+                    view.verdict.verdictFigures.lost.currency,
+                  )}
+                </span>{" "}
+                to cancellations you could have prevented.
+              </>
+            ) : (
+              view.verdict.headlineSentence
+            )}
           </p>
-
-          <div className="flex flex-col gap-4 border-t border-border pt-5">
-            <Kicker>Evidence briefing</Kicker>
-            <div className="flex flex-col gap-3">
-              {view.summaryTiles.map((tile) => (
-                <BriefingRow key={tile.label} tile={tile} onInspect={onInspect} />
-              ))}
-            </div>
-          </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
             {coverageChip ? (
@@ -592,16 +551,7 @@ function VerdictBand({
         </div>
 
         <div className="flex flex-col gap-6 lg:col-span-5">
-          {hasComparison && movementValue ? (
-            <MovementComparisonBars value={movementValue} />
-          ) : (
-            // An honest absence: the same sentence the verdict badges use, so
-            // the empty half of the band explains itself instead of looking
-            // like a chart that failed to load.
-            <p className="flex min-h-24 items-center rounded-lg border border-dashed border-border bg-card/60 px-4 text-xs leading-relaxed text-muted-foreground">
-              {view.verdict.badges[1]}
-            </p>
-          )}
+          <PotentialLostEarnedScale figures={view.verdict.verdictFigures} />
 
           <div className="mt-auto flex flex-col gap-2">
             {evidenceWindows.length > 0 ? (
@@ -809,12 +759,14 @@ function CompactFindingRow({
 
 function chapterDescription(chapter: WorkspaceChapterView): string | null {
   switch (chapter.id) {
-    case "summary":
-      return "The window's headline facts, each cited to stored evidence.";
+    case "cancellations":
+      return "Cancellations and the provider's own rejection loss, as they were written.";
+    case "availability":
+      return "Closed and scheduled time, and the reasons the provider recorded.";
     case "funnel":
-      return "Conversion between the funnel stages the reports recorded.";
-    case "operations":
-      return "Cancellations and closed time, as the provider wrote them.";
+      return "Conversion from impressions to orders, stage by stage.";
+    case "retention":
+      return "New against returning customers, and the pace new orders arrive at.";
     case "trust":
       // Named inline in CardContent with the platform's exact section label,
       // so the card leads with the vocabulary operators know from elsewhere.
@@ -822,6 +774,212 @@ function chapterDescription(chapter: WorkspaceChapterView): string | null {
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Chapter rail
+// ---------------------------------------------------------------------------
+
+/**
+ * The distinct provider reason labels a finding cites. An empty result means no
+ * reason was recorded, and a single value means every cited day shared one
+ * label -- which is the only case where a sentence may say "every cancellation
+ * was X" without inventing a cause.
+ */
+function distinctReasonValues(finding: WorkspaceFindingView | undefined): string[] {
+  if (!finding) return [];
+  const values = new Set<string>();
+  for (const citation of finding.evidence) {
+    const reason = citation.metric?.dimensions.reason_code;
+    if (reason) values.add(reason);
+  }
+  return [...values];
+}
+
+/**
+ * The approved draft's rail figure, plain reason, and cited-record count for a
+ * chapter, assembled from the chapter's own stored findings and nothing else.
+ *
+ * The figure is the headline amount the draft introduces with -- the money lost
+ * for cancellations, the closed-hour share, the end-to-end yield, the return
+ * mix -- read off the detector's stored value, never recomputed. The reason is
+ * one calm sentence; where the draft pairs it with a cause ("every cancellation
+ * was ITEM_UNAVAILABLE"), that cause is shown only when a single stored label
+ * covers the window, so an attribution is cited evidence and not prose.
+ */
+function chapterRailSummary(chapter: WorkspaceChapterView): {
+  figure: string | null;
+  figureClass: string;
+  reason: string | null;
+  inspectCount: number | null;
+} {
+  const loss = chapter.findings.find((finding) => finding.code === "ORDER_CANCELLATION_LOSS");
+  const shareRatio = chapter.findings
+    .filter((finding) => finding.code === "OPERATIONS_CLOSED_SHARE")
+    .map((finding) => ratioOf(finding))
+    .find((ratio) => ratio !== null);
+  const funnelRatio = chapter.findings
+    .filter((finding) => finding.code === "FUNNEL_STAGE_CONVERSION_END_TO_END")
+    .map((finding) => ratioOf(finding))
+    .find((ratio) => ratio !== null);
+  const repeatRatio = chapter.findings
+    .filter((finding) => finding.code === "CUSTOMER_REPEAT_SHARE")
+    .map((finding) => ratioOf(finding))
+    .find((ratio) => ratio !== null);
+
+  if (chapter.id === "cancellations" && loss) {
+    const impact = loss.monetaryImpact;
+    const reasonFinding = chapter.findings.find(
+      (finding) => finding.code === "ORDER_CANCELLATION_REASON",
+    );
+    const reasons = distinctReasonValues(reasonFinding);
+    const figure = impact ? formatMoney(impact.minorUnits, impact.currency) : null;
+    const reason =
+      reasons.length === 1
+        ? `Every single order cancellation recorded in this window was attributed to ${reasons[0]}.`
+        : loss.value?.kind === "count"
+          ? `The provider recorded ${formatCount(loss.value.value)} avoidable cancellations this window.`
+          : null;
+    return {
+      figure,
+      figureClass: figure ? "text-destructive" : "text-foreground",
+      reason,
+      inspectCount: loss.value?.kind === "count" ? loss.value.value : null,
+    };
+  }
+
+  if (chapter.id === "availability" && shareRatio) {
+    const { numerator, denominator } = shareRatio;
+    return {
+      figure: `${formatPercent(numerator, denominator)} Hours`,
+      figureClass: "text-foreground",
+      reason: `${formatPercent(numerator, denominator)} of scheduled operating time was recorded closed this window.`,
+      inspectCount: null,
+    };
+  }
+
+  if (chapter.id === "funnel" && funnelRatio) {
+    const { numerator, denominator } = funnelRatio;
+    return {
+      figure: `${formatPercentPrecise(numerator, denominator)} Yield`,
+      figureClass: "text-foreground",
+      reason: `Of every impression, ${formatPercentPrecise(numerator, denominator)} became a placed order.`,
+      inspectCount: null,
+    };
+  }
+
+  if (chapter.id === "retention" && repeatRatio) {
+    const { numerator, denominator } = repeatRatio;
+    const returning = Math.min(numerator, denominator);
+    const total = denominator;
+    return {
+      figure: `${formatCount(returning)} of ${formatCount(total)} Return`,
+      figureClass: "text-foreground",
+      reason: `${formatCount(total - returning)} of ${formatCount(total)} orders came from new customers; ${formatCount(returning)} returned.`,
+      inspectCount: null,
+    };
+  }
+
+  // A chapter whose headline figure is not among the four above falls back to
+  // the generic rail block: the featured finding's own figure, its own words
+  // (a needs_data sentence, or the outcome headline when one is not recorded),
+  // and its own cited record count.
+  const primary = chapter.findings[0];
+  const figure = primary ? findingValueLabel(primary) : null;
+  return {
+    figure,
+    figureClass: primary ? figureToneClass(primary) : "text-foreground",
+    reason: primary?.detail ?? primary?.headline ?? null,
+    inspectCount: primary?.evidence.length ?? null,
+  };
+}
+
+/**
+ * The approved draft's chapter rail: one big figure, one calm reason, the AI
+ * advice box drawn in the platform's green house style, and one way into the
+ * evidence. The advice is the narrated recommendation for this chapter; the
+ * inspect control opens the cited records behind the headline figure.
+ */
+function ChapterRail({
+  chapter,
+  recommendations,
+  onInspect,
+  organizationId,
+}: {
+  chapter: WorkspaceChapterView;
+  recommendations: readonly WorkspaceRecommendationView[];
+  onInspect: (findingId: string) => void;
+  organizationId: string;
+}) {
+  const summary = chapterRailSummary(chapter);
+  // The green box is the advice slot, so only advice goes in it. Narration
+  // labelled `observation` is a plain reading of the figure and belongs beside
+  // the figure -- putting it in the box gave the operator the number twice and
+  // no action at all.
+  const advice = recommendations.find((item) => item.label === "recommendation") ?? null;
+  const narratedObservation = recommendations.find((item) => item.label === "observation") ?? null;
+  const inspectFinding = chapter.findings[0];
+
+  // An empty chapter still gets its rail: a quiet frame that says no analysis
+  // has run, rather than a blank column that reads as a layout gap.
+  if (chapter.findings.length === 0) {
+    return (
+      <aside
+        aria-label={`${chapter.navLabel} figures`}
+        className="flex flex-col gap-8 lg:col-span-4"
+      >
+        <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-[11px] leading-relaxed text-muted-foreground">
+          {chapter.state === "not_run"
+            ? "Figures appear here once an analysis has run over this channel."
+            : chapter.state === "not_applicable"
+              ? "This chapter's figures need a report broken into periods."
+              : "Figures appear here once the missing evidence is written."}
+        </p>
+      </aside>
+    );
+  }
+
+  return (
+    <aside aria-label={`${chapter.navLabel} figures`} className="flex flex-col gap-8 lg:col-span-4">
+      <div className="flex flex-col gap-3">
+        {summary.figure ? (
+          <p className={`font-mono text-4xl font-bold tracking-tight ${summary.figureClass}`}>
+            {summary.figure}
+          </p>
+        ) : null}
+        {summary.reason ? (
+          <p className="text-[15px] leading-relaxed text-muted-foreground">{summary.reason}</p>
+        ) : null}
+        {/* The narrator's plain reading of the same figure, when it wrote one.
+            It sits under the deterministic sentence rather than replacing it:
+            the detector's own words stay the record, and the narration adds
+            what it saw across the findings together. */}
+        {narratedObservation ? (
+          <p className="text-[15px] leading-relaxed text-muted-foreground">
+            {narratedObservation.headline}
+          </p>
+        ) : null}
+      </div>
+
+      {advice ? (
+        <RecommendationControls organizationId={organizationId} recommendation={advice} />
+      ) : null}
+
+      {inspectFinding ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 w-full justify-center gap-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground"
+          onClick={() => onInspect(inspectFinding.id)}
+        >
+          <Fingerprint aria-hidden="true" className="size-4" />
+          {summary.inspectCount !== null && summary.inspectCount > 0
+            ? `Inspect ${formatCount(summary.inspectCount)} cited records`
+            : "Inspect evidence"}
+        </Button>
+      ) : null}
+    </aside>
+  );
 }
 
 export function ChannelWorkspace({
@@ -882,6 +1040,18 @@ export function ChannelWorkspace({
     () => view.chapters.filter((chapter) => chapter.state === "deferred"),
     [view.chapters],
   );
+
+  // Only the four findings the draft leads with carry an ordinal; the summary,
+  // evidence and deferred chapters read as supporting context. Computed once so
+  // no value is reassigned during render.
+  const findingOrdinals = useMemo(() => {
+    const ordinals = new Map<string, number>();
+    let ordinal = 0;
+    for (const chapter of inlineChapters) {
+      if (FINDING_CHAPTER_IDS.has(chapter.id)) ordinals.set(chapter.id, (ordinal += 1));
+    }
+    return ordinals;
+  }, [inlineChapters]);
 
   // Narration attaches where its first cited finding is displayed; a
   // recommendation citing nothing on this page still reaches the operator
@@ -975,7 +1145,7 @@ export function ChannelWorkspace({
     // Sized to its content, not to the viewport: the shell's `main` scrolls,
     // and capping this child's height would clip the narrative mid-chapter.
     <div className="flex w-full flex-col gap-8">
-      <div className="flex items-start gap-3">
+      {/* <div className="flex items-start gap-3">
         <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <LayoutTemplate aria-hidden="true" className="size-6" />
         </span>
@@ -989,7 +1159,7 @@ export function ChannelWorkspace({
             cannot yet support.
           </p>
         </div>
-      </div>
+      </div> */}
 
       <VerdictBand
         view={view}
@@ -1001,7 +1171,6 @@ export function ChannelWorkspace({
         canRunAnalysis={canRunAnalysis}
         pending={pending}
         onRunAnalysis={runAnalysis}
-        onInspect={inspect}
       />
 
       {message ? (
@@ -1086,20 +1255,23 @@ export function ChannelWorkspace({
       </nav>
 
       <section aria-label="Findings & recommendations" className="flex flex-col gap-10">
-        {inlineChapters.map((chapter, index) => (
-          <ChapterShell
-            key={chapter.id}
-            chapter={chapter}
-            number={index + 1}
-            heldFinding={chapter.id === "trust" ? (heldFinding ?? null) : null}
-            coverageFinding={chapter.id === "trust" ? (coverageFinding ?? null) : null}
-            onInspect={inspect}
-            recommendations={chapterRecommendations(chapter)}
-            organizationId={organizationId}
-            allFindings={allFindings}
-            run={view.run}
-          />
-        ))}
+        {inlineChapters.map((chapter) => {
+          const number = findingOrdinals.get(chapter.id) ?? null;
+          return (
+            <ChapterShell
+              key={chapter.id}
+              chapter={chapter}
+              number={number}
+              heldFinding={chapter.id === "trust" ? (heldFinding ?? null) : null}
+              coverageFinding={chapter.id === "trust" ? (coverageFinding ?? null) : null}
+              onInspect={inspect}
+              recommendations={chapterRecommendations(chapter)}
+              organizationId={organizationId}
+              allFindings={allFindings}
+              run={view.run}
+            />
+          );
+        })}
       </section>
 
       {view.unplacedFindings.length > 0 ? (
@@ -1231,7 +1403,8 @@ function ChapterShell({
   run,
 }: {
   chapter: WorkspaceChapterView;
-  number: number;
+  /** The finding ordinal, or null for a supplementary chapter. */
+  number: number | null;
   heldFinding: WorkspaceFindingView | null;
   coverageFinding: WorkspaceFindingView | null;
   onInspect: (findingId: string) => void;
@@ -1254,7 +1427,9 @@ function ChapterShell({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
               <CardTitle className="text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-                {`${String(number).padStart(2, "0")} · ${chapter.heading}`}
+                {number !== null
+                  ? `${String(number).padStart(2, "0")} · ${chapter.heading}`
+                  : chapter.heading}
               </CardTitle>
               {chapterDescription(chapter) ? (
                 <CardDescription className="text-xs">{chapterDescription(chapter)}</CardDescription>
@@ -1298,40 +1473,12 @@ function ChapterShell({
         </CardContent>
       </Card>
 
-      <aside
-        aria-label={`${chapter.navLabel} figures`}
-        className="flex flex-col gap-4 lg:col-span-4"
-      >
-        {chapter.findings.length > 0 ? (
-          <>
-            <FindingCard finding={chapter.findings[0]} onInspect={onInspect} />
-            {recommendations.length > 0 ? (
-              <div className="flex flex-col gap-3">
-                {recommendations.map((recommendation) => (
-                  <RecommendationControls
-                    key={recommendation.id}
-                    organizationId={organizationId}
-                    recommendation={recommendation}
-                  />
-                ))}
-              </div>
-            ) : null}
-            {chapter.findings.length > 1 ? (
-              <div className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-                {chapter.findings.slice(1).map((finding) => (
-                  <CompactFindingRow key={finding.id} finding={finding} onInspect={onInspect} />
-                ))}
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-[11px] leading-relaxed text-muted-foreground">
-            {chapter.state === "not_run"
-              ? "Figures appear here once an analysis has run over this channel."
-              : "Figures appear here once the missing evidence is written."}
-          </p>
-        )}
-      </aside>
+      <ChapterRail
+        chapter={chapter}
+        recommendations={recommendations}
+        onInspect={onInspect}
+        organizationId={organizationId}
+      />
     </section>
   );
 }

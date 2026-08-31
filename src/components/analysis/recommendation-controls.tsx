@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ThumbsDown, ThumbsUp } from "lucide-react";
+import { ThumbsDown, ThumbsUp, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { StatusBadge } from "@/components/ui/status-badge";
 import type { WorkspaceRecommendationView } from "@/modules/analysis/application/read-model";
 
 /**
@@ -100,14 +99,31 @@ export function RecommendationControls({
   return (
     <section
       aria-label={`Recommendation: ${recommendation.headline}`}
-      className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3"
+      // The approved draft's advice block: a soft emerald card with no heavy
+      // border, leading with the lightning mark and then the narrator's words.
+      className="flex flex-col gap-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-6"
     >
-      <div className="flex items-center gap-1.5">
-        <StatusBadge label={LABELS[recommendation.label]} tone="neutral" />
+      <div className="flex gap-4">
+        <span
+          aria-hidden="true"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white"
+        >
+          <Zap className="size-5" />
+        </span>
+        <div className="flex min-w-0 flex-col gap-1.5">
+          {recommendation.label === "needs_data" ? (
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              {LABELS[recommendation.label]}
+            </p>
+          ) : null}
+          <p className="text-[13px] font-medium leading-relaxed">{recommendation.headline}</p>
+          {recommendation.detail ? (
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              {recommendation.detail}
+            </p>
+          ) : null}
+        </div>
       </div>
-
-      <p className="text-sm font-medium leading-snug">{recommendation.headline}</p>
-      <p className="text-xs leading-relaxed text-muted-foreground">{recommendation.detail}</p>
 
       {recommendation.supportedActions.length > 0 ? (
         <ul className="flex flex-col gap-1 text-xs leading-relaxed">
@@ -150,11 +166,12 @@ export function RecommendationControls({
           ) : null}
         </p>
       ) : (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
+        <div className="flex items-center gap-2 pt-1">
           <Button
             type="button"
             variant="outline"
             size="sm"
+            className="h-8 bg-white px-3 text-[10px] font-bold uppercase tracking-wider"
             disabled={pending}
             onClick={() => decide("acknowledged")}
           >
@@ -164,51 +181,50 @@ export function RecommendationControls({
             type="button"
             variant="outline"
             size="sm"
+            className="h-8 bg-white px-3 text-[10px] font-bold uppercase tracking-wider"
             disabled={pending}
             onClick={() => decide("planned")}
           >
-            Mark planned
+            Planned
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground"
-            disabled={pending}
-            onClick={() => setDismissOpen(true)}
-          >
-            Dismiss
-          </Button>
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Helpful"
+              className="size-8 justify-center rounded-full border border-emerald-200 bg-white p-0 text-emerald-600"
+              aria-pressed={recommendation.myFeedback === true}
+              disabled={pending}
+              onClick={() => answer({ helpful: true }, "feedback")}
+            >
+              <ThumbsUp aria-hidden="true" className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Not helpful"
+              className="size-8 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
+              aria-pressed={recommendation.myFeedback === false}
+              disabled={pending}
+              onClick={() => answer({ helpful: false }, "feedback")}
+            >
+              <ThumbsDown aria-hidden="true" className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              disabled={pending}
+              onClick={() => setDismissOpen(true)}
+            >
+              Dismiss
+            </Button>
+          </div>
         </div>
       )}
-
-      <div className="flex items-center gap-1 border-t border-border pt-2">
-        <span className="sr-only">Was this helpful?</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="gap-1 text-muted-foreground"
-          aria-pressed={recommendation.myFeedback === true}
-          disabled={pending}
-          onClick={() => answer({ helpful: true }, "feedback")}
-        >
-          <ThumbsUp aria-hidden="true" className="size-3.5" />
-          Helpful
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="gap-1 text-muted-foreground"
-          aria-pressed={recommendation.myFeedback === false}
-          disabled={pending}
-          onClick={() => answer({ helpful: false }, "feedback")}
-        >
-          <ThumbsDown aria-hidden="true" className="size-3.5" />
-          Not helpful
-        </Button>
-      </div>
 
       <Dialog open={dismissOpen} onOpenChange={setDismissOpen}>
         <DialogContent>

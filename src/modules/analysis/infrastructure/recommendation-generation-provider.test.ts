@@ -52,9 +52,9 @@ describe("extractJsonText", () => {
   });
 
   it("rejects chatty preamble with a domain error instead of guessing", () => {
-    expect(() =>
-      extractJsonText('Here is your answer!\n```json\n{"a":1}\n```'),
-    ).toThrowError(/not usable JSON/);
+    expect(() => extractJsonText('Here is your answer!\n```json\n{"a":1}\n```')).toThrowError(
+      /not usable JSON/,
+    );
   });
 
   it("keeps provider text out of the rejection message", () => {
@@ -105,11 +105,23 @@ describe("recommendation generation provider", () => {
     await expect(provider.generate("s", "u")).resolves.toEqual({ ok: true });
   });
 
-  it("turns a non-JSON answer into a domain error, not a parse crash", async () => {
+  it("returns a non-JSON answer as raw text so the caller can retry the format", async () => {
+    // A reply that is not JSON is a format miss by the model, not an outage at
+    // the provider. Throwing here made the two indistinguishable upstream and
+    // skipped the narration workflow's one designed retry.
     generateText.mockResolvedValue({ text: "I could not do that." });
     const provider = createRecommendationGenerationProvider({ modelId: "gemini-2.0-flash" });
 
-    await expect(provider.generate("s", "u")).rejects.toThrow(/not usable JSON/);
+    await expect(provider.generate("s", "u")).resolves.toBe("I could not do that.");
+  });
+
+  it("still keeps provider text out of a genuine transport failure", async () => {
+    generateText.mockRejectedValue(new Error("503: model is experiencing high demand"));
+    const provider = createRecommendationGenerationProvider({ modelId: "gemini-2.0-flash" });
+
+    await expect(provider.generate("s", "u")).rejects.toThrow(
+      "The generation provider could not complete this request.",
+    );
   });
 
   it("never lets a provider failure message reach the caller", async () => {
@@ -127,12 +139,12 @@ describe("recommendation generation provider", () => {
     vi.doMock("@/lib/env", () => ({ env: { GOOGLE_GENERATIVE_AI_API_KEY: undefined } }));
     vi.doMock("@ai-sdk/google", () => ({ createGoogleGenerativeAI: () => languageModel }));
 
-    return import(
-      "@/modules/analysis/infrastructure/recommendation-generation-provider"
-    ).then(({ createRecommendationGenerationProvider: create }) => {
-      expect(() => create({ modelId: "gemini-2.0-flash" })).toThrow(
-        /No Google Generative AI credential/,
-      );
-    });
+    return import("@/modules/analysis/infrastructure/recommendation-generation-provider").then(
+      ({ createRecommendationGenerationProvider: create }) => {
+        expect(() => create({ modelId: "gemini-2.0-flash" })).toThrow(
+          /No Google Generative AI credential/,
+        );
+      },
+    );
   });
 });

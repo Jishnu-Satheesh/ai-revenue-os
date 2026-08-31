@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelsRollup } from "@/components/channels/channels-rollup";
@@ -11,6 +12,20 @@ import type { ChannelsOverviewView } from "@/modules/analysis/application/channe
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("recharts", () => ({
+  Bar: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  BarChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  CartesianGrid: () => null,
+  Cell: () => null,
+  Legend: () => null,
+  Pie: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  PieChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ResponsiveContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  Tooltip: () => null,
+  XAxis: () => null,
+  YAxis: () => null,
 }));
 
 const WINDOW = {
@@ -37,7 +52,39 @@ function view(overrides: Partial<ChannelsOverviewView> = {}): ChannelsOverviewVi
       unassessedNames: ["noon", "deliveroo"],
     },
     refusalReason: null,
-    rows: [],
+    rows: [
+      {
+        channelId: "talabat",
+        displayName: "Talabat",
+        status: "active",
+        assessed: true,
+        band: {
+          state: "complete",
+          potential: { minorUnits: 55300, currency: "AED" },
+          lost: { minorUnits: 35700, currency: "AED" },
+          earned: { minorUnits: 19600, currency: "AED" },
+        },
+      },
+      {
+        channelId: "keeta",
+        displayName: "Keeta",
+        status: "active",
+        assessed: false,
+        band: {
+          state: "revenue_only",
+          potential: { minorUnits: 41000, currency: "AED" },
+          lost: null,
+          earned: null,
+        },
+      },
+      {
+        channelId: "noon",
+        displayName: "Noon",
+        status: "active",
+        assessed: false,
+        band: { state: "refused", potential: null, lost: null, earned: null },
+      },
+    ],
     ...overrides,
   };
 }
@@ -45,11 +92,23 @@ function view(overrides: Partial<ChannelsOverviewView> = {}): ChannelsOverviewVi
 afterEach(cleanup);
 
 describe("ChannelsRollup", () => {
+  it("presents the selected window as one report canvas", () => {
+    render(<ChannelsRollup view={view()} organizationId="org-1" />);
+
+    expect(screen.getByRole("heading", { name: "Channel performance" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Revenue outcome" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Reported revenue mix" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Channel performance chart" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Where revenue was lost" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Evidence coverage" })).toBeInTheDocument();
+    expect(screen.queryByText("Capture gap by channel")).not.toBeInTheDocument();
+  });
+
   it("states the earned figure and the window it answers for", () => {
     render(<ChannelsRollup view={view()} organizationId="org-1" />);
 
     expect(screen.getByText("AED 196.00")).toBeTruthy();
-    expect(screen.getByText(/2026-01-01 to 2026-02-28/)).toBeTruthy();
+    expect(screen.getAllByText(/2026-01-01 to 2026-02-28/).length).toBeGreaterThan(0);
   });
 
   it("names how many channels it covered and which it did not", () => {

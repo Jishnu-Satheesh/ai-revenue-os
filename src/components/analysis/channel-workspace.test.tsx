@@ -188,6 +188,69 @@ describe("ChannelWorkspace", () => {
     expect(within(shelf).getByText(/Nothing here anchors to a chapter/)).toBeTruthy();
   });
 
+  it("gives the advice box the recommendation and puts the observation beside the figure", () => {
+    // What the operator saw before: the green advice box repeating the number
+    // it sits next to. Advice belongs in the box; the plain reading of the
+    // figure belongs with the figure.
+    const cancellation = finding({
+      id: "finding-cancel",
+      detectorKey: "orders.cancellation_loss",
+      code: "ORDER_CANCELLATION_LOSS",
+      kind: "observation",
+      metricKey: "order.avoidable_cancellation_count",
+    });
+    const base = {
+      analysisRunId: "run-1",
+      channelId: CHANNEL.id,
+      branchId: "branch-1",
+      supportedActions: [],
+      limitations: [],
+      citationFindingIds: ["finding-cancel"],
+      decisions: [],
+      myFeedback: null,
+      createdAt: "2026-02-01T00:05:00Z",
+    } as const;
+
+    renderWorkspace({
+      runs: [
+        run({ detectorVersions: [{ key: "orders.cancellation_loss", calculationVersion: 1 }] }),
+      ],
+      findings: [cancellation],
+      recommendations: [
+        {
+          ...base,
+          id: "rec-observation",
+          label: "observation",
+          headline: "Order cancellations caused avoidable revenue loss.",
+          detail: "The provider recorded financial losses from rejected and cancelled orders.",
+          resultDigest: "a".repeat(64),
+        },
+        {
+          ...base,
+          id: "rec-action",
+          label: "recommendation",
+          headline:
+            "Mark items out of stock before service rather than rejecting orders after they arrive.",
+          detail:
+            "Cancellations land after the order is accepted, so the lever is stock accuracy at open.",
+          resultDigest: "b".repeat(64),
+        },
+      ],
+    });
+
+    const rail = screen.getByRole("complementary", { name: "Cancellations figures" });
+
+    // The green advice card is the only place the action belongs, and the only
+    // place the restatement must not appear.
+    const adviceBoxes = within(rail).getAllByRole("region", { name: /^Recommendation: / });
+    expect(adviceBoxes).toHaveLength(1);
+    expect(adviceBoxes[0].getAttribute("aria-label")).toContain("Mark items out of stock");
+    expect(within(adviceBoxes[0]).queryByText(/caused avoidable revenue loss/)).toBeNull();
+
+    // The plain reading still reaches the operator -- beside the figure.
+    expect(within(rail).getByText(/caused avoidable revenue loss/)).toBeTruthy();
+  });
+
   it("keeps an accessible chapter map whose links resolve to rendered sections", () => {
     renderWorkspace({});
 
@@ -198,7 +261,14 @@ describe("ChannelWorkspace", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Summary", "Funnel", "Operations", "Reports & Trust", "Awaiting other reports"]);
+    ).toEqual([
+      "Cancellations",
+      "Availability",
+      "Funnel",
+      "Retention",
+      "Reports & Trust",
+      "Awaiting other reports",
+    ]);
   });
 
   it("renders the verdict band as an honest absence when nothing has completed", () => {
@@ -210,26 +280,119 @@ describe("ChannelWorkspace", () => {
     ).toBeTruthy();
     // No comparison bars without a recorded base; the absence explains itself.
     expect(screen.queryByText("Prior period")).toBeNull();
-    expect(screen.getByText("No period-over-period comparison is available yet.")).toBeTruthy();
+    expect(
+      screen.getByText("The earned / lost / potential split cannot be stated for this window yet."),
+    ).toBeTruthy();
     // The deterministic claim requires a run that produced findings.
     expect(screen.queryByText("Deterministic findings only")).toBeNull();
     expect(screen.getByText("Nothing analysed")).toBeTruthy();
-    // An unstateable gross figure is a dash beside its reason, never zero.
-    expect(screen.getByText(/No analysis has run for this channel yet\./)).toBeTruthy();
   });
 
-  it("draws the four chapter states distinctly in one pass", () => {
+  it("renders the approved revenue split from channel-scoped deterministic findings", () => {
     renderWorkspace({
       findings: [
         finding({
-          id: "movement-up",
-          detectorKey: "revenue.period_movement",
-          code: "REVENUE_PERIOD_MOVEMENT_UP",
+          id: "window-gross",
+          detectorKey: "revenue.window_gross",
+          code: "WINDOW_GROSS_REVENUE",
           valueKind: "money",
-          valueNumerator: 2_300,
-          valueDenominator: 1_900,
+          valueNumerator: 91_000,
+          valueDenominator: null,
+          currency: "AED",
+          expectedPeriodCount: 5,
+          observedPeriodCount: 2,
+          absentPeriodCount: 3,
+        }),
+        finding({
+          id: "cancellation-loss",
+          detectorKey: "orders.cancellation_loss",
+          code: "ORDER_CANCELLATION_LOSS",
+          valueKind: "count",
+          valueNumerator: 7,
+          valueDenominator: null,
+          currency: "AED",
+          monetaryImpactMinorUnits: 35_700,
+        }),
+      ],
+    });
+
+    expect(screen.getByText(/You earned/).textContent?.replace(/\u00a0/g, " ")).toBe(
+      "You earned AED 553 and lost AED 357 to cancellations you could have prevented.",
+    );
+    expect(
+      screen.getByRole("img", {
+        name: (name) =>
+          name.replace(/\u00a0/g, " ") ===
+          "Potential AED 910.00; lost AED 357.00; earned AED 553.00.",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("withholds a scale that would compare money in different currencies", () => {
+    renderWorkspace({
+      findings: [
+        finding({
+          id: "window-gross",
+          detectorKey: "revenue.window_gross",
+          code: "WINDOW_GROSS_REVENUE",
+          valueKind: "money",
+          valueNumerator: 91_000,
+          valueDenominator: null,
           currency: "AED",
         }),
+        finding({
+          id: "cancellation-loss",
+          detectorKey: "orders.cancellation_loss",
+          code: "ORDER_CANCELLATION_LOSS",
+          valueKind: "count",
+          valueNumerator: 7,
+          valueDenominator: null,
+          currency: "USD",
+          monetaryImpactMinorUnits: 35_700,
+        }),
+      ],
+    });
+
+    expect(
+      screen.getByText("The earned / lost / potential split cannot be stated for this window yet."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/You earned/)).toBeNull();
+  });
+
+  it("draws a zero-valued split column at zero height", () => {
+    renderWorkspace({
+      findings: [
+        finding({
+          id: "window-gross",
+          detectorKey: "revenue.window_gross",
+          code: "WINDOW_GROSS_REVENUE",
+          valueKind: "money",
+          valueNumerator: 91_000,
+          valueDenominator: null,
+          currency: "AED",
+        }),
+        finding({
+          id: "cancellation-loss",
+          detectorKey: "orders.cancellation_loss",
+          code: "ORDER_CANCELLATION_LOSS",
+          valueKind: "count",
+          valueNumerator: 0,
+          valueDenominator: null,
+          currency: "AED",
+          monetaryImpactMinorUnits: 0,
+        }),
+      ],
+    });
+
+    const lostColumn = screen.getByText("Lost").parentElement;
+    const bar = lostColumn?.querySelector(".h-40 > div");
+    expect(bar).not.toBeNull();
+    expect((bar as HTMLElement).style.height).toBe("0%");
+  });
+
+  it("draws the finding chapters distinctly in one pass", () => {
+    renderWorkspace({
+      findings: [
         finding({
           id: "funnel-stuck",
           detectorKey: "funnel.stage_conversion",
@@ -243,18 +406,6 @@ describe("ChannelWorkspace", () => {
       ],
     });
 
-    // Summary: reported, with figures and comparison bars drawn from stores.
-    const summary = screen.getByRole("region", { name: "Summary chapter" });
-    expect(within(summary).getAllByText(/AED 23\.00/).length).toBeGreaterThan(0);
-    const band = screen.getByRole("region", { name: "Marketplace audit verdict" });
-    // `\s` stands in for the non-breaking space `Intl` puts after the currency
-    // code, which accessible-name matching surfaces raw.
-    expect(
-      within(band).getByRole("img", {
-        name: /Prior period AED\s19\.00; movement \+AED\s23\.00/,
-      }),
-    ).toBeTruthy();
-
     // Funnel: needs_data, saying what was missing rather than showing a frame.
     const funnel = screen.getByRole("region", { name: "Funnel chapter" });
     expect(within(funnel).getAllByText("Needs data").length).toBeGreaterThan(0);
@@ -262,19 +413,36 @@ describe("ChannelWorkspace", () => {
       within(funnel).getAllByText(/missing step that read as a complete funnel/i).length,
     ).toBeGreaterThan(0);
 
-    // Operations: detectors exist, no findings came back -> not analysed.
-    const operations = screen.getByRole("region", { name: "Operations chapter" });
-    expect(within(operations).getByText("Not analysed")).toBeTruthy();
+    // The other finding chapters: a run completed and their detectors returned
+    // nothing, which means those detectors were never bound to it. A bound
+    // detector always answers, so this is "does not apply", not "not analysed" --
+    // telling an operator no analysis has completed when one just did is a false
+    // statement about their own data. The draft keeps them as separate sections.
+    for (const label of ["Cancellations", "Availability", "Retention"]) {
+      const chapter = screen.getByRole("region", { name: `${label} chapter` });
+      expect(within(chapter).getByText("Does not apply")).toBeTruthy();
+      expect(within(chapter).queryByText("Not analysed")).toBeNull();
+    }
 
-    // Trust has no reconciliation outcome in this fixture, so it reads as
-    // structurally empty -- while the coverage outcome it also detects is
-    // placed in Summary, where the read model files it.
+    // Trust has no coverage or reconciliation outcome in this fixture either,
+    // so it reads the same way.
     const trust = screen.getByRole("region", { name: "Reports & Trust chapter" });
-    expect(within(trust).getByText("Not analysed")).toBeTruthy();
+    expect(within(trust).getByText("Does not apply")).toBeTruthy();
+  });
+
+  it("says no analysis has completed only when none actually has", () => {
+    // The counterpart to the chapter states above: with no run at all, the
+    // chapters go back to naming the real absence rather than a mismatch of
+    // detector to evidence shape.
+    renderWorkspace({ runs: [], findings: [] });
+
+    const cancellations = screen.getByRole("region", { name: "Cancellations chapter" });
+    expect(within(cancellations).getByText("Not analysed")).toBeTruthy();
     expect(
-      within(trust).getByText(/Figures appear here once an analysis has run over this channel\./),
+      within(cancellations).getByText(
+        /No analysis has completed for this channel, so this chapter has nothing to report\./,
+      ),
     ).toBeTruthy();
-    expect(within(summary).getAllByText(/14 of 31 periods/).length).toBeGreaterThan(0);
   });
 
   it("lists every deferred chapter's own reason on the awaiting shelf, verbatim", () => {
@@ -319,28 +487,6 @@ describe("ChannelWorkspace", () => {
     expect(bodyText).not.toContain("Action Queue");
   });
 
-  it("renders money through formatMoney, with its base stated beside it", () => {
-    renderWorkspace({
-      findings: [
-        finding({
-          detectorKey: "revenue.period_movement",
-          code: "REVENUE_PERIOD_MOVEMENT_DOWN",
-          valueKind: "money",
-          valueNumerator: -30_000,
-          valueDenominator: 120_000,
-          currency: "AED",
-          expectedPeriodCount: 2,
-          observedPeriodCount: 2,
-          absentPeriodCount: 0,
-        }),
-      ],
-    });
-
-    // Signed money uses the same formatter; the minus is a real minus sign.
-    expect(screen.getAllByText(/−AED 300\.00/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/against AED 1,200\.00/)).toBeTruthy();
-  });
-
   it("orders a chapter's rail by the ranking the read model declares", () => {
     renderWorkspace({
       findings: [
@@ -371,10 +517,12 @@ describe("ChannelWorkspace", () => {
       ],
     });
 
-    const cancellation = screen.getByText(
-      "Avoidable cancellations, with the provider's own rejection loss",
-    );
-    const closedShare = screen.getByText("Share of scheduled minutes this channel reported closed");
+    const cancellation = within(
+      screen.getByRole("complementary", { name: "Cancellations figures" }),
+    ).getByText("AED 3,500.00");
+    const closedShare = within(
+      screen.getByRole("complementary", { name: "Availability figures" }),
+    ).getByText("81.9% Hours");
     expect(
       cancellation.compareDocumentPosition(closedShare) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -498,23 +646,14 @@ describe("ChannelWorkspace", () => {
     ).toBeTruthy();
   });
 
-  it("renders an em-dash and a reason for every figure it cannot state", () => {
-    renderWorkspace({});
-
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
-    // Both money figures are blocked by the same missing inputs, so the same
-    // recorded reason stands beside each dash.
-    expect(screen.getAllByText(/Contribution margin needs every variable cost/i)).toHaveLength(2);
-  });
-
   it("shows a needs_data outcome as a sentence with no figure", () => {
     renderWorkspace({
       findings: [
         finding({
-          detectorKey: "revenue.period_movement",
+          detectorKey: "funnel.stage_conversion",
           kind: "needs_data",
-          code: "REVENUE_PERIOD_MOVEMENT_UNAVAILABLE",
-          needsDataReason: "PRIOR_PERIOD_ABSENT",
+          code: "FUNNEL_STAGE_CONVERSION_UNAVAILABLE",
+          needsDataReason: "STAGE_SERIES_ABSENT",
           valueKind: null,
           valueNumerator: null,
           valueDenominator: null,
@@ -522,13 +661,7 @@ describe("ChannelWorkspace", () => {
       ],
     });
 
-    expect(
-      screen.getAllByText("No period-over-period comparison is available").length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText(/Reaching further back would compare across days nobody measured/i)
-        .length,
-    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(/carries no figures in this window/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Needs data").length).toBeGreaterThan(0);
   });
 

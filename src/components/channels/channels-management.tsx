@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import {
   ArchiveIcon,
   CirclePlusIcon,
@@ -15,15 +15,7 @@ import { useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -51,6 +43,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { formatMoney } from "@/components/analysis/format";
+import type { ChannelsOverviewRow } from "@/modules/analysis/application/channels-overview";
 import type {
   ChannelSourceAliasRow,
   OrganizationBranchRow,
@@ -81,6 +76,120 @@ const aliasSourceScopes = [
 
 function labelForCategory(category: Category) {
   return categories.find(([value]) => value === category)?.[1] ?? "Other";
+}
+
+type DirectoryFilter = "all" | "measured" | "attention" | "archived";
+
+function isMeasured(row: ChannelsOverviewRow | undefined) {
+  return row?.band.state === "complete";
+}
+
+function matchesDirectoryFilter({
+  filter,
+  channel,
+  analysis,
+  workspaceEnabled,
+}: {
+  filter: DirectoryFilter;
+  channel: OrganizationChannelRow;
+  analysis: ChannelsOverviewRow | undefined;
+  workspaceEnabled: boolean;
+}) {
+  if (filter === "all") return true;
+  if (filter === "archived") return channel.status === "archived";
+  if (filter === "measured") return channel.status === "active" && isMeasured(analysis);
+  return channel.status === "active" && workspaceEnabled && !isMeasured(analysis);
+}
+
+function countMappingsByChannel(mappings: readonly OrganizationChannelBranchRow[]) {
+  const counts = new Map<string, { total: number; historical: number }>();
+
+  for (const mapping of mappings) {
+    const current = counts.get(mapping.channel_id) ?? { total: 0, historical: 0 };
+    counts.set(mapping.channel_id, {
+      total: current.total + 1,
+      historical: current.historical + (mapping.status === "inactive" ? 1 : 0),
+    });
+  }
+
+  return counts;
+}
+
+function countAliasesByChannel(aliases: readonly ChannelSourceAliasRow[]) {
+  const counts = new Map<string, number>();
+
+  for (const alias of aliases) {
+    counts.set(alias.channel_id, (counts.get(alias.channel_id) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function ChannelAnalysisSummary({
+  analysis,
+  workspaceEnabled,
+}: {
+  analysis: ChannelsOverviewRow | undefined;
+  workspaceEnabled: boolean;
+}) {
+  if (!workspaceEnabled) {
+    return (
+      <div className="grid gap-1">
+        <Badge className="w-fit" variant="outline">
+          Analysis not enabled
+        </Badge>
+        <p className="text-sm text-muted-foreground">
+          Connect governed reporting to measure this channel.
+        </p>
+      </div>
+    );
+  }
+
+  if (analysis?.band.state === "complete" && analysis.band.earned && analysis.band.potential) {
+    return (
+      <div className="grid gap-1">
+        <Badge className="w-fit" variant="default">
+          Measured
+        </Badge>
+        <p className="text-lg font-semibold tracking-tight text-primary">
+          {formatMoney(analysis.band.earned.minorUnits, analysis.band.earned.currency)} earned
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {formatMoney(analysis.band.potential.minorUnits, analysis.band.potential.currency)}{" "}
+          potential
+          {analysis.band.lost
+            ? ` · ${formatMoney(analysis.band.lost.minorUnits, analysis.band.lost.currency)} loss`
+            : null}
+        </p>
+      </div>
+    );
+  }
+
+  if (analysis?.band.state === "revenue_only" && analysis.band.potential) {
+    return (
+      <div className="grid gap-1">
+        <Badge className="w-fit" variant="secondary">
+          Revenue reported
+        </Badge>
+        <p className="text-lg font-semibold tracking-tight">
+          {formatMoney(analysis.band.potential.minorUnits, analysis.band.potential.currency)}{" "}
+          revenue
+        </p>
+        <p className="text-sm text-muted-foreground">Loss not recorded for this window.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-1">
+      <Badge className="w-fit" variant="outline">
+        Needs analysis
+      </Badge>
+      <p className="text-sm text-muted-foreground">
+        No completed analysis for the selected reporting window.
+      </p>
+    </div>
+  );
 }
 
 function ChannelForm({
@@ -672,16 +781,15 @@ export function ChannelsManagement({
   branchMappings,
   aliases,
   canManage,
+  workspaceEnabled,
+  analysisRows,
+  portfolio,
 }: {
   organizationId: string;
   organizationName: string;
   channels: readonly OrganizationChannelRow[];
-  // `branches`, `canMapBranches` and `workspaceEnabled` stay part of the
-  // contract: Task 6's page passes a fixed prop set. The mapping setup that
-  // used to read the first two now lives on the channel's own page
-  // (`ChannelSetupPanel`), and every channel's card now links to that page
-  // unconditionally, so `workspaceEnabled` no longer decides whether the
-  // link renders -- the page itself decides what to draw once you're there.
+  // Mapping setup now lives on the channel's own page (`ChannelSetupPanel`),
+  // so the page-level register only reports its existing mapping state.
   branches?: readonly OrganizationBranchRow[];
   branchMappings?: readonly OrganizationChannelBranchRow[];
   aliases?: readonly ChannelSourceAliasRow[];
@@ -689,12 +797,27 @@ export function ChannelsManagement({
   canMapBranches?: boolean;
   /** Whether governed channel analysis is on for this organization. */
   workspaceEnabled?: boolean;
+  /** A row for each channel in the selected governed reporting window. */
+  analysisRows?: readonly ChannelsOverviewRow[];
+  /** Server-rendered portfolio outcome and comparison visualisation. */
+  portfolio?: ReactNode;
 }) {
   const router = useRouter();
-  const activeChannels = channels.filter((channel) => channel.status === "active");
-  const archivedChannels = channels.length - activeChannels.length;
+  const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>("all");
   const availableMappings = branchMappings ?? [];
   const availableAliases = aliases ?? [];
+  const analysisEnabled = workspaceEnabled ?? false;
+  const analysisByChannel = new Map((analysisRows ?? []).map((row) => [row.channelId, row]));
+  const mappingCounts = countMappingsByChannel(availableMappings);
+  const aliasCounts = countAliasesByChannel(availableAliases);
+  const visibleChannels = channels.filter((channel) =>
+    matchesDirectoryFilter({
+      filter: directoryFilter,
+      channel,
+      analysis: analysisByChannel.get(channel.id),
+      workspaceEnabled: analysisEnabled,
+    }),
+  );
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-6">
@@ -717,6 +840,8 @@ export function ChannelsManagement({
         ) : null}
       </div>
 
+      {portfolio ? <div className="flex flex-col gap-6">{portfolio}</div> : null}
+
       <Alert>
         <ShieldCheckIcon />
         <AlertTitle>Channel identity is separate from provider access</AlertTitle>
@@ -726,132 +851,143 @@ export function ChannelsManagement({
         </AlertDescription>
       </Alert>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription>Active channels</CardDescription>
-            <CardTitle className="text-2xl">{activeChannels.length}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Ready to be mapped to branches and source aliases.
-          </CardContent>
-        </Card>
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription>Archived history</CardDescription>
-            <CardTitle className="text-2xl">{archivedChannels}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Historical channel evidence is retained, never deleted.
-          </CardContent>
-        </Card>
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription>Report trust</CardDescription>
-            <CardTitle className="text-2xl">Not assessed</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Trust status appears after the first governed report package.
-          </CardContent>
-        </Card>
-      </div>
+      <section className="grid gap-5" aria-labelledby="channel-directory-heading">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+          <div className="grid gap-1">
+            <p className="text-sm font-medium text-primary">03 · Channel directory</p>
+            <h2 id="channel-directory-heading" className="text-2xl font-semibold tracking-tight">
+              Channel directory
+            </h2>
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Inspect each business identity with its exact reporting state, mapping coverage, and
+              evidence link.
+            </p>
+          </div>
+          <ToggleGroup
+            type="single"
+            value={directoryFilter}
+            onValueChange={(value) => {
+              if (value) setDirectoryFilter(value as DirectoryFilter);
+            }}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            aria-label="Filter channel directory"
+          >
+            <ToggleGroupItem value="all">All</ToggleGroupItem>
+            <ToggleGroupItem value="measured">Measured</ToggleGroupItem>
+            <ToggleGroupItem value="attention">Needs attention</ToggleGroupItem>
+            <ToggleGroupItem value="archived">Archived</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
 
-      {channels.length === 0 ? (
-        <Empty className="min-h-72">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <WaypointsIcon />
-            </EmptyMedia>
-            <EmptyTitle>No channels yet</EmptyTitle>
-            <EmptyDescription>
-              Start with the business surfaces that matter to this organization, then map their
-              report labels and branches.
-            </EmptyDescription>
-          </EmptyHeader>
-          {canManage ? (
-            <EmptyContent>
-              <ChannelDialog organizationId={organizationId} onComplete={() => router.refresh()} />
-            </EmptyContent>
-          ) : null}
-        </Empty>
-      ) : (
-        <section
-          aria-label="Organization channels"
-          className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
-        >
-          {channels.map((channel) => (
-            <Card
-              key={channel.id}
-              className={channel.status === "archived" ? "opacity-70" : undefined}
-            >
-              <CardHeader>
-                <CardTitle>{channel.display_name}</CardTitle>
-                <CardDescription>{channel.key}</CardDescription>
-                <CardAction>
-                  {canManage ? (
-                    <ChannelDialog
-                      organizationId={organizationId}
-                      channel={channel}
-                      onComplete={() => router.refresh()}
-                    />
-                  ) : null}
-                </CardAction>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                <Badge variant="secondary">{labelForCategory(channel.category)}</Badge>
-                <Badge variant={channel.status === "active" ? "outline" : "secondary"}>
-                  {channel.status}
-                </Badge>
-                {channel.template_key ? (
-                  <Badge variant="outline">Hint: {channel.template_key}</Badge>
-                ) : null}
-                <Badge variant="outline">
-                  {availableMappings.filter((mapping) => mapping.channel_id === channel.id).length}{" "}
-                  outlet
-                  {availableMappings.filter((mapping) => mapping.channel_id === channel.id)
-                    .length === 1
-                    ? ""
-                    : "s"}
-                </Badge>
-                {availableMappings.some(
-                  (mapping) => mapping.channel_id === channel.id && mapping.status === "inactive",
-                ) ? (
-                  <Badge variant="secondary">
-                    {
-                      availableMappings.filter(
-                        (mapping) =>
-                          mapping.channel_id === channel.id && mapping.status === "inactive",
-                      ).length
-                    }{" "}
-                    historical
-                  </Badge>
-                ) : null}
-                <Badge variant="outline">
-                  {availableAliases.filter((alias) => alias.channel_id === channel.id).length} label
-                  {availableAliases.filter((alias) => alias.channel_id === channel.id).length === 1
-                    ? ""
-                    : "s"}
-                </Badge>
-              </CardContent>
-              <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
-                <span>Evidence and financial reports are governed separately.</span>
-                <div className="flex items-center gap-2">
-                  {/* Every channel has its own page now -- Analysis when
-                      available, Setup always -- so the card links there
-                      unconditionally. The page itself decides which tabs to
-                      draw; the card does not need to guess in advance. */}
-                  <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
-                    <Link href={`/organizations/${organizationId}/channels/${channel.id}`}>
-                      Open channel
-                    </Link>
-                  </Button>
-                  {channel.status === "archived" ? <ArchiveIcon aria-label="Archived" /> : null}
-                </div>
-              </CardFooter>
-            </Card>
-          ))}
-        </section>
-      )}
+        {channels.length === 0 ? (
+          <Empty className="min-h-72 border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <WaypointsIcon />
+              </EmptyMedia>
+              <EmptyTitle>No channels yet</EmptyTitle>
+              <EmptyDescription>
+                Start with the business surfaces that matter to this organization, then map their
+                report labels and branches.
+              </EmptyDescription>
+            </EmptyHeader>
+            {canManage ? (
+              <EmptyContent>
+                <ChannelDialog
+                  organizationId={organizationId}
+                  onComplete={() => router.refresh()}
+                />
+              </EmptyContent>
+            ) : null}
+          </Empty>
+        ) : visibleChannels.length === 0 ? (
+          <Empty className="min-h-52 border">
+            <EmptyHeader>
+              <EmptyTitle>No channels match this view</EmptyTitle>
+              <EmptyDescription>
+                Choose another filter to see the rest of the portfolio.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <Card className="overflow-hidden" size="sm">
+            <CardContent className="p-0">
+              <div aria-label="Organization channels" className="divide-y">
+                {visibleChannels.map((channel) => {
+                  const channelMappings = mappingCounts.get(channel.id) ?? {
+                    total: 0,
+                    historical: 0,
+                  };
+                  const channelAliasCount = aliasCounts.get(channel.id) ?? 0;
+
+                  return (
+                    <article
+                      key={channel.id}
+                      className={
+                        channel.status === "archived"
+                          ? "grid gap-5 px-4 py-5 opacity-70 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.8fr)_auto] lg:items-center"
+                          : "grid gap-5 px-4 py-5 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.8fr)_auto] lg:items-center"
+                      }
+                    >
+                      <div className="grid gap-3">
+                        <div className="grid gap-1">
+                          <h3 className="font-semibold tracking-tight">{channel.display_name}</h3>
+                          <p className="text-sm text-muted-foreground">{channel.key}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="secondary">{labelForCategory(channel.category)}</Badge>
+                          <Badge variant={channel.status === "active" ? "outline" : "secondary"}>
+                            {channel.status}
+                          </Badge>
+                          {channel.template_key ? (
+                            <Badge variant="outline">Hint: {channel.template_key}</Badge>
+                          ) : null}
+                          <Badge variant="outline">
+                            {channelMappings.total} outlet{channelMappings.total === 1 ? "" : "s"}
+                          </Badge>
+                          {channelMappings.historical > 0 ? (
+                            <Badge variant="secondary">
+                              {channelMappings.historical} historical
+                            </Badge>
+                          ) : null}
+                          <Badge variant="outline">
+                            {channelAliasCount} label{channelAliasCount === 1 ? "" : "s"}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <ChannelAnalysisSummary
+                        analysis={analysisByChannel.get(channel.id)}
+                        workspaceEnabled={analysisEnabled}
+                      />
+
+                      <div className="flex items-center gap-2 lg:justify-end">
+                        {canManage ? (
+                          <ChannelDialog
+                            organizationId={organizationId}
+                            channel={channel}
+                            onComplete={() => router.refresh()}
+                          />
+                        ) : null}
+                        <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+                          <Link href={`/organizations/${organizationId}/channels/${channel.id}`}>
+                            Open channel
+                          </Link>
+                        </Button>
+                        {channel.status === "archived" ? (
+                          <ArchiveIcon aria-label="Archived" />
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </section>
     </div>
   );
 }

@@ -92,7 +92,6 @@ export default async function ChannelsPage({
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
-      {overview ? <ChannelsRollup view={overview} organizationId={context.organizationId} /> : null}
       <ChannelsManagement
         organizationId={context.organizationId}
         organizationName={organization.name}
@@ -103,6 +102,12 @@ export default async function ChannelsPage({
         canManage={hasOrganizationPermission(context.membership.role, "channel.manage")}
         canMapBranches={hasOrganizationPermission(context.membership.role, "channel.map_branch")}
         workspaceEnabled={workspaceEnabled}
+        analysisRows={overview?.rows}
+        portfolio={
+          overview ? (
+            <ChannelsRollup view={overview} organizationId={context.organizationId} />
+          ) : null
+        }
       />
     </div>
   );

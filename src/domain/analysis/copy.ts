@@ -16,7 +16,10 @@ import type { DetectorSeverity, FindingKind } from "@/domain/analysis/types";
 export type WorkspaceChapterId =
   | "summary"
   | "money"
+  | "cancellations"
+  | "availability"
   | "funnel"
+  | "retention"
   | "operations"
   | "items"
   | "promotions"
@@ -41,18 +44,33 @@ export type WorkspaceChapter = {
 
 /** In the order the approved channel-workspace design lays them out. */
 export const WORKSPACE_CHAPTERS: readonly WorkspaceChapter[] = [
+  // The four numbered findings the approved draft leads with. Each is a
+  // question the window answers, shown as an eight-column analysis card with a
+  // four-column figure rail; nothing is merged across them because each owes
+  // its numbers to a different detector.
   {
-    id: "summary",
-    navLabel: "Summary",
-    heading: "Channel summary",
-    detectorKeys: [
-      "revenue.period_movement",
-      "revenue.channel_share",
-      "evidence.period_coverage",
-      // Retention is a headline fact about a channel's customers, not a review,
-      // so the new/returning mix reads beside the window's other summary facts.
-      "customer.new_share",
-    ],
+    id: "cancellations",
+    navLabel: "Cancellations",
+    heading: "Cancellations Financial Impact",
+    detectorKeys: ["orders.cancellation_loss"],
+  },
+  {
+    id: "availability",
+    navLabel: "Availability",
+    heading: "Operating Availability Heatmap",
+    detectorKeys: ["operations.closed_share"],
+  },
+  {
+    id: "funnel",
+    navLabel: "Funnel",
+    heading: "Conversion Funnel Performance",
+    detectorKeys: ["funnel.stage_conversion"],
+  },
+  {
+    id: "retention",
+    navLabel: "Retention",
+    heading: "Customer Mix & Retention",
+    detectorKeys: ["customer.new_share"],
   },
   {
     id: "money",
@@ -61,18 +79,6 @@ export const WORKSPACE_CHAPTERS: readonly WorkspaceChapter[] = [
     detectorKeys: [],
     deferredReason:
       "Commission, payout, fee, and discount detectors need cost inputs that no approved report writes yet. None is registered, so none can report on this channel.",
-  },
-  {
-    id: "funnel",
-    navLabel: "Funnel",
-    heading: "Conversion funnel",
-    detectorKeys: ["funnel.stage_conversion"],
-  },
-  {
-    id: "operations",
-    navLabel: "Operations",
-    heading: "Operational efficiency",
-    detectorKeys: ["orders.cancellation_loss", "operations.closed_share"],
   },
   {
     id: "items",
@@ -147,6 +153,8 @@ export function findingHeadline(code: string): string {
       return "The funnel cannot be reported for this window";
     case "ORDER_CANCELLATION_LOSS":
       return "Avoidable cancellations, with the provider's own rejection loss";
+    case "ORDER_CANCELLATION_REASON":
+      return "Avoidable cancellations, by the provider's own reason";
     case "ORDER_CANCELLATION_LOSS_UNAVAILABLE":
       return "Cancellation loss cannot be reported for this window";
     case "OPERATIONS_CLOSED_SHARE":
@@ -251,26 +259,24 @@ export type VerdictView = {
   headlineSentence: string;
   /** Short factual statements, one per input, naming the fact or the gap. */
   badges: readonly string[];
+  /**
+   * The deterministic split the band's scale draws, or nulls where a side
+   * cannot be stated. `potential` is the window's gross revenue, `lost` is the
+   * provider's own rejection loss, and `earned` is potential minus lost -- each
+   * carried so the page can render the figures beside the sentence rather than
+   * folding a number into prose.
+   */
+  verdictFigures: {
+    earned: { minorUnits: number; currency: string } | null;
+    lost: { minorUnits: number; currency: string } | null;
+    potential: { minorUnits: number; currency: string } | null;
+  };
 };
 
 export function buildVerdictView(input: {
   grossMoney: { minorUnits: number; currency: string } | null;
   movement: "up" | "down" | "flat" | null;
   coverage: VerdictCoverage | null;
-  /**
-   * Accepted, and deliberately not read yet.
-   *
-   * `read-model.ts` already computes and passes this split, and has since
-   * d07fcf1. The half of that change which renders it lives in this file and
-   * was never committed, so the committed tree had a caller passing a field its
-   * callee did not declare and did not compile at all. Declaring it here makes
-   * the two halves consistent again without inventing the rendering: the band
-   * still says exactly what it said before.
-   *
-   * Whoever finishes the earned/lost/potential work owns turning this into a
-   * rendered figure. Until then an unread parameter is the honest state --
-   * better than a headline this file cannot yet justify.
-   */
   earnedLostPotential?: {
     potential: { minorUnits: number; currency: string } | null;
     lost: { minorUnits: number; currency: string } | null;
@@ -284,8 +290,21 @@ export function buildVerdictView(input: {
   const coverageIncomplete =
     input.coverage !== null && input.coverage.observedPeriods < input.coverage.expectedPeriods;
 
+  // The design's headline is a statement about cancellations, so it is told
+  // only when both sides of the split are actually stated. Otherwise the band
+  // falls back to the plain chronicle of what the evidence supports.
+  const split = input.earnedLostPotential;
+  const splitStated =
+    split !== undefined &&
+    split.earned !== null &&
+    split.lost !== null &&
+    split.potential !== null;
+
   let headlineSentence: string;
-  if (coverageIncomplete) {
+  if (splitStated) {
+    headlineSentence =
+      "You earned and lost revenue to cancellations you could have prevented.";
+  } else if (coverageIncomplete) {
     headlineSentence =
       "Read this window's figures with care: some of its periods carry no governed evidence.";
   } else if (input.movement === "down") {
@@ -319,5 +338,10 @@ export function buildVerdictView(input: {
           ? "Some periods in this window carry no governed evidence."
           : "Every period in this window carries governed evidence.",
     ],
+    verdictFigures: {
+      earned: split?.earned ?? null,
+      lost: split?.lost ?? null,
+      potential: split?.potential ?? null,
+    },
   };
 }
