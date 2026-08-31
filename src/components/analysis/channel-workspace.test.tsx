@@ -556,6 +556,9 @@ describe("ChannelWorkspace", () => {
       ],
     });
 
+    expect(screen.queryByText(/last attempt failed/i)).toBeNull();
+  });
+
   it("hides the run control from a member who may not start one", () => {
     renderWorkspace({ canRunAnalysis: false });
 
