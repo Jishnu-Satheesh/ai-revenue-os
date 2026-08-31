@@ -148,6 +148,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | L2 | Linear-informed section rebuild (approved P1 visual anchors + P3 asymmetric splits + P4 monochrome; P5 motion as fast-follow) — claimed: `src/components/marketing/fig-twin-card.tsx`, `fig-opportunity-list.tsx`, `fig-outcome-row.tsx`, `timeline-strip.tsx`, `approval-receipt.tsx` (each with its test), `capabilities.tsx`, `how-it-works.tsx`, `governance.tsx` (+ their tests), `content.ts`, `content.test.ts`, `landing-page.test.tsx`, `specs/021-public-landing-page.md`, `docs/superpowers/plans/2026-08-26-public-landing-page-implementation.md`. No migrations, no new deps, nothing outside the marketing surface | orchestrator (dsh) | high | L1 | **done — 53 tests green, typecheck/lint/prettier clean, build + browser verified** |
 | MC1 | Multi-channel governed report ingestion and analysis planning — claimed: `docs/superpowers/specs/2026-08-29-multi-channel-report-ingestion-and-analysis-design.md`, `docs/superpowers/plans/2026-08-29-multi-channel-report-ingestion-and-analysis.md`. Planning documents only: no production code, migration, RLS, Trigger, staging, or fixture mutation. `specs/018-governed-channel-intelligence.md` remains untouched while R1 owns it; the implementation plan must reconcile this companion spec into 018 after that claim is released. | codex-root | high | user planning request 2026-08-29 | **review — companion spec and 14-task plan drafted; user approval required before execution** |
 | CU1 | Client-facing Channels index UI/UX redesign — claimed: `src/app/(platform)/organizations/[organizationId]/channels/page.tsx`, `page.test.tsx`, `src/components/channels/channels-rollup.tsx`, `channels-rollup.test.tsx`, `channels-management.tsx`, `channels-management.test.tsx`, new `channel-portfolio-chart.tsx`, and its test. Width investigation temporarily claimed `src/components/layout/app-shell.tsx`; the ineffective shell experiment was fully reverted after live-browser comparison. Read-only references: the existing `[channelId]` page/workspace and `channels-overview.ts`. No migrations, schema, RLS, Trigger, provider, analysis workspace, or governed-analysis logic changes. | codex-root | high | user approval 2026-08-29; report-canvas reset and 112px performance-column cap approved 2026-08-31 | **done — report canvas and compact performance columns verified in the authenticated browser** |
+| GI1 | Growth Intelligence architectural specification — claimed: `specs/022-growth-intelligence.md`, `adrs/0044-evidence-first-growth-intelligence.md`. Documentation only: formalize the user-approved evidence-first design for recurring internal analysis, governed public-market research, a composed Growth Intelligence surface, and draft-only Campaign Opportunities. No production code, migrations, RLS, Trigger tasks, staging changes, or edits to currently claimed specs/ADRs. | codex-root | high | user approved all design sections 2026-08-31 | **in-progress — writing and self-reviewing spec/ADR** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -3348,3 +3349,46 @@ will ever see it.
 that touches a file another agent is editing, build the **index** in isolation. Never extract hunks
 from a working-tree diff and apply them to the index — git matches context loosely enough to apply and
 silently drops lines. That is how `11b6a4c` lost a closing brace and how I nearly repeated it today.
+
+### 2026-08-31 · claude · RESOLVED — the committed tree now equals the tree we test
+
+Committed in `d94959d`, on the user's explicit instruction and with their authority. Everything real
+in the working tree is now in git, **including other agents' in-flight work, committed unaltered**:
+the verdict band, the portfolio chart, the cancellation-reason work, ADR 0043, the growth-intelligence
+and month-year specs and plans. Nothing was rewritten to fit; nothing was dropped.
+
+**What was actually broken, all of it from partial commits across this shared worktree:**
+
+| Committed | Not committed | Effect |
+|---|---|---|
+| tests asserting `order.avoidable_cancellation_reason` | the detector and provider code satisfying it | 8 test failures |
+| `read-model.ts` passing `earnedLostPotential` | `copy.ts` declaring it | did not compile (fixed in `84ba304`) |
+| `channels-rollup.tsx` importing the portfolio chart | `channel-portfolio-chart.tsx` itself | missing module |
+| migrations `20260827200000`, `20260828100000` applied to staging | the files | staging ahead of git |
+
+**One change of mine was needed.** `talabat-performance.real-export.test.ts` read `fixtures/raw/`,
+which `.gitignore` excludes so customer data never reaches git, and hard-failed seven times wherever
+the file is absent — every clone but this one. Now `describe.skipIf(!hasRealExport)`. Skipping is
+defensible only because those assertions cannot be evaluated at all without the file; anything
+checkable from the scrubbed `fixtures/providers/` belongs in a suite that always runs.
+
+**Verified in isolation, which is the only check that would ever have caught this:** typecheck clean,
+suite **325 files passed, 1 skipped, 0 failed** — the skip being the real-export suite behaving
+correctly without fixtures.
+
+**One flake, named rather than buried.** exceljs's streaming `WorkbookReader` threw
+`Cannot read properties of undefined (reading 'sheets')` in `validate-report-package.test.ts` on one
+full isolated run under parallel load. Alone it passes three of three, and the next full run was
+clean. Pre-existing parser concurrency, not a regression — but if it starts appearing often, that is
+where to look.
+
+**Left untracked on purpose, not deleted:** editor and agent configs (`.cursor/`, `.claude/`,
+`.ironbee/`, `opencode.json`), `package.json.bak`, `session-ses_fd0a.md`, and the `scripts/tmp-*.mjs`
+probes. If any of those are real work, their owner should commit them — they are on disk untouched.
+
+**The rule that this cost us weeks to learn.** `pnpm test` against the working tree proves nothing
+about what we ship. Before committing anything that touches a file another agent is editing, build the
+**index** in isolation:
+`git checkout-index -a --prefix=<scratch>/`, symlink `node_modules`, run `tsc` and `vitest` there.
+And never extract hunks from a working-tree diff to apply to the index — git matches context loosely
+enough to apply and silently drops lines, which is exactly how `11b6a4c` lost a closing brace.
