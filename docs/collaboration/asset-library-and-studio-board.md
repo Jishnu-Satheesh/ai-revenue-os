@@ -152,7 +152,8 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI2 | Growth Intelligence implementation planning — claimed: `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Planning only: map the approved spec into four independently releasable increments with exact ownership, interfaces, migrations, RLS, workers, tests, rollout, and rollback. No production code, migrations, Trigger tasks, staging changes, or currently claimed implementation files. | codex-root | high | approved spec 022 and ADR 0044 | **done — 24-task execution plan approved 2026-08-31** |
 | GI3 | Growth Intelligence Task 1 pure domain contracts — claimed: new `src/domain/growth-intelligence/types.ts`, `schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `evidence-quality.ts`, `evidence-quality.test.ts`, `geography.ts`, `geography.test.ts`, `material-change.ts`, `material-change.test.ts`, `errors.ts`, and `index.ts`; tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Database-free TDD checkpoint; no migrations, RLS, Trigger tasks, APIs, staging changes, or files under active analysis/report claims. | codex-root | high | approved Growth Intelligence plan Task 1 | **done — 65 focused tests, typecheck, slice lint, and formatting verified; no staging change** |
 | GI4 | Growth Intelligence Task 2 rollout and permission mirror — claimed: `src/lib/env.ts`, new `src/modules/growth-intelligence/application/feature-access.ts` and `feature-access.test.ts`, `src/domain/access/permissions.ts`, `permissions.test.ts`, `permissions.drift.test.ts`, `supabase/migrations/20260831145236_growth_intelligence_permissions.sql`, `supabase/tests/database/permission_catalogue_test.sql`, and tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. No `database.types.ts`, RLS, Trigger, or other staging mutation is in scope. The migration was CLI-generated only after `20260831200000` and `20260831210000` both appeared on hosted staging and local/remote history matched. | codex-root | high | approved Growth Intelligence plan Task 2 | **done — applied to staging; 38 focused tests, typecheck, slice lint/format, and 27/27 live pgTAP verified** |
-| GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed now: migration slug `growth_intelligence_profiles_and_requests`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. `src/lib/supabase/database.types.ts` and its drift test are required later in this task but are not claimed while another session has staged changes there; no edit will occur until that shared-file ownership clears. | codex-root | high | approved Growth Intelligence plan Task 3 | **in-progress — schema precedent review and pgTAP RED first** |
+| GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed now: `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, `src/domain/growth-intelligence/schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. The domain-file extension closes deterministic Postgres/TypeScript digest ordering before staging apply. `src/lib/supabase/database.types.ts` and its drift test are required later in this task but are not claimed while another session has staged changes there; no edit will occur until that shared-file ownership clears. | codex-root | high | approved Growth Intelligence plan Task 3 | **in-progress — 94/94 rollback pgTAP checks green; cross-runtime identity vectors next; no Task 3 staging change yet** |
+| KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done at code level — both migrations applied to staging and called for real; landing the figures needs a fresh upload of the billing report, which is an operator decision (see log)** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -217,6 +218,58 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 ---
 
 ## 8. Log
+
+### 2026-09-01 · claude · KC1 done — the rest of what a marketplace charges
+
+**Commission is not the bill.** Reconciling a client's Keeta statement of account against what
+this platform records: commission and merchant-borne promotion subsidies, both already projected,
+came to about three quarters of what Keeta actually invoiced. The remainder was bank charges and
+POS machine fees, and nothing recorded either. Every figure ties out — the order export's
+commission equals the statement's commission line exactly, and the billing report's
+commission + bank + merchant-borne delivery subsidies equals the month's commission invoice to
+the fils. So the gap is trustworthy, not a rounding artefact.
+
+An operator reading "commission is a fifth of revenue" would reasonably conclude that is what the
+channel costs. It was roughly twice that.
+
+**Promotions-Data was investigated and deliberately not built.** Everything in it that sums
+correctly is already projected: its `Promotion expense` matches the restaurant export's on 43 of
+43 days. Everything new does not sum. One order can trigger two campaigns and the file writes one
+row per campaign, so summing across rows double-counts — on 6 of 27 January days the summed
+`Item promotion sales` exceeds the day's entire item revenue, which is impossible. The duplicate
+`Valid orders` header resolved too: the two columns are the denominators of `Avg. promotion cost`
+and `Expense per order` respectively (verified on 56 of 56 rows), a real distinction with the same
+double-counting problem. Its genuine value is per-campaign, blocked on the same subject grain
+Item-Data needs. `sourceColumnOrdinal` would have bound the columns; it would not have made them
+summable.
+
+**`signConvention` was needed and is new declaration-language surface.** `financialSign` asserts
+what a file contains and changes nothing about it. Keeta writes commission positive in the order
+export and negative in the billing report; one metric cannot hold both and stay summable.
+`deduction_as_cost` is admitted only on a column the contract already declares negative, so it can
+restate a deduction and can never invert a revenue column into a cost. Applied per row, so totals,
+control totals and stated totals stay in one convention. `database-agreement.test.ts` caught that
+the database's own allow-list needed the key too — without it the intake path would have closed at
+approval time with nothing failing in TypeScript.
+
+**`economics.channel_cost_load` names what it read.** It cannot know what a provider charged and
+never reported, so it states the cost lines it summed and calls the figure a floor rather than
+implying a completeness it cannot check. It excludes `promotion.provider_subsidy` — the
+marketplace's own money, which the restaurant never paid.
+
+**The staging step is not what the plan assumed.** A contract proposal requires the package in
+`awaiting_contract`; the billing package is `projected`, and there is no path back. Binding the POS
+column needs a new contract version, so the new figures land only by uploading the billing report
+again as a fresh package. That creates a second source of `revenue.gross` for the same 28 days and
+a batch of overlap decisions for an operator to settle. Left for the user rather than done
+unilaterally on shared staging.
+
+Verified on staging: both metric definitions present and pack-scoped; the registry constraint and
+the `claim_channel_analysis` guard both accept 7; the live validator accepts the real billing
+projection carrying `signConvention` and refuses both an undefined convention and a restated count.
+Full suite green on HEAD-plus-these-paths in an isolated index (335 files, 0 failed); pgTAP 0
+failing assertions. Commit `1a561fc`.
+
 
 Append only. Newest at the bottom.
 
