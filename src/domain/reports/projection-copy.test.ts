@@ -67,6 +67,31 @@ const daily = {
 };
 
 describe("saying what a declaration will record", () => {
+  it("says a figure was converted when the provider measured in another unit", () => {
+    // "Scheduled Open Minutes, from total open duration h" reads as a mistake:
+    // the column says hours and the metric says minutes, with nothing in
+    // between. The approval has to state the step it is approving.
+    const converted = {
+      schemaVersion: 1,
+      outputKind: "period_grain",
+      grain: "day",
+      periodKey: { normalizedSheetName: "csv", canonicalField: "period_date" },
+      outputs: [
+        {
+          ...output("scheduled", "order_count", "operations.scheduled_minutes", "count"),
+          convert: "hours_to_minutes",
+        },
+      ],
+    };
+
+    expect(summarizeReportProjection(converted, mapping)?.entries).toEqual([
+      {
+        label: "scheduled open minutes",
+        sourceColumn: "total orders, converted from hours to minutes",
+      },
+    ]);
+  });
+
   it("names every column a summed figure reads, not just the first", () => {
     // The approval screen is the whole point of the gate: an owner approving
     // a figure built from two columns while the copy names one of them is

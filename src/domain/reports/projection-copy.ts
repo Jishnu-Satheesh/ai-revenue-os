@@ -36,6 +36,11 @@ const GRAIN_SHAPE: Readonly<Record<string, string>> = {
   month: "one figure for each month",
 };
 
+/** Each named conversion, in the words an operator approves it by. */
+const UNIT_CONVERSION_COPY: Readonly<Record<string, string>> = {
+  hours_to_minutes: "converted from hours to minutes",
+};
+
 function columnLabel(sourceHeader: string): string {
   return sourceHeader.replaceAll("_", " ");
 }
@@ -65,14 +70,19 @@ export function summarizeReportProjection(
     const columns = [output.canonicalField, ...(output.sumWith ?? [])]
       .map((canonicalField) => sourceColumnFor(output.normalizedSheetName, canonicalField))
       .filter((column): column is string => column !== null);
+    const read =
+      columns.length === 0
+        ? null
+        : columns.length === 1
+          ? (columns[0] as string)
+          : `${columns.slice(0, -1).join(", ")} and ${columns[columns.length - 1]}`;
+    // Without this, "Scheduled Open Minutes, from total open duration h" reads
+    // as a mistake: the column says hours, the metric says minutes, and nothing
+    // on screen accounts for the step between them.
+    const conversion = output.convert ? UNIT_CONVERSION_COPY[output.convert] : undefined;
     return {
       label: describeMetric(output.metricKey),
-      sourceColumn:
-        columns.length === 0
-          ? null
-          : columns.length === 1
-            ? (columns[0] as string)
-            : `${columns.slice(0, -1).join(", ")} and ${columns[columns.length - 1]}`,
+      sourceColumn: read !== null && conversion ? `${read}, ${conversion}` : read,
     };
   });
 
