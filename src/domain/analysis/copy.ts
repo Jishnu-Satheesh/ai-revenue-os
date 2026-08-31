@@ -257,6 +257,25 @@ export function buildVerdictView(input: {
   grossMoney: { minorUnits: number; currency: string } | null;
   movement: "up" | "down" | "flat" | null;
   coverage: VerdictCoverage | null;
+  /**
+   * Accepted, and deliberately not read yet.
+   *
+   * `read-model.ts` already computes and passes this split, and has since
+   * d07fcf1. The half of that change which renders it lives in this file and
+   * was never committed, so the committed tree had a caller passing a field its
+   * callee did not declare and did not compile at all. Declaring it here makes
+   * the two halves consistent again without inventing the rendering: the band
+   * still says exactly what it said before.
+   *
+   * Whoever finishes the earned/lost/potential work owns turning this into a
+   * rendered figure. Until then an unread parameter is the honest state --
+   * better than a headline this file cannot yet justify.
+   */
+  earnedLostPotential?: {
+    potential: { minorUnits: number; currency: string } | null;
+    lost: { minorUnits: number; currency: string } | null;
+    earned: { minorUnits: number; currency: string } | null;
+  };
 }): VerdictView {
   // Trust gates everything else, mirroring why `evidence.period_coverage`
   // ships before every other detector: a trend over fourteen of thirty-one
