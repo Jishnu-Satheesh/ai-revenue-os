@@ -153,7 +153,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI3 | Growth Intelligence Task 1 pure domain contracts — claimed: new `src/domain/growth-intelligence/types.ts`, `schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `evidence-quality.ts`, `evidence-quality.test.ts`, `geography.ts`, `geography.test.ts`, `material-change.ts`, `material-change.test.ts`, `errors.ts`, and `index.ts`; tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Database-free TDD checkpoint; no migrations, RLS, Trigger tasks, APIs, staging changes, or files under active analysis/report claims. | codex-root | high | approved Growth Intelligence plan Task 1 | **done — 65 focused tests, typecheck, slice lint, and formatting verified; no staging change** |
 | GI4 | Growth Intelligence Task 2 rollout and permission mirror — claimed: `src/lib/env.ts`, new `src/modules/growth-intelligence/application/feature-access.ts` and `feature-access.test.ts`, `src/domain/access/permissions.ts`, `permissions.test.ts`, `permissions.drift.test.ts`, `supabase/migrations/20260831145236_growth_intelligence_permissions.sql`, `supabase/tests/database/permission_catalogue_test.sql`, and tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. No `database.types.ts`, RLS, Trigger, or other staging mutation is in scope. The migration was CLI-generated only after `20260831200000` and `20260831210000` both appeared on hosted staging and local/remote history matched. | codex-root | high | approved Growth Intelligence plan Task 2 | **done — applied to staging; 38 focused tests, typecheck, slice lint/format, and 27/27 live pgTAP verified** |
 | GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed now: `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, `src/domain/growth-intelligence/schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. The domain-file extension closes deterministic Postgres/TypeScript digest ordering before staging apply. `src/lib/supabase/database.types.ts` and its drift test are required later in this task but are not claimed while another session has staged changes there; no edit will occur until that shared-file ownership clears. | codex-root | high | approved Growth Intelligence plan Task 3 | **in-progress — 94/94 rollback pgTAP checks green; cross-runtime identity vectors next; no Task 3 staging change yet** |
-| KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done at code level — both migrations applied to staging and called for real; landing the figures needs a fresh upload of the billing report, which is an operator decision (see log)** |
+| KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done — projected on staging through the governed path and browser-verified at 1440px and 390px; the channel reads 39.3% where commission alone reads 21.4%** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -218,6 +218,53 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 ---
 
 ## 8. Log
+
+### 2026-09-01 · claude · the cost figures are live, and the browser proves it
+
+The upload went through the real operator path in the authenticated browser, not by script, because
+a contract proposal requires the package in `awaiting_contract` and the original was `projected`.
+Every step behaved:
+
+- **Recognition** read the updated library entry unprompted: five columns including the newly bound
+  `pos machine fee vat included`, described to the operator as "sales, payment processing charged
+  and POS and equipment fees" — the labels added to `copy.ts` this slice.
+- **The database allow-list mattered.** The proposed projection carries
+  `signConvention: "deduction_as_cost"` on both cost outputs, and
+  `assert_report_projection_document` accepted it. Without migration `20260831230000` this exact
+  step would have raised 22023 at approval time with nothing failing in TypeScript.
+- **Validation:** 31 sheet rows, 140 mapped values, 0 failed.
+- **The sign convention works on the real file.** Both costs land positive from columns the provider
+  writes negative: equipment fees AED 200.00 and payment processing AED 53.12 for January, matching
+  the billing report exactly.
+- **Reconciliation behaved as designed.** The two new metrics raised 28 `non_overlapping` rows each
+  and nothing to decide; `revenue.gross` raised 28 `ambiguous_overlap` rows, exactly as predicted.
+  Resolved as **keep existing**: both uploads are the same file with identical revenue, and the
+  live commission finding cites those exact `normalized_metrics` rows — superseding them would have
+  orphaned citations for no change in any figure.
+
+**The result the slice existed for.** On the same page, same window, both correct:
+
+- `economics.commission_share` — **21.4%**
+- `economics.channel_cost_load` — **39.3%**, "Read from 4 cost line(s): commission, payment
+  processing, equipment fees, promotions the restaurant funded", 139 cited records
+
+Nearly double. An operator reading only the first would price against half a cost.
+
+**Also verified:** the money chapter renders at 1440px and 390px with no horizontal overflow and no
+console errors, and Money has left the awaiting-other-reports shelf.
+
+**Trigger.dev:** deployed `20260901.1` (19 tasks) to **production**. Per the user's standing
+instruction, never run a local `trigger dev` worker on this machine — deploy to the cloud and
+trigger there. Note the Trigger MCP bundles CLI 4.5.10 against packages at 4.5.14 and refuses to
+start, and it is dev-only; prod work goes through `npx trigger.dev@4.5.14`.
+
+**One cosmetic thing left, not fixed.** The money card stretches to match the taller figure rail, so
+a chapter with two short ratio bars shows a large empty area. It is pre-existing layout behaviour
+for any short chapter, newly visible now that Money renders, and `channel-workspace.tsx` is R1's
+claim — so it is flagged rather than redesigned.
+
+Commits `c524eb3`, `0ad7a9b`, `43c17fd`.
+
 
 ### 2026-09-01 · claude · the money chapter was never wired, and a clock that was not injected
 
