@@ -64,6 +64,119 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["branches"]["Insert"]>;
         Relationships: [];
       };
+      organization_market_profiles: {
+        Row: {
+          id: string;
+          organization_id: string;
+          current_version_id: string | null;
+          enabled: boolean;
+          next_daily_research_due_at: string | null;
+          next_weekly_synthesis_due_at: string | null;
+          last_research_succeeded_at: string | null;
+          last_weekly_synthesis_succeeded_at: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      organization_market_profile_versions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          market_profile_id: string;
+          version: number;
+          schema_version: number;
+          profile_document: Record<string, unknown>;
+          profile_digest: string;
+          source_policy_digest: string;
+          proposal_source: "operator" | "ai" | "system";
+          model_provider: string | null;
+          model_name: string | null;
+          model_version: string | null;
+          model_input_digest: string | null;
+          created_by: string | null;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      organization_market_profile_decisions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          market_profile_id: string;
+          market_profile_version_id: string;
+          decision: "confirmed" | "rejected" | "disabled" | "superseded";
+          profile_digest: string;
+          superseded_by_version_id: string | null;
+          reason: string | null;
+          decided_by: string;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_requests: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string | null;
+          channel_id: string | null;
+          kind:
+            | "profile_discovery"
+            | "market_research"
+            | "weekly_synthesis"
+            | "business_evidence_changed"
+            | "evidence_reassessment";
+          trigger_reason:
+            | "profile_confirmed"
+            | "profile_revised"
+            | "daily_due"
+            | "weekly_due"
+            | "business_evidence_current"
+            | "source_policy_changed"
+            | "evidence_expired"
+            | "source_changed"
+            | "manual_retry";
+          request_fingerprint: string;
+          business_evidence_digest: string | null;
+          market_profile_version_id: string;
+          source_policy_digest: string;
+          research_rule_version: string;
+          local_time_bucket: string;
+          synthesis_version_tuple: string | null;
+          playbook_version_tuple: string | null;
+          status: "pending" | "claimed" | "succeeded" | "failed" | "cancelled";
+          due_at: string;
+          claim_token: string | null;
+          lease_expires_at: string | null;
+          attempt_count: number;
+          max_attempts: number;
+          dispatch_attempt_count: number;
+          last_dispatch_attempt_at: string | null;
+          safe_failure_code: string | null;
+          failed_at: string | null;
+          completed_at: string | null;
+          cancelled_at: string | null;
+          cancel_reason: string | null;
+          requested_by: string | null;
+          last_transition_actor_type: Database["public"]["Enums"]["audit_actor_type"];
+          last_transition_actor_id: string | null;
+          correlation_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       organization_channels: {
         Row: {
           id: string;
@@ -1761,6 +1874,97 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      enqueue_growth_intelligence_request: {
+        Args: {
+          p_organization_id: string;
+          p_request: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      propose_market_profile_version: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_profile_document: unknown;
+          p_profile_digest: string;
+          p_proposal_context: unknown;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      decide_market_profile_version: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_market_profile_version_id: string;
+          p_profile_digest: string;
+          p_decision: "confirmed" | "rejected" | "disabled";
+          p_reason: string | null;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      retry_growth_intelligence_request: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_request_id: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      cancel_growth_intelligence_request: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_request_id: string;
+          p_reason: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      claim_growth_intelligence_request: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_lease_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_growth_intelligence_request: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_growth_intelligence_request: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_safe_failure_code: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      claim_due_growth_intelligence_requests: {
+        Args: {
+          p_limit: number;
+          p_dispatch_cooldown_seconds: number;
+        };
+        Returns: {
+          organizationId: string;
+          requestId: string;
+          kind: string;
+          correlationId: string;
+        }[];
+      };
       start_governed_report_package_upload: {
         Args: {
           p_organization_id: string;

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import { compareCanonicalText } from "@/domain/growth-intelligence/schemas";
 import type { GrowthIntelligenceRequestFingerprintInput } from "@/domain/growth-intelligence/types";
 
 export type { GrowthIntelligenceRequestFingerprintInput } from "@/domain/growth-intelligence/types";
@@ -58,7 +59,7 @@ function canonicalize(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCanonicalText(left, right))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalize(item)}`)
       .join(",")}}`;
   }

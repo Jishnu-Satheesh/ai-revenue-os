@@ -49,6 +49,12 @@ describe("createGrowthIntelligenceRequestFingerprint", () => {
     );
   });
 
+  it("matches the database fingerprint contract for the canonical fixture", () => {
+    expect(createGrowthIntelligenceRequestFingerprint(input())).toBe(
+      "83ff7ff74b7da6205d7f09cb66c95d83bec41516160e4eef7bdde618719e262f",
+    );
+  });
+
   it.each([
     [
       "organization",

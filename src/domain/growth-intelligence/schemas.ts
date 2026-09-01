@@ -3,6 +3,21 @@ import { z } from "zod";
 import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
 
 const boundedText = (maximum: number) => z.string().trim().min(1).max(maximum);
+
+/** Matches PostgreSQL's UTF-8 `C` collation for digest-bound text. */
+export function compareCanonicalText(left: string, right: string): number {
+  const leftCodePoints = Array.from(left, (character) => character.codePointAt(0)!);
+  const rightCodePoints = Array.from(right, (character) => character.codePointAt(0)!);
+  const length = Math.min(leftCodePoints.length, rightCodePoints.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const difference = leftCodePoints[index]! - rightCodePoints[index]!;
+    if (difference !== 0) return difference;
+  }
+
+  return leftCodePoints.length - rightCodePoints.length;
+}
+
 const normalizedKeySchema = z
   .string()
   .trim()
@@ -76,7 +91,7 @@ function uniqueDomainsSchema(maximum: number) {
     .superRefine((domains, context) =>
       addDuplicateIssue(domains, context, "Domains must be unique after normalization."),
     )
-    .transform((domains) => [...domains].sort());
+    .transform((domains) => [...domains].sort(compareCanonicalText));
 }
 
 const uniqueUrlsSchema = z
@@ -85,7 +100,7 @@ const uniqueUrlsSchema = z
   .superRefine((urls, context) =>
     addDuplicateIssue(urls, context, "Public URLs must be unique after normalization."),
   )
-  .transform((urls) => [...urls].sort());
+  .transform((urls) => [...urls].sort(compareCanonicalText));
 
 const tradeAreaSchema = z
   .object({
@@ -151,8 +166,8 @@ const competitorSchema = z
   })
   .transform((competitor) => ({
     ...competitor,
-    geographyRefs: [...competitor.geographyRefs].sort(),
-    relevanceEvidenceUrls: [...competitor.relevanceEvidenceUrls].sort(),
+    geographyRefs: [...competitor.geographyRefs].sort(compareCanonicalText),
+    relevanceEvidenceUrls: [...competitor.relevanceEvidenceUrls].sort(compareCanonicalText),
   }));
 
 const topicSchema = z
@@ -174,7 +189,7 @@ const sourcePolicySchema = z
   .strict()
   .superRefine((policy, context) => {
     addDuplicateIssue(
-      policy.excludedPublishers.map((publisher) => publisher.toLocaleLowerCase()),
+      policy.excludedPublishers.map((publisher) => publisher.toLowerCase()),
       context,
       "Excluded publishers must be unique.",
     );
@@ -193,10 +208,8 @@ const sourcePolicySchema = z
   })
   .transform((policy) => ({
     ...policy,
-    excludedPublishers: [...policy.excludedPublishers].sort((left, right) =>
-      left.localeCompare(right),
-    ),
-    excludedCompetitorKeys: [...policy.excludedCompetitorKeys].sort(),
+    excludedPublishers: [...policy.excludedPublishers].sort(compareCanonicalText),
+    excludedCompetitorKeys: [...policy.excludedCompetitorKeys].sort(compareCanonicalText),
   }));
 
 const timeZoneSchema = z
@@ -275,7 +288,7 @@ export const marketProfileDocumentV1Schema: z.ZodType<MarketProfileDocumentV1> =
       });
     }
     addDuplicateIssue(
-      profile.nicheDescriptors.map((descriptor) => descriptor.toLocaleLowerCase()),
+      profile.nicheDescriptors.map((descriptor) => descriptor.toLowerCase()),
       context,
       "Niche descriptors must be unique.",
     );
@@ -302,12 +315,15 @@ export const marketProfileDocumentV1Schema: z.ZodType<MarketProfileDocumentV1> =
   })
   .transform((profile) => ({
     ...profile,
-    nicheDescriptors: [...profile.nicheDescriptors].sort((left, right) =>
-      left.localeCompare(right),
-    ),
+    nicheDescriptors: [...profile.nicheDescriptors].sort(compareCanonicalText),
     geographies: [...profile.geographies].sort((left, right) =>
-      `${left.layer}:${left.locationRef}`.localeCompare(`${right.layer}:${right.locationRef}`),
+      compareCanonicalText(
+        `${left.layer}:${left.locationRef}`,
+        `${right.layer}:${right.locationRef}`,
+      ),
     ),
-    competitors: [...profile.competitors].sort((left, right) => left.key.localeCompare(right.key)),
-    topics: [...profile.topics].sort((left, right) => left.key.localeCompare(right.key)),
+    competitors: [...profile.competitors].sort((left, right) =>
+      compareCanonicalText(left.key, right.key),
+    ),
+    topics: [...profile.topics].sort((left, right) => compareCanonicalText(left.key, right.key)),
   }));

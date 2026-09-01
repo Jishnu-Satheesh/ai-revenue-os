@@ -67,6 +67,12 @@ describe("createMarketProfileDigest", () => {
     expect(createMarketProfileDigest(profile())).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("matches the database digest contract for the version-one fixture", () => {
+    expect(createMarketProfileDigest(profile())).toBe(
+      "e054b02adfd9e95c4030430d7689819aa231bc58134b38160c173c88486c9f82",
+    );
+  });
+
   it("is stable when set-like arrays and normalized public identifiers arrive in another order", () => {
     const left = profile();
     const right = profile();

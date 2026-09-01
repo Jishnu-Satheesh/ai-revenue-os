@@ -156,6 +156,7 @@ const PRIVATE_RPC_ONLY_TABLES = new Set([
   // through the fenced recommendation RPCs; no session role holds a grant.
   "channel_recommendation_operations",
   "decision_cycle_operations",
+  "growth_intelligence_write_operations",
   "integration_credentials",
   "integration_report_profile_operations",
   "integration_report_validation_operations",

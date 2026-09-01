@@ -155,14 +155,14 @@
   - Make profile confirmation, automatic supersession of the prior current version, and the initial research request one transaction. Replay returns the same version, decisions, and request identifiers.
   - Append identifier-only audit events in the same transaction as each committed state change; `market_research.requested` records durable request admission before any best-effort wake-up.
 - **Steps:**
-  - [ ] Write pgTAP red tests for two-account/two-organization reads and mutations, viewer/operator/admin behavior, append-only enforcement, automatic prior-version supersession, one-current-version invariant, digest replay, request fingerprint uniqueness, due indexes, leases, fencing, retry, cancellation, identifier-only audit, and explicit grants.
-  - [ ] Generate the migration, inspect all referenced columns and existing membership helpers, and keep JSON document validation aligned with Task 1's schema version and allowlists.
-  - [ ] Add tenant-composite foreign keys and indexes before enabling and forcing RLS.
-  - [ ] Implement narrow security-definer operations with empty search paths and exact grants; no authenticated caller may invoke worker claim/completion functions.
-  - [ ] Dry-run and push the migration, run focused pgTAP, then invoke every new function once on staging with a rollback-safe fixture transaction where possible.
-  - [ ] Hand-maintain table/RPC types and prove the database type drift test passes.
-  - [ ] Run `pnpm db:test`, typecheck, lint, and `git diff --check`.
-  - [ ] Commit as `feat(growth-intelligence): persist profiles and durable work`.
+  - [x] Write pgTAP red tests for two-account/two-organization reads and mutations, viewer/operator/admin behavior, append-only enforcement, automatic prior-version supersession, one-current-version invariant, digest replay, request fingerprint uniqueness, due indexes, leases, fencing, retry, cancellation, identifier-only audit, and explicit grants.
+  - [x] Generate the migration, inspect all referenced columns and existing membership helpers, and keep JSON document validation aligned with Task 1's schema version and allowlists.
+  - [x] Add tenant-composite foreign keys and indexes before enabling and forcing RLS.
+  - [x] Implement narrow security-definer operations with empty search paths and exact grants; no authenticated caller may invoke worker claim/completion functions.
+  - [x] Dry-run and push the migration, run focused pgTAP, then invoke every new function once on staging with a rollback-safe fixture transaction where possible.
+  - [x] Hand-maintain table/RPC types and prove the database type drift test passes.
+  - [x] Run `pnpm db:test`, typecheck, lint, and `git diff --check`.
+  - [x] Commit as `feat(growth-intelligence): persist profiles and durable work`.
 
 ### Task 4: Build Market Profile proposal, review, and confirmation boundaries
 

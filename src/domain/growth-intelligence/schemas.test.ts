@@ -84,6 +84,17 @@ describe("marketProfileDocumentV1Schema", () => {
     ]);
   });
 
+  it("uses database-stable code-point ordering for digest-bound sets", () => {
+    const input = validProfile();
+    input.nicheDescriptors = ["apple", "Zulu"];
+    input.sourcePolicy.excludedPublishers = ["apple directory", "Zulu directory"];
+
+    const profile = marketProfileDocumentV1Schema.parse(input);
+
+    expect(profile.nicheDescriptors).toEqual(["Zulu", "apple"]);
+    expect(profile.sourcePolicy.excludedPublishers).toEqual(["Zulu directory", "apple directory"]);
+  });
+
   it("rejects an unknown field instead of silently expanding approved scope", () => {
     const input = { ...validProfile(), unapprovedResearchInstruction: "Search everywhere" };
 

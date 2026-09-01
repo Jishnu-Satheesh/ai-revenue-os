@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
-import { marketProfileDocumentV1Schema } from "@/domain/growth-intelligence/schemas";
+import {
+  compareCanonicalText,
+  marketProfileDocumentV1Schema,
+} from "@/domain/growth-intelligence/schemas";
 import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
 
 function canonicalize(value: unknown): string {
@@ -9,7 +12,7 @@ function canonicalize(value: unknown): string {
   if (typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
       .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCanonicalText(left, right))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalize(item)}`)
       .join(",")}}`;
   }
