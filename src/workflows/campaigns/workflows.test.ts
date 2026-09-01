@@ -158,6 +158,7 @@ function generateDeps(
     publisher: { publish },
     limitsByChannel: LIMITS,
     isCancelled: () => false,
+    clock: () => new Date("2026-09-01T00:00:00.000Z"),
     ...overrides,
   };
 }

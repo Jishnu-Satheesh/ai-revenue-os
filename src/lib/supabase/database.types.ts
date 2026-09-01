@@ -1900,6 +1900,15 @@ export type Database = {
         };
         Returns: Record<string, unknown>;
       };
+      find_market_profile_proposal_replay: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_proposal_context: unknown;
+          p_idempotency_key: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
       decide_market_profile_version: {
         Args: {
           p_organization_id: string;

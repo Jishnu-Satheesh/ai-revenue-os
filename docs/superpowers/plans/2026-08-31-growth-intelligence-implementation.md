@@ -175,17 +175,26 @@
   - Create `src/app/api/organizations/[organizationId]/market-profile/route.ts` and `route.test.ts`.
   - Create `src/app/api/organizations/[organizationId]/market-profile/proposals/route.ts` and `route.test.ts`.
   - Create `src/app/api/organizations/[organizationId]/market-profile/versions/[versionId]/decisions/route.ts` and `route.test.ts`.
+  - Create forward migrations with slugs `growth_intelligence_profile_proposal_replay` and `growth_intelligence_profile_revision_audit`, and extend `supabase/tests/database/growth_intelligence_profiles_test.sql`.
+  - Modify `src/lib/supabase/database.types.ts` for the authenticated replay RPC.
+  - Create `scripts/verify-growth-profile-concurrency.mjs` for a real two-session staging race check.
+  - Modify `package.json` and `pnpm-lock.yaml` for the ICANN public-suffix boundary.
 - **Interfaces:**
   - `MarketProfileService.propose` reads confirmed Digital Twin facts, performs one bounded discovery request, validates the candidate, and persists a proposal only.
+  - AI proposal retries perform an authenticated exact-replay lookup before model generation. Stable AI request identity binds the model provider, model name, model version, and bounded input digest rather than nondeterministic model output; operator proposals remain bound to their exact profile digest.
   - `MarketProfileService.decide` accepts `confirmed`, `rejected`, or `disabled`, exact version/digest, bounded reason, and correlation ID; confirmation supersedes the prior current version and enqueues recurring or evidence-reassessment work.
 - **Steps:**
-  - [ ] Write failing service and route tests for membership-before-rollout ordering, read/manage permission, bounded discovery input, malformed model output, one repair attempt, replay, stale version decision, automatic supersession, source exclusion revision, disablement, and safe public errors.
-  - [ ] Prove in tests that a proposal cannot start research, change the current profile, or create visible Market Evidence.
-  - [ ] Implement the signed-in repository and strict model provider; pass only confirmed public identity, niche, location, and topics and exclude raw business evidence.
-  - [ ] Implement routes in the order membership, rollout, permission, Zod parse, service call.
-  - [ ] Emit identifier-only `market_profile.proposed`, `market_profile.confirmed`, `market_profile.revision_proposed`, and `market_profile.disabled` events from committed domain outcomes.
-  - [ ] Run focused Vitest, typecheck, lint, and `git diff --check`.
-  - [ ] Commit as `feat(growth-intelligence): govern market profile approval`.
+  - [x] Write failing service and route tests for membership-before-rollout ordering, read/manage permission, bounded discovery input, malformed model output, one repair attempt, replay, stale version decision, automatic supersession, source exclusion revision, disablement, and safe public errors.
+  - [x] Prove in tests that a proposal cannot start research, change the current profile, or create visible Market Evidence.
+  - [x] Implement the signed-in repository and strict model provider; pass only confirmed public identity, niche, location, and topics and exclude raw business evidence.
+  - [x] Implement routes in the order membership, rollout, permission, Zod parse, service call.
+  - [x] Emit identifier-only `market_profile.proposed`, `market_profile.confirmed`, `market_profile.revision_proposed`, and `market_profile.disabled` events from committed domain outcomes.
+  - [x] Add and apply the approved forward-only replay RPC migration; prove exact sequential replay skips model generation and concurrent divergent model answers converge on the stored proposal.
+  - [x] Reject signed/query URLs and hosts without an ICANN registrable domain before proposal context crosses the model boundary.
+  - [x] Keep stable model identity available during provider credential outages so an already-committed replay remains readable without another model call.
+  - [x] Classify proposal audit events from immutable version history, including multiple unconfirmed revisions.
+  - [x] Run focused Vitest, typecheck, lint, and `git diff --check`.
+  - [x] Commit as `feat(growth-intelligence): govern market profile approval`.
 
 ### Task 5: Qualify and fence the public research adapter
 

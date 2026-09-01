@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(48);
+select extensions.plan(59);
 
 -- Contract and grants -------------------------------------------------------
 
@@ -13,6 +13,11 @@ select extensions.has_function(
   'public', 'propose_market_profile_version',
   array['uuid', 'uuid', 'jsonb', 'text', 'jsonb', 'text', 'uuid'],
   'profile proposals use one governed operation'
+);
+select extensions.has_function(
+  'public', 'find_market_profile_proposal_replay',
+  array['uuid', 'uuid', 'jsonb', 'text'],
+  'AI proposal retries can resolve the exact stored proposal before model generation'
 );
 select extensions.has_function(
   'public', 'decide_market_profile_version',
@@ -72,6 +77,14 @@ select extensions.ok(
 select extensions.ok(
   pg_catalog.has_function_privilege(
     'authenticated',
+    'public.find_market_profile_proposal_replay(uuid,uuid,jsonb,text)',
+    'execute'
+  ),
+  'authenticated operators may invoke the exact proposal replay lookup'
+);
+select extensions.ok(
+  pg_catalog.has_function_privilege(
+    'authenticated',
     'public.decide_market_profile_version(uuid,uuid,uuid,text,text,text,text,uuid)',
     'execute'
   ),
@@ -84,6 +97,14 @@ select extensions.ok(
     'execute'
   ),
   'anonymous callers cannot propose a profile'
+);
+select extensions.ok(
+  not pg_catalog.has_function_privilege(
+    'anon',
+    'public.find_market_profile_proposal_replay(uuid,uuid,jsonb,text)',
+    'execute'
+  ),
+  'anonymous callers cannot inspect proposal replay state'
 );
 
 -- Two-account fixtures ------------------------------------------------------
@@ -214,6 +235,22 @@ as $$
   );
 $$;
 
+create or replace function pg_temp.ai_proposal_context(
+  p_model_input_digest text default null
+)
+returns jsonb
+language sql
+immutable
+as $$
+  select pg_catalog.jsonb_build_object(
+    'source', 'ai',
+    'modelProvider', 'google',
+    'modelName', 'gemini-profile',
+    'modelVersion', 'market-profile-proposal@1',
+    'modelInputDigest', coalesce(p_model_input_digest, pg_catalog.repeat('b', 64))
+  );
+$$;
+
 set local role authenticated;
 set local request.jwt.claim.sub = 'a7000000-0000-4000-8000-000000000002';
 
@@ -262,6 +299,68 @@ select extensions.is(
   ),
   'the same profile digest replays across a different delivery key'
 );
+select extensions.is(
+  (
+    select (pg_temp.propose(
+      'a7000000-0000-4000-8000-000000000002'::uuid,
+      pg_temp.market_profile_document(),
+      'profile-proposal-ai-stable',
+      'a7000000-0000-4000-8000-000000000201'::uuid,
+      pg_temp.ai_proposal_context()
+    ) ->> 'profileVersionId')::uuid
+  ),
+  (
+    select id from public.organization_market_profile_versions
+    where organization_id = 'a7000000-0000-4000-8000-000000000201'::uuid
+  ),
+  'an AI proposal records stable request identity against the stored version'
+);
+select extensions.is(
+  (
+    select (pg_temp.propose(
+      'a7000000-0000-4000-8000-000000000002'::uuid,
+      pg_temp.market_profile_document(
+        'a7000000-0000-4000-8000-000000000301'::uuid,
+        'A divergent concurrent model answer'
+      ),
+      'profile-proposal-ai-stable',
+      'a7000000-0000-4000-8000-000000000201'::uuid,
+      pg_temp.ai_proposal_context()
+    ) ->> 'profileVersionId')::uuid
+  ),
+  (
+    select id from public.organization_market_profile_versions
+    where organization_id = 'a7000000-0000-4000-8000-000000000201'::uuid
+  ),
+  'the same stable AI request converges on its first stored proposal despite divergent output'
+);
+select extensions.is(
+  (
+    select (public.find_market_profile_proposal_replay(
+      'a7000000-0000-4000-8000-000000000201'::uuid,
+      'a7000000-0000-4000-8000-000000000002'::uuid,
+      pg_temp.ai_proposal_context(),
+      'profile-proposal-ai-stable'
+    ) ->> 'profileVersionId')::uuid
+  ),
+  (
+    select id from public.organization_market_profile_versions
+    where organization_id = 'a7000000-0000-4000-8000-000000000201'::uuid
+  ),
+  'an exact retry finds the stored AI proposal before another model request'
+);
+select extensions.throws_ok(
+  $$
+    select public.find_market_profile_proposal_replay(
+      'a7000000-0000-4000-8000-000000000201'::uuid,
+      'a7000000-0000-4000-8000-000000000002'::uuid,
+      pg_temp.ai_proposal_context(pg_catalog.repeat('c', 64)),
+      'profile-proposal-ai-stable'
+    )
+  $$,
+  '23505', null,
+  'an AI retry key cannot be reused after its bounded model input changes'
+);
 select extensions.throws_ok(
   $$ select pg_temp.propose(
     'a7000000-0000-4000-8000-000000000002'::uuid,
@@ -299,6 +398,18 @@ select extensions.throws_ok(
   ) $$,
   '42501', null,
   'a viewer cannot propose a Market Profile'
+);
+select extensions.throws_ok(
+  $$
+    select public.find_market_profile_proposal_replay(
+      'a7000000-0000-4000-8000-000000000201'::uuid,
+      'a7000000-0000-4000-8000-000000000003'::uuid,
+      pg_temp.ai_proposal_context(),
+      'profile-proposal-ai-stable'
+    )
+  $$,
+  '42501', null,
+  'a viewer cannot inspect proposal replay state'
 );
 select extensions.is(
   (
@@ -575,6 +686,45 @@ select extensions.ok(
   ),
   'the disablement audit event commits with the profile decision'
 );
+
+set local role authenticated;
+set local request.jwt.claim.sub = 'a7000000-0000-4000-8000-000000000005';
+select extensions.lives_ok(
+  $$ select pg_temp.propose(
+    'a7000000-0000-4000-8000-000000000005'::uuid,
+    pg_temp.market_profile_document(
+      'a7000000-0000-4000-8000-000000000302'::uuid,
+      'Other tenant first draft'
+    ),
+    'profile-proposal-unconfirmed-1',
+    'a7000000-0000-4000-8000-000000000202'::uuid
+  ) $$,
+  'a first unconfirmed profile proposal is accepted'
+);
+select extensions.lives_ok(
+  $$ select pg_temp.propose(
+    'a7000000-0000-4000-8000-000000000005'::uuid,
+    pg_temp.market_profile_document(
+      'a7000000-0000-4000-8000-000000000302'::uuid,
+      'Other tenant revised draft'
+    ),
+    'profile-proposal-unconfirmed-2',
+    'a7000000-0000-4000-8000-000000000202'::uuid
+  ) $$,
+  'a second unconfirmed profile proposal is accepted'
+);
+select extensions.is(
+  (
+    select event_name
+    from public.audit_events
+    where organization_id = 'a7000000-0000-4000-8000-000000000202'::uuid
+      and entity_type = 'organization_market_profile_version'
+      and payload ->> 'version' = '2'
+  ),
+  'market_profile.revision_proposed',
+  'immutable version two is audited as a revision before any confirmation exists'
+);
+reset role;
 
 select * from extensions.finish();
 
