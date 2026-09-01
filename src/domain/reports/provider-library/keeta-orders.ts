@@ -26,13 +26,16 @@ import type { ProviderReportDefinition } from "@/domain/reports/provider-library
  * the customer paid it or the restaurant was charged it, and the two are
  * opposite facts. Calling it a cost would be a claim this file cannot support.
  *
- * `Reason for order cancellation` is empty on 153 of 156 rows and its only
- * value is an image URL, not a reason. `Cancellation type` carries the real
- * fault attribution -- but its labels are prose ("Cancelled by merchant"), and
- * the declaration language matches categorical labels against upper-case codes
- * with no spaces. Reading them needs a label-mapping capability the language
- * does not have, so cancellation attribution waits for that rather than being
- * approximated here.
+ * `Reason for order cancellation` is almost always empty and its only value is
+ * an image URL, not a reason, so it stays unread.
+ *
+ * `Cancellation type` carries the fault attribution and is now projected, via
+ * the declared label map that translates Keeta's sentences into the approved
+ * vocabulary. What it counts is orders Keeta attributed to a party, which is
+ * not the same as the channel's cancelled-order count: a partially refunded
+ * order carries an attribution while the provider still counts it as
+ * fulfilled. The two figures are therefore not expected to agree, and the
+ * metric is named for what it counts rather than for what it nearly is.
  *
  * `Review score` is three distinct values across the whole export, almost all
  * absent. A rating derived from that would be arithmetic dressed as insight.
@@ -100,6 +103,16 @@ export const keetaOrders: ProviderReportDefinition = {
             financialSign: "positive",
             required: false,
           },
+          {
+            // Who cancelled the order, in Keeta's own words. Written `-` on
+            // every order Keeta did not cancel, which is the absence of an
+            // attribution rather than a party of its own.
+            canonicalField: "cancellation_type",
+            sourceHeader: "cancellation_type",
+            parser: "text",
+            absentMarkers: ["-"],
+            required: false,
+          },
         ],
       },
     ],
@@ -136,6 +149,31 @@ export const keetaOrders: ProviderReportDefinition = {
         metricKey: "operations.preparation_minutes",
         valueKind: "count",
         aggregation: "sum",
+      },
+      {
+        // One observation per party per day, counted from the sentences Keeta
+        // writes in this column. The map is the translation an operator
+        // approves; a fourth party would refuse the import rather than join
+        // the breakdown unnamed.
+        key: "cancellation_party",
+        normalizedSheetName: "sheet_0",
+        canonicalField: "cancellation_type",
+        metricKey: "order.cancellation_attribution_count",
+        valueKind: "count",
+        aggregation: "sum",
+        categorical: {
+          dimensionKey: "cancelled_by",
+          allowedValues: ["MERCHANT", "CUSTOMER_SERVICE", "PLATFORM"],
+          labelMap: {
+            "Cancelled by merchant": "MERCHANT",
+            "Cancelled by customer service": "CUSTOMER_SERVICE",
+            // Keeta's own cancellation. The parenthetical says the restaurant
+            // was compensated; that is a payment this file does not state, so
+            // only the party is read.
+            "Cancelled by Keeta (compensation to restaurant)": "PLATFORM",
+          },
+          collectInjectedValues: false,
+        },
       },
     ],
     controlTotals: [],

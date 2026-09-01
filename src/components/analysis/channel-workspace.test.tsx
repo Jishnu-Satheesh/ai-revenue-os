@@ -625,6 +625,74 @@ describe("ChannelWorkspace", () => {
     expect(within(cancellations).getByText(/root-cause breakdown is unavailable/i)).toBeTruthy();
   });
 
+  it("says who cancelled where the marketplace names a party but prices no loss", () => {
+    // Keeta attributes every cancellation and states no rejection loss. Without
+    // its own rail the chapter would hold the findings and show an empty frame
+    // beside them, which reads as nothing having been found.
+    renderWorkspace({
+      findings: [
+        finding({
+          id: "attributed-total",
+          detectorKey: "orders.cancellation_attribution",
+          code: "ORDER_CANCELLATION_ATTRIBUTION_TOTAL",
+          metricKey: "order.cancellation_attribution_count",
+          valueKind: "count",
+          valueNumerator: 12,
+          valueDenominator: null,
+        }),
+        finding({
+          id: "attributed-share",
+          detectorKey: "orders.cancellation_attribution",
+          code: "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS",
+          metricKey: "order.cancellation_attribution_count",
+          valueKind: "ratio",
+          valueNumerator: 12,
+          valueDenominator: 60,
+        }),
+        finding({
+          id: "party-service",
+          detectorKey: "orders.cancellation_attribution",
+          code: "ORDER_CANCELLATION_ATTRIBUTION_PARTY",
+          metricKey: "order.cancellation_attribution_count",
+          valueKind: "ratio",
+          valueNumerator: 3,
+          valueDenominator: 12,
+        }),
+        finding({
+          id: "party-merchant",
+          detectorKey: "orders.cancellation_attribution",
+          code: "ORDER_CANCELLATION_ATTRIBUTION_PARTY",
+          metricKey: "order.cancellation_attribution_count",
+          valueKind: "ratio",
+          valueNumerator: 9,
+          valueDenominator: 12,
+        }),
+      ],
+      evidence: [
+        metricEvidence("party-service", "service-jan-06", "component", {
+          periodStart: "2026-01-06",
+          numerator: 3,
+          dimensions: { cancelled_by: "CUSTOMER_SERVICE" },
+        }),
+        metricEvidence("party-merchant", "merchant-jan-06", "component", {
+          periodStart: "2026-01-06",
+          numerator: 9,
+          dimensions: { cancelled_by: "MERCHANT" },
+        }),
+      ],
+    });
+
+    const cancellations = screen.getByRole("region", { name: "Cancellations chapter" });
+    expect(within(cancellations).getByText("20% Cancelled")).toBeTruthy();
+    // The largest party leads regardless of the order the findings arrive in,
+    // and the provider's code is spoken rather than renamed.
+    expect(
+      within(cancellations).getByText(
+        "20% of the orders this channel took were cancelled with a party named. It held merchant responsible for 75% of them.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("lands findings outside every chapter in the Also measured band", () => {
     renderWorkspace({
       findings: [

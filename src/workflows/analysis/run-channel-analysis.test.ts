@@ -56,7 +56,7 @@ describe("runChannelAnalysis", () => {
 
     expect(deps.claim).toHaveBeenCalledWith(
       expect.objectContaining({
-        registryVersion: 7,
+        registryVersion: 8,
         metricKeys: [
           "cost.commission",
           "cost.equipment_fee",
@@ -72,6 +72,8 @@ describe("runChannelAnalysis", () => {
           "operations.scheduled_minutes",
           "order.avoidable_cancellation_count",
           "order.avoidable_cancellation_reason",
+          "order.cancellation_attribution_count",
+          "order.total_count",
           "promotion.funding",
           "revenue.gross",
           "revenue.rejection_loss",
@@ -83,6 +85,7 @@ describe("runChannelAnalysis", () => {
           { key: "revenue.window_gross", calculationVersion: 2 },
           { key: "funnel.stage_conversion", calculationVersion: 1 },
           { key: "orders.cancellation_loss", calculationVersion: 1 },
+          { key: "orders.cancellation_attribution", calculationVersion: 1 },
           { key: "operations.closed_share", calculationVersion: 1 },
           { key: "customer.new_share", calculationVersion: 1 },
           { key: "economics.commission_share", calculationVersion: 1 },
@@ -117,6 +120,7 @@ describe("runChannelAnalysis", () => {
       // answers with a named refusal rather than staying silent.
       "funnel.stage_conversion:needs_data",
       "orders.cancellation_loss:needs_data",
+      "orders.cancellation_attribution:needs_data",
       "operations.closed_share:needs_data",
       "customer.new_share:needs_data",
       "economics.commission_share:needs_data",
@@ -145,7 +149,7 @@ describe("runChannelAnalysis", () => {
       outcome: "completed",
       findingCount: 0,
       observationCount: 1,
-      needsDataCount: 9,
+      needsDataCount: 10,
     });
   });
 

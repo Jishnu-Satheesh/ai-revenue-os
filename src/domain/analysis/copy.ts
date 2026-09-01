@@ -52,7 +52,7 @@ export const WORKSPACE_CHAPTERS: readonly WorkspaceChapter[] = [
     id: "cancellations",
     navLabel: "Cancellations",
     heading: "Cancellations Financial Impact",
-    detectorKeys: ["orders.cancellation_loss"],
+    detectorKeys: ["orders.cancellation_loss", "orders.cancellation_attribution"],
   },
   {
     id: "availability",
@@ -162,6 +162,14 @@ export function findingHeadline(code: string): string {
       return "Avoidable cancellations, by the provider's own reason";
     case "ORDER_CANCELLATION_LOSS_UNAVAILABLE":
       return "Cancellation loss cannot be reported for this window";
+    case "ORDER_CANCELLATION_ATTRIBUTION_TOTAL":
+      return "Cancellations this marketplace attributed to somebody";
+    case "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS":
+      return "Attributed cancellations, against the orders this channel took";
+    case "ORDER_CANCELLATION_ATTRIBUTION_PARTY":
+      return "Cancellations by the party the provider held responsible";
+    case "ORDER_CANCELLATION_ATTRIBUTION_UNAVAILABLE":
+      return "Who cancelled cannot be reported for this window";
     case "OPERATIONS_CLOSED_SHARE":
       return "Share of scheduled minutes this channel reported closed";
     case "OPERATIONS_CLOSED_DAYS":
@@ -216,6 +224,10 @@ export function needsDataSentence(reason: string): string {
       return "One of the two stages this pair converts between carries no figures in this window. Nothing is filled in, because a missing step that read as a complete funnel would be worse than no funnel.";
     case "CANCELLATION_LOSS_SERIES_ABSENT":
       return "No approved report has written the cancellation or rejection-loss figures these days need, so neither a count nor a provider-stated loss can be reported.";
+    case "CANCELLATION_ATTRIBUTION_SERIES_ABSENT":
+      return "No approved report says who cancelled these days' orders. A provider that never names a party leaves the cancellations counted but unattributed.";
+    case "CANCELLATION_ATTRIBUTION_UNDIMENSIONED":
+      return "The attributed cancellations carry no party, so there is nobody to report them against.";
     case "CLOSED_SHARE_SERIES_ABSENT":
       return "No approved report has written the closed-minute or scheduled-minute figures these days need, so no share of scheduled time can be reported.";
     case "CUSTOMER_MIX_SERIES_ABSENT":

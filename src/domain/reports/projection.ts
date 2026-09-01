@@ -99,6 +99,32 @@ const reportProjectionOutputSchema = z
           .min(1)
           .max(20),
         /**
+         * How this provider's own words become the declared vocabulary.
+         *
+         * Some providers write codes and some write sentences. Talabat labels a
+         * closed day `CHECK_IN_REQUIRED`; Keeta labels a cancelled order
+         * `Cancelled by merchant`. A dimension value has to be a stable key --
+         * something a detector can group on and a chart can compare across
+         * providers -- so prose cannot be stored as it arrives.
+         *
+         * The map declares, for this column, which literal text stands for
+         * which approved code. It is approved with the rest of the document,
+         * which is the point: an operator reading it sees "Cancelled by
+         * merchant means MERCHANT" and can say whether that is true. Inferring
+         * it -- upper-casing, stripping spaces, matching loosely -- would put
+         * the same judgement in code where nobody approves it and no one sees
+         * it change.
+         *
+         * Where a map is declared it is the only way in, and it must reach
+         * every allowed value: a code nothing maps to is a vocabulary entry
+         * that can never be written, which is a declaration mistake rather
+         * than a harmless one. Text the map does not carry still refuses the
+         * import, exactly as an undeclared label always has (ADR 0034).
+         */
+        labelMap: z
+          .record(z.string().min(1).max(128), z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/))
+          .optional(),
+        /**
          * Also read this field's labels out of the cells a ragged row injects.
          * Talabat continues its reason list into the cells it inserts, so the
          * second cause of a closed day lives in the displacement itself.
@@ -336,6 +362,53 @@ export const reportProjectionDocumentSchema = z
             message: "Each allowed value may be declared once.",
           });
         }
+        const labelMap = output.categorical.labelMap;
+        if (labelMap) {
+          const literals = Object.keys(labelMap);
+          if (literals.length === 0 || literals.length > 20) {
+            context.addIssue({
+              code: "custom",
+              path: ["outputs"],
+              message: "A label map declares between one and twenty provider labels.",
+            });
+          }
+          if (literals.some((literal) => literal.trim().length === 0)) {
+            context.addIssue({
+              code: "custom",
+              path: ["outputs"],
+              message: "A provider label cannot be blank.",
+            });
+          }
+          // Cells are matched with surrounding whitespace and casing ignored,
+          // so two literals differing only in those would be one rule with two
+          // answers, and which one won would depend on key order.
+          const folded = new Set(literals.map((literal) => literal.trim().toLowerCase()));
+          if (folded.size !== literals.length) {
+            context.addIssue({
+              code: "custom",
+              path: ["outputs"],
+              message: "Two provider labels differ only by case or spacing.",
+            });
+          }
+          const allowed = new Set(output.categorical.allowedValues);
+          const mapped = new Set(Object.values(labelMap));
+          if ([...mapped].some((code) => !allowed.has(code))) {
+            context.addIssue({
+              code: "custom",
+              path: ["outputs"],
+              message: "A label map may only produce values the output declares as allowed.",
+            });
+          }
+          // A declared code nothing maps to can never be written, which reads
+          // in the approved document as a category that simply never occurs.
+          if ([...allowed].some((code) => !mapped.has(code))) {
+            context.addIssue({
+              code: "custom",
+              path: ["outputs"],
+              message: "Every allowed value needs at least one provider label mapped to it.",
+            });
+          }
+        }
       }
       outputKeys.add(output.key);
       metricKeys.add(output.metricKey);
@@ -474,24 +547,59 @@ function columnInRow(
 }
 
 /**
+ * The literal provider labels this column translates, folded for matching.
+ *
+ * Built once per output rather than per cell: an order export is one row per
+ * order, and the item exports run to five figures.
+ */
+function labelLookupFor(
+  categorical: ReportProjectionDocument["outputs"][number]["categorical"],
+): ReadonlyMap<string, string> | null {
+  if (!categorical?.labelMap) return null;
+  return new Map(
+    Object.entries(categorical.labelMap).map(([literal, code]) => [
+      literal.trim().toLowerCase(),
+      code,
+    ]),
+  );
+}
+
+/**
  * The category label a cell carries, under the declared rules.
  *
- * Empty cells say nothing. Numbers in an injected region are the provider's
- * own figures passing through, not categories, and are ignored rather than
- * coerced. Any other text has to be one of the declared labels: a category
- * nobody approved refuses the import instead of quietly becoming part of a
- * breakdown an operator will read as complete.
+ * Cells the contract calls absent say nothing -- Keeta writes `-` in this
+ * column on every order it did not cancel, and that is the absence of a
+ * category, not a category of its own. Numbers in an injected region are the
+ * provider's own figures passing through, not categories, and are ignored
+ * rather than coerced.
+ *
+ * Any other text has to resolve to a declared label: through the declared
+ * label map where the column carries prose, and otherwise by reading the cell
+ * as the code itself. Either way a category nobody approved refuses the import
+ * instead of quietly becoming part of a breakdown an operator will read as
+ * complete.
  */
-function categoryLabel(value: unknown, allowed: readonly string[]): string | null {
-  if (isEmptyCell(value)) return null;
+function categoryLabel(
+  value: unknown,
+  allowed: readonly string[],
+  labels: ReadonlyMap<string, string> | null,
+  absentMarkers: readonly string[] | undefined,
+): string | null {
+  if (isAbsentValue(value, absentMarkers)) return null;
   if (typeof value === "number") return null;
   if (isFormula(value) || value instanceof Date || typeof value === "object") {
     throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
   }
-  const text = String(value).trim().toUpperCase();
+  const text = String(value).trim();
   if (text.length === 0) return null;
-  if (!allowed.includes(text)) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
-  return text;
+  if (labels) {
+    const code = labels.get(text.toLowerCase());
+    if (code === undefined) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
+    return code;
+  }
+  const code = text.toUpperCase();
+  if (!allowed.includes(code)) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
+  return code;
 }
 
 function stringValue(value: unknown, code: string): string {
@@ -1054,6 +1162,7 @@ export function projectPeriodGrainMetrics(input: {
       index,
       absentMarkers: field.absentMarkers,
       parser: field.parser,
+      labels: labelLookupFor(output.categorical),
       contributors: [
         { index, absentMarkers: field.absentMarkers, parser: field.parser },
         ...extras,
@@ -1103,7 +1212,7 @@ export function projectPeriodGrainMetrics(input: {
     const byCategory = categoryCounts.get(periodStart) ?? new Map();
     categoryCounts.set(periodStart, byCategory);
 
-    for (const { output, index, contributors } of columns) {
+    for (const { output, index, absentMarkers, labels, contributors } of columns) {
       if (output.categorical) {
         const base = columnInRow(index, shift, ragged);
         const cells = [row[base]];
@@ -1124,7 +1233,12 @@ export function projectPeriodGrainMetrics(input: {
           }
         }
         for (const cell of cells) {
-          const label = categoryLabel(cell, output.categorical.allowedValues);
+          const label = categoryLabel(
+            cell,
+            output.categorical.allowedValues,
+            labels,
+            absentMarkers,
+          );
           if (label === null) continue;
           byCategory.set(
             `${output.key}\u0000${label}`,

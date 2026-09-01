@@ -797,6 +797,28 @@ function distinctReasonValues(finding: WorkspaceFindingView | undefined): string
 }
 
 /**
+ * The party one attributed-cancellation finding counts, read off its own cited
+ * rows rather than from its position in the list.
+ */
+function attributedParty(finding: WorkspaceFindingView): string | null {
+  const parties = new Set<string>();
+  for (const citation of finding.evidence) {
+    const party = citation.metric?.dimensions.cancelled_by;
+    if (party) parties.add(party);
+  }
+  return parties.size === 1 ? [...parties][0] : null;
+}
+
+/**
+ * A provider's code as a sentence reads it: `CUSTOMER_SERVICE` becomes
+ * "customer service". Presentation only -- nothing is renamed or interpreted,
+ * so the word in the sentence is still the word the provider wrote.
+ */
+function spokenCode(code: string): string {
+  return code.toLowerCase().replace(/_/g, " ");
+}
+
+/**
  * The approved draft's rail figure, plain reason, and cited-record count for a
  * chapter, assembled from the chapter's own stored findings and nothing else.
  *
@@ -846,6 +868,52 @@ function chapterRailSummary(chapter: WorkspaceChapterView): {
       reason,
       inspectCount: loss.value?.kind === "count" ? loss.value.value : null,
     };
+  }
+
+  // The same chapter for a marketplace that names who cancelled but prices no
+  // rejection. Keeta is exactly that: it attributes every cancellation and
+  // states no loss, so without this the chapter would hold the findings and
+  // show an empty rail beside them.
+  if (chapter.id === "cancellations" && !loss) {
+    const orderShare = chapter.findings
+      .filter((finding) => finding.code === "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS")
+      .map((finding) => ratioOf(finding))
+      .find((ratio) => ratio !== null);
+    const parties = chapter.findings
+      .filter((finding) => finding.code === "ORDER_CANCELLATION_ATTRIBUTION_PARTY")
+      .map((finding) => ({ ratio: ratioOf(finding), party: attributedParty(finding) }))
+      .filter(
+        (entry): entry is { ratio: { numerator: number; denominator: number }; party: string } =>
+          entry.ratio !== null && entry.party !== null,
+      )
+      .sort((left, right) => right.ratio.numerator - left.ratio.numerator);
+    const leading = parties[0];
+    const attributed = chapter.findings.find(
+      (finding) => finding.code === "ORDER_CANCELLATION_ATTRIBUTION_TOTAL",
+    );
+    const attributedCount = attributed?.value?.kind === "count" ? attributed.value.value : null;
+
+    if (orderShare || leading || attributedCount !== null) {
+      const figure = orderShare
+        ? `${formatPercent(orderShare.numerator, orderShare.denominator)} Cancelled`
+        : attributedCount !== null
+          ? `${formatCount(attributedCount)} Cancelled`
+          : null;
+      const scale = orderShare
+        ? `${formatPercent(orderShare.numerator, orderShare.denominator)} of the orders this channel took were cancelled with a party named.`
+        : attributedCount !== null
+          ? `The provider attributed ${formatCount(attributedCount)} cancellations this window.`
+          : null;
+      const blame = leading
+        ? ` It held ${spokenCode(leading.party)} responsible for ${formatPercent(leading.ratio.numerator, leading.ratio.denominator)} of them.`
+        : "";
+      return {
+        figure,
+        figureClass: figure ? "text-destructive" : "text-foreground",
+        reason: scale ? `${scale}${blame}` : null,
+        inspectCount: attributedCount,
+      };
+    }
   }
 
   if (chapter.id === "availability" && shareRatio) {

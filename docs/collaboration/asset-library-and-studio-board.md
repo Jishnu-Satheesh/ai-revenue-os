@@ -182,6 +182,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI4 | Growth Intelligence Task 2 rollout and permission mirror — claimed: `src/lib/env.ts`, new `src/modules/growth-intelligence/application/feature-access.ts` and `feature-access.test.ts`, `src/domain/access/permissions.ts`, `permissions.test.ts`, `permissions.drift.test.ts`, `supabase/migrations/20260831145236_growth_intelligence_permissions.sql`, `supabase/tests/database/permission_catalogue_test.sql`, and tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. No `database.types.ts`, RLS, Trigger, or other staging mutation is in scope. The migration was CLI-generated only after `20260831200000` and `20260831210000` both appeared on hosted staging and local/remote history matched. | codex-root | high | approved Growth Intelligence plan Task 2 | **done — applied to staging; 38 focused tests, typecheck, slice lint/format, and 27/27 live pgTAP verified** |
 | GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed now: `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, `src/domain/growth-intelligence/schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. The domain-file extension closes deterministic Postgres/TypeScript digest ordering before staging apply. `src/lib/supabase/database.types.ts` and its drift test are required later in this task but are not claimed while another session has staged changes there; no edit will occur until that shared-file ownership clears. | codex-root | high | approved Growth Intelligence plan Task 3 | **in-progress — 94/94 rollback pgTAP checks green; cross-runtime identity vectors next; no Task 3 staging change yet** |
 | KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done — projected on staging through the governed path and browser-verified at 1440px and 390px; the channel reads 39.3% where commission alone reads 21.4%** |
+| KC2 | Read a provider's prose category labels — claimed: `src/domain/reports/projection.ts`, new `src/domain/reports/projection-label-map.test.ts`, new `supabase/migrations/20260901090000_admit_projection_label_map.sql`, new `supabase/migrations/20260901090500_cancellation_attribution_metric_definition.sql`, new `supabase/migrations/20260901091000_admit_registry_v8.sql`, `supabase/tests/database/governed_report_projection_document_test.sql`, `src/domain/reports/provider-library/keeta-orders.ts` and its real-export test, new `src/domain/analysis/detectors/orders-cancellation-attribution.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/domain/analysis/copy.ts`, `src/components/analysis/channel-workspace.tsx` and its test, `adrs/0034-reason-codes-are-metric-row-dimensions.md`, `specs/018-governed-channel-intelligence.md`. No new table, no RLS change, no `database.types.ts` edit. | claude | high | user approval 2026-09-01 | **in-progress — language, guard, provider binding, detector and tests all green; migrations applied to staging and all three live guards accept the shipped documents; awaiting the live re-projection and browser check** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -246,6 +247,72 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 ---
 
 ## 8. Log
+
+### 2026-09-01 · claude · KC2 — a provider that labels its rows in sentences
+
+**What was wrong.** Keeta's order export has a column saying who cancelled each order. The platform
+had been counting that channel's cancellations for weeks with no fault attached to any of them,
+because the labels are English — `Cancelled by merchant` — and the projection language matched
+categorical labels against upper-case codes with no spaces. The most actionable fact in the file sat
+in a column nothing could read.
+
+**What was built.** `categorical.labelMap`: a declared map from the provider's literal text to an
+approved code, approved with the rest of the document. Where a map is declared it is the only way
+in and it must reach every allowed value, so a code nothing maps to cannot be declared. Matching
+ignores case and surrounding space; two literals differing only in those are refused as one rule
+with two answers. The refusal ADR 0034 rests on is unchanged — unmapped text still stops the import.
+
+The categorical branch now also honours the contract field's `absentMarkers`. It did not before, and
+Keeta writes `-` on every order it did not cancel, so without that the import would have refused on
+the first completed order.
+
+**Three migrations, applied to staging and verified live:**
+
+- `20260901090000_admit_projection_label_map` — the guard replaced whole from the live
+  `20260831230000` definition, diffed before applying: the categorical key allow-list widened by one
+  key, and one validation block added. Nothing else differs.
+- `20260901090500_cancellation_attribution_metric_definition` — `order.cancellation_attribution_count`,
+  pack-scoped.
+- `20260901091000_admit_registry_v8` — registry 8 in both places, the check constraint and the guard
+  inside `claim_channel_analysis`, confirmed by reading both back.
+
+**A separate metric, deliberately.** Talabat names *why* an order was cancelled
+(`ITEM_UNAVAILABLE`); Keeta names *who* cancelled it. Folding both into
+`order.avoidable_cancellation_reason` would make a breakdown mixing reasons and parties read as if
+it compared like with like.
+
+**What it counts, and what it does not.** Orders the provider attributed to a party. That is not the
+channel's cancelled-order count and will not equal it — a partially refunded order carries an
+attribution while the provider still counts it as fulfilled. The projection language has no filters
+by design (ADR 0027), so rather than filter, the metric is named for what it counts and the detector
+states the divergence as a limitation. Worth writing down: the alternative considered and rejected
+was adding filters to the declaration language, which is the thing ADR 0027 deliberately excluded.
+
+**`orders.cancellation_attribution`** states the attributed total, each party's share of it, and —
+where an approved report counts the orders — the share of orders that carried an attribution, over
+the days carrying both figures. It recognises no party by name; the vocabulary is the provider's and
+arrives through their label map. Monetary impact is declared not computable: Keeta prices no
+cancellation, and multiplying one by an average basket would be a model presented as a measurement.
+
+**The workspace.** The cancellations chapter's rail required `ORDER_CANCELLATION_LOSS`, which only
+Talabat produces. A marketplace that names a party but prices no loss would have held the findings
+and shown an empty frame beside them — which reads as nothing having been found — so the chapter now
+has its own rail for that case.
+
+**Verified.** 18 of 18 pgTAP assertions against staging, including the six new label-map cases. The
+full suite runs 339 of 340 files green; the one failure is `database.types.test.ts`, and both of its
+assertions name Growth Intelligence tables, which are theirs. The real-export test proves every
+attribution in the client's own file resolves to a declared code with none arriving as prose.
+
+Most importantly, all three **live** staging guards were called with the shipped Keeta documents and
+accepted them: `assert_report_contract_document`, `assert_report_projection_document`, and
+`assert_report_projection_matches_contract`. That is the failure this repo has hit twice — every
+test green and Postgres refusing at the moment an operator clicks approve — and it is closed.
+
+**Still to do:** the live re-projection through the operator UI, and the browser check at both
+widths. The chrome-devtools MCP failed to connect this session, so neither was attempted rather
+than half-done.
+
 
 ### 2026-09-01 · claude · single agent from here, and the money card fixed rather than flagged
 

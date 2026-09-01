@@ -74,3 +74,42 @@ Dimension values are stored as bounded source snapshots, not platform enums:
 they record what the provider wrote, not a platform-controlled classification.
 Nothing downstream should switch behaviour on a specific label; a detector
 that must treat one specially declares that in its own versioned calculation.
+
+## Amendment, 2026-09-01: the declared vocabulary is a mapping, not only a list
+
+`allowedValues` assumed providers write keys. Talabat does — a closed day says
+`CHECK_IN_REQUIRED`. Keeta writes English: an order says `Cancelled by
+merchant`. The original rule matched a cell by upper-casing it and requiring
+membership in the allowed list, so a label with a space in it could not be
+declared at all, and the one column in Keeta's order export that says whose
+fault a cancellation was stayed unreadable. The platform counted that channel's
+cancellations for weeks with no fault attached to any of them.
+
+A categorical output may now declare `categorical.labelMap`: which literal text
+this provider writes for which approved code. Where a map is declared it is the
+only way in, and it must reach every value in `allowedValues` — a code nothing
+maps to can never be written, and reads in an approved document as a category
+that simply never occurred. Matching ignores surrounding whitespace and case,
+so two literals differing only in those are refused as one rule with two
+answers.
+
+### Why a declared map rather than inference
+
+Upper-casing, stripping spaces, or matching loosely would produce the same
+codes with none of the accountability. The judgement "Cancelled by merchant
+means MERCHANT" is a claim about what a provider meant, and it belongs where an
+owner or admin reads it and can say whether it is true — beside the rest of the
+mapping they approve — not in a projector where nobody sees it change.
+
+### What does not change
+
+The refusal this ADR rests on is untouched. Text the map does not carry stops
+the import rather than becoming an "other" nobody defined, which is still how a
+provider's vocabulary drifting under a breakdown becomes a contract revision
+instead of silence.
+
+Storage does not change: a label is still a dimension value on an ordinary
+numeric row, and grouping is still a read-time concern. The rule that nothing
+downstream switches behaviour on a specific label holds, and the first detector
+to read a mapped vocabulary — `orders.cancellation_attribution` — states counts
+and proportions per party without recognising any party by name.

@@ -3,6 +3,7 @@ import { economicsChannelCostLoadDetector } from "@/domain/analysis/detectors/ec
 import { economicsCommissionShareDetector } from "@/domain/analysis/detectors/economics-commission-share";
 import { funnelStageConversionDetector } from "@/domain/analysis/detectors/funnel-stage-conversion";
 import { operationsClosedShareDetector } from "@/domain/analysis/detectors/operations-closed-share";
+import { ordersCancellationAttributionDetector } from "@/domain/analysis/detectors/orders-cancellation-attribution";
 import { ordersCancellationLossDetector } from "@/domain/analysis/detectors/orders-cancellation-loss";
 import { periodCoverageDetector } from "@/domain/analysis/detectors/period-coverage";
 import { reconciliationBlockedDetector } from "@/domain/analysis/detectors/reconciliation-blocked";
@@ -48,7 +49,11 @@ import type {
 // of account showed commission to be about half of what the marketplace
 // actually charged. `economics.channel_cost_load` reads every merchant-borne
 // deduction rather than the largest one.
-export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 7;
+// 8: cancellations stop being anonymous. Keeta's order export names the party
+// that cancelled each one, in sentences the projection language could not read
+// until the declared label map landed, so `orders.cancellation_attribution`
+// answers whose cancellations a channel's are instead of only how many.
+export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 8;
 
 export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   periodCoverageDetector,
@@ -58,6 +63,7 @@ export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   revenueWindowGrossDetector,
   funnelStageConversionDetector,
   ordersCancellationLossDetector,
+  ordersCancellationAttributionDetector,
   operationsClosedShareDetector,
   customerNewShareDetector,
   economicsCommissionShareDetector,

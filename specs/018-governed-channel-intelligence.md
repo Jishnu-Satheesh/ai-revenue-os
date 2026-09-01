@@ -622,9 +622,16 @@ accepted from the worker. A row dated outside the package's declared window is
 `PERIOD_OUT_OF_DECLARED_RANGE`; a row whose date cannot be read is `INVALID_LOCAL_DATE`. See
 ADR 0030.
 
-Categorical outputs write provider reason codes as dimension values on those same numeric rows, and
+Categorical outputs write provider labels as dimension values on those same numeric rows, and
 continuous quantities reach count metrics through decimal-parser columns accumulated in exact
 fixed-point addition, never floating point. See ADR 0034 and ADR 0036.
+
+Where a provider writes those labels as prose rather than as codes, the approved declaration carries
+a `categorical.labelMap` naming which literal text stands for which approved value — Keeta's
+`Cancelled by merchant` for `MERCHANT`. The map is approved with the rest of the document rather
+than inferred at import, must reach every value the output allows, and does not loosen the refusal:
+text it does not carry stops the import instead of becoming an undefined "other". See the
+2026-09-01 amendment to ADR 0034.
 
 ### 10.2 Exact-range metric ledger
 
@@ -850,6 +857,29 @@ The channel VerdictBand reads Potential from this observation and Lost from
 derived split `Potential − Lost`, shown only when both stored amounts share a currency and potential
 is not smaller than lost. This does not depend on a model-written recommendation or on the
 organization-scoped `revenue.channel_share` detector.
+
+#### Registry versions 4 to 8
+
+Each appends without changing what came before, and each is admitted in two places — the
+`channel_analysis_runs` check constraint and the guard inside `claim_channel_analysis` — because
+changing only the first passes every unit test and then raises 22023 at claim time.
+
+- **4** — `revenue.window_gross` may answer from a provider's own span total, so a channel that
+  states one figure per export is analysable at all.
+- **5** — a span becomes a grain a run can be claimed at. Only the two detectors that can honestly
+  answer without periods bind there; the rest are not bound at all rather than bound and refusing.
+- **6** — `economics.commission_share`, the first detector that reads a cost. Keeta's order export
+  states the commission the marketplace charged, so what a channel costs to sell through comes from
+  evidence rather than from a configured rate.
+- **7** — `economics.channel_cost_load`. Commission was never the whole bill: reconciling a client's
+  own statement of account showed it to be roughly half of what the marketplace actually charged,
+  with bank charges and equipment fees making up the rest.
+- **8** — `orders.cancellation_attribution`. Keeta names the party that cancelled each order, in
+  sentences the projection language could not read until `categorical.labelMap` landed, so the
+  workspace answers whose cancellations a channel's are instead of only how many. It states counts
+  and the proportions between them; it recognises no party by name, per ADR 0034. Its monetary
+  impact is declared not computable — this provider prices no cancellation, and multiplying one by
+  an average basket would be a model presented as a measurement.
 
 ### 11.3 Analysis records
 
