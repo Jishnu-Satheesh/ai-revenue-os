@@ -10,6 +10,7 @@ vi.mock("@/modules/integrations/application/feature-access", () => ({
 }));
 
 import {
+  requestReportPackageProfiling,
   requestReportPackageProjection,
   requestReportPackageValidation,
 } from "@/modules/reports/application/dispatch";
@@ -120,6 +121,44 @@ describe("dispatching a validation", () => {
     await requestReportPackageValidation({
       organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
       correlationId: "c2", validationRunId,
+    });
+
+    expect(keyOf(0)).toBe(keyOf(1));
+  });
+});
+
+describe("dispatching profiling", () => {
+  it("keeps the worker's key stable while giving each retry its own dispatch", async () => {
+    // Profiling is the one case where the two keys must differ. Its claim
+    // stores the key it first saw and refuses a different one, so what the
+    // worker presents has to stay the package's key; what Trigger
+    // de-duplicates on has to change, or the retry is dropped.
+    await requestReportPackageProfiling({
+      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c1",
+    });
+    await requestReportPackageProfiling({
+      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c2",
+      attemptKey: "report-retry:00000000-0000-4000-8000-00000000000c",
+    });
+    await requestReportPackageProfiling({
+      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c3",
+      attemptKey: "report-retry:00000000-0000-4000-8000-00000000000d",
+    });
+
+    expect(payloadKeyOf(0)).toBe(payloadKeyOf(1));
+    expect(payloadKeyOf(1)).toBe(payloadKeyOf(2));
+    expect(keyOf(0)).not.toBe(keyOf(1));
+    expect(keyOf(1)).not.toBe(keyOf(2));
+  });
+
+  it("still profiles once when an upload completes twice", async () => {
+    // No attempt key means the first profiling of a package, which must not
+    // run twice because the upload was completed twice.
+    await requestReportPackageProfiling({
+      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c1",
+    });
+    await requestReportPackageProfiling({
+      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c2",
     });
 
     expect(keyOf(0)).toBe(keyOf(1));

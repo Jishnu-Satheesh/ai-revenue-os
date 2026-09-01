@@ -11,8 +11,21 @@ export async function requestReportPackageProfiling(input: {
   organizationId: string;
   packageId: string;
   correlationId: string;
+  /**
+   * The operator's own key for this retry, which is new on every press.
+   *
+   * Profiling needs the two keys to differ, unlike validation and projection.
+   * The claim stores the key it first saw and refuses a different one -- there
+   * is no branch that discards a stale profiling operation -- so what the
+   * worker presents has to stay the package's key across attempts. What Trigger
+   * de-duplicates on must not: a dispatch key that repeats makes it drop the
+   * retry against the attempt that already finished, and the operator is told
+   * the checks were queued when nothing ran.
+   */
+  attemptKey?: string;
 }): Promise<boolean> {
   const profileKey = `report-profile:${input.packageId}`;
+  const dispatchKey = input.attemptKey ? `${profileKey}:${input.attemptKey}` : profileKey;
   try {
     await tasks.trigger<typeof reportPackageProfilingTask>(
       "report-package.profile",
@@ -21,7 +34,7 @@ export async function requestReportPackageProfiling(input: {
         packageId: input.packageId,
         idempotencyKey: profileKey,
       },
-      { idempotencyKey: profileKey },
+      { idempotencyKey: dispatchKey },
     );
     return true;
   } catch (error) {

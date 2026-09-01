@@ -356,6 +356,12 @@ retry, and only silently. `requestReportPackageValidation` had the identical bug
 validation" was equally dead. Both are now keyed on the run id, which is new per attempt while a
 redelivery of the same run still de-duplicates. Five tests in `dispatch.test.ts` hold it.
 
+The same defect had a third instance: the generic "Retry", which re-queues the structural checks,
+keys on `report-profile:{package}`. Profiling needs the two keys to differ rather than merge --
+its claim stores the key it first saw and refuses a different one, and nothing discards a stale
+profiling operation -- so the worker still presents the package's key while Trigger de-duplicates on
+a dispatch key carrying the operator's own per-press retry key.
+
 **2. A failure that explained nothing.** `PROJECTION_PROCESSING_FAILED` names a category. The cause
 went to `console.error` in the worker -- invisible to an operator, and unreadable for a production
 run through a `--dev-only` MCP. `integration_report_projection_runs.failure_detail` now records the

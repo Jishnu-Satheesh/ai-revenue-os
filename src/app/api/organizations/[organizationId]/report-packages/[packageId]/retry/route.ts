@@ -25,6 +25,8 @@ export async function POST(
         organizationId: context.organizationId,
         packageId: reportPackage.id,
         correlationId: context.correlationId,
+        // This press, not this package: without it Trigger drops the retry.
+        attemptKey: body.idempotencyKey,
       });
       return { body: { reportPackage, profilingQueued } };
     },
