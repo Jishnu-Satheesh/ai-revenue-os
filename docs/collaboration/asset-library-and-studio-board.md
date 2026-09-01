@@ -2,6 +2,26 @@
 
 **Agents:** `claude` (Claude Opus 5, Claude Code) and `codex` (Codex CLI).
 
+> ## ⚠️ SINGLE-AGENT SINCE 2026-09-01 — READ THIS FIRST
+>
+> **Only one agent works in this repository now.** The user confirmed on 2026-09-01 that no other
+> agent is active. Everything below about two threads, split tool access, and quota-based division
+> of labour is **historical record, not a live contract**.
+>
+> What this changes, concretely:
+>
+> - **Every `in-progress` row on the Task board is stale.** R1, GI5 and D1 have no one working them.
+>   A claimed file is not a blocked file. Do not flag work as "someone else's claim" and leave it —
+>   fix it, then say what you fixed.
+> - **The three shared-tree rules in section 2 still apply for a different reason.** Claim files,
+>   own migrations, and never `git stash` — not because another agent might collide, but because the
+>   stash stack is shared with the main checkout and other worktrees, and a pushed migration is
+>   still live on shared staging immediately.
+> - **Path-limited commits are no longer needed** to protect another agent's staged work. Commit
+>   normally unless the working tree actually shows changes you did not make.
+>
+> If a second agent is ever started again, delete this block and say so in the Log.
+
 **Two threads from 2026-08-24.** The Asset Library (spec 019) and the Creative Studio (spec 020) are
 now run in separate conversations because holding both in one was mixing them up. This board stays
 shared — it is the only thing joining them, and both threads log here.
@@ -218,6 +238,33 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 ---
 
 ## 8. Log
+
+### 2026-09-01 · claude · single agent from here, and the money card fixed rather than flagged
+
+**The user confirmed no other agent is active.** A banner now sits at the top of this file and
+`AGENTS.md` section 10 has been rewritten from "more than one AI agent works in this repository" to
+say one does. The three shared-tree rules survive, but for different reasons: the stash stack is
+shared with the main checkout and other worktrees, and a pushed migration is live on staging
+immediately — neither has anything to do with a second agent.
+
+**The rule that changed:** a claimed file is not a blocked file. Every `in-progress` row here — R1,
+GI5, D1 — has nobody working it. Earlier today I declined to fix a layout defect and a spec
+contradiction because R1's row named the files. That was the wrong call under these conditions, and
+the banner exists so it is not repeated.
+
+**The money card is fixed.** A grid item stretches to its row by default, and the row is as tall as
+whichever column has more to say. The rail is transparent so stretching cost it nothing, but the
+card is a bordered box — a chapter whose figures are two short bars drew that border around a
+screenful of nothing, which reads as content that failed to load rather than a chapter that is
+brief. `items-start` on the chapter grid sizes both columns to their content. The money card went
+from stretching to 504px down to 124px, and every other chapter measured correctly afterwards
+(cancellations 305, availability 437, funnel 345, retention 305, trust 371). Verified in the browser
+at 1440px and 390px, no overflow, no console errors.
+
+**Still open for whoever picks it up:** `specs/018-governed-channel-intelligence.md` says "Money,
+Items, Promotions, and Customer Voice collapse into one muted awaiting-other-reports row". Money
+reports now. Under the single-agent rule that is mine to correct, and it is the next thing to do.
+
 
 ### 2026-09-01 · claude · the cost figures are live, and the browser proves it
 

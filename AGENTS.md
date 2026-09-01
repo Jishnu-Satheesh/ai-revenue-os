@@ -170,21 +170,30 @@ When implementation contradicts documentation, stop and resolve the contradictio
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only. Never replace the symlink with a copy.
 
-## 10. Multi-agent coordination
+## 10. Coordination and the collaboration board
 
-More than one AI agent works in this repository at the same time, in the same working tree.
+**One agent works in this repository.** Confirmed by the user on 2026-09-01. It was two for a
+period from 2026-08-24, and `docs/collaboration/asset-library-and-studio-board.md` still carries
+that arrangement — treat all of it as historical record.
 
-Before starting any task, read `docs/collaboration/asset-library-and-studio-board.md`. It records who
-owns which task, which files are claimed, which agent holds which tool access, and an append-only
-log of what has already been decided and discovered. Add your own entries as you go; edit your own
-rows only.
+**A claimed file is not a blocked file.** Task-board rows still marked `in-progress` have nobody
+working them. If you find a defect in a file some old row claims, fix it and say what you fixed.
+Declining to touch working code because a stale row names it is a failure, not caution.
 
-Three rules exist because the tree is shared:
+Still read the board before starting, and still add entries as you go. It is no longer a live
+contract between agents, but it is the durable record of what was decided, discovered and rejected
+across sessions, and it is the only such record that survives a new conversation.
 
-- Claim the files you intend to touch on the board before opening them.
-- Only the agent holding the migration task writes or pushes migrations. A pushed migration is live
-  on shared staging immediately.
-- Never use `git stash`. The stash stack is shared across worktrees and other sessions.
+Three rules survive, for reasons that have nothing to do with other agents:
+
+- **Never use `git stash`.** The stash stack is shared with the main checkout and every other
+  worktree, and other sessions may pop it. Use a temporary WIP commit instead.
+- **A pushed migration is live on shared staging immediately.** There is no local rehearsal, so get
+  it right by reading the existing schema first.
+- **Claim the files you intend to touch on the board.** Not to reserve them, but so the next session
+  can see what a change touched and why.
+
+If a second agent is ever started again, say so here and in the board's banner.
 
 ## 11. Misc
 <!-- TRIGGER.DEV SKILLS START -->

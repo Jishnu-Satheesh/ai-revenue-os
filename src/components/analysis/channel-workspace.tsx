@@ -1420,7 +1420,13 @@ function ChapterShell({
     <section
       id={chapter.id}
       aria-label={`${chapter.navLabel} chapter`}
-      className="grid scroll-mt-24 grid-cols-1 gap-6 lg:grid-cols-12"
+      // `items-start` because a grid item stretches to its row by default, and
+      // the row is as tall as whichever column has more to say. The rail is
+      // transparent so stretching costs it nothing, but the card is a bordered
+      // box: a chapter whose figures are two short bars drew that border around
+      // a screenful of nothing, which reads as content that failed to load
+      // rather than a chapter that is simply brief.
+      className="grid scroll-mt-24 grid-cols-1 items-start gap-6 lg:grid-cols-12"
     >
       <Card className="lg:col-span-8">
         <CardHeader>

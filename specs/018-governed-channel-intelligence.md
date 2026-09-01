@@ -220,6 +220,10 @@ no AI narration, no provider or campaign actions, no OCR, and no model-read valu
 - Money, Items, Promotions, and Customer Voice stay awaiting-other-reports, collapsed into one muted
   row naming the report each needs, because the Talabat performance export holds no commission or
   payout columns, no per-item rows, no promotion funding detail, and no ratings.
+  **Superseded for Money on 2026-09-01.** Kept as the record of what this dated slice shipped. Keeta
+  exports later supplied the commission and fee columns Talabat's export lacks, so the Money chapter
+  now reports rather than waits; see registry 7 below. Items, Promotions and Customer Voice are
+  unchanged and still wait.
 
 #### Staging proof and recommendation completion (2026-08-26)
 
@@ -1179,9 +1183,12 @@ no execute button.
 Data-Ink Maximal Narrative draft: the verdict band leads, and the narrative chapters are numbered in
 the order ADR 0035 defines — declared monetary impact first, then the deterministic fallbacks — so
 the page opens with what each problem cost. Chapters the current exports cannot fill do not render
-empty frames: Money, Items, Promotions, and Customer Voice collapse into one muted
+empty frames: Items, Promotions, and Customer Voice collapse into one muted
 awaiting-other-reports row naming the report each needs, because the Talabat performance export
-holds no data for them (section 4.1.7). The page still distinguishes reported, needs data, no
+holds no data for them (section 4.1.7). Money was in that row until 2026-09-01 and no longer is:
+Keeta's order export writes the commission a marketplace charges and its billing report writes the
+bank and equipment fees beside it, so `economics.commission_share` and `economics.channel_cost_load`
+both report there from evidence. The page still distinguishes reported, needs data, no
 detector yet, and not analysed, because all four look identical as a blank frame and mean entirely
 different things.
 
