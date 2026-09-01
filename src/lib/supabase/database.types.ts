@@ -700,6 +700,13 @@ export type Database = {
           absent_row_count: number | null;
           error_codes: unknown;
           warning_codes: unknown;
+          /**
+           * What the failure knew about itself, bounded to 300 characters:
+           * the error's own name and message, never workbook content. Null on
+           * a run that succeeded, and on every failure recorded before the
+           * platform started keeping this.
+           */
+          failure_detail: string | null;
           correlation_id: string;
           started_at: string;
           completed_at: string | null;
@@ -2183,6 +2190,8 @@ export type Database = {
           p_claim_token: string;
           p_failure_code: string;
           p_result_digest: string;
+          /** The error's own name and message, truncated by the function. */
+          p_failure_detail?: string | null;
         };
         Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;
       };

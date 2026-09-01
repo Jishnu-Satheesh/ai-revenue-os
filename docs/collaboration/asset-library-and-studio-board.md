@@ -181,9 +181,9 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI3 | Growth Intelligence Task 1 pure domain contracts — claimed: new `src/domain/growth-intelligence/types.ts`, `schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `evidence-quality.ts`, `evidence-quality.test.ts`, `geography.ts`, `geography.test.ts`, `material-change.ts`, `material-change.test.ts`, `errors.ts`, and `index.ts`; tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Database-free TDD checkpoint; no migrations, RLS, Trigger tasks, APIs, staging changes, or files under active analysis/report claims. | codex-root | high | approved Growth Intelligence plan Task 1 | **done — 65 focused tests, typecheck, slice lint, and formatting verified; no staging change** |
 | GI4 | Growth Intelligence Task 2 rollout and permission mirror — claimed: `src/lib/env.ts`, new `src/modules/growth-intelligence/application/feature-access.ts` and `feature-access.test.ts`, `src/domain/access/permissions.ts`, `permissions.test.ts`, `permissions.drift.test.ts`, `supabase/migrations/20260831145236_growth_intelligence_permissions.sql`, `supabase/tests/database/permission_catalogue_test.sql`, and tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. No `database.types.ts`, RLS, Trigger, or other staging mutation is in scope. The migration was CLI-generated only after `20260831200000` and `20260831210000` both appeared on hosted staging and local/remote history matched. | codex-root | high | approved Growth Intelligence plan Task 2 | **done — applied to staging; 38 focused tests, typecheck, slice lint/format, and 27/27 live pgTAP verified** |
 | GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed: `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, `src/domain/growth-intelligence/schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `src/lib/supabase/database.types.ts`, `database.types.test.ts`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. The domain-file extension closes deterministic Postgres/TypeScript digest ordering. | codex-root | high | approved Growth Intelligence plan Task 3 | **done — migration applied to staging; 106/106 focused live pgTAP and full pgTAP green; 183 focused unit/type-drift tests, source typecheck, full lint, format, and diff checks green** |
-| GI6 | Growth Intelligence Task 4 governed Market Profile application boundary — claimed: new `src/modules/growth-intelligence/application/ports.ts`, `profile-service.ts`, `profile-service.test.ts`, `api-schemas.ts`, `api-schemas.test.ts`; new `src/modules/growth-intelligence/infrastructure/profile-repository.ts`, `profile-repository.test.ts`, `profile-proposal-provider.ts`, `profile-proposal-provider.test.ts`; new Market Profile read/proposal/decision routes and tests under `src/app/api/organizations/[organizationId]/market-profile/**`; Task 4 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No new schema or migration. | codex-root | high | approved Growth Intelligence plan Task 4; Task 3 staging contract live | **in-progress — inspect current route, Digital Twin, Supabase, event, and model-provider patterns before RED tests** |
+| GI6 | Growth Intelligence Task 4 governed Market Profile application boundary — claimed: new `src/modules/growth-intelligence/application/ports.ts`, `profile-service.ts`, `profile-service.test.ts`, `api-schemas.ts`, `api-schemas.test.ts`; new `src/modules/growth-intelligence/infrastructure/profile-repository.ts`, `profile-repository.test.ts`, `profile-proposal-provider.ts`, `profile-proposal-provider.test.ts`; new Market Profile read/proposal/decision routes and tests under `src/app/api/organizations/[organizationId]/market-profile/**`; Task 4 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No new schema or migration. | codex-root | high | approved Growth Intelligence plan Task 4; Task 3 staging contract live | **done — signed-in profile read/proposal/decision APIs; deterministic model-scope fence and one repair; 110 Growth Intelligence tests, typecheck, focused/full lint, format, and diff checks green** |
 | KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done — projected on staging through the governed path and browser-verified at 1440px and 390px; the channel reads 39.3% where commission alone reads 21.4%** |
-| KC2 | Read a provider's prose category labels — claimed: `src/domain/reports/projection.ts`, new `src/domain/reports/projection-label-map.test.ts`, new `supabase/migrations/20260901090000_admit_projection_label_map.sql`, new `supabase/migrations/20260901090500_cancellation_attribution_metric_definition.sql`, new `supabase/migrations/20260901091000_admit_registry_v8.sql`, `supabase/tests/database/governed_report_projection_document_test.sql`, `src/domain/reports/provider-library/keeta-orders.ts` and its real-export test, new `src/domain/analysis/detectors/orders-cancellation-attribution.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/domain/analysis/copy.ts`, `src/components/analysis/channel-workspace.tsx` and its test, `adrs/0034-reason-codes-are-metric-row-dimensions.md`, `specs/018-governed-channel-intelligence.md`. No new table, no RLS change, no `database.types.ts` edit. | claude | high | user approval 2026-09-01 | **in-progress — language, guard, provider binding, detector and tests all green; migrations applied to staging and all three live guards accept the shipped documents; deployed to Trigger production as 20260901.3; the live upload, contract approval, validation and figures approval all passed on staging; the projection run failed once with a generic code and is awaiting a retry, then the browser check** |
+| KC2 | Read a provider's prose category labels — claimed: `src/domain/reports/projection.ts`, new `src/domain/reports/projection-label-map.test.ts`, new `supabase/migrations/20260901090000_admit_projection_label_map.sql`, new `supabase/migrations/20260901090500_cancellation_attribution_metric_definition.sql`, new `supabase/migrations/20260901091000_admit_registry_v8.sql`, `supabase/tests/database/governed_report_projection_document_test.sql`, `src/domain/reports/provider-library/keeta-orders.ts` and its real-export test, new `src/domain/analysis/detectors/orders-cancellation-attribution.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/domain/analysis/copy.ts`, `src/components/analysis/channel-workspace.tsx` and its test, `adrs/0034-reason-codes-are-metric-row-dimensions.md`, `specs/018-governed-channel-intelligence.md`. No new table, no RLS change, no `database.types.ts` edit. | claude | high | user approval 2026-09-01 | **in-progress — language, guard, provider binding, detector and tests all green; migrations applied to staging and all three live guards accept the shipped documents; deployed to Trigger production as 20260901.3; the live upload, contract approval, validation and figures approval all passed on staging; the projection landed 158 observations once three defects in its path were fixed; browser-verified at 1440px and an emulated 390px. **Done** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -343,29 +343,60 @@ from start to failure, Trigger production run `run_06g5o9c98m8l686ts77q1o6n01` o
 - Every per-observation clause in the completion RPC passes for all 158 rows (evidence shape,
   binding match, dimension match), checked by running the clauses as SQL over the payload.
 
-**So every hop succeeds in isolation and the pipeline failed once in the middle.** The most likely
-remaining cause is transient -- a storage download or RPC hiccup, both of which the worker's `rpc`
-and `download` wrappers turn into a plain `Error`, which the boundary maps to the generic code. The
-next step is simply to retry the projection from the UI.
+**It was not transient, and I was wrong to lean that way.** Two more defects sat in the path, and
+finding them turned up a third. All three are fixed.
 
-**A real gap this exposed.** When an unexpected exception reaches the projection boundary, the run
-records only `PROJECTION_PROCESSING_FAILED`. The error's name and message go to `console.error` in
-the worker, which an operator cannot see, and which a `--dev-only` MCP cannot read for a production
-run either. Hours went into reconstructing a failure the platform already knew the cause of and
-threw away. Recording the error name and message on the run row would be a small change and is
-proposed, not built -- it is outside the approved plan.
+**1. The retry button was a decoy.** `requestReportPackageProjection` keyed the Trigger dispatch on
+`report-projection:{package}:{version}` -- the same string on every attempt. Trigger de-duplicated
+each retry against the attempt that had already finished, returned the old handle, and ran nothing.
+The caller got a success receipt and the package sat at `awaiting_projection` through three presses.
+The database was never the problem: a failed run with the package back at `awaiting_projection`
+already makes the claim discard the stale operation and start fresh. Only the transport dropped the
+retry, and only silently. `requestReportPackageValidation` had the identical bug, so "Retry
+validation" was equally dead. Both are now keyed on the run id, which is new per attempt while a
+redelivery of the same run still de-duplicates. Five tests in `dispatch.test.ts` hold it.
 
-**Still to do:** retry the projection, then the browser check at both widths. The chrome-devtools MCP
-connected once this session and dropped again; the pipeline was never driven through HTTP calls
-dressed up as a UI verification.
+**2. A failure that explained nothing.** `PROJECTION_PROCESSING_FAILED` names a category. The cause
+went to `console.error` in the worker -- invisible to an operator, and unreadable for a production
+run through a `--dev-only` MCP. `integration_report_projection_runs.failure_detail` now records the
+error's own name and message, bounded to 300 characters, identifiers only and never workbook
+content, and the package card shows it as "Why it stopped". The worker's `rpc` wrapper keeps the
+Postgres message too, instead of reducing it to an error code.
 
-Note for whoever picks this up: the existing `orders_detail` package (uploaded 2026-08-31, projected)
-was approved against a contract that binds five fields and does not include `Cancellation type`.
-Re-projecting it changes nothing. Landing the attribution needs the file uploaded again as a new
-package with the new contract and projection approved, and the overlap decisions on commission,
-provider subsidy and preparation minutes settled as "keep existing" — the new metric is not in that
-overlap set, so it lands cleanly. `order.total_count` already has 67 current days, so the share of
-orders has its denominator.
+That fix paid for itself on the next run, which said:
+
+    23505 duplicate key value violates unique constraint
+    "report_projection_reconciliations_period_grain_idx"
+
+**3. The reconciliation identity forgot the category.** ADR 0034 makes dimensions part of a
+period-grain observation's identity, and `normalized_metrics` honours it everywhere. This one index
+did not -- keyed on run, output and period alone, it read a day's second category as the day's first
+recorded twice. It stayed invisible because every categorical output shipped before this one writes
+at most one label a day: Talabat's closed-day reasons do so deliberately, which is what
+`collectInjectedValues: false` is for. Keeta names three parties and several days carry two. The
+index now includes `reconciliation_digest`, which is computed per observation and already carries
+the dimensions, so two categories of one day coexist while the same evidence twice is still refused.
+Two pgTAP assertions cover both halves.
+
+**Then it went green.** Package `ca630453` projected 158 observations; the three overlap groups
+against the earlier upload were settled as "keep existing" through the reconciliation panel; package
+status `projected`. The ledger carries what the raw file carries: merchant 35 across 21 days,
+customer service 3, platform 2.
+
+`channel-analysis.run` at registry 8 produced the detector's four outcomes:
+
+- `ORDER_CANCELLATION_ATTRIBUTION_TOTAL` -- 40
+- `ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS` -- 40/105 over the shared days
+- `ORDER_CANCELLATION_ATTRIBUTION_PARTY` -- 35/40, 3/40, 2/40
+
+**The workspace says it in a sentence.** "38.1% Cancelled -- 38.1% of the orders this channel took
+were cancelled with a party named. It held merchant responsible for 87.5% of them", over 40 cited
+records. Checked at 1440x900 and at an emulated 390x844: no console errors, no horizontal overflow,
+every chapter sized to its content (cancellations 197px, money 173px, availability 437px).
+
+**Full suite: 348 of 348 files, 3567 tests, no failures.** pgTAP 58 of 58 on the period-grain suite
+and 18 of 18 on the projection-document suite, both against staging.
+
 
 
 ### 2026-09-01 · claude · single agent from here, and the money card fixed rather than flagged
@@ -3889,3 +3920,24 @@ the full hosted pgTAP suite passed with zero failures. Focused domain/access/typ
 and source TypeScript passed against stable generated route types. The ordinary `pnpm typecheck`
 command was also attempted, but another live `next dev` process had left `.next/dev/types/validator.ts`
 partially written; excluding only that active generated cache produced a clean full-source result.
+
+### 2026-09-01 · codex-root · Growth Intelligence Task 4 governs the Market Profile boundary
+
+The signed-in Market Profile API now reads immutable profile history, creates AI or operator-authored
+proposals, and records exact-version confirmation, rejection, or disablement. Every route resolves
+membership before the rollout gate, checks `growth_intelligence.read` or
+`growth_intelligence.manage`, validates strict request shapes, and only then reaches the service.
+Profile confirmation remains the sole operation that activates a version and enqueues research;
+proposal creation cannot change the current pointer or create Market Evidence.
+
+The AI boundary receives only bounded, operator-confirmed public identity, niche, location, topic,
+and public-link context. It gets one initial call and at most one repair. Deterministic checks reject
+invented URLs, domains, competitors, branches, countries, and timezones even when the model output is
+structurally valid. Tag-shaped operator text is escaped before prompt insertion. Transport and
+database detail are replaced with safe public errors, and committed non-replayed outcomes emit only
+profile, version, decision, and request identifiers.
+
+Verification: the complete Growth Intelligence slice passed 110/110 Vitest tests; ordinary
+`pnpm typecheck` passed; focused ESLint passed with zero findings; full ESLint passed with no errors
+and only 18 unrelated pre-existing warnings. Targeted formatting passed. This task adds no migration
+and makes no staging database change.

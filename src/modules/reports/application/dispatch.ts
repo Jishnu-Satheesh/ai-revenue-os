@@ -44,7 +44,15 @@ export async function requestReportPackageValidation(input: {
 }): Promise<boolean> {
   if (!isGovernedReportValidationEnabled(input.organizationId)) return false;
   const validationRunId = input.validationRunId ?? crypto.randomUUID();
-  const validationKey = `report-validation:${input.packageId}:${input.contractVersionId}`;
+  // Keyed on the run, not on the package and contract. A key that is the same
+  // string on every attempt makes Trigger de-duplicate the retry against the
+  // attempt that already failed: the dispatch returns the old handle, the
+  // caller is told the work is queued, and nothing runs. The database is built
+  // to retry -- a failed run and a package back at `awaiting_*` makes the claim
+  // discard the stale operation and start a fresh one -- so the only thing that
+  // ever stopped a retry was this key. A redelivery of the same dispatch keeps
+  // the same run id and is still de-duplicated, which is what the key is for.
+  const validationKey = `report-validation:${validationRunId}`;
   try {
     await tasks.trigger<typeof reportPackageValidationTask>(
       "report-package.validate",
@@ -79,7 +87,8 @@ export async function requestReportPackageProjection(input: {
 }): Promise<boolean> {
   if (!isGovernedReportProjectionEnabled(input.organizationId)) return false;
   const projectionRunId = input.projectionRunId ?? crypto.randomUUID();
-  const idempotencyKey = `report-projection:${input.packageId}:${input.projectionVersionId}`;
+  // Keyed on the run, for the reason `requestReportPackageValidation` gives.
+  const idempotencyKey = `report-projection:${projectionRunId}`;
   try {
     await tasks.trigger<typeof reportPackageProjectionTask>("report-package.project", {
       organizationId: input.organizationId, packageId: input.packageId,

@@ -168,6 +168,12 @@ export type ReportProjectionDependencies = {
     claimToken: string;
     code: ReportProjectionFailureCode;
     resultDigest: string;
+    /**
+     * What the failure knew about itself, for the codes that name a category
+     * rather than a cause. Identifiers and the error's own name and message
+     * only; never workbook content.
+     */
+    detail?: string;
   }): Promise<void>;
 };
 
@@ -291,6 +297,28 @@ function safeSourceDigest(output: ProjectionOutput): string {
       ].join("|"),
     )
     .digest("hex");
+}
+
+/**
+ * What a failure knew about itself, in one bounded line.
+ *
+ * The error's own name and message, and for our own typed failures the code
+ * they carry, because a code alone says which category the failure belongs to
+ * and not which thing went wrong. Bounded to the column's 300 characters, and
+ * carrying identifiers only: a workbook value must never reach a record an
+ * operator reads, and none of the errors raised on this path carries one.
+ */
+function failureDetail(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const code =
+    error instanceof ReportProjectionFailure || error instanceof ReportProjectionError
+      ? (error as { code?: string }).code
+      : undefined;
+  const parts = [error.name, code, error.message].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  const line = [...new Set(parts)].join(": ").replace(/\s+/g, " ").trim();
+  return line.length === 0 ? undefined : line.slice(0, 300);
 }
 
 function safePeriodSourceDigest(observation: PeriodGrainObservationPayload): string {
@@ -504,6 +532,11 @@ export async function runReportPackageProjection(
       // generic code without recording what it was would make every such run
       // unexplainable after the fact — identifiers and the error's own name
       // and message only; never workbook content.
+      //
+      // The same detail is written to the run below. A log line the operator
+      // cannot read, and which a production run does not surface to anyone
+      // afterwards, is not a record: it cost a full session on 2026-09-01 to
+      // rebuild a cause the worker had already held and discarded.
       console.error("report projection failed unexpectedly", {
         organizationId: payload.organizationId,
         packageId: payload.packageId,
@@ -521,6 +554,7 @@ export async function runReportPackageProjection(
       claimToken,
       code,
       resultDigest: failureDigest(code),
+      detail: failureDetail(error),
     });
     return { outcome: "failed" };
   }

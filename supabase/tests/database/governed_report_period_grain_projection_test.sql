@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(56);
+select extensions.plan(58);
 
 -- The fenced write path for a daily, weekly, or monthly series. Exercised
 -- against a real package with a real lease, because everything interesting
@@ -288,6 +288,56 @@ set local request.jwt.claim.sub = 'e5000000-0000-4000-8000-000000000001';
 select extensions.is((public.resolve_governed_report_projection_overlap('e5000000-0000-4000-8000-000000000201'::uuid, 'e5000000-0000-4000-8000-000000000001'::uuid, (select id from public.report_projection_reconciliations where report_package_id = 'e5000000-0000-4000-8000-000000000503'::uuid order by id limit 1), 'accept_correction', 'series-overlap-resolution-01', 'e5000000-0000-4000-8000-000000000651'::uuid) ->> 'outcome'), 'resolved', 'an owner can accept the total as the correction');
 select extensions.is((select reconciliation_state from public.exact_range_metric_observations where report_package_id = 'e5000000-0000-4000-8000-000000000503'::uuid), 'current', 'the accepted total becomes current evidence');
 select extensions.is((select count(*)::integer from public.normalized_metrics where organization_id = 'e5000000-0000-4000-8000-000000000201'::uuid and reconciliation_state = 'excluded'), 2, 'every day the total covered is set aside, not just the first, so nothing double-counts');
+
+-- Two categories of one day ---------------------------------------------------------
+
+-- ADR 0034 makes the dimensions part of a period-grain observation's identity,
+-- and `normalized_metrics` has always honoured that. The reconciliation index
+-- did not: keyed on run, output and period alone, it read a day's second
+-- category as the day's first recorded twice and raised 23505. Nothing caught
+-- it because every categorical output shipped before Keeta's cancellation
+-- parties writes at most one label a day.
+reset role;
+select extensions.lives_ok(
+  $$
+  insert into public.report_projection_reconciliations (
+    organization_id, report_package_id, projection_run_id, projection_output_key, projection_target,
+    period_start, period_end, classification, reconciliation_digest, candidate_count,
+    quality_state, completeness_state, calculation_version, correlation_id)
+  values
+    ('e5000000-0000-4000-8000-000000000201', 'e5000000-0000-4000-8000-000000000501',
+     'e5000000-0000-4000-8000-000000000901', 'cancellation_party', 'period_grain',
+     '2026-01-05', '2026-01-05', 'non_overlapping', repeat('a', 64), 0,
+     'complete', 'complete', 1, 'e5000000-0000-4000-8000-000000000651'),
+    ('e5000000-0000-4000-8000-000000000201', 'e5000000-0000-4000-8000-000000000501',
+     'e5000000-0000-4000-8000-000000000901', 'cancellation_party', 'period_grain',
+     '2026-01-05', '2026-01-05', 'non_overlapping', repeat('b', 64), 0,
+     'complete', 'complete', 1, 'e5000000-0000-4000-8000-000000000651')
+  $$,
+  'one output may record two categories for the same day'
+);
+
+select extensions.throws_ok(
+  $$
+  insert into public.report_projection_reconciliations (
+    organization_id, report_package_id, projection_run_id, projection_output_key, projection_target,
+    period_start, period_end, classification, reconciliation_digest, candidate_count,
+    quality_state, completeness_state, calculation_version, correlation_id)
+  values
+    ('e5000000-0000-4000-8000-000000000201', 'e5000000-0000-4000-8000-000000000501',
+     'e5000000-0000-4000-8000-000000000901', 'cancellation_party', 'period_grain',
+     '2026-01-05', '2026-01-05', 'non_overlapping', repeat('a', 64), 0,
+     'complete', 'complete', 1, 'e5000000-0000-4000-8000-000000000651')
+  $$,
+  '23505',
+  null,
+  'but the same evidence twice is still refused'
+);
+
+-- Back to the role the isolation checks below are written against.
+reset role;
+set local role authenticated;
+set local request.jwt.claim.sub = 'e5000000-0000-4000-8000-000000000001';
 
 -- Tenant isolation -----------------------------------------------------------------
 

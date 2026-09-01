@@ -246,7 +246,17 @@ export const reportPackageProjectionTask = schemaTask({
       args: Record<string, unknown>,
     ) => {
       const { data, error } = await supabase.rpc(name, args as never);
-      if (error) throw new Error(`Report projection state transition failed: ${error.code}`);
+      // The message is kept, not only the code. Postgres raises these from
+      // fixed strings in the projection guards -- "report projection
+      // observation evidence is invalid" and the like -- so it names which
+      // rule refused rather than only that one did, and it carries no value
+      // from the workbook.
+      if (error)
+        throw new Error(
+          `Report projection state transition failed: ${[error.code, error.message]
+            .filter(Boolean)
+            .join(" ")}`,
+        );
       return data as T;
     };
     const result = await runReportPackageProjection(payload, {
@@ -315,6 +325,7 @@ export const reportPackageProjectionTask = schemaTask({
           p_organization_id: input.organizationId, p_report_package_id: input.packageId,
           p_projection_run_id: input.projectionRunId, p_claim_token: input.claimToken,
           p_failure_code: input.code, p_result_digest: input.resultDigest,
+          p_failure_detail: input.detail ?? null,
         });
       },
     });

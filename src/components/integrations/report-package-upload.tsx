@@ -1035,6 +1035,18 @@ export function ReportPackageUpload({
                       this rollout is enabled.
                     </p>
                   ) : null}
+                  {/*
+                    What the failure knew about itself. A code alone names a
+                    category -- "processing failed" -- and leaves an operator
+                    with nothing to act on and nothing to report. The detail is
+                    the error's own words, recorded by the run that failed.
+                  */}
+                  {latestProjection?.status === "failed" && latestProjection.failure_detail ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">Why it stopped: </span>
+                      {latestProjection.failure_detail}
+                    </p>
+                  ) : null}
                 </div>
               );
             })

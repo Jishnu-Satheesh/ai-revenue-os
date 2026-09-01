@@ -182,7 +182,7 @@ describe("governed report package projection", () => {
     options: { input?: Buffer; mappingDocument?: unknown } = {},
   ) {
     const input = options.input ?? Buffer.from("net_sales\n12.34\n0.66\n");
-    const failures: { code: string }[] = [];
+    const failures: { code: string; detail?: string }[] = [];
     const completions: unknown[] = [];
     const seriesCompletions: {
       observations: { periodStart: string; periodEnd: string; valueNumerator: string }[];
@@ -223,7 +223,7 @@ describe("governed report package projection", () => {
           seriesCompletions.push(value);
         },
         fail: async (value) => {
-          failures.push({ code: value.code });
+          failures.push({ code: value.code, detail: value.detail });
         },
       },
     );
@@ -320,7 +320,7 @@ describe("governed report package projection", () => {
     });
 
     expect(result.outcome).toBe("failed");
-    expect(failures).toEqual([{ code: "PERIOD_OUT_OF_DECLARED_RANGE" }]);
+    expect(failures).toMatchObject([{ code: "PERIOD_OUT_OF_DECLARED_RANGE" }]);
     expect(seriesCompletions).toEqual([]);
   });
 
@@ -331,7 +331,7 @@ describe("governed report package projection", () => {
     });
 
     expect(result.outcome).toBe("failed");
-    expect(failures).toEqual([{ code: "INVALID_LOCAL_DATE" }]);
+    expect(failures).toMatchObject([{ code: "INVALID_LOCAL_DATE" }]);
   });
 
   it("carries no workbook value into the series it hands to Postgres", async () => {
@@ -367,7 +367,55 @@ describe("governed report package projection", () => {
     });
 
     expect(result.outcome).toBe("failed");
-    expect(failures).toEqual([{ code: "CONTROL_TOTAL_MISMATCH" }]);
+    expect(failures).toMatchObject([{ code: "CONTROL_TOTAL_MISMATCH" }]);
+  });
+
+  it("records what an unexpected failure knew about itself", async () => {
+    // The whole reason this exists: `PROJECTION_PROCESSING_FAILED` names a
+    // category, not a cause. Without the detail, a run that fails for a reason
+    // nobody anticipated is unexplainable afterwards -- which is exactly what
+    // happened to a Keeta order export on 2026-09-01, twice, deterministically.
+    const { failures, result } = await runWith(dailyProjection, {
+      input: Buffer.from("net_sales\n12.34\n"),
+      mappingDocument: { ...(contract.mapping_document as object), currency: "SAR" },
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(failures[0]?.code).toBe("PROJECTION_PROCESSING_FAILED");
+    expect(failures[0]?.detail).toBeTruthy();
+    expect(failures[0]?.detail?.length).toBeLessThanOrEqual(300);
+  });
+
+  it("keeps the detail to what the error said, and within the column", async () => {
+    // A long message is truncated rather than allowed to refuse the failure
+    // itself: losing the code as well as the reason would be worse.
+    const failures: { code: string; detail?: string }[] = [];
+    await runReportPackageProjection(
+      {
+        organizationId: packageRow.organization_id,
+        packageId: packageRow.id,
+        contractVersionId: "33333333-3333-4333-8333-333333333333",
+        projectionVersionId: "44444444-4444-4444-8444-444444444444",
+        projectionRunId: "55555555-5555-4555-8555-555555555555",
+        correlationId: "66666666-6666-4666-8666-666666666666",
+        idempotencyKey: "report-projection-guard-test",
+      },
+      {
+        claim: async () => {
+          throw new Error(`state transition failed: ${"x".repeat(500)}`);
+        },
+        objectStore: { stat: async () => ({ id: "", metadata: {} }), download: async () => Buffer.from("") },
+        complete: async () => {},
+        completePeriodGrain: async () => {},
+        fail: async (value) => {
+          failures.push({ code: value.code, detail: value.detail });
+        },
+      },
+    ).catch(() => undefined);
+
+    if (failures.length > 0) {
+      expect(failures[0]?.detail?.length).toBeLessThanOrEqual(300);
+    }
   });
 
   it("projects normally when the rows do reach the stated total", async () => {
