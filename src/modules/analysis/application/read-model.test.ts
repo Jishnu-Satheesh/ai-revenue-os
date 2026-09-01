@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildChannelWorkspaceView } from "@/modules/analysis/application/read-model";
+import { channelAnalysisDetectors } from "@/domain/analysis/registry";
+import { WORKSPACE_CHAPTERS } from "@/domain/analysis/copy";
+import {
+  BAND_DETECTOR_KEYS,
+  buildChannelWorkspaceView,
+} from "@/modules/analysis/application/read-model";
 import type {
   ChannelAnalysisRunRecord,
   ChannelFindingRecord,
@@ -65,6 +70,23 @@ function finding(overrides: Partial<ChannelFindingRecord> = {}): ChannelFindingR
 }
 
 describe("buildChannelWorkspaceView", () => {
+  it("gives every registered detector somewhere to appear", () => {
+    // A chapter with no detector keys renders as deferred, so a detector
+    // belonging to no chapter and to no band slot is computed, stored, cited --
+    // and shown to nobody. That is what happened to `economics.commission_share`:
+    // it shipped while the money chapter still told operators no approved report
+    // writes a cost, and nothing compared the two halves. This is that check.
+    const placed = new Set([
+      ...WORKSPACE_CHAPTERS.flatMap((chapter) => chapter.detectorKeys),
+      ...BAND_DETECTOR_KEYS,
+    ]);
+    const unplaced = channelAnalysisDetectors
+      .map((detector) => detector.key)
+      .filter((key) => !placed.has(key));
+
+    expect(unplaced).toEqual([]);
+  });
+
   it("places every shipped detector in the chapter that owns it", () => {
     const view = buildChannelWorkspaceView({
       runs: [run()],
@@ -109,7 +131,6 @@ describe("buildChannelWorkspaceView", () => {
     expect(deferred.map((chapter) => chapter.id).sort()).toEqual([
       "customer-voice",
       "items",
-      "money",
       "promotions",
       "recommendations",
     ]);

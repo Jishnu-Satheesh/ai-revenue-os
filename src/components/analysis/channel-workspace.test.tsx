@@ -266,6 +266,7 @@ describe("ChannelWorkspace", () => {
       "Availability",
       "Funnel",
       "Retention",
+      "Money",
       "Reports & Trust",
       "Awaiting other reports",
     ]);
@@ -451,7 +452,8 @@ describe("ChannelWorkspace", () => {
     const shelf = screen.getByRole("region", { name: "Awaiting other reports" });
     // One distinctive clause per chapter's recorded deferredReason.
     for (const clause of [
-      "none can report on this channel.",
+      // The money chapter is no longer here: an approved report writes what a
+      // marketplace charges, so it reports rather than waits.
       "item profit without a cost is a guess.",
       "which does not exist yet.",
       "the platform does not yet import.",
@@ -462,7 +464,7 @@ describe("ChannelWorkspace", () => {
           within(shelf).getByText(new RegExp(clause.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))),
       ).toBeTruthy();
     }
-    expect(within(shelf).getByText("Money")).toBeTruthy();
+    expect(within(shelf).queryByText("Money")).toBeNull();
     expect(within(shelf).getByText("Items")).toBeTruthy();
     expect(within(shelf).getByText("Promotions")).toBeTruthy();
     expect(within(shelf).getByText("Customer Voice")).toBeTruthy();

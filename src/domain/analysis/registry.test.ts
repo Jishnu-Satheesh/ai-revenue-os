@@ -8,6 +8,7 @@ import {
   selectDetectors,
 } from "@/domain/analysis/registry";
 import { createFindingCalculationDigest } from "@/domain/analysis/digest";
+import { WORKSPACE_CHAPTERS } from "@/domain/analysis/copy";
 import { PROVIDER_REPORT_DEFINITIONS } from "@/domain/reports/provider-library";
 import { evidence, point, window } from "@/domain/analysis/test-fixtures";
 
@@ -27,6 +28,28 @@ describe("the detector registry", () => {
       "revenue.window_gross",
     ]);
     expect(CHANNEL_ANALYSIS_REGISTRY_VERSION).toBe(7);
+  });
+
+  it("charts no detector the registry does not have", () => {
+    // The other direction: a chapter naming a detector nobody registered waits
+    // forever for findings that cannot arrive.
+    const registered = new Set(channelAnalysisDetectors.map((detector) => detector.key));
+    const dangling = WORKSPACE_CHAPTERS.flatMap((chapter) => chapter.detectorKeys).filter(
+      (key) => !registered.has(key),
+    );
+
+    expect(dangling).toEqual([]);
+  });
+
+  it("keeps a deferred chapter honest about having no detector", () => {
+    // `deferredReason` is the sentence an operator reads instead of findings.
+    // A chapter carrying both a reason and a detector would show the findings
+    // and keep the excuse.
+    for (const chapter of WORKSPACE_CHAPTERS) {
+      if (chapter.detectorKeys.length > 0) {
+        expect(chapter.deferredReason, chapter.id).toBeUndefined();
+      }
+    }
   });
 
   it("binds only the detectors that can answer without periods at the span grain", () => {

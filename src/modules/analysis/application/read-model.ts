@@ -176,7 +176,7 @@ export type ChannelWorkspaceView = {
  * unplaced "Also measured" row. The cross-channel share remains placed for
  * organization-scope readers, but is never substituted for this channel view.
  */
-const BAND_DETECTOR_KEYS = new Set([
+export const BAND_DETECTOR_KEYS = new Set([
   "revenue.channel_share",
   "revenue.period_movement",
   "revenue.window_gross",

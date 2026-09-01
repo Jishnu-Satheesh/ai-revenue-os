@@ -76,9 +76,14 @@ export const WORKSPACE_CHAPTERS: readonly WorkspaceChapter[] = [
     id: "money",
     navLabel: "Money",
     heading: "Marketplace money audit",
-    detectorKeys: [],
-    deferredReason:
-      "Commission, payout, fee, and discount detectors need cost inputs that no approved report writes yet. None is registered, so none can report on this channel.",
+    // No longer deferred. Keeta's order export writes the commission a
+    // marketplace charged and its billing report writes the rest of the bill,
+    // so two detectors can answer here from evidence rather than from a
+    // configured rate. Both are listed: the narrower one is correct and, read
+    // alone, misleading -- commission is about half of what a marketplace
+    // charges, and a chapter showing only that would let an operator price
+    // against half a cost.
+    detectorKeys: ["economics.commission_share", "economics.channel_cost_load"],
   },
   {
     id: "items",
@@ -167,6 +172,14 @@ export function findingHeadline(code: string): string {
       return "Share of orders from returning customers";
     case "CUSTOMER_NEW_SHARE_UNAVAILABLE":
       return "Customer mix cannot be reported for this window";
+    case "COMMISSION_SHARE_OF_REVENUE":
+      return "Commission charged, against the revenue it was charged on";
+    case "COMMISSION_SHARE_UNAVAILABLE":
+      return "The commission rate cannot be reported for this window";
+    case "CHANNEL_COST_LOAD_OF_REVENUE":
+      return "Every deduction this marketplace made, against the revenue it was charged on";
+    case "CHANNEL_COST_LOAD_UNAVAILABLE":
+      return "What this channel costs cannot be reported for this window";
     default:
       return code;
   }
@@ -209,6 +222,16 @@ export function needsDataSentence(reason: string): string {
       return "No approved report has written the new-order or returning-order figures these days need, so no customer mix can be reported.";
     case "CUSTOMER_ORDER_TOTAL_IS_ZERO":
       return "Every order count in this window is zero, so no share of customers is defined. Zero percent would read as nobody coming back over what is really nobody ordering.";
+    case "COMMISSION_SERIES_ABSENT":
+      return "No approved report has written what this marketplace charged for these days, so no rate can be stated.";
+    case "COST_SERIES_ABSENT":
+      return "No approved report has written any cost this marketplace charged for these days. A channel with no recorded cost is not a free channel, only an unmeasured one.";
+    case "REVENUE_SERIES_ABSENT":
+      return "No approved report has written revenue for these days, so there is nothing for a cost to be a share of.";
+    case "NO_SHARED_PERIOD":
+      return "The cost figures and the revenue figures cover different days, and none overlap. Dividing one by the other would report a rate for days nobody measured both sides of.";
+    case "REVENUE_NOT_POSITIVE":
+      return "Revenue over the days carrying both figures is zero, so a share of it is undefined rather than zero.";
     default:
       return reason;
   }
@@ -295,15 +318,11 @@ export function buildVerdictView(input: {
   // falls back to the plain chronicle of what the evidence supports.
   const split = input.earnedLostPotential;
   const splitStated =
-    split !== undefined &&
-    split.earned !== null &&
-    split.lost !== null &&
-    split.potential !== null;
+    split !== undefined && split.earned !== null && split.lost !== null && split.potential !== null;
 
   let headlineSentence: string;
   if (splitStated) {
-    headlineSentence =
-      "You earned and lost revenue to cancellations you could have prevented.";
+    headlineSentence = "You earned and lost revenue to cancellations you could have prevented.";
   } else if (coverageIncomplete) {
     headlineSentence =
       "Read this window's figures with care: some of its periods carry no governed evidence.";
