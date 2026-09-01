@@ -2,25 +2,33 @@
 
 **Agents:** `claude` (Claude Opus 5, Claude Code) and `codex` (Codex CLI).
 
-> ## ⚠️ SINGLE-AGENT SINCE 2026-09-01 — READ THIS FIRST
+> ## ⚠️ WHO OWNS WHAT, AS OF 2026-09-01 — READ THIS FIRST
 >
-> **Only one agent works in this repository now.** The user confirmed on 2026-09-01 that no other
-> agent is active. Everything below about two threads, split tool access, and quota-based division
-> of labour is **historical record, not a live contract**.
+> **Growth Intelligence belongs to another agent. Do not touch it.** That means everything under
+> `src/domain/growth-intelligence/` and `src/modules/growth-intelligence/`,
+> `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`,
+> `supabase/tests/database/growth_intelligence_*_test.sql`, `specs/022-growth-intelligence.md`,
+> `adrs/0044-*`, and the GI rows on the Task board (GI1–GI5). Leave their uncommitted changes in the
+> working tree alone and never commit them.
 >
-> What this changes, concretely:
+> **`database.types.test.ts` fails because of their unapplied migration.** That is theirs to
+> resolve. Do not "fix" it by adding their tables to `UNTYPED_TABLES` — that would assert a decision
+> about a schema you do not own.
 >
-> - **Every `in-progress` row on the Task board is stale.** R1, GI5 and D1 have no one working them.
->   A claimed file is not a blocked file. Do not flag work as "someone else's claim" and leave it —
->   fix it, then say what you fixed.
-> - **The three shared-tree rules in section 2 still apply for a different reason.** Claim files,
->   own migrations, and never `git stash` — not because another agent might collide, but because the
->   stash stack is shared with the main checkout and other worktrees, and a pushed migration is
->   still live on shared staging immediately.
-> - **Path-limited commits are no longer needed** to protect another agent's staged work. Commit
->   normally unless the working tree actually shows changes you did not make.
+> **Everything else in this repository has one agent.** The older rows — R1, D1, and the two-thread
+> Asset Library / Creative Studio split described below — are historical record, not a live
+> contract. For those:
 >
-> If a second agent is ever started again, delete this block and say so in the Log.
+> - **A claimed file is not a blocked file.** Fix the defect, then say what you fixed. Declining to
+>   touch working code because a stale row names it is a failure, not caution.
+> - **Path-limited commits are still worth using** while another agent has uncommitted Growth
+>   Intelligence work in this shared tree, so their changes are never swept into your commit.
+>
+> The three shared-tree rules in section 2 still apply for reasons unrelated to any of this: the
+> stash stack is shared with the main checkout and other worktrees, and a pushed migration is live
+> on shared staging immediately.
+>
+> If ownership changes again, correct this block and say so in the Log.
 
 **Two threads from 2026-08-24.** The Asset Library (spec 019) and the Creative Studio (spec 020) are
 now run in separate conversations because holding both in one was mixing them up. This board stays
@@ -241,9 +249,11 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 
 ### 2026-09-01 · claude · single agent from here, and the money card fixed rather than flagged
 
-**The user confirmed no other agent is active.** A banner now sits at the top of this file and
-`AGENTS.md` section 10 has been rewritten from "more than one AI agent works in this repository" to
-say one does. The three shared-tree rules survive, but for different reasons: the stash stack is
+**Ownership clarified, in two steps.** The user first said no other agent was active; then
+corrected that **Growth Intelligence is being worked by another agent**. The banner at the top of
+this file and `AGENTS.md` section 10 now say exactly that: GI is off-limits — its source, migration,
+pgTAP suites, spec 022 and ADR 0044 — and everything else has one agent. The `database.types.ts`
+drift from GI's unapplied migration is theirs to resolve, not a defect to fix here. The three shared-tree rules survive, but for different reasons: the stash stack is
 shared with the main checkout and other worktrees, and a pushed migration is live on staging
 immediately — neither has anything to do with a second agent.
 

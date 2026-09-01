@@ -172,13 +172,20 @@ When implementation contradicts documentation, stop and resolve the contradictio
 
 ## 10. Coordination and the collaboration board
 
-**One agent works in this repository.** Confirmed by the user on 2026-09-01. It was two for a
-period from 2026-08-24, and `docs/collaboration/asset-library-and-studio-board.md` still carries
-that arrangement — treat all of it as historical record.
+**Growth Intelligence belongs to another agent. Do not touch it.** As of 2026-09-01 that is the one
+live claim in this repository: `src/domain/growth-intelligence/`,
+`src/modules/growth-intelligence/`, the `growth_intelligence_*` migration and pgTAP suites,
+`specs/022-growth-intelligence.md`, and ADR 0044. Leave their uncommitted changes in the working
+tree alone, never commit them, and do not resolve the `database.types.ts` drift their unapplied
+migration causes — that is theirs.
 
-**A claimed file is not a blocked file.** Task-board rows still marked `in-progress` have nobody
-working them. If you find a defect in a file some old row claims, fix it and say what you fixed.
-Declining to touch working code because a stale row names it is a failure, not caution.
+**Everything else has one agent.** The two-thread arrangement in
+`docs/collaboration/asset-library-and-studio-board.md` and its older `in-progress` rows are
+historical record, not a live contract.
+
+**Outside Growth Intelligence, a claimed file is not a blocked file.** If you find a defect in a
+file some old row claims, fix it and say what you fixed. Declining to touch working code because a
+stale row names it is a failure, not caution.
 
 Still read the board before starting, and still add entries as you go. It is no longer a live
 contract between agents, but it is the durable record of what was decided, discovered and rejected
@@ -193,7 +200,7 @@ Three rules survive, for reasons that have nothing to do with other agents:
 - **Claim the files you intend to touch on the board.** Not to reserve them, but so the next session
   can see what a change touched and why.
 
-If a second agent is ever started again, say so here and in the board's banner.
+If ownership changes again, correct this section and the board's banner together.
 
 ## 11. Misc
 <!-- TRIGGER.DEV SKILLS START -->
