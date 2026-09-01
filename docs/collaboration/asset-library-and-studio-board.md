@@ -219,6 +219,46 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 
 ## 8. Log
 
+### 2026-09-01 · claude · the money chapter was never wired, and a clock that was not injected
+
+**Correction to my own 2026-09-01 entry above.** I reported that the money chapter's premise was
+removed. It was not. `economics.commission_share` shipped while `WORKSPACE_CHAPTERS` still gave the
+money chapter no detector keys and a `deferredReason` saying no approved report writes a cost. A
+chapter with no detector keys renders as deferred, so the detector has been computing, storing and
+citing findings no operator could see, under a sentence saying the opposite. Both economics
+detectors are wired in now, with copy for four finding codes and five refusal reasons.
+
+A guard now exists at the read-model layer: every registered detector must appear in a chapter or
+in `BAND_DETECTOR_KEYS`. My first attempt put it in the domain layer and produced three false
+positives — `revenue.period_movement`, `revenue.channel_share` and `revenue.window_gross` are
+deliberately band-placed — so the check belongs where band placement is known. `MONEY_DEFERRED_REASON`
+in the read model is untouched on purpose: it is about contribution margin, which still needs food,
+packaging and labour costs no report writes.
+
+**A wall clock in a service built around an injected one.** `qualifySource` in
+`src/modules/campaigns/application/service.ts` called `qualifyCampaignSource` with `new Date()` at
+both sites while every timestamp the same request records comes from `dependencies.now`. Two
+different "now"s in one operation, and an untestable step. Found only because a fixture's expiry
+date arrived in real life and two unrelated tests began failing. Fixed and pinned with a guard that
+was verified to fail against the old code. Tier 1, no active claim on the file.
+
+**Two hand-offs.**
+
+1. `specs/018-governed-channel-intelligence.md` now contradicts the code. Its "Shipped" paragraph
+   says "Money, Items, Promotions, and Customer Voice collapse into one muted
+   awaiting-other-reports row". Money reports now. The file is claimed by **R1**, still marked
+   in-progress, so I have not edited it. R1's owner should correct that sentence.
+
+2. I have edited files R1 also claims — `src/modules/analysis/application/read-model.ts`, its test,
+   and `src/components/analysis/channel-workspace.test.tsx` — as earlier slices in this thread did.
+   R1 has been in-progress since 2026-08-26 and reads as stale. Flagging rather than assuming:
+   R1's owner should either release those files or reconcile.
+
+Suite: 337 of 338 files pass. The one failure is `database.types.test.ts`, from GI5's untracked
+migration adding tables not yet typed or listed in `UNTYPED_TABLES` — GI5's own row says that step
+is still ahead of it. Commits `c524eb3` and `0ad7a9b`.
+
+
 ### 2026-09-01 · claude · KC1 done — the rest of what a marketplace charges
 
 **Commission is not the bill.** Reconciling a client's Keeta statement of account against what
