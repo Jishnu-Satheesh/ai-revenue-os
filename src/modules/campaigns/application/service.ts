@@ -278,11 +278,16 @@ async function qualifySource(
   organizationId: string,
   request: CreateCampaignRequest,
 ) {
+  // The service is built around an injected clock and this function reached
+  // past it to the wall clock, so an opportunity's expiry was judged against a
+  // different "now" than everything else the same request records. Nothing
+  // caught it until a fixture's expiry date arrived in real life.
+  const now = dependencies.now ?? (() => new Date());
   if (request.source.kind === "manual_brief") {
     const result = qualifyCampaignSource({
       organizationId,
       source: { kind: "manual_brief", briefId: randomUUID() },
-      now: new Date(),
+      now: now(),
     });
     if (result.outcome === "blocked") {
       throw new DomainError("VALIDATION_ERROR", "This brief cannot start a campaign.");
@@ -301,7 +306,7 @@ async function qualifySource(
   const result = qualifyCampaignSource({
     organizationId,
     source: { kind: "decision_opportunity", opportunity },
-    now: new Date(),
+    now: now(),
   });
   if (result.outcome === "blocked") {
     // The reason is deliberately specific here: unlike a tenant boundary, an
