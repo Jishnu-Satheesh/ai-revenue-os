@@ -181,7 +181,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI3 | Growth Intelligence Task 1 pure domain contracts — claimed: new `src/domain/growth-intelligence/types.ts`, `schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `evidence-quality.ts`, `evidence-quality.test.ts`, `geography.ts`, `geography.test.ts`, `material-change.ts`, `material-change.test.ts`, `errors.ts`, and `index.ts`; tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Database-free TDD checkpoint; no migrations, RLS, Trigger tasks, APIs, staging changes, or files under active analysis/report claims. | codex-root | high | approved Growth Intelligence plan Task 1 | **done — 65 focused tests, typecheck, slice lint, and formatting verified; no staging change** |
 | GI4 | Growth Intelligence Task 2 rollout and permission mirror — claimed: `src/lib/env.ts`, new `src/modules/growth-intelligence/application/feature-access.ts` and `feature-access.test.ts`, `src/domain/access/permissions.ts`, `permissions.test.ts`, `permissions.drift.test.ts`, `supabase/migrations/20260831145236_growth_intelligence_permissions.sql`, `supabase/tests/database/permission_catalogue_test.sql`, and tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. No `database.types.ts`, RLS, Trigger, or other staging mutation is in scope. The migration was CLI-generated only after `20260831200000` and `20260831210000` both appeared on hosted staging and local/remote history matched. | codex-root | high | approved Growth Intelligence plan Task 2 | **done — applied to staging; 38 focused tests, typecheck, slice lint/format, and 27/27 live pgTAP verified** |
 | GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed: `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, `src/domain/growth-intelligence/schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `src/lib/supabase/database.types.ts`, `database.types.test.ts`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. The domain-file extension closes deterministic Postgres/TypeScript digest ordering. | codex-root | high | approved Growth Intelligence plan Task 3 | **done — migration applied to staging; 106/106 focused live pgTAP and full pgTAP green; 183 focused unit/type-drift tests, source typecheck, full lint, format, and diff checks green** |
-| GI6 | Growth Intelligence Task 4 governed Market Profile application boundary — claimed: new `src/modules/growth-intelligence/application/ports.ts`, `profile-service.ts`, `profile-service.test.ts`, `api-schemas.ts`, `api-schemas.test.ts`; new `src/modules/growth-intelligence/infrastructure/profile-repository.ts`, `profile-repository.test.ts`, `profile-proposal-provider.ts`, `profile-proposal-provider.test.ts`; new Market Profile read/proposal/decision routes and tests under `src/app/api/organizations/[organizationId]/market-profile/**`; Task 4 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No new schema or migration. | codex-root | high | approved Growth Intelligence plan Task 4; Task 3 staging contract live | **done — signed-in profile read/proposal/decision APIs; deterministic model-scope fence and one repair; 110 Growth Intelligence tests, typecheck, focused/full lint, format, and diff checks green** |
+| GI6 | Growth Intelligence Task 4 governed Market Profile application boundary — claimed: new `src/modules/growth-intelligence/application/ports.ts`, `profile-service.ts`, `profile-service.test.ts`, `api-schemas.ts`, `api-schemas.test.ts`; new `src/modules/growth-intelligence/infrastructure/profile-repository.ts`, `profile-repository.test.ts`, `profile-proposal-provider.ts`, `profile-proposal-provider.test.ts`; new Market Profile read/proposal/decision routes and tests under `src/app/api/organizations/[organizationId]/market-profile/**`; Task 4 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. | codex-root | high | approved Growth Intelligence plan Task 4; Task 3 staging contract live | **in-progress — review fixes correlation UUIDs, private URL filtering, and event classification; durable AI replay needs approval for a narrow forward RPC migration** |
 | KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done — projected on staging through the governed path and browser-verified at 1440px and 390px; the channel reads 39.3% where commission alone reads 21.4%** |
 | KC2 | Read a provider's prose category labels — claimed: `src/domain/reports/projection.ts`, new `src/domain/reports/projection-label-map.test.ts`, new `supabase/migrations/20260901090000_admit_projection_label_map.sql`, new `supabase/migrations/20260901090500_cancellation_attribution_metric_definition.sql`, new `supabase/migrations/20260901091000_admit_registry_v8.sql`, `supabase/tests/database/governed_report_projection_document_test.sql`, `src/domain/reports/provider-library/keeta-orders.ts` and its real-export test, new `src/domain/analysis/detectors/orders-cancellation-attribution.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/domain/analysis/copy.ts`, `src/components/analysis/channel-workspace.tsx` and its test, `adrs/0034-reason-codes-are-metric-row-dimensions.md`, `specs/018-governed-channel-intelligence.md`. No new table, no RLS change, no `database.types.ts` edit. | claude | high | user approval 2026-09-01 | **in-progress — language, guard, provider binding, detector and tests all green; migrations applied to staging and all three live guards accept the shipped documents; deployed to Trigger production as 20260901.3; the live upload, contract approval, validation and figures approval all passed on staging; the projection landed 158 observations once three defects in its path were fixed; browser-verified at 1440px and an emulated 390px. **Done** |
 
@@ -248,6 +248,29 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 ---
 
 ## 8. Log
+
+### 2026-09-01 · claude · every dispatcher swept for the retry defect
+
+Three retries in the reports module were dropped by Trigger as duplicates because their idempotency
+keys did not change between attempts. Having fixed all three, the question was whether the same
+mistake lived anywhere else. Every `tasks.trigger` call in the codebase was read:
+
+| Dispatch | Key it de-duplicates on | Verdict |
+| --- | --- | --- |
+| `report-package.profile` | was the package alone | **was broken, fixed** — dispatch key now carries the operator's per-press retry key while the worker still presents the package key its claim stores |
+| `report-package.validate` | was package + contract version | **was broken, fixed** — now the validation run id |
+| `report-package.project` | was package + projection version | **was broken, fixed** — now the projection run id |
+| `channel-analysis.run` | the analysis run id | already correct, and its comment says why |
+| `campaign.generate-bundle`, `revise-bundle`, `generate-variants` | the operator's own per-request key | already correct at both layers |
+| integration `test` / `sync` / `import` / `disconnect` | a dispatch key built from the ingestion run id, deliberately separate from the key the run row holds | already correct — the Integration Hub had solved this properly, and its separation of the two keys is what profiling now copies |
+| `economics.recompute-ledger` | no idempotency key, concurrency key only | correct — a recompute after every rate change is wanted, not de-duplicated |
+
+**The defect was confined to the reports module and is now gone from it.** Nothing else in the
+codebase shares it. Worth recording the shape rather than only the fix: a key that identifies *what*
+the work is about de-duplicates the retry along with the double-submit; a key that identifies *which
+attempt* this is de-duplicates only the redelivery. Where a claim stores the key and refuses a
+different one, the two keys have to be different values, which is the profiling case.
+
 
 ### 2026-09-01 · claude · KC2 — a provider that labels its rows in sentences
 
@@ -3927,7 +3950,7 @@ and source TypeScript passed against stable generated route types. The ordinary 
 command was also attempted, but another live `next dev` process had left `.next/dev/types/validator.ts`
 partially written; excluding only that active generated cache produced a clean full-source result.
 
-### 2026-09-01 · codex-root · Growth Intelligence Task 4 governs the Market Profile boundary
+### 2026-09-01 · codex-root · Growth Intelligence Task 4 review checkpoint
 
 The signed-in Market Profile API now reads immutable profile history, creates AI or operator-authored
 proposals, and records exact-version confirmation, rejection, or disablement. Every route resolves
@@ -3943,7 +3966,13 @@ structurally valid. Tag-shaped operator text is escaped before prompt insertion.
 database detail are replaced with safe public errors, and committed non-replayed outcomes emit only
 profile, version, decision, and request identifiers.
 
-Verification: the complete Growth Intelligence slice passed 110/110 Vitest tests; ordinary
-`pnpm typecheck` passed; focused ESLint passed with zero findings; full ESLint passed with no errors
-and only 18 unrelated pre-existing warnings. Targeted formatting passed. This task adds no migration
-and makes no staging database change.
+Review then found three boundary defects. Correlation IDs are now validated as UUIDs after permission
+but before model cost or UUID persistence. Private, local, metadata, reserved, and IP-literal URLs are
+removed before proposal context reaches the model. Proposal event classification now comes from the
+transactional version number rather than a racy pre-write read.
+
+One issue remains intentionally unimplemented: a repeated AI request currently calls the model before
+the database can replay its idempotency key. A changed model answer can therefore conflict with the
+first answer. Fixing this properly requires a narrow forward migration: an authenticated exact-replay
+preflight RPC plus stable AI operation-fingerprint semantics. That is a material expansion from Task
+4's approved no-migration boundary and awaits explicit approval before staging changes.
