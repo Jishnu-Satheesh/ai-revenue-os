@@ -181,8 +181,9 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI3 | Growth Intelligence Task 1 pure domain contracts — claimed: new `src/domain/growth-intelligence/types.ts`, `schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `evidence-quality.ts`, `evidence-quality.test.ts`, `geography.ts`, `geography.test.ts`, `material-change.ts`, `material-change.test.ts`, `errors.ts`, and `index.ts`; tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. Database-free TDD checkpoint; no migrations, RLS, Trigger tasks, APIs, staging changes, or files under active analysis/report claims. | codex-root | high | approved Growth Intelligence plan Task 1 | **done — 65 focused tests, typecheck, slice lint, and formatting verified; no staging change** |
 | GI4 | Growth Intelligence Task 2 rollout and permission mirror — claimed: `src/lib/env.ts`, new `src/modules/growth-intelligence/application/feature-access.ts` and `feature-access.test.ts`, `src/domain/access/permissions.ts`, `permissions.test.ts`, `permissions.drift.test.ts`, `supabase/migrations/20260831145236_growth_intelligence_permissions.sql`, `supabase/tests/database/permission_catalogue_test.sql`, and tracking updates in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. No `database.types.ts`, RLS, Trigger, or other staging mutation is in scope. The migration was CLI-generated only after `20260831200000` and `20260831210000` both appeared on hosted staging and local/remote history matched. | codex-root | high | approved Growth Intelligence plan Task 2 | **done — applied to staging; 38 focused tests, typecheck, slice lint/format, and 27/27 live pgTAP verified** |
 | GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed: `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, `src/domain/growth-intelligence/schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `src/lib/supabase/database.types.ts`, `database.types.test.ts`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. The domain-file extension closes deterministic Postgres/TypeScript digest ordering. | codex-root | high | approved Growth Intelligence plan Task 3 | **done — migration applied to staging; 106/106 focused live pgTAP and full pgTAP green; 183 focused unit/type-drift tests, source typecheck, full lint, format, and diff checks green** |
+| GI6 | Growth Intelligence Task 4 governed Market Profile application boundary — claimed: new `src/modules/growth-intelligence/application/ports.ts`, `profile-service.ts`, `profile-service.test.ts`, `api-schemas.ts`, `api-schemas.test.ts`; new `src/modules/growth-intelligence/infrastructure/profile-repository.ts`, `profile-repository.test.ts`, `profile-proposal-provider.ts`, `profile-proposal-provider.test.ts`; new Market Profile read/proposal/decision routes and tests under `src/app/api/organizations/[organizationId]/market-profile/**`; Task 4 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No new schema or migration. | codex-root | high | approved Growth Intelligence plan Task 4; Task 3 staging contract live | **in-progress — inspect current route, Digital Twin, Supabase, event, and model-provider patterns before RED tests** |
 | KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done — projected on staging through the governed path and browser-verified at 1440px and 390px; the channel reads 39.3% where commission alone reads 21.4%** |
-| KC2 | Read a provider's prose category labels — claimed: `src/domain/reports/projection.ts`, new `src/domain/reports/projection-label-map.test.ts`, new `supabase/migrations/20260901090000_admit_projection_label_map.sql`, new `supabase/migrations/20260901090500_cancellation_attribution_metric_definition.sql`, new `supabase/migrations/20260901091000_admit_registry_v8.sql`, `supabase/tests/database/governed_report_projection_document_test.sql`, `src/domain/reports/provider-library/keeta-orders.ts` and its real-export test, new `src/domain/analysis/detectors/orders-cancellation-attribution.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/domain/analysis/copy.ts`, `src/components/analysis/channel-workspace.tsx` and its test, `adrs/0034-reason-codes-are-metric-row-dimensions.md`, `specs/018-governed-channel-intelligence.md`. No new table, no RLS change, no `database.types.ts` edit. | claude | high | user approval 2026-09-01 | **in-progress — language, guard, provider binding, detector and tests all green; migrations applied to staging and all three live guards accept the shipped documents; deployed to Trigger production as 20260901.3; awaiting the live re-projection and browser check** |
+| KC2 | Read a provider's prose category labels — claimed: `src/domain/reports/projection.ts`, new `src/domain/reports/projection-label-map.test.ts`, new `supabase/migrations/20260901090000_admit_projection_label_map.sql`, new `supabase/migrations/20260901090500_cancellation_attribution_metric_definition.sql`, new `supabase/migrations/20260901091000_admit_registry_v8.sql`, `supabase/tests/database/governed_report_projection_document_test.sql`, `src/domain/reports/provider-library/keeta-orders.ts` and its real-export test, new `src/domain/analysis/detectors/orders-cancellation-attribution.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/domain/analysis/copy.ts`, `src/components/analysis/channel-workspace.tsx` and its test, `adrs/0034-reason-codes-are-metric-row-dimensions.md`, `specs/018-governed-channel-intelligence.md`. No new table, no RLS change, no `database.types.ts` edit. | claude | high | user approval 2026-09-01 | **in-progress — language, guard, provider binding, detector and tests all green; migrations applied to staging and all three live guards accept the shipped documents; deployed to Trigger production as 20260901.3; the live upload, contract approval, validation and figures approval all passed on staging; the projection run failed once with a generic code and is awaiting a retry, then the browser check** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -313,10 +314,50 @@ test green and Postgres refusing at the moment an operator clicks approve — an
 `npx trigger.dev@4.5.14 deploy`. The cloud worker now carries the label map and registry 8. Never a
 local worker: this machine is resource-limited, and a local dev worker has crashed it before.
 
-**Still to do:** the live re-projection through the operator UI, and the browser check at both
-widths. The chrome-devtools MCP would not connect across three attempts this session, so neither was
-attempted rather than half-done, and the pipeline was not driven through HTTP calls dressed up as a
-UI verification.
+**The live run got most of the way.** Through the real operator screens on staging, package
+`ca630453`: uploaded, profiled, recognised as the known `keeta.orders.detail` report, contract v2
+approved, validated (157 sheet rows, 780 mapped values, 0 failed), figures proposed and **approved**.
+The recognition panel and the approval panel both render the new column in plain English --
+"cancellation type" among the columns it reads, and "Cancellations By Who The Provider Blamed --
+one figure for each day, from cancellation type".
+
+That approval is the proof that mattered most: the database accepted a projection document carrying
+`labelMap` through the real approval path, which is the failure this repository has hit twice (every
+test green, Postgres refusing at the moment an operator clicks approve).
+
+**The projection itself then failed**, run `98fb6b5a`, `PROJECTION_PROCESSING_FAILED`, 3.7 seconds
+from start to failure, Trigger production run `run_06g5o9c98m8l686ts77q1o6n01` on version
+`20260901.3` -- the deploy carrying this change.
+
+**What was ruled out, each by direct test against staging, not by reading code:**
+
+- The stored object is byte-identical to the fixture (same sha256, same length).
+- The stored contract field is right: `text`, optional, `absentMarkers: ["-"]`.
+- The stored projection document is right: the three literals mapped to `MERCHANT`,
+  `CUSTOMER_SERVICE`, `PLATFORM`, `dimensionKey: cancelled_by`.
+- The whole worker workflow, run locally against those exact stored documents and that exact file,
+  returns `projected` with 158 observations, 26 of them attributions.
+- The completion RPC accepts that exact 158-observation payload -- tested twice, once as `postgres`
+  and once with `set local role service_role`, both inside a rolled-back transaction.
+- The claim step's metric-definition lookup returns all four keys through PostgREST.
+- Every per-observation clause in the completion RPC passes for all 158 rows (evidence shape,
+  binding match, dimension match), checked by running the clauses as SQL over the payload.
+
+**So every hop succeeds in isolation and the pipeline failed once in the middle.** The most likely
+remaining cause is transient -- a storage download or RPC hiccup, both of which the worker's `rpc`
+and `download` wrappers turn into a plain `Error`, which the boundary maps to the generic code. The
+next step is simply to retry the projection from the UI.
+
+**A real gap this exposed.** When an unexpected exception reaches the projection boundary, the run
+records only `PROJECTION_PROCESSING_FAILED`. The error's name and message go to `console.error` in
+the worker, which an operator cannot see, and which a `--dev-only` MCP cannot read for a production
+run either. Hours went into reconstructing a failure the platform already knew the cause of and
+threw away. Recording the error name and message on the run row would be a small change and is
+proposed, not built -- it is outside the approved plan.
+
+**Still to do:** retry the projection, then the browser check at both widths. The chrome-devtools MCP
+connected once this session and dropped again; the pipeline was never driven through HTTP calls
+dressed up as a UI verification.
 
 Note for whoever picks this up: the existing `orders_detail` package (uploaded 2026-08-31, projected)
 was approved against a contract that binds five fields and does not include `Cancellation type`.
