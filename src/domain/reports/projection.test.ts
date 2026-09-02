@@ -497,4 +497,34 @@ describe("an undeclared categorical value", () => {
     expect(failure.message).not.toContain(periodKeys[9]);
     expect(failure.message).toContain("+2 more");
   });
+
+  it("bounds an oversized undeclared value instead of trusting it", () => {
+    // A declared label can never exceed 64 characters -- the document schema
+    // enforces that on `allowedValues`. An *undeclared* value carries no such
+    // guarantee: it is whatever text sat in that cell, and a mis-detected
+    // ragged-row shift could feed an unrelated cell in at this position. This
+    // is the one place that text becomes a persisted, operator-visible
+    // record, so it is bounded here rather than trusted.
+    const overlong = "X".repeat(120);
+    let thrown: unknown;
+    try {
+      projectPeriodGrainMetrics({
+        contract: cancelReasonContract,
+        document: cancelReasonDocument(),
+        declaredCurrency: "AED",
+        declaredPeriod: { periodStart: "2026-03-01", periodEnd: "2026-03-31" },
+        sheets: sheetsWithCancellationReason(overlong, ["2026-03-04"]),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const failure = thrown as ReportCategoricalValueNotDeclared;
+    // 64 kept characters plus the trailing marker, never the full 120.
+    expect(failure.value).toBe(`${"X".repeat(64)}…`);
+    expect(failure.value.length).toBe(65);
+    // The message is built from the bounded value, not the raw one.
+    expect(failure.message).toContain(failure.value);
+    expect(failure.message).not.toContain(overlong);
+  });
 });

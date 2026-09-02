@@ -35,6 +35,28 @@ export class ReportControlTotalMismatch extends ReportProjectionError {
 const MAX_NAMED_PERIODS = 8;
 
 /**
+ * The longest `value` this error will carry verbatim.
+ *
+ * Not an arbitrary guess: a declared label is bounded by the same rule the
+ * document schema already enforces on `allowedValues`
+ * (`^[A-Z][A-Z0-9_]{0,63}$`), so 64 characters is the most a legitimate
+ * category could ever need. An *undeclared* value has no such guarantee --
+ * it is whatever text sat at that cell, and if a ragged row's shift is ever
+ * mis-detected, that could be an unrelated cell read at the wrong offset
+ * rather than a category at all. Bounding it here, at the one place this
+ * text becomes a persisted, operator-visible record, is cheaper than trusting
+ * every caller upstream to have bounded it first.
+ */
+const MAX_VALUE_LENGTH = 64;
+const TRUNCATION_MARKER = "…";
+
+function boundedCategoryValue(value: string): string {
+  return value.length > MAX_VALUE_LENGTH
+    ? `${value.slice(0, MAX_VALUE_LENGTH)}${TRUNCATION_MARKER}`
+    : value;
+}
+
+/**
  * A categorical column carried a label the approved figures do not declare.
  *
  * Carries the label rather than only a code, for the reason ADR 0029 gives for
@@ -43,6 +65,12 @@ const MAX_NAMED_PERIODS = 8;
  * decide in seconds. An operator told "CATEGORICAL_VALUE_NOT_DECLARED" opens
  * the source.
  *
+ * `value` is bounded to `MAX_VALUE_LENGTH`, with a trailing marker when it was
+ * cut, so a truncated value is visibly a truncated value rather than a short
+ * one. Without this, an oversized value could itself consume the room
+ * `periodKeys` and the phrase "is not a declared value" need before
+ * `failureDetail`'s 300-character cut ever applies.
+ *
  * `periodKeys` holds every offending day, but the message names at most the
  * first eight of them -- `failureDetail` truncates to 300 characters, and a
  * month of dates would push the label and output key, the part an operator
@@ -50,17 +78,20 @@ const MAX_NAMED_PERIODS = 8;
  * truncation can only ever eat days, never them.
  */
 export class ReportCategoricalValueNotDeclared extends ReportProjectionError {
+  public readonly value: string;
+
   constructor(
     public readonly outputKey: string,
-    public readonly value: string,
+    value: string,
     /** Every period the undeclared label appears on, in ascending order. */
     public readonly periodKeys: readonly string[],
   ) {
     super("CATEGORICAL_VALUE_NOT_DECLARED");
     this.name = "ReportCategoricalValueNotDeclared";
+    this.value = boundedCategoryValue(value);
     const shown = periodKeys.slice(0, MAX_NAMED_PERIODS);
     const remaining = periodKeys.length - shown.length;
     const days = remaining > 0 ? `${shown.join(", ")}, +${remaining} more` : shown.join(", ");
-    this.message = `${outputKey}: ${value} is not a declared value (${days})`;
+    this.message = `${outputKey}: ${this.value} is not a declared value (${days})`;
   }
 }
