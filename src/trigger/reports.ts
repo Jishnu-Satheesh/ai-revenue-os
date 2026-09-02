@@ -1,4 +1,4 @@
-import { logger, schemaTask } from "@trigger.dev/sdk";
+import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 
 import { reportProjectionTaskSchema, reportProfilingTaskSchema, reportValidationTaskSchema } from "@/domain/reports/schemas";
 import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
@@ -110,6 +110,13 @@ export const reportPackageProfilingTask = schemaTask({
       packageId: payload.packageId,
       outcome: result.outcome,
     });
+    // The state transition is already recorded by the RPC above, so the
+    // database is correct either way. This is only about what the run list
+    // says. A governed refusal is permanent -- a date that will not parse will
+    // not parse on the third attempt -- so it aborts rather than retries.
+    if (result.outcome === "failed") {
+      throw new AbortTaskRunError(`report-package refused: ${payload.packageId}`);
+    }
     return result;
   },
 });
@@ -226,6 +233,13 @@ export const reportPackageValidationTask = schemaTask({
       validationRunId: payload.validationRunId,
       outcome: result.outcome,
     });
+    // The state transition is already recorded by the RPC above, so the
+    // database is correct either way. This is only about what the run list
+    // says. A governed refusal is permanent -- a date that will not parse will
+    // not parse on the third attempt -- so it aborts rather than retries.
+    if (result.outcome === "failed") {
+      throw new AbortTaskRunError(`report-package refused: ${payload.packageId}`);
+    }
     return result;
   },
 });
@@ -334,6 +348,13 @@ export const reportPackageProjectionTask = schemaTask({
     // blank days is a different import from one with none, and no workbook
     // value is carried here.
     logger.info("report_package.projection_completed", { organizationId: payload.organizationId, packageId: payload.packageId, projectionVersionId: payload.projectionVersionId, projectionRunId: payload.projectionRunId, correlationId: payload.correlationId, outcome: result.outcome, absentRowCount: result.absentRowCount });
+    // The state transition is already recorded by the RPC above, so the
+    // database is correct either way. This is only about what the run list
+    // says. A governed refusal is permanent -- a date that will not parse will
+    // not parse on the third attempt -- so it aborts rather than retries.
+    if (result.outcome === "failed") {
+      throw new AbortTaskRunError(`report-package refused: ${payload.packageId}`);
+    }
     return result;
   },
 });
