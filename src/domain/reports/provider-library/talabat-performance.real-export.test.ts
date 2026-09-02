@@ -3,7 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { talabatPerformance } from "@/domain/reports/provider-library/talabat-performance";
-import { projectPeriodGrainMetrics } from "@/domain/reports/projection";
+import {
+  projectPeriodGrainMetrics,
+  ReportCategoricalValueNotDeclared,
+} from "@/domain/reports/projection";
 import { readCsvRows, readWorkbookRows } from "@/workflows/reports/project-report-package";
 
 /**
@@ -254,6 +257,68 @@ describe.skipIf(!hasCsvExport)(
     it("reads the total order count for the declared window", async () => {
       const result = await projectCsvFixture();
       expect(sumByMetric(result.observations, "order.total_count")).toBe(20);
+    });
+  },
+);
+
+/**
+ * The real client file that was refused with nothing to act on: the full
+ * error, in production, was `ReportProjectionError: CATEGORICAL_VALUE_NOT_DECLARED`.
+ *
+ * Its `Avoidable Cancellation Reason` column carries `CLOSED` on several days,
+ * which the approved figures do not declare -- only `ITEM_UNAVAILABLE` is.
+ * Refusing the import is correct and unchanged; this only checks that the
+ * refusal now names the label instead of only the code.
+ */
+const FIXTURE_MARCH = "fixtures/raw/Talabat/Mar-2026.xlsx";
+const hasMarchExport = existsSync(FIXTURE_MARCH);
+
+const MARCH_DECLARED_PERIOD = {
+  periodStart: "2026-03-01",
+  periodEnd: "2026-03-31",
+};
+
+describe.skipIf(!hasMarchExport)(
+  "talabat performance projection over the real March export",
+  () => {
+    it("refuses the March export by name", async () => {
+      const sheets = await readWorkbookRows(readFileSync(FIXTURE_MARCH));
+      expect(() =>
+        projectPeriodGrainMetrics({
+          contract: talabatPerformance.contract,
+          document: talabatPerformance.projection as Extract<
+            typeof talabatPerformance.projection,
+            { outputKind: "period_grain" }
+          >,
+          declaredCurrency: "AED",
+          declaredPeriod: MARCH_DECLARED_PERIOD,
+          sheets,
+        }),
+      ).toThrow(/CLOSED/);
+    });
+
+    it("names the declared output the label was refused on", async () => {
+      const sheets = await readWorkbookRows(readFileSync(FIXTURE_MARCH));
+      let thrown: unknown;
+      try {
+        projectPeriodGrainMetrics({
+          contract: talabatPerformance.contract,
+          document: talabatPerformance.projection as Extract<
+            typeof talabatPerformance.projection,
+            { outputKind: "period_grain" }
+          >,
+          declaredCurrency: "AED",
+          declaredPeriod: MARCH_DECLARED_PERIOD,
+          sheets,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(ReportCategoricalValueNotDeclared);
+      const failure = thrown as ReportCategoricalValueNotDeclared;
+      expect(failure.value).toBe("CLOSED");
+      expect(failure.outputKey).toBe("avoidable_cancel_reason");
+      expect(failure.periodKeys.length).toBeGreaterThan(0);
     });
   },
 );

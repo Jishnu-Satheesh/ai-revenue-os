@@ -6,6 +6,7 @@ import {
   projectExactRangeMetrics,
   projectPeriodGrainMetrics,
   reportProjectionDocumentSchema,
+  ReportCategoricalValueNotDeclared,
   type ReportProjectionDocument,
 } from "@/domain/reports/projection";
 
@@ -151,13 +152,29 @@ describe("governed exact-range report projection", () => {
       contract,
       document,
       declaredCurrency: "AED",
-      sheets: [{ normalizedSheetName: "settlement", rows: [["net_sales", "order_count"], ["13.00", "3"]] }],
+      sheets: [
+        {
+          normalizedSheetName: "settlement",
+          rows: [
+            ["net_sales", "order_count"],
+            ["13.00", "3"],
+          ],
+        },
+      ],
     });
     const second = projectExactRangeMetrics({
       contract,
       document,
       declaredCurrency: "AED",
-      sheets: [{ normalizedSheetName: "settlement", rows: [["net_sales", "order_count"], ["13.00", "3"]] }],
+      sheets: [
+        {
+          normalizedSheetName: "settlement",
+          rows: [
+            ["net_sales", "order_count"],
+            ["13.00", "3"],
+          ],
+        },
+      ],
     });
 
     expect(createReportProjectionResultDigest(first)).toBe(
@@ -237,7 +254,13 @@ function categoricalFixture({
     document,
     declaredCurrency: "AED",
     sheets: [
-      { normalizedSheetName: "sheet1", rows: [["Date", "Reason Code"], ["2026-01-01", cell]] },
+      {
+        normalizedSheetName: "sheet1",
+        rows: [
+          ["Date", "Reason Code"],
+          ["2026-01-01", cell],
+        ],
+      },
     ],
   };
 }
@@ -259,35 +282,53 @@ describe("a categorical cell carrying two labels", () => {
   });
 
   it("refuses the joined value when no separator is declared", () => {
-    expect(() =>
+    let thrown: unknown;
+    try {
       projectPeriodGrainMetrics(
         categoricalFixture({ valueSeparator: undefined, cell: "CHECK_IN_REQUIRED;UNREACHABLE" }),
-      ),
-    ).toThrow(/CATEGORICAL_VALUE_NOT_DECLARED/);
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ReportCategoricalValueNotDeclared);
+    const failure = thrown as ReportCategoricalValueNotDeclared;
+    expect(failure.code).toBe("CATEGORICAL_VALUE_NOT_DECLARED");
+    // With no separator declared, the whole cell is the one and only "first"
+    // segment -- there is nothing to split, so the joined text is the value.
+    expect(failure.value).toBe("CHECK_IN_REQUIRED;UNREACHABLE");
   });
 
   it("reads an unjoined value unchanged when a separator is declared", () => {
     const result = projectPeriodGrainMetrics(
       categoricalFixture({ valueSeparator: ";", cell: "UNREACHABLE" }),
     );
-    expect(result.observations.some((o) => o.dimensions?.reason_code === "UNREACHABLE")).toBe(
-      true,
-    );
+    expect(result.observations.some((o) => o.dimensions?.reason_code === "UNREACHABLE")).toBe(true);
   });
 
   it("still refuses a first value that is not declared", () => {
-    expect(() =>
+    let thrown: unknown;
+    try {
       projectPeriodGrainMetrics(
         categoricalFixture({ valueSeparator: ";", cell: "CLOSED;UNREACHABLE" }),
-      ),
-    ).toThrow(/CATEGORICAL_VALUE_NOT_DECLARED/);
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ReportCategoricalValueNotDeclared);
+    const failure = thrown as ReportCategoricalValueNotDeclared;
+    expect(failure.code).toBe("CATEGORICAL_VALUE_NOT_DECLARED");
+    // Only the first segment is the value, not the whole joined cell -- that
+    // is what the field's declared vocabulary would have to admit.
+    expect(failure.value).toBe("CLOSED");
   });
 
   it("treats a cell that is only a separator as absent", () => {
-    const result = projectPeriodGrainMetrics(categoricalFixture({ valueSeparator: ";", cell: ";" }));
-    expect(
-      result.observations.filter((o) => o.dimensions?.reason_code !== undefined),
-    ).toHaveLength(0);
+    const result = projectPeriodGrainMetrics(
+      categoricalFixture({ valueSeparator: ";", cell: ";" }),
+    );
+    expect(result.observations.filter((o) => o.dimensions?.reason_code !== undefined)).toHaveLength(
+      0,
+    );
   });
 
   it("counts the second label when the first slot is empty", () => {
@@ -296,17 +337,164 @@ describe("a categorical cell carrying two labels", () => {
     const result = projectPeriodGrainMetrics(
       categoricalFixture({ valueSeparator: ";", cell: ";UNREACHABLE" }),
     );
-    expect(result.observations.some((o) => o.dimensions?.reason_code === "UNREACHABLE")).toBe(
-      true,
-    );
+    expect(result.observations.some((o) => o.dimensions?.reason_code === "UNREACHABLE")).toBe(true);
   });
 
   it("treats a cell of only separators as absent", () => {
     const result = projectPeriodGrainMetrics(
       categoricalFixture({ valueSeparator: ";", cell: ";;" }),
     );
-    expect(
-      result.observations.filter((o) => o.dimensions?.reason_code !== undefined),
-    ).toHaveLength(0);
+    expect(result.observations.filter((o) => o.dimensions?.reason_code !== undefined)).toHaveLength(
+      0,
+    );
+  });
+});
+
+/**
+ * A cancellation-reason column mirroring Talabat's real one: one declared
+ * label, `ITEM_UNAVAILABLE`, and an undeclared one a real March export
+ * carried without warning. The key is named `avoidable_cancel_reason` to
+ * match the live output that refused the client's file.
+ */
+const cancelReasonContract: ReportContractDocument = {
+  schemaVersion: 1,
+  currency: "AED",
+  outletGrain: "branch",
+  sheets: [
+    {
+      normalizedSheetName: "sheet1",
+      headerRow: 1,
+      dataStartRow: 2,
+      allowFormula: false,
+      allowMergedCells: false,
+      fields: [
+        {
+          canonicalField: "period_date",
+          sourceHeader: "date",
+          parser: "local_date",
+          required: true,
+        },
+        {
+          canonicalField: "avoidable_cancellation_reason",
+          sourceHeader: "avoidable_cancellation_reason",
+          parser: "text",
+          required: false,
+        },
+      ],
+    },
+  ],
+  controls: [],
+  unmappedFieldDisposition: "reviewed_ignore",
+} as unknown as ReportContractDocument;
+
+function cancelReasonDocument() {
+  return reportProjectionDocumentSchema.parse({
+    schemaVersion: 1,
+    outputKind: "period_grain",
+    grain: "day",
+    periodKey: { normalizedSheetName: "sheet1", canonicalField: "period_date" },
+    outputs: [
+      {
+        key: "avoidable_cancel_reason",
+        normalizedSheetName: "sheet1",
+        canonicalField: "avoidable_cancellation_reason",
+        metricKey: "order.avoidable_cancellation_reason",
+        valueKind: "count",
+        aggregation: "sum",
+        categorical: {
+          dimensionKey: "reason_code",
+          allowedValues: ["ITEM_UNAVAILABLE"],
+          collectInjectedValues: false,
+        },
+      },
+    ],
+    controlTotals: [],
+  }) as Extract<ReportProjectionDocument, { outputKind: "period_grain" }>;
+}
+
+/**
+ * Every date in `periodKeys` carries the undeclared value; one extra day
+ * ahead of them carries the one label the contract does declare, so a
+ * regression that refused the whole column -- rather than the specific value
+ * -- would not be caught by a fixture where every row was undeclared.
+ */
+function sheetsWithCancellationReason(undeclaredValue: string, periodKeys: readonly string[]) {
+  return [
+    {
+      normalizedSheetName: "sheet1",
+      rows: [
+        ["Date", "Avoidable Cancellation Reason"],
+        ["2026-03-01", "ITEM_UNAVAILABLE"],
+        ...periodKeys.map((date) => [date, undeclaredValue]),
+      ],
+    },
+  ];
+}
+
+describe("an undeclared categorical value", () => {
+  it("names the label it refused and the days it appeared on", () => {
+    // Talabat's March export carries the cancellation reason CLOSED, which the
+    // approved figures do not declare. Refusing is right. Refusing without
+    // saying what offended is what sent a live operator to the code.
+    let thrown: unknown;
+    try {
+      projectPeriodGrainMetrics({
+        contract: cancelReasonContract,
+        document: cancelReasonDocument(),
+        declaredCurrency: "AED",
+        declaredPeriod: { periodStart: "2026-03-01", periodEnd: "2026-03-31" },
+        sheets: sheetsWithCancellationReason("CLOSED", ["2026-03-04", "2026-03-11"]),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ReportCategoricalValueNotDeclared);
+    const failure = thrown as ReportCategoricalValueNotDeclared;
+    expect(failure.code).toBe("CATEGORICAL_VALUE_NOT_DECLARED");
+    expect(failure.value).toBe("CLOSED");
+    expect(failure.outputKey).toBe("avoidable_cancel_reason");
+    expect(failure.periodKeys).toEqual(["2026-03-04", "2026-03-11"]);
+    // failureDetail() joins name, code and message. Today all three are the code.
+    expect(failure.message).toContain("CLOSED");
+    expect(failure.message).toContain("avoidable_cancel_reason");
+  });
+
+  it("caps the days named in the message so the label and output key survive truncation", () => {
+    // failureDetail() truncates the joined name/code/message to 300
+    // characters. A month of offending dates would overflow that and could
+    // push the label itself past the cut -- the one part an operator needs.
+    const periodKeys = [
+      "2026-03-02",
+      "2026-03-03",
+      "2026-03-04",
+      "2026-03-05",
+      "2026-03-06",
+      "2026-03-07",
+      "2026-03-08",
+      "2026-03-09",
+      "2026-03-10",
+      "2026-03-11",
+    ];
+    let thrown: unknown;
+    try {
+      projectPeriodGrainMetrics({
+        contract: cancelReasonContract,
+        document: cancelReasonDocument(),
+        declaredCurrency: "AED",
+        declaredPeriod: { periodStart: "2026-03-01", periodEnd: "2026-03-31" },
+        sheets: sheetsWithCancellationReason("CLOSED", periodKeys),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const failure = thrown as ReportCategoricalValueNotDeclared;
+    expect(failure.periodKeys).toEqual(periodKeys);
+    // The full, untruncated list of days is still on the error object -- only
+    // the message shown to the operator is capped.
+    expect(failure.message).toContain("avoidable_cancel_reason: CLOSED");
+    expect(failure.message).not.toContain(periodKeys[9]);
+    expect(failure.message).toContain("+2 more");
   });
 });
