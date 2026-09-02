@@ -211,14 +211,14 @@
   - The provider contract records official endpoints, versions, auth, fields, citations, retry facts, data retention/training/residency, terms, robots behavior, commercial approval, and verified failure semantics.
   - The adapter remains unavailable when any required contract fact or controlled-canary evidence is absent.
 - **Steps:**
-  - [ ] Select one provider only after comparing official documentation and legal/commercial/privacy/security requirements; record the decision and dated sources in the provider contract.
-  - [ ] Stop this task without enabling research if provider terms, citation provenance, retention, SSRF controls, or cost ceilings cannot satisfy the approved spec.
+  - [x] Compare official documentation and legal/commercial/privacy/security requirements; record the Exa Enterprise technical candidate and dated sources in the provider contract.
+  - [x] Stop without enabling research because the executed terms, retention/training controls, durable derived-claim storage rights, credential, commercial approval, and controlled-canary evidence are absent; commit the reviewed refusal state.
   - [ ] Write contract tests for success, partial results, robots/access refusal, paywall/CAPTCHA, redirect, timeout before and after request, rate limit, malformed content, removed source, cost ceiling, and safe normalized errors.
-  - [ ] Write SSRF and DNS tests for loopback, RFC1918, link-local, IPv6 local, metadata hosts, credential-bearing URLs, unsafe ports, DNS rebinding, redirect escape, and non-HTTP(S) schemes.
-  - [ ] Write adversarial tests proving source text cannot change query scope, call another tool, inject instructions, or select the tenant.
-  - [ ] Implement the deterministic query executor and bounded adapter from the verified contract only; do not invent retry codes, fields, or permissions.
+  - [x] Write SSRF and DNS tests for loopback, RFC1918, link-local, IPv6 local, metadata hosts, credential-bearing URLs, unsafe ports, DNS rebinding, redirect escape, and non-HTTP(S) schemes.
+  - [x] Write adversarial tests proving source text cannot change query scope, call another tool, inject instructions, or select the tenant.
+  - [x] Implement the deterministic query planner, reusable HTTP fence, and disabled bounded adapter from the reviewed contract state only; no retry codes, fields, permissions, or provider transport are invented.
   - [ ] Capture one controlled, redacted canary retrieval with citations, safe identifiers, measured latency/cost, failure cleanup, and no stored full page.
-  - [ ] Run focused tests, typecheck, lint, and secret/sensitive-log scans.
+  - [x] Run focused tests, typecheck, lint, formatting/diff checks, and secret/sensitive-log scans.
   - [ ] Commit as `feat(growth-intelligence): qualify bounded public research` only when the adapter gate is fully evidenced; otherwise commit the reviewed refusal state without enabling the adapter.
 
 ### Task 6: Persist immutable Market Evidence and current-state events
