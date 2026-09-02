@@ -14,7 +14,18 @@ import {
   Wand2,
 } from "lucide-react";
 
-import { attestAndApprove } from "@/components/campaigns/campaign-actions";
+import { attestAndApprove, decideLearningProposal } from "@/components/campaigns/campaign-actions";
+import {
+  AllocationLedger,
+  type AllocationLedgerEvent,
+} from "@/components/campaigns/allocation-ledger";
+import { VariantGrid, type VariantCard } from "@/components/campaigns/variant-grid";
+import { OutcomeProof, type OutcomeProofData } from "@/components/campaigns/outcome-proof";
+import {
+  LearningReview,
+  type LearningDecision,
+  type LearningProposalData,
+} from "@/components/campaigns/learning-review";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,6 +98,36 @@ const APPROVAL_WINDOWS = [
   { value: "72", label: "3 days" },
   { value: "168", label: "7 days" },
 ] as const;
+
+/**
+ * The approval must outlive the creative it licenses.
+ *
+ * The policy authorizes variants until a fixed instant, and the database
+ * refuses an approval that lapses before then — a licence with no authority
+ * behind it reads to an operator as permission the system would in fact
+ * decline. So a window shorter than the policy is not offered at all.
+ *
+ * Offering it and failing afterwards is the worse version of the same rule: it
+ * spends the operator's attestation before telling them the choice was never
+ * available.
+ */
+function approvalWindowOptions(policyExpiresAt: string, now: number) {
+  const required = new Date(policyExpiresAt).getTime();
+  const usable = APPROVAL_WINDOWS.filter(
+    (option) => now + Number(option.value) * 3_600_000 >= required,
+  );
+  if (usable.length > 0) return usable;
+
+  // The policy outlasts every preset. Rather than refuse to render an approval
+  // control, offer exactly the window the policy needs.
+  const hours = Math.max(1, Math.ceil((required - now) / 3_600_000));
+  return [
+    {
+      value: String(hours),
+      label: `Until the creative window closes (${Math.ceil(hours / 24)} days)`,
+    },
+  ] as const;
+}
 
 const ATTESTATION_STATEMENT =
   "I have reviewed every proposed asset and confirm none of them depicts or implies a real-world fact the evidence does not support.";
@@ -602,17 +643,55 @@ export function CampaignStudio({
   organizationId,
   organizationName,
   timeZone,
+  variants,
+  variantsRemaining,
+  allocationEvents = [],
+  outcome = null,
+  learningProposal = null,
+  canDecideLearning = false,
+  currency = null,
 }: Readonly<{
   view: StudioView;
   organizationId: string;
   organizationName: string;
   timeZone: string;
+  /** Creative produced under this approval. Empty until any has been. */
+  variants?: readonly VariantCard[];
+  variantsRemaining?: Readonly<Record<string, number>>;
+  /**
+   * The fast loop's decisions for this campaign, newest first. Empty until the
+   * loop has run and recorded something worth an operator's attention.
+   */
+  allocationEvents?: readonly AllocationLedgerEvent[];
+  /**
+   * The settled result and its proof, once the evidence loop has settled the
+   * campaign. Null while the outcome window and settlement delay have not yet
+   * passed.
+   */
+  outcome?: OutcomeProofData | null;
+  /**
+   * The learning proposal the evidence loop drafted from the settled outcome,
+   * once one exists. Null until the loop has proposed and none has been decided.
+   */
+  learningProposal?: LearningProposalData | null;
+  /** Whether the viewer may record a decision; viewers may read but not decide. */
+  canDecideLearning?: boolean;
+  /** The organization's currency; money values in both panels render in it. */
+  currency?: string | null;
 }>) {
   const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
   const [directionId, setDirectionId] = useState(evidenceLed?.id ?? view.directions[0]?.id ?? "");
   const [attested, setAttested] = useState(false);
-  const [windowHours, setWindowHours] = useState("24");
+  // Read once on mount rather than on every render. Reading the clock during
+  // render makes the component's output depend on when React happened to run
+  // it, which is the impurity the compiler is right to refuse.
+  const [mountedAt] = useState(() => Date.now());
+  const windowOptions = useMemo(
+    () => approvalWindowOptions(view.generationPolicy.policyExpiresAt, mountedAt),
+    [view.generationPolicy.policyExpiresAt, mountedAt],
+  );
+  const [windowHours, setWindowHours] = useState(windowOptions[0]?.value ?? "168");
   const [approving, setApproving] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
@@ -648,6 +727,24 @@ export function CampaignStudio({
     router.refresh();
   }
 
+  /**
+   * Records the operator's decision on a learning proposal and refreshes so the
+   * closed proposal renders as history. The decision route only records a
+   * human's choice; it promotes nothing.
+   */
+  async function decideLearning(decision: LearningDecision) {
+    if (!learningProposal) return { ok: false as const, message: "No proposal to decide." };
+    const result = await decideLearningProposal({
+      organizationId,
+      campaignId: view.campaignId,
+      proposalId: learningProposal.id,
+      decision,
+    });
+    if (!result.ok) return { ok: false as const, message: result.message };
+    router.refresh();
+    return { ok: true as const };
+  }
+
   return (
     <div className="flex min-h-0 flex-col gap-4">
       {/* Persistent bundle header: what this is, which version, and whether
@@ -676,7 +773,12 @@ export function CampaignStudio({
         </div>
       </header>
 
-      <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,21rem)]">
+      {/* `min-h-0` here let this grid shrink to a fraction of its own content —
+          measured at 123px against 2949px of children — so everything below the
+          fold overflowed the box and painted over whatever followed. Nothing
+          followed it until the variant grid did, which is why it went unseen.
+          The page scrolls at `main`, so this row sizes to its content. */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,21rem)]">
         <Tabs value={directionId} onValueChange={setDirectionId} className="flex min-w-0 flex-col">
           {/* The filmstrip. Three directions side by side, each showing its own
               artwork, so the alternative is visible rather than imagined. */}
@@ -857,7 +959,7 @@ export function CampaignStudio({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {APPROVAL_WINDOWS.map((option) => (
+                  {windowOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -894,6 +996,60 @@ export function CampaignStudio({
           </section>
         </aside>
       </div>
+
+      {/* Shown only once an approval exists. Before that there is no envelope
+          for creative to sit inside, and an empty grid would imply there is. */}
+      {view.approval.status === "live" ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold">Creative variants</h2>
+          <p className="text-sm text-muted-foreground">
+            Produced inside this approval. Each one varies the image and the words; none of them
+            changes the offer, the claims, the audience, the placement, the schedule or the spend.
+          </p>
+          <VariantGrid variants={variants ?? []} remaining={variantsRemaining ?? {}} />
+
+          {allocationEvents.length > 0 ? (
+            <div className="mt-4 flex flex-col gap-2">
+              <h3 className="text-base font-semibold">Allocation decisions</h3>
+              <p className="text-sm text-muted-foreground">
+                Every decision the loop made, and why — including the decisions not to act. Each one
+                names the rule, the values it compared, and when.
+              </p>
+              <AllocationLedger events={allocationEvents} timeZone={timeZone} currency={currency} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* The settled result is not gated on a live approval: a campaign that ran
+          and settled keeps its proof after the approval has lapsed. */}
+      {outcome !== null ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold">Result</h2>
+          <p className="text-sm text-muted-foreground">
+            The settled verdict and the proof behind it: what was hypothesized, what actually
+            delivered, what it cost, and why the verdict carries its label.
+          </p>
+          <OutcomeProof outcome={outcome} timeZone={timeZone} />
+        </section>
+      ) : null}
+
+      {/* A learning proposal only exists after settlement, and only until an
+          operator decides it. It is the loop's last arrow, and the operator's
+          decision is the last word on whether a lesson leaves its campaign. */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">Learning</h2>
+        <p className="text-sm text-muted-foreground">
+          A lesson the evidence loop drafted from this campaign&apos;s own settled outcome. It stays
+          attached to this campaign until you decide otherwise.
+        </p>
+        <LearningReview
+          proposal={learningProposal}
+          canDecide={canDecideLearning}
+          timeZone={timeZone}
+          onDecide={decideLearning}
+        />
+      </section>
 
       <p className="sr-only">Reviewing campaign artwork for {organizationName}.</p>
     </div>

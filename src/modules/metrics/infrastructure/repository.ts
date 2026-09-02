@@ -3,9 +3,12 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { metricError } from "@/domain/metrics/errors";
+import { toCalendarDate } from "@/domain/metrics/periods";
 import type { MetricPeriodGrain } from "@/domain/metrics/types";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
+  GovernedMetricObservation,
+  GovernedMetricWindowPort,
   MetricDefinitionRecord,
   MetricIngestionWindow,
   MetricIngestionWindowPort,
@@ -60,8 +63,10 @@ export function createMetricSeriesRepository(supabase: MetricsClient): MetricSer
         .eq("metric_definition_id", query.metricDefinitionId)
         .eq("period_grain", query.grain)
         // "Current" has one definition and no second source of truth: a
-        // restatement supersedes rather than updates.
+        // restatement supersedes rather than updates, and evidence held for an
+        // owner's overlap decision is not settled fact yet.
         .is("superseded_by_id", null)
+        .eq("reconciliation_state", "current")
         .gte("period_start", query.rangeStart.toISOString())
         .lt("period_start", query.rangeEndExclusive.toISOString())
         .order("period_start", { ascending: true })
@@ -156,6 +161,7 @@ export function createMetricIngestionWindowRepository(
         .eq("organization_id", organizationId)
         .eq("source_ingestion_run_id", ingestionRunId)
         .is("superseded_by_id", null)
+        .eq("reconciliation_state", "current")
         .order("period_start", { ascending: true })
         .limit(MAX_WINDOW_ROWS);
 
@@ -180,6 +186,7 @@ export function createMetricIngestionWindowRepository(
         .eq("organization_id", organizationId)
         .eq("metric_definition_id", definition.id)
         .is("superseded_by_id", null)
+        .eq("reconciliation_state", "current")
         .order("period_start", { ascending: true })
         .limit(MAX_WINDOW_ROWS);
 
@@ -402,4 +409,152 @@ function toNumber(value: number | string): number {
 
 function toNumberOrNull(value: number | string | null): number | null {
   return value === null ? null : toNumber(value);
+}
+
+/** A year of daily periods across a handful of channels, with room to spare. */
+const MAX_GOVERNED_WINDOW_ROWS = 10_000;
+/**
+ * `period_start` is an instant and the window is stated in calendar dates, so
+ * the fetch is widened past the widest UTC offset in use and the exact local
+ * dates are applied afterwards. Narrowing first would drop the first or last
+ * period for any branch east or west of the window's own zone.
+ */
+const WINDOW_WIDENING_DAYS = 2;
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Governed evidence for one window.
+ *
+ * `reconciliation_digest is not null` is what makes a row governed: it is
+ * written only by the report projection path. A series some other collector
+ * produced is not evidence about a governed import, and mixing the two would
+ * let an unreviewed source answer a question about a reviewed one.
+ */
+export function createGovernedMetricWindowRepository(
+  supabase: MetricsClient,
+): GovernedMetricWindowPort {
+  return {
+    async loadGovernedWindow(query) {
+      const series = createMetricSeriesRepository(supabase);
+      const definitions = new Map<string, string>();
+      for (const key of query.metricKeys) {
+        const definition = await series.loadDefinition(query.organizationId, key);
+        if (definition?.isActive) definitions.set(definition.id, definition.key);
+      }
+      if (definitions.size === 0) return [];
+
+      const fetchStart = new Date(
+        Date.parse(`${query.windowStart}T00:00:00Z`) - WINDOW_WIDENING_DAYS * MS_PER_DAY,
+      );
+      const fetchEnd = new Date(
+        Date.parse(`${query.windowEnd}T00:00:00Z`) + (WINDOW_WIDENING_DAYS + 1) * MS_PER_DAY,
+      );
+
+      let request = supabase
+        .from("normalized_metrics")
+        .select(
+          "id, channel_id, branch_id, metric_definition_id, period_grain, period_start, period_end, period_timezone, value_kind, value_numerator, currency, quality_tier, dimensions",
+        )
+        .eq("organization_id", query.organizationId)
+        .in("metric_definition_id", [...definitions.keys()])
+        .is("superseded_by_id", null)
+        .eq("reconciliation_state", query.reconciliationState ?? "current")
+        .not("reconciliation_digest", "is", null)
+        .not("channel_id", "is", null)
+        .gte("period_start", fetchStart.toISOString())
+        .lt("period_start", fetchEnd.toISOString())
+        .order("period_start", { ascending: true })
+        .limit(MAX_GOVERNED_WINDOW_ROWS);
+
+      if (query.channelId) request = request.eq("channel_id", query.channelId);
+      if (query.branchId) request = request.eq("branch_id", query.branchId);
+
+      const { data, error } = await request;
+      if (error) throw metricError("METRIC_QUERY_FAILED", { code: error.code ?? "unknown" });
+
+      // A truncated read is worse than no read: a detector told about fewer
+      // periods than exist would report a gap nobody has.
+      if ((data ?? []).length >= MAX_GOVERNED_WINDOW_ROWS)
+        throw metricError("METRIC_QUERY_FAILED", {
+          reason: "governed window exceeded its row budget",
+        });
+
+      return (data ?? [])
+        .map((row) => {
+          const timeZone = row.period_timezone;
+          const periodStartDate = toCalendarDate(new Date(row.period_start), timeZone);
+          // `period_end` is the exclusive next local midnight, so the last day
+          // inside the period is the instant a millisecond before it.
+          const periodEndDate = toCalendarDate(new Date(Date.parse(row.period_end) - 1), timeZone);
+          return {
+            id: row.id,
+            channelId: row.channel_id as string,
+            branchId: row.branch_id,
+            metricKey: definitions.get(row.metric_definition_id) as string,
+            grain: row.period_grain as MetricPeriodGrain,
+            periodStartDate,
+            periodEndDate,
+            periodTimezone: timeZone,
+            valueKind: row.value_kind as "money" | "count",
+            numerator:
+              row.value_kind === "money"
+                ? toExactInteger(row.value_numerator)
+                : toExactQuantity(row.value_numerator),
+            currency: row.currency,
+            qualityTier: row.quality_tier as GovernedMetricObservation["qualityTier"],
+            dimensions: toDimensionRecord(row.dimensions),
+          };
+        })
+        .filter(
+          (observation) =>
+            observation.periodStartDate >= query.windowStart &&
+            observation.periodStartDate <= query.windowEnd,
+        );
+    },
+  };
+}
+
+/**
+ * Money is integer minor units and a count is whole. A value that has left the
+ * safe integer range stopped being exact somewhere upstream, and a detector
+ * would go on to subtract it from another one.
+ */
+function toExactInteger(value: number | string): number {
+  const parsed = toNumber(value);
+  if (!Number.isSafeInteger(parsed))
+    throw metricError("METRIC_QUERY_FAILED", {
+      reason: "governed observation is not an exact integer",
+    });
+  return parsed;
+}
+
+/**
+ * A measured quantity may carry fractions -- the provider wrote `355.6` closed
+ * minutes, and rounding it would fabricate time nobody lost (ADR 0036). What
+ * is refused is anything a detector cannot sum and restate without drift:
+ * non-finite values and magnitudes beyond the exact integer range.
+ */
+function toExactQuantity(value: number | string): number {
+  const parsed = toNumber(value);
+  if (!Number.isFinite(parsed) || Math.abs(parsed) >= Number.MAX_SAFE_INTEGER)
+    throw metricError("METRIC_QUERY_FAILED", {
+      reason: "governed observation is not an exact quantity",
+    });
+  return parsed;
+}
+
+/**
+ * The categorical labels a categorical output wrote beside its figure
+ * (ADR 0034). The column is bounded jsonb, but jsonb is still untyped from
+ * this side, so anything that is not a flat string-valued object is dropped
+ * rather than trusted: a dimension value a detector cannot read as a label is
+ * not one it may group by.
+ */
+function toDimensionRecord(value: unknown): Readonly<Record<string, string>> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  const record: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string") record[key] = entry;
+  }
+  return record;
 }

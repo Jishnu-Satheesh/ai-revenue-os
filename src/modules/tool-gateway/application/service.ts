@@ -96,6 +96,10 @@ export function createToolGateway(dependencies: ToolGatewayDependencies) {
           organizationId: input.organizationId,
           actionRunId: input.actionRunId,
           idempotencyKey: input.idempotencyKey,
+          // Passed through, never re-derived. The adapter must apply a provider
+          // ceiling no larger than what the database committed, and it can only
+          // check that against the reservation this claim actually made.
+          reservation: { amountMinor: claim.reservationMinor, currency: claim.currency },
           signal,
         });
       } catch {

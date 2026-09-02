@@ -95,6 +95,36 @@
 }
 
 /*
+ * The public landing page renders its own atmosphere regardless of the app
+ * theme. Overriding the semantic variables inside one scope keeps every
+ * component on tokens — no component hardcodes a palette value.
+ */
+.marketing {
+  --background: oklch(0.135 0.012 275);
+  --foreground: oklch(0.955 0.005 275);
+  --card: oklch(0.17 0.014 275);
+  --card-foreground: oklch(0.955 0.005 275);
+  --popover: oklch(0.17 0.014 275);
+  --popover-foreground: oklch(0.955 0.005 275);
+  --primary: oklch(0.62 0.13 164);
+  --primary-foreground: oklch(0.17 0.04 165);
+  --secondary: oklch(0.235 0.02 280);
+  --secondary-foreground: oklch(0.955 0.005 275);
+  --muted: oklch(0.205 0.016 275);
+  --muted-foreground: oklch(0.72 0.018 275);
+  --accent: oklch(0.22 0.02 280);
+  --accent-foreground: oklch(0.955 0.005 275);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.68 0.13 164);
+  --surface: oklch(0.17 0.014 275);
+  --surface-subtle: oklch(0.205 0.016 275);
+  --border: oklch(1 0 0 / 8%);
+  --success: oklch(0.75 0.17 160);
+  --warning: oklch(0.82 0.14 85);
+  --glow-accent: oklch(0.72 0.16 162);
+}
+
+/*
  * Layered on purpose.
  *
  * These were unlayered, and unlayered CSS beats anything inside a layer. Since
@@ -121,6 +151,39 @@
   a {
     -webkit-tap-highlight-color: transparent;
   }
+}
+
+.cn-toast-success,
+.cn-toast-error,
+.cn-toast-info {
+  color: white !important;
+}
+
+.cn-toast-success {
+  background-color: var(--success) !important;
+  border-color: var(--success) !important;
+}
+
+.cn-toast-success * {
+  color: white !important;
+}
+
+.cn-toast-error {
+  background-color: var(--danger) !important;
+  border-color: var(--danger) !important;
+}
+
+.cn-toast-error * {
+  color: white !important;
+}
+
+.cn-toast-info {
+  background-color: #000 !important;
+  border-color: #000 !important;
+}
+
+.cn-toast-info * {
+  color: white !important;
 }
 
 .dark {

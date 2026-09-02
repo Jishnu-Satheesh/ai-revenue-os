@@ -16,8 +16,19 @@ const storagePolicyFixMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260810150000_fix_integration_import_storage_policies.sql",
 );
-/** Retains the captured subquery it was corrected for; excluded from that guard. */
-const supersededStoragePolicyMigration = "20260807230118_integration_hub.sql";
+/**
+ * Migrations that still contain the captured subquery they were corrected for.
+ *
+ * A migration is history and is never edited, so the broken form stays on disk
+ * after its fix ships. Each entry here is paired with the migration that
+ * replaced its policy, and nothing is added without that replacement.
+ */
+const supersededStoragePolicyMigrations = new Set([
+  // Fixed by 20260810150000_fix_integration_import_storage_policies.sql.
+  "20260807230118_integration_hub.sql",
+  // Fixed by 20260822090000_qualify_governed_report_storage_policy.sql.
+  "20260820150246_governed_report_package_intake.sql",
+]);
 const authenticatedOperationsMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260808025602_integration_authenticated_operations.sql",
@@ -769,6 +780,28 @@ describe("Integration Hub migration contract", () => {
     }
   });
 
+  it("keeps the effective governed report upload policy qualified", () => {
+    // The exemption above lets the intake migration keep its original,
+    // unqualified body. That is only safe while the policy that actually runs
+    // is the corrected one, so the replacement is asserted rather than assumed.
+    const effective = readFileSync(
+      resolve(migrationsDirectory, "20260822090000_qualify_governed_report_storage_policy.sql"),
+      "utf8",
+    );
+    const policy = statementContaining(
+      effective,
+      'create policy "operators upload governed report package objects"',
+    );
+
+    expect(policy).toContain("bucket_id = 'governed-report-packages'");
+    expect(policy).toContain("(storage.foldername(objects.name))[1]");
+    expect(policy).toContain("(storage.foldername(objects.name))[2]");
+    expect(policy).toContain("(storage.foldername(objects.name))[3]");
+    expect(policy).toContain("objects.name = p.storage_path");
+    expect(policy).toContain("private.has_organization_permission(p.organization_id, 'report.upload')");
+    expect(policy).not.toMatch(/storage\.foldername\(\s*name\s*\)/);
+  });
+
   it("qualifies the storage column inside every policy subquery", () => {
     // `integration_data_sources` has a `name` column of its own, so an
     // unqualified storage.foldername(name) inside `exists (...)` binds to the
@@ -776,7 +809,7 @@ describe("Integration Hub migration contract", () => {
     // for every row. That silently disabled the whole bucket once already, and
     // a permissive policy that never matches denies everything.
     for (const file of readdirSync(migrationsDirectory).filter((name) => name.endsWith(".sql"))) {
-      if (file === supersededStoragePolicyMigration) continue;
+      if (supersededStoragePolicyMigrations.has(file)) continue;
 
       // Comment lines are dropped first: the corrective migration quotes the
       // broken form to explain it, and that explanation is not a policy.

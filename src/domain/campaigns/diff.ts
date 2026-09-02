@@ -1,5 +1,4 @@
 import { CampaignError } from "@/domain/campaigns/errors";
-import { bundleDigest } from "@/domain/campaigns/digest";
 import { normalizeManifest } from "@/domain/campaigns/normalization";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
 
@@ -41,6 +40,11 @@ export type CampaignDiff = {
  * comparison and can. The screen shows this, and the server recomputes the
  * whole diff with its digests when the version is actually written — the
  * preview is a courtesy, and the stored diff is the record.
+ *
+ * That split has to hold at the module level, not just the function level: a
+ * top-level `node:crypto` import fails a browser build whether or not anything
+ * on the page ever calls it. `diffManifests` therefore lives beside the digest
+ * it exists to attach, and nothing in this file reaches Node.
  */
 export function diffManifestChanges(
   before: CampaignBundleManifest,
@@ -56,25 +60,6 @@ export function diffManifestChanges(
   const changes: CampaignDiffChange[] = [];
   collect(normalizeManifest(before), normalizeManifest(after), "", changes);
   return changes;
-}
-
-export function diffManifests(
-  before: CampaignBundleManifest,
-  after: CampaignBundleManifest,
-): CampaignDiff {
-  const changes = diffManifestChanges(before, after);
-
-  return {
-    fromVersion: before.version,
-    toVersion: after.version,
-    fromDigest: bundleDigest(before),
-    toDigest: bundleDigest(after),
-    changes,
-    // Any manifest change is material, so any change invalidates. Stated as a
-    // derived fact rather than a constant, so the rule stays visible if the
-    // manifest ever gains a genuinely cosmetic field.
-    invalidatesApproval: changes.some((change) => change.materiality === "material"),
-  };
 }
 
 function collect(

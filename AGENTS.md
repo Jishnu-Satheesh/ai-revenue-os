@@ -17,6 +17,8 @@ Before changing code, read only the context needed for the task, starting with:
 9. `context/14-coding-standards.md`
 10. `context/15-ai-coding-standards.md`
 11. `context/18-anti-patterns.md`
+12. `docs/collaboration/asset-library-and-studio-board.md` — always, before touching any file, while
+    more than one agent is active. See section 10.
 
 Do not read every document automatically. Load context deliberately to reduce noise and stale assumptions.
 
@@ -50,6 +52,11 @@ and `DATABASE_URL` in `.env.local`. Everything below follows from that:
 ## 2. Non-negotiable product rules
 
 - Optimize for measurable incremental gross profit and customer acquisition, not automation volume.
+- Advise freely, execute narrowly. The platform exists to do the analysis the client cannot do
+  themselves. Make the recommendation whenever the evidence supports one, and attach its citations
+  so the client can check the reasoning. Withholding useful advice because impact is not yet
+  measurable is a failure, not rigour. The fence belongs on execution and on claims about realized
+  results — never on the advice itself. See ADR 0039.
 - Keep the platform core industry-neutral. Restaurant-specific logic belongs in the Restaurant Industry Pack.
 - Enforce tenant isolation at the database and application layers.
 - Separate decisions from execution. The Decision Engine proposes actions; the Execution Plane performs validated actions.
@@ -126,7 +133,7 @@ Never:
 - allow LLM output to be executed without schema validation.
 - hard-code restaurant concepts into platform-core tables or services.
 - hide errors, silently discard events, or mark uncertain data as verified.
-- declare business impact without an explicit baseline, attribution method, and measurement window.
+- state a **realized or attributed** business result without an explicit baseline, attribution method, and measurement window. This governs claims about what *did* happen — "this recommendation earned you AED 4,000". A forward-looking estimate is not a realized result: offer one whenever its inputs are cited and its assumptions are stated on the same surface, and label it an estimate rather than a measurement.
 - make autonomous budget, price, discount, or public-brand changes beyond configured policy.
 - log secrets, access tokens, raw payment details, or unnecessary customer PII.
 - write Tier 3 feature code before its Execution Plan, or its spec where one is required, has been approved.
@@ -163,10 +170,42 @@ When implementation contradicts documentation, stop and resolve the contradictio
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only. Never replace the symlink with a copy.
 
-## 10. Misc
+## 10. Coordination and the collaboration board
+
+**Growth Intelligence belongs to another agent. Do not touch it.** As of 2026-09-01 that is the one
+live claim in this repository: `src/domain/growth-intelligence/`,
+`src/modules/growth-intelligence/`, the `growth_intelligence_*` migration and pgTAP suites,
+`specs/022-growth-intelligence.md`, and ADR 0044. Leave their uncommitted changes in the working
+tree alone, never commit them, and do not resolve the `database.types.ts` drift their unapplied
+migration causes — that is theirs.
+
+**Everything else has one agent.** The two-thread arrangement in
+`docs/collaboration/asset-library-and-studio-board.md` and its older `in-progress` rows are
+historical record, not a live contract.
+
+**Outside Growth Intelligence, a claimed file is not a blocked file.** If you find a defect in a
+file some old row claims, fix it and say what you fixed. Declining to touch working code because a
+stale row names it is a failure, not caution.
+
+Still read the board before starting, and still add entries as you go. It is no longer a live
+contract between agents, but it is the durable record of what was decided, discovered and rejected
+across sessions, and it is the only such record that survives a new conversation.
+
+Three rules survive, for reasons that have nothing to do with other agents:
+
+- **Never use `git stash`.** The stash stack is shared with the main checkout and every other
+  worktree, and other sessions may pop it. Use a temporary WIP commit instead.
+- **A pushed migration is live on shared staging immediately.** There is no local rehearsal, so get
+  it right by reading the existing schema first.
+- **Claim the files you intend to touch on the board.** Not to reserve them, but so the next session
+  can see what a change touched and why.
+
+If ownership changes again, correct this section and the board's banner together.
+
+## 11. Misc
 <!-- TRIGGER.DEV SKILLS START -->
 ## Trigger.dev agent skills
 
-This project has Trigger.dev agent skills installed in `.agents/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`, `trigger-getting-started`, `trigger-realtime-and-frontend`.
+This project has Trigger.dev agent skills installed in `.claude/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-getting-started`, `trigger-realtime-and-frontend`, `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`.
 <!-- TRIGGER.DEV SKILLS END -->
 

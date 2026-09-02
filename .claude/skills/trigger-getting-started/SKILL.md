@@ -11,7 +11,7 @@ description: >
   and you are writing task code, switch to the trigger-authoring-tasks skill.
 type: core
 library: trigger.dev
-library_version: "4.5.11"
+library_version: "4.5.12"
 sources:
   - docs/quick-start.mdx
   - docs/manual-setup.mdx
@@ -211,4 +211,4 @@ Docs:
 
 ## Version
 
-Generated for @trigger.dev/sdk 4.5.11. Re-run the trigger.dev skills installer after upgrading.
+Generated for @trigger.dev/sdk 4.5.12. Re-run the trigger.dev skills installer after upgrading.

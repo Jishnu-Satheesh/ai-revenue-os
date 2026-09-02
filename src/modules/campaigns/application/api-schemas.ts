@@ -55,6 +55,21 @@ export const createCampaignRequestSchema = z
   });
 export type CreateCampaignRequest = z.infer<typeof createCampaignRequestSchema>;
 
+/**
+ * A variant run names the exact version it was requested against.
+ *
+ * Without the digest, an operator working in a tab left open since yesterday
+ * would queue creative under a proposal that has since changed — and variants
+ * are precisely the creative nobody reviews one by one.
+ */
+export const variantsRequestSchema = z.strictObject({
+  bundleVersionId: z.string().uuid(),
+  bundleDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  perDirection: z.number().int().positive().max(50),
+  idempotencyKey: idempotencyKeySchema,
+});
+export type VariantsRequest = z.infer<typeof variantsRequestSchema>;
+
 export const generateRequestSchema = z.strictObject({
   idempotencyKey: idempotencyKeySchema,
 });

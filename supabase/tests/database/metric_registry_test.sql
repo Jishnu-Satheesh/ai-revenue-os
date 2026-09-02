@@ -40,7 +40,14 @@ select extensions.is(
     from public.metric_definitions
     where owner_scope = 'core'
   ),
-  array['revenue.gross', 'transactions.count', 'units.count'],
+  array[
+    -- Campaign delivery vocabulary, added with the campaign metric grain. A
+    -- click and an impression are neutral units of delivery: a distributor's
+    -- ads produce them exactly as a restaurant's do.
+    'delivery.clicks', 'delivery.impressions', 'delivery.spend',
+    -- Economics vocabulary.
+    'revenue.gross', 'transactions.count', 'units.count'
+  ],
   'the core metric vocabulary is seeded and stays industry-neutral'
 );
 

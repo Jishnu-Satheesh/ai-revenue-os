@@ -6,6 +6,27 @@
         "mcp"
       ],
       "command": "npx"
+    },
+    "ironbee-devtools": {
+      "command": "/usr/share/cursor/cursor",
+      "args": [
+        "/home/spy/.cursor/extensions/ironbee-ai.ironbee-vscode-0.2.2-linux-x64/node_modules/@ironbee-ai/devtools/dist/index.js"
+      ],
+      "env": {
+        "BROWSER_DEVTOOLS_INSTALL_CHROMIUM": "false",
+        "OTEL_ENABLE": "true",
+        "OTEL_EXPORTER_HTTP_URL": "https://collector.service.ironbee.ai",
+        "OTEL_EXPORTER_HTTP_HEADERS": "X-OAuth-Token=${file:~/.ironbee/config.json#collector.oauthToken}",
+        "OTEL_EXPORTER_TYPE": "otlp/http-protobuf",
+        "OTEL_INSTRUMENTATION_USER_INTERACTION_EVENTS": "change,input,click",
+        "BROWSER_HEADLESS_ENABLE": "true",
+        "ELECTRON_RUN_AS_NODE": "1",
+        "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+        "PLATFORM": "compose",
+        "COMPOSE_PLATFORMS": "browser,node,backend",
+        "TOOL_INPUT_METADATA_ENABLE": "true",
+        "SCENARIOS_DIR": ".ironbee/scenarios"
+      }
     }
   }
 }

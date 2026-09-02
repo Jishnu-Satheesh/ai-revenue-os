@@ -36,9 +36,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { SidebarMenuButton } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import type { AccountRole, OrganizationRole } from "@/domain/organizations/types";
+import { DropdownMenuItem } from "../ui/dropdown-menu";
 
 const accountRoleOptions: readonly { value: AccountRole; label: string; hint: string }[] = [
   { value: "member", label: "Member", hint: "Works in the clients. No agency administration." },
@@ -181,10 +181,10 @@ export function InviteMemberDialog() {
       }}
     >
       <DialogTrigger asChild>
-        <SidebarMenuButton tooltip="Invite member" data-testid="invite-member-entry">
+        <DropdownMenuItem data-testid="invite-member-entry" onSelect={(e) => e.preventDefault()}>
           <UserPlus />
           <span>Invite member</span>
-        </SidebarMenuButton>
+        </DropdownMenuItem>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>

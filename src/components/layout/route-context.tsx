@@ -40,6 +40,7 @@ const segmentLabels: Readonly<Record<string, string>> = {
   onboarding: "Guided onboarding",
   integrations: "Integrations",
   memory: "Business Memory",
+  channels: "Channels",
   economics: "Channel economics",
 };
 

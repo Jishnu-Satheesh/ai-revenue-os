@@ -2,7 +2,11 @@
 
 ## Status
 
-Draft.
+Draft, except section 6.3 and section 7.5, which are approved for the
+evidence-readiness slice of the Governed Dynamic Channels and Marketplace
+Intelligence program. Those two sections describe a read-only classification
+over governed report evidence. Everything else in this document remains a draft
+and no part of it is authority to compute, store, or display a margin.
 
 ## 1. Business outcome
 
@@ -164,6 +168,131 @@ Capturing rates triggers the same task with a whole-organization window instead 
 - **One effective date for the capture.** An operator states their current cost structure at a point in time; a later tier change opens a new effective period from the operator surface rather than editing this one.
 - **Completion needs one priced cost and a date, not every component.** Most operators cannot state their cost of goods on the first day, and blocking the section would stall onboarding over exactly the gap this ledger exists to report honestly.
 
+### 6.3 Evidence readiness, before any margin is computed
+
+The ledger cannot be trusted before the evidence behind it is. This section
+defines a **read-only** classification that answers one question — *is the
+governed report evidence this organization already holds sufficient to begin
+Channel Economics work?* — and deliberately answers no other. It computes no
+margin, writes no entry, captures no rate, and reveals no rate.
+
+The evidence it reads is the governed exact-range ledger built by
+`specs/018-governed-channel-intelligence.md` section 10.2 under ADR 0026 and
+ADR 0027. Readiness is derived at read time from that evidence and from the
+coverage function in 7.3. Nothing is stored, so nothing can drift.
+
+#### 6.3.1 The readiness tuple
+
+Readiness is classified per **organization, channel, branch, and exact local
+period** — the same grain the exact-range ledger records, which is the only
+grain that exists here. The tuple key is channel, branch, inclusive local start
+date, inclusive local end date, and period timezone.
+
+Currency is an attribute of the tuple, never part of its key. Two current money
+observations inside one tuple carrying different currencies is precisely the
+condition 6.3.3 calls `not_comparable`; folding currency into the key would hide
+that contradiction by splitting it into two tidy tuples.
+
+Only **current** observations are read — `reconciliation_state = 'current'`,
+not superseded, excluded, or held. A history view is the only exception and
+must say so explicitly. Values are never read: readiness needs the shape of the
+evidence, not the numbers in it, and reading a number here would put workbook
+content on a surface that has no business holding it.
+
+Nothing is inferred. A daily, weekly, or monthly figure is never derived from an
+exact range; ranges are never prorated, summed across an overlap, currency
+converted, or joined across differing periods.
+
+#### 6.3.2 Which roles must be supplied
+
+Roles are read from the registry binding in
+`specs/015-metric-registry-and-normalized-metrics.md` section 5.1, exactly as
+section 6 already requires, so the core never learns a provider's vocabulary. An
+observation supplies a role when its metric definition is active, visible to the
+organization, and carries that `economics_role`; an organization's own
+definition outranks shared vocabulary for the same role.
+
+- `gross_revenue` is **required**. Without it there is no period to price.
+- `transaction_count` is **required** for readiness, though not for the ledger
+  itself. This ledger's promise is what a business earns *per transaction*; a
+  revenue total with no denominator cannot begin that work.
+- `unit_count` and `reported_margin` are optional and are reported as present or
+  absent without affecting the classification.
+
+Cost inputs are read only as coverage, per 6.3.4.
+
+#### 6.3.3 The five states, and the order they are decided in
+
+A tuple is classified by the **first** matching rule. Worst wins, so a tuple is
+never described more favourably than its weakest fact allows.
+
+1. **`blocked`** — evidence exists but may not be used. Any of: an observation
+   for this tuple is held as `blocked_overlap`; an ambiguous-overlap
+   reconciliation for this tuple is unresolved; every observation for the tuple
+   is `superseded` or `excluded` with no current replacement; or the source
+   package sits in `reconciliation_required`, `validation_failed`,
+   `projection_failed`, or `failed`.
+2. **`not_comparable`** — the inputs exist but cannot honestly be combined. Any
+   of: two current observations in the tuple bind the same role through
+   different metric definitions; money observations in the tuple carry different
+   currencies; a required role is absent from the tuple but is supplied for the
+   same channel and branch by a current observation whose exact range intersects
+   this one without matching it, or matches it under a different timezone; or a
+   required role is absent from the tuple but is supplied for the identical
+   period and timezone under a different branch or channel.
+3. **`needs_data`** — a required input is simply absent. Any of: no current
+   observation supplies `gross_revenue`; none supplies `transaction_count`; or
+   cost coverage is `unchecked` or reports no covered component at all.
+4. **`partial_evidence`** — the required evidence is present and comparable but
+   incomplete. Any of: a supplying observation carries `quality_state` or
+   `completeness_state` of `partial`; or some, but not all, applicable cost
+   components are covered.
+5. **`ready_for_economics`** — current, non-overlapping, complete, comparable
+   observations supply every required role, and every applicable cost component
+   is covered.
+
+`ready_for_economics` means *work may begin*, not *the margin is correct*. It is
+a statement about evidence and never about a figure, because this slice computes
+no figure.
+
+Warnings are carried on every tuple regardless of its state, as typed codes with
+plain-language copy. A warning that stopped being visible once the headline read
+`partial_evidence` would defeat the point of grading at all.
+
+#### 6.3.4 Cost coverage is availability, never an amount
+
+Cost readiness is read through the governed coverage function named in 7.3 and
+through nothing else. That function returns, for each registered component,
+**whether** it is covered and **at what quality tier**. It returns no amount, no
+percentage, no effective date, no contract, and no supplier.
+
+An operator may therefore be told "commission has a measured source" or "food
+cost is missing". They may not be told what the commission is. This holds for
+every role, including owner and admin, on this surface: the readiness panel is
+not the rate surface and gains nothing by becoming one.
+
+An empty or failed coverage read is `unchecked`. It is never an all-clear, and
+per 6.3.3 it classifies the tuple `needs_data` rather than letting silence read
+as sufficiency.
+
+A component the operator cannot close stays subject to 7.4: it is named and
+explained, and it carries no action.
+
+#### 6.3.5 Determinism
+
+The read model carries a version and is ordered stably by channel key, branch,
+start date, end date, and timezone. A digest is computed over the ordered,
+value-free classification, so the same evidence always produces the same
+response and a change in readiness is attributable to a change in evidence
+rather than to query order.
+
+#### 6.3.6 What this section does not do
+
+No contribution margin, no economics entry or component write, no rate capture
+or edit, no recomputation, no cost allocation, no normalized daily metric write,
+no detector, recommendation, benchmark, Business Memory write, AI narration, or
+provider action. No marketplace-specific rule and no provider-specific table.
+
 ## 7. UX flow
 
 The operator view answers three questions in order:
@@ -200,6 +329,31 @@ An empty coverage read is reported as unchecked, never as an all-clear.
 ### 7.4 A gap the operator cannot close is not a task
 
 The task list distinguishes a component the operator can price from one the platform cannot yet use. `packaging` needs a unit-count metric and `promotion_funding` needs a provider line-item path; no rate anyone could type would resolve either. Those rows are named and explained but carry no action, because offering a button nobody can complete is worse than offering none.
+
+### 7.5 The evidence readiness panel
+
+One panel on an existing surface, answering three questions in plain language
+and nothing else:
+
+- **What evidence is ready?** Each channel, branch, and exact local period the
+  organization actually holds current governed evidence for, with its state from
+  6.3.3 and its exact start and end dates, timezone, and currency shown as
+  recorded. Never a rolled-up month, never a rate, never a total.
+- **What prevents an honest contribution margin?** The named reasons behind the
+  state — a missing role, a held overlap, a currency that does not match, a cost
+  component with no source — in the operator's words rather than the ledger's.
+- **What should the user provide next?** The single next step for each reason,
+  subject to 7.4: a gap nobody can close is named and explained and offers no
+  action.
+
+The worked example the panel must be able to produce: *"Gross revenue is
+available for this exact Talabat period. Contribution margin is not calculated
+because commission, delivery cost, and food cost evidence are missing."*
+
+The panel never renders a workbook value, a row, a cell, a formula, a signed
+URL, a filename, a prompt, a secret, or model output. It states no figure of any
+kind, because it has none. A tuple that is not `ready_for_economics` is never
+described as trusted.
 
 ## 8. AI behavior
 
@@ -244,6 +398,10 @@ No model computes, adjusts, or explains a margin figure. A generated narrative o
 - Provider and client rate divergence produces a proposal, never an overwrite.
 - The operator view names missing components explicitly and links each to a resolving action.
 - Tenant isolation is tested, including snapshot tables.
+- Evidence readiness classifies only current exact-range evidence, never a superseded, excluded, or overlap-held observation, and never a value.
+- A readiness response reveals cost availability and quality tier only; no rate amount, percentage, effective date, or supplier reaches any role on that surface.
+- An unavailable coverage read reads as `unchecked` and never as sufficiency.
+- Readiness is organization-scoped, feature-flagged off by default, and enforced at the API boundary and the page loader rather than in navigation alone.
 
 ## 13. Test plan
 
@@ -251,6 +409,7 @@ No model computes, adjusts, or explains a margin figure. A generated narrative o
 - Database: RLS, effective-dated uniqueness, snapshot consistency with source entries.
 - Integration: a seeded organization with deliberately incomplete cost data, asserting `indicative` grading propagates and blocks decision use.
 - Component: the operator view under complete, partial, and empty data.
+- Readiness: each of the five states from a fixture of governed exact-range evidence; superseded, excluded, and overlap-held observations excluded from readiness; missing registered roles; mismatched period, timezone, currency, branch, channel, and metric definition; coverage returning availability and tier only; cross-organization isolation; viewer, operator, and owner boundaries; feature flag enforced at both the API and the page; and a stable ordering and digest across repeated reads.
 
 ## 14. Migration and rollback
 
@@ -259,6 +418,9 @@ New tables only; no changes to existing schemas. The pack catalog seed is idempo
 ## 15. Documentation updates
 
 - `context/04-domain-model.md` — cost component and channel economics entities in the core.
+- `specs/018-governed-channel-intelligence.md`, which supplies the governed evidence readiness reads
+- `adrs/0026-governed-channel-identity-and-report-contracts.md`
+- `adrs/0027-governed-report-projection-declarations.md`
 - `industry-packs/restaurant/domain-model.md` — the mapping from `Order` and `MenuItem` onto core grains.
 - `context/19-glossary.md` — contribution margin, cost component, completeness grade.
 
@@ -269,4 +431,7 @@ New tables only; no changes to existing schemas. The pack catalog seed is idempo
 - `specs/001-organization-digital-twin.md`
 - `adrs/0006-use-industry-packs.md`
 - `context/09-business-memory.md`
+- `specs/018-governed-channel-intelligence.md`, which supplies the governed evidence readiness reads
+- `adrs/0026-governed-channel-identity-and-report-contracts.md`
+- `adrs/0027-governed-report-projection-declarations.md`
 - `industry-packs/restaurant/domain-model.md`

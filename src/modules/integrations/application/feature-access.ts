@@ -47,3 +47,77 @@ export function isIntegrationHubEnabled(
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
 }
+
+export function isGovernedReportValidationEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(
+    env.GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS,
+  ),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+export function isGovernedReportProjectionEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(
+    env.GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS,
+  ),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+export function assertGovernedReportProjectionEnabled(organizationId: string): void {
+  if (!isGovernedReportProjectionEnabled(organizationId)) {
+    throw new DomainError("FEATURE_NOT_AVAILABLE", "Deterministic report projection is not enabled for this organization.");
+  }
+}
+
+/**
+ * Whether this organization sees governed economics evidence readiness.
+ *
+ * Unset means off for everyone. Rollback for the readiness slice is removing an
+ * ID from this list: nothing is written by that surface, so turning it off
+ * leaves no evidence, projection, or history behind to unwind.
+ */
+export function isGovernedEconomicsReadinessEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(
+    env.GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS,
+  ),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+/**
+ * Whether this organization sees governed channel analysis.
+ *
+ * Unset means off for everyone. Rollback is removing an ID from this list: the
+ * findings a run already wrote stay readable and immutable, and no new run can
+ * start, so nothing has to be unwound.
+ */
+export function isGovernedChannelAnalysisEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseIntegrationOrganizationIds(
+    env.GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS,
+  ),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+export function assertGovernedChannelAnalysisEnabled(organizationId: string): void {
+  if (!isGovernedChannelAnalysisEnabled(organizationId)) {
+    throw new DomainError(
+      "FEATURE_NOT_AVAILABLE",
+      "Governed channel analysis is not enabled for this organization.",
+    );
+  }
+}
+
+export function assertGovernedEconomicsReadinessEnabled(organizationId: string): void {
+  if (!isGovernedEconomicsReadinessEnabled(organizationId)) {
+    throw new DomainError(
+      "FEATURE_NOT_AVAILABLE",
+      "Economics evidence readiness is not enabled for this organization.",
+    );
+  }
+}

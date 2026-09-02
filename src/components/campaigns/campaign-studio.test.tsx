@@ -6,6 +6,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
+import type { AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
 import { toStudioView, type StudioView } from "@/modules/campaigns/application/studio-view";
 import type {
@@ -249,10 +250,13 @@ describe("editing opens a workspace at its own address", () => {
 
 describe("the approval window is an explicit choice", () => {
   it("shows the window the approval will be bound to", () => {
+    // The fixture's policy runs to 30 September, which no preset reaches, so
+    // the only offer is the window the policy actually needs. A "24 hours"
+    // option here would be a choice the database refuses.
     renderStudio();
 
     expect(screen.getByLabelText(/approval valid for/i)).toBeInTheDocument();
-    expect(screen.getByText("24 hours")).toBeInTheDocument();
+    expect(screen.getByText(/until the creative window closes/i)).toBeInTheDocument();
   });
 });
 
@@ -335,5 +339,105 @@ describe("the cockpit shows what an operator is being asked to authorise", () =>
 
     expect(screen.getByText(/version digest/i)).toBeInTheDocument();
     expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
+  });
+});
+
+describe("the approval window has to cover the creative it licenses", () => {
+  it("does not offer a window that lapses before the policy does", () => {
+    // The database refuses such an approval, so offering it would spend the
+    // operator's attestation before telling them the choice was unavailable.
+    const view = studioView();
+    view.generationPolicy.policyExpiresAt = "2026-08-20T12:00:00.000Z";
+    vi.setSystemTime(new Date("2026-08-15T12:00:00.000Z"));
+    renderStudio(view);
+
+    // Five days out: 24 hours and 3 days both fall short, 7 days covers it.
+    expect(screen.queryByText("24 hours")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /approval valid for/i })).toHaveTextContent(
+      /7 days/i,
+    );
+    vi.useRealTimers();
+  });
+
+  it("offers exactly the window the policy needs when no preset reaches it", () => {
+    const view = studioView();
+    view.generationPolicy.policyExpiresAt = "2026-10-01T12:00:00.000Z";
+    vi.setSystemTime(new Date("2026-08-15T12:00:00.000Z"));
+    renderStudio(view);
+
+    expect(screen.getByRole("combobox", { name: /approval valid for/i })).toHaveTextContent(
+      /until the creative window closes/i,
+    );
+    vi.useRealTimers();
+  });
+});
+
+describe("the fast loop's reasoning is shown to the operator", () => {
+  function renderLive(allocationEvents: readonly AllocationLedgerEvent[] = []) {
+    return render(
+      <CampaignStudio
+        view={studioView(approvalFor())}
+        organizationId={ORGANIZATION_ID}
+        organizationName="Al Noor Kitchen"
+        timeZone="Asia/Dubai"
+        allocationEvents={allocationEvents}
+      />,
+    );
+  }
+
+  it("shows, per pause, the rule, the observed value, the threshold and the time", () => {
+    renderLive([
+      {
+        id: "e0000000-0000-4000-8000-000000000001",
+        variantId: "f0000000-0000-4000-8000-000000000001",
+        ruleKey: "diagnostic.spend_ceiling",
+        ruleVersion: "v1",
+        observedValue: 12_000,
+        threshold: 10_000,
+        resolvedMarginMinor: null,
+        resolvedMarginGrade: null,
+        action: "pause",
+        reasonCode: "spend_ceiling_exceeded",
+        actor: "agent",
+        occurredAt: "2026-08-19T12:00:00.000Z",
+      },
+    ]);
+
+    expect(screen.getByRole("heading", { name: /allocation decisions/i })).toBeInTheDocument();
+    // The studio also shows a spend ceiling in the proposal rail, so the card
+    // copy is asserted by its plain-language reason rather than its title.
+    expect(screen.getByText(/spend went above the approved ceiling/i)).toBeInTheDocument();
+    // Rendered in the organization's currency and timezone, not raw backend data.
+    expect(screen.getByText(/19 Aug 2026, 16:00/i)).toBeInTheDocument();
+  });
+
+  it("shows the resolved margin and its grade when a margin rule fired", () => {
+    renderLive([
+      {
+        id: "e0000000-0000-4000-8000-000000000002",
+        variantId: "f0000000-0000-4000-8000-000000000001",
+        ruleKey: "margin.contribution_floor",
+        ruleVersion: "v1",
+        observedValue: 4_200,
+        threshold: 5_000,
+        resolvedMarginMinor: 4_200,
+        resolvedMarginGrade: "measured",
+        action: "pause",
+        reasonCode: "margin_below_floor",
+        actor: "agent",
+        occurredAt: "2026-08-19T12:00:00.000Z",
+      },
+    ]);
+
+    expect(screen.getByText(/contribution margin floor/i)).toBeInTheDocument();
+    expect(screen.getByText(/contribution margin fell below the floor/i)).toBeInTheDocument();
+    expect(screen.getByText("Measured")).toBeInTheDocument();
+  });
+
+  it("hides the section until the loop has recorded something worth reading", () => {
+    renderLive();
+    expect(
+      screen.queryByRole("heading", { name: /allocation decisions/i }),
+    ).not.toBeInTheDocument();
   });
 });

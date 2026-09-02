@@ -162,6 +162,19 @@ function jsonResponse(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body } as unknown as Response;
 }
 
+/**
+ * The data-source requests only, ignoring the report package panel.
+ *
+ * That panel is mounted inside this tab and loads its own snapshot as soon as
+ * it appears, so `fetch` is already busy before the operator touches anything.
+ * These assertions are about what registering, importing, or archiving a source
+ * sends, so they look at those requests rather than at whichever one happened
+ * to go first.
+ */
+function dataSourceCalls(fetchSpy: { mock: { calls: Parameters<typeof fetch>[] } }) {
+  return fetchSpy.mock.calls.filter(([url]) => !String(url).includes("/report-packages"));
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
 });
@@ -244,8 +257,8 @@ describe("DataSourcesTab", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Register source/i }));
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    await waitFor(() => expect(dataSourceCalls(fetchSpy).length).toBeGreaterThan(0));
+    const [url, init] = dataSourceCalls(fetchSpy)[0] ?? [];
     expect(url).toBe(`/api/organizations/${organizationId}/integrations/data-sources`);
     const body = JSON.parse(String((init as RequestInit).body));
     expect(body).toMatchObject({ sourceType: "manual", name: "Weekly counter sales" });
@@ -263,7 +276,7 @@ describe("DataSourcesTab", () => {
     });
 
     expect(await screen.findByText(/Only .csv files are supported/i)).toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(dataSourceCalls(fetchSpy)).toHaveLength(0);
   });
 
   it("rejects a CSV over 10 MiB before any request is made", async () => {
@@ -276,7 +289,7 @@ describe("DataSourcesTab", () => {
     fireEvent.change(screen.getByLabelText(/CSV file/i), { target: { files: [oversized] } });
 
     expect(await screen.findByText(/no larger than 10 MiB/i)).toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(dataSourceCalls(fetchSpy)).toHaveLength(0);
   });
 
   it("requires at least one mapped column before uploading a CSV", async () => {
@@ -300,7 +313,7 @@ describe("DataSourcesTab", () => {
     fireEvent.click(screen.getByRole("button", { name: /Upload CSV source/i }));
 
     expect(await screen.findByText(/Map at least one CSV column/i)).toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(dataSourceCalls(fetchSpy)).toHaveLength(0);
   });
 
   it("never renders a raw CSV cell value in a validation message", async () => {
@@ -324,8 +337,8 @@ describe("DataSourcesTab", () => {
     renderSources();
     fireEvent.click(screen.getByRole("button", { name: /^Import$/i }));
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+    await waitFor(() => expect(dataSourceCalls(fetchSpy).length).toBeGreaterThan(0));
+    expect(dataSourceCalls(fetchSpy)[0]?.[0]).toBe(
       `/api/organizations/${organizationId}/integrations/data-sources/${dataSourceId}/import`,
     );
     expect(await screen.findByText(/Import queued/i)).toBeInTheDocument();
@@ -361,8 +374,8 @@ describe("DataSourcesTab", () => {
     renderSources();
     fireEvent.click(screen.getByRole("button", { name: /^Archive$/i }));
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    await waitFor(() => expect(dataSourceCalls(fetchSpy).length).toBeGreaterThan(0));
+    const [url, init] = dataSourceCalls(fetchSpy)[0] ?? [];
     expect(url).toBe(
       `/api/organizations/${organizationId}/integrations/data-sources/${dataSourceId}`,
     );

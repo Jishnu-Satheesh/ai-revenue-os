@@ -16,12 +16,30 @@ type LogContext = {
   campaignId?: string;
   connectionId?: string;
   dataSourceId?: string;
+  /** An organization-owned channel. Opaque, and not a provider connection. */
+  channelId?: string;
+  /** A recommendation the narrator produced. Opaque. */
+  recommendationId?: string;
+  /** Which answer a member gave. Bounded vocabulary, never their reason text. */
+  decisionKind?: "acknowledged" | "dismissed" | "planned";
   runId?: string;
   workerId?: string;
   durationMs?: number;
   errorCode?: string;
   failurePaths?: string;
   httpStatus?: number;
+  /**
+   * Counts and money only. This type is an allowlist on purpose: anything not
+   * named here cannot be logged, which is what keeps prompts, generated copy
+   * and customer text out of the log stream by construction.
+   */
+  variantsRequested?: number;
+  variantsStored?: number;
+  variantsRefused?: number;
+  costMinor?: number;
+  /** Campaign metric collection counts, kept to the same opaque-count rule. */
+  metricsConsidered?: number;
+  metricsRecorded?: number;
 };
 
 function write(level: "info" | "warn" | "error", message: string, context: LogContext = {}) {

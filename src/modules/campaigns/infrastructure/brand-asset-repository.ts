@@ -3,6 +3,11 @@ import {
   type BrandAssetObjectStore,
   type BrandAssetStore,
 } from "@/modules/campaigns/application/brand-asset-service";
+import { DomainError } from "@/lib/errors";
+import {
+  type BrandAssetPersistenceFailure,
+  throwBrandAssetMutationError,
+} from "@/modules/campaigns/infrastructure/brand-asset-persistence-error";
 
 /**
  * Brand-asset writes, all through security-definer RPCs.
@@ -11,7 +16,7 @@ import {
  * path from a session to a row that claims a version is usable.
  */
 
-type RpcResult<T> = { data: T | null; error: { code?: string } | null };
+type RpcResult<T> = { data: T | null; error: BrandAssetPersistenceFailure | null };
 
 export type BrandAssetPersistence = {
   rpc(
@@ -20,8 +25,12 @@ export type BrandAssetPersistence = {
   ): Promise<RpcResult<unknown>>;
 };
 
-function brandAssetError(): never {
-  throw new Error("The brand asset could not be reserved or finalized.");
+function brandAssetError(cause?: unknown): never {
+  throw new DomainError(
+    "DOMAIN_ERROR",
+    "The brand asset could not be reserved or finalized.",
+    cause,
+  );
 }
 
 export function createBrandAssetStore(persistence: BrandAssetPersistence): BrandAssetStore {
@@ -34,9 +43,18 @@ export function createBrandAssetStore(persistence: BrandAssetPersistence): Brand
           brand_asset_id: input.brandAssetId,
           label: input.label,
           asset_role: input.assetRole,
+          ...(input.classification === null
+            ? {}
+            : {
+                conditioning_roles: input.classification.conditioningRoles,
+                tags: input.classification.tags,
+                scripts: input.classification.scripts,
+                ownership: input.classification.ownership,
+              }),
         },
       });
-      if (error || !data) brandAssetError();
+      if (error) throwBrandAssetMutationError(error);
+      if (!data) brandAssetError();
 
       const parsed = brandAssetReservationSchema.safeParse({
         brandAssetId: (data as Record<string, unknown>).brand_asset_id,
@@ -61,7 +79,7 @@ export function createBrandAssetStore(persistence: BrandAssetPersistence): Brand
           height_px: input.heightPx,
         },
       });
-      if (error) brandAssetError();
+      if (error) throwBrandAssetMutationError(error);
     },
   };
 }

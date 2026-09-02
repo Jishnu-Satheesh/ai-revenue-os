@@ -45,24 +45,43 @@ const claimResultSchema = z.union([
     result_version_id: z.string().uuid().nullable(),
     failure_code: z.string().nullable(),
   }),
-  z.strictObject({
-    outcome: z.literal("claimed"),
-    claim_token: z.string().uuid(),
-    attempt: z.number().int().positive(),
-    campaign_id: z.string().uuid(),
-    source_snapshot_id: z.string().uuid(),
-    kind: z.enum(["generate", "revise"]),
-    base_version_id: z.string().uuid().nullable(),
-    base_digest: z.string().nullable(),
-    correlation_id: z.string().uuid(),
-  }),
+  z
+    .strictObject({
+      outcome: z.literal("claimed"),
+      claim_token: z.string().uuid(),
+      attempt: z.number().int().positive(),
+      campaign_id: z.string().uuid(),
+      source_snapshot_id: z.string().uuid(),
+      kind: z.enum(["generate", "revise", "variants"]),
+      base_version_id: z.string().uuid().nullable(),
+      base_digest: z.string().nullable(),
+      correlation_id: z.string().uuid(),
+      /**
+       * Set only for a variants run; the size the first attempt asked for.
+       *
+       * Optional rather than required on purpose. This field is additive, and
+       * a deploy that reaches production ahead of its migration would otherwise
+       * fail to parse every claim and stop all generation — a strictness that
+       * protects nothing and breaks the two kinds that never had the field.
+       */
+      variants_per_direction: z.number().int().positive().max(50).nullish().default(null),
+    })
+    .superRefine((run, context) => {
+      if ((run.kind === "variants") !== (run.variants_per_direction !== null)) {
+        context.addIssue({
+          code: "custom",
+          path: ["variants_per_direction"],
+          message: "Only a variants run carries the persisted variant count.",
+        });
+      }
+    }),
 ]);
 
 export type EnqueueRunInput = {
   organizationId: string;
   campaignId: string;
   sourceSnapshotId: string;
-  kind: "generate" | "revise";
+  kind: "generate" | "revise" | "variants";
   idempotencyKey: string;
   correlationId: string;
   baseVersionId?: string | null;
@@ -74,6 +93,12 @@ export type EnqueueRunInput = {
    */
   operatorPrompt?: string | null;
   patchScope?: string | null;
+  /**
+   * Variant runs only. Stored on the run rather than sent through the queue, so
+   * a redelivery reproduces the size the first attempt asked for instead of
+   * whatever the payload happens to say.
+   */
+  variantsPerDirection?: number | null;
 };
 
 /**
@@ -108,6 +133,7 @@ export function createCampaignRunDispatcher(persistence: CampaignRunPersistence)
           correlation_id: input.correlationId,
           base_version_id: input.baseVersionId ?? null,
           base_digest: input.baseDigest ?? null,
+          variants_per_direction: input.variantsPerDirection ?? null,
           operator_prompt: input.operatorPrompt ?? null,
           patch_scope: input.patchScope ?? null,
         },
@@ -162,6 +188,7 @@ export function createCampaignRunStore(persistence: CampaignRunPersistence): Gen
         sourceSnapshotId: parsed.data.source_snapshot_id,
         kind: parsed.data.kind,
         correlationId: parsed.data.correlation_id,
+        variantsPerDirection: parsed.data.variants_per_direction,
       };
     },
 

@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { refineImagePrompt, type ModelRouter } from "@/ai/model-router";
+import { type ModelRouter } from "@/ai/model-router";
 import type {
   CampaignGenerationProvider,
   CampaignGenerationTelemetrySink,
@@ -10,12 +10,20 @@ import type {
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
 import type { GenerationContext } from "@/modules/campaigns/application/generation-context";
 import type { EvaluationFailure } from "@/modules/campaigns/application/evaluation";
-import type { CampaignPlanner, GeneratedAssetUpload } from "@/workflows/campaigns/generate-bundle";
+import type {
+  CampaignImageGuidance,
+  CampaignPlanner,
+  GeneratedAssetUpload,
+} from "@/workflows/campaigns/generate-bundle";
 import type { RevisionPlanner } from "@/workflows/campaigns/revise-bundle";
+import { DomainError } from "@/lib/errors";
 import {
   campaignAssetPath,
   ingestCampaignImage,
 } from "@/modules/campaigns/infrastructure/asset-intake";
+import { buildBlueprintReferencePrompt } from "@/modules/campaigns/infrastructure/reference-prompt";
+
+export const CAMPAIGN_IMAGE_PROMPT_VERSION = "campaign-image-prompt-v1";
 
 /**
  * The planner: pinned evidence in, candidate creative out.
@@ -103,7 +111,6 @@ const OUTPUT_CONTRACT = [
   "      so any 64-character hex string is acceptable here, but the length and",
   "      alphabet are not negotiable.",
   '    mimeType: "image/jpeg"|"image/png"|"image/webp", widthPx, heightPx: integers,',
-  '    truthClass: "synthetic_generated"|"synthetic_composite"|"authentic_source",',
   "    provenance: an object with EXACTLY these five keys and no others:",
   '      { kind: "generated", modelId: string, promptVersionId: string,',
   "        generationProfile: one of the three profile values,",
@@ -355,7 +362,15 @@ export function createCampaignPlanner(
       context: GenerationContext;
       manifest: CampaignBundleManifest;
       signal: AbortSignal;
+      imageGuidance?: CampaignImageGuidance;
     }) {
+      if (!input.imageGuidance) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "No governed image reference context is available for this generation.",
+        );
+      }
+
       const startedAt = Date.now();
       const uploads: GeneratedAssetUpload[] = [];
       const imageRoute = dependencies.router.resolve("image");
@@ -374,6 +389,13 @@ export function createCampaignPlanner(
           input.manifest.actions.find((action) => action.directionId === direction?.id)
             ?.placement ?? "feed_image";
         const size = PLACEMENT_SIZES[placement];
+        const blueprint = input.imageGuidance.blueprintsByAssetId[asset.id];
+        if (!blueprint) {
+          throw new DomainError(
+            "VALIDATION_ERROR",
+            "No governed art-direction blueprint is available for this image.",
+          );
+        }
 
         const generated = await dependencies.provider.generateImage({
           context: {
@@ -381,15 +403,14 @@ export function createCampaignPlanner(
             campaignId: context.campaignId,
             correlationId: context.correlationId,
           },
-          prompt: refineImagePrompt({
-            route: imageRoute,
-            // The alt text is the description of the image, so it is also the
-            // most honest thing to draw from: the picture and its description
-            // cannot drift apart if one produced the other.
-            subject: asset.altText,
-            brandDirection: direction?.rationale ?? input.context.objective,
-            negativeConstraints: input.context.hardConstraints,
+          prompt: buildBlueprintReferencePrompt({
+            operatorCreativeDirection: direction?.rationale ?? input.context.objective,
+            subjectDescription: input.imageGuidance.subjectDescription,
+            resolution: input.imageGuidance.resolution,
+            hardConstraints: input.context.hardConstraints,
+            blueprint,
           }),
+          references: input.imageGuidance.references,
           widthPx: size.widthPx,
           heightPx: size.heightPx,
         });
@@ -434,6 +455,8 @@ export function createCampaignPlanner(
           storagePath: path,
           // The hash of what was stored, not what the model said it made.
           contentHash: ingested.contentHash,
+          modelId: generated.image.modelId,
+          promptVersionId: CAMPAIGN_IMAGE_PROMPT_VERSION,
         });
       }
 

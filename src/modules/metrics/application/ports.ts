@@ -182,3 +182,73 @@ export type MetricProjectionStore = {
     observations: readonly MetricObservationWrite[],
   ): Promise<{ written: number; duplicates: number }>;
 };
+
+/**
+ * One current, governed observation, as the analysis layer needs to read it.
+ *
+ * Distinct from `MetricObservationRecord` on purpose. A detector cites the row
+ * it used, so the row's id has to travel with the figure; and it compares
+ * calendar periods, so the boundary arrives as the local date the projection
+ * recorded rather than as an instant every reader would have to convert again.
+ */
+export type GovernedMetricObservation = {
+  /** The `normalized_metrics` row, so a finding can cite the figure it used. */
+  id: string;
+  channelId: string;
+  branchId: string | null;
+  metricKey: string;
+  grain: MetricPeriodGrain;
+  /** Inclusive local dates in `periodTimezone`. */
+  periodStartDate: string;
+  periodEndDate: string;
+  periodTimezone: string;
+  valueKind: "money" | "count";
+  /**
+   * Integer minor units for money; a whole count otherwise, except where the
+   * provider measured a quantity in fractions -- closed minutes arrive as
+   * `355.6` -- which are carried exactly as written (ADR 0036), never rounded.
+   */
+  numerator: number;
+  currency: string | null;
+  qualityTier: MetricQualityTier;
+  /**
+   * The categorical labels the provider attached to this figure (ADR 0034).
+   * Empty unless the projection wrote a categorical output, whose rows carry
+   * exactly one declared label under one declared dimension key.
+   */
+  dimensions: Readonly<Record<string, string>>;
+};
+
+export type GovernedMetricWindowQuery = {
+  organizationId: string;
+  metricKeys: readonly string[];
+  /** Inclusive local dates in `timeZone`. */
+  windowStart: string;
+  windowEnd: string;
+  timeZone: string;
+  /** Absent asks about every channel; a value narrows to one. */
+  channelId?: string | null;
+  branchId?: string | null;
+  /**
+   * `current` is settled evidence and the default. `blocked_overlap` asks the
+   * opposite question -- what is being held back from every rollup while an
+   * owner decides -- which is a fact about the evidence rather than evidence,
+   * and is never mixed into a figure.
+   */
+  reconciliationState?: "current" | "blocked_overlap";
+};
+
+/**
+ * The read side of governed evidence.
+ *
+ * Only rows a governed report projection wrote, and only those that are current
+ * evidence: a superseded revision has been restated, and a row held for an
+ * owner's overlap decision is not settled fact. A detector that read either
+ * would be reporting on evidence the platform has already declined to trust.
+ *
+ * Truncation is a failure rather than a shorter answer. A detector told about
+ * fewer periods than exist would report a gap nobody has.
+ */
+export type GovernedMetricWindowPort = {
+  loadGovernedWindow(query: GovernedMetricWindowQuery): Promise<GovernedMetricObservation[]>;
+};

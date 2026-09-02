@@ -30,10 +30,17 @@ values (
 
 -- Subject kinds --------------------------------------------------------------
 
+-- The keys rather than a count. This assertion exists to catch an
+-- industry-specific subject reaching the core, and a count says only that the
+-- number moved; it names neither what arrived nor whether it belonged.
 select extensions.is(
-  (select count(*)::bigint from public.subject_kinds where owner_scope = 'core'),
-  3::bigint,
-  'the core subject kind vocabulary is seeded'
+  (
+    select pg_catalog.array_agg(key order by key)
+    from public.subject_kinds
+    where owner_scope = 'core'
+  ),
+  array['branch', 'campaign', 'campaign_action', 'channel', 'creative_variant', 'organization'],
+  'the core subject kind vocabulary is seeded and stays industry-neutral'
 );
 
 select extensions.throws_ok(

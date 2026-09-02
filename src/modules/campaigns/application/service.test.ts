@@ -158,6 +158,29 @@ describe("createCampaignService.create", () => {
     expect(result).toMatchObject({ campaignId: CAMPAIGN_ID, runId: "run-1" });
   });
 
+  it("judges an opportunity's expiry by the injected clock, not the wall clock", async () => {
+    // This was a real defect. The service is built around an injected clock and
+    // the qualification step reached past it to `new Date()`, so an
+    // opportunity's expiry was judged against a different "now" than every
+    // timestamp the same request went on to record. Nothing caught it until a
+    // fixture's expiry date arrived in real life and two unrelated tests began
+    // failing. Pinned here explicitly so a calendar is never the thing that
+    // notices again.
+    findOpportunity.mockResolvedValue(
+      opportunity({ expiresAt: new Date("2020-01-02T00:00:00.000Z") }),
+    );
+
+    await service(new Date("2020-01-01T00:00:00.000Z")).create(ORGANIZATION_ID, ACTOR_ID, {
+      ...manualRequest(),
+      source: { kind: "decision_opportunity", opportunityId: OPPORTUNITY_ID },
+      brief: undefined,
+    } as CreateCampaignRequest);
+
+    expect(createCampaign).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceKind: "decision_opportunity" }),
+    );
+  });
+
   it("takes an opportunity campaign's intent from the opportunity, not a brief", async () => {
     findOpportunity.mockResolvedValue(opportunity());
 

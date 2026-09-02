@@ -8,7 +8,9 @@ vi.hoisted(() => {
 vi.mock("server-only", () => ({}));
 
 import {
+  assertGovernedEconomicsReadinessEnabled,
   assertIntegrationHubEnabled,
+  isGovernedEconomicsReadinessEnabled,
   isIntegrationHubEnabled,
   parseIntegrationOrganizationIds,
 } from "@/modules/integrations/application/feature-access";
@@ -50,6 +52,36 @@ describe("Integration Hub rollout access", () => {
 
   it("blocks organizations outside the enabled rollout", () => {
     expect(() => assertIntegrationHubEnabled(organizationB, new Set([organizationA]))).toThrowError(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+  });
+});
+
+describe("governed economics readiness rollout", () => {
+  it("is off for an organization outside the enabled set", () => {
+    expect(isGovernedEconomicsReadinessEnabled(organizationB, new Set([organizationA]))).toBe(
+      false,
+    );
+  });
+
+  it("is off for everyone when the variable is unset", () => {
+    // The default the rollback plan depends on. An unset variable parses to an
+    // empty set, and an empty set enables nobody.
+    expect(isGovernedEconomicsReadinessEnabled(organizationA, parseIntegrationOrganizationIds(undefined))).toBe(
+      false,
+    );
+  });
+
+  it("is on for an enabled organization whatever case its ID arrives in", () => {
+    expect(
+      isGovernedEconomicsReadinessEnabled(organizationA.toUpperCase(), new Set([organizationA])),
+    ).toBe(true);
+  });
+
+  it("refuses a disabled organization as an unavailable feature rather than a denial", () => {
+    // FEATURE_NOT_AVAILABLE becomes a 404 at the boundary. A 403 would confirm
+    // the surface exists, which is a roadmap leak rather than an access answer.
+    expect(() => assertGovernedEconomicsReadinessEnabled(organizationB)).toThrowError(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
   });

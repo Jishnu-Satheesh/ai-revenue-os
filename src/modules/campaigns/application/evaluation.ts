@@ -1,5 +1,9 @@
-import { campaignBundleSchema } from "@/domain/campaigns/schemas";
+import {
+  campaignBundleModelManifestSchema,
+  campaignBundleSchema,
+} from "@/domain/campaigns/schemas";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
+import type { GeneratedAssetTruthClass } from "@/domain/campaigns/truth-class";
 import {
   evaluateContentPolicy,
   type ChannelContentLimits,
@@ -43,6 +47,10 @@ export type EvaluationResult =
 export type EvaluationInput = {
   candidate: unknown;
   context: GenerationContext;
+  /** Derived from the resolver outcome. A model never supplies this claim. */
+  truthClass: GeneratedAssetTruthClass;
+  /** Exact positive reference versions pinned for this run. */
+  derivedFromBrandAssetVersionIds: readonly string[];
   limitsByChannel: Partial<Record<CampaignChannel, ChannelContentLimits>>;
   /** Asset ids the planner actually produced for this campaign. */
   producedAssetIds: readonly string[];
@@ -52,7 +60,42 @@ export type EvaluationInput = {
 const DEFAULT_MAX_ASSETS = 12;
 
 export function evaluateGeneratedBundle(input: EvaluationInput): EvaluationResult {
-  const parsed = campaignBundleSchema.safeParse(input.candidate);
+  const modelParsed = campaignBundleModelManifestSchema.safeParse(input.candidate);
+  if (!modelParsed.success) {
+    return {
+      outcome: "invalid",
+      failures: modelParsed.error.issues.slice(0, 20).map((issue) => ({
+        code: "malformed_manifest" as const,
+        detail: issue.message,
+        path: issue.path.map((segment) => segment as string | number),
+      })),
+    };
+  }
+
+  if (modelParsed.data.assets.some((asset) => asset.provenance.kind !== "generated")) {
+    return {
+      outcome: "invalid",
+      failures: [
+        {
+          code: "malformed_manifest",
+          detail: "A generation model may declare only generated assets.",
+          path: ["assets"],
+        },
+      ],
+    };
+  }
+
+  const parsed = campaignBundleSchema.safeParse({
+    ...modelParsed.data,
+    assets: modelParsed.data.assets.map((asset) => ({
+      ...asset,
+      truthClass: input.truthClass,
+      provenance: {
+        ...asset.provenance,
+        derivedFromBrandAssetVersionIds: [...input.derivedFromBrandAssetVersionIds],
+      },
+    })),
+  });
   if (!parsed.success) {
     return {
       outcome: "invalid",

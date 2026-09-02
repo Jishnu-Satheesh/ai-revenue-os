@@ -7,19 +7,16 @@ import {
   Bot,
   BrainCircuit,
   Cable,
-  Coins,
   Compass,
   LayoutDashboard,
   type LucideIcon,
   Megaphone,
-  Settings2,
   Sparkles,
   Waypoints,
 } from "lucide-react";
 
 import { organizationIdFromPathname, overviewPath } from "@/lib/routes";
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
-import { InviteMemberDialog } from "@/components/accounts/invite-member-dialog";
 import { SidebarIdentity } from "@/components/accounts/sidebar-identity";
 import {
   Sidebar as SidebarPrimitive,
@@ -33,7 +30,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 
@@ -58,7 +54,7 @@ const workspaceEntries: readonly WorkspaceEntry[] = [
   },
   { label: "Campaigns", icon: Megaphone, path: (id) => `/organizations/${id}/campaigns` },
   { label: "Business Memory", icon: BrainCircuit, path: (id) => `/organizations/${id}/memory` },
-  { label: "Channel economics", icon: Coins, path: (id) => `/organizations/${id}/economics` },
+  { label: "Channels", icon: Waypoints, path: (id) => `/organizations/${id}/channels` },
   { label: "Integration Hub", icon: Cable, path: (id) => `/organizations/${id}/integrations` },
   { label: "Guided onboarding", icon: Compass, path: (id) => `/organizations/${id}/onboarding` },
   { label: "Agents", icon: Bot },
@@ -148,25 +144,7 @@ export function Sidebar() {
         ) : null}
       </SidebarContent>
       <SidebarFooter>
-        <SidebarSeparator className="group-data-[collapsible=icon]:hidden" />
         <SidebarMenu>
-          {/* Agency-level, not organization-scoped: membership follows the
-              person across every client, so this sits outside the workspace
-              group and renders with or without an active organization. */}
-          <SidebarMenuItem>
-            <InviteMemberDialog />
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              disabled
-              tooltip="Settings — not available yet"
-              className="cursor-default"
-            >
-              <Settings2 />
-              <span>Settings</span>
-              <UpcomingBadge />
-            </SidebarMenuButton>
-          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarIdentity />
           </SidebarMenuItem>

@@ -165,8 +165,18 @@ describe("a successful call", () => {
       "actionRunId",
       "idempotencyKey",
       "organizationId",
+      "reservation",
       "signal",
     ]);
+  });
+
+  it("hands the adapter what the database actually committed", async () => {
+    // The adapter is what tells a provider a number, so it has to be able to
+    // check that number against the reservation rather than against the plan.
+    await gateway().execute(INPUT, new AbortController().signal);
+
+    const call = invoke.mock.calls[0]?.[0] as { reservation: unknown };
+    expect(call.reservation).toEqual({ amountMinor: null, currency: null });
   });
 });
 

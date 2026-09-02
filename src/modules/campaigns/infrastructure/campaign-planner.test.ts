@@ -10,8 +10,16 @@ import {
   createRevisionPlanner,
   createSupabaseCampaignAssetStorage,
 } from "@/modules/campaigns/infrastructure/campaign-planner";
-import { createGenerationContextLoader } from "@/modules/campaigns/infrastructure/generation-readers";
-import type { GenerationContextPersistence } from "@/modules/campaigns/infrastructure/generation-readers";
+import {
+  createGenerationContextLoader,
+  createReferenceCandidateReader,
+  createSupabaseReferenceObjectReader,
+  type GenerationContextPersistence,
+} from "@/modules/campaigns/infrastructure/generation-readers";
+import {
+  createGenerationReferenceContextWriter,
+  type GenerationReferenceContextPersistence,
+} from "@/modules/campaigns/infrastructure/creation-repository";
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const CAMPAIGN_ID = "c0000000-0000-4000-8000-000000000001";
@@ -76,6 +84,53 @@ function generationContext() {
   };
 }
 
+function imageGuidance() {
+  const blueprint = {
+    composition: "Centered pot with negative space.",
+    framing: "Tight overhead crop.",
+    lighting: "Soft daylight.",
+    cameraTreatment: "Natural 50mm treatment.",
+    palette: ["brick red", "deep green"],
+    focalPoint: "The curry.",
+    surfaceNotes: ["matte stone"],
+    propNotes: [],
+    avoid: ["busy tableware"],
+  };
+  return {
+    subjectDescription:
+      "Kingfish in brick-red coconut gravy, served in a clay pot with curry leaves.",
+    resolution: {
+      resolverVersion: 1 as const,
+      outcome: "synthesis_permitted" as const,
+      refusalCode: null,
+      referenceSlots: [],
+      avoidReferences: [
+        {
+          role: "avoid" as const,
+          brandAssetId: "51111111-1111-4111-8111-111111111111",
+          brandAssetVersionId: "61111111-1111-4111-8111-111111111111",
+          reasonCodes: ["wrong_subject" as const],
+        },
+      ],
+      negativeRules: [
+        { code: "wrong_subject" as const, description: "Do not substitute another dish." },
+      ],
+    },
+    references: [
+      {
+        role: "avoid" as const,
+        ordinal: 0,
+        mimeType: "image/png" as const,
+        bytes: new Uint8Array([4, 5, 6]),
+      },
+    ],
+    blueprintsByAssetId: Object.fromEntries(
+      validManifest().assets.map((asset) => [asset.id, blueprint]),
+    ),
+    hardConstraints: ["Never imply a health claim."],
+  };
+}
+
 beforeEach(() => {
   for (const spy of [generatePlan, generateImage, generatePatch, upload]) spy.mockReset();
   generatePlan.mockResolvedValue({
@@ -112,6 +167,18 @@ describe("campaign planner", () => {
     expect(candidate.campaignId).toBe("c0000000-0000-4000-8000-000000000001");
   });
 
+  it("never asks the model to declare an asset truth class", async () => {
+    await planner().plan({
+      context: generationContext(),
+      prompt: "evidence",
+      signal: new AbortController().signal,
+    });
+
+    const call = generatePlan.mock.calls[0]?.[0] as { outputContract: string };
+    expect(call.outputContract).not.toContain("truthClass");
+    expect(call.outputContract).toContain("altText");
+  });
+
   it("names the failures verbatim on a repair pass", async () => {
     await planner().plan({
       context: generationContext(),
@@ -133,10 +200,15 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest,
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads[0]?.contentHash).toMatch(/^[0-9a-f]{64}$/);
     expect(result.uploads[0]?.contentHash).not.toBe(declared);
+    expect(result.uploads[0]).toMatchObject({
+      modelId: "imagen-1",
+      promptVersionId: "campaign-image-prompt-v1",
+    });
   });
 
   it("writes under the tenant's own folder, which is what the storage policy checks", async () => {
@@ -144,22 +216,44 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     const call = upload.mock.calls[0]?.[0] as { path: string };
     expect(call.path.split("/")[0]).toBe(ORGANIZATION_ID);
   });
 
-  it("carries the hard constraints into the image prompt", async () => {
+  it("draws from the declared subject and governed references, never accessibility alt text", async () => {
+    const manifest = validManifest();
     await planner().materializeAssets({
       context: generationContext(),
-      manifest: validManifest(),
+      manifest,
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
-    const call = generateImage.mock.calls[0]?.[0] as { prompt: string };
+    const call = generateImage.mock.calls[0]?.[0] as {
+      prompt: string;
+      references: Array<{ role: string; bytes: Uint8Array }>;
+    };
     expect(call.prompt).toContain("Never imply a health claim.");
-    expect(call.prompt).toContain("not documentary photography");
+    expect(call.prompt).toContain("Kingfish in brick-red coconut gravy");
+    expect(call.prompt).toContain("role=avoid ordinal=0 reasons=wrong_subject");
+    expect(call.prompt).toContain("<art_direction_blueprint>");
+    expect(call.prompt).toContain("Do not render text of any kind, in any script");
+    expect(call.prompt).not.toContain(manifest.assets[0]!.altText);
+    expect(call.references).toEqual(imageGuidance().references);
+  });
+
+  it("fails closed before image spend when governed image guidance is missing", async () => {
+    await expect(
+      planner().materializeAssets({
+        context: generationContext(),
+        manifest: validManifest(),
+        signal: new AbortController().signal,
+      } as never),
+    ).rejects.toThrow("No governed image reference context is available");
+    expect(generateImage).not.toHaveBeenCalled();
   });
 
   it("stops at the next image when the run is cancelled", async () => {
@@ -176,6 +270,7 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: controller.signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads.length).toBeLessThan(validManifest().assets.length);
@@ -197,6 +292,7 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads).toEqual([]);
@@ -210,6 +306,7 @@ describe("campaign planner", () => {
       context: generationContext(),
       manifest: validManifest(),
       signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
     });
 
     expect(result.uploads).toEqual([]);
@@ -295,6 +392,16 @@ describe("generation context readers", () => {
     facts: { objective: "Sell lunch", syntheticAssetsAllowed: true },
     assertions: [],
     brand_asset_version_ids: [],
+    reference_slots: [],
+    negative_rules: [],
+    resolver_version: null,
+    resolution_outcome: null,
+    subject_profile_id: null,
+    subject_description: "Kingfish in brick-red coconut gravy.",
+    avoid_reference_version_ids: [],
+    blueprint: null,
+    plan_model_id: null,
+    creative_direction: "Warm daylight and a tight crop.",
     campaign_title: "Weekday lunch",
     latest_version_id: VERSION_ID,
     operator_prompt: "Shorten the hook.",
@@ -367,6 +474,39 @@ describe("generation context readers", () => {
     expect(Object.keys(result?.assetStoragePaths ?? {})).toHaveLength(1);
   });
 
+  it("carries the immutable subject and reference request into the worker", async () => {
+    const { loader } = loaderFor({
+      ...CONTEXT_ROW,
+      facts: {
+        ...CONTEXT_ROW.facts,
+        subjectTags: ["മീൻ കറി"],
+        settingTags: ["terrace"],
+        occasionTags: ["weekend"],
+        styleTags: ["warm"],
+        scripts: ["Mlym", "Arab"],
+      },
+    });
+
+    const result = await loader.snapshots.read({
+      organizationId: ORGANIZATION_ID,
+      campaignId: CAMPAIGN_ID,
+      sourceSnapshotId: SNAPSHOT_ID,
+      claimToken: CLAIM_TOKEN,
+    });
+
+    expect(result).toMatchObject({
+      subjectDescription: "Kingfish in brick-red coconut gravy.",
+      creativeDirection: "Warm daylight and a tight crop.",
+      resolutionRequest: {
+        subjectTags: ["മീൻ കറി"],
+        settingTags: ["terrace"],
+        occasionTags: ["weekend"],
+        styleTags: ["warm"],
+        scripts: ["Mlym", "Arab"],
+      },
+    });
+  });
+
   it("refuses a context payload that does not match the contract", async () => {
     const { loader } = loaderFor({ campaign_id: "not-a-uuid" });
 
@@ -377,5 +517,121 @@ describe("generation context readers", () => {
         claimToken: CLAIM_TOKEN,
       }),
     ).rejects.toThrow(/could not be read/);
+  });
+});
+
+describe("generation reference adapters", () => {
+  it("maps current review evidence and storage metadata without dropping rejected candidates", async () => {
+    const rpc = vi.fn(async () => ({
+      data: {
+        candidates: [
+          {
+            brand_asset_id: "21111111-1111-4111-8111-111111111111",
+            brand_asset_version_id: "31111111-1111-4111-8111-111111111111",
+            label: "Rejected plating",
+            asset_role: "reference",
+            conditioning_roles: ["subject"],
+            tags: ["മീൻ കറി"],
+            scripts: [],
+            ownership: "owned",
+            version: 2,
+            storage_path: `${ORGANIZATION_ID}/asset/version/source`,
+            content_hash: "a".repeat(64),
+            mime_type: "image/png",
+            byte_size: 123,
+            width_px: 512,
+            height_px: 512,
+            current_verdict: "rejected",
+            current_reason_codes: ["not_our_plating"],
+            current_reviewed_at: "2026-08-24T10:00:00.000Z",
+          },
+        ],
+        rejected_reasons: [
+          { code: "not_our_plating", description: "Do not use this plating style." },
+        ],
+      },
+      error: null,
+    }));
+
+    const result = await createReferenceCandidateReader({ rpc } as never).read(ORGANIZATION_ID);
+
+    expect(result.candidates[0]).toMatchObject({
+      brandAssetVersionId: "31111111-1111-4111-8111-111111111111",
+      currentVerdict: "rejected",
+      currentReasonCodes: ["not_our_plating"],
+      storagePath: `${ORGANIZATION_ID}/asset/version/source`,
+      mimeType: "image/png",
+    });
+    expect(result.reasonRegistry).toEqual([
+      { code: "not_our_plating", description: "Do not use this plating style." },
+    ]);
+    expect(rpc).toHaveBeenCalledWith("read_reference_candidates", {
+      target_organization_id: ORGANIZATION_ID,
+    });
+  });
+
+  it("reads reference bytes only from the private brand-assets bucket", async () => {
+    const download = vi.fn(async () => ({
+      data: new Blob([new Uint8Array([1, 2, 3])]),
+      error: null,
+    }));
+    const from = vi.fn(() => ({ download }));
+
+    const bytes = await createSupabaseReferenceObjectReader({ storage: { from } }).read(
+      "a/b/source",
+    );
+
+    expect(from).toHaveBeenCalledWith("brand-assets");
+    expect(download).toHaveBeenCalledWith("a/b/source");
+    expect([...bytes!]).toEqual([1, 2, 3]);
+  });
+
+  it("pins resolution and blueprint through the claim-fenced worker RPC", async () => {
+    const rpc = vi.fn(async () => ({ data: { replayed: false }, error: null }));
+    const writer = createGenerationReferenceContextWriter({
+      rpc,
+    } as GenerationReferenceContextPersistence);
+    const resolution = imageGuidance().resolution;
+
+    await writer.pinResolution({
+      organizationId: ORGANIZATION_ID,
+      runId: RUN_ID,
+      claimToken: CLAIM_TOKEN,
+      resolution,
+    });
+    await writer.pinBlueprint({
+      organizationId: ORGANIZATION_ID,
+      runId: RUN_ID,
+      claimToken: CLAIM_TOKEN,
+      blueprint: { byAssetId: { asset: { composition: "tight" } } },
+      planModelId: "gemini-plan",
+    });
+
+    expect(rpc).toHaveBeenNthCalledWith(
+      1,
+      "pin_campaign_generation_run_reference_context",
+      expect.objectContaining({
+        target_organization_id: ORGANIZATION_ID,
+        input_pin: expect.objectContaining({
+          organization_id: ORGANIZATION_ID,
+          run_id: RUN_ID,
+          claim_token: CLAIM_TOKEN,
+          phase: "resolution",
+          resolver_version: 1,
+          resolution_outcome: "synthesis_permitted",
+          avoid_reference_version_ids: ["61111111-1111-4111-8111-111111111111"],
+        }),
+      }),
+    );
+    expect(rpc).toHaveBeenNthCalledWith(
+      2,
+      "pin_campaign_generation_run_reference_context",
+      expect.objectContaining({
+        input_pin: expect.objectContaining({
+          phase: "blueprint",
+          plan_model_id: "gemini-plan",
+        }),
+      }),
+    );
   });
 });

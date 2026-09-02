@@ -60,7 +60,7 @@ export const generationContextSchema = z.strictObject({
   softConventions: z.array(z.string().trim().min(1).max(400)).max(60),
   restrictedTerms: z.array(z.string().trim().min(1).max(80)).max(200),
   brandAssetVersionIds: z.array(z.string().uuid()).max(40),
-  /** True only when the organization accepted purely synthetic imagery. */
+  /** True only when the organization accepted a synthetic setting. */
   syntheticAssetsAllowed: z.boolean(),
   primaryMetricKey: z.string().trim().min(1).max(160),
   baselineSource: z.string().trim().min(1).max(240),
@@ -125,13 +125,6 @@ export function buildGenerationContext(input: GenerationContextInput): Generatio
   if (!currency || !/^[A-Z]{3}$/.test(currency)) missing.push("currency");
   if (!primaryMetricKey) missing.push("primary_metric");
   if (!baselineSource) missing.push("baseline_source");
-
-  // Brand assets are not required, but generating imagery with neither a usable
-  // brand asset nor permission for synthetic imagery would leave the planner
-  // with nothing legitimate to draw from.
-  if (input.brandAssetVersionIds.length === 0 && !input.syntheticAssetsAllowed) {
-    missing.push("brand_constraints");
-  }
 
   if (missing.length > 0) {
     return { outcome: "needs_data", missing: [...new Set(missing)] };

@@ -15,3 +15,21 @@ coverage
 .superpowers/
 .superdesign/tmp/
 .worktrees/
+
+# IronBee runtime artifacts
+.ironbee/sessions/
+.ironbee/otel/
+.ironbee/config.local.json
+.ironbee/codex-threads.json
+.ironbee/vcs-cache.json
+.claude/settings.local.json
+
+# Raw provider exports, before redaction.
+#
+# Real marketplace downloads carry customer names, addresses, phone numbers and
+# order identifiers. They are read here to build report contracts and are never
+# committed; the scrubbed fixtures derived from them live in fixtures/providers/.
+fixtures/raw/
+!fixtures/raw/README.md
+
+/screenshots

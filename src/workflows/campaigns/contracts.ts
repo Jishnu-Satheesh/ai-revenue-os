@@ -62,7 +62,7 @@ export function campaignGenerationRequestDigest(input: {
   organizationId: string;
   campaignId: string;
   sourceSnapshotId: string;
-  kind: "generate" | "revise";
+  kind: "generate" | "revise" | "variants";
   baseVersionId?: string | null;
   baseDigest?: string | null;
 }): string {
@@ -78,4 +78,31 @@ export function campaignGenerationRequestDigest(input: {
   return createHash("sha256")
     .update(parts.map((part) => `${part.length}:${part}`).join("|"), "utf8")
     .digest("hex");
+}
+
+/**
+ * What a variant run carries between the queue and the worker.
+ *
+ * Identifiers and a persisted run key, and nothing else. The prompt, the model
+ * credentials and the campaign's business context are all read by the worker
+ * under its own credentials — a payload that carried them would put business
+ * text into a queue, a log line and a retry record.
+ *
+ * `perDirection` is the one number here, and it is read back from the run row
+ * rather than trusted from the payload, so a redelivery cannot quietly ask for
+ * a different amount of creative than the attempt it replaces.
+ */
+export const campaignVariantPayloadSchema = z.strictObject({
+  organizationId: z.string().uuid(),
+  campaignId: z.string().uuid(),
+  bundleVersionId: z.string().uuid(),
+  runId: z.string().uuid(),
+  correlationId: z.string().uuid(),
+  costCeilingMinor: z.number().int().nonnegative(),
+});
+
+export type CampaignVariantPayload = z.infer<typeof campaignVariantPayloadSchema>;
+
+export function parseCampaignVariantPayload(payload: unknown): CampaignVariantPayload {
+  return campaignVariantPayloadSchema.parse(payload);
 }

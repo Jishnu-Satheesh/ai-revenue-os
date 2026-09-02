@@ -1,5 +1,9 @@
 # Organization Intelligence Cockpit Design
 
+> **Superseded 2026-08-24.** The locked Growth Intelligence Hybrid direction is specified in
+> `docs/superpowers/specs/2026-08-24-organization-growth-intelligence-overview-design.md`. This
+> document remains historical context for the cockpit implementation it originally approved.
+
 **Date:** 2026-08-13
 
 **Status:** Approved visual direction; awaiting written-spec review

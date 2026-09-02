@@ -9,10 +9,10 @@ Checked-in contract: `src/modules/integrations/providers/meta/contract.ts`. Cons
 ## Review window
 
 - Contract version: `meta_campaign_v1`
-- Pinned Graph API version: `v26.0`
+- Pinned Graph API version: `v24.0` — the version `FacebookAdsApi.VERSION` calls, which cannot be overridden. Released 2025-10-08, supported to 2028-02-18. See ADR 0025.
 - Verified at: `2026-08-11T00:00:00.000Z`
 - Expires at: `2026-09-10T00:00:00.000Z`
-- Review rule: expiry is fail-closed; recheck official documentation and controlled-account evidence before renewing.
+- Review rule: expiry is fail-closed; recheck official documentation and controlled-account evidence before renewing. An SDK upgrade is also a review trigger: a test asserts this version equals the SDK's, so bumping the dependency fails until the contract is re-verified against the new version.
 
 The raw checked-in literal is private to the module so a caller cannot accidentally bypass temporal validation.
 
@@ -52,14 +52,14 @@ This list records names present in the consulted publishing material. It does no
 
 ## Placement and content limits
 
-| Stable placement key | State | Size limit | Copy limit | Hashtag limit | Restriction |
-| --- | --- | ---: | ---: | ---: | --- |
-| `instagram.feed_image` | blocked | unknown | unknown | unknown | `meta.instagram_feed_image_blocked` |
-| `instagram.image_story` | blocked | unknown | unknown | unknown | `meta.instagram_image_story_blocked` |
-| `facebook.feed_image` | blocked | unknown | unknown | unknown | `meta.facebook_feed_image_blocked` |
-| `facebook.image_story` | blocked | unknown | unknown | unknown | `meta.facebook_image_story_unproven` |
-| `meta_ads.feed_image` | blocked | unknown | unknown | unknown | `meta.ads_feed_image_blocked` |
-| `meta_ads.image_story` | blocked | unknown | unknown | unknown | `meta.ads_image_story_blocked` |
+| Stable placement key    | State   | Size limit | Copy limit | Hashtag limit | Restriction                          |
+| ----------------------- | ------- | ---------: | ---------: | ------------: | ------------------------------------ |
+| `instagram.feed_image`  | blocked |    unknown |    unknown |       unknown | `meta.instagram_feed_image_blocked`  |
+| `instagram.image_story` | blocked |    unknown |    unknown |       unknown | `meta.instagram_image_story_blocked` |
+| `facebook.feed_image`   | blocked |    unknown |    unknown |       unknown | `meta.facebook_feed_image_blocked`   |
+| `facebook.image_story`  | blocked |    unknown |    unknown |       unknown | `meta.facebook_image_story_unproven` |
+| `meta_ads.feed_image`   | blocked |    unknown |    unknown |       unknown | `meta.ads_feed_image_blocked`        |
+| `meta_ads.image_story`  | blocked |    unknown |    unknown |       unknown | `meta.ads_image_story_blocked`       |
 
 `unknown` is a blocker, not an unlimited value. The Instagram source proves JPEG-only image publishing and a 100 API-published-post moving 24-hour limit, but it does not supply a complete size, copy, and hashtag limit set for every planned placement. The Page posts source proves Page photo publishing but does not prove a Facebook Page image Story action. Advertising eligibility and fields require controlled-account sandbox evidence before they may enter this contract.
 

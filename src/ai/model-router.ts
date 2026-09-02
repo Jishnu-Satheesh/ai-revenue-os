@@ -21,6 +21,7 @@ import { DomainError } from "@/lib/errors";
  */
 
 export type ModelTask = "plan" | "patch" | "repair" | "image";
+export type PlanPromptPurpose = "campaign_bundle" | "art_direction_blueprint";
 
 /**
  * Model families behave differently enough that the prompt has to know which
@@ -129,6 +130,12 @@ const TRUTH_RULES = [
   "If the evidence does not support a claim, leave the claim out.",
 ].join("\n");
 
+const BLUEPRINT_TRUTH_RULES = [
+  "Use only the supplied visual references and context.",
+  "Do not add factual claims, a different subject, an offer, rendered text, an endorsement, or a permission.",
+  "Return visual treatment only; evidence citation is not part of this object.",
+].join("\n");
+
 /**
  * Family-specific shaping.
  *
@@ -136,17 +143,23 @@ const TRUTH_RULES = [
  * when prose is explicitly forbidden; without that it tends to open with a
  * friendly sentence that breaks JSON parsing.
  */
-function familyRefinements(family: ModelFamily, task: ModelTask): readonly string[] {
+function familyRefinements(
+  family: ModelFamily,
+  task: ModelTask,
+  planPurpose: PlanPromptPurpose,
+): readonly string[] {
   if (family !== "gemini") return [];
   const shared = [
     "Return a single JSON value and nothing else.",
     "Do not wrap the JSON in a code fence. Do not add commentary before or after it.",
   ];
   if (task === "plan") {
-    return [
-      ...shared,
-      "Make the three directions genuinely different from one another in both image and words, not three phrasings of one idea.",
-    ];
+    return planPurpose === "campaign_bundle"
+      ? [
+          ...shared,
+          "Make the three directions genuinely different from one another in both image and words, not three phrasings of one idea.",
+        ]
+      : shared;
   }
   if (task === "patch" || task === "repair") {
     return [
@@ -173,6 +186,8 @@ export type RefinePromptInput = {
   outputContract: string;
   /** Named failures a repair pass must address. Repair task only. */
   repairFailures?: readonly string[];
+  /** Keeps plan-family shaping specific to the artifact being produced. */
+  planPurpose?: PlanPromptPurpose;
 };
 
 /**
@@ -185,14 +200,20 @@ export type RefinePromptInput = {
  */
 export function refinePrompt(input: RefinePromptInput): RefinedPrompt {
   const { route } = input;
+  const truthRules =
+    route.task === "plan" && input.planPurpose === "art_direction_blueprint"
+      ? BLUEPRINT_TRUTH_RULES
+      : TRUTH_RULES;
 
   const system = [
     input.role,
     "",
     INJECTION_PREAMBLE,
     "",
-    TRUTH_RULES,
-    ...familyRefinements(route.family, route.task).flatMap((line) => ["", line]),
+    truthRules,
+    ...familyRefinements(route.family, route.task, input.planPurpose ?? "campaign_bundle").flatMap(
+      (line) => ["", line],
+    ),
   ].join("\n");
 
   const repairSection =
@@ -219,33 +240,4 @@ export function refinePrompt(input: RefinePromptInput): RefinedPrompt {
   ].join("\n");
 
   return { system, prompt, route };
-}
-
-/**
- * Shapes an image prompt for the routed image model.
- *
- * The truth clause is not decoration. An image model asked for "a busy
- * restaurant" will happily produce something that reads as a photograph of a
- * real venue on a real night, and that image would then need an attestation
- * nobody can honestly give.
- */
-export function refineImagePrompt(input: {
-  route: ModelRoute;
-  subject: string;
-  brandDirection: string;
-  negativeConstraints?: readonly string[];
-}): string {
-  const lines = [
-    input.subject,
-    "",
-    `Art direction: ${input.brandDirection}`,
-    "",
-    "This is an illustrative marketing image, not documentary photography.",
-    "Do not depict real identifiable people, real branded products, logos you were not given, awards, or review scores.",
-    "Do not render text that states a price, a discount, or a claim.",
-  ];
-  if (input.negativeConstraints?.length) {
-    lines.push("", `Avoid: ${input.negativeConstraints.join("; ")}`);
-  }
-  return lines.join("\n");
 }

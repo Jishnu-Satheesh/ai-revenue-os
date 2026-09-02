@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { diffManifestChanges, type CampaignDiff } from "@/domain/campaigns/diff";
 import { CampaignError } from "@/domain/campaigns/errors";
 import { normalizeManifest } from "@/domain/campaigns/normalization";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
@@ -80,4 +81,30 @@ export function canonicalManifestJson(manifest: CampaignBundleManifest): string 
 
 export function bundleDigest(manifest: CampaignBundleManifest): string {
   return createHash("sha256").update(canonicalManifestJson(manifest), "utf8").digest("hex");
+}
+
+/**
+ * The diff as it is recorded, digests included.
+ *
+ * The change list is computed by `diffManifestChanges`, which is pure and runs
+ * anywhere. Only the two digests need Node, so only this wrapper does — which
+ * is why it sits here rather than beside the comparison it delegates to.
+ */
+export function diffManifests(
+  before: CampaignBundleManifest,
+  after: CampaignBundleManifest,
+): CampaignDiff {
+  const changes = diffManifestChanges(before, after);
+
+  return {
+    fromVersion: before.version,
+    toVersion: after.version,
+    fromDigest: bundleDigest(before),
+    toDigest: bundleDigest(after),
+    changes,
+    // Any manifest change is material, so any change invalidates. Stated as a
+    // derived fact rather than a constant, so the rule stays visible if the
+    // manifest ever gains a genuinely cosmetic field.
+    invalidatesApproval: changes.some((change) => change.materiality === "material"),
+  };
 }

@@ -48,11 +48,17 @@ Guided onboarding is the organization-scoped control plane for resumable ten-sec
 
 Connection catalog, OAuth or credential handoff, webhook registration, file imports, provider health, and branch mappings.
 
-The approved V1 is a health-first organization workspace with a provider-agnostic adapter registry, a fixture-backed read-only Google Business Profile provider, manual/CSV data sources, capability grants, account mappings, ingestion-run metadata, and health checks. The Google path remains fixture-only with writes and webhooks deferred under ADR 0010. Capability-gated campaign providers may later register bounded writes and webhook intake only through a non-expired checked-in contract, installed adapter, organization-specific grant, deterministic policy, and Tool Gateway or verified webhook route. Credentials sit behind a server-only `CredentialStore`, now implemented over Supabase Vault alongside a generic OAuth session substrate: secrets are stored as Vault references, only a digest of the OAuth state is persisted, and consumption is a single atomic write that rechecks the caller's current role. No provider is registered as connectable, so every connect attempt fails closed; Meta appears in the catalog as a declared-blocked provider with the restriction codes from its checked-in contract. Trigger.dev executes durable work while Postgres remains authoritative. See `specs/003-integration-hub.md`, `docs/verification/campaigns/credential-security-review.md`, and ADRs 0010 and 0016.
+The approved V1 is a health-first organization workspace with a provider-agnostic adapter registry, a fixture-backed read-only Google Business Profile provider, manual/CSV data sources, governed report-package intake, capability grants, account mappings, ingestion-run metadata, and health checks. Governed report packages are a separate private Storage and Postgres lifecycle: an operator declares the dynamic business channel, branch, period, report type, and currency, the browser uses a signed resumable XLSX/CSV upload, and a Trigger worker records bounded structural evidence, an exact approved contract, validation summaries, and deterministic exact-range projection evidence. Postgres classifies matching digests as duplicate replay, keeps non-overlapping periods separate, blocks ambiguous intersecting periods from the current rollup, and lets only an owner/admin append a correction/supersession resolution. The Integration Hub exposes those safe identifiers, states, and next steps—not workbook cells or aggregate values. This does not create Channel Economics, a provider connection, credentials, Business Memory, benchmarks, or actions. The Google path remains fixture-only with writes and webhooks deferred under ADR 0010. Capability-gated campaign providers may later register bounded writes and webhook intake only through a non-expired checked-in contract, installed adapter, organization-specific grant, deterministic policy, and Tool Gateway or verified webhook route. Credentials sit behind a server-only `CredentialStore`, now implemented over Supabase Vault alongside a generic OAuth session substrate: secrets are stored as Vault references, only a digest of the OAuth state is persisted, and consumption is a single atomic write that rechecks the caller's current role. No provider is registered as connectable, so every connect attempt fails closed; Meta appears in the catalog as a declared-blocked provider with the restriction codes from its checked-in contract. Trigger.dev executes durable work while Postgres remains authoritative. See `specs/003-integration-hub.md`, `specs/018-governed-channel-intelligence.md`, `docs/verification/campaigns/credential-security-review.md`, and ADRs 0010, 0016, and 0026.
 
 ### Data Ingestion and Normalization
 
 Schemas, validation, deduplication, source quality, reconciliation, and normalized metrics.
+
+### Channel Economics
+
+Contribution margin by channel, its cost component vocabulary, effective-dated tenant rates, and the completeness grade on every figure.
+
+Ahead of any margin, a read-only **evidence readiness** model classifies each organization/channel/branch/exact-period tuple as `ready_for_economics`, `partial_evidence`, `needs_data`, `not_comparable`, or `blocked`. It is derived at request time from the governed exact-range ledger and from the governed cost-coverage function, stores nothing, computes no margin, and reads no workbook value. Cost inputs appear only as availability and quality tier, never as an amount. Organization-scoped and off by default behind `GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS`, enforced in the page loader and the API boundary. See `specs/012-channel-economics-ledger.md` sections 6.3 and 7.5, `specs/018-governed-channel-intelligence.md` section 10.2, and ADRs 0026 and 0027.
 
 ### Business Memory
 
@@ -111,6 +117,13 @@ The only route from an approved Campaign Channel Action to a public or money-mov
 Human-readable history of observations, decisions, approvals, executions, failures, and outcomes.
 
 ## Experience
+
+### Public Landing Page
+
+The signed-out face of the product at `/`: hero with an illustrative cockpit preview, capabilities,
+how-it-works, governance, and walkthrough CTA. Signed-in users are redirected by the ADR 0015
+resolver instead. Lives in `src/components/marketing/` with its own dark token scope in
+`globals.css` (`.marketing`).
 
 ### Agency Portfolio
 

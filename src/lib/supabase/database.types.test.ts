@@ -26,6 +26,46 @@ const TYPES_FILE = resolve(process.cwd(), "src/lib/supabase/database.types.ts");
  * leaving one untyped becomes a decision rather than an oversight.
  */
 const UNTYPED_TABLES = new Set([
+  // Campaign results are written only by the collection worker through
+  // record_campaign_metric_observation, which writes the value and the
+  // observation in one transaction. A direct insert could leave a figure with
+  // nothing pointing at it, or a gap recorded as a zero.
+  "campaign_metric_observations",
+  // Paid provider objects are written only by the ads adapter through
+  // record_campaign_ads_object as each id is returned. Members read them; a
+  // direct insert would defeat the resume-rather-than-duplicate guarantee.
+  "campaign_ads_objects",
+  // Exposures are written only by the dispatch worker through
+  // record_campaign_exposure, which refuses any run the gateway has not
+  // confirmed. Members read them through RLS; nothing writes one from a session.
+  "campaign_exposures",
+  // Inbound webhook deliveries are written only by the webhook route under the
+  // service role, and read through the narrow contract in webhook-receipts.ts.
+  // No session reaches them: a quarantined row has no tenant to scope it to.
+  "provider_webhook_receipts",
+  // Creative variants are written only through `append_campaign_creative_variant`,
+  // which assigns the slot numbers under a lock, and read through the narrow
+  // contract in `variant-repository.ts`. A generated row type would invite a
+  // direct insert that skips the RPC and therefore skips the cap.
+  "campaign_creative_variants",
+  // The allocation loop's ledger, resumes, and pause-run substrate are written
+  // only by security-definer RPCs (the loop, and the operator resume route), and
+  // read through the narrow contract in `allocation-repository.ts` or the
+  // read-only allocation route. A generated row type would imply a direct write
+  // path that deliberately does not exist.
+  "campaign_allocation_events",
+  "campaign_variant_resumes",
+  "campaign_pause_runs",
+  // The evidence loop's verdict record is written only by the settlement
+  // worker through settle_campaign_outcome, which enforces preregistration and
+  // the settlement delay, and read through the read-only outcome route. A
+  // generated row type would imply a direct write path that does not exist.
+  "campaign_outcomes",
+  // Learning proposals are written only by the evidence loop through
+  // propose_campaign_learning (which enforces settlement and campaign-scoped
+  // evidence) and decided only by the operator decision route. A generated row
+  // type would imply a direct write path that deliberately does not exist.
+  "campaign_learning_proposals",
   // Decision persistence uses a deliberately narrow repository contract. The
   // browser can read only the opportunity feed projection, while the remaining
   // ledger tables are worker-only and reached through constrained RPCs.
@@ -90,6 +130,19 @@ const UNTYPED_TABLES = new Set([
   "campaign_budget_reservations",
   "provider_receipts",
   "tool_invocations",
+  // Exact-range report projection writes only through claim-fenced RPCs. The
+  // hand-maintained UI types expose its safe read surface; this guard keeps the
+  // migration parser from implying browser writes.
+  "report_projection_versions",
+  "report_projection_decisions",
+  "report_projection_bindings",
+  "integration_report_projection_runs",
+  "exact_range_metric_observations",
+  "report_projection_lineage",
+  // Reconciliation writes and resolution outcomes are confined to claim-fenced
+  // RPCs; public row types model the safe read projection only.
+  "report_projection_reconciliations",
+  "report_projection_reconciliation_resolutions",
 ]);
 
 /**
@@ -98,8 +151,19 @@ const UNTYPED_TABLES = new Set([
  * one to the public type surface would falsely imply direct table access.
  */
 const PRIVATE_RPC_ONLY_TABLES = new Set([
+  "channel_analysis_operations",
+  // The narrator's lease ledger (ADR 0037): claimed, completed, and failed only
+  // through the fenced recommendation RPCs; no session role holds a grant.
+  "channel_recommendation_operations",
   "decision_cycle_operations",
+  "growth_intelligence_write_operations",
   "integration_credentials",
+  "integration_report_profile_operations",
+  "integration_report_validation_operations",
+  "integration_report_write_operations",
+  "report_contract_write_operations",
+  "integration_report_projection_operations",
+  "report_projection_write_operations",
   "tool_gateway_operations",
 ]);
 

@@ -15,10 +15,19 @@ export default defineConfig({
   },
   // Image generation is the long pole: three drawings, each of which may take
   // minutes under load and is retried once if it hangs.
-  maxDuration: 2_700,
+  maxDuration: 3_300,
   build: {
     // `sharp` ships prebuilt native binaries. Bundling it produces a worker
     // that fails at runtime on the first image, so it has to stay external.
-    external: ["sharp"],
+    //
+    // `@napi-rs/canvas` is the poster text renderer and is native for the same
+    // reason. It is listed here before anything imports it deliberately: the
+    // failure mode of forgetting is a worker that builds cleanly and dies on the
+    // first render, which is discovered far later and much more expensively.
+    // `fontkit` answers glyph coverage. It is not native, but it is ESM-only,
+    // parses binary tables, and opens the vendored font files from disk by path
+    // at runtime. Bundling it risks the same shape of failure as the two above:
+    // a build that succeeds and a worker that dies on the first render.
+    external: ["sharp", "@napi-rs/canvas", "fontkit"],
   },
 });

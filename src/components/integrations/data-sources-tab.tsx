@@ -10,6 +10,7 @@ import {
   type CsvSourceSubmission,
   type ManualSourceSubmission,
 } from "@/components/integrations/data-source-form";
+import { ReportPackageUpload } from "@/components/integrations/report-package-upload";
 import type { MetricTargetChoice } from "@/components/integrations/csv-mapping-form";
 import { formatInstant, runStatusLabel } from "@/components/integrations/health-status";
 import {
@@ -173,6 +174,7 @@ export function DataSourcesTab({
 
   return (
     <div className="flex flex-col gap-4">
+      <ReportPackageUpload organizationId={organizationId} role={role} timeZone={timeZone} />
       {canImport ? (
         <Card>
           <CardHeader>

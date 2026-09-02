@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -25,12 +25,12 @@ import {
  * asserts the live rows, so both ends are covered.
  */
 
-const MIGRATION = resolve(
-  process.cwd(),
-  "supabase/migrations/20260817141000_permission_catalogue.sql",
-);
-
-const sql = readFileSync(MIGRATION, "utf8");
+const migrationsDirectory = resolve(process.cwd(), "supabase/migrations");
+const sql = readdirSync(migrationsDirectory)
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
+  .map((name) => readFileSync(resolve(migrationsDirectory, name), "utf8"))
+  .join("\n");
 
 /** Reads SQL string literals out of one `(...)` tuple, unescaping `''`. */
 function parseTuple(inner: string): string[] {
@@ -62,11 +62,7 @@ function parseTuple(inner: string): string[] {
 }
 
 /** The tuples of the `values` block that follows `header`, up to its `;`. */
-function seededRows(header: string): string[][] {
-  const start = sql.indexOf(header);
-  if (start === -1) throw new Error(`Seed block not found: ${header}`);
-
-  const body = sql.slice(start + header.length);
+function seededRowsFrom(body: string): string[][] {
   const rows: string[][] = [];
   let index = 0;
   let depth = 0;
@@ -101,6 +97,21 @@ function seededRows(header: string): string[][] {
     index += 1;
   }
   return rows;
+}
+
+function seededRows(header: string): string[][] {
+  const blocks: string[][] = [];
+  let searchFrom = 0;
+
+  while (true) {
+    const start = sql.indexOf(header, searchFrom);
+    if (start === -1) break;
+    blocks.push(...seededRowsFrom(sql.slice(start + header.length)));
+    searchFrom = start + header.length;
+  }
+
+  if (blocks.length === 0) throw new Error(`Seed block not found: ${header}`);
+  return blocks;
 }
 
 const permissionRows = seededRows(

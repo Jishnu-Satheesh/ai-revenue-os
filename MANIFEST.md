@@ -25,6 +25,10 @@
 - `adrs/0019-campaign-measurement-and-learning.md`
 - `adrs/0020-bounded-creative-family-approval.md`
 - `adrs/0021-two-speed-campaign-optimization.md`
+- `adrs/0022-account-as-tenant-root.md`
+- `adrs/0023-permission-as-data-authorization.md`
+- `adrs/0024-meta-graph-calls-over-the-business-sdk.md`
+- `adrs/0025-meta-business-sdk-as-transport.md`
 - `context/00-vision.md`
 - `context/01-project-overview.md`
 - `context/02-product-principles.md`
