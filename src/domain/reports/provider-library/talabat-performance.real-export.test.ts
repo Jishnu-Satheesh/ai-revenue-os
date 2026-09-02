@@ -19,7 +19,7 @@ import { readCsvRows, readWorkbookRows } from "@/workflows/reports/project-repor
  * expectation.
  */
 
-const FIXTURE = "fixtures/raw/Talabat-Jan-Feb-2026-Performance-Report.xlsx";
+const FIXTURE = "fixtures/raw/Talabat/Talabat-Jan-Feb-2026-Performance-Report.xlsx";
 
 /**
  * The client's real export is deliberately not in the repository -- `.gitignore`

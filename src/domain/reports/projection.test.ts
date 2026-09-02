@@ -289,4 +289,24 @@ describe("a categorical cell carrying two labels", () => {
       result.observations.filter((o) => o.dimensions?.reason_code !== undefined),
     ).toHaveLength(0);
   });
+
+  it("counts the second label when the first slot is empty", () => {
+    // An empty leading slot lists nothing, so the first *listed* reason is
+    // whatever comes after it -- not undeclared, merely in second position.
+    const result = projectPeriodGrainMetrics(
+      categoricalFixture({ valueSeparator: ";", cell: ";UNREACHABLE" }),
+    );
+    expect(result.observations.some((o) => o.dimensions?.reason_code === "UNREACHABLE")).toBe(
+      true,
+    );
+  });
+
+  it("treats a cell of only separators as absent", () => {
+    const result = projectPeriodGrainMetrics(
+      categoricalFixture({ valueSeparator: ";", cell: ";;" }),
+    );
+    expect(
+      result.observations.filter((o) => o.dimensions?.reason_code !== undefined),
+    ).toHaveLength(0);
+  });
 });

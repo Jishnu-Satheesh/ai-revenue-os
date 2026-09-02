@@ -611,8 +611,21 @@ function categoryLabel(
   }
   const text = String(value).trim();
   if (text.length === 0) return null;
-  // Only the first label is counted. See the field's declaration.
-  const first = separator ? text.split(separator)[0].trim() : text;
+  // Only the first label is counted. See the field's declaration. "First"
+  // means the first *listed* reason, not the first character position: a
+  // cell whose leading slot is empty -- ";UNREACHABLE" -- still names one
+  // reason, in second position, and it is not undeclared, merely displaced.
+  // Refusing it over an empty slot would dead-end an operator over nothing;
+  // silently dropping it would be exactly the discard this codebase refuses.
+  // A cell that lists nothing at all -- only separators, or only whitespace
+  // between them -- has no first listed reason and stays absent, same as a
+  // blank cell.
+  const first = separator
+    ? (text
+        .split(separator)
+        .map((segment) => segment.trim())
+        .find((segment) => segment.length > 0) ?? "")
+    : text;
   if (first.length === 0) return null;
   if (labels) {
     const code = labels.get(first.toLowerCase());
