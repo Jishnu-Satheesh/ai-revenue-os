@@ -92,6 +92,7 @@ export const reportPackageProfilingTask = schemaTask({
           p_claim_token: input.claimToken,
           p_content_sha256: input.contentSha256,
           p_schema_fingerprint: input.schemaFingerprint,
+          p_structure_fingerprint: input.structureFingerprint,
           p_sheets: input.sheets,
         });
       },

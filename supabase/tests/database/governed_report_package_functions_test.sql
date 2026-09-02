@@ -157,6 +157,7 @@ select extensions.throws_ok(
       'd1000000-0000-4000-8000-000000000601'::uuid,
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       '[{"sheetPosition":1,"sheetName":"CSV","normalizedSheetName":"csv","rowCount":1,"populatedCellCount":1,"expandedBytes":4,"headerCandidates":[{"rowPosition":1,"normalizedHeaders":["orphaned_without_a_digest"]}],"hasFormula":false,"hasMergedCells":false,"hasRepeatedHeader":false}]'::jsonb
     )
   $$,
@@ -172,6 +173,7 @@ select extensions.lives_ok(
       'd1000000-0000-4000-8000-000000000601'::uuid,
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       '[{"sheetPosition":1,"sheetName":"CSV","normalizedSheetName":"csv","rowCount":1,"populatedCellCount":1,"expandedBytes":4,"headerCandidateDigests":[{"rowPosition":1,"fieldCount":1,"digest":"b8a78c345cafa060523a4409ef977a18a6e035cf3ede56b295f302332819ae6e","normalizedHeaderDigests":["1f47dd5317fab65368164a12f027f7d16bbe2d3eddfedf05be115fc693324a73"]}],"hasFormula":false,"hasMergedCells":false,"hasRepeatedHeader":false}]'::jsonb
     )
   $$,

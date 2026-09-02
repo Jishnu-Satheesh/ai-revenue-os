@@ -423,6 +423,8 @@ export type Database = {
           parser_version: number;
           fingerprint_version: number;
           schema_fingerprint: string | null;
+          structure_version: number;
+          structure_fingerprint: string | null;
           status:
             | "awaiting_upload"
             | "uploaded"
@@ -2036,6 +2038,7 @@ export type Database = {
           p_claim_token: string;
           p_content_sha256: string;
           p_schema_fingerprint: string;
+          p_structure_fingerprint: string;
           p_sheets: unknown;
         };
         Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"] | null;

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(18);
+select extensions.plan(20);
 
 select extensions.has_table('public', 'integration_report_packages', 'governed report packages exist');
 select extensions.has_table('public', 'integration_report_sheet_manifests', 'bounded report sheet manifests exist');
@@ -10,6 +10,10 @@ select extensions.has_column('public', 'integration_report_packages', 'content_s
 select extensions.has_column('public', 'integration_report_packages', 'storage_object_version', 'immutable storage version is retained');
 select extensions.has_column('public', 'integration_report_packages', 'retained_until', 'retention metadata is retained');
 select extensions.has_column('public', 'integration_report_sheet_manifests', 'populated_cell_count', 'sheet evidence stores counts, not cells');
+select extensions.has_column('public', 'integration_report_packages', 'structure_fingerprint',
+  'packages retain a worksheet-name-free structure fingerprint');
+select extensions.has_column('public', 'integration_report_packages', 'structure_version',
+  'packages record which structure algorithm produced that fingerprint');
 
 select extensions.ok(
   (select relrowsecurity from pg_catalog.pg_class where oid = 'public.integration_report_packages'::regclass),
