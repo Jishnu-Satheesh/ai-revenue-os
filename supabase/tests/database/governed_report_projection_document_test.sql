@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(18);
+select extensions.plan(20);
 
 -- The guard between an approved mapping and the ledger. It had never been
 -- exercised against the declaration language as it actually stands, which is
@@ -167,6 +167,22 @@ select extensions.throws_ok(
        '{"allowedValues":["MERCHANT"],"labelMap":"Cancelled by merchant"}'::jsonb)) $$,
   '22023', 'report projection categorical label map is invalid',
   'a map that is not a map is refused'
+);
+
+-- The value separator. Talabat's CSV export cannot shift cells the way its
+-- spreadsheet export does, so a day's second closure reason joins the first
+-- in one cell instead of landing in an injected one.
+select extensions.lives_ok(
+  $$ select private.assert_report_projection_document(pg_temp.categorical(
+       '{"allowedValues":["CHECK_IN_REQUIRED","UNREACHABLE"],"valueSeparator":";"}'::jsonb)) $$,
+  'a declared separator for a cell carrying two labels is accepted'
+);
+
+select extensions.throws_ok(
+  $$ select private.assert_report_projection_document(pg_temp.categorical(
+       '{"allowedValues":["CHECK_IN_REQUIRED","UNREACHABLE"],"valueSeparator":"12345"}'::jsonb)) $$,
+  '22023', 'report projection categorical output is invalid',
+  'a separator longer than four characters is refused'
 );
 
 select * from extensions.finish();

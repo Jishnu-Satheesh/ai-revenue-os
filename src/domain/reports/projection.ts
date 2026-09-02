@@ -127,6 +127,22 @@ const reportProjectionOutputSchema = z
           .record(z.string().min(1).max(128), z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/))
           .optional(),
         /**
+         * The character a provider uses when one cell carries two labels.
+         *
+         * Talabat's spreadsheet export writes a day's second closure reason
+         * into an injected cell, which the ragged-row rule already reads. Its
+         * CSV export cannot shift cells, so it joins both reasons into one:
+         * `CHECK_IN_REQUIRED;UNREACHABLE`. Only the first is counted, which is
+         * the rule this output already follows for the spreadsheet -- the
+         * provider's own summary counts each day once, by its first-listed
+         * reason.
+         *
+         * Declared rather than detected, like every other reading rule here. A
+         * contract that does not set it is unchanged: a cell carrying a
+         * separator stays undeclared and refuses the import.
+         */
+        valueSeparator: z.string().min(1).max(4).optional(),
+        /**
          * Also read this field's labels out of the cells a ragged row injects.
          * Talabat continues its reason list into the cells it inserts, so the
          * second cause of a closed day lives in the displacement itself.
@@ -584,6 +600,7 @@ function labelLookupFor(
 function categoryLabel(
   value: unknown,
   allowed: readonly string[],
+  separator: string | undefined,
   labels: ReadonlyMap<string, string> | null,
   absentMarkers: readonly string[] | undefined,
 ): string | null {
@@ -594,12 +611,15 @@ function categoryLabel(
   }
   const text = String(value).trim();
   if (text.length === 0) return null;
+  // Only the first label is counted. See the field's declaration.
+  const first = separator ? text.split(separator)[0].trim() : text;
+  if (first.length === 0) return null;
   if (labels) {
-    const code = labels.get(text.toLowerCase());
+    const code = labels.get(first.toLowerCase());
     if (code === undefined) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
     return code;
   }
-  const code = text.toUpperCase();
+  const code = first.toUpperCase();
   if (!allowed.includes(code)) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
   return code;
 }
@@ -1295,6 +1315,7 @@ export function projectPeriodGrainMetrics(input: {
           const label = categoryLabel(
             cell,
             output.categorical.allowedValues,
+            output.categorical.valueSeparator,
             labels,
             absentMarkers,
           );

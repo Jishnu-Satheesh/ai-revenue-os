@@ -219,7 +219,7 @@ function assertObjectIdentity(
   }
 }
 
-async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
+export async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
   const rows: unknown[][] = [];
   const parser = Readable.from([buffer]).pipe(
     parse({

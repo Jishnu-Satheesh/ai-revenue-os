@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { talabatPerformance } from "@/domain/reports/provider-library/talabat-performance";
 import { projectPeriodGrainMetrics } from "@/domain/reports/projection";
-import { readWorkbookRows } from "@/workflows/reports/project-report-package";
+import { readCsvRows, readWorkbookRows } from "@/workflows/reports/project-report-package";
 
 /**
  * The real drafting export, projected end to end through the approved
@@ -161,3 +161,99 @@ describe.skipIf(!hasRealExport)("talabat performance projection over the real ex
     expect(zeroDays.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * The real client file that was refused, projected end to end.
+ *
+ * This is the CSV export of the same report the suite above reads as XLSX.
+ * The spreadsheet writes a day's second closure reason into an injected
+ * cell; the CSV has nowhere to shift a cell to, so it joins both reasons
+ * into one with a semicolon -- `CHECK_IN_REQUIRED;UNREACHABLE` -- and that
+ * joined string is not a declared value on its own. Every expected total
+ * below was verified against the file by hand first, so a regression here is
+ * a wrong reading of the export and not a wrong expectation.
+ */
+const FIXTURE_CSV = "fixtures/raw/Talabat/Jan-2026.csv";
+const hasCsvExport = existsSync(FIXTURE_CSV);
+
+const CSV_DECLARED_PERIOD = {
+  periodStart: "2026-01-01",
+  periodEnd: "2026-01-31",
+};
+
+async function projectCsvFixture() {
+  const rows = await readCsvRows(readFileSync(FIXTURE_CSV));
+  return projectPeriodGrainMetrics({
+    contract: talabatPerformance.contract,
+    document: talabatPerformance.projection as Extract<
+      typeof talabatPerformance.projection,
+      { outputKind: "period_grain" }
+    >,
+    declaredCurrency: "AED",
+    declaredPeriod: CSV_DECLARED_PERIOD,
+    // The shape the projection workflow itself builds for a CSV package: one
+    // sheet, named for the format rather than the report, because the
+    // contract binds this sheet by position and never by name.
+    sheets: [{ normalizedSheetName: "csv", rows }],
+  });
+}
+
+describe.skipIf(!hasCsvExport)(
+  "talabat performance projection over the real CSV export (Jan 2026)",
+  () => {
+    it("reads all 31 declared days of January", async () => {
+      const rows = await readCsvRows(readFileSync(FIXTURE_CSV));
+      expect(rows).toHaveLength(32); // header plus 31 data rows
+      const dates = rows.slice(1).map((row) => row[0]);
+      expect(dates[0]).toBe("2026-01-01");
+      expect(dates[dates.length - 1]).toBe("2026-01-31");
+    });
+
+    it("attributes every closed day to exactly one declared reason, reading only the first of a joined cell", async () => {
+      const result = await projectCsvFixture();
+      // Every closed day in January carries two reasons in the same cell in
+      // this export; only the first is counted, which is the rule this
+      // output already follows for the spreadsheet.
+      const checkIn = result.observations.filter(
+        (observation) =>
+          observation.metricKey === "operations.closed_days" &&
+          observation.dimensions?.reason_code === "CHECK_IN_REQUIRED",
+      );
+      const unreachable = result.observations.filter(
+        (observation) =>
+          observation.metricKey === "operations.closed_days" &&
+          observation.dimensions?.reason_code === "UNREACHABLE",
+      );
+      const total = (rows: typeof checkIn) =>
+        rows.reduce((sum, observation) => sum + Number(observation.valueNumerator), 0);
+      expect(total(checkIn)).toBe(28);
+      expect(total(unreachable)).toBe(3);
+      expect(total(checkIn) + total(unreachable)).toBe(31);
+    });
+
+    it("attributes every avoidable cancellation to its declared reason", async () => {
+      const result = await projectCsvFixture();
+      const reasonDays = result.observations.filter(
+        (observation) =>
+          observation.metricKey === "order.avoidable_cancellation_reason" &&
+          observation.dimensions?.reason_code === "ITEM_UNAVAILABLE",
+      );
+      const total = reasonDays.reduce(
+        (sum, observation) => sum + Number(observation.valueNumerator),
+        0,
+      );
+      expect(total).toBe(7);
+    });
+
+    it("reads gross revenue in minor units", async () => {
+      const result = await projectCsvFixture();
+      // AED 438.00 across the declared window.
+      expect(sumByMetric(result.observations, "revenue.gross")).toBe(43_800);
+    });
+
+    it("reads the total order count for the declared window", async () => {
+      const result = await projectCsvFixture();
+      expect(sumByMetric(result.observations, "order.total_count")).toBe(20);
+    });
+  },
+);
