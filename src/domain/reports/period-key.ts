@@ -145,6 +145,16 @@ export function parsePeriodKey(
 
   const text = String(value).trim();
 
+  // An unambiguous form is read whatever the contract declares.
+  //
+  // The declaration exists because `03/04/2026` is the third of April or the
+  // fourth of March depending on who exported it, and nothing in the value can
+  // say which. `YYYY-MM-DD` has no second reading anywhere, so refusing it
+  // under a declaration drafted from the same provider's spreadsheet export is
+  // pedantry rather than rigour -- and it refused a real client's CSV.
+  const iso = ISO.exec(text);
+  if (iso) return fromParts(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
   if (encoding === "iso_date") {
     const match = ISO.exec(text);
     if (!match) throw new ReportProjectionError("INVALID_LOCAL_DATE");
