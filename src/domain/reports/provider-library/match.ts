@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { PROVIDER_REPORT_DEFINITIONS } from "@/domain/reports/provider-library";
 import type { ProviderReportDefinition } from "@/domain/reports/provider-library/types";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
+import { TRANSPOSED_HEADER_ROW_POSITION } from "@/domain/reports/transpose";
 
 /**
  * Recognising an uploaded file as a report family the platform already knows.
@@ -94,11 +95,16 @@ export function matchProviderDefinition(input: {
       return no({ reason: "merged_cells_not_allowed", normalizedSheetName: name });
     }
 
-    const candidate = sheet.headerCandidateDigests.find(
-      (row) => row.rowPosition === rule.headerRow,
-    );
+    // A rotated sheet keeps its names down the first column, so its candidate
+    // is filed under a position no row can occupy rather than under the header
+    // row, which on a statement is the company's own name.
+    const headerRow =
+      rule.recordOrientation === "period_columns"
+        ? TRANSPOSED_HEADER_ROW_POSITION
+        : rule.headerRow;
+    const candidate = sheet.headerCandidateDigests.find((row) => row.rowPosition === headerRow);
     if (!candidate) {
-      return no({ reason: "header_row_not_profiled", normalizedSheetName: name, headerRow: rule.headerRow });
+      return no({ reason: "header_row_not_profiled", normalizedSheetName: name, headerRow });
     }
     const present = new Set(candidate.normalizedHeaderDigests);
     for (const field of rule.fields) {

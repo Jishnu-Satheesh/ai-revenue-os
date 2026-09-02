@@ -20,7 +20,9 @@ import {
   ReportProjectionError,
   reportProjectionDocumentSchema,
 } from "@/domain/reports/projection";
+import { reconstructPdfGrid } from "@/domain/reports/pdf-grid";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
+import { extractPdfTextLayer } from "@/workflows/reports/pdf-text-layer";
 
 const payloadSchema = z
   .object({
@@ -47,7 +49,7 @@ type ProjectionPackage = {
   /** Inclusive local dates, as the operator declared the package covers. */
   declared_period_start: string;
   declared_period_end: string;
-  file_kind: "csv" | "xlsx";
+  file_kind: "csv" | "xlsx" | "pdf";
 };
 
 type ProjectionOutput = {
@@ -234,6 +236,28 @@ async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
   return rows;
 }
 
+/**
+ * A PDF read as one sheet per page, exactly as it was profiled and validated.
+ *
+ * The grid comes back from the text layer's coordinates. A page with no table
+ * is an empty sheet rather than a failure -- a statement's cover page is not a
+ * reason to refuse the statement -- and the contract says which pages it needs
+ * through the fields it cannot otherwise find.
+ */
+export async function readPdfRows(
+  buffer: Buffer,
+): Promise<Array<{ normalizedSheetName: string; rows: unknown[][] }>> {
+  const extracted = await extractPdfTextLayer(buffer);
+  if (extracted.outcome === "failed") throw new ReportProjectionFailure("UNREADABLE_WORKBOOK");
+  return extracted.pages.map((page) => {
+    const grid = reconstructPdfGrid(page.items);
+    return {
+      normalizedSheetName: `page_${page.pageNumber}`,
+      rows: grid.outcome === "reconstructed" ? grid.grid.rows.map((row) => [...row.cells]) : [],
+    };
+  });
+}
+
 export async function readWorkbookRows(
   buffer: Buffer,
 ): Promise<Array<{ normalizedSheetName: string; rows: unknown[][] }>> {
@@ -382,7 +406,9 @@ export async function runReportPackageProjection(
     const sheets =
       claim.reportPackage.file_kind === "csv"
         ? [{ normalizedSheetName: "csv", rows: await readCsvRows(buffer) }]
-        : await readWorkbookRows(buffer);
+        : claim.reportPackage.file_kind === "pdf"
+          ? await readPdfRows(buffer)
+          : await readWorkbookRows(buffer);
     const definitions = new Map(
       claim.metricDefinitions.map((definition) => [definition.key, definition]),
     );

@@ -114,4 +114,104 @@ describe("report schema fingerprint", () => {
       }),
     ).not.toBe(createReportSchemaFingerprint(base));
   });
+
+  describe("a sheet whose records are its columns", () => {
+    function transposed(overrides: Record<string, unknown> = {}) {
+      return {
+        ...contract,
+        controls: [],
+        sheets: [
+          {
+            ...contract.sheets[0],
+            recordOrientation: "period_columns",
+            periodHeaderRow: 4,
+            ...overrides,
+          },
+        ],
+      };
+    }
+
+    it("accepts a rotated sheet that says which row names its periods", () => {
+      expect(reportContractDocumentSchema.safeParse(transposed()).success).toBe(true);
+    });
+
+    it("refuses a rotated sheet that does not", () => {
+      // A column heading has no heading of its own. Without this there is
+      // nothing to date a figure by.
+      const document = transposed();
+      const sheet: Record<string, unknown> = { ...document.sheets[0] };
+      delete sheet.periodHeaderRow;
+
+      expect(reportContractDocumentSchema.safeParse({ ...document, sheets: [sheet] }).success).toBe(
+        false,
+      );
+    });
+
+    it("refuses a period header row on a sheet that is not rotated", () => {
+      expect(
+        reportContractDocumentSchema.safeParse(transposed({ recordOrientation: "rows" })).success,
+      ).toBe(false);
+    });
+
+    it("refuses a totals row or ragged rows on a rotated sheet", () => {
+      // Both describe a shape the sheet has before it is rotated, and neither
+      // survives the rotation with its meaning intact.
+      expect(
+        reportContractDocumentSchema.safeParse(
+          transposed({ totalsRow: { canonicalField: "net_sales", label: "Total" } }),
+        ).success,
+      ).toBe(false);
+      expect(
+        reportContractDocumentSchema.safeParse(
+          transposed({ raggedRows: { injectedFromColumnIndex: 2 } }),
+        ).success,
+      ).toBe(false);
+    });
+
+    it("refuses a counting control over a rotated sheet", () => {
+      // The profile counted the sheet the way it arrived. Twenty-four accounts
+      // over four months profiles as twenty-four rows and validates as four, so
+      // the control would fail every time while nothing was wrong.
+      const document = transposed();
+      expect(
+        reportContractDocumentSchema.safeParse({
+          ...document,
+          controls: [
+            {
+              key: "row_count",
+              kind: "row_count",
+              normalizedSheetName: document.sheets[0].normalizedSheetName,
+              tolerance: 0,
+            },
+          ],
+        }).success,
+      ).toBe(false);
+    });
+  });
+
+  describe("how a provider writes a number", () => {
+    function withField(field: Record<string, unknown>) {
+      return {
+        ...contract,
+        controls: [],
+        sheets: [
+          { ...contract.sheets[0], fields: [{ ...contract.sheets[0].fields[0], ...field }] },
+        ],
+      };
+    }
+
+    it("accepts a grouped numeric column", () => {
+      expect(
+        reportContractDocumentSchema.safeParse(withField({ numberFormat: "grouped" })).success,
+      ).toBe(true);
+    });
+
+    it("refuses a number format on a column that holds no number", () => {
+      expect(
+        reportContractDocumentSchema.safeParse(
+          withField({ parser: "text", financialSign: undefined, numberFormat: "grouped" }),
+        ).success,
+      ).toBe(false);
+    });
+  });
 });

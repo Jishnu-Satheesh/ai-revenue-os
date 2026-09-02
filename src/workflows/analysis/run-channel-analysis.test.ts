@@ -56,10 +56,12 @@ describe("runChannelAnalysis", () => {
 
     expect(deps.claim).toHaveBeenCalledWith(
       expect.objectContaining({
-        registryVersion: 8,
+        registryVersion: 9,
         metricKeys: [
           "cost.commission",
           "cost.equipment_fee",
+          "cost.food",
+          "cost.packaging",
           "cost.payment_processing",
           "customer.new_order_count",
           "customer.returning_order_count",
@@ -75,6 +77,7 @@ describe("runChannelAnalysis", () => {
           "order.cancellation_attribution_count",
           "order.total_count",
           "promotion.funding",
+          "revenue.company_gross",
           "revenue.gross",
           "revenue.rejection_loss",
         ],
@@ -90,6 +93,7 @@ describe("runChannelAnalysis", () => {
           { key: "customer.new_share", calculationVersion: 1 },
           { key: "economics.commission_share", calculationVersion: 1 },
           { key: "economics.channel_cost_load", calculationVersion: 1 },
+          { key: "economics.company_cost_structure", calculationVersion: 1 },
         ],
       }),
     );
@@ -125,6 +129,7 @@ describe("runChannelAnalysis", () => {
       "customer.new_share:needs_data",
       "economics.commission_share:needs_data",
       "economics.channel_cost_load:needs_data",
+      "economics.company_cost_structure:needs_data",
     ]);
     expect(call.findings.every((finding) => finding.calculationDigest.length === 64)).toBe(true);
   });
@@ -149,7 +154,7 @@ describe("runChannelAnalysis", () => {
       outcome: "completed",
       findingCount: 0,
       observationCount: 1,
-      needsDataCount: 10,
+      needsDataCount: 11,
     });
   });
 

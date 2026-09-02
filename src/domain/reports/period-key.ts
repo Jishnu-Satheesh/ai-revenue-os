@@ -35,12 +35,23 @@ export type PeriodKeyEncoding =
    * has to. Guessing would be worse than useless here: every quantity in the
    * file is also a number.
    */
-  | "excel_serial";
+  | "excel_serial"
+  /**
+   * `May 2026`, the form an accounting statement names a column with.
+   *
+   * Names a month rather than a day, so it resolves to the first of that month
+   * and is only ever legal on a monthly declaration. A statement column headed
+   * `May 2026` is a fact about all of May; pretending it was the first would be
+   * a different claim, which is why the grain check below refuses it anywhere
+   * else.
+   */
+  | "month_year";
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 const COMPACT = /^(\d{4})(\d{2})(\d{2})$/;
 const TEXT = /^(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})$/;
 const DAY_MONTH = /^(\d{1,2})\s*[/\- ]\s*([A-Za-z]{3,9})\.?$/;
+const MONTH_YEAR = /^([A-Za-z]{3,9})\.?\s+(\d{4})$/;
 
 /**
  * Day zero of the spreadsheet serial calendar.
@@ -166,6 +177,14 @@ export function parsePeriodKey(
     if (!month) throw new ReportProjectionError("INVALID_LOCAL_DATE");
     const day = Number(match[1]);
     return fromParts(resolveYear(month, day, context), month, day);
+  }
+
+  if (encoding === "month_year") {
+    const match = MONTH_YEAR.exec(text);
+    if (!match) throw new ReportProjectionError("INVALID_LOCAL_DATE");
+    const month = MONTHS[match[1].slice(0, 3).toLowerCase()];
+    if (!month) throw new ReportProjectionError("INVALID_LOCAL_DATE");
+    return fromParts(Number(match[2]), month, 1);
   }
 
   const match = TEXT.exec(text);

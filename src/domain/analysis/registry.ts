@@ -1,5 +1,6 @@
 import { customerNewShareDetector } from "@/domain/analysis/detectors/customer-new-share";
 import { economicsChannelCostLoadDetector } from "@/domain/analysis/detectors/economics-channel-cost-load";
+import { economicsCompanyCostStructureDetector } from "@/domain/analysis/detectors/economics-company-cost-structure";
 import { economicsCommissionShareDetector } from "@/domain/analysis/detectors/economics-commission-share";
 import { funnelStageConversionDetector } from "@/domain/analysis/detectors/funnel-stage-conversion";
 import { operationsClosedShareDetector } from "@/domain/analysis/detectors/operations-closed-share";
@@ -53,7 +54,13 @@ import type {
 // that cancelled each one, in sentences the projection language could not read
 // until the declared label map landed, so `orders.cancellation_attribution`
 // answers whose cancellations a channel's are instead of only how many.
-export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 8;
+// 9: the first detector that reads the client's own books rather than a
+// marketplace's export. No marketplace has ever told this platform what the
+// food cost, so `economics.company_cost_structure` reads food, packaging and
+// the commission the books recorded against the revenue the books state --
+// company-wide, never attributed to a channel, because nothing in a set of
+// books says which marketplace an order's ingredients were bought for.
+export const CHANNEL_ANALYSIS_REGISTRY_VERSION = 9;
 
 export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   periodCoverageDetector,
@@ -68,6 +75,7 @@ export const channelAnalysisDetectors: readonly DetectorDeclaration[] = [
   customerNewShareDetector,
   economicsCommissionShareDetector,
   economicsChannelCostLoadDetector,
+  economicsCompanyCostStructureDetector,
 ];
 
 /**

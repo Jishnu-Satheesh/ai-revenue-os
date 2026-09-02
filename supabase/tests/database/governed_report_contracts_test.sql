@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(24);
+select extensions.plan(31);
 
 select extensions.has_table('public', 'report_contracts', 'stable report contract identities exist');
 select extensions.has_table('public', 'report_contract_versions', 'immutable report contract versions exist');
@@ -137,6 +137,65 @@ select extensions.throws_ok(
   '22023',
   'report contract sheet positions are duplicated',
   'two sheets read from the same position are refused'
+);
+
+-- A statement whose periods are its column headings. Every provider export is
+-- one row per period; an accounting profit and loss is the transpose, and the
+-- sheet says so rather than the reader guessing. See ADR 0045.
+
+create or replace function pg_temp.rotated_shape() returns jsonb language sql immutable as $shape$
+  select jsonb_set(
+           jsonb_set(
+             jsonb_set(pg_temp.contract_shape() #- '{sheets,0,totalsRow}', '{controls}', '[]'::jsonb),
+             '{sheets,0,recordOrientation}', '"period_columns"'::jsonb),
+           '{sheets,0,periodHeaderRow}', '4'::jsonb)
+$shape$;
+
+select extensions.lives_ok(
+  $q$ select private.assert_report_contract_document(pg_temp.rotated_shape()) $q$,
+  'a sheet that says its records are its columns is accepted'
+);
+select extensions.throws_ok(
+  $q$ select private.assert_report_contract_document(jsonb_set(pg_temp.rotated_shape(), '{sheets,0,recordOrientation}', '"sideways"'::jsonb)) $q$,
+  '22023',
+  'report contract record orientation is invalid',
+  'an orientation outside the two a sheet may say is refused'
+);
+select extensions.throws_ok(
+  $q$ select private.assert_report_contract_document(pg_temp.rotated_shape() #- '{sheets,0,periodHeaderRow}') $q$,
+  '22023',
+  'report contract period header row is invalid',
+  'a rotated sheet that does not say which row names its periods is refused'
+);
+select extensions.throws_ok(
+  $q$ select private.assert_report_contract_document(jsonb_set(pg_temp.contract_shape(), '{sheets,0,periodHeaderRow}', '4'::jsonb)) $q$,
+  '22023',
+  'report contract period header row is invalid',
+  'a period header row on a sheet that is not rotated is refused'
+);
+select extensions.throws_ok(
+  $q$ select private.assert_report_contract_document(jsonb_set(pg_temp.rotated_shape(), '{sheets,0,totalsRow}', (pg_temp.contract_shape() -> 'sheets' -> 0 -> 'totalsRow'))) $q$,
+  '22023',
+  'report contract transposed sheet rule is invalid',
+  'a totals row on a rotated sheet is refused, because rotating it changes what it means'
+);
+select extensions.throws_ok(
+  $q$ select private.assert_report_contract_document(jsonb_set(
+        pg_temp.rotated_shape(),
+        '{controls}',
+        '[{"key": "rows", "kind": "row_count", "normalizedSheetName": "performance", "tolerance": 0}]'::jsonb)) $q$,
+  '22023',
+  'report contract control rule is invalid',
+  'a row count over a rotated sheet is refused, because the profile counted it unrotated'
+);
+
+-- A PDF hands over what was printed, and an accounting statement prints
+-- `1,234.56`. Declared on the column, exactly as the date encoding is.
+select extensions.throws_ok(
+  $q$ select private.assert_report_contract_document(jsonb_set(pg_temp.contract_shape(), '{sheets,0,fields,0,numberFormat}', '"grouped"'::jsonb)) $q$,
+  '22023',
+  'report contract field rule is invalid',
+  'a number format on a column that holds no number is refused'
 );
 
 select * from extensions.finish();

@@ -41,6 +41,12 @@ const METRIC_LABELS: Readonly<Record<string, string>> = {
   "revenue.rejection_loss": "revenue lost to rejected orders",
   "delivery.spend": "delivery spend",
   "margin.contribution": "reported margin",
+  // The company's own books, not a channel's. The statement's income line
+  // already contains the marketplaces' sales, which is why it is not called
+  // sales: naming it the same thing would invite it to be compared with them.
+  "revenue.company_gross": "total sales in the books",
+  "cost.food": "food cost",
+  "cost.packaging": "packaging cost",
 };
 
 export function describeMetric(metricKey: string): string {

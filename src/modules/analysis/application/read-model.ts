@@ -1,5 +1,6 @@
 import {
   buildVerdictView,
+  costLineHeadline,
   findingHeadline,
   KIND_LABEL,
   needsDataSentence,
@@ -238,7 +239,10 @@ function toFindingView(
     kind: finding.kind,
     kindLabel: KIND_LABEL[finding.kind],
     code: finding.code,
-    headline: findingHeadline(finding.code),
+    headline:
+      finding.code === "COMPANY_COST_LINE_SHARE_OF_REVENUE" && finding.metricKey
+        ? costLineHeadline(finding.metricKey)
+        : findingHeadline(finding.code),
     detail: finding.needsDataReason ? needsDataSentence(finding.needsDataReason) : null,
     severity: finding.severity,
     severityTone: finding.severity ? SEVERITY_TONE[finding.severity] : null,

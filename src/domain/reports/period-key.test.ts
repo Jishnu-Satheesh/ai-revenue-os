@@ -163,4 +163,36 @@ describe("the period a date falls in", () => {
     // 2026-01-01 is a Thursday, so its week began in December.
     expect(periodStartFor("2026-01-01", "week")).toBe("2025-12-29");
   });
+
+  describe("a column headed with a month and a year", () => {
+    it("reads the month a statement names", () => {
+      expect(parsePeriodKey("May 2026", "month_year")).toBe("2026-05-01");
+      expect(parsePeriodKey("December 2026", "month_year")).toBe("2026-12-01");
+      expect(parsePeriodKey("Sept. 2026", "month_year")).toBe("2026-09-01");
+    });
+
+    it("resolves to the first of the month, which is the period start", () => {
+      // A statement column headed `May 2026` is a fact about all of May. The
+      // first is where a monthly period starts, not a claim about that day.
+      expect(parsePeriodKey("Jun 2026", "month_year")).toBe("2026-06-01");
+    });
+
+    it("refuses anything that is not a month and a year", () => {
+      for (const value of ["2026", "May", "05 2026", "May 26", "Quintilis 2026", ""]) {
+        expect(() => parsePeriodKey(value, "month_year"), value).toThrow();
+      }
+    });
+
+    it("reads a month by its first three letters, as every other encoding does", () => {
+      // Long-standing behaviour shared with `text_date`, recorded here rather
+      // than left implicit: it is what lets `Sept.` and `September` both work,
+      // and it is why a word that merely starts like a month is accepted.
+      expect(parsePeriodKey("Mayo 2026", "month_year")).toBe("2026-05-01");
+    });
+
+    it("needs no declared period, because the value carries its own year", () => {
+      // Unlike `01/Jan`, nothing here is inferred from the package.
+      expect(parsePeriodKey("Aug 2026", "month_year")).toBe("2026-08-01");
+    });
+  });
 });

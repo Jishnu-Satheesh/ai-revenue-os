@@ -1,3 +1,4 @@
+import { accountingProfitAndLoss } from "@/domain/reports/provider-library/accounting-profit-and-loss";
 import { eatEasilyBranchSales } from "@/domain/reports/provider-library/eateasily-branch-sales";
 import { keetaBillingSummary } from "@/domain/reports/provider-library/keeta-billing-summary";
 import { keetaOrders } from "@/domain/reports/provider-library/keeta-orders";
@@ -11,9 +12,10 @@ export type { ProviderReportDefinition };
 /**
  * Every report family the platform already knows how to read.
  *
- * Five definitions across six channels: EatEasily and Smile are one platform
- * under two names and share a definition, and the Offline Store's profit and
- * loss is a PDF control document rather than a projectable export.
+ * Six definitions. EatEasily and Smile are one platform under two names and
+ * share a definition. The last is not a marketplace export at all: the
+ * company's own profit and loss, which is where food and packaging cost are
+ * stated and nowhere else.
  *
  * A definition is inert. It describes a shape; it grants nothing. An owner or
  * admin still approves it for their organization before a single figure is read
@@ -26,6 +28,7 @@ export const PROVIDER_REPORT_DEFINITIONS: readonly ProviderReportDefinition[] = 
   keetaRestaurantDaily,
   noonSalesSummary,
   eatEasilyBranchSales,
+  accountingProfitAndLoss,
 ];
 
 export function findProviderReportDefinition(key: string): ProviderReportDefinition | undefined {

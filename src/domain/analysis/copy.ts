@@ -83,7 +83,15 @@ export const WORKSPACE_CHAPTERS: readonly WorkspaceChapter[] = [
     // alone, misleading -- commission is about half of what a marketplace
     // charges, and a chapter showing only that would let an operator price
     // against half a cost.
-    detectorKeys: ["economics.commission_share", "economics.channel_cost_load"],
+    detectorKeys: [
+      "economics.commission_share",
+      "economics.channel_cost_load",
+      // Reads the client's own books rather than a marketplace's export, so it
+      // answers only where a books channel has one. It is listed here because
+      // it belongs to the same question: the two above say what selling costs,
+      // and only this one says what making the food costs.
+      "economics.company_cost_structure",
+    ],
   },
   {
     id: "items",
@@ -188,8 +196,35 @@ export function findingHeadline(code: string): string {
       return "Every deduction this marketplace made, against the revenue it was charged on";
     case "CHANNEL_COST_LOAD_UNAVAILABLE":
       return "What this channel costs cannot be reported for this window";
+    case "COMPANY_COST_STRUCTURE_OF_REVENUE":
+      return "What the company spent to trade, against the revenue its books state";
+    case "COMPANY_COST_LINE_SHARE_OF_REVENUE":
+      return "This cost line, against the revenue the books state";
+    case "COMPANY_COST_STRUCTURE_UNAVAILABLE":
+      return "What the company spent cannot be reported for this window";
     default:
       return code;
+  }
+}
+
+/**
+ * The headline for a single cost line reported on its own.
+ *
+ * `economics.company_cost_structure` emits one finding per line under one code,
+ * so the code alone would headline food, packaging and commission identically.
+ * A reader deciding where the money goes has to be able to tell them apart at a
+ * glance.
+ */
+export function costLineHeadline(metricKey: string): string {
+  switch (metricKey) {
+    case "cost.food":
+      return "Food cost, against the revenue the books state";
+    case "cost.packaging":
+      return "Packaging cost, against the revenue the books state";
+    case "cost.commission":
+      return "Marketplace commission, against the revenue the books state";
+    default:
+      return findingHeadline("COMPANY_COST_LINE_SHARE_OF_REVENUE");
   }
 }
 

@@ -7,6 +7,8 @@ import {
 } from "@/domain/reports/contracts";
 import { parsePeriodKey, periodStartFor, type PeriodKeyContext } from "@/domain/reports/period-key";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
+import { ungroupNumber } from "@/domain/reports/number-format";
+import { transposePeriodColumns } from "@/domain/reports/transpose";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
   ReportControlTotalMismatch,
@@ -820,6 +822,46 @@ function reconcileControlTotals(
 }
 
 /**
+ * A sheet read the way its contract says it is laid out.
+ *
+ * A statement whose periods are its column headings is rotated here, once, and
+ * everything after this point reads cells without knowing the difference. See
+ * `@/domain/reports/transpose`.
+ */
+function readContractSheet(
+  rule: ReportContractDocument["sheets"][number],
+  source: { rows: readonly (readonly unknown[])[] },
+): { rows: readonly (readonly unknown[])[]; ambiguousLabels: ReadonlySet<string> | null } {
+  if (rule.recordOrientation !== "period_columns") {
+    return { rows: source.rows, ambiguousLabels: null };
+  }
+  const transposed = transposePeriodColumns({
+    rows: source.rows,
+    periodHeaderRow: rule.periodHeaderRow ?? 1,
+  });
+  return { rows: transposed.rows, ambiguousLabels: transposed.ambiguousLabels };
+}
+
+/**
+ * Where a declared field sits, refusing a label the statement uses twice.
+ *
+ * A profit and loss repeats a label freely, with different figures underneath
+ * each time. The header map keeps the first match, so resolving one silently
+ * would pick a total nobody chose -- and on this statement the two candidates
+ * differ by the entire delivery commission bill.
+ */
+function headerColumn(
+  headers: ReadonlyMap<string, number>,
+  ambiguousLabels: ReadonlySet<string> | null,
+  sourceHeader: string,
+): number | undefined {
+  if (ambiguousLabels?.has(sourceHeader)) {
+    throw new ReportProjectionError("AMBIGUOUS_ROW_LABEL");
+  }
+  return headers.get(sourceHeader);
+}
+
+/**
  * Which row of this sheet the provider rendered as its own total, if any.
  *
  * A declared totals row that cannot be pinned to exactly one row stops the
@@ -950,10 +992,11 @@ export function projectExactRangeMetrics(input: {
     const { sheet: rule, field } = findSourceField(input.contract, output, true);
     const source = selectContractSheet(rule, input.sheets);
     if (!source) throw new ReportProjectionError("REQUIRED_SHEET_MISSING");
-    const header = source.rows[rule.headerRow - 1];
+    const { rows: sheetRows, ambiguousLabels } = readContractSheet(rule, source);
+    const header = sheetRows[rule.headerRow - 1];
     if (!header) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
     const headers = sourceHeaderMap(header);
-    const columnIndex = headers.get(field.sourceHeader);
+    const columnIndex = headerColumn(headers, ambiguousLabels, field.sourceHeader);
     if (columnIndex === undefined)
       throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
     if (output.categorical) {
@@ -967,17 +1010,17 @@ export function projectExactRangeMetrics(input: {
     const headerLastPopulated = ragged ? lastPopulatedIndex(header) : -1;
 
     if (!totalsRowIndexes.has(output.normalizedSheetName)) {
-      totalsRowIndexes.set(output.normalizedSheetName, resolveTotalsRowIndex(rule, source.rows));
+      totalsRowIndexes.set(output.normalizedSheetName, resolveTotalsRowIndex(rule, sheetRows));
     }
     const totalsRowIndex = totalsRowIndexes.get(output.normalizedSheetName) ?? null;
 
     let total = "0";
     let contributorCount = 0;
-    for (let rowIndex = rule.dataStartRow - 1; rowIndex < source.rows.length; rowIndex += 1) {
+    for (let rowIndex = rule.dataStartRow - 1; rowIndex < sheetRows.length; rowIndex += 1) {
       // The provider's own total is set aside, never summed. Adding it to the
       // rows it totals would double the figure and look like a clean import.
       if (rowIndex === totalsRowIndex) continue;
-      const row = source.rows[rowIndex];
+      const row = sheetRows[rowIndex];
       const value =
         row?.[columnInRow(columnIndex, rowShift(row ?? [], ragged, headerLastPopulated), ragged)];
       // An exact-range sum covers the whole declared period, so a row that said
@@ -985,12 +1028,13 @@ export function projectExactRangeMetrics(input: {
       if (isAbsentValue(value, field.absentMarkers)) {
         throw new ReportProjectionError("REQUIRED_PROJECTED_VALUE_MISSING");
       }
+      const ungrouped = ungroupNumber(value, field.numberFormat);
       total = addIntegerStrings(
         total,
         applySignConvention(
           output.valueKind === "money"
-            ? moneyMinorUnits(value, input.declaredCurrency)
-            : integer(value),
+            ? moneyMinorUnits(ungrouped, input.declaredCurrency)
+            : integer(ungrouped),
           output.signConvention,
         ),
       );
@@ -998,12 +1042,12 @@ export function projectExactRangeMetrics(input: {
     }
 
     if (totalsRowIndex !== null && output.valueKind === "money") {
-      const stated = source.rows[totalsRowIndex]?.[columnIndex];
+      const stated = sheetRows[totalsRowIndex]?.[columnIndex];
       if (!isAbsentValue(stated, field.absentMarkers)) {
         sheetTotals.set(
           output.key,
           applySignConvention(
-            moneyMinorUnits(stated, input.declaredCurrency),
+            moneyMinorUnits(ungroupNumber(stated, field.numberFormat), input.declaredCurrency),
             output.signConvention,
           ),
         );
@@ -1019,7 +1063,7 @@ export function projectExactRangeMetrics(input: {
       normalizedSheetName: output.normalizedSheetName,
       canonicalField: output.canonicalField,
       firstDataRow: rule.dataStartRow,
-      lastDataRow: Math.max(rule.dataStartRow - 1, source.rows.length),
+      lastDataRow: Math.max(rule.dataStartRow - 1, sheetRows.length),
       contributorCount,
     });
   }
@@ -1113,7 +1157,8 @@ export function projectPeriodGrainMetrics(input: {
   const source = selectContractSheet(rule, input.sheets);
   if (!source) throw new ReportProjectionError("REQUIRED_SHEET_MISSING");
 
-  const header = source.rows[rule.headerRow - 1];
+  const { rows: sheetRows, ambiguousLabels } = readContractSheet(rule, source);
+  const header = sheetRows[rule.headerRow - 1];
   if (!header) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
   const headers = sourceHeaderMap(header);
 
@@ -1127,7 +1172,7 @@ export function projectPeriodGrainMetrics(input: {
   // The encoding lives on the contract field, so the validator and the
   // projector read the same column the same way.
   const encoding = periodField.dateEncoding ?? "iso_date";
-  const periodColumn = headers.get(periodField.sourceHeader);
+  const periodColumn = headerColumn(headers, ambiguousLabels, periodField.sourceHeader);
   if (periodColumn === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
 
   const ragged = rule.raggedRows ?? null;
@@ -1135,7 +1180,7 @@ export function projectPeriodGrainMetrics(input: {
 
   const columns = input.document.outputs.map((output) => {
     const { sheet: outputSheet, field } = findSourceField(input.contract, output, false);
-    const index = headers.get(field.sourceHeader);
+    const index = headerColumn(headers, ambiguousLabels, field.sourceHeader);
     if (index === undefined) throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
     // One governed figure the provider reports across several columns. Each
     // extra column is resolved and value-kind checked exactly like the first,
@@ -1152,33 +1197,47 @@ export function projectPeriodGrainMetrics(input: {
       ) {
         throw new ReportProjectionError("PROJECTION_FIELD_VALUE_KIND_MISMATCH");
       }
-      const extraIndex = headers.get(extra.sourceHeader);
+      const extraIndex = headerColumn(headers, ambiguousLabels, extra.sourceHeader);
       if (extraIndex === undefined)
         throw new ReportProjectionError("REQUIRED_SOURCE_HEADER_MISSING");
-      return { index: extraIndex, absentMarkers: extra.absentMarkers, parser: extra.parser };
+      return {
+        index: extraIndex,
+        absentMarkers: extra.absentMarkers,
+        parser: extra.parser,
+        numberFormat: extra.numberFormat,
+      };
     });
     return {
       output,
       index,
       absentMarkers: field.absentMarkers,
       parser: field.parser,
+      numberFormat: field.numberFormat,
       labels: labelLookupFor(output.categorical),
       contributors: [
-        { index, absentMarkers: field.absentMarkers, parser: field.parser },
+        {
+          index,
+          absentMarkers: field.absentMarkers,
+          parser: field.parser,
+          numberFormat: field.numberFormat,
+        },
         ...extras,
       ],
     };
   });
 
-  const totalsRowIndex = resolveTotalsRowIndex(rule, source.rows);
+  const totalsRowIndex = resolveTotalsRowIndex(rule, sheetRows);
   const sheetTotals = new Map<string, string>();
   if (totalsRowIndex !== null) {
-    const totalsShift = rowShift(source.rows[totalsRowIndex] ?? [], ragged, headerLastPopulated);
-    for (const { output, index } of columns) {
+    const totalsShift = rowShift(sheetRows[totalsRowIndex] ?? [], ragged, headerLastPopulated);
+    for (const { output, index, numberFormat } of columns) {
       if (output.categorical || output.valueKind !== "money") continue;
-      const stated = source.rows[totalsRowIndex]?.[columnInRow(index, totalsShift, ragged)];
+      const stated = sheetRows[totalsRowIndex]?.[columnInRow(index, totalsShift, ragged)];
       if (isAbsentValue(stated, [])) continue;
-      sheetTotals.set(output.key, moneyMinorUnits(stated, input.declaredCurrency));
+      sheetTotals.set(
+        output.key,
+        moneyMinorUnits(ungroupNumber(stated, numberFormat), input.declaredCurrency),
+      );
     }
   }
 
@@ -1190,12 +1249,12 @@ export function projectPeriodGrainMetrics(input: {
   const categoryCounts = new Map<string, Map<string, number>>();
   let absentRowCount = 0;
 
-  for (let rowIndex = rule.dataStartRow - 1; rowIndex < source.rows.length; rowIndex += 1) {
+  for (let rowIndex = rule.dataStartRow - 1; rowIndex < sheetRows.length; rowIndex += 1) {
     // The provider's own total is not a period, and it carries no date to be
     // one. Reading it as data would both double the figures and fail the date
     // parser on whatever label sits in the period column.
     if (rowIndex === totalsRowIndex) continue;
-    const row = source.rows[rowIndex];
+    const row = sheetRows[rowIndex];
     if (!row) continue;
     // Padding is a structurally empty row. An absent marker is a statement
     // about one field's value, so it does not make the row disappear: a dated
@@ -1259,21 +1318,20 @@ export function projectPeriodGrainMetrics(input: {
         absentRowCount += 1;
         continue;
       }
-      const amount = cells.reduce(
-        (running, cell) =>
-          addDecimals(
-            running,
-            output.valueKind === "money"
-              ? moneyMinorUnits(cell.value, input.declaredCurrency)
-              : // A decimal column is a quantity measured in fractions, kept
-                // exact through fixed-point addition; an integer column stays
-                // integral.
-                cell.contributor.parser === "decimal"
-                ? decimalQuantity(cell.value)
-                : integer(cell.value),
-          ),
-        "0",
-      );
+      const amount = cells.reduce((running, cell) => {
+        const value = ungroupNumber(cell.value, cell.contributor.numberFormat);
+        return addDecimals(
+          running,
+          output.valueKind === "money"
+            ? moneyMinorUnits(value, input.declaredCurrency)
+            : // A decimal column is a quantity measured in fractions, kept
+              // exact through fixed-point addition; an integer column stays
+              // integral.
+              cell.contributor.parser === "decimal"
+              ? decimalQuantity(value)
+              : integer(value),
+        );
+      }, "0");
       const running = byOutput.get(output.key) ?? { total: "0", contributors: 0 };
       byOutput.set(output.key, {
         // Converted once, after the row's columns are added, so adding then

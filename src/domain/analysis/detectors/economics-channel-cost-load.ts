@@ -102,7 +102,12 @@ export const economicsChannelCostLoadDetector: DetectorDeclaration = {
   limitations: [
     "Counts only the cost lines an approved report writes. A charge the provider never reported cannot appear here, so the figure is a floor.",
     "Covers only the periods carrying a revenue figure; costs charged outside them are excluded from both sides.",
-    "A cost load is not a margin. Food, packaging, labour and rent are not in any approved report here, and what remains after these deductions is not profit.",
+    // Narrowed to the channel on 2026-09-01. The company's own profit and loss
+    // states food and packaging monthly, and the platform reads it now -- but
+    // at company scope, not per channel, so nothing here can attribute a
+    // kitchen's cost to the marketplace an order came through. The sentence has
+    // to say which of those it means.
+    "A cost load is not a margin. No approved report states this channel's food, packaging, labour or rent, so what remains after these deductions is not profit.",
   ],
   needsDataConditions: [
     "No current governed revenue.gross evidence exists in the window.",

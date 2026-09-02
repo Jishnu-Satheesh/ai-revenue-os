@@ -23,13 +23,19 @@ import { buildGuidedContractDocument } from "@/domain/reports/guided-mapping";
  */
 
 const MIGRATIONS = join(process.cwd(), "supabase", "migrations");
-const VALIDATOR = "create or replace function private.assert_report_contract_document";
+/**
+ * Case-insensitive on purpose. A repair migration that replaces this function
+ * whole starts from `pg_get_functiondef`, which renders the DDL in upper case,
+ * and a marker that only matched the hand-written lower-case form would quietly
+ * read an older migration and report the newest keys as unknown.
+ */
+const VALIDATOR = /create or replace function private\.assert_report_contract_document/i;
 
 /** The live body is the newest migration that replaces the function. */
 function liveValidatorSource(): string {
   const owning = readdirSync(MIGRATIONS)
     .filter((name) => name.endsWith(".sql"))
-    .filter((name) => readFileSync(join(MIGRATIONS, name), "utf8").includes(VALIDATOR))
+    .filter((name) => VALIDATOR.test(readFileSync(join(MIGRATIONS, name), "utf8")))
     .sort();
   expect(owning.length).toBeGreaterThan(0);
   return readFileSync(join(MIGRATIONS, owning[owning.length - 1] as string), "utf8");

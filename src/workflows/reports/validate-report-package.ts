@@ -10,7 +10,13 @@ import {
   type PeriodKeyContext,
   type PeriodKeyEncoding,
 } from "@/domain/reports/period-key";
+import {
+  ungroupNumber,
+  type ReportNumberFormat,
+} from "@/domain/reports/number-format";
+import { reconstructPdfGrid } from "@/domain/reports/pdf-grid";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
+import { transposePeriodColumns } from "@/domain/reports/transpose";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
   normalizeReportStructureIdentifier,
@@ -18,6 +24,7 @@ import {
   type ReportContractDocument,
 } from "@/domain/reports/contracts";
 import { inspectXlsxArchive } from "@/workflows/reports/profile-report-package";
+import { extractPdfTextLayer } from "@/workflows/reports/pdf-text-layer";
 import { reportValidationTaskSchema } from "@/domain/reports/schemas";
 import type { ReportPackageRow } from "@/modules/reports/application/ports";
 
@@ -41,6 +48,7 @@ export const REPORT_VALIDATION_CODES = [
   "FORMULA_VALUE_UNSUPPORTED",
   "MERGED_CELLS_REJECTED",
   "CONTROL_MISMATCH",
+  "AMBIGUOUS_ROW_LABEL",
 ] as const;
 
 export type ReportValidationCode = (typeof REPORT_VALIDATION_CODES)[number];
@@ -259,13 +267,21 @@ function isValidParserValue(
   declaredPeriod?: PeriodKeyContext,
 ): boolean {
   if (isFormulaCell(value)) return false;
-  const text = typeof value === "string" ? value.trim() : String(value);
+  // A statement prints `1,234.56`. The separators come off here, under the
+  // contract's own declaration, so the validator and the projector read the
+  // same cell the same way.
+  const ungrouped = ungroupNumber(value, field.numberFormat);
+  const text = typeof ungrouped === "string" ? ungrouped.trim() : String(ungrouped);
   switch (field.parser) {
     case "integer":
-      return typeof value === "number" ? Number.isSafeInteger(value) : integerPattern.test(text);
+      return typeof ungrouped === "number"
+        ? Number.isSafeInteger(ungrouped)
+        : integerPattern.test(text);
     case "decimal":
     case "money":
-      return typeof value === "number" ? Number.isFinite(value) : numericPattern.test(text);
+      return typeof ungrouped === "number"
+        ? Number.isFinite(ungrouped)
+        : numericPattern.test(text);
     case "local_date":
       return isValidDate(value, field.dateEncoding, declaredPeriod);
     case "timestamp":
@@ -282,8 +298,12 @@ function isValidParserValue(
   }
 }
 
-function matchesFinancialSign(value: unknown, sign: "positive" | "negative"): boolean {
-  const candidate = formulaCachedValue(value);
+function matchesFinancialSign(
+  value: unknown,
+  sign: "positive" | "negative",
+  numberFormat: ReportNumberFormat | undefined,
+): boolean {
+  const candidate = ungroupNumber(formulaCachedValue(value), numberFormat);
   const numeric = typeof candidate === "number" ? candidate : Number(String(candidate).trim());
   return Number.isFinite(numeric) && (sign === "positive" ? numeric >= 0 : numeric <= 0);
 }
@@ -327,12 +347,32 @@ function validateSheets(
     if (sheet.hasFormula && !rule.allowFormula) sheetErrors.push("FORMULA_REJECTED");
     if (sheet.hasMergedCells && !rule.allowMergedCells) sheetErrors.push("MERGED_CELLS_REJECTED");
 
-    const header = sheet.rows[rule.headerRow - 1] ?? [];
+    // A statement keeps its periods in the column headings, so it is rotated
+    // once here and read exactly like any other sheet afterwards.
+    const transposed =
+      rule.recordOrientation === "period_columns"
+        ? transposePeriodColumns({
+            rows: sheet.rows,
+            periodHeaderRow: rule.periodHeaderRow ?? 1,
+          })
+        : null;
+    const rows = transposed ? transposed.rows : sheet.rows;
+    const ambiguousLabels = transposed ? transposed.ambiguousLabels : null;
+
+    const header = rows[rule.headerRow - 1] ?? [];
     const headers = sourceHeaderMap(header);
     const fieldColumns = new Map<string, number>();
     let success = 0;
     let failure = 0;
     for (const field of rule.fields) {
+      // A label the statement uses twice with different figures underneath is
+      // refused rather than resolved. The header map keeps the first match, and
+      // picking it would be a silent guess about which total was meant.
+      if (ambiguousLabels?.has(field.sourceHeader)) {
+        sheetErrors.push("AMBIGUOUS_ROW_LABEL");
+        failure += 1;
+        continue;
+      }
       const column = headers.get(field.sourceHeader);
       if (column === undefined) {
         if (field.required) {
@@ -352,12 +392,12 @@ function validateSheets(
     // that were never meant to be filled. A totals row the file does not carry
     // is not failed here: projection is where that decision belongs, and it
     // makes it with a code of its own.
-    const totalsRow = findTotalsRow({ rule, rows: sheet.rows, fieldColumns });
+    const totalsRow = findTotalsRow({ rule, rows, fieldColumns });
     const totalsRowIndex = totalsRow.outcome === "found" ? totalsRow.rowIndex : null;
 
-    for (let rowIndex = rule.dataStartRow - 1; rowIndex < sheet.rows.length; rowIndex += 1) {
+    for (let rowIndex = rule.dataStartRow - 1; rowIndex < rows.length; rowIndex += 1) {
       if (rowIndex === totalsRowIndex) continue;
-      const row = sheet.rows[rowIndex];
+      const row = rows[rowIndex];
       if (!row) continue;
       for (const field of rule.fields) {
         const column = fieldColumns.get(field.canonicalField);
@@ -396,7 +436,7 @@ function validateSheets(
         if (
           field.parser === "money" &&
           field.financialSign !== undefined &&
-          !matchesFinancialSign(parsedValue, field.financialSign)
+          !matchesFinancialSign(parsedValue, field.financialSign, field.numberFormat)
         ) {
           sheetErrors.push("INVALID_MONEY");
           failure += 1;
@@ -562,6 +602,46 @@ export async function validateXlsxBuffer(
   return validateSheets(sheets, contract, profiles, declaredPeriod);
 }
 
+/**
+ * A PDF validated as one sheet per page, exactly as it was profiled.
+ *
+ * The grid is rebuilt from the text layer's coordinates by
+ * `@/domain/reports/pdf-grid`, which is the only thing in the pipeline that
+ * knows what a PDF is. Everything from here on reads cells.
+ *
+ * A page that carries no table is kept as an empty sheet rather than failing
+ * the document, the way an empty worksheet is: a statement's cover page or its
+ * notes are not a reason to refuse the statement. The contract decides which
+ * pages it requires, and says so through the fields it cannot find.
+ */
+export async function validatePdfBuffer(
+  buffer: Buffer,
+  contract: ReportContractDocument,
+  profiles: readonly ValidationProfileSheet[],
+  declaredPeriod?: PeriodKeyContext,
+): Promise<ReportValidationResult> {
+  const extracted = await extractPdfTextLayer(buffer);
+  if (extracted.outcome === "failed") throw new ReportValidationFailure("UNREADABLE_WORKBOOK");
+
+  const sheets: ParsedSheet[] = extracted.pages.map((page) => {
+    const grid = reconstructPdfGrid(page.items);
+    const rows =
+      grid.outcome === "reconstructed" ? grid.grid.rows.map((row) => [...row.cells]) : [];
+    return {
+      normalizedSheetName: `page_${page.pageNumber}`,
+      rows,
+      rowCount: rows.length,
+      populatedCellCount: rows.reduce((sum, row) => sum + populatedValueCount(row), 0),
+      // Neither exists in a PDF. A statement's figures are painted text, so
+      // there is no formula to reject and no merge to detect.
+      hasFormula: false,
+      hasMergedCells: false,
+    };
+  });
+
+  return validateSheets(sheets, contract, profiles, declaredPeriod);
+}
+
 function validationFailureDigest(code: ReportValidationFailureCode): string {
   return createValidationResultDigest({
     status: "failed",
@@ -625,7 +705,9 @@ export async function runReportPackageValidation(
     const result =
       claim.reportPackage.file_kind === "csv"
         ? await validateCsvBuffer(buffer, contract, claim.sheetManifests, declaredPeriod)
-        : await validateXlsxBuffer(buffer, contract, claim.sheetManifests, declaredPeriod);
+        : claim.reportPackage.file_kind === "pdf"
+          ? await validatePdfBuffer(buffer, contract, claim.sheetManifests, declaredPeriod)
+          : await validateXlsxBuffer(buffer, contract, claim.sheetManifests, declaredPeriod);
     await dependencies.complete({
       organizationId: payload.organizationId,
       packageId: payload.packageId,

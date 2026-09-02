@@ -8,6 +8,10 @@ import * as yauzl from "yauzl";
 import { normalizeReportStructureIdentifier } from "@/domain/reports/contracts";
 import { createReportSchemaFingerprint } from "@/domain/reports/document-digest";
 import { reconstructPdfGrid } from "@/domain/reports/pdf-grid";
+import {
+  TRANSPOSED_HEADER_ROW_POSITION,
+  TRANSPOSED_PERIOD_HEADER,
+} from "@/domain/reports/transpose";
 import { extractPdfTextLayer, isLegacyXlsBuffer } from "@/workflows/reports/pdf-text-layer";
 import { REPORT_PACKAGE_LIMITS, type ReportPackageFailureCode } from "@/domain/reports/types";
 import { reportProfilingTaskSchema } from "@/domain/reports/schemas";
@@ -99,6 +103,15 @@ function readsAsLabels(values: readonly string[]): boolean {
   return values.every((value) => !LOOKS_NUMERIC.test(value.trim()));
 }
 
+/**
+ * How many accounts a rotated sheet can be recognised by.
+ *
+ * The label column is read into memory to digest it, so it needs a ceiling that
+ * a streaming reader does not. A statement with more than a thousand accounts is
+ * not a statement, and a data column that long is not a set of headers.
+ */
+const MAX_TRANSPOSED_LABELS = 1_000;
+
 type HeaderCandidate = {
   rowPosition: number;
   fieldCount: number;
@@ -106,6 +119,54 @@ type HeaderCandidate = {
   normalizedHeaderDigests: string[];
   normalizedHeaders: string[];
 };
+
+/**
+ * The digest of a sheet's first column, for recognising a rotated statement.
+ *
+ * Only labels the column uses exactly once are kept. A profit and loss repeats
+ * a label freely -- `Total for Cost of Goods Sold` appears once for food and
+ * packaging and again including delivery commission -- and the reader refuses
+ * to bind an ambiguous one. Leaving them out here means a contract that binds
+ * one is refused at approval, before anything runs, rather than accepted and
+ * then failed on the first real file.
+ *
+ * Header names, never values: the same rule every other candidate follows. A
+ * column of figures fails `readsAsLabels` and keeps its text out of the profile.
+ */
+function transposedHeaderCandidate(labels: readonly unknown[]): HeaderCandidate | null {
+  const counts = new Map<string, string>();
+  const repeated = new Set<string>();
+  for (const value of labels.slice(0, MAX_TRANSPOSED_LABELS)) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length === 0) continue;
+    const normalized = normalizeReportStructureIdentifier(trimmed);
+    if (counts.has(normalized)) repeated.add(normalized);
+    else counts.set(normalized, trimmed);
+  }
+  for (const normalized of repeated) counts.delete(normalized);
+  // The reader supplies this one. A statement names its months in a column
+  // heading, so after rotation they are values with no header above them, and
+  // the rotated sheet always presents them under the reserved name whatever row
+  // the contract says they were on. An account genuinely called this is dropped
+  // rather than kept: two things answering to one name is the ambiguity the
+  // reader refuses, and refusing it at approval is earlier and cheaper.
+  counts.delete(TRANSPOSED_PERIOD_HEADER);
+
+  const unique = [...counts.keys()];
+  if (unique.length < 2) return null;
+  unique.push(TRANSPOSED_PERIOD_HEADER);
+  const normalizedHeaderDigests = unique.map(headerValueDigest);
+  return {
+    rowPosition: TRANSPOSED_HEADER_ROW_POSITION,
+    fieldCount: unique.length,
+    digest: createHash("sha256").update(JSON.stringify(normalizedHeaderDigests)).digest("hex"),
+    normalizedHeaderDigests,
+    normalizedHeaders: readsAsLabels([...counts.values()])
+      ? unique.slice(0, MAX_RETAINED_HEADERS)
+      : [],
+  };
+}
 
 function retainedHeaderNames(candidates: readonly HeaderCandidate[]) {
   return candidates
@@ -262,6 +323,12 @@ export async function profilePdfBuffer(buffer: Buffer): Promise<SheetManifestInp
         headerCandidateDigests.push(candidate);
       }
     });
+    // Appended after the row candidates and outside their cap, because a
+    // statement's own header rows -- its title, its basis, its month headings --
+    // would otherwise fill the five places before the column that names its
+    // accounts was ever reached.
+    const transposed = transposedHeaderCandidate(rows.map((row) => row.cells[0]));
+    if (transposed) headerCandidateDigests.push(transposed);
     assertWithinLimit(
       populatedCellCount,
       REPORT_PACKAGE_LIMITS.maxPopulatedCells,
@@ -379,6 +446,7 @@ export async function profileXlsxBuffer(buffer: Buffer): Promise<SheetManifestIn
       let rows = 0;
       let cells = 0;
       const headerCandidateDigests: HeaderCandidate[] = [];
+      const labelColumn: unknown[] = [];
       let hasRepeatedHeader = false;
       let hasFormula = false;
       for await (const row of worksheet) {
@@ -386,6 +454,10 @@ export async function profileXlsxBuffer(buffer: Buffer): Promise<SheetManifestIn
         totalRows += 1;
         assertWithinLimit(totalRows, REPORT_PACKAGE_LIMITS.maxRows, "TOO_MANY_ROWS");
         const values = Array.isArray(row.values) ? row.values : [];
+        // ExcelJS leaves index zero empty so a row reads 1-based, so the first
+        // real column is index one. Bounded, because the streaming reader is
+        // deliberately not holding the sheet in memory.
+        if (labelColumn.length < MAX_TRANSPOSED_LABELS) labelColumn.push(values[1]);
         const candidate = headerCandidateDigest(rows, values);
         if (candidate && headerCandidateDigests.length < MAX_HEADER_CANDIDATES) {
           headerCandidateDigests.push(candidate);
@@ -406,6 +478,8 @@ export async function profileXlsxBuffer(buffer: Buffer): Promise<SheetManifestIn
           "TOO_MANY_POPULATED_CELLS",
         );
       }
+      const transposed = transposedHeaderCandidate(labelColumn);
+      if (transposed) headerCandidateDigests.push(transposed);
       const reader = worksheet as unknown as { name?: string; id?: number };
       const position = manifests.length + 1;
       const archiveFlags = archive.worksheetFlags.get(reader.id ?? position);

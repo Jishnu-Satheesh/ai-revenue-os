@@ -476,6 +476,48 @@ The parser port has versioned adapters for XLSX, CSV, and machine-generated PDF.
 - No raw order, customer, review, or item row is stored in Postgres or application logs.
 - Customer-level columns are classified and minimized before any optional model access.
 
+### 7.4 Sheets whose records are their columns
+
+Every provider export the client sends is one row per period and one column per figure. An
+accounting profit and loss is the transpose: one row per account, one column per month. All the
+information is there, rotated ninety degrees, and a reader that only knows the first shape cannot
+follow it.
+
+- A contract sheet declares **`recordOrientation`** — `rows` (the default, and what every contract
+  approved before 2026-09-01 keeps) or `period_columns`. Nothing is sniffed. A file is read the way
+  its approved contract says it is laid out, and no other way.
+- A `period_columns` sheet also declares **`periodHeaderRow`**, the row of the file that carries the
+  period names. A statement names its months in a column heading rather than in a cell of its own,
+  so after rotation those names are values with nothing above them. The reader supplies the reserved
+  header `report_period`, and the contract binds it like any other field.
+- The rotation happens once, on the way in. After it, `headerRow` and `dataStartRow` mean exactly
+  what they always meant, counted down the rotated grid, and validation, the parsers, the projection
+  language, the control totals and the lineage all work unchanged. Nothing downstream asks which way
+  round the file was.
+- A rotated sheet may not declare a **totals row** or **ragged rows**, and no **row or cell count
+  control** may name one. The first two describe a shape the sheet has before rotation and do not
+  survive it with their meaning intact; the third would compare a count taken after rotation against
+  a profile taken before it, and fail every time while nothing was wrong.
+- **A label the statement uses twice is refused, not resolved.** A profit and loss repeats a label
+  freely, with different figures under each. Binding one and silently getting the other is the
+  failure mode this whole path exists to prevent, so a bound duplicate is a typed
+  `AMBIGUOUS_ROW_LABEL` failure. Recognition applies the same rule earlier: a repeated label is left
+  out of the profiled candidate, so a contract binding one is refused at approval rather than on the
+  first real file.
+- **Recognition reads the first column.** A rotated sheet has no header row to digest, so the
+  profiler additionally digests the label column and files it at row position `0` — outside the
+  range a contract may name, so nothing reaches it by accident. `assert_report_contract_matches_package`
+  sends a `period_columns` sheet there by its declared orientation rather than by its row number.
+- **`numberFormat`** belongs to the same family as `dateEncoding` and exists for the same reason: a
+  spreadsheet hands over a number, while a PDF hands over what was printed, and an accounting
+  statement prints `1,234.56`. A numeric field declares `plain` (default) or `grouped`. Declared
+  rather than sniffed, because `1,234` is one number on a statement and could be two badly split
+  columns in a CSV, and an undeclared grouped column keeps failing.
+- **`month_year`** is a period-key encoding for a column headed `May 2026`. It resolves to the first
+  of that month, which is where a monthly period starts.
+
+See ADR 0045.
+
 Storage paths are tenant-prefixed and immutable:
 
 `organizationId/channelId/packageId/revision/{original|sheets/...}`.
@@ -880,6 +922,20 @@ changing only the first passes every unit test and then raises 22023 at claim ti
   and the proportions between them; it recognises no party by name, per ADR 0034. Its monetary
   impact is declared not computable — this provider prices no cancellation, and multiplying one by
   an average basket would be a model presented as a measurement.
+- **9** — `economics.company_cost_structure`, the first detector that reads the client's own books
+  rather than a marketplace's export. No marketplace has ever stated what the food cost, so the money
+  chapter has always had to say that what remains after a marketplace's deductions is not profit. It
+  reads `cost.food`, `cost.packaging` and the marketplace commission the books recorded against
+  `revenue.company_gross`, and reports each line on its own as well as together, because a reader
+  deciding what to do needs to know whether the cost sits in the kitchen or in the commission.
+
+  It divides by `revenue.company_gross` and never by `revenue.gross`. A statement that books
+  marketplace commission as a cost has, under accrual, already counted those marketplaces' sales as
+  income, so dividing a company cost by one channel's revenue would compare a whole against a part.
+  Nothing it reports is attributed to a channel: a set of books does not say which marketplace an
+  order's ingredients were bought for, and the finding says so in its own limitations. Its monetary
+  impact is declared not computable — these are costs already incurred and recorded, not a gain or
+  loss the analysis found.
 
 ### 11.3 Analysis records
 

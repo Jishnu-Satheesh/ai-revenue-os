@@ -35,8 +35,17 @@ const contractFieldSchema = z
      * approved before this existed was reading.
      */
     dateEncoding: z
-      .enum(["iso_date", "compact_date", "text_date", "day_month", "excel_serial"])
+      .enum(["iso_date", "compact_date", "text_date", "day_month", "excel_serial", "month_year"])
       .optional(),
+    /**
+     * How this provider writes a number, for numeric fields only.
+     *
+     * A spreadsheet hands over a number and its display format is nobody's
+     * business. A PDF hands over what was printed, and an accounting statement
+     * prints `1,234.56`. Declared rather than sniffed, for the same reason the
+     * date encoding is. See `@/domain/reports/number-format`.
+     */
+    numberFormat: z.enum(["plain", "grouped"]).optional(),
   })
   .strict()
   .superRefine((field, ctx) => {
@@ -59,6 +68,16 @@ const contractFieldSchema = z
         code: "custom",
         path: ["dateEncoding"],
         message: "Only a local date field may declare a date encoding.",
+      });
+    }
+    if (
+      field.numberFormat &&
+      !["integer", "decimal", "money", "percentage"].includes(field.parser)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["numberFormat"],
+        message: "Only a numeric field may declare a number format.",
       });
     }
     for (const marker of field.absentMarkers ?? []) {
@@ -151,6 +170,35 @@ const contractSheetSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * Which way round this sheet holds its records.
+     *
+     * Every provider export the client sends is `rows`: one row per period,
+     * one column per figure. An accounting statement is the transpose -- one
+     * row per account, one column per month -- and all the information is
+     * there, rotated ninety degrees.
+     *
+     * Declaring the orientation rather than sniffing it keeps the rest of the
+     * pipeline ignorant of the difference. The sheet is rotated once, on the
+     * way in, and `headerRow` and `dataStartRow` then mean exactly what they
+     * always meant, counted down the rotated grid: for a statement whose first
+     * column is the account name, the header row is 1 and the data starts at 2.
+     *
+     * Defaults to `rows`, so every contract approved before this existed reads
+     * byte-identically. See ADR 0045.
+     */
+    recordOrientation: z.enum(["rows", "period_columns"]).optional(),
+    /**
+     * The row of the original sheet that names the periods, 1-based.
+     *
+     * A statement puts its months in a column heading rather than in a cell of
+     * their own, so after rotation that heading becomes a value with no header
+     * above it. This says which row it was, and the reader gives it a header of
+     * its own so the contract can bind it like any other field.
+     *
+     * Transposed sheets only. There is nothing for it to mean otherwise.
+     */
+    periodHeaderRow: z.number().int().min(1).max(250_000).optional(),
   })
   .strict()
   .superRefine((sheet, ctx) => {
@@ -177,6 +225,40 @@ const contractSheetSchema = z
         code: "custom",
         path: ["totalsRow"],
         message: "The totals row must be labelled in a field this sheet binds.",
+      });
+    }
+    const transposed = sheet.recordOrientation === "period_columns";
+    if (transposed && sheet.periodHeaderRow === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["periodHeaderRow"],
+        message: "A transposed sheet must say which row names its periods.",
+      });
+    }
+    if (!transposed && sheet.periodHeaderRow !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["periodHeaderRow"],
+        message: "Only a transposed sheet has a period header row.",
+      });
+    }
+    // Both describe a shape the sheet has before it is rotated, and neither
+    // survives the rotation with its meaning intact. A totals row becomes a
+    // totals column, and a ragged row becomes a column that is longer than the
+    // others -- which is what a statement's blank cells look like anyway.
+    // Silently reinterpreting either would be worse than refusing it.
+    if (transposed && sheet.totalsRow) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["totalsRow"],
+        message: "A transposed sheet cannot declare a totals row.",
+      });
+    }
+    if (transposed && sheet.raggedRows) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["raggedRows"],
+        message: "A transposed sheet cannot declare ragged rows.",
       });
     }
   });
@@ -237,12 +319,29 @@ export const reportContractDocumentSchema = z
       }
       positions.add(sheet.sheetLocator.position);
     }
+    const transposedSheets = new Set(
+      document.sheets
+        .filter((sheet) => sheet.recordOrientation === "period_columns")
+        .map((sheet) => sheet.normalizedSheetName),
+    );
     for (const control of document.controls) {
       if (!sheets.has(control.normalizedSheetName)) {
         ctx.addIssue({
           code: "custom",
           path: ["controls"],
           message: "Every control must name a selected sheet.",
+        });
+      }
+      // Both controls compare a count taken at validation against the one the
+      // profile recorded, and the profile counted the sheet the way it arrived.
+      // Twenty-four accounts over four months profiles as twenty-four rows and
+      // validates as four, so the control would fail every time while nothing
+      // was wrong.
+      if (transposedSheets.has(control.normalizedSheetName)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["controls"],
+          message: "A transposed sheet cannot be checked by a row or cell count.",
         });
       }
     }
