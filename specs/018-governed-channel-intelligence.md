@@ -4,6 +4,10 @@
 
 Approved. The user approved ADR 0026, the comparison-led landing direction, and the chapter-indexed channel-workspace direction on 2026-08-20. Intake, deterministic Talabat projection, detector findings, and the recommendation control plane are implemented on the feature branch. Release 1 remains in progress: production analysis is now proven against the recovered Talabat projection, while the longer narration deadline still needs promotion and a successful chained retry, and the refined channel workspace still needs authenticated desktop and mobile browser acceptance.
 
+Section 4.1.8 adds a repeat-intake and in-place audit slice, approved on 2026-09-02 after a live
+four-month load exposed that the reuse promised in section 8.2 was never built. ADR 0046 records
+that decision and sections 8.1 and 8.2 are corrected accordingly.
+
 This is a large Tier-3 program. ADR 0026 records the durable architecture decision. The
 Superdesign comparison required by section 18 is a separate approval gate before production TSX.
 
@@ -266,6 +270,60 @@ no AI narration, no provider or campaign actions, no OCR, and no model-read valu
   remote build network, so successful narration remains a release gate independent of the now
   proven deterministic Analysis result.
 
+### 4.1.8 Planned repeat-intake and in-place audit slice (2026-09-02)
+
+Approved on 2026-09-02 after an operator loaded four months of Talabat's performance report for a
+paying client. The design is
+`docs/superpowers/specs/2026-09-02-governed-report-reuse-and-channel-intake-design.md`; the durable
+decision is ADR 0046.
+
+What the live attempt exposed:
+
+- Every month asked the same four governance questions again, for files differing only in their
+  figures. Three independent causes: validation requires a contract version proposed against that
+  exact package, so no approval can ever admit a later file; the schema fingerprint hashes the
+  worksheet name, which Talabat rewrites per export; and the report type is free text inside the
+  reuse key.
+- The CSV export of a report drafted from its XLSX export was refused with `INVALID_LOCAL_DATE`.
+  The contract declares one date encoding, and the provider writes dates two ways.
+- `CATEGORICAL_VALUE_NOT_DECLARED` refused a file over the cancellation reason `CLOSED` without
+  naming the label, the days it appeared on, or any way out short of editing the provider library.
+  The failure detail is plumbed but empty: `ReportProjectionError` carries only a code whose message
+  is that same code, so the recorded detail repeats itself.
+- Governed refusals returned `{ outcome: "failed" }` and Trigger.dev recorded `COMPLETED`.
+- Projection completing wrote governed evidence and stopped; the audit ran only from a button on
+  another route.
+- The channel detail page accepts no window and displays the newest completed run, so a chosen
+  month changed nothing on screen.
+
+Phase 1, ingestion:
+
+- `structure_fingerprint` on packages, per section 8.1.
+- `report_structure_admissions` and the second admissible path in both claim functions, per
+  section 8.2 and ADR 0046.
+- One approval screen replacing the four-step flow on an organization's first sight of a
+  structure; report type derived from the recognised family.
+- A backfill granting admissions from mappings already approved, reporting what it will grant.
+- A strict `YYYY-MM-DD` string accepted whatever encoding a contract declares. Ambiguous forms
+  still require a declaration; `03/04/2026` is not made guessable.
+- A `ReportCategoricalValueNotDeclared` subclass carrying the label, output key and dates, on the
+  `ReportControlTotalMismatch` precedent of ADR 0029, so the existing failure detail says something.
+  A one-click declaration proposes an amended projection version for approval. Scoped to the
+  declaring organization.
+- Governed refusals raised as non-retryable Trigger errors, so a refusal reads as `FAILED` without
+  burning retries.
+
+Phase 2, the surfaces:
+
+- A clean projection dispatches `channel-analysis.run` for its declared window, keyed on the
+  projection run. A `reconciliation_required` or `partially_projected` result does not, because an
+  audit of disputed figures would state a conclusion the platform cannot support.
+- The channel detail page accepts `?window=`, selects the run matching that window, and drives the
+  picker through the URL. A window with no completed run is named and offered, never answered with
+  another window's figures.
+- A Reports panel on the channel page carrying the whole intake with the channel fixed from route
+  context. The Integrations governed-reports view is unchanged.
+
 ### 4.2 Release 2
 
 - Provider-neutral public benchmark research, with Exa Search and Contents as the first adapter.
@@ -527,10 +585,12 @@ worker can claim the package.
 
 ## 8. Schema fingerprints and report contracts
 
-### 8.1 Fingerprint
+### 8.1 Fingerprints
 
-A schema fingerprint is a versioned digest over declared context plus deterministic workbook
-structure:
+A package carries two versioned digests. Both are computed during profiling, and neither contains
+cell values, customer PII, financial totals, or filenames.
+
+**Schema fingerprint** identifies an exact profiled shape, worksheet names included:
 
 - report family, channel template hint, currency, and outlet grain;
 - ordered normalized sheet names and positions;
@@ -538,8 +598,29 @@ structure:
 - repeated-header, merged-cell, formula, and structural flags;
 - parser and fingerprint algorithm versions.
 
-Cell values, customer PII, financial totals, and filenames do not enter the fingerprint. The same
-schema with different dates or amounts therefore reuses its approved contract.
+It is recorded on append-only contract, decision and binding rows and is never redefined.
+
+**Structure fingerprint** identifies the same report across the months a provider issues it, and is
+what reuse is keyed on:
+
+- outlet grain and parser version;
+- per sheet, ordered by position: the position and the repeated-header, merged-cell and formula
+  flags;
+- per header candidate row: its row position, field count, and the digests of its normalized
+  column names;
+- the structure algorithm version.
+
+It excludes the worksheet name, the report type, the declared currency, and the declared period.
+
+The exclusion of worksheet names is the point. Talabat names its tab after the export range —
+`Talabat-Jan-Feb-2026-Performanc`, then `Mar-2026` — so a digest containing that name changes every
+month for a file whose columns never move. A name a provider rewrites per export is a label on the
+folder, not the identity of what is inside it. Currency and report type are matched explicitly at
+admission rather than folded into the digest, so a mismatch is refused by name instead of
+disappearing as a non-match.
+
+Two files with the same columns therefore carry one structure identity whatever their dates,
+amounts, worksheet name, or file format. See ADR 0046.
 
 ### 8.2 Contract records
 
@@ -566,9 +647,24 @@ derived from the latest valid decision/binding event; the immutable version row 
 rewrite its history.
 
 `report_contract_bindings` maps an approved exact version to one organization, channel, report
-family, fingerprint, currency, and outlet-grain context. At most one active binding exists for that
-tuple. Automatic reuse occurs only when every bound field matches and deterministic validation and
-reconciliation pass.
+family, schema fingerprint, currency, and outlet-grain context. At most one active binding exists
+for that tuple.
+
+Reuse across uploads is carried by `report_structure_admissions` rather than by the binding. An
+admission states that, for one organization and channel, a file of one structure fingerprint and
+currency is read using one approved contract version and one approved projection version, granted
+by a named person until revoked. `claim_governed_report_package_validation` and the projection
+claim admit a package on either a contract version proposed against that exact package or a
+matching active admission; every other invariant they enforce is unchanged. Each package records
+`admitted_under_admission_id`, so an import always names the authorisation that let it in, and
+revoking an admission returns that structure to per-upload approval without rewriting a figure.
+
+An organization's first upload of an unadmitted structure asks once — one screen naming the report
+and the figures it will read, one approval, which writes the contract version, its decision, the
+projection version, its decision, and the admission, all attributed to the operator. Later uploads
+of that structure are admitted silently. A library-drafted family is recognised in every
+organization; a hand-built mapping is reused only within its own organization until it is
+deliberately promoted into the library. See ADR 0046.
 
 ### 8.3 Declarative transform language
 
