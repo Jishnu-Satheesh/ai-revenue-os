@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(17);
+select extensions.plan(18);
 
 insert into auth.users (id)
 values ('d1000000-0000-4000-8000-000000000001'::uuid);
@@ -189,6 +189,14 @@ select extensions.is(
   (select schema_fingerprint from public.integration_report_packages where id = (select (package ->> 'id')::uuid from report_package_execution)),
   'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   'profile completion stores the supplied structural fingerprint once'
+);
+-- The column reuse across Tasks 6-9 is keyed on. Nothing above proves the
+-- update statement actually writes it -- only that the column exists and
+-- that the 7-argument call is accepted.
+select extensions.is(
+  (select structure_fingerprint from public.integration_report_packages where id = (select (package ->> 'id')::uuid from report_package_execution)),
+  'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  'profile completion persists the supplied structure fingerprint'
 );
 -- A profile keeps column names, and nothing from under them. The names let an
 -- operator map an export the platform does not recognise, which a one-way

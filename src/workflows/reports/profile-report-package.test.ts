@@ -129,6 +129,10 @@ describe("governed report package profiling", () => {
     // profiled shape, worksheet name included, and is recorded on rows that
     // outlive this code.
     expect(completions[0].schemaFingerprint).not.toBe(completions[1].schemaFingerprint);
+    // A real digest, not an absent field the two runs happen to agree on --
+    // `toBe` alone would still pass if `complete` were never given the field
+    // at all, since `undefined === undefined`.
+    expect(completions[0].structureFingerprint).toMatch(/^[a-f0-9]{64}$/);
     // The structure fingerprint is what reuse is keyed on, and these are the
     // same report.
     expect(completions[0].structureFingerprint).toBe(completions[1].structureFingerprint);
