@@ -2147,6 +2147,26 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["integration_report_packages"]["Row"];
       };
+      // Task 9B (ADR 0046): the two worker-only links that carry an admitted
+      // package from awaiting_contract through to awaiting_projection with
+      // no human actor. Each is fenced by the admission itself -- see
+      // 20260902178000_advance_an_admitted_package.sql.
+      advance_governed_report_package_on_admission: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
+      advance_admitted_report_package_to_projection: {
+        Args: {
+          p_organization_id: string;
+          p_report_package_id: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown> | null;
+      };
       propose_governed_report_projection: {
         Args: {
           p_organization_id: string;

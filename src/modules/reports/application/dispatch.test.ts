@@ -15,7 +15,6 @@ import {
   requestReportPackageProjection,
   requestReportPackageValidation,
 } from "@/modules/reports/application/dispatch";
-import type { ReportStructureAdmission } from "@/modules/reports/application/admissions";
 
 /**
  * The retry that never ran.
@@ -37,22 +36,6 @@ const ORGANIZATION = "00000000-0000-4000-8000-000000000002";
 const CONTRACT = "00000000-0000-4000-8000-000000000003";
 const PROJECTION = "00000000-0000-4000-8000-000000000004";
 const CORRELATION = "00000000-0000-4000-8000-000000000005";
-const CHANNEL = "00000000-0000-4000-8000-000000000006";
-const ADMISSION = "00000000-0000-4000-8000-000000000007";
-
-function admission(): ReportStructureAdmission {
-  return {
-    id: ADMISSION,
-    channelId: CHANNEL,
-    structureFingerprint: "a".repeat(64),
-    reportType: "Performance",
-    reportFamilyKey: null,
-    contractVersionId: CONTRACT,
-    projectionVersionId: PROJECTION,
-    grantedBy: "00000000-0000-4000-8000-000000000008",
-    grantedAt: "2026-09-02T00:00:00.000Z",
-  };
-}
 
 const argOf = (call: number, index: number): { idempotencyKey: string } =>
   (trigger.mock.calls as unknown as unknown[][])[call]?.[index] as { idempotencyKey: string };
@@ -185,12 +168,12 @@ describe("dispatching profiling", () => {
 });
 
 describe("continuing a package once it is admitted", () => {
-  it("starts validation itself when the structure is already admitted", async () => {
+  it("starts validation itself when link A advances the package", async () => {
     const dispatched: string[] = [];
     const outcome = await continueAdmittedReportPackage(
       { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
       {
-        findAdmissionForPackage: async () => admission(),
+        advanceOnAdmission: async () => ({ outcome: "admitted", contractVersionId: CONTRACT }),
         requestValidation: async (input) => {
           dispatched.push(input.contractVersionId);
           return true;
@@ -198,15 +181,17 @@ describe("continuing a package once it is admitted", () => {
       },
     );
     expect(outcome).toBe("admitted");
-    expect(dispatched).toEqual([admission().contractVersionId]);
+    expect(dispatched).toEqual([CONTRACT]);
   });
 
-  it("waits for a person when the structure has never been admitted here", async () => {
+  it("waits for a person when link A refuses to advance the package", async () => {
+    // Covers every non-"admitted" outcome the RPC can return (not_found,
+    // not_ready, no_admission) -- none of them changes what happens here.
     const dispatched: string[] = [];
     const outcome = await continueAdmittedReportPackage(
       { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
       {
-        findAdmissionForPackage: async () => null,
+        advanceOnAdmission: async () => ({ outcome: "not_admitted" }),
         requestValidation: async () => {
           dispatched.push("should not happen");
           return true;
@@ -220,31 +205,32 @@ describe("continuing a package once it is admitted", () => {
   it("still reports the structure admitted even when the validation dispatch itself fails", async () => {
     // Whether the dispatch lands is requestValidation's own concern -- it
     // already logs the failure. "admitted" answers a different question
-    // (was this structure recognised), so a transport failure here must not
-    // be confused with "nobody has admitted this yet", which would send the
-    // package back to a human for a decision that was already made.
+    // (did the database just record this package as admitted), so a
+    // transport failure here must not be confused with "nobody has admitted
+    // this yet", which would send the package back to a human for a
+    // decision that was already made.
     const outcome = await continueAdmittedReportPackage(
       { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
       {
-        findAdmissionForPackage: async () => admission(),
+        advanceOnAdmission: async () => ({ outcome: "admitted", contractVersionId: CONTRACT }),
         requestValidation: async () => false,
       },
     );
     expect(outcome).toBe("admitted");
   });
 
-  it("looks up the admission by organization and package, not by anything else", async () => {
-    const seen: Array<{ organizationId: string; packageId: string }> = [];
+  it("calls link A with the organization, package and correlation id, not by anything else", async () => {
+    const seen: Array<{ organizationId: string; packageId: string; correlationId: string }> = [];
     await continueAdmittedReportPackage(
       { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
       {
-        findAdmissionForPackage: async (input) => {
+        advanceOnAdmission: async (input) => {
           seen.push(input);
-          return null;
+          return { outcome: "not_admitted" };
         },
         requestValidation: async () => true,
       },
     );
-    expect(seen).toEqual([{ organizationId: ORGANIZATION, packageId: PACKAGE }]);
+    expect(seen).toEqual([{ organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION }]);
   });
 });

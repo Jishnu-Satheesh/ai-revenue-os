@@ -1,9 +1,10 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 
 import { reportProjectionTaskSchema, reportProfilingTaskSchema, reportValidationTaskSchema } from "@/domain/reports/schemas";
 import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
+import type { Database } from "@/lib/supabase/database.types";
 import { createReportWorkerServiceClient } from "@/lib/supabase/service";
-import { findAdmissionForReportPackage } from "@/modules/reports/application/admissions";
 import {
   continueAdmittedReportPackage,
   requestReportPackageProjection,
@@ -19,6 +20,106 @@ const retry = {
   maxTimeoutInMs: 30_000,
   factor: 2,
 } as const;
+
+/**
+ * Link A (Task 9B, ADR 0046). Calls
+ * `advance_governed_report_package_on_admission` directly rather than
+ * reading an admission here and writing the package's status in a separate
+ * round trip -- a read-then-act split like that is racy in a way the RPC's
+ * own row lock and status guard are not
+ * (20260902178000_advance_an_admitted_package.sql). The RPC can only ever
+ * move a package that an active admission genuinely matches; every other
+ * outcome it returns (`not_found`, `not_ready`, `no_admission`) collapses to
+ * `"not_admitted"` here; none of them changes what
+ * `continueAdmittedReportPackage` does next.
+ *
+ * A thrown error degrades to `"not_admitted"` with a warning rather than
+ * escaping, for the reason `findAdmissionForReportPackage` did before it:
+ * this runs after `complete_governed_report_package_profiling` has already
+ * committed the package at `awaiting_contract` with nobody watching it
+ * retry. A retry of the profiling task short-circuits an
+ * already-`awaiting_contract` package to `"completed"` rather than
+ * `"profiled"`, so this code would never run again for that upload -- one
+ * transient failure here would permanently, not just temporarily, lose the
+ * auto-continuation.
+ */
+async function advanceReportPackageOnAdmission(
+  supabase: SupabaseClient<Database>,
+  input: { organizationId: string; packageId: string; correlationId: string },
+): Promise<{ outcome: "admitted"; contractVersionId: string } | { outcome: "not_admitted" }> {
+  try {
+    const { data, error } = await supabase.rpc("advance_governed_report_package_on_admission", {
+      p_organization_id: input.organizationId,
+      p_report_package_id: input.packageId,
+      p_correlation_id: input.correlationId,
+    });
+    if (error) throw new Error(error.message);
+    const contractVersionId = data?.reportContractVersionId;
+    if (data?.outcome === "admitted" && typeof contractVersionId === "string") {
+      return { outcome: "admitted", contractVersionId };
+    }
+    return { outcome: "not_admitted" };
+  } catch (error) {
+    logger.warn("report_package.admission_advance_failed", {
+      organizationId: input.organizationId,
+      errorCode: error instanceof Error ? error.name : "unknown",
+    });
+    return { outcome: "not_admitted" };
+  }
+}
+
+/**
+ * Link B (Task 9B, ADR 0046). The worker-only counterpart of
+ * `request_governed_report_package_projection`, usable only because the
+ * package carries the admission that put it here
+ * (`admitted_under_admission_id is not null`) -- see
+ * 20260902178000_advance_an_admitted_package.sql. A package validated
+ * through the ordinary per-upload human contract approval always has that
+ * column null and is refused (`not_admitted`), exactly as intended: it keeps
+ * needing a person to press "Retry projection".
+ *
+ * A genuine RPC failure (as opposed to a semantic refusal) is logged here
+ * and folded into `"not_ready"` rather than thrown: this is best-effort
+ * chaining after validation evidence has already been durably recorded, the
+ * same posture the binding lookup this replaces already had -- failing the
+ * whole task would only produce a retry storm over something the human
+ * "Retry projection" path already covers.
+ */
+async function advanceReportPackageToProjection(
+  supabase: SupabaseClient<Database>,
+  input: { organizationId: string; packageId: string; correlationId: string },
+): Promise<
+  | { outcome: "requested"; contractVersionId: string; projectionVersionId: string }
+  | { outcome: "not_admitted" | "not_ready" | "no_binding" | "not_found" }
+> {
+  const { data, error } = await supabase.rpc("advance_admitted_report_package_to_projection", {
+    p_organization_id: input.organizationId,
+    p_report_package_id: input.packageId,
+    p_correlation_id: input.correlationId,
+  });
+  if (error) {
+    logger.warn("report_package.projection_advance_failed", {
+      organizationId: input.organizationId,
+      packageId: input.packageId,
+      errorCode: error.code ?? "unknown",
+    });
+    return { outcome: "not_ready" };
+  }
+  const outcome = data?.outcome;
+  const contractVersionId = data?.reportContractVersionId;
+  const projectionVersionId = data?.reportProjectionVersionId;
+  if (
+    outcome === "requested" &&
+    typeof contractVersionId === "string" &&
+    typeof projectionVersionId === "string"
+  ) {
+    return { outcome: "requested", contractVersionId, projectionVersionId };
+  }
+  if (outcome === "not_admitted" || outcome === "not_ready" || outcome === "no_binding" || outcome === "not_found") {
+    return { outcome };
+  }
+  return { outcome: "not_ready" };
+}
 
 export const reportPackageProfilingTask = schemaTask({
   id: "report-package.profile",
@@ -130,10 +231,10 @@ export const reportPackageProfilingTask = schemaTask({
     // someone to press the button that used to be the only way there. A
     // fresh correlation id is minted because this run is the one asking --
     // the profiling payload never carried the operator's, since profiling
-    // itself has no approval to correlate with. The lookup itself lives in
-    // admissions.ts (`findAdmissionForReportPackage`), not inline here, so
-    // its failure-handling -- a database hiccup must fall back to "wait for
-    // a person", never escape and permanently lose this package's
+    // itself has no approval to correlate with. The advance itself is
+    // `advanceReportPackageOnAdmission` (Link A, Task 9B) above, not inline
+    // here, so its failure-handling -- a database hiccup must fall back to
+    // "wait for a person", never escape and permanently lose this package's
     // auto-continuation -- is unit tested without Trigger.
     if (result.outcome === "profiled") {
       await continueAdmittedReportPackage(
@@ -143,7 +244,7 @@ export const reportPackageProfilingTask = schemaTask({
           correlationId: crypto.randomUUID(),
         },
         {
-          findAdmissionForPackage: (lookup) => findAdmissionForReportPackage(supabase, lookup),
+          advanceOnAdmission: (input) => advanceReportPackageOnAdmission(supabase, input),
           requestValidation: requestReportPackageValidation,
         },
       );
@@ -275,32 +376,48 @@ export const reportPackageValidationTask = schemaTask({
     // means some sheets validated and some did not, and a projection over
     // evidence nobody fully approved would be a figure nobody approved
     // either -- that package stays exactly where the pre-existing manual
-    // "Retry" flow already puts it. The projection version is the one bound
-    // to the contract this run validated against; look it up rather than
-    // widen the validation payload to carry a field only this branch needs.
+    // "Retry" flow already puts it.
+    //
+    // Before Task 9B, this dispatched the projection task directly without
+    // ever moving the package to `awaiting_projection` first, so
+    // `claim_governed_report_package_projection` (which requires exactly
+    // that status) refused it every time -- the same "wiring with no path"
+    // defect the profiling chain had. Link B
+    // (`advanceReportPackageToProjection`, above) is what actually performs
+    // that move now, and it can only do so because this package carries the
+    // admission that validated it (`admitted_under_admission_id is not
+    // null`) -- a package validated through the ordinary human contract
+    // approval is refused (`not_admitted`) and keeps needing a person to
+    // press "Retry projection", exactly as before Task 9B.
     if (result.outcome === "validated") {
-      const { data: binding, error: bindingError } = await supabase
-        .from("report_projection_bindings")
-        .select("report_projection_version_id")
-        .eq("organization_id", payload.organizationId)
-        .eq("report_contract_version_id", payload.contractVersionId)
-        .eq("active", true)
-        .maybeSingle();
-      if (bindingError || !binding) {
+      const advanced = await advanceReportPackageToProjection(supabase, {
+        organizationId: payload.organizationId,
+        packageId: payload.packageId,
+        correlationId: payload.correlationId,
+      });
+      if (advanced.outcome === "requested") {
+        await requestReportPackageProjection({
+          organizationId: payload.organizationId,
+          packageId: payload.packageId,
+          contractVersionId: advanced.contractVersionId,
+          projectionVersionId: advanced.projectionVersionId,
+          correlationId: payload.correlationId,
+        });
+      } else if (advanced.outcome === "no_binding") {
+        // Worth flagging: this package was admitted and cleanly validated,
+        // but its contract version has no active projection binding -- a
+        // configuration gap, not the ordinary case.
         logger.warn("report_package.projection_binding_missing", {
           organizationId: payload.organizationId,
           packageId: payload.packageId,
           contractVersionId: payload.contractVersionId,
         });
-      } else {
-        await requestReportPackageProjection({
-          organizationId: payload.organizationId,
-          packageId: payload.packageId,
-          contractVersionId: payload.contractVersionId,
-          projectionVersionId: binding.report_projection_version_id,
-          correlationId: payload.correlationId,
-        });
       }
+      // `not_admitted` is the ordinary human-approved case -- expected to
+      // happen constantly -- and `not_found`/`not_ready` mean the package
+      // already moved on before this call ran. Neither is logged, for the
+      // same reason admissions.ts stays silent on the ordinary unadmitted
+      // case: a warning here would drown out the genuine failure above.
     }
     return result;
   },

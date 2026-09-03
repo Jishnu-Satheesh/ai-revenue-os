@@ -5,7 +5,6 @@ import { tasks } from "@trigger.dev/sdk";
 import { logger } from "@/lib/logger";
 import type { reportPackageProfilingTask, reportPackageProjectionTask, reportPackageValidationTask } from "@/trigger/reports";
 import { isGovernedReportProjectionEnabled, isGovernedReportValidationEnabled } from "@/modules/integrations/application/feature-access";
-import type { ReportStructureAdmission } from "@/modules/reports/application/admissions";
 
 /** Trigger only orchestrates; the database owns package state. */
 export async function requestReportPackageProfiling(input: {
@@ -118,18 +117,30 @@ export async function requestReportPackageProjection(input: {
 
 /**
  * The two collaborators `continueAdmittedReportPackage` needs, injected so it
- * runs in a test without Trigger or a database. `findAdmissionForPackage` is
- * a read: it answers whether this organization already vouched for this exact
- * column structure, on some other upload. `requestValidation` is a dispatch:
- * in production it is `requestReportPackageValidation` above, which already
- * carries its own feature-flag guard and idempotency key -- nothing here
- * duplicates either.
+ * runs in a test without Trigger or a database.
+ *
+ * `advanceOnAdmission` calls Link A
+ * (`advance_governed_report_package_on_admission`, Task 9B / ADR 0046)
+ * directly, rather than reading an admission here and writing the package's
+ * status in a separate call: a read-then-act split across two round trips is
+ * racy in a way the RPC's own row lock and status guard are not, and the RPC
+ * already refuses to move anything unless an active admission genuinely
+ * matches -- see the migration for the fencing. Its outcome is narrowed to
+ * exactly the two shapes this function needs; every other outcome the RPC
+ * can return (`not_found`, `not_ready`, `no_admission`) collapses to
+ * `"not_admitted"` at the call site, because none of them changes what
+ * happens next here.
+ *
+ * `requestValidation` is a dispatch: in production it is
+ * `requestReportPackageValidation` above, which already carries its own
+ * feature-flag guard and idempotency key -- nothing here duplicates either.
  */
 export type ContinueAdmittedReportPackageCollaborators = {
-  findAdmissionForPackage(input: {
+  advanceOnAdmission(input: {
     organizationId: string;
     packageId: string;
-  }): Promise<ReportStructureAdmission | null>;
+    correlationId: string;
+  }): Promise<{ outcome: "admitted"; contractVersionId: string } | { outcome: "not_admitted" }>;
   requestValidation(input: {
     organizationId: string;
     packageId: string;
@@ -147,29 +158,31 @@ export type ContinueAdmittedReportPackageCollaborators = {
  * and currency. Validation starts on its own because there is nothing left
  * for a person to decide.
  *
- * Finding no admission is not a failure -- it is the ordinary case for a
+ * `"not_admitted"` is not a failure -- it is the ordinary case for a
  * structure nobody has vouched for yet, and the only correct move is the one
  * the product already made before this function existed: leave the package
  * waiting for a person. Nothing here is allowed to grant what only a human
- * approval can, so there is no path from "no admission" to a dispatch.
+ * approval can, so there is no path from `"not_admitted"` to a dispatch.
  */
 export async function continueAdmittedReportPackage(
   input: { organizationId: string; packageId: string; correlationId: string },
   collaborators: ContinueAdmittedReportPackageCollaborators,
 ): Promise<"admitted" | "awaiting_approval"> {
-  const admission = await collaborators.findAdmissionForPackage({
+  const advanced = await collaborators.advanceOnAdmission({
     organizationId: input.organizationId,
     packageId: input.packageId,
+    correlationId: input.correlationId,
   });
-  if (!admission) return "awaiting_approval";
+  if (advanced.outcome !== "admitted") return "awaiting_approval";
   // Whether the dispatch itself lands is `requestValidation`'s own concern --
   // it already logs a warning on failure, the same as every other dispatch in
-  // this file. "admitted" describes what was found (a standing admission),
-  // not the transport, so it is returned either way.
+  // this file. "admitted" describes what the database already recorded (the
+  // package now carries this admission), not the transport, so it is
+  // returned either way.
   await collaborators.requestValidation({
     organizationId: input.organizationId,
     packageId: input.packageId,
-    contractVersionId: admission.contractVersionId,
+    contractVersionId: advanced.contractVersionId,
     correlationId: input.correlationId,
   });
   return "admitted";
