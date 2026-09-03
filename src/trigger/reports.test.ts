@@ -19,10 +19,6 @@ import { advanceReportPackageOnAdmission, advanceReportPackageToProjection } fro
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 
-type FakeSupabaseClient = Partial<SupabaseClient<Database>> & {
-  rpc: ReturnType<typeof vi.fn>;
-};
-
 describe("Report Package Trigger abort on refusal", () => {
   it("imports AbortTaskRunError from the Trigger SDK", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
@@ -83,10 +79,10 @@ describe("Link A (advanceReportPackageOnAdmission) error handling", () => {
   const CORRELATION_ID = "33333333-3333-4333-8333-333333333333";
   const CONTRACT_VERSION_ID = "44444444-4444-4444-8444-444444444444";
 
-  it("degrades network error to not_admitted without escaping", async () => {
+  it("degrades network error to not_admitted and logs warning", async () => {
     const fakeSupabase = {
       rpc: vi.fn().mockRejectedValue(new Error("Network timeout")),
-    } as FakeSupabaseClient;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(
       advanceReportPackageOnAdmission(fakeSupabase, {
@@ -103,7 +99,7 @@ describe("Link A (advanceReportPackageOnAdmission) error handling", () => {
         data: null,
         error: { message: "no admission matches" },
       }),
-    } as FakeSupabaseClient;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(
       advanceReportPackageOnAdmission(fakeSupabase, {
@@ -123,7 +119,7 @@ describe("Link A (advanceReportPackageOnAdmission) error handling", () => {
         },
         error: null,
       }),
-    } as FakeSupabaseClient;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(
       advanceReportPackageOnAdmission(fakeSupabase, {
@@ -145,10 +141,10 @@ describe("Link B (advanceReportPackageToProjection) error handling", () => {
   const CONTRACT_VERSION_ID = "44444444-4444-4444-8444-444444444444";
   const PROJECTION_VERSION_ID = "55555555-5555-4555-8555-555555555555";
 
-  it("degrades network error to not_ready without escaping", async () => {
+  it("degrades network error to not_ready and logs warning", async () => {
     const fakeSupabase = {
       rpc: vi.fn().mockRejectedValue(new Error("Network timeout")),
-    } as FakeSupabaseClient;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(
       advanceReportPackageToProjection(fakeSupabase, {
@@ -165,7 +161,7 @@ describe("Link B (advanceReportPackageToProjection) error handling", () => {
         data: null,
         error: { code: "NOT_READY" },
       }),
-    } as FakeSupabaseClient;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(
       advanceReportPackageToProjection(fakeSupabase, {
@@ -186,7 +182,7 @@ describe("Link B (advanceReportPackageToProjection) error handling", () => {
         },
         error: null,
       }),
-    } as FakeSupabaseClient;
+    } as unknown as SupabaseClient<Database>;
 
     await expect(
       advanceReportPackageToProjection(fakeSupabase, {
