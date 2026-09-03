@@ -56,3 +56,55 @@ describe("Report Package Trigger abort on refusal", () => {
     expect(projectionAbort).toBeGreaterThan(projectionLogger);
   });
 });
+
+describe("Link A and Link B error handling guarantees", () => {
+  it("Link A wraps the RPC in try/catch to prevent escape of network errors", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
+
+    // Find the advanceReportPackageOnAdmission function
+    const linkAStart = source.indexOf("export async function advanceReportPackageOnAdmission");
+    const linkAEnd = source.indexOf("export async function advanceReportPackageToProjection");
+    const linkABlock = source.slice(linkAStart, linkAEnd);
+
+    // Verify it has try and catch
+    expect(linkABlock).toContain("try {");
+    expect(linkABlock).toContain("} catch (error) {");
+
+    // Verify the RPC call is inside the try block
+    const tryBlock = linkABlock.slice(linkABlock.indexOf("try {"), linkABlock.indexOf("} catch"));
+    expect(tryBlock).toContain('supabase.rpc("advance_governed_report_package_on_admission"');
+
+    // Verify it returns { outcome: "not_admitted" } in the catch
+    const catchBlock = linkABlock.slice(linkABlock.indexOf("} catch"));
+    expect(catchBlock).toContain('return { outcome: "not_admitted" }');
+  });
+
+  it("Link B wraps the RPC in try/catch to prevent escape of network errors", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
+
+    // Find the advanceReportPackageToProjection function
+    const linkBStart = source.indexOf("export async function advanceReportPackageToProjection");
+    const linkBEnd = source.indexOf("export const reportPackageProfilingTask");
+    const linkBBlock = source.slice(linkBStart, linkBEnd);
+
+    // Verify it has try and catch
+    expect(linkBBlock).toContain("try {");
+    expect(linkBBlock).toContain("} catch (error) {");
+
+    // Verify the RPC call is inside the try block
+    const tryBlock = linkBBlock.slice(linkBBlock.indexOf("try {"), linkBBlock.indexOf("} catch"));
+    expect(tryBlock).toContain('supabase.rpc("advance_admitted_report_package_to_projection"');
+
+    // Verify it returns { outcome: "not_ready" } in the catch
+    const catchBlock = linkBBlock.slice(linkBBlock.indexOf("} catch"));
+    expect(catchBlock).toContain('return { outcome: "not_ready" }');
+  });
+
+  it("Link A and Link B are exported so their error handling can be unit tested", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
+
+    // Verify both functions are exported
+    expect(source).toContain("export async function advanceReportPackageOnAdmission");
+    expect(source).toContain("export async function advanceReportPackageToProjection");
+  });
+});

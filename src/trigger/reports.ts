@@ -42,7 +42,7 @@ const retry = {
  * transient failure here would permanently, not just temporarily, lose the
  * auto-continuation.
  */
-async function advanceReportPackageOnAdmission(
+export async function advanceReportPackageOnAdmission(
   supabase: SupabaseClient<Database>,
   input: { organizationId: string; packageId: string; correlationId: string },
 ): Promise<{ outcome: "admitted"; contractVersionId: string } | { outcome: "not_admitted" }> {
@@ -78,46 +78,56 @@ async function advanceReportPackageOnAdmission(
  * needing a person to press "Retry projection".
  *
  * A genuine RPC failure (as opposed to a semantic refusal) is logged here
- * and folded into `"not_ready"` rather than thrown: this is best-effort
- * chaining after validation evidence has already been durably recorded, the
- * same posture the binding lookup this replaces already had -- failing the
+ * and folded into `"not_ready"` rather than thrown: this runs after
+ * validation evidence has already been durably recorded, and failing the
  * whole task would only produce a retry storm over something the human
- * "Retry projection" path already covers.
+ * "Retry projection" path already covers. Both the network error case
+ * (RPC rejects) and the semantic error case (RPC resolves with error field)
+ * are handled symmetrically.
  */
-async function advanceReportPackageToProjection(
+export async function advanceReportPackageToProjection(
   supabase: SupabaseClient<Database>,
   input: { organizationId: string; packageId: string; correlationId: string },
 ): Promise<
   | { outcome: "requested"; contractVersionId: string; projectionVersionId: string }
   | { outcome: "not_admitted" | "not_ready" | "no_binding" | "not_found" }
 > {
-  const { data, error } = await supabase.rpc("advance_admitted_report_package_to_projection", {
-    p_organization_id: input.organizationId,
-    p_report_package_id: input.packageId,
-    p_correlation_id: input.correlationId,
-  });
-  if (error) {
+  try {
+    const { data, error } = await supabase.rpc("advance_admitted_report_package_to_projection", {
+      p_organization_id: input.organizationId,
+      p_report_package_id: input.packageId,
+      p_correlation_id: input.correlationId,
+    });
+    if (error) {
+      logger.warn("report_package.projection_advance_failed", {
+        organizationId: input.organizationId,
+        packageId: input.packageId,
+        errorCode: error.code ?? "unknown",
+      });
+      return { outcome: "not_ready" };
+    }
+    const outcome = data?.outcome;
+    const contractVersionId = data?.reportContractVersionId;
+    const projectionVersionId = data?.reportProjectionVersionId;
+    if (
+      outcome === "requested" &&
+      typeof contractVersionId === "string" &&
+      typeof projectionVersionId === "string"
+    ) {
+      return { outcome: "requested", contractVersionId, projectionVersionId };
+    }
+    if (outcome === "not_admitted" || outcome === "not_ready" || outcome === "no_binding" || outcome === "not_found") {
+      return { outcome };
+    }
+    return { outcome: "not_ready" };
+  } catch (error) {
     logger.warn("report_package.projection_advance_failed", {
       organizationId: input.organizationId,
       packageId: input.packageId,
-      errorCode: error.code ?? "unknown",
+      errorCode: error instanceof Error ? error.name : "unknown",
     });
     return { outcome: "not_ready" };
   }
-  const outcome = data?.outcome;
-  const contractVersionId = data?.reportContractVersionId;
-  const projectionVersionId = data?.reportProjectionVersionId;
-  if (
-    outcome === "requested" &&
-    typeof contractVersionId === "string" &&
-    typeof projectionVersionId === "string"
-  ) {
-    return { outcome: "requested", contractVersionId, projectionVersionId };
-  }
-  if (outcome === "not_admitted" || outcome === "not_ready" || outcome === "no_binding" || outcome === "not_found") {
-    return { outcome };
-  }
-  return { outcome: "not_ready" };
 }
 
 export const reportPackageProfilingTask = schemaTask({
