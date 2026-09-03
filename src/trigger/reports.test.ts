@@ -80,6 +80,9 @@ describe("Link A (advanceReportPackageOnAdmission) error handling", () => {
   const CONTRACT_VERSION_ID = "44444444-4444-4444-8444-444444444444";
 
   it("degrades network error to not_admitted and logs warning", async () => {
+    const { logger } = await import("@trigger.dev/sdk");
+    vi.clearAllMocks();
+
     const fakeSupabase = {
       rpc: vi.fn().mockRejectedValue(new Error("Network timeout")),
     } as unknown as SupabaseClient<Database>;
@@ -91,6 +94,11 @@ describe("Link A (advanceReportPackageOnAdmission) error handling", () => {
         correlationId: CORRELATION_ID,
       }),
     ).resolves.toEqual({ outcome: "not_admitted" });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "report_package.admission_advance_failed",
+      expect.any(Object),
+    );
   });
 
   it("handles semantic RPC error by returning not_admitted", async () => {
@@ -142,6 +150,9 @@ describe("Link B (advanceReportPackageToProjection) error handling", () => {
   const PROJECTION_VERSION_ID = "55555555-5555-4555-8555-555555555555";
 
   it("degrades network error to not_ready and logs warning", async () => {
+    const { logger } = await import("@trigger.dev/sdk");
+    vi.clearAllMocks();
+
     const fakeSupabase = {
       rpc: vi.fn().mockRejectedValue(new Error("Network timeout")),
     } as unknown as SupabaseClient<Database>;
@@ -153,6 +164,11 @@ describe("Link B (advanceReportPackageToProjection) error handling", () => {
         correlationId: CORRELATION_ID,
       }),
     ).resolves.toEqual({ outcome: "not_ready" });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "report_package.projection_advance_failed",
+      expect.any(Object),
+    );
   });
 
   it("handles semantic RPC error by returning not_ready", async () => {
