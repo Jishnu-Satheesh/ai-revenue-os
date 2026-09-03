@@ -34,10 +34,9 @@ const retry = {
  * `continueAdmittedReportPackage` does next.
  *
  * A thrown error degrades to `"not_admitted"` with a warning rather than
- * escaping, for the reason `findAdmissionForReportPackage` did before it:
- * this runs after `complete_governed_report_package_profiling` has already
- * committed the package at `awaiting_contract` with nobody watching it
- * retry. A retry of the profiling task short-circuits an
+ * escaping: this runs after `complete_governed_report_package_profiling` has
+ * already committed the package at `awaiting_contract` with nobody watching
+ * it retry. A retry of the profiling task short-circuits an
  * already-`awaiting_contract` package to `"completed"` rather than
  * `"profiled"`, so this code would never run again for that upload -- one
  * transient failure here would permanently, not just temporarily, lose the

@@ -64,50 +64,6 @@ function fakeClient(options: { rows?: ReportStructureAdmissionRow[] } = {}) {
   };
 }
 
-type PackageLookupRow = { channel_id: string; structure_fingerprint: string | null; declared_currency: string };
-
-/**
- * A client that answers two different tables differently, which
- * `findAdmissionForReportPackage` needs and `fakeClient` above does not
- * support: it reads `integration_report_packages` first, then
- * `report_structure_admissions`, and each has its own row and error to
- * configure independently -- exactly what proves the two reads are
- * *not* handled the same way, which is the bug this suite now guards
- * against.
- */
-function fakeReportPackageClient(options: {
-  packageRow?: PackageLookupRow | null;
-  packageError?: { message: string } | null;
-  admissionRows?: ReportStructureAdmissionRow[];
-  admissionError?: { message: string } | null;
-}) {
-  const packageQuery = {
-    eq: vi.fn(),
-    maybeSingle: vi.fn(async () => ({
-      data: options.packageRow ?? null,
-      error: options.packageError ?? null,
-    })),
-  };
-  packageQuery.eq.mockReturnValue(packageQuery);
-  const admissionRows = options.admissionRows ?? [];
-  const admissionQuery = {
-    eq: vi.fn(),
-    maybeSingle: vi.fn(async () => ({
-      data: admissionRows[0] ?? null,
-      error: options.admissionError ?? null,
-    })),
-  };
-  admissionQuery.eq.mockReturnValue(admissionQuery);
-  return {
-    from: vi.fn((table: string) =>
-      table === "integration_report_packages"
-        ? { select: vi.fn(() => packageQuery) }
-        : { select: vi.fn(() => admissionQuery) },
-    ),
-    rpc: vi.fn(),
-  };
-}
-
 describe("findActiveAdmission", () => {
   it("returns no admission when the structure was never granted", async () => {
     const service = createAdmissionService(fakeClient({ rows: [] }) as never);
