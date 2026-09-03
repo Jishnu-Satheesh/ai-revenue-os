@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { createAdmissionService, UnprofiledReportPackageError } from "@/modules/reports/application/admissions";
+const mocks = vi.hoisted(() => ({ warn: vi.fn() }));
+vi.mock("@/lib/logger", () => ({ logger: { warn: mocks.warn, info: vi.fn(), error: vi.fn() } }));
+
+import {
+  createAdmissionService,
+  findAdmissionForReportPackage,
+  UnprofiledReportPackageError,
+} from "@/modules/reports/application/admissions";
 import type { ReportStructureAdmissionRow } from "@/modules/reports/application/ports";
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
@@ -57,6 +64,132 @@ function fakeClient(options: { rows?: ReportStructureAdmissionRow[] } = {}) {
     rpc: vi.fn(),
   };
 }
+
+type PackageLookupRow = { channel_id: string; structure_fingerprint: string | null; declared_currency: string };
+
+/**
+ * A client that answers two different tables differently, which
+ * `findAdmissionForReportPackage` needs and `fakeClient` above does not
+ * support: it reads `integration_report_packages` first, then
+ * `report_structure_admissions`, and each has its own row and error to
+ * configure independently -- exactly what proves the two reads are
+ * *not* handled the same way, which is the bug this suite now guards
+ * against.
+ */
+function fakeReportPackageClient(options: {
+  packageRow?: PackageLookupRow | null;
+  packageError?: { message: string } | null;
+  admissionRows?: ReportStructureAdmissionRow[];
+  admissionError?: { message: string } | null;
+}) {
+  const packageQuery = {
+    eq: vi.fn(),
+    maybeSingle: vi.fn(async () => ({
+      data: options.packageRow ?? null,
+      error: options.packageError ?? null,
+    })),
+  };
+  packageQuery.eq.mockReturnValue(packageQuery);
+  const admissionRows = options.admissionRows ?? [];
+  const admissionQuery = {
+    eq: vi.fn(),
+    maybeSingle: vi.fn(async () => ({
+      data: admissionRows[0] ?? null,
+      error: options.admissionError ?? null,
+    })),
+  };
+  admissionQuery.eq.mockReturnValue(admissionQuery);
+  return {
+    from: vi.fn((table: string) =>
+      table === "integration_report_packages"
+        ? { select: vi.fn(() => packageQuery) }
+        : { select: vi.fn(() => admissionQuery) },
+    ),
+    rpc: vi.fn(),
+  };
+}
+
+describe("findAdmissionForReportPackage", () => {
+  beforeEach(() => mocks.warn.mockClear());
+
+  it("returns the admission when the package is profiled and a match is active", async () => {
+    const client = fakeReportPackageClient({
+      packageRow: {
+        channel_id: CHANNEL_ID,
+        structure_fingerprint: "a".repeat(64),
+        declared_currency: "AED",
+      },
+      admissionRows: [admissionRow()],
+    });
+
+    await expect(
+      findAdmissionForReportPackage(client as never, { organizationId: ORGANIZATION_ID, packageId: PACKAGE_ID }),
+    ).resolves.toEqual({
+      id: ADMISSION_ID,
+      channelId: CHANNEL_ID,
+      structureFingerprint: "a".repeat(64),
+      reportType: "Performance",
+      reportFamilyKey: null,
+      contractVersionId: CONTRACT_VERSION_ID,
+      projectionVersionId: PROJECTION_VERSION_ID,
+      grantedBy: ACTOR_ID,
+      grantedAt: "2026-09-02T00:00:00.000Z",
+    });
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it("waits for a person, silently, when the package has no recorded structure fingerprint yet", async () => {
+    // The ordinary case: profiling has not run, or predates Task 2. Not an
+    // error, so it must not log one -- a warning here would drown out the
+    // genuine failures below under routine, expected traffic.
+    const client = fakeReportPackageClient({
+      packageRow: { channel_id: CHANNEL_ID, structure_fingerprint: null, declared_currency: "AED" },
+    });
+
+    await expect(
+      findAdmissionForReportPackage(client as never, { organizationId: ORGANIZATION_ID, packageId: PACKAGE_ID }),
+    ).resolves.toBeNull();
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it("falls back to no admission, with a warning, when the package read itself fails", async () => {
+    const client = fakeReportPackageClient({ packageError: { message: "connection reset" } });
+
+    await expect(
+      findAdmissionForReportPackage(client as never, { organizationId: ORGANIZATION_ID, packageId: PACKAGE_ID }),
+    ).resolves.toBeNull();
+    expect(mocks.warn).toHaveBeenCalledWith(
+      "report_package.admission_lookup_failed",
+      expect.objectContaining({ organizationId: ORGANIZATION_ID, refusalCode: "package_read_failed" }),
+    );
+  });
+
+  it("falls back to no admission, with a warning, instead of throwing when the admission read fails", async () => {
+    // This is the asymmetry the review caught: findActiveAdmission throws a
+    // DomainError on a genuine query failure rather than returning null the
+    // way the package read above does. Left uncaught, that throw would
+    // escape the profiling task after the package was already committed at
+    // awaiting_contract, and a retry can never reach "profiled" again for an
+    // already-awaiting_contract package -- so one transient failure here
+    // would permanently, not just temporarily, lose the auto-continuation.
+    const client = fakeReportPackageClient({
+      packageRow: {
+        channel_id: CHANNEL_ID,
+        structure_fingerprint: "a".repeat(64),
+        declared_currency: "AED",
+      },
+      admissionError: { message: "connection reset" },
+    });
+
+    await expect(
+      findAdmissionForReportPackage(client as never, { organizationId: ORGANIZATION_ID, packageId: PACKAGE_ID }),
+    ).resolves.toBeNull();
+    expect(mocks.warn).toHaveBeenCalledWith(
+      "report_package.admission_lookup_failed",
+      expect.objectContaining({ organizationId: ORGANIZATION_ID, refusalCode: "admission_read_failed" }),
+    );
+  });
+});
 
 describe("findActiveAdmission", () => {
   it("returns no admission when the structure was never granted", async () => {

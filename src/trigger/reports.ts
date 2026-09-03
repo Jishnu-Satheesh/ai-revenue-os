@@ -3,7 +3,7 @@ import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 import { reportProjectionTaskSchema, reportProfilingTaskSchema, reportValidationTaskSchema } from "@/domain/reports/schemas";
 import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
 import { createReportWorkerServiceClient } from "@/lib/supabase/service";
-import { createAdmissionService } from "@/modules/reports/application/admissions";
+import { findAdmissionForReportPackage } from "@/modules/reports/application/admissions";
 import {
   continueAdmittedReportPackage,
   requestReportPackageProjection,
@@ -130,7 +130,11 @@ export const reportPackageProfilingTask = schemaTask({
     // someone to press the button that used to be the only way there. A
     // fresh correlation id is minted because this run is the one asking --
     // the profiling payload never carried the operator's, since profiling
-    // itself has no approval to correlate with.
+    // itself has no approval to correlate with. The lookup itself lives in
+    // admissions.ts (`findAdmissionForReportPackage`), not inline here, so
+    // its failure-handling -- a database hiccup must fall back to "wait for
+    // a person", never escape and permanently lose this package's
+    // auto-continuation -- is unit tested without Trigger.
     if (result.outcome === "profiled") {
       await continueAdmittedReportPackage(
         {
@@ -139,25 +143,7 @@ export const reportPackageProfilingTask = schemaTask({
           correlationId: crypto.randomUUID(),
         },
         {
-          async findAdmissionForPackage({ organizationId, packageId }) {
-            const { data: reportPackage, error } = await supabase
-              .from("integration_report_packages")
-              .select("channel_id, structure_fingerprint, declared_currency")
-              .eq("organization_id", organizationId)
-              .eq("id", packageId)
-              .maybeSingle();
-            // No fingerprint means this profile predates Task 2, or the read
-            // itself failed -- either way, there is nothing to match an
-            // admission against, and the package waits for a person exactly
-            // as it always has.
-            if (error || !reportPackage || !reportPackage.structure_fingerprint) return null;
-            return createAdmissionService(supabase).findActiveAdmission({
-              organizationId,
-              channelId: reportPackage.channel_id,
-              structureFingerprint: reportPackage.structure_fingerprint,
-              declaredCurrency: reportPackage.declared_currency,
-            });
-          },
+          findAdmissionForPackage: (lookup) => findAdmissionForReportPackage(supabase, lookup),
           requestValidation: requestReportPackageValidation,
         },
       );
