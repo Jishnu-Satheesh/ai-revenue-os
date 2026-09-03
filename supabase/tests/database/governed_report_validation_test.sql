@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(26);
+select extensions.plan(27);
 
 select extensions.has_table('public', 'integration_report_validation_runs', 'validation runs retain bounded evidence');
 select extensions.has_table('public', 'integration_report_validation_sheet_results', 'sheet summaries are stored separately from workbooks');
@@ -263,12 +263,16 @@ from storage.objects where bucket_id = 'governed-report-packages'
   and name like 'f1000000-0000-4000-8000-000000000201/%000000000512/%';
 
 set local role service_role;
--- The admitted_under_admission_id write is confirmed separately (staging
--- evidence in the task report): a scalar subquery re-reading the packages
--- table here would run under this statement's own snapshot, taken before
--- the claim's internal update, and would see the pre-update NULL even
--- though the update has genuinely committed inside the function's own
--- transaction-scoped writes.
+-- outcome and contractVersion come from the function's own jsonb return
+-- value, so they can be checked inline in the same statement that calls it.
+-- admitted_under_admission_id is a column write, not a return value: reading
+-- it back requires its own separate top-level statement (immediately below),
+-- the same pattern already used for `status` after
+-- complete_governed_report_package_validation above -- a scalar subquery
+-- folded into *this* statement would run under this statement's own
+-- snapshot, taken before the claim's internal update, and would see the
+-- pre-update NULL even though the update has genuinely committed inside the
+-- function's own transaction-scoped writes.
 select extensions.is(
   (select jsonb_build_object('outcome', result ->> 'outcome', 'contractVersionId', result -> 'contractVersion' ->> 'id')
    from (select public.claim_governed_report_package_validation(
@@ -279,6 +283,12 @@ select extensions.is(
    ) as result) claimed),
   jsonb_build_object('outcome', 'acquired', 'contractVersionId', 'f1000000-0000-4000-8000-000000000702'),
   'a package with no per-package contract version but a matching active admission claims successfully, using the admission''s contract version'
+);
+select extensions.is(
+  (select admitted_under_admission_id from public.integration_report_packages
+   where id = 'f1000000-0000-4000-8000-000000000510'::uuid),
+  'f1000000-0000-4000-8000-000000000720'::uuid,
+  'a package claimed through a standing admission records which admission admitted it'
 );
 select extensions.is(
   (public.claim_governed_report_package_validation(
