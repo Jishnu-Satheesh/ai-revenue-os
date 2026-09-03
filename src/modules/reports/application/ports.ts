@@ -44,6 +44,8 @@ export type ReportProjectionBindingRow =
   Database["public"]["Tables"]["report_projection_bindings"]["Row"];
 export type ReportProjectionRunRow =
   Database["public"]["Tables"]["integration_report_projection_runs"]["Row"];
+export type ReportStructureAdmissionRow =
+  Database["public"]["Tables"]["report_structure_admissions"]["Row"];
 export type ReportProjectionReconciliationGroup = {
   representative_reconciliation_id: string;
   organization_id: string;
