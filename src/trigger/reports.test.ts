@@ -1,7 +1,27 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+vi.mock("@trigger.dev/sdk", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  schemaTask: vi.fn((config) => config),
+}));
+vi.mock("@/lib/env", () => ({
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: "https://test.supabase.co",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "test-key",
+  },
+}));
+
+import { advanceReportPackageOnAdmission, advanceReportPackageToProjection } from "@/trigger/reports";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/database.types";
+
+type FakeSupabaseClient = Partial<SupabaseClient<Database>> & {
+  rpc: ReturnType<typeof vi.fn>;
+};
 
 describe("Report Package Trigger abort on refusal", () => {
   it("imports AbortTaskRunError from the Trigger SDK", async () => {
@@ -57,54 +77,127 @@ describe("Report Package Trigger abort on refusal", () => {
   });
 });
 
-describe("Link A and Link B error handling guarantees", () => {
-  it("Link A wraps the RPC in try/catch to prevent escape of network errors", async () => {
-    const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
+describe("Link A (advanceReportPackageOnAdmission) error handling", () => {
+  const ORG_ID = "11111111-1111-4111-8111-111111111111";
+  const PACKAGE_ID = "22222222-2222-4222-8222-222222222222";
+  const CORRELATION_ID = "33333333-3333-4333-8333-333333333333";
+  const CONTRACT_VERSION_ID = "44444444-4444-4444-8444-444444444444";
 
-    // Find the advanceReportPackageOnAdmission function
-    const linkAStart = source.indexOf("export async function advanceReportPackageOnAdmission");
-    const linkAEnd = source.indexOf("export async function advanceReportPackageToProjection");
-    const linkABlock = source.slice(linkAStart, linkAEnd);
+  it("degrades network error to not_admitted without escaping", async () => {
+    const fakeSupabase = {
+      rpc: vi.fn().mockRejectedValue(new Error("Network timeout")),
+    } as FakeSupabaseClient;
 
-    // Verify it has try and catch
-    expect(linkABlock).toContain("try {");
-    expect(linkABlock).toContain("} catch (error) {");
-
-    // Verify the RPC call is inside the try block
-    const tryBlock = linkABlock.slice(linkABlock.indexOf("try {"), linkABlock.indexOf("} catch"));
-    expect(tryBlock).toContain('supabase.rpc("advance_governed_report_package_on_admission"');
-
-    // Verify it returns { outcome: "not_admitted" } in the catch
-    const catchBlock = linkABlock.slice(linkABlock.indexOf("} catch"));
-    expect(catchBlock).toContain('return { outcome: "not_admitted" }');
+    await expect(
+      advanceReportPackageOnAdmission(fakeSupabase, {
+        organizationId: ORG_ID,
+        packageId: PACKAGE_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({ outcome: "not_admitted" });
   });
 
-  it("Link B wraps the RPC in try/catch to prevent escape of network errors", async () => {
-    const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
+  it("handles semantic RPC error by returning not_admitted", async () => {
+    const fakeSupabase = {
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "no admission matches" },
+      }),
+    } as FakeSupabaseClient;
 
-    // Find the advanceReportPackageToProjection function
-    const linkBStart = source.indexOf("export async function advanceReportPackageToProjection");
-    const linkBEnd = source.indexOf("export const reportPackageProfilingTask");
-    const linkBBlock = source.slice(linkBStart, linkBEnd);
-
-    // Verify it has try and catch
-    expect(linkBBlock).toContain("try {");
-    expect(linkBBlock).toContain("} catch (error) {");
-
-    // Verify the RPC call is inside the try block
-    const tryBlock = linkBBlock.slice(linkBBlock.indexOf("try {"), linkBBlock.indexOf("} catch"));
-    expect(tryBlock).toContain('supabase.rpc("advance_admitted_report_package_to_projection"');
-
-    // Verify it returns { outcome: "not_ready" } in the catch
-    const catchBlock = linkBBlock.slice(linkBBlock.indexOf("} catch"));
-    expect(catchBlock).toContain('return { outcome: "not_ready" }');
+    await expect(
+      advanceReportPackageOnAdmission(fakeSupabase, {
+        organizationId: ORG_ID,
+        packageId: PACKAGE_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({ outcome: "not_admitted" });
   });
 
-  it("Link A and Link B are exported so their error handling can be unit tested", async () => {
-    const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
+  it("returns admitted with contractVersionId on success", async () => {
+    const fakeSupabase = {
+      rpc: vi.fn().mockResolvedValue({
+        data: {
+          outcome: "admitted",
+          reportContractVersionId: CONTRACT_VERSION_ID,
+        },
+        error: null,
+      }),
+    } as FakeSupabaseClient;
 
-    // Verify both functions are exported
-    expect(source).toContain("export async function advanceReportPackageOnAdmission");
-    expect(source).toContain("export async function advanceReportPackageToProjection");
+    await expect(
+      advanceReportPackageOnAdmission(fakeSupabase, {
+        organizationId: ORG_ID,
+        packageId: PACKAGE_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({
+      outcome: "admitted",
+      contractVersionId: CONTRACT_VERSION_ID,
+    });
+  });
+});
+
+describe("Link B (advanceReportPackageToProjection) error handling", () => {
+  const ORG_ID = "11111111-1111-4111-8111-111111111111";
+  const PACKAGE_ID = "22222222-2222-4222-8222-222222222222";
+  const CORRELATION_ID = "33333333-3333-4333-8333-333333333333";
+  const CONTRACT_VERSION_ID = "44444444-4444-4444-8444-444444444444";
+  const PROJECTION_VERSION_ID = "55555555-5555-4555-8555-555555555555";
+
+  it("degrades network error to not_ready without escaping", async () => {
+    const fakeSupabase = {
+      rpc: vi.fn().mockRejectedValue(new Error("Network timeout")),
+    } as FakeSupabaseClient;
+
+    await expect(
+      advanceReportPackageToProjection(fakeSupabase, {
+        organizationId: ORG_ID,
+        packageId: PACKAGE_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({ outcome: "not_ready" });
+  });
+
+  it("handles semantic RPC error by returning not_ready", async () => {
+    const fakeSupabase = {
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: "NOT_READY" },
+      }),
+    } as FakeSupabaseClient;
+
+    await expect(
+      advanceReportPackageToProjection(fakeSupabase, {
+        organizationId: ORG_ID,
+        packageId: PACKAGE_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({ outcome: "not_ready" });
+  });
+
+  it("returns requested with version IDs on success", async () => {
+    const fakeSupabase = {
+      rpc: vi.fn().mockResolvedValue({
+        data: {
+          outcome: "requested",
+          reportContractVersionId: CONTRACT_VERSION_ID,
+          reportProjectionVersionId: PROJECTION_VERSION_ID,
+        },
+        error: null,
+      }),
+    } as FakeSupabaseClient;
+
+    await expect(
+      advanceReportPackageToProjection(fakeSupabase, {
+        organizationId: ORG_ID,
+        packageId: PACKAGE_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({
+      outcome: "requested",
+      contractVersionId: CONTRACT_VERSION_ID,
+      projectionVersionId: PROJECTION_VERSION_ID,
+    });
   });
 });
