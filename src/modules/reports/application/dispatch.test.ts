@@ -10,10 +10,12 @@ vi.mock("@/modules/integrations/application/feature-access", () => ({
 }));
 
 import {
+  continueAdmittedReportPackage,
   requestReportPackageProfiling,
   requestReportPackageProjection,
   requestReportPackageValidation,
 } from "@/modules/reports/application/dispatch";
+import type { ReportStructureAdmission } from "@/modules/reports/application/admissions";
 
 /**
  * The retry that never ran.
@@ -34,6 +36,23 @@ const PACKAGE = "00000000-0000-4000-8000-000000000001";
 const ORGANIZATION = "00000000-0000-4000-8000-000000000002";
 const CONTRACT = "00000000-0000-4000-8000-000000000003";
 const PROJECTION = "00000000-0000-4000-8000-000000000004";
+const CORRELATION = "00000000-0000-4000-8000-000000000005";
+const CHANNEL = "00000000-0000-4000-8000-000000000006";
+const ADMISSION = "00000000-0000-4000-8000-000000000007";
+
+function admission(): ReportStructureAdmission {
+  return {
+    id: ADMISSION,
+    channelId: CHANNEL,
+    structureFingerprint: "a".repeat(64),
+    reportType: "Performance",
+    reportFamilyKey: null,
+    contractVersionId: CONTRACT,
+    projectionVersionId: PROJECTION,
+    grantedBy: "00000000-0000-4000-8000-000000000008",
+    grantedAt: "2026-09-02T00:00:00.000Z",
+  };
+}
 
 const argOf = (call: number, index: number): { idempotencyKey: string } =>
   (trigger.mock.calls as unknown as unknown[][])[call]?.[index] as { idempotencyKey: string };
@@ -162,5 +181,70 @@ describe("dispatching profiling", () => {
     });
 
     expect(keyOf(0)).toBe(keyOf(1));
+  });
+});
+
+describe("continuing a package once it is admitted", () => {
+  it("starts validation itself when the structure is already admitted", async () => {
+    const dispatched: string[] = [];
+    const outcome = await continueAdmittedReportPackage(
+      { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
+      {
+        findAdmissionForPackage: async () => admission(),
+        requestValidation: async (input) => {
+          dispatched.push(input.contractVersionId);
+          return true;
+        },
+      },
+    );
+    expect(outcome).toBe("admitted");
+    expect(dispatched).toEqual([admission().contractVersionId]);
+  });
+
+  it("waits for a person when the structure has never been admitted here", async () => {
+    const dispatched: string[] = [];
+    const outcome = await continueAdmittedReportPackage(
+      { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
+      {
+        findAdmissionForPackage: async () => null,
+        requestValidation: async () => {
+          dispatched.push("should not happen");
+          return true;
+        },
+      },
+    );
+    expect(outcome).toBe("awaiting_approval");
+    expect(dispatched).toEqual([]);
+  });
+
+  it("still reports the structure admitted even when the validation dispatch itself fails", async () => {
+    // Whether the dispatch lands is requestValidation's own concern -- it
+    // already logs the failure. "admitted" answers a different question
+    // (was this structure recognised), so a transport failure here must not
+    // be confused with "nobody has admitted this yet", which would send the
+    // package back to a human for a decision that was already made.
+    const outcome = await continueAdmittedReportPackage(
+      { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
+      {
+        findAdmissionForPackage: async () => admission(),
+        requestValidation: async () => false,
+      },
+    );
+    expect(outcome).toBe("admitted");
+  });
+
+  it("looks up the admission by organization and package, not by anything else", async () => {
+    const seen: Array<{ organizationId: string; packageId: string }> = [];
+    await continueAdmittedReportPackage(
+      { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
+      {
+        findAdmissionForPackage: async (input) => {
+          seen.push(input);
+          return null;
+        },
+        requestValidation: async () => true,
+      },
+    );
+    expect(seen).toEqual([{ organizationId: ORGANIZATION, packageId: PACKAGE }]);
   });
 });

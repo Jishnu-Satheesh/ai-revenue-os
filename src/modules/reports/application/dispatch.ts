@@ -5,6 +5,7 @@ import { tasks } from "@trigger.dev/sdk";
 import { logger } from "@/lib/logger";
 import type { reportPackageProfilingTask, reportPackageProjectionTask, reportPackageValidationTask } from "@/trigger/reports";
 import { isGovernedReportProjectionEnabled, isGovernedReportValidationEnabled } from "@/modules/integrations/application/feature-access";
+import type { ReportStructureAdmission } from "@/modules/reports/application/admissions";
 
 /** Trigger only orchestrates; the database owns package state. */
 export async function requestReportPackageProfiling(input: {
@@ -113,4 +114,63 @@ export async function requestReportPackageProjection(input: {
     logger.warn("report_package.projection_dispatch_failed", { organizationId: input.organizationId, correlationId: input.correlationId, errorCode: error instanceof Error ? error.name : "unknown" });
     return false;
   }
+}
+
+/**
+ * The two collaborators `continueAdmittedReportPackage` needs, injected so it
+ * runs in a test without Trigger or a database. `findAdmissionForPackage` is
+ * a read: it answers whether this organization already vouched for this exact
+ * column structure, on some other upload. `requestValidation` is a dispatch:
+ * in production it is `requestReportPackageValidation` above, which already
+ * carries its own feature-flag guard and idempotency key -- nothing here
+ * duplicates either.
+ */
+export type ContinueAdmittedReportPackageCollaborators = {
+  findAdmissionForPackage(input: {
+    organizationId: string;
+    packageId: string;
+  }): Promise<ReportStructureAdmission | null>;
+  requestValidation(input: {
+    organizationId: string;
+    packageId: string;
+    contractVersionId: string;
+    correlationId: string;
+  }): Promise<boolean>;
+};
+
+/**
+ * What a freshly profiled package does next, without waiting for a person.
+ *
+ * ADR 0046's whole point is that a structure is approved once: an admission
+ * found here means someone already answered the four governance questions
+ * for this exact set of columns, on a different upload, under this channel
+ * and currency. Validation starts on its own because there is nothing left
+ * for a person to decide.
+ *
+ * Finding no admission is not a failure -- it is the ordinary case for a
+ * structure nobody has vouched for yet, and the only correct move is the one
+ * the product already made before this function existed: leave the package
+ * waiting for a person. Nothing here is allowed to grant what only a human
+ * approval can, so there is no path from "no admission" to a dispatch.
+ */
+export async function continueAdmittedReportPackage(
+  input: { organizationId: string; packageId: string; correlationId: string },
+  collaborators: ContinueAdmittedReportPackageCollaborators,
+): Promise<"admitted" | "awaiting_approval"> {
+  const admission = await collaborators.findAdmissionForPackage({
+    organizationId: input.organizationId,
+    packageId: input.packageId,
+  });
+  if (!admission) return "awaiting_approval";
+  // Whether the dispatch itself lands is `requestValidation`'s own concern --
+  // it already logs a warning on failure, the same as every other dispatch in
+  // this file. "admitted" describes what was found (a standing admission),
+  // not the transport, so it is returned either way.
+  await collaborators.requestValidation({
+    organizationId: input.organizationId,
+    packageId: input.packageId,
+    contractVersionId: admission.contractVersionId,
+    correlationId: input.correlationId,
+  });
+  return "admitted";
 }

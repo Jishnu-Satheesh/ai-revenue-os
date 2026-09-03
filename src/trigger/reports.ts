@@ -3,6 +3,12 @@ import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 import { reportProjectionTaskSchema, reportProfilingTaskSchema, reportValidationTaskSchema } from "@/domain/reports/schemas";
 import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
 import { createReportWorkerServiceClient } from "@/lib/supabase/service";
+import { createAdmissionService } from "@/modules/reports/application/admissions";
+import {
+  continueAdmittedReportPackage,
+  requestReportPackageProjection,
+  requestReportPackageValidation,
+} from "@/modules/reports/application/dispatch";
 import { runReportPackageProfiling } from "@/workflows/reports/profile-report-package";
 import { runReportPackageValidation } from "@/workflows/reports/validate-report-package";
 import { runReportPackageProjection } from "@/workflows/reports/project-report-package";
@@ -116,6 +122,45 @@ export const reportPackageProfilingTask = schemaTask({
     // not parse on the third attempt -- so it aborts rather than retries.
     if (result.outcome === "failed") {
       throw new AbortTaskRunError(`report-package refused: ${payload.packageId}`);
+    }
+    // A profile that lands cleanly may already have an answer waiting for it:
+    // if this organization admitted this exact column structure on some
+    // earlier upload, ADR 0046 says the four governance questions are not
+    // asked again, and validation starts here rather than waiting for
+    // someone to press the button that used to be the only way there. A
+    // fresh correlation id is minted because this run is the one asking --
+    // the profiling payload never carried the operator's, since profiling
+    // itself has no approval to correlate with.
+    if (result.outcome === "profiled") {
+      await continueAdmittedReportPackage(
+        {
+          organizationId: payload.organizationId,
+          packageId: payload.packageId,
+          correlationId: crypto.randomUUID(),
+        },
+        {
+          async findAdmissionForPackage({ organizationId, packageId }) {
+            const { data: reportPackage, error } = await supabase
+              .from("integration_report_packages")
+              .select("channel_id, structure_fingerprint, declared_currency")
+              .eq("organization_id", organizationId)
+              .eq("id", packageId)
+              .maybeSingle();
+            // No fingerprint means this profile predates Task 2, or the read
+            // itself failed -- either way, there is nothing to match an
+            // admission against, and the package waits for a person exactly
+            // as it always has.
+            if (error || !reportPackage || !reportPackage.structure_fingerprint) return null;
+            return createAdmissionService(supabase).findActiveAdmission({
+              organizationId,
+              channelId: reportPackage.channel_id,
+              structureFingerprint: reportPackage.structure_fingerprint,
+              declaredCurrency: reportPackage.declared_currency,
+            });
+          },
+          requestValidation: requestReportPackageValidation,
+        },
+      );
     }
     return result;
   },
@@ -239,6 +284,37 @@ export const reportPackageValidationTask = schemaTask({
     // not parse on the third attempt -- so it aborts rather than retries.
     if (result.outcome === "failed") {
       throw new AbortTaskRunError(`report-package refused: ${payload.packageId}`);
+    }
+    // Only a clean `validated` chains into projection. `partially_validated`
+    // means some sheets validated and some did not, and a projection over
+    // evidence nobody fully approved would be a figure nobody approved
+    // either -- that package stays exactly where the pre-existing manual
+    // "Retry" flow already puts it. The projection version is the one bound
+    // to the contract this run validated against; look it up rather than
+    // widen the validation payload to carry a field only this branch needs.
+    if (result.outcome === "validated") {
+      const { data: binding, error: bindingError } = await supabase
+        .from("report_projection_bindings")
+        .select("report_projection_version_id")
+        .eq("organization_id", payload.organizationId)
+        .eq("report_contract_version_id", payload.contractVersionId)
+        .eq("active", true)
+        .maybeSingle();
+      if (bindingError || !binding) {
+        logger.warn("report_package.projection_binding_missing", {
+          organizationId: payload.organizationId,
+          packageId: payload.packageId,
+          contractVersionId: payload.contractVersionId,
+        });
+      } else {
+        await requestReportPackageProjection({
+          organizationId: payload.organizationId,
+          packageId: payload.packageId,
+          contractVersionId: payload.contractVersionId,
+          projectionVersionId: binding.report_projection_version_id,
+          correlationId: payload.correlationId,
+        });
+      }
     }
     return result;
   },
