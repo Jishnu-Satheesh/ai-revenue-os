@@ -425,6 +425,7 @@ export type Database = {
           schema_fingerprint: string | null;
           structure_version: number;
           structure_fingerprint: string | null;
+          admitted_under_admission_id: string | null;
           status:
             | "awaiting_upload"
             | "uploaded"
@@ -832,6 +833,31 @@ export type Database = {
           resolved_by: string;
           correlation_id: string;
           created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** One durable, revocable grant admitting a report structure. See ADR 0046. */
+      report_structure_admissions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          channel_id: string;
+          structure_fingerprint: string;
+          structure_version: number;
+          declared_currency: string;
+          outlet_grain: "branch";
+          report_type: string;
+          report_family_key: string | null;
+          report_contract_version_id: string;
+          report_projection_version_id: string;
+          active: boolean;
+          granted_by: string;
+          granted_at: string;
+          revoked_by: string | null;
+          revoked_at: string | null;
+          correlation_id: string;
         };
         Insert: never;
         Update: never;

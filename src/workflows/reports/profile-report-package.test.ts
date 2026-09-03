@@ -39,6 +39,7 @@ function reportPackage(): ReportPackageRow {
     schema_fingerprint: null,
     structure_version: 1,
     structure_fingerprint: null,
+    admitted_under_admission_id: null,
     status: "uploaded",
     safe_failure_code: null,
     safe_failure_at: null,
