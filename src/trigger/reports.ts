@@ -7,8 +7,14 @@ import {
   reportValidationTaskSchema,
 } from "@/domain/reports/schemas";
 import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
+import type { AnalysisGrain } from "@/domain/analysis/types";
 import type { Database } from "@/lib/supabase/database.types";
 import { createReportWorkerServiceClient } from "@/lib/supabase/service";
+import { requestChannelAnalysis } from "@/modules/analysis/application/dispatch";
+import {
+  dispatchAnalysisForCleanProjection,
+  type ProjectionCompletionSummary,
+} from "@/modules/reports/application/auto-analysis";
 import {
   continueAdmittedReportPackage,
   hasEnqueuedGrowthIntelligenceRequests,
@@ -493,6 +499,17 @@ export const reportPackageProjectionTask = schemaTask({
         );
       return data as T;
     };
+    // What the audit needs, learned along the way. The claim parses the
+    // approved figures (grain included); the completion RPCs return the
+    // package row they just wrote (status, channel, branch, window). Both
+    // are captured here so the dispatch decision below reads what happened
+    // rather than re-reading the database. A holder object rather than two
+    // locals: assignments land inside the callbacks below, and a local read
+    // back out here would still be narrowed to its null initializer.
+    const projectionCompletion: {
+      completedPackage: Record<string, unknown> | null;
+      projectionGrain: AnalysisGrain | null;
+    } = { completedPackage: null, projectionGrain: null };
     const result = await runReportPackageProjection(payload, {
       async claim(input) {
         const data = await rpc<Record<string, unknown> | null>(
@@ -536,6 +553,10 @@ export const reportPackageProjectionTask = schemaTask({
           (projectionVersion as { projection_document?: unknown }).projection_document,
         );
         if (!document.success) return { outcome: "conflict" };
+        // A series carries its own grain; a provider total covering one
+        // export is a span, the same vocabulary the analysis claim accepts.
+        projectionCompletion.projectionGrain =
+          document.data.outputKind === "period_grain" ? document.data.grain : "span";
         const { data: definitions, error } = await supabase
           .from("metric_definitions")
           .select("id, key, value_kind")
@@ -588,6 +609,7 @@ export const reportPackageProjectionTask = schemaTask({
             p_outputs: input.outputs,
           },
         );
+        projectionCompletion.completedPackage = data;
         await wakeGrowthIntelligenceIfEnqueued(input.organizationId, payload.correlationId, data);
       },
       async completePeriodGrain(input) {
@@ -604,6 +626,7 @@ export const reportPackageProjectionTask = schemaTask({
             p_absent_row_count: input.absentRowCount,
           },
         );
+        projectionCompletion.completedPackage = data;
         await wakeGrowthIntelligenceIfEnqueued(input.organizationId, payload.correlationId, data);
       },
       async fail(input) {
@@ -637,6 +660,28 @@ export const reportPackageProjectionTask = schemaTask({
     if (result.outcome === "failed") {
       throw new AbortTaskRunError(`report-package refused: ${payload.packageId}`);
     }
+    // The audit follows the figures. A clean projection starts the channel
+    // analysis for the package's own window, channel and branch, so the
+    // channel page has an answer without anyone pressing the button. The
+    // decision reads the captured completion above; anything disputed stays
+    // silent here and stays available on the workspace button.
+    const completion: ProjectionCompletionSummary = {
+      projectionOutcome: result.outcome,
+      packageStatus: projectionCompletion.completedPackage?.status,
+      channelId: projectionCompletion.completedPackage?.channel_id,
+      branchId: projectionCompletion.completedPackage?.branch_id,
+      windowStart: projectionCompletion.completedPackage?.declared_period_start,
+      windowEnd: projectionCompletion.completedPackage?.declared_period_end,
+      periodGrain: projectionCompletion.projectionGrain,
+    };
+    await dispatchAnalysisForCleanProjection(
+      {
+        organizationId: payload.organizationId,
+        correlationId: payload.correlationId,
+        completion,
+      },
+      { requestAnalysis: requestChannelAnalysis },
+    );
     return result;
   },
 });

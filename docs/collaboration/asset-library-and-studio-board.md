@@ -4204,3 +4204,43 @@ implementation plan is next.
   one new declare route under `report-packages/[packageId]/`,
   `src/components/integrations/report-package-upload.tsx` (failure panel only).
   Growth Intelligence files are not touched.
+
+### 2026-09-04 · opencode · Governed reuse Slice 1 landed (declare-a-label)
+
+- The drafted `20260903130000` migration passed review unchanged: propose-only,
+  same digest and idempotency shape as the hand-authored propose RPC, approval
+  still fenced by the existing decide RPC (which re-checks the contract
+  binding), grant to `authenticated` only.
+- `dry-run` showed exactly that one pending migration; pushed; new pgTAP suite
+  `governed_report_declare_categorical_value_test.sql` is 15/15 against staging,
+  covering happy path, all five refusals, idempotent replay, key conflict, and
+  cross-org invisibility. The suite run itself executed the new function for
+  real on every branch (first-call rule).
+- App slice: `database.types.ts` RPC entry (narrow), ports/service/repository
+  pass-through with operator-facing messages, POST
+  `report-projections/[projectionVersionId]/declarations` with server-derived
+  idempotency key, failure-detail parser with null-fallback, declare button in
+  the failure panel (read-only line for operators). Commits `67fd1d6` (DB) and
+  the app slice; `git push` remains the user's step.
+- Verified: 15/15 pgTAP; 357 tests across reports modules/domain/API routes;
+  170 across workflows/trigger/types (6 pre-existing skips); 85 integration
+  component tests; ESLint clean on all touched files; typecheck reports zero
+  errors in touched files (the remaining `snoozedUntil` errors are the
+  in-flight GI snooze slice's, untouched here).
+- NOT done: authenticated browser acceptance (desktop + emulated mobile). No
+  browser automation is available in this session, so per the plan's own rule
+  this is reported rather than claimed — needs a session with Chrome DevTools
+  before the slice is called done.
+
+### 2026-09-04 · opencode · Governed reuse Slices 2+3 (auto-analysis, channel intake)
+
+- Execution Plans for both slices approved by the user. Slice 1 is committed
+  (`67fd1d6` + app slice); browser verification waits until the whole goal is
+  implemented.
+- **Claiming (Slice 2):** `src/modules/reports/application/auto-analysis.ts`
+  (new) + test, `src/trigger/reports.ts` (projection task only),
+  `src/trigger/reports.test.ts`. No database, API, or UI files.
+- **Claiming (Slice 3):** `src/components/integrations/report-package-upload.tsx`
+  (additive fixed-channel prop only), `src/components/channels/channel-detail.tsx`
+  (additive tab), `src/app/(platform)/organizations/[organizationId]/channels/[channelId]/page.tsx`
+  (Reports panel), plus their tests. Growth Intelligence files are not touched.

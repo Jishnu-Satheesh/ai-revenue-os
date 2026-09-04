@@ -20,11 +20,27 @@ type LogContext = {
   channelId?: string;
   /** A recommendation the narrator produced. Opaque. */
   recommendationId?: string;
+  /** A synthesized intelligence item. Opaque. */
+  itemId?: string;
+  /** Which store a presentation preference names. Bounded vocabulary. */
+  sourceKind?: "synthesis_item" | "channel_recommendation" | "opportunity";
+  /** The preferred record. Opaque. */
+  sourceId?: string;
   /** Which answer a member gave. Bounded vocabulary, never their reason text. */
-  decisionKind?: "acknowledged" | "dismissed" | "planned";
+  decisionKind?:
+    | "acknowledged"
+    | "dismissed"
+    | "planned"
+    | "snoozed"
+    | "pinned"
+    | "unpinned"
+    | "resolved";
   runId?: string;
   /** A canonical YYYY-MM analysis selection. Opaque calendar label. */
   month?: string;
+  /** Inclusive local-date window bounds. Opaque calendar labels, like month. */
+  windowStart?: string;
+  windowEnd?: string;
   workerId?: string;
   durationMs?: number;
   errorCode?: string;
