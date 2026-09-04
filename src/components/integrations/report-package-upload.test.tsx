@@ -350,4 +350,180 @@ describe("ReportPackageUpload report type derivation", () => {
 
     expect(await screen.findByRole("textbox", { name: /^report type$/i })).toBeInTheDocument();
   });
+
+  it("disqualifies itself, falling back to free text, when the channel has ever carried more than one recognised family", async () => {
+    const OTHER_PACKAGE_ID = "aaaaaaaa-2222-4aaa-8aaa-aaaaaaaaaaaa";
+    const OTHER_CONTRACT_VERSION_ID = "bbbbbbbb-2222-4bbb-8bbb-bbbbbbbbbbbb";
+    const twoFamilySnapshot = recognisedSnapshot();
+    // A second, later upload for the same channel that turned out to be a
+    // *different* recognised family -- exactly the Keeta case the review
+    // named: several definitions can match the same channel over time. If
+    // the derivation blindly reused the first family's report type here, it
+    // would mislabel this and every later upload of the second family, with
+    // no way for an operator to correct a read-only field.
+    (twoFamilySnapshot.packages as unknown[]).push(
+      packageFixture({
+        id: OTHER_PACKAGE_ID,
+        report_type: "Delivery orders",
+        declared_period_start: "2026-02-01",
+        declared_period_end: "2026-02-28",
+      }),
+    );
+    (twoFamilySnapshot.contractVersions as unknown[]).push({
+      id: OTHER_CONTRACT_VERSION_ID,
+      organization_id: ORGANIZATION_ID,
+      report_package_id: OTHER_PACKAGE_ID,
+      provider_definition_key: "keeta.orders.detail",
+      version: 1,
+      schema_fingerprint: "1".repeat(64),
+      mapping_digest: "2".repeat(64),
+      mapping_document: null,
+    });
+    (twoFamilySnapshot.contractDecisions as unknown[]).push({
+      report_contract_version_id: OTHER_CONTRACT_VERSION_ID,
+      decision: "approved",
+    });
+    stubFetch(twoFamilySnapshot);
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+
+    expect(await screen.findByRole("textbox", { name: /^report type$/i })).toBeInTheDocument();
+    expect(screen.queryByText("Marketplace performance")).not.toBeInTheDocument();
+    expect(screen.queryByText("Delivery orders")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReportPackageUpload reached by an operator", () => {
+  const CHANNEL_ID = "cccccccc-9999-4ccc-8ccc-cccccccccccc";
+  const AWAITING_PACKAGE_ID = "dddddddd-9999-4ddd-8ddd-dddddddddddd";
+
+  function awaitingContractSnapshot() {
+    return {
+      packages: [
+        {
+          id: AWAITING_PACKAGE_ID,
+          organization_id: ORGANIZATION_ID,
+          channel_id: CHANNEL_ID,
+          branch_id: "88888888-8888-4888-8888-888888888888",
+          report_type: "Marketplace performance",
+          declared_period_start: "2026-03-01",
+          declared_period_end: "2026-03-31",
+          declared_currency: "AED",
+          period_timezone: "Asia/Dubai",
+          file_kind: "xlsx",
+          original_filename: "performance-march.xlsx",
+          declared_content_type:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          declared_content_length: 1_024,
+          storage_bucket_id: "governed-report-packages",
+          storage_path: `${ORGANIZATION_ID}/performance-march.xlsx`,
+          storage_object_id: "99999999-9999-4999-8999-999999999997",
+          storage_object_version: "1",
+          content_sha256: "1".repeat(64),
+          parser_version: 1,
+          fingerprint_version: 2,
+          schema_fingerprint: "2".repeat(64),
+          status: "awaiting_contract",
+          safe_failure_code: null,
+          safe_failure_at: null,
+          upload_expires_at: "2026-03-01T01:00:00.000Z",
+          uploaded_at: "2026-03-01T00:01:00.000Z",
+          profiled_at: "2026-03-01T00:02:00.000Z",
+          retained_until: "2027-03-01T00:00:00.000Z",
+          created_by: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          correlation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          created_at: "2026-03-01T00:00:00.000Z",
+          updated_at: "2026-03-01T00:03:00.000Z",
+        },
+      ],
+      sheetManifests: [],
+      contracts: [],
+      contractVersions: [],
+      contractDecisions: [],
+      contractBindings: [],
+      validationRuns: [],
+      validationSheetResults: [],
+      validationControlResults: [],
+      projectionVersions: [],
+      projectionDecisions: [],
+      projectionBindings: [],
+      projectionRuns: [],
+      reconciliationGroups: [],
+      channels: [{ id: CHANNEL_ID, display_name: "Noon", key: "noon", status: "active" }],
+      branches: [],
+    } as unknown as ReportPackageSnapshot;
+  }
+
+  function stubFetchWithRecognition(recognisedFamilies: unknown[]) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/recognised-families")) {
+          return new Response(JSON.stringify({ sheets: [], recognisedFamilies }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify(awaitingContractSnapshot()), { status: 200 });
+      }),
+    );
+  }
+
+  function renderAsOperator() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ReportPackageUpload organizationId={ORGANIZATION_ID} role="operator" timeZone="Asia/Dubai" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("lets an operator (report.upload, not report.contract_approve) select an upload and reach the admission screen's explanation for a recognised report", async () => {
+    stubFetchWithRecognition([
+      {
+        key: "noon.sales.period",
+        provider: "Noon",
+        reportType: "sales_period_summary",
+        summary: "Sales and successful orders for the whole reporting period, from Noon's sales export.",
+        reads: ["revenue.gross", "transactions.count"],
+        columns: ["sales", "successful_orders"],
+      },
+    ]);
+    renderAsOperator();
+
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: /which upload are you mapping/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: /marketplace performance · 2026-03-01/i }),
+    );
+
+    expect(
+      await screen.findByText(/an owner or admin needs to approve it once/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+    // Names the report even though the operator cannot act on it.
+    expect(screen.getByText(/Noon · sales period summary/)).toBeInTheDocument();
+  });
+
+  it("tells an operator an owner or admin still needs to map an unrecognised upload, rather than showing the guided form", async () => {
+    stubFetchWithRecognition([]);
+    renderAsOperator();
+
+    fireEvent.click(
+      await screen.findByRole("combobox", { name: /which upload are you mapping/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: /marketplace performance · 2026-03-01/i }),
+    );
+
+    expect(
+      await screen.findByText(/this upload still needs an owner or admin to say what its columns mean/i),
+    ).toBeInTheDocument();
+    // The guided mapping form (sheet/column questions) never renders for an
+    // operator -- proposing a mapping requires report.contract_approve too,
+    // so showing it here would just be refused on submit.
+    expect(screen.queryByText(/tell us what these columns mean/i)).not.toBeInTheDocument();
+  });
 });

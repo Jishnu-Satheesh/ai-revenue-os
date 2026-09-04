@@ -467,9 +467,9 @@ export function ReportPackageUpload({
     void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
 
   /**
-   * The report type this channel is already known to carry, if any upload of
-   * it has ever been recognised as a known library family and had its mapping
-   * approved.
+   * The report type this channel is already known to carry, if -- and only
+   * if -- every upload of it that was ever recognised as a known library
+   * family and approved agrees on both which family and which exact text.
    *
    * Recognition itself cannot run before this file is even uploaded -- it
    * reads a profile that does not exist until after the upload completes --
@@ -481,25 +481,40 @@ export function ReportPackageUpload({
    * again and risking "Performance report" one month and "Performance
    * Report" the next) is what keeps a channel's admission usable at all. See
    * ADR 0046: "a reuse key with a hand-typed component is not a key."
+   *
+   * A channel is not guaranteed to carry only one family -- Keeta's own
+   * exports can match several definitions -- and which family *this* upload
+   * turns out to be is not knowable before it is profiled. Picking the first
+   * approved family found would silently mislabel every later upload of a
+   * second family, and the field is read-only, so an operator could not even
+   * correct it: a narrower repeat of the exact defect this plan exists to
+   * close. So this disqualifies itself -- returns null, falling back to the
+   * free-text input -- the moment the channel's history is ambiguous either
+   * about which family (more than one distinct `provider_definition_key`) or
+   * about which spelling (more than one distinct `report_type` text within
+   * one family). Only a channel whose entire approved-library history agrees
+   * on one family and one spelling is confident enough to show read-only.
    */
   const recognisedReportTypeForChannel = useMemo(() => {
     if (!channelId) return null;
-    const approvedLibraryVersion = view.contractVersions.find((version) => {
-      if (!version.provider_definition_key) return false;
+    const approvedLibraryReportTypes = view.contractVersions.flatMap((version) => {
+      if (!version.provider_definition_key) return [];
       const owningPackage = view.packages.find(
         (candidate) => candidate.id === version.report_package_id,
       );
-      if (!owningPackage || owningPackage.channel_id !== channelId) return false;
-      return view.contractDecisions.some(
+      if (!owningPackage || owningPackage.channel_id !== channelId) return [];
+      const approved = view.contractDecisions.some(
         (decision) =>
           decision.report_contract_version_id === version.id && decision.decision === "approved",
       );
+      if (!approved) return [];
+      return [{ familyKey: version.provider_definition_key, reportType: owningPackage.report_type }];
     });
-    if (!approvedLibraryVersion) return null;
-    const owningPackage = view.packages.find(
-      (candidate) => candidate.id === approvedLibraryVersion.report_package_id,
-    );
-    return owningPackage?.report_type ?? null;
+    if (approvedLibraryReportTypes.length === 0) return null;
+    const distinctFamilies = new Set(approvedLibraryReportTypes.map((entry) => entry.familyKey));
+    const distinctReportTypes = new Set(approvedLibraryReportTypes.map((entry) => entry.reportType));
+    if (distinctFamilies.size > 1 || distinctReportTypes.size > 1) return null;
+    return approvedLibraryReportTypes[0].reportType;
   }, [channelId, view.contractVersions, view.packages, view.contractDecisions]);
 
   // What actually gets submitted: the derived value once the channel's report
