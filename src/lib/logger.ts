@@ -23,6 +23,8 @@ type LogContext = {
   /** Which answer a member gave. Bounded vocabulary, never their reason text. */
   decisionKind?: "acknowledged" | "dismissed" | "planned";
   runId?: string;
+  /** A canonical YYYY-MM analysis selection. Opaque calendar label. */
+  month?: string;
   workerId?: string;
   durationMs?: number;
   errorCode?: string;

@@ -48,8 +48,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { enumerateAnalysisMonths, formatAnalysisMonth } from "@/domain/analysis/calendar";
 import type { AnalysisGrain } from "@/domain/analysis/types";
-import type { ChannelEvidenceWindow } from "@/modules/analysis/application/ports";
 import type {
   ChannelWorkspaceView,
   WorkspaceChapterView,
@@ -84,15 +84,6 @@ export type WorkspaceChannel = {
   status: string;
 };
 
-/** The period length an operator reads, not the enum a detector binds. */
-const GRAIN_LABEL: Readonly<Record<AnalysisGrain, string>> = {
-  day: "daily",
-  week: "weekly",
-  month: "monthly",
-  // Not a length. This provider reported one figure for the whole window.
-  span: "whole period",
-};
-
 /** The plural unit a coverage count is spoken in, matching the analysed grain. */
 const GRAIN_UNIT: Readonly<Record<AnalysisGrain, string>> = {
   day: "days",
@@ -124,16 +115,21 @@ const FINDING_CHAPTER_IDS: ReadonlySet<string> = new Set([
   "retention",
 ]);
 
-/**
- * What one window choice is called.
- *
- * The dates are the ones the package declared and are shown exactly, never
- * rounded to a month name: "1 Jan – 28 Feb" and "January to February" are the
- * same span only by accident, and the analysis runs on the former.
- */
-function windowLabel(option: ChannelEvidenceWindow): string {
-  return `${option.windowStart} to ${option.windowEnd} · ${GRAIN_LABEL[option.grain]}`;
-}
+/** The twelve month names the Month control always shows, whatever the year. */
+const MONTH_OPTIONS = [
+  { value: "01", label: "January" },
+  { value: "02", label: "February" },
+  { value: "03", label: "March" },
+  { value: "04", label: "April" },
+  { value: "05", label: "May" },
+  { value: "06", label: "June" },
+  { value: "07", label: "July" },
+  { value: "08", label: "August" },
+  { value: "09", label: "September" },
+  { value: "10", label: "October" },
+  { value: "11", label: "November" },
+  { value: "12", label: "December" },
+] as const;
 
 /**
  * Short labels for the bars a chapter draws. Long headlines belong to the
@@ -476,24 +472,34 @@ function ChapterVisual({
 function VerdictBand({
   view,
   coverageChip,
-  selectedWindowId,
-  onSelectWindow,
-  evidenceWindows,
+  monthHorizon,
+  selectedMonth,
+  onSelectMonth,
+  timeZone,
   canRunAnalysis,
   pending,
   onRunAnalysis,
-  selectedWindow,
 }: {
   view: ChannelWorkspaceView;
   coverageChip: string | null;
-  selectedWindowId: string | null;
-  onSelectWindow: (packageId: string) => void;
-  evidenceWindows: readonly ChannelEvidenceWindow[];
+  monthHorizon: { firstMonth: string; lastMonth: string } | null;
+  selectedMonth: string | null;
+  onSelectMonth: (month: string) => void;
+  timeZone: string | null;
   canRunAnalysis: boolean;
   pending: boolean;
   onRunAnalysis: () => void;
-  selectedWindow: ChannelEvidenceWindow | null;
 }) {
+  const months = useMemo(
+    () => (monthHorizon ? enumerateAnalysisMonths(monthHorizon) : []),
+    [monthHorizon],
+  );
+  const years = useMemo(() => [...new Set(months.map((month) => month.slice(0, 4)))], [months]);
+  const selectedYear = selectedMonth?.slice(0, 4) ?? years[years.length - 1] ?? null;
+  const [year, setYear] = useState<string | null>(null);
+  const activeYear = year ?? selectedYear;
+  const selectable = (month: string) =>
+    monthHorizon !== null && month >= monthHorizon.firstMonth && month <= monthHorizon.lastMonth;
   return (
     <section
       aria-label="Marketplace audit verdict"
@@ -554,36 +560,69 @@ function VerdictBand({
           <PotentialLostEarnedScale figures={view.verdict.verdictFigures} />
 
           <div className="mt-auto flex flex-col gap-2">
-            {evidenceWindows.length > 0 ? (
+            {months.length > 0 && selectedMonth ? (
               <>
-                <Select value={selectedWindowId ?? undefined} onValueChange={onSelectWindow}>
-                  <SelectTrigger
-                    aria-label="Window to analyse"
-                    className="h-9 w-full rounded-full border-border bg-card pl-3.5 pr-3 text-xs font-semibold shadow-sm lg:w-auto lg:min-w-64"
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={activeYear ?? undefined}
+                    onValueChange={(next) => {
+                      setYear(next);
+                      const firstInYear = months.find((month) => month.slice(0, 4) === next);
+                      if (firstInYear && firstInYear !== selectedMonth) {
+                        onSelectMonth(firstInYear);
+                      }
+                    }}
                   >
-                    <CalendarRange aria-hidden="true" className="size-3.5 text-muted-foreground" />
-                    <SelectValue placeholder="Choose a window" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* The port delivers these newest-first; the offer keeps
-                        that order so the freshest declared window is the
-                        default choice, not buried. */}
-                    {evidenceWindows.map((option) => (
-                      <SelectItem key={option.packageId} value={option.packageId}>
-                        {windowLabel(option)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedWindow ? (
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    {selectedWindow.sourceFilename
-                      ? `From ${selectedWindow.sourceFilename}. `
-                      : null}
-                    The window an approved report declared, in {selectedWindow.timeZone}. Days the
-                    provider left blank are counted as absent, not as zero.
-                  </p>
-                ) : null}
+                    <SelectTrigger
+                      aria-label="Year to analyse"
+                      className="h-9 rounded-full border-border bg-card pl-3.5 pr-3 text-xs font-semibold shadow-sm"
+                    >
+                      <CalendarRange
+                        aria-hidden="true"
+                        className="size-3.5 text-muted-foreground"
+                      />
+                      <SelectValue placeholder="Year" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {years.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={selectedMonth} onValueChange={onSelectMonth}>
+                    <SelectTrigger
+                      aria-label="Month to analyse"
+                      className="h-9 rounded-full border-border bg-card pl-3.5 pr-3 text-xs font-semibold shadow-sm"
+                    >
+                      <SelectValue placeholder="Month" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* All twelve names stay visible so the control reads as
+                          a calendar; pairs outside the reported horizon are
+                          disabled rather than hidden. */}
+                      {MONTH_OPTIONS.map((option) => {
+                        const value = `${activeYear}-${option.value}`;
+                        return (
+                          <SelectItem
+                            key={option.value}
+                            value={value}
+                            disabled={!selectable(value)}
+                          >
+                            {option.label}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {formatAnalysisMonth(selectedMonth)}
+                  {timeZone ? `, in ${timeZone}` : null}. An approved report declared this month.
+                  Days the provider left blank are counted as absent, not as zero. A month with no
+                  governed evidence analyses as exactly that, not as zero.
+                </p>
                 {canRunAnalysis ? (
                   <Button
                     type="button"
@@ -600,8 +639,8 @@ function VerdictBand({
               // Not a disabled button. An operator staring at one cannot tell
               // whether the platform is busy, broken, or waiting on them.
               <p className="text-[11px] leading-snug text-muted-foreground">
-                There is no window to analyse yet. An approved report has to write governed evidence
-                for this channel before an analysis has anything to run over.
+                There is no reported month to analyse yet. An approved report has to declare a
+                period for this channel before an analysis has anything to run over.
               </p>
             )}
           </div>
@@ -1054,7 +1093,9 @@ export function ChannelWorkspace({
   organizationId,
   channel,
   view,
-  evidenceWindows,
+  monthHorizon,
+  selectedMonth,
+  timeZone,
   canRunAnalysis,
   channelsHref,
   economicsHref,
@@ -1063,27 +1104,33 @@ export function ChannelWorkspace({
   channel: WorkspaceChannel;
   view: ChannelWorkspaceView;
   /**
-   * The windows this channel holds governed evidence for, newest first. Offered
-   * instead of spans counted back from today, because evidence arrives as
-   * uploaded reports covering periods already past: "the last thirty days"
-   * reaches an imported January only by coincidence.
+   * The contiguous month horizon this channel's declared packages cover.
+   * Offered instead of spans counted back from today, because evidence
+   * arrives as uploaded reports covering periods already past: "the last
+   * thirty days" reaches an imported January only by coincidence.
    */
-  evidenceWindows: readonly ChannelEvidenceWindow[];
+  monthHorizon: { firstMonth: string; lastMonth: string } | null;
+  /** The canonical month the page URL selected. */
+  selectedMonth: string | null;
+  /** The organization's zone, for the caption under the picker. */
+  timeZone: string | null;
   canRunAnalysis: boolean;
   channelsHref: string;
   economicsHref: string;
 }) {
   const router = useRouter();
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
-  const [selectedWindowId, setSelectedWindowId] = useState<string | null>(
-    evidenceWindows[0]?.packageId ?? null,
-  );
-  const selectedWindow =
-    evidenceWindows.find((option) => option.packageId === selectedWindowId) ??
-    evidenceWindows[0] ??
-    null;
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+
+  // Month navigation is a history change, never a relabel: the evidence
+  // periods under every figure stay exactly what the run recorded.
+  const selectMonth = useCallback(
+    (month: string) => {
+      router.push(`?month=${month}`);
+    },
+    [router],
+  );
 
   const allFindings = useMemo<WorkspaceFindingView[]>(
     () => [...view.chapters.flatMap((chapter) => chapter.findings), ...view.unplacedFindings],
@@ -1168,19 +1215,19 @@ export function ChannelWorkspace({
     : view.verdict.badges[2];
 
   async function runAnalysis() {
-    if (!selectedWindow) return;
+    if (!selectedMonth) return;
     setPending(true);
     setMessage(null);
-    const { windowStart, windowEnd, grain, branchId } = selectedWindow;
     try {
       const response = await fetch(
         `/api/organizations/${organizationId}/channels/${channel.id}/analysis`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          // The branch the evidence was written for, so the analysis asks about
-          // the same rows the package produced rather than every branch at once.
-          body: JSON.stringify({ windowStart, windowEnd, periodGrain: grain, branchId }),
+          // The month alone. The server resolves the window, the zone, and
+          // the grain from the channel's declared packages, so no caller
+          // date, grain, or branch can bypass the resolver.
+          body: JSON.stringify({ month: selectedMonth }),
         },
       );
       if (!response.ok) {
@@ -1196,7 +1243,7 @@ export function ChannelWorkspace({
       setMessage({
         tone: "info",
         // Honest about the shape of the work: the run is queued, not finished.
-        text: `Analysis started for ${formatWindow(windowStart, windowEnd)}. It runs in the background; refresh in a moment to see the result.`,
+        text: `Analysis started for ${formatAnalysisMonth(selectedMonth)}. It runs in the background; refresh in a moment to see the result.`,
       });
       router.refresh();
     } catch {
@@ -1232,10 +1279,10 @@ export function ChannelWorkspace({
       <VerdictBand
         view={view}
         coverageChip={coverageChip}
-        evidenceWindows={evidenceWindows}
-        selectedWindow={selectedWindow}
-        selectedWindowId={selectedWindow?.packageId ?? null}
-        onSelectWindow={setSelectedWindowId}
+        monthHorizon={monthHorizon}
+        selectedMonth={selectedMonth}
+        onSelectMonth={selectMonth}
+        timeZone={timeZone}
         canRunAnalysis={canRunAnalysis}
         pending={pending}
         onRunAnalysis={runAnalysis}
@@ -1248,8 +1295,8 @@ export function ChannelWorkspace({
         </Alert>
       ) : null}
 
-      {/* What is on screen, stated exactly. A window label that rounded to a
-          month name would be a claim the evidence does not make. */}
+      {/* What is on screen, stated exactly. The month names the question;
+          the run below names the evidence window it actually analysed. */}
       <div
         aria-label="Run status"
         className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-xs"

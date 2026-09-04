@@ -8,7 +8,6 @@ import { ChannelWorkspace } from "@/components/analysis/channel-workspace";
 import { buildChannelWorkspaceView } from "@/modules/analysis/application/read-model";
 import type {
   ChannelAnalysisRunRecord,
-  ChannelEvidenceWindow,
   ChannelFindingEvidenceRecord,
   ChannelFindingRecord,
 } from "@/modules/analysis/application/ports";
@@ -100,24 +99,15 @@ function metricEvidence(
   } as ChannelFindingEvidenceRecord;
 }
 
-const EVIDENCE_WINDOW: ChannelEvidenceWindow = {
-  packageId: "package-1",
-  channelId: CHANNEL.id,
-  branchId: "branch-1",
-  windowStart: "2026-01-01",
-  windowEnd: "2026-01-31",
-  timeZone: "Asia/Dubai",
-  grain: "day",
-  governedRowCount: 28,
-  sourceFilename: "Talabat-Jan-2026.xlsx",
-};
+const MONTH_HORIZON = { firstMonth: "2025-12", lastMonth: "2026-02" };
 
 function renderWorkspace(input: {
   runs?: ChannelAnalysisRunRecord[];
   findings?: ChannelFindingRecord[];
   evidence?: ChannelFindingEvidenceRecord[];
   canRunAnalysis?: boolean;
-  evidenceWindows?: ChannelEvidenceWindow[];
+  monthHorizon?: { firstMonth: string; lastMonth: string } | null;
+  selectedMonth?: string | null;
   recommendations?: import("@/modules/analysis/application/ports").ChannelRecommendationRecord[];
 }) {
   const view = buildChannelWorkspaceView({
@@ -131,7 +121,9 @@ function renderWorkspace(input: {
       organizationId="org-1"
       channel={CHANNEL}
       view={view}
-      evidenceWindows={input.evidenceWindows ?? [EVIDENCE_WINDOW]}
+      monthHorizon={input.monthHorizon === undefined ? MONTH_HORIZON : input.monthHorizon}
+      selectedMonth={input.selectedMonth === undefined ? "2026-01" : input.selectedMonth}
+      timeZone="Asia/Dubai"
       canRunAnalysis={input.canRunAnalysis ?? true}
       channelsHref="/organizations/org-1/channels"
       economicsHref="/organizations/org-1/economics"
@@ -139,11 +131,11 @@ function renderWorkspace(input: {
   );
 }
 
-/** Opens the pill-style window select, whose options live in a Radix portal. */
-async function openWindowPicker() {
+/** Opens a pill-style select, whose options live in a Radix portal. */
+async function openPicker(label: string) {
   // Radix opens the listbox from pointerdown only when the event looks like a
   // primary click, which jsdom's synthetic event does not do on its own.
-  fireEvent.pointerDown(screen.getByLabelText("Window to analyse"), {
+  fireEvent.pointerDown(screen.getByLabelText(label), {
     button: 0,
     ctrlKey: false,
     pointerType: "mouse",
@@ -768,41 +760,71 @@ describe("ChannelWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Run analysis" })).toBeNull();
   });
 
-  it("offers the declared windows newest-first inside the pill control", async () => {
-    renderWorkspace({
-      evidenceWindows: [
-        EVIDENCE_WINDOW,
-        {
-          ...EVIDENCE_WINDOW,
-          packageId: "package-2",
-          windowStart: "2025-12-01",
-          windowEnd: "2025-12-31",
-        },
-      ],
-    });
+  it("offers twelve month names with out-of-horizon pairs disabled", async () => {
+    renderWorkspace({});
 
-    const options = await openWindowPicker();
+    const options = await openPicker("Month to analyse");
     expect(options.map((option) => option.textContent)).toEqual([
-      "2026-01-01 to 2026-01-31 · daily",
-      "2025-12-01 to 2025-12-31 · daily",
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ]);
+    // The horizon runs December 2025 to February 2026; within 2026 only
+    // January and February are selectable.
+    const disabled = options
+      .filter((option) => option.getAttribute("aria-disabled") === "true")
+      .map((option) => option.textContent);
+    expect(disabled).toEqual([
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ]);
   });
 
-  it("names the grain the evidence was written at, so a run cannot ask for another", async () => {
-    renderWorkspace({
-      evidenceWindows: [{ ...EVIDENCE_WINDOW, grain: "month" }],
-    });
+  it("offers only the years the reported horizon covers", async () => {
+    renderWorkspace({});
 
-    const options = await openWindowPicker();
-    expect(options.some((option) => /· monthly$/.test(option.textContent ?? ""))).toBe(true);
+    const options = await openPicker("Year to analyse");
+    expect(options.map((option) => option.textContent)).toEqual(["2025", "2026"]);
   });
 
-  it("says there is no window to analyse rather than offering a dead control", () => {
-    renderWorkspace({ evidenceWindows: [] });
+  it("starts the run for the selected month and nothing else", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ analysisRunId: "run-9" }), { status: 202 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderWorkspace({ selectedMonth: "2026-02" });
 
-    expect(screen.getByText(/no window to analyse yet/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(JSON.parse(init?.body as string)).toEqual({ month: "2026-02" });
+    vi.unstubAllGlobals();
+  });
+
+  it("says there is no reported month rather than offering a dead control", () => {
+    renderWorkspace({ monthHorizon: null, selectedMonth: null });
+
+    expect(screen.getByText(/no reported month to analyse yet/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Run analysis" })).toBeNull();
-    expect(screen.queryByLabelText("Window to analyse")).toBeNull();
+    expect(screen.queryByLabelText("Month to analyse")).toBeNull();
   });
 
   it("does not imply a provider connection from a channel", () => {

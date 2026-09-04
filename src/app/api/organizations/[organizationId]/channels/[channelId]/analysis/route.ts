@@ -6,16 +6,18 @@ import { apiErrorResponse, getOrganizationContext } from "@/lib/api/organization
 import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { requestChannelAnalysis } from "@/modules/analysis/application/dispatch";
+import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { assertGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
 import type { OrganizationRole } from "@/domain/organizations/types";
 
 /**
- * Start a deterministic analysis of one channel over a declared window.
+ * Start a deterministic analysis of one channel for one calendar month.
  *
- * The window is supplied, never inferred. A window derived from whatever
- * evidence happens to exist can never report a gap at its own edges: three days
- * of January would look like a complete three-day window rather than a January
- * missing twenty-eight days.
+ * The month is selected, never inferred and never accompanied by caller
+ * dates: the server resolves the window, the zone, and the grain from the
+ * channel's declared packages, and the worker re-resolves the evidence and
+ * cache key under its lease before using a prior result. A month the reports
+ * do not declare is refused here, before any work starts.
  *
  * This route starts work; it does not decide anything. The claim RPC re-resolves
  * the channel, the branch timezone, and the metric vocabulary, and refuses a
@@ -27,21 +29,11 @@ const paramsSchema = z.object({
   channelId: z.string().uuid(),
 });
 
-const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date.");
-
 const bodySchema = z
   .object({
-    windowStart: localDate,
-    windowEnd: localDate,
-    periodGrain: z.enum(["day", "week", "month", "span"]),
-    /** Optional: absent analyses every branch this channel trades through. */
-    branchId: z.string().uuid().nullable().default(null),
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Use a YYYY-MM month."),
   })
-  .strict()
-  .refine((body) => body.windowEnd >= body.windowStart, {
-    message: "The window must end on or after it starts.",
-    path: ["windowEnd"],
-  });
+  .strict();
 
 export async function POST(
   request: Request,
@@ -69,14 +61,32 @@ export async function POST(
     }
 
     const body = bodySchema.parse(await request.json().catch(() => ({})));
+    // Monthly selection is channel-wide: the picker names no branch, so the
+    // run analyses every branch this channel trades through.
+    const resolved = await createAuthenticatedChannelAnalysisRepository(
+      context.supabase,
+    ).resolveMonthInput({
+      organizationId: routeParams.organizationId,
+      channelId: routeParams.channelId,
+      month: body.month,
+    });
+    if (resolved === null) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "That month is outside this channel's reported timeline. Pick a month your approved reports declare.",
+      );
+    }
+
     const analysisRunId = crypto.randomUUID();
     const dispatched = await requestChannelAnalysis({
       organizationId: routeParams.organizationId,
       channelId: routeParams.channelId,
-      branchId: body.branchId,
-      windowStart: body.windowStart,
-      windowEnd: body.windowEnd,
-      periodGrain: body.periodGrain,
+      branchId: null,
+      windowStart: resolved.windowStart,
+      windowEnd: resolved.windowEnd,
+      periodGrain: resolved.grain,
+      month: body.month,
+      windowTimezone: resolved.timeZone,
       analysisRunId,
       correlationId,
     });
@@ -93,6 +103,7 @@ export async function POST(
     logger.info("channel_analysis.requested", {
       organizationId: routeParams.organizationId,
       channelId: routeParams.channelId,
+      month: body.month,
       runId: analysisRunId,
       correlationId,
     });
