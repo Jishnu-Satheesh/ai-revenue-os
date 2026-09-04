@@ -241,3 +241,113 @@ describe("ReportPackageUpload reconciliation actions", () => {
     expect(document.body).not.toHaveTextContent("records checked");
   });
 });
+
+describe("ReportPackageUpload report type derivation", () => {
+  const CHANNEL_ID = "99999999-9999-4999-8999-999999999999";
+  const RECOGNISED_PACKAGE_ID = "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa";
+  const RECOGNISED_CONTRACT_VERSION_ID = "bbbbbbbb-1111-4bbb-8bbb-bbbbbbbbbbbb";
+
+  function packageFixture(overrides: Record<string, unknown> = {}) {
+    return {
+      id: RECOGNISED_PACKAGE_ID,
+      organization_id: ORGANIZATION_ID,
+      channel_id: CHANNEL_ID,
+      branch_id: "88888888-8888-4888-8888-888888888888",
+      report_type: "Marketplace performance",
+      declared_period_start: "2026-01-01",
+      declared_period_end: "2026-01-31",
+      declared_currency: "AED",
+      period_timezone: "Asia/Dubai",
+      file_kind: "xlsx",
+      original_filename: "performance.xlsx",
+      declared_content_type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      declared_content_length: 1_024,
+      storage_bucket_id: "governed-report-packages",
+      storage_path: `${ORGANIZATION_ID}/performance.xlsx`,
+      storage_object_id: "99999999-9999-4999-8999-999999999998",
+      storage_object_version: "1",
+      content_sha256: "e".repeat(64),
+      parser_version: 1,
+      fingerprint_version: 2,
+      schema_fingerprint: "f".repeat(64),
+      status: "projected",
+      safe_failure_code: null,
+      safe_failure_at: null,
+      upload_expires_at: "2026-01-01T01:00:00.000Z",
+      uploaded_at: "2026-01-01T00:01:00.000Z",
+      profiled_at: "2026-01-01T00:02:00.000Z",
+      retained_until: "2027-01-01T00:00:00.000Z",
+      created_by: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      correlation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:03:00.000Z",
+      ...overrides,
+    };
+  }
+
+  function recognisedSnapshot(overrides: { decision?: "approved" | "rejected" } = {}) {
+    return {
+      packages: [packageFixture()],
+      sheetManifests: [],
+      contracts: [],
+      contractVersions: [
+        {
+          id: RECOGNISED_CONTRACT_VERSION_ID,
+          organization_id: ORGANIZATION_ID,
+          report_package_id: RECOGNISED_PACKAGE_ID,
+          provider_definition_key: "talabat.performance.daily",
+          version: 1,
+          schema_fingerprint: "c".repeat(64),
+          mapping_digest: "d".repeat(64),
+          mapping_document: null,
+        },
+      ],
+      contractDecisions: [
+        {
+          report_contract_version_id: RECOGNISED_CONTRACT_VERSION_ID,
+          decision: overrides.decision ?? "approved",
+        },
+      ],
+      contractBindings: [],
+      validationRuns: [],
+      validationSheetResults: [],
+      validationControlResults: [],
+      projectionVersions: [],
+      projectionDecisions: [],
+      projectionBindings: [],
+      projectionRuns: [],
+      reconciliationGroups: [],
+      channels: [{ id: CHANNEL_ID, display_name: "Talabat", key: "talabat", status: "active" }],
+      branches: [],
+    } as unknown as ReportPackageSnapshot;
+  }
+
+  function stubFetch(body: ReportPackageSnapshot) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    );
+  }
+
+  it("replaces the free-text field with the channel's already-known report type", async () => {
+    stubFetch(recognisedSnapshot());
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+
+    expect(await screen.findByText("Marketplace performance")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /^report type$/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the free-text field when the channel has no approved library mapping", async () => {
+    stubFetch(recognisedSnapshot({ decision: "rejected" }));
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+
+    expect(await screen.findByRole("textbox", { name: /^report type$/i })).toBeInTheDocument();
+  });
+});

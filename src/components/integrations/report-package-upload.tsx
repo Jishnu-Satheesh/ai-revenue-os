@@ -26,7 +26,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { ReportIntakeMapping } from "@/components/integrations/report-intake-mapping";
+import { ReportAdmissionApproval } from "@/components/integrations/report-admission-approval";
+import { ReportIntakeMapping, type RecognisedFamily } from "@/components/integrations/report-intake-mapping";
 import { summarizeReportProjection } from "@/domain/reports/projection-copy";
 import {
   Select,
@@ -367,6 +368,73 @@ function safeValidationCodes(value: unknown): string[] {
     : [];
 }
 
+type ReportFamilyRecognition = { sheets: unknown[]; recognisedFamilies: RecognisedFamily[] };
+
+/**
+ * Which of the two mapping experiences a selected upload gets.
+ *
+ * Exactly one recognised family collapses the old propose-then-approve pair
+ * into the single standing-admission screen from ADR 0046. Zero families, or
+ * more than one -- Keeta's exports all share a sheet name and differ only in
+ * their columns, so several can match -- falls back to the guided flow,
+ * which already lets an approver choose among candidates rather than this
+ * step guessing on their behalf.
+ *
+ * An operator reaches this too: they hold `report.upload` and `report.retry`
+ * but not `report.contract_approve`, so they can select an upload and see
+ * what it needs, even though only the admission screen (not the guided form,
+ * which would just be refused on submit) tells them anything useful to look
+ * at while they wait for an owner or admin.
+ */
+function ReportContractStep({
+  organizationId,
+  packageId,
+  canApprove,
+  onDone,
+}: Readonly<{
+  organizationId: string;
+  packageId: string;
+  canApprove: boolean;
+  onDone: () => void;
+}>) {
+  const recognition = useQuery({
+    queryKey: ["report-recognised-families", organizationId, packageId],
+    queryFn: () =>
+      requestJson<ReportFamilyRecognition>(
+        `${reportPackagesPath(organizationId)}/${packageId}/recognised-families`,
+      ),
+  });
+
+  if (recognition.isPending) {
+    return <p className="text-sm text-muted-foreground">Reading the file&rsquo;s structure…</p>;
+  }
+
+  const families = recognition.isError ? [] : (recognition.data?.recognisedFamilies ?? []);
+
+  if (families.length === 1) {
+    return (
+      <ReportAdmissionApproval
+        organizationId={organizationId}
+        packageId={packageId}
+        family={families[0]}
+        canApprove={canApprove}
+        onAdmitted={onDone}
+      />
+    );
+  }
+
+  if (!canApprove) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        This upload still needs an owner or admin to say what its columns mean. Nothing is read
+        until they do.
+      </p>
+    );
+  }
+
+  return <ReportIntakeMapping organizationId={organizationId} packageId={packageId} onProposed={onDone} />;
+}
+
 export function ReportPackageUpload({
   organizationId,
   role,
@@ -397,6 +465,49 @@ export function ReportPackageUpload({
   const activeBranches = view.branches;
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
+
+  /**
+   * The report type this channel is already known to carry, if any upload of
+   * it has ever been recognised as a known library family and had its mapping
+   * approved.
+   *
+   * Recognition itself cannot run before this file is even uploaded -- it
+   * reads a profile that does not exist until after the upload completes --
+   * so this does not repeat that check. It reuses its outcome: the exact,
+   * immutable `report_type` text a prior approved upload for this channel
+   * recorded. That text, not the library's own name for the family, is what
+   * `grant_governed_report_structure_admission`'s binding match compares
+   * every later upload against, so reusing it verbatim (rather than typing it
+   * again and risking "Performance report" one month and "Performance
+   * Report" the next) is what keeps a channel's admission usable at all. See
+   * ADR 0046: "a reuse key with a hand-typed component is not a key."
+   */
+  const recognisedReportTypeForChannel = useMemo(() => {
+    if (!channelId) return null;
+    const approvedLibraryVersion = view.contractVersions.find((version) => {
+      if (!version.provider_definition_key) return false;
+      const owningPackage = view.packages.find(
+        (candidate) => candidate.id === version.report_package_id,
+      );
+      if (!owningPackage || owningPackage.channel_id !== channelId) return false;
+      return view.contractDecisions.some(
+        (decision) =>
+          decision.report_contract_version_id === version.id && decision.decision === "approved",
+      );
+    });
+    if (!approvedLibraryVersion) return null;
+    const owningPackage = view.packages.find(
+      (candidate) => candidate.id === approvedLibraryVersion.report_package_id,
+    );
+    return owningPackage?.report_type ?? null;
+  }, [channelId, view.contractVersions, view.packages, view.contractDecisions]);
+
+  // What actually gets submitted: the derived value once the channel's report
+  // type is known, the hand-typed one otherwise. Computed at render rather
+  // than synced into state, so there is no moment where the free-text field's
+  // last-typed value and the derived one could disagree about what a submit
+  // sends.
+  const effectiveReportType = recognisedReportTypeForChannel ?? reportType;
 
   const selectedProjectionContract = view.contractVersions.find(
     (version) => version.id === projectionContractVersionId,
@@ -446,7 +557,7 @@ export function ReportPackageUpload({
           body: JSON.stringify({
             channelId,
             branchId,
-            reportType,
+            reportType: effectiveReportType,
             periodStart,
             periodEnd,
             currency,
@@ -763,14 +874,29 @@ export function ReportPackageUpload({
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-type">Report type</Label>
-              <Input
-                id="report-type"
-                value={reportType}
-                onChange={(event) => setReportType(event.target.value)}
-                maxLength={120}
-                placeholder="e.g. Marketplace settlement"
-                required
-              />
+              {recognisedReportTypeForChannel ? (
+                <>
+                  <p
+                    id="report-type"
+                    className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium"
+                  >
+                    {recognisedReportTypeForChannel}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    This channel already reads a known report. Every upload of it is filed under
+                    the same type automatically.
+                  </p>
+                </>
+              ) : (
+                <Input
+                  id="report-type"
+                  value={reportType}
+                  onChange={(event) => setReportType(event.target.value)}
+                  maxLength={120}
+                  placeholder="e.g. Marketplace settlement"
+                  required
+                />
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-currency">Declared currency</Label>
@@ -1164,7 +1290,7 @@ export function ReportPackageUpload({
           ) : (
             <p className="text-sm text-muted-foreground">Nothing has been mapped yet.</p>
           )}
-          {canApproveContract ? (
+          {canApproveContract || canUpload ? (
             <div className="space-y-3 rounded-lg border border-dashed p-4">
               <div className="space-y-2">
                 <Label htmlFor="report-contract-package">Which upload are you mapping?</Label>
@@ -1184,11 +1310,12 @@ export function ReportPackageUpload({
                 </Select>
               </div>
               {proposalPackageId ? (
-                <ReportIntakeMapping
+                <ReportContractStep
                   key={proposalPackageId}
                   organizationId={organizationId}
                   packageId={proposalPackageId}
-                  onProposed={() => {
+                  canApprove={canApproveContract}
+                  onDone={() => {
                     setProposalPackageId("");
                     invalidate();
                   }}
