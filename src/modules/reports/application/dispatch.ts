@@ -3,8 +3,16 @@ import "server-only";
 import { tasks } from "@trigger.dev/sdk";
 
 import { logger } from "@/lib/logger";
-import type { reportPackageProfilingTask, reportPackageProjectionTask, reportPackageValidationTask } from "@/trigger/reports";
-import { isGovernedReportProjectionEnabled, isGovernedReportValidationEnabled } from "@/modules/integrations/application/feature-access";
+import type { dispatchDueWorkTask } from "@/trigger/growth-intelligence";
+import type {
+  reportPackageProfilingTask,
+  reportPackageProjectionTask,
+  reportPackageValidationTask,
+} from "@/trigger/reports";
+import {
+  isGovernedReportProjectionEnabled,
+  isGovernedReportValidationEnabled,
+} from "@/modules/integrations/application/feature-access";
 
 /** Trigger only orchestrates; the database owns package state. */
 export async function requestReportPackageProfiling(input: {
@@ -103,14 +111,26 @@ export async function requestReportPackageProjection(input: {
   // Keyed on the run, for the reason `requestReportPackageValidation` gives.
   const idempotencyKey = `report-projection:${projectionRunId}`;
   try {
-    await tasks.trigger<typeof reportPackageProjectionTask>("report-package.project", {
-      organizationId: input.organizationId, packageId: input.packageId,
-      contractVersionId: input.contractVersionId, projectionVersionId: input.projectionVersionId,
-      projectionRunId, correlationId: input.correlationId, idempotencyKey,
-    }, { idempotencyKey });
+    await tasks.trigger<typeof reportPackageProjectionTask>(
+      "report-package.project",
+      {
+        organizationId: input.organizationId,
+        packageId: input.packageId,
+        contractVersionId: input.contractVersionId,
+        projectionVersionId: input.projectionVersionId,
+        projectionRunId,
+        correlationId: input.correlationId,
+        idempotencyKey,
+      },
+      { idempotencyKey },
+    );
     return true;
   } catch (error) {
-    logger.warn("report_package.projection_dispatch_failed", { organizationId: input.organizationId, correlationId: input.correlationId, errorCode: error instanceof Error ? error.name : "unknown" });
+    logger.warn("report_package.projection_dispatch_failed", {
+      organizationId: input.organizationId,
+      correlationId: input.correlationId,
+      errorCode: error instanceof Error ? error.name : "unknown",
+    });
     return false;
   }
 }
@@ -186,4 +206,45 @@ export async function continueAdmittedReportPackage(
     correlationId: input.correlationId,
   });
   return "admitted";
+}
+
+/**
+ * Whether a completion document woke Growth Intelligence work: the RPCs merge
+ * a non-empty `growthIntelligenceRequests` list only when evidence became
+ * current. Anything else enqueued nothing, so the sweeper gets no nudge.
+ */
+export function hasEnqueuedGrowthIntelligenceRequests(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    Array.isArray((data as { growthIntelligenceRequests?: unknown }).growthIntelligenceRequests) &&
+    (data as { growthIntelligenceRequests: unknown[] }).growthIntelligenceRequests.length > 0
+  );
+}
+
+/**
+ * Nudge the Growth Intelligence sweeper after report-current evidence lands.
+ *
+ * Latency optimization only: the requests the database just wrote are durable
+ * and due, so a lost nudge only delays the wake-up. A nudge that fails must
+ * never fail the report run that already counted, which is why this returns
+ * nothing and logs a warning instead of throwing.
+ */
+export async function wakeGrowthIntelligenceDispatch(input: {
+  organizationId: string;
+  correlationId: string;
+}): Promise<void> {
+  try {
+    await tasks.trigger<typeof dispatchDueWorkTask>(
+      "growth-intelligence.dispatch-due",
+      { correlationId: input.correlationId },
+      { idempotencyKey: `growth-intelligence:wake:${input.correlationId}` },
+    );
+  } catch (error) {
+    logger.warn("growth_intelligence.wake_dispatch_failed", {
+      organizationId: input.organizationId,
+      correlationId: input.correlationId,
+      errorCode: error instanceof Error ? error.name : "unknown",
+    });
+  }
 }

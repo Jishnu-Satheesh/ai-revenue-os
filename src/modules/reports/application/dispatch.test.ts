@@ -11,6 +11,7 @@ vi.mock("@/modules/integrations/application/feature-access", () => ({
 
 import {
   continueAdmittedReportPackage,
+  hasEnqueuedGrowthIntelligenceRequests,
   requestReportPackageProfiling,
   requestReportPackageProjection,
   requestReportPackageValidation,
@@ -71,12 +72,20 @@ describe("dispatching a projection", () => {
     // The key still does its job: the same run dispatched twice is one run.
     const projectionRunId = "00000000-0000-4000-8000-00000000000a";
     await requestReportPackageProjection({
-      organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
-      projectionVersionId: PROJECTION, correlationId: "c1", projectionRunId,
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      contractVersionId: CONTRACT,
+      projectionVersionId: PROJECTION,
+      correlationId: "c1",
+      projectionRunId,
     });
     await requestReportPackageProjection({
-      organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
-      projectionVersionId: PROJECTION, correlationId: "c2", projectionRunId,
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      contractVersionId: CONTRACT,
+      projectionVersionId: PROJECTION,
+      correlationId: "c2",
+      projectionRunId,
     });
 
     expect(keyOf(0)).toBe(keyOf(1));
@@ -86,8 +95,11 @@ describe("dispatching a projection", () => {
     // The worker passes this string to the claim as its idempotency key, so the
     // two must not drift apart.
     await requestReportPackageProjection({
-      organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
-      projectionVersionId: PROJECTION, correlationId: "c1",
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      contractVersionId: CONTRACT,
+      projectionVersionId: PROJECTION,
+      correlationId: "c1",
     });
 
     expect(payloadKeyOf(0)).toBe(keyOf(0));
@@ -100,11 +112,15 @@ describe("dispatching a projection", () => {
 describe("dispatching a validation", () => {
   it("gives each attempt its own key, so a retry is not dropped as a duplicate", async () => {
     await requestReportPackageValidation({
-      organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      contractVersionId: CONTRACT,
       correlationId: "c1",
     });
     await requestReportPackageValidation({
-      organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      contractVersionId: CONTRACT,
       correlationId: "c2",
     });
 
@@ -117,12 +133,18 @@ describe("dispatching a validation", () => {
   it("de-duplicates a redelivery of the same attempt", async () => {
     const validationRunId = "00000000-0000-4000-8000-00000000000b";
     await requestReportPackageValidation({
-      organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
-      correlationId: "c1", validationRunId,
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      contractVersionId: CONTRACT,
+      correlationId: "c1",
+      validationRunId,
     });
     await requestReportPackageValidation({
-      organizationId: ORGANIZATION, packageId: PACKAGE, contractVersionId: CONTRACT,
-      correlationId: "c2", validationRunId,
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      contractVersionId: CONTRACT,
+      correlationId: "c2",
+      validationRunId,
     });
 
     expect(keyOf(0)).toBe(keyOf(1));
@@ -136,14 +158,20 @@ describe("dispatching profiling", () => {
     // worker presents has to stay the package's key; what Trigger
     // de-duplicates on has to change, or the retry is dropped.
     await requestReportPackageProfiling({
-      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c1",
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      correlationId: "c1",
     });
     await requestReportPackageProfiling({
-      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c2",
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      correlationId: "c2",
       attemptKey: "report-retry:00000000-0000-4000-8000-00000000000c",
     });
     await requestReportPackageProfiling({
-      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c3",
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      correlationId: "c3",
       attemptKey: "report-retry:00000000-0000-4000-8000-00000000000d",
     });
 
@@ -157,10 +185,14 @@ describe("dispatching profiling", () => {
     // No attempt key means the first profiling of a package, which must not
     // run twice because the upload was completed twice.
     await requestReportPackageProfiling({
-      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c1",
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      correlationId: "c1",
     });
     await requestReportPackageProfiling({
-      organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: "c2",
+      organizationId: ORGANIZATION,
+      packageId: PACKAGE,
+      correlationId: "c2",
     });
 
     expect(keyOf(0)).toBe(keyOf(1));
@@ -219,6 +251,45 @@ describe("continuing a package once it is admitted", () => {
     expect(outcome).toBe("admitted");
   });
 
+  it("nudges the Growth Intelligence sweeper without letting a lost nudge fail anything", async () => {
+    const { wakeGrowthIntelligenceDispatch } = await import(
+      "@/modules/reports/application/dispatch"
+    );
+
+    await wakeGrowthIntelligenceDispatch({
+      organizationId: ORGANIZATION,
+      correlationId: CORRELATION,
+    });
+
+    expect(trigger).toHaveBeenCalledWith(
+      "growth-intelligence.dispatch-due",
+      { correlationId: CORRELATION },
+      { idempotencyKey: `growth-intelligence:wake:${CORRELATION}` },
+    );
+  });
+
+  it("logs a lost Growth Intelligence nudge instead of throwing it", async () => {
+    const { wakeGrowthIntelligenceDispatch } = await import(
+      "@/modules/reports/application/dispatch"
+    );
+    trigger.mockRejectedValueOnce(new Error("transport down"));
+
+    await expect(
+      wakeGrowthIntelligenceDispatch({ organizationId: ORGANIZATION, correlationId: CORRELATION }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("recognises a completion document that woke Growth Intelligence work", () => {
+    expect(
+      hasEnqueuedGrowthIntelligenceRequests({
+        growthIntelligenceRequests: [{ requestId: "request-1", month: "2026-02", replayed: false }],
+      }),
+    ).toBe(true);
+    expect(hasEnqueuedGrowthIntelligenceRequests({ growthIntelligenceRequests: [] })).toBe(false);
+    expect(hasEnqueuedGrowthIntelligenceRequests({ outcome: "resolved" })).toBe(false);
+    expect(hasEnqueuedGrowthIntelligenceRequests(null)).toBe(false);
+  });
+
   it("calls link A with the organization, package and correlation id, not by anything else", async () => {
     const seen: Array<{ organizationId: string; packageId: string; correlationId: string }> = [];
     await continueAdmittedReportPackage(
@@ -231,6 +302,8 @@ describe("continuing a package once it is admitted", () => {
         requestValidation: async () => true,
       },
     );
-    expect(seen).toEqual([{ organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION }]);
+    expect(seen).toEqual([
+      { organizationId: ORGANIZATION, packageId: PACKAGE, correlationId: CORRELATION },
+    ]);
   });
 });

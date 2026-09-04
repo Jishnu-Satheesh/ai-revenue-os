@@ -1,14 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AbortTaskRunError, logger, schemaTask } from "@trigger.dev/sdk";
 
-import { reportProjectionTaskSchema, reportProfilingTaskSchema, reportValidationTaskSchema } from "@/domain/reports/schemas";
+import {
+  reportProjectionTaskSchema,
+  reportProfilingTaskSchema,
+  reportValidationTaskSchema,
+} from "@/domain/reports/schemas";
 import { reportProjectionDocumentSchema } from "@/domain/reports/projection";
 import type { Database } from "@/lib/supabase/database.types";
 import { createReportWorkerServiceClient } from "@/lib/supabase/service";
 import {
   continueAdmittedReportPackage,
+  hasEnqueuedGrowthIntelligenceRequests,
   requestReportPackageProjection,
   requestReportPackageValidation,
+  wakeGrowthIntelligenceDispatch,
 } from "@/modules/reports/application/dispatch";
 import { runReportPackageProfiling } from "@/workflows/reports/profile-report-package";
 import { runReportPackageValidation } from "@/workflows/reports/validate-report-package";
@@ -20,6 +26,24 @@ const retry = {
   maxTimeoutInMs: 30_000,
   factor: 2,
 } as const;
+
+/**
+ * Best-effort Growth Intelligence wake-up after report-current evidence.
+ *
+ * The completion RPCs merge `growthIntelligenceRequests` into their returned
+ * document only when evidence became current. A non-empty list means durable
+ * due requests exist, so the sweeper gets a nudge; the nudge itself swallows
+ * transport failures, and a lost nudge only delays the wake-up because the
+ * sweeper still finds the due requests on its own pass.
+ */
+async function wakeGrowthIntelligenceIfEnqueued(
+  organizationId: string,
+  correlationId: string,
+  data: Record<string, unknown> | null,
+): Promise<void> {
+  if (!hasEnqueuedGrowthIntelligenceRequests(data)) return;
+  await wakeGrowthIntelligenceDispatch({ organizationId, correlationId });
+}
 
 /**
  * Link A (Task 9B, ADR 0046). Calls
@@ -116,7 +140,12 @@ export async function advanceReportPackageToProjection(
     ) {
       return { outcome: "requested", contractVersionId, projectionVersionId };
     }
-    if (outcome === "not_admitted" || outcome === "not_ready" || outcome === "no_binding" || outcome === "not_found") {
+    if (
+      outcome === "not_admitted" ||
+      outcome === "not_ready" ||
+      outcome === "no_binding" ||
+      outcome === "not_found"
+    ) {
       return { outcome };
     }
     return { outcome: "not_ready" };
@@ -341,7 +370,9 @@ export const reportPackageValidationTask = schemaTask({
           return { id: object.id, metadata: (object.metadata ?? {}) as Record<string, unknown> };
         },
         async download({ path }) {
-          const { data, error } = await supabase.storage.from("governed-report-packages").download(path);
+          const { data, error } = await supabase.storage
+            .from("governed-report-packages")
+            .download(path);
           if (error) throw new Error("Report object is unavailable.");
           return Buffer.from(await data.arrayBuffer());
         },
@@ -464,70 +495,125 @@ export const reportPackageProjectionTask = schemaTask({
     };
     const result = await runReportPackageProjection(payload, {
       async claim(input) {
-        const data = await rpc<Record<string, unknown> | null>("claim_governed_report_package_projection", {
-          p_organization_id: input.organizationId,
-          p_report_package_id: input.packageId,
-          p_report_contract_version_id: input.contractVersionId,
-          p_report_projection_version_id: input.projectionVersionId,
-          p_projection_run_id: input.projectionRunId,
-          p_idempotency_key: input.idempotencyKey,
-          p_claim_token: input.claimToken,
-          p_correlation_id: input.correlationId,
-        });
+        const data = await rpc<Record<string, unknown> | null>(
+          "claim_governed_report_package_projection",
+          {
+            p_organization_id: input.organizationId,
+            p_report_package_id: input.packageId,
+            p_report_contract_version_id: input.contractVersionId,
+            p_report_projection_version_id: input.projectionVersionId,
+            p_projection_run_id: input.projectionRunId,
+            p_idempotency_key: input.idempotencyKey,
+            p_claim_token: input.claimToken,
+            p_correlation_id: input.correlationId,
+          },
+        );
         const outcome = typeof data?.outcome === "string" ? data.outcome : "conflict";
-        if (outcome !== "acquired") return { outcome: outcome as "completed" | "not_found" | "not_ready" | "in_progress" | "conflict" | "expired" | "object_mismatch" };
+        if (outcome !== "acquired")
+          return {
+            outcome: outcome as
+              | "completed"
+              | "not_found"
+              | "not_ready"
+              | "in_progress"
+              | "conflict"
+              | "expired"
+              | "object_mismatch",
+          };
         const reportPackage = data?.reportPackage;
         const contractVersion = data?.contractVersion;
         const projectionVersion = data?.projectionVersion;
-        if (!reportPackage || typeof reportPackage !== "object" || !contractVersion || typeof contractVersion !== "object" || !projectionVersion || typeof projectionVersion !== "object") return { outcome: "conflict" };
-        const document = reportProjectionDocumentSchema.safeParse((projectionVersion as { projection_document?: unknown }).projection_document);
+        if (
+          !reportPackage ||
+          typeof reportPackage !== "object" ||
+          !contractVersion ||
+          typeof contractVersion !== "object" ||
+          !projectionVersion ||
+          typeof projectionVersion !== "object"
+        )
+          return { outcome: "conflict" };
+        const document = reportProjectionDocumentSchema.safeParse(
+          (projectionVersion as { projection_document?: unknown }).projection_document,
+        );
         if (!document.success) return { outcome: "conflict" };
         const { data: definitions, error } = await supabase
           .from("metric_definitions")
           .select("id, key, value_kind")
-          .in("key", document.data.outputs.map((output) => output.metricKey))
+          .in(
+            "key",
+            document.data.outputs.map((output) => output.metricKey),
+          )
           .eq("is_active", true)
           .or(`organization_id.is.null,organization_id.eq.${input.organizationId}`);
         if (error || !definitions) return { outcome: "conflict" };
-        return { outcome: "acquired", reportPackage: reportPackage as never, contractVersion: contractVersion as never, projectionVersion: projectionVersion as never, metricDefinitions: definitions as never };
+        return {
+          outcome: "acquired",
+          reportPackage: reportPackage as never,
+          contractVersion: contractVersion as never,
+          projectionVersion: projectionVersion as never,
+          metricDefinitions: definitions as never,
+        };
       },
       objectStore: {
         async stat({ path }) {
           const folder = path.split("/").slice(0, -1).join("/");
           const filename = path.split("/").at(-1);
           if (!filename) throw new Error("Report object is unavailable.");
-          const { data, error } = await supabase.storage.from("governed-report-packages").list(folder, { limit: 2, search: filename });
+          const { data, error } = await supabase.storage
+            .from("governed-report-packages")
+            .list(folder, { limit: 2, search: filename });
           if (error) throw new Error("Report object is unavailable.");
           const object = data.find((candidate) => candidate.name === filename);
           if (!object || !object.id) throw new Error("Report object is unavailable.");
           return { id: object.id, metadata: (object.metadata ?? {}) as Record<string, unknown> };
         },
         async download({ path }) {
-          const { data, error } = await supabase.storage.from("governed-report-packages").download(path);
+          const { data, error } = await supabase.storage
+            .from("governed-report-packages")
+            .download(path);
           if (error) throw new Error("Report object is unavailable.");
           return Buffer.from(await data.arrayBuffer());
         },
       },
       async complete(input) {
-        await rpc("complete_governed_report_package_projection", {
-          p_organization_id: input.organizationId, p_report_package_id: input.packageId,
-          p_projection_run_id: input.projectionRunId, p_claim_token: input.claimToken,
-          p_result_digest: input.resultDigest, p_result: input.result, p_outputs: input.outputs,
-        });
+        const data = await rpc<Record<string, unknown> | null>(
+          "complete_governed_report_package_projection",
+          {
+            p_organization_id: input.organizationId,
+            p_report_package_id: input.packageId,
+            p_projection_run_id: input.projectionRunId,
+            p_claim_token: input.claimToken,
+            p_result_digest: input.resultDigest,
+            p_result: input.result,
+            p_outputs: input.outputs,
+          },
+        );
+        await wakeGrowthIntelligenceIfEnqueued(input.organizationId, payload.correlationId, data);
       },
       async completePeriodGrain(input) {
-        await rpc("complete_governed_report_package_period_grain_projection", {
-          p_organization_id: input.organizationId, p_report_package_id: input.packageId,
-          p_projection_run_id: input.projectionRunId, p_claim_token: input.claimToken,
-          p_result_digest: input.resultDigest, p_result: input.result,
-          p_observations: input.observations, p_absent_row_count: input.absentRowCount,
-        });
+        const data = await rpc<Record<string, unknown> | null>(
+          "complete_governed_report_package_period_grain_projection",
+          {
+            p_organization_id: input.organizationId,
+            p_report_package_id: input.packageId,
+            p_projection_run_id: input.projectionRunId,
+            p_claim_token: input.claimToken,
+            p_result_digest: input.resultDigest,
+            p_result: input.result,
+            p_observations: input.observations,
+            p_absent_row_count: input.absentRowCount,
+          },
+        );
+        await wakeGrowthIntelligenceIfEnqueued(input.organizationId, payload.correlationId, data);
       },
       async fail(input) {
         await rpc("fail_governed_report_package_projection", {
-          p_organization_id: input.organizationId, p_report_package_id: input.packageId,
-          p_projection_run_id: input.projectionRunId, p_claim_token: input.claimToken,
-          p_failure_code: input.code, p_result_digest: input.resultDigest,
+          p_organization_id: input.organizationId,
+          p_report_package_id: input.packageId,
+          p_projection_run_id: input.projectionRunId,
+          p_claim_token: input.claimToken,
+          p_failure_code: input.code,
+          p_result_digest: input.resultDigest,
           p_failure_detail: input.detail ?? null,
         });
       },
@@ -535,7 +621,15 @@ export const reportPackageProjectionTask = schemaTask({
     // The gap count is evidence, not noise: a series that arrived with eleven
     // blank days is a different import from one with none, and no workbook
     // value is carried here.
-    logger.info("report_package.projection_completed", { organizationId: payload.organizationId, packageId: payload.packageId, projectionVersionId: payload.projectionVersionId, projectionRunId: payload.projectionRunId, correlationId: payload.correlationId, outcome: result.outcome, absentRowCount: result.absentRowCount });
+    logger.info("report_package.projection_completed", {
+      organizationId: payload.organizationId,
+      packageId: payload.packageId,
+      projectionVersionId: payload.projectionVersionId,
+      projectionRunId: payload.projectionRunId,
+      correlationId: payload.correlationId,
+      outcome: result.outcome,
+      absentRowCount: result.absentRowCount,
+    });
     // The state transition is already recorded by the RPC above, so the
     // database is correct either way. This is only about what the run list
     // says. A governed refusal is permanent -- a date that will not parse will
