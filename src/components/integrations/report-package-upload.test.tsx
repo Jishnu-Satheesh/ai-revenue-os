@@ -340,6 +340,66 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
   });
 });
 
+describe("ReportPackageUpload fixed channel", () => {
+  const FIXED_CHANNEL_ID = "77777777-7777-4777-8777-777777777777";
+  const OTHER_CHANNEL_ID = "99999999-9999-4999-8999-999999999999";
+
+  function fixedSnapshot() {
+    return {
+      ...snapshot,
+      packages: [
+        ...snapshot.packages,
+        {
+          ...snapshot.packages[0],
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          channel_id: OTHER_CHANNEL_ID,
+          report_type: "Somebody else's settlement",
+        },
+      ],
+      channels: [{ id: FIXED_CHANNEL_ID, display_name: "Talabat", key: "talabat" }],
+    } as unknown as ReportPackageSnapshot;
+  }
+
+  function renderFixed() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ReportPackageUpload
+          organizationId={ORGANIZATION_ID}
+          role="owner"
+          timeZone="Asia/Dubai"
+          fixedChannelId={FIXED_CHANNEL_ID}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  function stubSnapshot(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    );
+  }
+
+  it("names the fixed channel read-only instead of offering the select", async () => {
+    stubSnapshot(fixedSnapshot());
+    renderFixed();
+
+    // The channel name arrives with the snapshot, so reaching it proves the
+    // query settled before asserting on the form.
+    await screen.findByText("Talabat");
+    expect(screen.queryByRole("combobox", { name: /business channel/i })).not.toBeInTheDocument();
+  });
+
+  it("lists only this channel's uploads", async () => {
+    stubSnapshot(fixedSnapshot());
+    renderFixed();
+
+    await screen.findByText(/Performance · 2026-01-01 to 2026-02-28/i);
+    expect(screen.queryByText(/Somebody else's settlement/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("ReportPackageUpload report type derivation", () => {
   const CHANNEL_ID = "99999999-9999-4999-8999-999999999999";
   const RECOGNISED_PACKAGE_ID = "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa";

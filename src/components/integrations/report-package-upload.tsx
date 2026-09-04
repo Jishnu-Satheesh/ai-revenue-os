@@ -519,7 +519,18 @@ export function ReportPackageUpload({
   organizationId,
   role,
   timeZone,
-}: Readonly<{ organizationId: string; role: OrganizationRole; timeZone: string }>) {
+  fixedChannelId,
+}: Readonly<{
+  organizationId: string;
+  role: OrganizationRole;
+  timeZone: string;
+  /**
+   * The channel page fixes the channel from the route, so the form is
+   * shorter and every upload lands where the operator is standing. Absent
+   * on the Integrations view, which behaves exactly as before.
+   */
+  fixedChannelId?: string;
+}>) {
   const queryClient = useQueryClient();
   const [channelId, setChannelId] = useState("");
   const [branchId, setBranchId] = useState("");
@@ -535,6 +546,7 @@ export function ReportPackageUpload({
   const canUpload = hasReportPermission(role, "report.upload");
   const canRetry = hasReportPermission(role, "report.retry");
   const canApproveContract = hasReportPermission(role, "report.contract_approve");
+  const effectiveChannelId = fixedChannelId ?? channelId;
 
   const snapshot = useQuery({
     queryKey: ["report-packages", organizationId],
@@ -542,6 +554,28 @@ export function ReportPackageUpload({
   });
 
   const view = useMemo(() => toSnapshotView(snapshot.data), [snapshot.data]);
+  // The channel page answers for one channel, so it lists only that
+  // channel's uploads. The Integrations view keeps answering for all of them.
+  const visiblePackages = fixedChannelId
+    ? view.packages.filter((reportPackage) => reportPackage.channel_id === fixedChannelId)
+    : view.packages;
+  // Versions belong to a channel through their package. A fixed view hides
+  // every other channel's mappings and figures rather than offering
+  // approvals for work happening elsewhere.
+  const contractVersionVisible = (version: { report_package_id: string }): boolean =>
+    !fixedChannelId ||
+    view.packages.some(
+      (reportPackage) =>
+        reportPackage.id === version.report_package_id &&
+        reportPackage.channel_id === fixedChannelId,
+    );
+  const projectionVersionVisible = (version: { report_contract_version_id: string }): boolean => {
+    if (!fixedChannelId) return true;
+    const contractVersion = view.contractVersions.find(
+      (candidate) => candidate.id === version.report_contract_version_id,
+    );
+    return contractVersion ? contractVersionVisible(contractVersion) : false;
+  };
   const activeBranches = view.branches;
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
@@ -576,13 +610,13 @@ export function ReportPackageUpload({
    * on one family and one spelling is confident enough to show read-only.
    */
   const recognisedReportTypeForChannel = useMemo(() => {
-    if (!channelId) return null;
+    if (!effectiveChannelId) return null;
     const approvedLibraryReportTypes = view.contractVersions.flatMap((version) => {
       if (!version.provider_definition_key) return [];
       const owningPackage = view.packages.find(
         (candidate) => candidate.id === version.report_package_id,
       );
-      if (!owningPackage || owningPackage.channel_id !== channelId) return [];
+      if (!owningPackage || owningPackage.channel_id !== effectiveChannelId) return [];
       const approved = view.contractDecisions.some(
         (decision) =>
           decision.report_contract_version_id === version.id && decision.decision === "approved",
@@ -595,7 +629,7 @@ export function ReportPackageUpload({
     const distinctReportTypes = new Set(approvedLibraryReportTypes.map((entry) => entry.reportType));
     if (distinctFamilies.size > 1 || distinctReportTypes.size > 1) return null;
     return approvedLibraryReportTypes[0].reportType;
-  }, [channelId, view.contractVersions, view.packages, view.contractDecisions]);
+  }, [effectiveChannelId, view.contractVersions, view.packages, view.contractDecisions]);
 
   // What actually gets submitted: the derived value once the channel's report
   // type is known, the hand-typed one otherwise. Computed at render rather
@@ -650,7 +684,7 @@ export function ReportPackageUpload({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            channelId,
+            channelId: effectiveChannelId,
             branchId,
             reportType: effectiveReportType,
             periodStart,
@@ -939,18 +973,25 @@ export function ReportPackageUpload({
           >
             <div className="space-y-2">
               <Label htmlFor="report-channel">Business channel</Label>
-              <Select value={channelId} onValueChange={setChannelId}>
-                <SelectTrigger id="report-channel">
-                  <SelectValue placeholder="Select channel" />
-                </SelectTrigger>
-                <SelectContent>
-                  {view.channels.map((channel) => (
-                    <SelectItem key={channel.id} value={channel.id}>
-                      {channel.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {fixedChannelId ? (
+                <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium">
+                  {view.channels.find((channel) => channel.id === fixedChannelId)?.display_name ??
+                    "This channel"}
+                </p>
+              ) : (
+                <Select value={channelId} onValueChange={setChannelId}>
+                  <SelectTrigger id="report-channel">
+                    <SelectValue placeholder="Select channel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {view.channels.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>
+                        {channel.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-branch">Branch / outlet</Label>
@@ -1050,7 +1091,11 @@ export function ReportPackageUpload({
               <Button
                 type="submit"
                 disabled={
-                  upload.isPending || snapshot.isLoading || !channelId || !branchId || !currency
+                  upload.isPending ||
+                  snapshot.isLoading ||
+                  !effectiveChannelId ||
+                  !branchId ||
+                  !currency
                 }
               >
                 <UploadCloud data-icon="inline-start" />{" "}
@@ -1065,9 +1110,11 @@ export function ReportPackageUpload({
         )}
 
         <div className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">1 · Recent uploads</h3>
-          {view.packages.length ? (
-            view.packages.map((reportPackage) => {
+          <h3 className="text-sm font-medium">
+            {fixedChannelId ? "1 · This channel's uploads" : "1 · Recent uploads"}
+          </h3>
+          {visiblePackages.length ? (
+            visiblePackages.map((reportPackage) => {
               const latestValidation = view.validationRuns.find(
                 (run) => run.report_package_id === reportPackage.id,
               );
@@ -1291,8 +1338,8 @@ export function ReportPackageUpload({
               An owner or admin decides. Until then the file has been profiled and nothing more.
             </p>
           </div>
-          {view.contractVersions.length ? (
-            view.contractVersions.map((version) => {
+          {view.contractVersions.filter(contractVersionVisible).length ? (
+            view.contractVersions.filter(contractVersionVisible).map((version) => {
               const decision = view.contractDecisions.find(
                 (item) => item.report_contract_version_id === version.id,
               );
@@ -1391,7 +1438,9 @@ export function ReportPackageUpload({
               );
             })
           ) : (
-            <p className="text-sm text-muted-foreground">Nothing has been mapped yet.</p>
+            <p className="text-sm text-muted-foreground">
+              {fixedChannelId ? "Nothing has been mapped for this channel yet." : "Nothing has been mapped yet."}
+            </p>
           )}
           {canApproveContract || canUpload ? (
             <div className="space-y-3 rounded-lg border border-dashed p-4">
@@ -1402,7 +1451,7 @@ export function ReportPackageUpload({
                     <SelectValue placeholder="Select an upload waiting to be mapped" />
                   </SelectTrigger>
                   <SelectContent>
-                    {view.packages
+                    {visiblePackages
                       .filter((reportPackage) => reportPackage.status === "awaiting_contract")
                       .map((reportPackage) => (
                         <SelectItem key={reportPackage.id} value={reportPackage.id}>
@@ -1436,7 +1485,7 @@ export function ReportPackageUpload({
               A separate decision, because it is a separate consequence: this is what enters the
               ledger and drives every figure downstream. No workbook value appears here.
             </p>
-            {view.projectionVersions.map((version) => {
+            {view.projectionVersions.filter(projectionVersionVisible).map((version) => {
               const decision = view.projectionDecisions.find(
                 (item) => item.report_projection_version_id === version.id,
               );
@@ -1540,6 +1589,7 @@ export function ReportPackageUpload({
                     </SelectTrigger>
                     <SelectContent>
                       {view.contractVersions
+                        .filter(contractVersionVisible)
                         .filter((version) =>
                           view.contractDecisions.some(
                             (decision) =>

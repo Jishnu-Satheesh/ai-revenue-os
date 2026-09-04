@@ -12,6 +12,7 @@ describe("ChannelDetail", () => {
       <ChannelDetail
         channelName="talabat"
         workspace={<p>Workspace here</p>}
+        reports={<p>Reports here</p>}
         setup={<p>Setup here</p>}
         defaultTab="analysis"
       />,
@@ -28,6 +29,7 @@ describe("ChannelDetail", () => {
       <ChannelDetail
         channelName="talabat"
         workspace={null}
+        reports={<p>Reports here</p>}
         setup={<p>Setup here</p>}
         defaultTab="setup"
       />,
@@ -44,11 +46,43 @@ describe("ChannelDetail", () => {
       <ChannelDetail
         channelName="talabat"
         workspace={null}
+        reports={<p>Reports here</p>}
         setup={<p>Setup here</p>}
         defaultTab="analysis"
       />,
     );
 
     expect(screen.getByText("Setup here")).toBeTruthy();
+  });
+
+  it("offers a Reports tab beside Analysis and Setup when intake is permitted", () => {
+    render(
+      <ChannelDetail
+        channelName="talabat"
+        workspace={<p>Workspace here</p>}
+        reports={<p>Reports here</p>}
+        setup={<p>Setup here</p>}
+        defaultTab="analysis"
+      />,
+    );
+
+    // Inactive tab panels stay unmounted, so the tab itself is the assertion.
+    expect(screen.getByRole("tab", { name: "Reports" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Analysis" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Setup" })).toBeTruthy();
+  });
+
+  it("offers no Reports tab when the viewer may neither upload nor approve", () => {
+    render(
+      <ChannelDetail
+        channelName="talabat"
+        workspace={<p>Workspace here</p>}
+        reports={null}
+        setup={<p>Setup here</p>}
+        defaultTab="analysis"
+      />,
+    );
+
+    expect(screen.queryByRole("tab", { name: "Reports" })).toBeNull();
   });
 });

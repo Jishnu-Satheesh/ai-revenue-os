@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChannelWorkspace } from "@/components/analysis/channel-workspace";
 import { ChannelDetail } from "@/components/channels/channel-detail";
 import { ChannelSetupPanel } from "@/components/channels/channels-management";
+import { ReportPackageUpload } from "@/components/integrations/report-package-upload";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { analysisMonthBounds } from "@/domain/analysis/calendar";
@@ -149,6 +150,22 @@ export default async function ChannelDetailPage({
       <ChannelDetail
         channelName={channel.display_name}
         workspace={workspace}
+        reports={
+          // Intake where the work happens: the same governed-reports flow as
+          // the Integrations view, with the channel fixed from the route so
+          // the form is shorter and every upload lands on this channel. An
+          // operator uploads, an owner or admin approves, and the audit
+          // starts on its own after a clean projection.
+          hasOrganizationPermission(role, "report.upload") ||
+          hasOrganizationPermission(role, "report.contract_approve") ? (
+            <ReportPackageUpload
+              organizationId={context.organizationId}
+              role={role}
+              timeZone={organization.default_timezone}
+              fixedChannelId={channel.id}
+            />
+          ) : null
+        }
         defaultTab={analysisAvailable ? "analysis" : "setup"}
         setup={
           <ChannelSetupPanel

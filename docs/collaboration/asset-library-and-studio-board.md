@@ -4161,6 +4161,30 @@ implementation plan is next.
 - Full gates: `pnpm test` 386 files / 4003 passed / 6 skipped; `pnpm db:test` 59 suites pass;
   `pnpm lint` 0 errors (32 warnings, none in touched files); `pnpm build` green. Removed 10
   unreferenced `scripts/tmp-*.mjs` scratch probes from the prior session.
+
+### 2026-09-04 · muse-code · Slices A+B done: channel snooze end to end + Task 16 close-out
+
+- Slice A (approved plan): a stored channel snooze used to hard-fail the composed GI read
+  (`CHANNEL_DECISIONS` allowlist) and had no send control. Now the horizon travels stored row
+  to record to view to card on both the analysis and GI paths; the channel workspace sends a
+  snooze through a future-horizon dialog using the route's own refusal wording and shows a
+  standing snooze with its horizon; the actor's channel-preference horizon is read back and
+  hides that row for that actor alone until it passes (organization policy untouched, expired
+  horizons stay visible, no timeline event since a preference is presentation, not an answer).
+- Slice B: Task 16 verification rerun across read-service, read-model, repository, and route
+  suites — green; the plan's preference-snooze follow-up is resolved above, the remaining
+  follow-ups stay where the plan put them (action-key default to Increment 4, per-lane
+  cursors to Task 18).
+- Touched (additive only, no migration/RPC/event/RLS): analysis `ports.ts`, `read-model.ts`,
+  `read-repository.ts`, `recommendation-controls.tsx`, GI `read-model.ts`, `read-repository.ts`,
+  plus focused tests and fixtures. TDD: 9 new red-first tests, all green.
+- Gates: 340 tests across analysis, GI, both component trees, and both API route trees pass;
+  `tsc` clean; ESLint clean on all touched files; `git diff --check` clean. Full `pnpm build`
+  not rerun (no new imports; last full build green) — rerun with the next slice.
+- Caution for the next session: two of my mid-flight prettier-motivated edits landed on the
+  wrong occurrence (a joined line and a rewritten assertion in neighboring tests); both caught
+  by the suites and repaired, diff reviewed line by line. Prefer `prettier --write` on new
+  files only, and diff every formatting edit.
 - Verified: `pnpm typecheck` clean; 287 tests across the four growth-intelligence API suites,
   `src/modules/analysis`, and `src/modules/growth-intelligence` all pass; ESLint clean on touched
   files; both pgTAP decision suites (`channel_recommendation_decisions`,
