@@ -117,3 +117,16 @@ export function createAnalysisWorkerServiceClient(): SupabaseClient<Database> {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 }
+
+/**
+ * Growth Intelligence worker client, constructed only after strict payload
+ * parsing. Requests are claimed through fenced RPCs that check every rule
+ * again, but the profile, request, and evidence reads are tenant-wide, so the
+ * credential must not be created for a request nobody validated.
+ */
+export function createGrowthIntelligenceWorkerServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Growth Intelligence workers");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
