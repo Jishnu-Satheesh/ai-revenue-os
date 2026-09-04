@@ -233,14 +233,14 @@
   - Add `begin_market_research_run`, `complete_market_research_run`, `fail_market_research_run`, `record_market_evidence_claims`, and `append_market_evidence_claim_event` with request fencing.
   - Claims and links are immutable; expiry, withdrawal, exclusion, correction, and supersession append events.
 - **Steps:**
-  - [ ] Write pgTAP red tests for RLS, grants, cross-tenant source/link refusal, append-only claims/events, fenced writes, digest replay, bounded quotations, source exclusion, current-state derivation, corroboration and contradiction edges, and partial run preservation.
-  - [ ] Generate the migration and align relational fields and bounded JSON allowlists with the section 7.2 claim contract.
-  - [ ] Add tenant-leading indexes for active/fresh claims, profile/run lineage, source-domain exclusion, geography, expiry, and evidence links.
-  - [ ] Implement repository integration tests proving only compact claims and citation metadata cross the boundary and no full public page is persisted.
-  - [ ] Dry-run, push, run focused pgTAP, and invoke every new function once on staging.
-  - [ ] Update handwritten types and run the database type drift test.
-  - [ ] Run `pnpm db:test`, focused Vitest, typecheck, lint, and `git diff --check`.
-  - [ ] Commit as `feat(growth-intelligence): store cited market evidence`.
+- [x] Write pgTAP red tests for RLS, grants, cross-tenant source/link refusal, append-only claims/events, fenced writes, digest replay, bounded quotations, source exclusion, current-state derivation, corroboration and contradiction edges, and partial run preservation.
+- [x] Generate the migration and align relational fields and bounded JSON allowlists with the section 7.2 claim contract.
+- [x] Add tenant-leading indexes for active/fresh claims, profile/run lineage, source-domain exclusion, geography, expiry, and evidence links.
+- [x] Implement repository integration tests proving only compact claims and citation metadata cross the boundary and no full public page is persisted.
+- [x] Dry-run, push, run focused pgTAP, and invoke every new function once on staging.
+- [x] Update handwritten types and run the database type drift test.
+- [x] Run `pnpm db:test`, focused Vitest, typecheck, lint, and `git diff --check`.
+- [x] Commit as `feat(growth-intelligence): store cited market evidence`.
 
 ### Task 7: Run daily research, weekly consolidation, and durable recovery
 

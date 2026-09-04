@@ -2,18 +2,19 @@
 
 **Agents:** `claude` (Claude Opus 5, Claude Code) and `codex` (Codex CLI).
 
-> ## ⚠️ WHO OWNS WHAT, AS OF 2026-09-01 — READ THIS FIRST
+> ## WHO OWNS WHAT, AS OF 2026-09-04 — READ THIS FIRST
 >
-> **Growth Intelligence belongs to another agent. Do not touch it.** That means everything under
+> **Growth Intelligence is owned by this session (muse-code).** The user directed a resume of the
+> interrupted Growth Intelligence work on 2026-09-04, no peer sessions are active, and the prior
+> 2026-09-01 reservation is released. That means everything under
 > `src/domain/growth-intelligence/` and `src/modules/growth-intelligence/`,
-> `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`,
-> `supabase/tests/database/growth_intelligence_*_test.sql`, `specs/022-growth-intelligence.md`,
-> `adrs/0044-*`, and the GI rows on the Task board (GI1–GI5). Leave their uncommitted changes in the
-> working tree alone and never commit them.
+> `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql` and later
+> `growth_intelligence_*` migrations, `supabase/tests/database/growth_intelligence_*_test.sql` and
+> `market_evidence_test.sql`, `specs/022-growth-intelligence.md`, `adrs/0044-*`, and the GI rows on
+> the Task board (GI1–GI13). Verify the Task 13 staging state before building on it.
 >
-> **`database.types.test.ts` fails because of their unapplied migration.** That is theirs to
-> resolve. Do not "fix" it by adding their tables to `UNTYPED_TABLES` — that would assert a decision
-> about a schema you do not own.
+> **`database.types.test.ts` drift is now this session's to resolve narrowly** as part of the
+> Task 13 verification, in its own narrow commit per shared-tree rule 4.
 >
 > **Everything else in this repository has one agent.** The older rows — R1, D1, and the two-thread
 > Asset Library / Creative Studio split described below — are historical record, not a live
@@ -183,9 +184,15 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI5 | Growth Intelligence Task 3 profiles and durable request ledger — claimed: `supabase/migrations/20260831154256_growth_intelligence_profiles_and_requests.sql`, new `supabase/tests/database/growth_intelligence_profiles_test.sql`, new `supabase/tests/database/growth_intelligence_requests_test.sql`, `src/domain/growth-intelligence/schemas.ts`, `schemas.test.ts`, `profile-digest.ts`, `profile-digest.test.ts`, `request-fingerprint.ts`, `request-fingerprint.test.ts`, `src/lib/supabase/database.types.ts`, `database.types.test.ts`, and Task 3 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`. The domain-file extension closes deterministic Postgres/TypeScript digest ordering. | codex-root | high | approved Growth Intelligence plan Task 3 | **done — migration applied to staging; 106/106 focused live pgTAP and full pgTAP green; 183 focused unit/type-drift tests, source typecheck, full lint, format, and diff checks green** |
 | GI6 | Growth Intelligence Task 4 governed Market Profile application boundary — claimed: new `src/modules/growth-intelligence/application/ports.ts`, `profile-service.ts`, `profile-service.test.ts`, `api-schemas.ts`, `api-schemas.test.ts`; new `src/modules/growth-intelligence/infrastructure/profile-repository.ts`, `profile-repository.test.ts`, `profile-proposal-provider.ts`, `profile-proposal-provider.test.ts`; new Market Profile read/proposal/decision routes and tests under `src/app/api/organizations/[organizationId]/market-profile/**`; forward migrations with slugs `growth_intelligence_profile_proposal_replay` and `growth_intelligence_profile_revision_audit`; `supabase/tests/database/growth_intelligence_profiles_test.sql`; `src/lib/supabase/database.types.ts`; new `scripts/verify-growth-profile-concurrency.mjs`; `package.json` and `pnpm-lock.yaml` for the public-suffix boundary dependency; Task 4 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. | codex-root | high | approved Growth Intelligence plan Task 4; user approved the forward replay migration 2026-09-01; Task 3 staging contract live | **done — governed boundary and both forward migrations live; sequential and true concurrent replay, tenant isolation, audit history, safe URL/model boundaries, and production build verified** |
 | GI7 | Growth Intelligence Task 5 public-research qualification boundary — claimed: new `docs/provider-contracts/market-research-v1.md`, `docs/verification/growth-intelligence/research-adapter-qualification.md`, and `src/modules/growth-intelligence/infrastructure/research/**`; Task 5 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No provider signup, terms acceptance, credential creation, paid call, live canary, migration, Trigger task, or enablement is in scope. Existing report-provider work remains untouched.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | codex-root                      | high              | approved Growth Intelligence plan Task 5; official-source review on 2026-09-01 found no self-serve provider contract that satisfies durable cited-claim storage plus retention/training controls | **done — reviewed refusal state committed; Exa Enterprise remains a candidate, not an enabled integration**                                                                                                                                                                                                                                                                                                                                                       |
+| GI8 | Growth Intelligence Task 6 immutable Market Evidence — applied `growth_intelligence_market_evidence` plus forward recorder, source-identity, contract-hardening, quote-key, and state-tie repairs; `supabase/tests/database/market_evidence_test.sql`, `src/lib/supabase/database.types.ts`, `src/lib/supabase/database.types.test.ts`, `src/modules/growth-intelligence/infrastructure/evidence-repository.ts`, `evidence-repository.test.ts`, Task 6 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`, and this board. No provider enablement, external retrieval, Trigger task, Market Watch UI, or `/overview` change is in scope. | codex-root | xhigh | approved Growth Intelligence plan Task 6; Task 3 market-profile/request contract is live; Task 5 adapter remains fail-closed | **done — all forward migrations applied to staging; 57 focused pgTAP assertions cover RLS, fences, replay, source/competitor policy, aggregate quotation retention, deterministic freshness, current state, audit fields, partial preservation, and safe failures; 88 focused TypeScript tests pass** |
 | GI6B | Campaign workflow clock-fixture repair — claimed: `src/workflows/campaigns/workflows.test.ts`; test-only change discovered by the Task 4 repository-wide regression run. Pin the already-supported injected clock so the fixed September campaign schedule does not become invalid as wall time advances. No Campaign production behavior changes. | codex-root | medium | full Task 4 regression suite exposed seven time-sensitive baseline failures | **done — all 33 focused Campaign workflow tests pass with the deterministic fixture clock** |
 | KC1 | Keeta channel cost completeness — claimed: new `supabase/migrations/20260831220000_channel_operating_cost_metric_definitions.sql`, `src/domain/reports/provider-library/keeta-billing-summary.ts`, new `src/domain/reports/provider-library/keeta-billing-summary.real-export.test.ts`, new `src/domain/analysis/detectors/economics-channel-cost-load.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/workflows/analysis/run-channel-analysis.test.ts`, `docs/collaboration/asset-library-and-studio-board.md`. No new table, no RLS change, no `database.types.ts` edit (metric definitions are rows in an existing typed table). | claude | high | user approval 2026-08-31 | **done — projected on staging through the governed path and browser-verified at 1440px and 390px; the channel reads 39.3% where commission alone reads 21.4%** |
 | KC2 | Read a provider's prose category labels — claimed: `src/domain/reports/projection.ts`, new `src/domain/reports/projection-label-map.test.ts`, new `supabase/migrations/20260901090000_admit_projection_label_map.sql`, new `supabase/migrations/20260901090500_cancellation_attribution_metric_definition.sql`, new `supabase/migrations/20260901091000_admit_registry_v8.sql`, `supabase/tests/database/governed_report_projection_document_test.sql`, `src/domain/reports/provider-library/keeta-orders.ts` and its real-export test, new `src/domain/analysis/detectors/orders-cancellation-attribution.ts` and its test, `src/domain/analysis/registry.ts`, `registry.test.ts`, `src/domain/analysis/copy.ts`, `src/components/analysis/channel-workspace.tsx` and its test, `adrs/0034-reason-codes-are-metric-row-dimensions.md`, `specs/018-governed-channel-intelligence.md`. No new table, no RLS change, no `database.types.ts` edit. | claude | high | user approval 2026-09-01 | **in-progress — language, guard, provider binding, detector and tests all green; migrations applied to staging and all three live guards accept the shipped documents; deployed to Trigger production as 20260901.3; the live upload, contract approval, validation and figures approval all passed on staging; the projection landed 158 observations once three defects in its path were fixed; browser-verified at 1440px and an emulated 390px. **Done** |
+| GI9 | Growth Intelligence Task 7 durable market monitoring — claimed: new `src/workflows/growth-intelligence/run-market-research.ts`, `run-market-research.test.ts`, `consolidate-market-evidence.ts`, `consolidate-market-evidence.test.ts`, `dispatch-due-work.ts`, `dispatch-due-work.test.ts`, new `src/trigger/growth-intelligence.ts`, `growth-intelligence.test.ts`, append-only `createGrowthIntelligenceWorkerServiceClient` factory in `src/lib/supabase/service.ts` (no worker client exists for GI yet; sibling pattern, no behavior change); Task 7 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No migration, no RLS change, no provider enablement, no `database.types.ts` edit, no `trigger.config.ts` edit (the existing `./src/trigger` dir discovery covers the new task module). | muse-code | high | approved Growth Intelligence plan Task 7; Tasks 1–6 live on staging; Task 5 adapter remains fail-closed | **in-progress** |
+| GI10 | Growth Intelligence Task 8 governed Market Watch — claimed: new `src/modules/growth-intelligence/application/market-watch.ts`, `market-watch.test.ts`, new `src/modules/growth-intelligence/infrastructure/read-repository.ts`, `read-repository.test.ts`, new `src/app/api/organizations/[organizationId]/growth-intelligence/route.ts`, `route.test.ts`, new `src/app/api/organizations/[organizationId]/growth-intelligence/requests/[requestId]/retry/route.ts`, `route.test.ts`, new `src/components/growth-intelligence/market-profile-review.tsx`, `market-profile-review.test.tsx`, `market-watch.tsx`, `market-watch.test.tsx`, `source-evidence-drawer.tsx`, `source-evidence-drawer.test.tsx`, new `src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx`, `loading.tsx`, `error.tsx`, modify `src/lib/routes.ts` and `routes.test.ts`; Task 8 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No migration, no RLS change, no provider enablement, no Trigger task, no Opportunities redirect (Increment 3). | muse-code | high | approved Growth Intelligence plan Task 8; Tasks 1–6 live on staging; Task 7 code written, verification blocked by sandbox | **in-progress** |
+| GI11 | Growth Intelligence Task 12 deterministic synthesis contracts — claimed: new `src/domain/growth-intelligence/synthesis.ts`, `synthesis.test.ts`, `items.ts`, `items.test.ts`, `priority.ts`, `priority.test.ts`, `lineage.ts`, `lineage.test.ts`, modify `src/domain/growth-intelligence/index.ts`; Task 12 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. Pure deterministic domain only: no Supabase, Trigger, model SDK, Next.js, migration, or analysis/report file. | muse-code | high | approved Growth Intelligence plan Task 12; spec 022 sections 8.5, 9.5, 9.6, 13; Tasks 1–6 live; Tasks 7–8 code-written, verification blocked by sandbox | **in-progress** |
+| GI12 | Growth Intelligence Task 13 governed synthesis persistence — claimed: new `supabase/migrations/20260903120000_growth_intelligence_synthesis_items.sql`, new `supabase/tests/database/growth_intelligence_synthesis_test.sql`, new `supabase/tests/database/growth_intelligence_item_decisions_test.sql`, narrow `src/lib/supabase/database.types.ts` + `database.types.test.ts` update (separate narrow commit per rule 4), new `src/modules/growth-intelligence/infrastructure/synthesis-repository.ts`, `synthesis-repository.test.ts`; Task 13 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. Migration drafted for review, NOT applied (no shell; staging is live-on-apply). No analysis/report/decisions file, no provider enablement. | muse-code | high | approved Growth Intelligence plan Task 13; depends on Task 12 contracts; Tasks 1–6 live; Tasks 7–8, 12 code-written, verification blocked by sandbox | **in-progress — migration applied to staging per user 2026-09-04 (unverified from here); pgTAP + function-invoke + suite runs pending** |
+| GI13 | Growth Intelligence Task 14 business/market synthesis worker — claimed: new `src/modules/growth-intelligence/infrastructure/synthesis-provider.ts`, `synthesis-provider.test.ts`, new `src/modules/growth-intelligence/application/synthesis-service.ts`, `synthesis-service.test.ts`, new `src/workflows/growth-intelligence/run-synthesis.ts`, `run-synthesis.test.ts`, modify `src/trigger/growth-intelligence.ts`, `growth-intelligence.test.ts`; Task 14 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No analysis/report/decisions file, no migration, no RLS change, no `database.types.ts` edit, no provider enablement (factory defaults fail-closed), no dispatch-table change. | muse-code | high | approved Growth Intelligence plan Task 14; depends on Task 12 validators and Task 13 fenced RPCs; Tasks 1–6 live; Tasks 7–8, 12–13 code-written, verification blocked by sandbox | **in-progress** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -250,6 +257,17 @@ Append only. Clear a blocker by adding a resolving line, not by deleting it.
 ---
 
 ## 8. Log
+
+### 2026-09-03 · muse-code · GI12 — synthesis persistence migration drafted for review
+
+`supabase/migrations/20260903120000_growth_intelligence_synthesis_items.sql` is drafted and
+unapplied: 9 tables (synthesis runs, items with Task 12 fingerprints, tenant-composite claim/finding/goal
+links, append-only decisions, actor-scoped preferences), 5 fenced RPCs, tenant RLS with least-privilege
+grants. No polymorphic evidence column exists, so a Channel Recommendation or Opportunity identifier has
+nowhere to be stored as an item copy. Review notes: the shared run-mutation trigger could not be reused
+(it names adapter columns); actor checks use `auth.uid()` per the propose/decide precedent, not a JWT GUC.
+Applying needs a working shell (`supabase migration new` was bypassed — filename hand-cut after the latest
+applied migration) plus hosted pgTAP, and the `database.types.ts` update ships as its own narrow commit.
 
 ### 2026-09-01 · claude · every dispatcher swept for the retry defect
 
@@ -4019,3 +4037,92 @@ No migration, Trigger task, provider account, credential, live request, source p
 secret was created or retained. Focused Vitest, source typecheck, ESLint, formatting, and diff checks
 are recorded with the Task 5 commit; a full repository test run remains affected by concurrent
 accounting-report work outside GI7.
+
+### 2026-09-02 · claude-governed-channel-intelligence · Overview route rebuilt as a report
+
+The organization Overview was a card grid whose vocabulary ("Digital Twin readiness", "indicative
+margin upper bound") meant nothing to a non-technical client member. It is now the channel
+workspace's own report anatomy, so the two routes read as one product: a full-bleed verdict band
+over a Sales / Costs / Kept scale, a strip stating exactly what is on screen, a flat chapter map,
+then chapters pairing an eight-column card with a four-column figure rail.
+
+Design first, in `docs/design/overview-redesign/` — four `.dc.html` artboards (desktop, phone,
+day-one, and the headline in its three honest states) seeded into a published canvas. The phone
+artboard is generated from the desktop one by a transform so the two cannot drift.
+
+**Added** `src/components/organizations/overview-report.tsx` and `overview-visuals.tsx` (the only
+client file: two recharts visuals). **Retired** `organization-intelligence-cockpit.tsx`,
+`channel-economics-overview.tsx` and both their tests, plus `buildStrategicBriefing` and
+`selectRecentCampaigns` — the briefing restated the figures below it, and the campaign card was
+demo fixtures. **Added** `buildOverviewMoneyScale` and `buildOverviewComparison` to the overview
+read-model.
+
+Four judgement calls worth knowing about:
+
+- `costsRecordedMinor` sums only recorded costs. Sales minus the kept floor would look like a costs
+  figure and would in fact be a guess about the days that recorded no costs at all.
+- The comparison returns null rather than zero when the prior window recorded nothing, or when its
+  currency differs. "+100%" against nothing is not a measurement.
+- Copy is industry-neutral ("items you sell", never "dishes"); a test asserts it. The design drafts
+  used restaurant nouns and would have violated the platform-core rule if implemented literally.
+- `OrganizationManagement` stays on the route behind the `#organization-management` anchor. The
+  design moved it off without naming a destination, and no other route hosts it.
+
+`marked superseded`: the 2026-08-24 overview design doc, per its own convention.
+
+Not verified in a browser. The Chrome DevTools MCP disconnected mid-session, so the rendered page
+has not been exercised at either width — only that the route compiles and serves 200. Typecheck and
+ESLint are clean; 3657 tests pass, with `project-report-package.test.ts` failing only under the
+full parallel run and passing 14/14 in isolation (the known xlsx flake on this machine).
+
+### 2026-09-02 · claude-governed-channel-intelligence · Repeat intake: what four months of Talabat proved
+
+An operator loaded Jan–Apr 2026 of Talabat's performance report for a paying client and hit six
+distinct failures. Investigated before designing; every cause below was read out of the code, not
+inferred.
+
+**Claiming for the slice ahead:** `src/domain/reports/period-key.ts`, `document-digest.ts`,
+`contracts.ts`, `projection.ts`, `provider-library/*`; `src/workflows/reports/*`;
+`src/trigger/reports.ts`; `src/modules/reports/*`; `src/components/integrations/report-*`;
+`src/app/(platform)/organizations/[organizationId]/channels/**`;
+`src/components/analysis/channel-workspace.tsx`; new `report_structure_admissions` migrations.
+Growth Intelligence is untouched and stays that way.
+
+What the investigation found:
+
+- **The repeat mapping had three independent causes, not one.**
+  `claim_governed_report_package_validation` demands a contract version whose `report_package_id`
+  is *this* package, so no approval can ever admit a later file — the binding table is consulted
+  only to confirm the per-package version is bound. The schema fingerprint hashes the normalized
+  worksheet name, and Talabat names its tab after the export range
+  (`Talabat-Jan-Feb-2026-Performanc`, then `Mar-2026`), so identical columns fingerprint
+  differently every month. And `report_type` is a free-text input on the upload form while sitting
+  inside the reuse key. Fixing any one alone would have changed nothing.
+- **Spec 018 promised the reuse and it was never built.** §8.2: "Automatic reuse occurs only when
+  every bound field matches." §8.1 simultaneously required sheet names in the digest and concluded
+  the same schema reuses its contract — not both true for this provider. Corrected in this change
+  per AGENTS.md §9, rather than left as aspiration.
+- **The CSV refusal is a two-format provider, not a bad file.** `talabat-performance.ts` declares
+  `dateEncoding: "excel_serial"` because the XLSX arrives as a serial with cell styles ignored. The
+  CSV of the same report writes `2026-01-01`, so `parsePeriodKey` computes `Number("2026-01-01")`,
+  gets `NaN`, and raises `INVALID_LOCAL_DATE`.
+- **`CATEGORICAL_VALUE_NOT_DECLARED` on Mar-2026 is the label `CLOSED`.** Verified by reading the
+  fixture: the approved figures permit only `ITEM_UNAVAILABLE`. Refusing is right; refusing without
+  naming the label is not. The detail field is plumbed and empty rather than missing --
+  `failureDetail` joins the error name, code and message, and `ReportProjectionError`'s message *is*
+  its code, so the stored detail reads `ReportProjectionError: CATEGORICAL_VALUE_NOT_DECLARED`.
+  `ReportControlTotalMismatch` already solves exactly this, one class down, per ADR 0029.
+- **Trigger.dev's "Completed" is deliberate and half wrong.** Both report tasks return
+  `{ outcome: "failed" }` rather than throwing, which correctly avoids retrying an unparseable
+  date, and incorrectly makes the run list say the opposite of what happened.
+- **The channel page cannot answer for a window.** It accepts no `searchParams` and renders
+  `runs.find((run) => run.status === "completed")`. The workspace picker drives only what a future
+  run covers, so selecting a month changes nothing on screen.
+
+`docs/superpowers/specs/2026-09-02-governed-report-reuse-and-channel-intake-design.md` is the
+approved design; ADR 0046 records standing admissions as the unit of reuse; spec 018 §4.1.8, §8.1
+and §8.2 are updated. Rejected on the way: auto-proposing and auto-approving per upload, which
+needs no guard migration and would have recorded operators as approving mappings they never saw.
+
+Nothing implemented yet. The user approved the design section by section on 2026-09-02 and the
+implementation plan is next.
