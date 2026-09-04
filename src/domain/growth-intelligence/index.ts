@@ -9,6 +9,35 @@ export {
   MARKET_EVIDENCE_FRESHNESS_REGISTRY_VERSION,
 } from "@/domain/growth-intelligence/evidence-quality";
 export { evaluateGeographicCompatibility } from "@/domain/growth-intelligence/geography";
+export { validateSynthesisCandidate } from "@/domain/growth-intelligence/synthesis";
+export type {
+  EligibleSynthesisClaim,
+  SynthesisCandidate,
+  SynthesisValidationContext,
+  SynthesisValidationReason,
+  SynthesisValidationResult,
+} from "@/domain/growth-intelligence/synthesis";
+export {
+  createGrowthIntelligenceItemFingerprint,
+  createGrowthIntelligenceItemIdentity,
+} from "@/domain/growth-intelligence/items";
+export type {
+  GrowthIntelligenceItemIdentity,
+  GrowthIntelligenceItemInput,
+} from "@/domain/growth-intelligence/items";
+export {
+  buildRecommendationPriority,
+  compareRecommendationPriority,
+  PRIORITY_RULE_VERSION,
+} from "@/domain/growth-intelligence/priority";
+export type {
+  RecommendationPriority,
+  RecommendationPriorityBand,
+  RecommendationPriorityComponent,
+  RecommendationPriorityInput,
+} from "@/domain/growth-intelligence/priority";
+export { classifyItemLineage } from "@/domain/growth-intelligence/lineage";
+export type { ItemLineage } from "@/domain/growth-intelligence/lineage";
 export {
   createMarketEvidenceMaterialFingerprint,
   hasMaterialMarketEvidenceChange,
