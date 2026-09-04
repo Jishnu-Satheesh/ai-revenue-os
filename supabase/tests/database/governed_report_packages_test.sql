@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(20);
+select extensions.plan(22);
 
 select extensions.has_table('public', 'integration_report_packages', 'governed report packages exist');
 select extensions.has_table('public', 'integration_report_sheet_manifests', 'bounded report sheet manifests exist');
@@ -70,6 +70,32 @@ select extensions.ok(
       and policyname = 'operators upload governed report package objects'
   ),
   'private storage accepts only the governed upload policy'
+);
+
+-- Task 9C: the deployed Trigger worker still calls the six-argument profiling
+-- completion signature Task 2 dropped. Both it and the seven-argument
+-- function it now wraps must exist side by side until the worker redeploys.
+select extensions.ok(
+  pg_catalog.to_regprocedure(
+    'public.complete_governed_report_package_profiling(uuid,uuid,uuid,text,text,jsonb)'
+  ) is not null
+  and pg_catalog.to_regprocedure(
+    'public.complete_governed_report_package_profiling(uuid,uuid,uuid,text,text,text,jsonb)'
+  ) is not null,
+  'both the six-argument compatibility overload and the seven-argument profiling completion function exist'
+);
+select extensions.ok(
+  not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.complete_governed_report_package_profiling(uuid,uuid,uuid,text,text,jsonb)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.complete_governed_report_package_profiling(uuid,uuid,uuid,text,text,text,jsonb)',
+    'execute'
+  ),
+  'authenticated users cannot execute either profiling completion overload'
 );
 select extensions.has_trigger('public', 'integration_report_packages', 'integration_report_packages_audit', 'package lifecycle transitions are audited');
 select extensions.has_trigger('public', 'integration_report_packages', 'integration_report_packages_prevent_delete', 'package hard deletes are blocked');
