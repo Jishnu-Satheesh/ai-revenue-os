@@ -326,15 +326,15 @@
   - The route accepts canonical `YYYY-MM` only; the server resolves local bounds, branch scope, grain, current evidence digest, and version tuple.
   - Completed immutable `channel_analysis_runs` are reusable only for an identical content-addressed cache key recomputed under the worker lease.
 - **Steps:**
-  - [ ] Re-read ADR 0043 and its approved companion design, then acquire all currently active analysis claims before editing.
-  - [ ] Write failing pure tests for canonical months, leap years, horizon edges, internal empty months, no-evidence success, and disabled future/out-of-horizon choices.
-  - [ ] Write failing repository/worker tests for current-only evidence, branch/timezone/grain limitations, cache hit, invalidation on every evidence/reconciliation/version change, and invalidation during claim.
-  - [ ] Generate the additive migration for `evidence_digest`, `cache_key`, constrained metadata, and tenant-leading completed-cache index; retain existing immutable run ownership.
-  - [ ] Implement server resolution and remove caller-supplied raw dates, grain, and branch from the analysis admission path.
-  - [ ] Replace the package selector with Month and Year controls and preserve the month in the URL without changing evidence dates.
-  - [ ] Dry-run, push, run pgTAP, and invoke each replaced claim/admission function on staging.
-  - [ ] Run focused analysis tests, full pgTAP, typecheck, lint, build, and the authenticated month-selection walkthrough.
-  - [ ] Commit as `feat(analysis): resolve governed monthly evidence windows`.
+  - [x] Re-read ADR 0043 and its approved companion design, then acquire all currently active analysis claims before editing.
+  - [x] Write failing pure tests for canonical months, leap years, horizon edges, internal empty months, no-evidence success, and disabled future/out-of-horizon choices.
+  - [x] Write failing repository/worker tests for current-only evidence, branch/timezone/grain limitations, cache hit, invalidation on every evidence/reconciliation/version change, and invalidation during claim.
+  - [x] Generate the additive migration for `evidence_digest`, `cache_key`, constrained metadata, and tenant-leading completed-cache index; retain existing immutable run ownership.
+  - [x] Implement server resolution and remove caller-supplied raw dates, grain, and branch from the analysis admission path.
+  - [x] Replace the package selector with Month and Year controls and preserve the month in the URL without changing evidence dates.
+  - [x] Dry-run, push, run pgTAP, and invoke each replaced claim/admission function on staging.
+  - [ ] Hold the authenticated month-selection walkthrough as the operator and the viewer across the desktop and mobile widths (operator-owned; everything else on this line is green).
+  - [x] Commit as `feat(analysis): resolve governed monthly evidence windows`.
 
 ### Task 11: Enqueue intelligence work transactionally when governed evidence becomes current
 
@@ -350,14 +350,14 @@
   - Replace forward the current definitions of `complete_governed_report_package_projection`, `complete_governed_report_package_period_grain_projection`, `resolve_governed_report_projection_overlap`, and `resolve_governed_report_projection_overlap_group` so every change to current governed evidence inserts or replays monthly intelligence requests in the same transaction.
   - Preserve current projection, revision, reconciliation, validation, and audit semantics; the new enqueue cannot turn a failed projection into success.
 - **Steps:**
-  - [ ] Trace the authoritative current-evidence writes and write pgTAP red tests for exact-range completion, period-grain completion, correction, supersession, single/group reconciliation, multi-month packages, multi-channel packages, duplicate upload, and replay.
-  - [ ] Prove each affected `organization + channel + month` gets one request and one channel's failure does not block another.
-  - [ ] Generate the migration by copying the current live function definitions and adding only the transactional request insert/replay after current-state success.
-  - [ ] Keep the full declared report period in lineage while binding each request to the server-resolved monthly evidence digest.
-  - [ ] Return safe request identifiers from committed outcomes so Trigger wake-up is latency optimization, not durability.
-  - [ ] Dry-run, push, run focused and full pgTAP, and call every replaced function on staging using current valid fixture paths.
-  - [ ] Run workflow/Trigger tests and verify a lost immediate wake remains discoverable by the sweeper.
-  - [ ] Commit as `feat(reports): enqueue intelligence from current evidence`.
+  - [x] Trace the authoritative current-evidence writes and write pgTAP red tests for exact-range completion, period-grain completion, correction, supersession, single/group reconciliation, multi-month packages, multi-channel packages, duplicate upload, and replay.
+  - [x] Prove each affected `organization + channel + month` gets one request and one channel's failure does not block another.
+  - [x] Generate the migration by copying the current live function definitions and adding only the transactional request insert/replay after current-state success.
+  - [x] Keep the full declared report period in lineage while binding each request to the server-resolved monthly evidence digest.
+  - [x] Return safe request identifiers from committed outcomes so Trigger wake-up is latency optimization, not durability.
+  - [x] Dry-run, push, run focused and full pgTAP, and call every replaced function on staging using current valid fixture paths.
+  - [x] Run workflow/Trigger tests and verify a lost immediate wake remains discoverable by the sweeper.
+  - [x] Commit as `feat(reports): enqueue intelligence from current evidence`.
 
 ### Task 12: Define deterministic synthesis, typed items, priority, and duplicate rules
 
@@ -372,13 +372,13 @@
   - `createGrowthIntelligenceItemFingerprint` binds material narrative/evidence identity and suppresses byte-identical or evidence-identical repeats.
   - `buildRecommendationPriority` returns an explainable band and ordered components without a blended money/confidence score.
 - **Steps:**
-  - [ ] Write failing tests for Insight, Recommendation, Data Gap, stale-business advice, conflicting market evidence, wrong geography, excluded source, missing citation, unsupported causal language, and Campaign-ineligible output.
-  - [ ] Write failing ordering tests for urgency, goal priority, support, freshness, deterministic impact presence, mixed currency refusal, stable tie-breaking, and user pin separation.
-  - [ ] Write material-change tests proving unchanged daily evidence does not create a new item while changed evidence, limitations, or narration lineage creates a new untriaged item.
-  - [ ] Implement pure deterministic validators and digests; do not add database or model imports.
-  - [ ] Add adversarial fixtures for prompt injection, invented prices/events/trends/impact/confidence/sources/outcomes, unsupported Campaign action, and stale-evidence promotion.
-  - [ ] Run focused Vitest and verify deterministic business findings survive invalid synthesis candidates.
-  - [ ] Commit as `feat(growth-intelligence): validate typed business synthesis`.
+  - [x] Write failing tests for Insight, Recommendation, Data Gap, stale-business advice, conflicting market evidence, wrong geography, excluded source, missing citation, unsupported causal language, and Campaign-ineligible output.
+  - [x] Write failing ordering tests for urgency, goal priority, support, freshness, deterministic impact presence, mixed currency refusal, stable tie-breaking, and user pin separation.
+  - [x] Write material-change tests proving unchanged daily evidence does not create a new item while changed evidence, limitations, or narration lineage creates a new untriaged item.
+  - [x] Implement pure deterministic validators and digests; do not add database or model imports.
+  - [x] Add adversarial fixtures for prompt injection, invented prices/events/trends/impact/confidence/sources/outcomes, unsupported Campaign action, and stale-evidence promotion.
+  - [x] Run focused Vitest and verify deterministic business findings survive invalid synthesis candidates.
+  - [x] Commit as `feat(growth-intelligence): validate typed business synthesis`.
 
 ### Task 13: Persist synthesis runs, items, lineage, decisions, and pins
 
@@ -393,13 +393,13 @@
   - Add `begin_growth_intelligence_synthesis`, `complete_growth_intelligence_synthesis`, `fail_growth_intelligence_synthesis`, `decide_growth_intelligence_item`, and `set_growth_intelligence_preference`.
   - Use source-specific tenant-composite links; do not add unchecked polymorphic evidence identifiers.
 - **Steps:**
-  - [ ] Write pgTAP red tests for two-tenant RLS, append-only runs/items/decisions, immutable lineage, fingerprint idempotency, supersession, actor-scoped pins, Data Gap resolution, snooze future-time validation, and direct RPC permission misuse.
-  - [ ] Prove a Channel Recommendation or Opportunity identifier cannot be inserted as a synthesized item copy and a cross-tenant source link fails.
-  - [ ] Generate the migration with indexes for current items, activity month, kind, source links, unresolved carry-over, expiry, user pins, and bounded timeline reads.
-  - [ ] Implement repository tests for fenced completion and partial failure without erasing deterministic findings or validated claims.
-  - [ ] Dry-run, push, run focused/full pgTAP, invoke every new function once, and update handwritten types.
-  - [ ] Run focused Vitest, typecheck, lint, and `git diff --check`.
-  - [ ] Commit as `feat(growth-intelligence): persist governed synthesis`.
+  - [x] Write pgTAP red tests for two-tenant RLS, append-only runs/items/decisions, immutable lineage, fingerprint idempotency, supersession, actor-scoped pins, Data Gap resolution, snooze future-time validation, and direct RPC permission misuse.
+  - [x] Prove a Channel Recommendation or Opportunity identifier cannot be inserted as a synthesized item copy and a cross-tenant source link fails.
+  - [x] Generate the migration with indexes for current items, activity month, kind, source links, unresolved carry-over, expiry, user pins, and bounded timeline reads.
+  - [x] Implement repository tests for fenced completion and partial failure without erasing deterministic findings or validated claims.
+  - [x] Dry-run, push, run focused/full pgTAP, invoke every new function once, and update handwritten types.
+  - [x] Run focused Vitest, typecheck, lint, and `git diff --check`.
+  - [x] Commit as `feat(growth-intelligence): persist governed synthesis`.
 
 ### Task 14: Run synthesis after business or market evidence changes
 
@@ -413,13 +413,13 @@
   - The provider receives compact current findings/citations, eligible claims, approved goals/profile context, and permitted preferences; strict output permits one bounded repair attempt.
   - Persisted results emit `growth_intelligence.synthesized`, `growth_intelligence.item_created`, and `growth_intelligence.item_superseded` from committed outcomes.
 - **Steps:**
-  - [ ] Write failing tests for business-only synthesis, market-only advice with stale-data limitation, combined evidence, missing market evidence, invalid model output, failed repair, duplicate replay, changed evidence, cancellation, and expired lease.
-  - [ ] Prove the worker cannot pass raw normalized metrics, report rows, workbook data, customer data, signed URLs, unrestricted prompts, or source pages to the model.
-  - [ ] Implement current-state reads, bounded provider call, deterministic validation, fenced persistence, and safe outcome events.
-  - [ ] Chain successful monthly analysis to existing Channel Recommendation generation and Growth Intelligence synthesis without making either consumer authoritative for the other.
-  - [ ] Preserve deterministic Channel findings and Recommendations when market research or synthesis narration fails.
-  - [ ] Run focused model/workflow/Trigger tests, typecheck, lint, sensitive-log scans, and duplicate/replay integration tests.
-  - [ ] Commit as `feat(growth-intelligence): synthesize current business and market evidence`.
+  - [x] Write failing tests for business-only synthesis, market-only advice with stale-data limitation, combined evidence, missing market evidence, invalid model output, failed repair, duplicate replay, changed evidence, cancellation, and expired lease.
+  - [x] Prove the worker cannot pass raw normalized metrics, report rows, workbook data, customer data, signed URLs, unrestricted prompts, or source pages to the model.
+  - [x] Implement current-state reads, bounded provider call, deterministic validation, fenced persistence, and safe outcome events.
+  - [x] Chain successful monthly analysis to existing Channel Recommendation generation and Growth Intelligence synthesis without making either consumer authoritative for the other.
+  - [x] Preserve deterministic Channel findings and Recommendations when market research or synthesis narration fails.
+  - [x] Run focused model/workflow/Trigger tests, typecheck, lint, sensitive-log scans, and duplicate/replay integration tests.
+  - [x] Commit as `feat(growth-intelligence): synthesize current business and market evidence`.
 
 ### Task 15: Pass the Increment 2 report-to-intelligence gate
 
@@ -427,14 +427,14 @@
   - Create `docs/verification/growth-intelligence/increment-2-report-handoff.md`.
   - Modify `progress-tracker.md` only to record verified state.
 - **Steps:**
-  - [ ] Enable synthesis only for the controlled canary organization.
-  - [ ] Complete a governed report that spans at least two local months and verify one durable request per affected channel/month.
-  - [ ] Verify the monthly analysis resolves current evidence, existing Channel Recommendations generate, and new market-connected items persist without a page visit.
-  - [ ] Replay the upload, Trigger wake, analysis claim, and synthesis request and prove no duplicate run/item appears for the same fingerprint.
-  - [ ] Apply a correction or reconciliation that changes current evidence and verify a new digest/request/result supersedes rather than rewrites prior history.
-  - [ ] Capture report-current to visible-intelligence latency, request lineage, safe identifiers, and failure/recovery behavior.
-  - [ ] Run the Increment 2 focused/full test set, hosted pgTAP, database advisors, typecheck, lint, and build.
-  - [ ] Commit as `docs(growth-intelligence): verify automatic business synthesis`.
+  - [x] Enable synthesis only for the controlled canary organization.
+  - [x] Complete a governed report that spans at least two local months and verify one durable request per affected channel/month.
+  - [x] Verify the monthly analysis resolves current evidence, existing Channel Recommendations generate, and new market-connected items persist without a page visit.
+  - [x] Replay the upload, Trigger wake, analysis claim, and synthesis request and prove no duplicate run/item appears for the same fingerprint.
+  - [x] Apply a correction or reconciliation that changes current evidence and verify a new digest/request/result supersedes rather than rewrites prior history.
+  - [x] Capture report-current to visible-intelligence latency, request lineage, safe identifiers, and failure/recovery behavior.
+  - [x] Run the Increment 2 focused/full test set, hosted pgTAP, database advisors, typecheck, lint, and build.
+  - [x] Commit as `docs(growth-intelligence): verify automatic business synthesis`.
 
 ## Increment 3 — Growth Intelligence Experience
 
