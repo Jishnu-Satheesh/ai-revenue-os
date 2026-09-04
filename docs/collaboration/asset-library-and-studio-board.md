@@ -4133,3 +4133,74 @@ needs no guard migration and would have recorded operators as approving mappings
 
 Nothing implemented yet. The user approved the design section by section on 2026-09-02 and the
 implementation plan is next.
+
+### 2026-09-04 · muse-code · Resumed Growth Intelligence Task 17 (synchronized triage) after session wall
+
+- The interrupted harness had fixed the preferences route test's mock hoisting but left 3/3
+  preferences tests red. Root cause was not the mock: the test passed a bare promise as the
+  route's second argument instead of the `{ params }` context object every sibling suite passes,
+  so `await params` resolved to `undefined` and the route threw reading `organizationId`.
+  Fixed in the test file only; route untouched.
+- `pnpm typecheck` then showed 6 errors across the in-flight snooze slice, all mechanical:
+  `LogContext` knew neither the 7-kind item decision vocabulary nor `itemId`/`sourceKind`/`sourceId`
+  (added as bounded codes and opaque ids, per the allowlist's own rule; `pinned` stays out of logs
+  because it is a boolean, not an identifier or code), the preferences response spread `sourceKind`
+  twice, and `database.types.ts` still carried the old 5-arg `triage_channel_recommendation`
+  signature while migration `20260904093804` (already applied to staging) takes six args with
+  `snoozed`. Hand-updated the Args type to match the applied migration; no migration change.
+- Touched: the preferences `route.test.ts`; `src/lib/logger.ts`; `src/lib/supabase/database.types.ts`
+  (narrow `triage_channel_recommendation` Args only); preferences and item-decision routes
+  (log context + response shape only); one doc line on the channel-recommendation decisions route.
+- Follow-up round: `database.types.test.ts` caught the `snoozed_until` column missing from the
+  `channel_recommendation_decisions` Row (added, with `snoozed` in its decision union), which
+  surfaced the read path still typed for three answers — widened
+  `ChannelRecommendationDecisionRecord`, both recommendation-view decision unions, and added the
+  `Snoozed` past-tense label so a stored snooze renders instead of showing a blank. Lane logic
+  (`actionable`) is value-agnostic, so no behavior change. Deliberately out of scope: a
+  snooze-sending control and horizon display in the workspace need a picker design first.
+- Full gates: `pnpm test` 386 files / 4003 passed / 6 skipped; `pnpm db:test` 59 suites pass;
+  `pnpm lint` 0 errors (32 warnings, none in touched files); `pnpm build` green. Removed 10
+  unreferenced `scripts/tmp-*.mjs` scratch probes from the prior session.
+- Verified: `pnpm typecheck` clean; 287 tests across the four growth-intelligence API suites,
+  `src/modules/analysis`, and `src/modules/growth-intelligence` all pass; ESLint clean on touched
+  files; both pgTAP decision suites (`channel_recommendation_decisions`,
+  `growth_intelligence_item_decisions`) pass against staging, which also executes the replaced
+  `triage_channel_recommendation` and `decide_growth_intelligence_item` functions for real.
+- `pnpm build` was still compiling at time of writing (5+ min in this tree); rerun before sign-off.
+  Nothing committed; `git push` and any migration apply remain the user's steps.
+
+### 2026-09-04 · muse-code · Growth Intelligence Task 17 tail: test-shape and typecheck fixes
+
+- Resumed the interrupted triage/snooze session. The preferences route test passed a bare
+  promise where the route takes a `{ params }` context, so every case died at
+  `rawParams.organizationId` and the mock mapped it to 422. Fixed the three call sites;
+  the 4 GI route suites are 24/24 green.
+- Typecheck had 6 errors, all in the in-flight slice: `LogContext` knew neither the
+  `snoozed | pinned | unpinned | resolved` answer vocabulary nor the `itemId` / `sourceKind` /
+  `sourceId` identifiers the new routes log, `database.types.ts` still carried the 5-arg
+  `triage_channel_recommendation` signature after migration `20260904093804` replaced it with
+  the 6-arg snooze form, and the preferences response spread `sourceKind` twice. Fixed all
+  four files; `tsc --noEmit` is clean and the touched-file ESLint pass is clean.
+- **Touched:** the preferences `route.test.ts` + `route.ts`, the items-decisions `route.ts`,
+  the channel-recommendation decisions `route.ts` (doc line only), `src/lib/logger.ts`,
+  `src/lib/supabase/database.types.ts`. No migration, no RLS, no behavior change.
+- Staging state verified read-only: migrations `20260904093804` and `20260904094601` are
+  applied, and both decision pgTAP suites pass against staging (0 failures), which also
+  executes the replaced RPCs for the first-call rule. Broader Vitest across the GI,
+  organizations, analysis, channel-recommendation, and overview-report surface is green.
+- `pnpm build`: green (compiled clean, static pages generated, BUILD_ID written).
+
+### 2026-09-04 · opencode · Governed reuse Slice 1: one-click declaration of a refused label
+
+- Resuming the interrupted governed-report-reuse work per the approved spec
+  `docs/superpowers/specs/2026-09-02-governed-report-reuse-and-channel-intake-design.md`.
+  Phase 1 is otherwise landed; this slice finishes the declare-a-label flow.
+- **Claiming:** `supabase/migrations/20260903130000_declare_projection_categorical_value.sql`
+  (drafted, unapplied — review only, no edits needed),
+  `supabase/tests/database/governed_report_declare_categorical_value_test.sql` (new),
+  `src/lib/supabase/database.types.ts` (narrow RPC Args entry only),
+  `src/modules/reports/application/ports.ts` + `service.ts`,
+  `src/modules/reports/infrastructure/repository.ts` (pass-through only),
+  one new declare route under `report-packages/[packageId]/`,
+  `src/components/integrations/report-package-upload.tsx` (failure panel only).
+  Growth Intelligence files are not touched.
