@@ -1290,9 +1290,11 @@ export type Database = {
           id: string;
           organization_id: string;
           recommendation_id: string;
-          decision: "acknowledged" | "dismissed" | "planned";
+          decision: "acknowledged" | "dismissed" | "planned" | "snoozed";
           /** Required when the decision dismisses; null for every other answer. */
           dismissal_reason: string | null;
+          /** Required when the decision snoozes; null for every other answer. */
+          snoozed_until: string | null;
           actor_id: string;
           /**
            * Snapshot of the actor's display name, resolved definer-side at
@@ -2571,6 +2573,18 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["report_projection_versions"]["Row"];
       };
+      propose_governed_report_projection_with_declared_value: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_report_projection_version_id: string;
+          p_output_key: string;
+          p_value: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Database["public"]["Tables"]["report_projection_versions"]["Row"];
+      };
       decide_governed_report_projection: {
         Args: {
           p_organization_id: string;
@@ -2720,9 +2734,10 @@ export type Database = {
         Args: {
           p_organization_id: string;
           p_recommendation_id: string;
-          p_decision: "acknowledged" | "dismissed" | "planned";
+          p_decision: "acknowledged" | "dismissed" | "planned" | "snoozed";
           p_dismissal_reason: string | null;
           p_actor_id: string;
+          p_snoozed_until: string | null;
         };
         Returns: undefined;
       };

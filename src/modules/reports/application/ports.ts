@@ -182,6 +182,20 @@ export type ReportPackageRepository = {
     idempotencyKey: string;
     correlationId: string;
   }): Promise<ReportProjectionVersionRow>;
+  /**
+   * The one-click exit from a categorical refusal: appends one label to one
+   * output's vocabulary and proposes the result. Grants nothing -- approval
+   * still goes through decideProjection.
+   */
+  proposeProjectionWithDeclaredValue(input: {
+    organizationId: string;
+    actorId: string;
+    projectionVersionId: string;
+    outputKey: string;
+    value: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportProjectionVersionRow>;
   decideProjection(input: {
     organizationId: string;
     actorId: string;

@@ -95,3 +95,38 @@ export class ReportCategoricalValueNotDeclared extends ReportProjectionError {
     this.message = `${outputKey}: ${this.value} is not a declared value (${days})`;
   }
 }
+
+export type ParsedCategoricalRefusal = {
+  outputKey: string;
+  value: string;
+  /** The dates as recorded, in the order the run wrote them. */
+  dates: string[];
+};
+
+/**
+ * What a recorded categorical refusal was about, recovered from the run's
+ * own words.
+ *
+ * The worker stores `name: code: message`, so a refusal arrives shaped like
+ * `ReportProjectionError: CATEGORICAL_VALUE_NOT_DECLARED: cancel_reason:
+ * CLOSED is not a declared value (2026-03-04, 2026-03-11)`. The output key
+ * is matched strictly and the value greedily from the right, because a raw
+ * provider label may itself contain the words being matched on. Anything
+ * that does not parse returns null, and the panel falls back to the raw
+ * detail with no button rather than a wrong one.
+ */
+export function parseCategoricalRefusalDetail(detail: string): ParsedCategoricalRefusal | null {
+  const marker = "CATEGORICAL_VALUE_NOT_DECLARED: ";
+  const markerIndex = detail.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const remainder = detail.slice(markerIndex + marker.length);
+  const match = /^([a-z][a-z0-9_]{0,63}): (.*) is not a declared value \((.*)\)$/.exec(remainder);
+  if (!match) return null;
+  const [, outputKey, value, dates] = match;
+  if (value.length === 0) return null;
+  return {
+    outputKey,
+    value,
+    dates: dates.length === 0 ? [] : dates.split(",").map((day) => day.trim()),
+  };
+}

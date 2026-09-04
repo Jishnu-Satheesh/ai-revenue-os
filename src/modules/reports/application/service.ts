@@ -337,6 +337,25 @@ export function createReportPackageService(repository: ReportPackageRepository) 
       });
     },
 
+    async proposeProjectionWithDeclaredValue(
+      context: AuthenticatedReportContext,
+      projectionVersionId: string,
+      outputKey: string,
+      value: string,
+      idempotencyKey: string,
+    ) {
+      assertPermission(context, "report.contract_approve");
+      return repository.proposeProjectionWithDeclaredValue({
+        organizationId: context.organizationId,
+        actorId: context.actorId,
+        projectionVersionId: packageIdSchema.parse(projectionVersionId),
+        outputKey,
+        value,
+        idempotencyKey,
+        correlationId: context.correlationId,
+      });
+    },
+
     async decideProjection(
       context: AuthenticatedReportContext,
       projectionVersionId: string,

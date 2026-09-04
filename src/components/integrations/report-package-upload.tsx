@@ -28,6 +28,10 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ReportAdmissionApproval } from "@/components/integrations/report-admission-approval";
 import { ReportIntakeMapping, type RecognisedFamily } from "@/components/integrations/report-intake-mapping";
+import {
+  parseCategoricalRefusalDetail,
+  type ParsedCategoricalRefusal,
+} from "@/domain/reports/projection-error";
 import { summarizeReportProjection } from "@/domain/reports/projection-copy";
 import {
   Select,
@@ -433,6 +437,82 @@ function ReportContractStep({
   }
 
   return <ReportIntakeMapping organizationId={organizationId} packageId={packageId} onProposed={onDone} />;
+}
+
+/**
+ * The way out of a categorical refusal, offered where the refusal is read.
+ *
+ * The run stopped because a label the provider wrote is not in the approved
+ * vocabulary. Declaring it proposes the label into the figures as a new,
+ * unapproved version -- the existing Approve control below still has to pass
+ * it before anything is read. An operator without approval permission sees
+ * who must act instead of a button that would only be refused.
+ */
+function CategoricalRefusalDeclaration({
+  organizationId,
+  projectionVersionId,
+  failureDetail,
+  canDeclare,
+}: Readonly<{
+  organizationId: string;
+  projectionVersionId: string;
+  failureDetail: string;
+  canDeclare: boolean;
+}>) {
+  const queryClient = useQueryClient();
+  const refusal: ParsedCategoricalRefusal | null = parseCategoricalRefusalDetail(failureDetail);
+  const declareLabel = useMutation({
+    mutationFn: () =>
+      requestJson(
+        `/api/organizations/${organizationId}/report-projections/${projectionVersionId}/declarations`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ outputKey: refusal?.outputKey, value: refusal?.value }),
+        },
+      ),
+    onSuccess: () => {
+      toast.success(
+        "Label proposed into the figures. Approve the new version below, then retry the projection.",
+      );
+      void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
+    },
+    onError: (error) =>
+      toast.error(
+        error instanceof Error ? error.message : "The label could not be declared.",
+      ),
+  });
+
+  if (!refusal) return null;
+  const dates = refusal.dates.length > 0 ? refusal.dates.join(", ") : "dates not recorded";
+  if (!canDeclare) {
+    return (
+      <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+        <Lock className="mt-0.5 size-3.5 shrink-0" />
+        The file uses the label {refusal.value} ({dates}), which nobody has declared yet. An
+        owner or admin declares it once, then the figures can be approved and read.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 space-y-2 rounded-md border p-2 text-xs">
+      <p className="text-muted-foreground">
+        The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
+        ({dates}), which is not a declared {refusal.outputKey.replaceAll("_", " ")} value.
+        Declaring it proposes the figures again with that label counted -- nothing is approved
+        until an owner or admin says so below.
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={declareLabel.isPending}
+        onClick={() => declareLabel.mutate()}
+      >
+        <UserCheck data-icon="inline-start" />{" "}
+        {declareLabel.isPending ? "Declaring…" : `Declare "${refusal.value}" as a value we count`}
+      </Button>
+    </div>
+  );
 }
 
 export function ReportPackageUpload({
@@ -1183,10 +1263,18 @@ export function ReportPackageUpload({
                     the error's own words, recorded by the run that failed.
                   */}
                   {latestProjection?.status === "failed" && latestProjection.failure_detail ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">Why it stopped: </span>
-                      {latestProjection.failure_detail}
-                    </p>
+                    <>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">Why it stopped: </span>
+                        {latestProjection.failure_detail}
+                      </p>
+                      <CategoricalRefusalDeclaration
+                        organizationId={organizationId}
+                        projectionVersionId={latestProjection.report_projection_version_id}
+                        failureDetail={latestProjection.failure_detail}
+                        canDeclare={canApproveContract}
+                      />
+                    </>
                   ) : null}
                 </div>
               );

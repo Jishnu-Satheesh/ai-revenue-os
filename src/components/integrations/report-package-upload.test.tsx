@@ -242,6 +242,104 @@ describe("ReportPackageUpload reconciliation actions", () => {
   });
 });
 
+describe("ReportPackageUpload categorical refusal declaration", () => {
+  const FAILURE_DETAIL =
+    "ReportCategoricalValueNotDeclared: CATEGORICAL_VALUE_NOT_DECLARED: cancel_reason: CLOSED is not a declared value (2026-03-04, 2026-03-11)";
+
+  function failedSnapshot(detail: string) {
+    return {
+      ...snapshot,
+      packages: snapshot.packages.map((pkg) => ({ ...pkg, status: "projection_failed" })),
+      projectionRuns: snapshot.projectionRuns.map((run) => ({
+        ...run,
+        status: "failed",
+        failure_detail: detail,
+      })),
+      reconciliationGroups: [],
+    } as unknown as ReportPackageSnapshot;
+  }
+
+  function stubSnapshot(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return new Response(JSON.stringify({ reportProjectionVersion: { id: "new-version" } }), {
+            status: 201,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+  }
+
+  function renderUploadAs(role: "owner" | "operator") {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ReportPackageUpload organizationId={ORGANIZATION_ID} role={role} timeZone="Asia/Dubai" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("names the refused label and offers to declare it", async () => {
+    stubSnapshot(failedSnapshot(FAILURE_DETAIL));
+    renderUploadAs("owner");
+
+    const button = await screen.findByRole("button", { name: /Declare "CLOSED" as a value we count/i });
+    expect(button).toBeEnabled();
+    expect(screen.getByText(/which is not a declared cancel reason value/i)).toBeInTheDocument();
+  });
+
+  it("declares through the new route and points at the approval control", async () => {
+    stubSnapshot(failedSnapshot(FAILURE_DETAIL));
+    renderUploadAs("owner");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Declare "CLOSED" as a value we count/i }),
+    );
+
+    await waitFor(() => {
+      const fetchMock = vi.mocked(fetch);
+      const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(post?.[0]).toBe(
+        `/api/organizations/${ORGANIZATION_ID}/report-projections/${PROJECTION_VERSION_ID}/declarations`,
+      );
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        outputKey: "cancel_reason",
+        value: "CLOSED",
+      });
+    });
+    await waitFor(() =>
+      expect(toastMocks.success).toHaveBeenCalledWith(
+        "Label proposed into the figures. Approve the new version below, then retry the projection.",
+      ),
+    );
+  });
+
+  it("tells an operator who must act instead of offering a button that would be refused", async () => {
+    stubSnapshot(failedSnapshot(FAILURE_DETAIL));
+    renderUploadAs("operator");
+
+    await screen.findByText(/An owner or admin declares it once/i);
+    expect(
+      screen.queryByRole("button", { name: /Declare "CLOSED" as a value we count/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("leaves any other failure exactly as it was, with no declare button", async () => {
+    stubSnapshot(failedSnapshot("ReportProjectionFailure: INVALID_LOCAL_DATE"));
+    renderUploadAs("owner");
+
+    await screen.findByText(/Why it stopped:/i);
+    expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("ReportPackageUpload report type derivation", () => {
   const CHANNEL_ID = "99999999-9999-4999-8999-999999999999";
   const RECOGNISED_PACKAGE_ID = "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa";
