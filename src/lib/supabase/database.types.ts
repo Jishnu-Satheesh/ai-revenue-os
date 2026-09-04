@@ -177,6 +177,286 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      market_research_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          growth_intelligence_request_id: string;
+          market_profile_version_id: string;
+          claim_token: string;
+          adapter_provider: string;
+          adapter_version: string;
+          model_provider: string | null;
+          model_version: string | null;
+          run_fingerprint: string;
+          query_plan_digest: string | null;
+          status: "running" | "completed" | "partial" | "failed";
+          evidence_payload_digest: string | null;
+          result_digest: string | null;
+          source_attempt_count: number;
+          source_success_count: number;
+          adapter_cost_micros_usd: number;
+          adapter_latency_ms: number;
+          safe_failure_code: string | null;
+          started_at: string;
+          completed_at: string | null;
+          failed_at: string | null;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      market_evidence_sources: {
+        Row: {
+          id: string;
+          organization_id: string;
+          market_research_run_id: string;
+          market_profile_version_id: string;
+          source_key: string;
+          source_url: string;
+          source_domain: string;
+          publisher: string | null;
+          source_class: "official" | "first_party" | "industry_research" | "public_signal";
+          availability: "available" | "unavailable" | "excluded";
+          source_content_digest: string | null;
+          safe_failure_code: string | null;
+          quotation_characters: number;
+          retrieved_at: string;
+          published_at: string | null;
+          observed_at: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      market_evidence_claims: {
+        Row: {
+          id: string;
+          organization_id: string;
+          market_research_run_id: string;
+          market_profile_version_id: string;
+          claim_key: string;
+          claim_digest: string;
+          subject_kind:
+            | "market"
+            | "competitor"
+            | "event"
+            | "regulation"
+            | "seasonality"
+            | "audience"
+            | "topic";
+          subject_ref: string;
+          claim_kind: string;
+          paraphrase: string;
+          quotation: string | null;
+          geographic_layer: "trade_area" | "city" | "country";
+          geography_ref: string;
+          freshness_class: "fast" | "standard" | "structural";
+          claim_category:
+            | "availability"
+            | "offer"
+            | "price"
+            | "event"
+            | "review_trend"
+            | "demand_trend"
+            | "regulation"
+            | "seasonality"
+            | "structural_context";
+          freshness_registry_version: number;
+          published_at: string | null;
+          observed_at: string | null;
+          stale_at: string;
+          expires_at: string;
+          limitations: string[];
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      market_evidence_claim_events: {
+        Row: {
+          id: string;
+          organization_id: string;
+          market_evidence_claim_id: string;
+          event_type:
+            | "observed"
+            | "expired"
+            | "withdrawn"
+            | "excluded"
+            | "corrected"
+            | "superseded";
+          event_digest: string;
+          reason: string | null;
+          occurred_at: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      market_evidence_links: {
+        Row: {
+          id: string;
+          organization_id: string;
+          market_evidence_claim_id: string;
+          market_evidence_source_id: string | null;
+          related_market_evidence_claim_id: string | null;
+          relation: "supports" | "corroborates" | "contradicts";
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_synthesis_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          growth_intelligence_request_id: string;
+          market_profile_version_id: string;
+          claim_token: string;
+          provider: string;
+          model_version: string | null;
+          run_fingerprint: string;
+          status: "running" | "completed" | "failed";
+          result_digest: string | null;
+          item_count: number;
+          safe_failure_code: string | null;
+          started_at: string;
+          completed_at: string | null;
+          failed_at: string | null;
+          correlation_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_items: {
+        Row: {
+          id: string;
+          organization_id: string;
+          growth_intelligence_synthesis_run_id: string;
+          market_profile_version_id: string;
+          kind: "insight" | "recommendation" | "data_gap";
+          narrative: string;
+          item_fingerprint: string;
+          evidence_fingerprint: string;
+          geographic_layer: "trade_area" | "city" | "country";
+          geography_ref: string;
+          support_grade: "primary" | "corroborated" | "single_source" | "contextual" | "conflicted";
+          freshness: "current" | "stale" | "expired";
+          urgency: "high" | "medium" | "low";
+          goal_alignment: "direct" | "indirect" | "none";
+          activity_month: string;
+          status: "current" | "superseded";
+          superseded_by_item_id: string | null;
+          missing_input: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_item_market_claims: {
+        Row: {
+          organization_id: string;
+          growth_intelligence_item_id: string;
+          market_evidence_claim_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_item_channel_findings: {
+        Row: {
+          organization_id: string;
+          growth_intelligence_item_id: string;
+          finding_id: string;
+          finding_digest: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_item_goals: {
+        Row: {
+          organization_id: string;
+          growth_intelligence_item_id: string;
+          goal_ref: string;
+          alignment: "direct" | "indirect" | "none";
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_item_decisions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          growth_intelligence_item_id: string;
+          actor_id: string;
+          decision:
+            | "acknowledged"
+            | "pinned"
+            | "unpinned"
+            | "planned"
+            | "snoozed"
+            | "dismissed"
+            | "resolved";
+          reason: string | null;
+          snoozed_until: string | null;
+          item_fingerprint: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_item_preferences: {
+        Row: {
+          organization_id: string;
+          growth_intelligence_item_id: string;
+          user_id: string;
+          pinned: boolean;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      channel_recommendation_preferences: {
+        Row: {
+          organization_id: string;
+          channel_recommendation_id: string;
+          user_id: string;
+          pinned: boolean;
+          snoozed_until: string | null;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      opportunity_preferences: {
+        Row: {
+          organization_id: string;
+          opportunity_id: string;
+          user_id: string;
+          pinned: boolean;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       organization_channels: {
         Row: {
           id: string;
@@ -1996,6 +2276,114 @@ export type Database = {
           p_safe_failure_code: string;
         };
         Returns: Record<string, unknown>;
+      };
+      begin_market_research_run: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_metadata: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      record_market_evidence_claims: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_market_research_run_id: string;
+          p_payload: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_market_research_run: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_market_research_run_id: string;
+          p_result: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_market_research_run: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_market_research_run_id: string;
+          p_failure: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      append_market_evidence_claim_event: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_event_type: "expired" | "withdrawn" | "excluded" | "corrected" | "superseded";
+          p_event: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      begin_growth_intelligence_synthesis: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_metadata: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_growth_intelligence_synthesis: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_synthesis_run_id: string;
+          p_result: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_growth_intelligence_synthesis: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_synthesis_run_id: string;
+          p_safe_failure_code: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      decide_growth_intelligence_item: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_item_id: string;
+          p_decision: string;
+          p_reason: string | null;
+          p_snoozed_until: string | null;
+          p_item_fingerprint: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      set_growth_intelligence_preference: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_source_kind: string;
+          p_source_id: string;
+          p_pinned: boolean;
+          p_snoozed_until: string | null;
+        };
+        Returns: Record<string, unknown>;
+      };
+      market_evidence_claim_current_state: {
+        Args: {
+          p_organization_id: string;
+          p_market_evidence_claim_id: string;
+        };
+        Returns: string | null;
       };
       claim_due_growth_intelligence_requests: {
         Args: {
