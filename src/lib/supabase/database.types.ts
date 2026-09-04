@@ -1162,6 +1162,9 @@ export type Database = {
           metric_versions: unknown;
           input_digest: string;
           result_digest: string | null;
+          /** Set only on the monthly path, which reuses completed runs by key. */
+          evidence_digest: string | null;
+          cache_key: string | null;
           status: "running" | "completed" | "failed";
           finding_count: number;
           observation_count: number;
