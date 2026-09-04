@@ -228,3 +228,236 @@ describe("authenticated Growth Intelligence read repository", () => {
     ).rejects.toThrow("Market evidence could not be loaded.");
   });
 });
+
+function workspacePersistence(results: Record<string, QueryResult[]> = {}) {
+  const queues = new Map(Object.entries(results).map(([table, rows]) => [table, [...rows]]));
+  const calls: Array<{ table: string; filters: Array<[string, unknown]>; limit?: number }> = [];
+  const from = vi.fn((table: string) => {
+    const result = queues.get(table)?.shift() ?? { data: [], error: null };
+    const call: { table: string; filters: Array<[string, unknown]>; limit?: number } = {
+      table,
+      filters: [],
+    };
+    calls.push(call);
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn((key: string, value: unknown) => {
+        call.filters.push([key, value]);
+        return builder;
+      }),
+      in: vi.fn((key: string, value: unknown) => {
+        call.filters.push([key, value]);
+        return builder;
+      }),
+      lte: vi.fn((key: string, value: unknown) => {
+        call.filters.push([`lte:${key}`, value]);
+        return builder;
+      }),
+      order: vi.fn(() => builder),
+      limit: vi.fn((value: number) => {
+        call.limit = value;
+        return builder;
+      }),
+      maybeSingle: vi.fn(async () => result),
+      then: (resolve: (value: QueryResult) => unknown) => Promise.resolve(result).then(resolve),
+    };
+    return builder;
+  });
+  return { client: { from } as never, calls, from };
+}
+
+const actorId = "20000000-0000-4000-8000-000000000002";
+
+function workspaceItemRow(overrides = {}) {
+  return {
+    id: "70000000-0000-4000-8000-000000000007",
+    kind: "insight",
+    narrative: "Delivery orders spike on rainy Thursdays.",
+    item_fingerprint: "a".repeat(64),
+    evidence_fingerprint: "b".repeat(64),
+    support_grade: "corroborated",
+    freshness: "current",
+    urgency: "medium",
+    goal_alignment: "direct",
+    activity_month: "2026-09",
+    status: "current",
+    missing_input: null,
+    created_at: "2026-09-02T08:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function channelRecommendationRow(overrides = {}) {
+  return {
+    id: "60000000-0000-4000-8000-000000000006",
+    channel_id: "61000000-0000-4000-8000-000000000061",
+    branch_id: null,
+    label: "recommendation",
+    headline: "Extend Friday hours",
+    detail: "Friday evenings carry the strongest observed demand.",
+    window_start: "2026-08-01",
+    window_end: "2026-08-31",
+    created_at: "2026-09-01T08:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("workspace reads", () => {
+  it("reads the organization's stored timezone", async () => {
+    const db = workspacePersistence({
+      organizations: [{ data: [{ default_timezone: "Asia/Dubai" }], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    await expect(repository.readOrganizationTimeZone(organizationId)).resolves.toBe(
+      "Asia/Dubai",
+    );
+  });
+
+  it("refuses to guess a timezone when none is stored", async () => {
+    const db = workspacePersistence({ organizations: [{ data: [], error: null }] });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    await expect(repository.readOrganizationTimeZone(organizationId)).rejects.toThrow(
+      /timezone/i,
+    );
+  });
+
+  it("lists current items through the viewed month with their latest decision and pin", async () => {
+    const db = workspacePersistence({
+      growth_intelligence_items: [
+        {
+          data: [
+            workspaceItemRow(),
+            workspaceItemRow({
+              id: "70000000-0000-4000-8000-000000000008",
+              activity_month: "2026-07",
+            }),
+          ],
+          error: null,
+        },
+      ],
+      growth_intelligence_item_decisions: [
+        {
+          data: [
+            {
+              growth_intelligence_item_id: "70000000-0000-4000-8000-000000000007",
+              actor_id: actorId,
+              decision: "acknowledged",
+              reason: null,
+              snoozed_until: null,
+              item_fingerprint: "a".repeat(64),
+              created_at: "2026-09-03T08:00:00.000Z",
+            },
+          ],
+          error: null,
+        },
+      ],
+      growth_intelligence_item_preferences: [
+        {
+          data: [
+            {
+              growth_intelligence_item_id: "70000000-0000-4000-8000-000000000008",
+              user_id: actorId,
+              pinned: true,
+            },
+          ],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const items = await repository.listWorkspaceItems({
+      organizationId,
+      actorId,
+      throughMonth: "2026-09",
+      limit: 100,
+    });
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ id: "70000000-0000-4000-8000-000000000007" });
+    expect(items[0]!.decision).toBe("acknowledged");
+    expect(items[1]!.activityMonth).toBe("2026-07");
+    expect(items[1]!.pinned).toBe(true);
+    const itemQuery = db.calls.find((call) => call.table === "growth_intelligence_items")!;
+    expect(itemQuery.filters).toContainEqual(["organization_id", organizationId]);
+    expect(itemQuery.filters).toContainEqual(["status", "current"]);
+    expect(itemQuery.filters).toContainEqual(["lte:activity_month", "2026-09"]);
+  });
+
+  it("lists channel recommendations with their latest owning-module decision and pin", async () => {
+    const db = workspacePersistence({
+      channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
+      channel_recommendation_decisions: [
+        {
+          data: [
+            {
+              recommendation_id: "60000000-0000-4000-8000-000000000006",
+              decision: "acknowledged",
+              created_at: "2026-09-02T08:00:00.000Z",
+            },
+          ],
+          error: null,
+        },
+      ],
+      channel_recommendation_preferences: [
+        {
+          data: [
+            {
+              channel_recommendation_id: "60000000-0000-4000-8000-000000000006",
+              user_id: actorId,
+              pinned: false,
+            },
+          ],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const rows = await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId,
+      limit: 100,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: "60000000-0000-4000-8000-000000000006",
+      label: "recommendation",
+      windowStart: "2026-08-01",
+      windowEnd: "2026-08-31",
+      generatedAt: "2026-09-01T08:00:00.000Z",
+    });
+    expect(rows[0]!.decision).toEqual({
+      decision: "acknowledged",
+      createdAt: "2026-09-02T08:00:00.000Z",
+    });
+  });
+
+  it("skips decision and pin lookups when there is nothing to resolve", async () => {
+    const db = workspacePersistence({
+      growth_intelligence_items: [{ data: [], error: null }],
+      channel_recommendations: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    await repository.listWorkspaceItems({
+      organizationId,
+      actorId,
+      throughMonth: "2026-09",
+      limit: 100,
+    });
+    await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId,
+      limit: 100,
+    });
+
+    expect(db.calls.map((call) => call.table).sort()).toEqual([
+      "channel_recommendations",
+      "growth_intelligence_items",
+    ]);
+  });
+});

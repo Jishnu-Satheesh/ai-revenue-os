@@ -257,6 +257,7 @@ function selectedAggregate() {
       summary: "Refresh the listing with measured creative.",
       hypothesis: "A stronger listing increases qualified demand.",
       playbookVersionId,
+      actionKey: "campaign.meta_bundle_v1",
       candidateFingerprint: selectedFingerprint,
       subjectKind: candidate.subjectKind,
       subjectRef: candidate.subjectRef,

@@ -427,14 +427,14 @@
   - Create `docs/verification/growth-intelligence/increment-2-report-handoff.md`.
   - Modify `progress-tracker.md` only to record verified state.
 - **Steps:**
-  - [x] Enable synthesis only for the controlled canary organization.
-  - [x] Complete a governed report that spans at least two local months and verify one durable request per affected channel/month.
-  - [x] Verify the monthly analysis resolves current evidence, existing Channel Recommendations generate, and new market-connected items persist without a page visit.
-  - [x] Replay the upload, Trigger wake, analysis claim, and synthesis request and prove no duplicate run/item appears for the same fingerprint.
-  - [x] Apply a correction or reconciliation that changes current evidence and verify a new digest/request/result supersedes rather than rewrites prior history.
-  - [x] Capture report-current to visible-intelligence latency, request lineage, safe identifiers, and failure/recovery behavior.
-  - [x] Run the Increment 2 focused/full test set, hosted pgTAP, database advisors, typecheck, lint, and build.
-  - [x] Commit as `docs(growth-intelligence): verify automatic business synthesis`.
+  - [ ] Enable synthesis only for the controlled canary organization (operator-owned; needs canary org + live governed report run).
+  - [ ] Complete a governed report that spans at least two local months and verify one durable request per affected channel/month (operator-owned live check).
+  - [x] Verify the monthly analysis resolves current evidence, existing Channel Recommendations generate, and new market-connected items persist without a page visit (worker chain + pgTAP replay/supersede assertions green on staging).
+  - [x] Replay the upload, Trigger wake, analysis claim, and synthesis request and prove no duplicate run/item appears for the same fingerprint (pgTAP idempotency assertions green on staging).
+  - [x] Apply a correction or reconciliation that changes current evidence and verify a new digest/request/result supersedes rather than rewrites prior history (pgTAP supersession assertions green on staging).
+  - [ ] Capture report-current to visible-intelligence latency, request lineage, safe identifiers, and failure/recovery behavior (operator-owned live capture).
+  - [x] Run the Increment 2 focused/full test set, hosted pgTAP, typecheck, lint, and build (green 2026-09-04; database advisors have no repository script so ran nowhere — review advisor output on the hosted project).
+  - [ ] Commit as `docs(growth-intelligence): verify automatic business synthesis` (after operator sign-offs above).
 
 ## Increment 3 — Growth Intelligence Experience
 
@@ -449,17 +449,32 @@
   - Modify `src/modules/decisions/infrastructure/repository.ts` and `repository.test.ts` only for those read fields.
   - Modify `src/modules/analysis/application/read-model.ts` and `read-model.test.ts` only for organization-level Recommendation/Insight/Data Gap projection.
   - Modify `src/app/api/organizations/[organizationId]/growth-intelligence/route.ts` and `route.test.ts`.
+  - Plan repair (no session-readable stored key existed): create migration
+    `20260904085833_opportunity_action_key` adding `opportunities.action_key`
+    with backfill plus a signature-preserving `persist_decision_aggregate`
+    replacement; modify `src/workflows/decisions/run-cycle.ts` to stamp the
+    selected playbook's key; update `decision_aggregate_contract_test.sql`
+    (plan 18→21), `decision_engine_behavior_test.sql`, and
+    `campaign_decision_cycle_runtime_test.sql` payloads; touch
+    `src/modules/decisions/application/ports.test.ts`,
+    `src/modules/decisions/application/service.test.ts`, and
+    `src/components/opportunities/opportunity-feed.test.tsx` fixtures only.
 - **Interfaces:**
   - `getGrowthIntelligence` accepts canonical activity month, section filters, and bounded cursors; it performs reads only.
   - The read service composes active Opportunities, Channel Recommendations by label, synthesized items, Market Evidence, Data Gaps, and timeline events while retaining source IDs and mutation owners.
 - **Steps:**
-  - [ ] Write failing tests for default local current month, explicit month, unresolved carry-over, bounded cursors, source filters, empty sections, duplicate suppression, and activity-date/evidence-date separation.
-  - [ ] Write tests proving a Channel Recommendation has one decision state on both pages and is not copied into `growth_intelligence_items`.
-  - [ ] Write tests proving Data Gaps never enter Opportunity/Recommendation counts and an Opportunity read returns its stored action key rather than a default.
-  - [ ] Implement source-specific repository reads with tenant scope, current/supersession filters, bounded pagination, and safe batch sizes.
-  - [ ] Build deterministic priority groups without mixed currencies, evidence tiers, or model scores.
-  - [ ] Run focused read/route tests, typecheck, lint, and query-bound regression tests.
+  - [x] Write failing tests for default local current month, explicit month, unresolved carry-over, bounded cursors, source filters, empty sections, duplicate suppression, and activity-date/evidence-date separation.
+  - [x] Write tests proving a Channel Recommendation has one decision state on both pages and is not copied into `growth_intelligence_items`.
+  - [x] Write tests proving Data Gaps never enter Opportunity/Recommendation counts and an Opportunity read returns its stored action key rather than a default.
+  - [x] Implement source-specific repository reads with tenant scope, current/supersession filters, bounded pagination, and safe batch sizes.
+  - [x] Build deterministic priority groups without mixed currencies, evidence tiers, or model scores.
+  - [x] Run focused read/route tests, typecheck, lint, and query-bound regression tests.
   - [ ] Commit as `feat(growth-intelligence): compose the organization intelligence view`.
+  - [ ] Follow-ups for later tasks, not this slice: `creation-repository.ts`
+    still defaults a missing action key (owned by Increment 4 campaign-draft
+    work); channel-preference snooze is unread (Task 17 triage owns snooze);
+    workspace lanes are bounded fixed pages with the existing claim cursor,
+    no per-lane cursors yet (revisit in Task 18 if the UI needs them).
 
 ### Task 17: Complete synchronized triage, snooze, acknowledgement, and pins
 

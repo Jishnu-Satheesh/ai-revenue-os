@@ -551,3 +551,85 @@ export function buildChannelWorkspaceView(input: {
     recommendations: input.recommendations.map(toRecommendationView),
   };
 }
+
+/**
+ * One stored narration lifted to organization scope with its evidence window
+ * and its owning-module triage answer. The organization workspace groups by
+ * label; it never copies the narration into another module's records.
+ */
+export type OrganizationRecommendationRecord = {
+  id: string;
+  channelId: string;
+  branchId: string | null;
+  label: "observation" | "recommendation" | "needs_data";
+  headline: string;
+  detail: string;
+  /** Inclusive local business evidence dates from the completed run. */
+  windowStart: string;
+  windowEnd: string;
+  /** When the narration was generated (UTC instant). */
+  generatedAt: string;
+  /** The latest owning-module triage answer, if any. */
+  decision: {
+    decision: "acknowledged" | "dismissed" | "planned";
+    createdAt: string;
+  } | null;
+  pinned: boolean;
+};
+
+export type OrganizationRecommendationLaneRecord = OrganizationRecommendationRecord & {
+  /** False once a human answer removes the row from its active lane. */
+  actionable: boolean;
+  /** True when an earlier window's unresolved row carries into this view. */
+  carriedOver: boolean;
+  /** Present only when carriedOver; e.g. "2 months old". */
+  ageLabel: string | null;
+};
+
+export type OrganizationRecommendationLanes = {
+  recommendations: OrganizationRecommendationLaneRecord[];
+  insights: OrganizationRecommendationLaneRecord[];
+  dataGaps: OrganizationRecommendationLaneRecord[];
+};
+
+const ORGANIZATION_MONTH = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
+
+function organizationMonthIndex(month: string): number {
+  const [year, part] = month.split("-");
+  return Number(year) * 12 + Number(part);
+}
+
+/**
+ * Split stored narrations into the workspace lanes for one canonical
+ * activity month. Pure: grouping, carry-over ageing, and actionability only.
+ * Counts, ordering, and cross-module composition stay with the caller.
+ */
+export function projectOrganizationRecommendationLane(
+  records: readonly OrganizationRecommendationRecord[],
+  activityMonth: string,
+): OrganizationRecommendationLanes {
+  if (!ORGANIZATION_MONTH.test(activityMonth)) {
+    throw new Error(`Activity month must be canonical YYYY-MM, got ${activityMonth}.`);
+  }
+  const lanes: OrganizationRecommendationLanes = {
+    recommendations: [],
+    insights: [],
+    dataGaps: [],
+  };
+  for (const record of records) {
+    const monthsOld =
+      organizationMonthIndex(activityMonth) -
+      organizationMonthIndex(record.windowEnd.slice(0, 7));
+    const carriedOver = monthsOld > 0;
+    const laneRecord: OrganizationRecommendationLaneRecord = {
+      ...record,
+      actionable: record.decision === null || record.decision.decision === "acknowledged",
+      carriedOver,
+      ageLabel: carriedOver ? (monthsOld === 1 ? "1 month old" : `${monthsOld} months old`) : null,
+    };
+    if (record.label === "recommendation") lanes.recommendations.push(laneRecord);
+    else if (record.label === "observation") lanes.insights.push(laneRecord);
+    else lanes.dataGaps.push(laneRecord);
+  }
+  return lanes;
+}

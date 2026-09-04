@@ -412,6 +412,7 @@ export async function runCampaignDecisionCycle(
                 opportunity: {
                   id: opportunityId,
                   playbookVersionId: context.playbook.versionId,
+                  actionKey: context.playbook.actionKey,
                   candidateFingerprint: candidate.candidateFingerprint,
                   title: "Review a governed Meta campaign recommendation",
                   summary:

@@ -16,6 +16,13 @@ export type OpportunityFeedItem = {
   organizationId: string;
   decisionRecordId: string;
   playbookVersionId: string;
+  /**
+   * The action key stored on the playbook definition, read through the
+   * version join. Callers must never substitute a code default: the stored
+   * value is what the Decision Engine actually selected.
+   */
+  actionKey: string;
+  createdAt: string;
   title: string;
   summary: string;
   evidenceTier: "computed" | "observed" | "prior";
@@ -234,6 +241,12 @@ export const decisionOpportunitySchema = z
   .strictObject({
     id: z.string().uuid(),
     playbookVersionId: z.string().uuid(),
+    /**
+     * Stamped by the worker from the selected playbook version's stored
+     * action definition and persisted on the opportunity row, so reads
+     * return the stored identity instead of a code default.
+     */
+    actionKey: registeredKeySchema,
     candidateFingerprint: sha256HexSchema,
     title: z.string().min(1).max(240),
     summary: z.string().min(1).max(4000),

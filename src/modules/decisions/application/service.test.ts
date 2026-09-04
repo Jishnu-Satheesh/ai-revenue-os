@@ -154,6 +154,7 @@ function selectedOpportunity() {
     summary: "Test",
     hypothesis: "Test",
     playbookVersionId: tuple().playbookVersionId,
+    actionKey: "campaign.meta_bundle_v1",
     candidateFingerprint: "a".repeat(64),
     subjectKind: "branch",
     subjectRef: "branch-1",

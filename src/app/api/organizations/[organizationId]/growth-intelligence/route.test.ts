@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   listLinksByClaims: vi.fn(),
   listEventsByClaims: vi.fn(),
   listRequests: vi.fn(),
+  readOrganizationTimeZone: vi.fn(),
+  listWorkspaceItems: vi.fn(),
+  listChannelRecommendationRecords: vi.fn(),
+  listOpportunities: vi.fn(),
   warn: vi.fn(),
 }));
 
@@ -38,7 +42,13 @@ vi.mock("@/modules/growth-intelligence/infrastructure/read-repository", () => ({
     listLinksByClaims: mocks.listLinksByClaims,
     listEventsByClaims: mocks.listEventsByClaims,
     listRequests: mocks.listRequests,
+    readOrganizationTimeZone: mocks.readOrganizationTimeZone,
+    listWorkspaceItems: mocks.listWorkspaceItems,
+    listChannelRecommendationRecords: mocks.listChannelRecommendationRecords,
   }),
+}));
+vi.mock("@/modules/decisions/infrastructure/repository", () => ({
+  createDecisionRepository: () => ({ listOpportunities: mocks.listOpportunities }),
 }));
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: vi.fn() }),
@@ -80,6 +90,10 @@ beforeEach(() => {
   mocks.listLinksByClaims.mockResolvedValue([]);
   mocks.listEventsByClaims.mockResolvedValue([]);
   mocks.listRequests.mockResolvedValue([]);
+  mocks.readOrganizationTimeZone.mockResolvedValue("Asia/Dubai");
+  mocks.listWorkspaceItems.mockResolvedValue([]);
+  mocks.listChannelRecommendationRecords.mockResolvedValue([]);
+  mocks.listOpportunities.mockResolvedValue([]);
 });
 
 function get(url: string) {
@@ -150,6 +164,82 @@ describe("GET Growth Intelligence", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.assertAccess).not.toHaveBeenCalled();
+  });
+
+  it("composes the workspace for an explicit month and section filter", async () => {
+    mocks.listWorkspaceItems.mockResolvedValue([
+      {
+        id: "70000000-0000-4000-8000-000000000007",
+        kind: "insight",
+        narrative: "Delivery orders spike on rainy Thursdays.",
+        fingerprint: "a".repeat(64),
+        supportGrade: "corroborated",
+        freshness: "current",
+        urgency: "medium",
+        goalAlignment: "direct",
+        activityMonth: "2026-07",
+        generatedAt: "2026-07-15T08:00:00.000Z",
+        evidenceWindowStart: null,
+        evidenceWindowEnd: null,
+        marketObservedAt: null,
+        missingInput: null,
+        decision: null,
+        decidedAt: null,
+        snoozedUntil: null,
+        pinned: false,
+      },
+    ]);
+
+    const response = await get(`https://example.test/api/x?month=2026-09&sections=insights`);
+    const body = (await response.json()) as {
+      workspace: {
+        activityMonth: string;
+        counts: Record<string, number>;
+        insights: Array<{ carriedOver: boolean; ageLabel: string | null }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.workspace.activityMonth).toBe("2026-09");
+    expect(body.workspace.counts).toEqual({
+      opportunities: 0,
+      recommendations: 0,
+      insights: 1,
+      dataGaps: 0,
+    });
+    expect(body.workspace.insights[0]!.carriedOver).toBe(true);
+    expect(body.workspace.insights[0]!.ageLabel).toBe("2 months old");
+    expect(mocks.listWorkspaceItems).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId,
+        actorId: "user-1",
+        throughMonth: "2026-09",
+      }),
+    );
+    expect(mocks.listOpportunities).toHaveBeenCalledWith(organizationId);
+  });
+
+  it("rejects a non-canonical month and unknown sections without tenant reads", async () => {
+    const badMonth = await get(`https://example.test/api/x?month=September`);
+    expect(badMonth.status).toBe(400);
+    expect(mocks.readProfile).not.toHaveBeenCalled();
+
+    const badSections = await get(`https://example.test/api/x?sections=insights,launch`);
+    expect(badSections.status).toBe(400);
+  });
+
+  it("leaves market watch intact when the workspace read fails", async () => {
+    mocks.readOrganizationTimeZone.mockRejectedValue(new Error("denied"));
+
+    const response = await get(`https://example.test/api/x`);
+    const body = (await response.json()) as {
+      workspace: unknown;
+      marketWatch: { signals: unknown[] };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.workspace).toBeNull();
+    expect(body.marketWatch.signals).toEqual([]);
   });
 
   it("keeps cross-tenant rows out by scoping every read to the context organization", async () => {

@@ -14,15 +14,59 @@ import {
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
 import { buildMarketWatch } from "@/modules/growth-intelligence/application/market-watch";
 import { createMarketProfileService } from "@/modules/growth-intelligence/application/profile-service";
+import {
+  createGrowthIntelligenceReadService,
+  type GrowthIntelligenceWorkspaceRepository,
+} from "@/modules/growth-intelligence/application/read-service";
+import type { GrowthIntelligenceSection } from "@/modules/growth-intelligence/application/read-model";
 import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/growth-intelligence/infrastructure/read-repository";
 import { createAuthenticatedMarketProfileRepository } from "@/modules/growth-intelligence/infrastructure/profile-repository";
+import type { DecisionPersistence } from "@/modules/decisions/infrastructure/repository";
+import { createDecisionRepository } from "@/modules/decisions/infrastructure/repository";
 import type { MarketGeographicLayer } from "@/domain/growth-intelligence/types";
+
+const WORKSPACE_SECTIONS: readonly GrowthIntelligenceSection[] = [
+  "opportunities",
+  "recommendations",
+  "insights",
+  "data_gaps",
+  "timeline",
+];
 
 const querySchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(50).default(20),
     cursor: z.string().min(1).max(500).nullable().optional(),
     geography: z.enum(["trade_area", "city", "country"]).nullable().optional(),
+    month: z
+      .string()
+      .regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/, "The activity month must be canonical YYYY-MM.")
+      .nullable()
+      .optional(),
+    sections: z
+      .string()
+      .min(1)
+      .max(200)
+      .nullable()
+      .optional()
+      .transform((value, context) => {
+        if (value === null || value === undefined) return undefined;
+        const sections = value
+          .split(",")
+          .map((section) => section.trim())
+          .filter((section) => section.length > 0);
+        const unknown = sections.filter(
+          (section) => !(WORKSPACE_SECTIONS as readonly string[]).includes(section),
+        );
+        if (unknown.length > 0) {
+          context.addIssue({
+            code: "custom",
+            message: `Unknown workspace sections: ${unknown.join(", ")}.`,
+          });
+          return z.NEVER;
+        }
+        return sections as GrowthIntelligenceSection[];
+      }),
   })
   .strict();
 
@@ -59,6 +103,8 @@ export async function GET(
       limit: url.searchParams.get("limit") ?? undefined,
       cursor: url.searchParams.get("cursor"),
       geography: url.searchParams.get("geography"),
+      month: url.searchParams.get("month"),
+      sections: url.searchParams.get("sections"),
     });
 
     const service = createMarketProfileService({
@@ -106,9 +152,35 @@ export async function GET(
       allowBoundedQuotes,
     });
 
+    // The composed workspace reads through the owning modules only and
+    // starts no work. A failure here must not take down Market Watch: the
+    // page still renders and the workspace simply arrives as null.
+    let workspace = null;
+    try {
+      const workspaceService = createGrowthIntelligenceReadService({
+        workspace: reads as unknown as GrowthIntelligenceWorkspaceRepository,
+        opportunities: createDecisionRepository(
+          context.supabase as unknown as DecisionPersistence,
+        ),
+      });
+      workspace = await workspaceService.getWorkspace({
+        organizationId,
+        actorId: context.user.id,
+        activityMonth: query.month,
+        sections: query.sections,
+      });
+    } catch (workspaceError) {
+      logger.warn("growth_intelligence.workspace_degraded", {
+        organizationId,
+        correlationId,
+        errorCode: toPublicError(workspaceError).code,
+      });
+    }
+
     const response = NextResponse.json({
       marketWatch: { ...marketWatch, nextCursor: claims.nextCursor },
       profile,
+      workspace,
     });
     response.headers.set("x-correlation-id", correlationId);
     response.headers.set("Cache-Control", "no-store");

@@ -33,6 +33,8 @@ type OpportunityRow = {
   organization_id: string;
   decision_record_id: string;
   playbook_version_id: string;
+  action_key: unknown;
+  created_at: string;
   title: string;
   summary: string;
   evidence_tier: OpportunityFeedItem["evidenceTier"];
@@ -56,12 +58,24 @@ function asNumber(value: number | string): number {
   return parsed;
 }
 
+function storedActionKey(value: unknown): string {
+  // The key lives on the opportunity row, written by the worker from the
+  // selected playbook version. A missing or malformed value is a contract
+  // break: callers must never paper over it with a code default.
+  if (typeof value !== "string" || !/^[a-z][a-z0-9_.-]{0,119}$/.test(value)) {
+    decisionDatabaseError();
+  }
+  return value as string;
+}
+
 function toFeedItem(row: OpportunityRow): OpportunityFeedItem {
   return {
     id: row.id,
     organizationId: row.organization_id,
     decisionRecordId: row.decision_record_id,
     playbookVersionId: row.playbook_version_id,
+    actionKey: storedActionKey(row.action_key),
+    createdAt: row.created_at,
     title: row.title,
     summary: row.summary,
     evidenceTier: row.evidence_tier,
@@ -85,7 +99,7 @@ export function createDecisionRepository(
       const { data, error } = await persistence
         .from("opportunities")
         .select(
-          "id,organization_id,decision_record_id,playbook_version_id,title,summary,evidence_tier,impact_low_minor,impact_high_minor,execution_cost_minor,expected_contribution_minor,currency,time_to_impact_days,status,expires_at",
+          "id,organization_id,decision_record_id,playbook_version_id,action_key,created_at,title,summary,evidence_tier,impact_low_minor,impact_high_minor,execution_cost_minor,expected_contribution_minor,currency,time_to_impact_days,status,expires_at",
         )
         .order("expected_contribution_minor", { ascending: false })
         .eq("organization_id", organizationId);

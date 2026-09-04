@@ -85,14 +85,14 @@ values
     'db4b0000-0000-4000-8000-000000000501'::uuid,
     'db4b0000-0000-4000-8000-000000000101'::uuid,
     'db4b0000-0000-4000-8000-000000000401'::uuid,
-    '1.0.0', 'Tenant one hypothesis', '{"action":"tenant_one"}'::jsonb,
+    '1.0.0', 'Tenant one hypothesis', '{"action":"tenant_one","action_key":"tenant.one_v1"}'::jsonb,
     1, 'testing.metric', 7, true
   ),
   (
     'db4b0000-0000-4000-8000-000000000502'::uuid,
     'db4b0000-0000-4000-8000-000000000102'::uuid,
     'db4b0000-0000-4000-8000-000000000402'::uuid,
-    '1.0.0', 'Tenant two hypothesis', '{"action":"tenant_two"}'::jsonb,
+    '1.0.0', 'Tenant two hypothesis', '{"action":"tenant_two","action_key":"tenant.two_v1"}'::jsonb,
     1, 'testing.metric', 7, true
   );
 
@@ -218,6 +218,7 @@ values
       'opportunity', jsonb_build_object(
         'id', 'db4b0000-0000-4000-8000-000000000801',
         'playbookVersionId', 'db4b0000-0000-4000-8000-000000000501',
+        'actionKey', 'tenant.one_v1',
         'candidateFingerprint', repeat('a', 64), 'title', 'Tenant one opportunity',
         'summary', 'A safe tenant-one projection.', 'hypothesis', 'The action improves the metric.',
         'subjectKind', 'branch', 'subjectRef', 'tenant-one-branch',
@@ -267,6 +268,7 @@ values
       'opportunity', jsonb_build_object(
         'id', 'db4b0000-0000-4000-8000-000000000802',
         'playbookVersionId', 'db4b0000-0000-4000-8000-000000000502',
+        'actionKey', 'tenant.two_v1',
         'candidateFingerprint', repeat('f', 64), 'title', 'Tenant two opportunity',
         'summary', 'A safe tenant-two projection.', 'hypothesis', 'The action improves the metric.',
         'subjectKind', 'organization', 'subjectRef', 'tenant-two',

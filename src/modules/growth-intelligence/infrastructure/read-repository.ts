@@ -5,6 +5,10 @@ import { z } from "zod";
 
 import { DomainError } from "@/lib/errors";
 import type { Database } from "@/lib/supabase/database.types";
+import type {
+  ChannelRecommendationRow,
+  SynthesizedItemRow,
+} from "@/modules/growth-intelligence/application/read-model";
 
 /**
  * Session-bound Market Watch reads.
@@ -20,6 +24,7 @@ type QueryBuilder<T> = PromiseLike<{ data: T; error: unknown }> & {
   select(columns: string): QueryBuilder<T>;
   eq(column: string, value: unknown): QueryBuilder<T>;
   in(column: string, values: readonly unknown[]): QueryBuilder<T>;
+  lte(column: string, value: unknown): QueryBuilder<T>;
   or(filters: string): QueryBuilder<T>;
   order(column: string, options?: { ascending?: boolean }): QueryBuilder<T>;
   limit(count: number): QueryBuilder<T>;
@@ -149,6 +154,18 @@ export type GrowthIntelligenceReadRepository = {
     organizationId: string;
     requestId: string;
   }): Promise<MarketWatchRequestRow | null>;
+  readOrganizationTimeZone(organizationId: string): Promise<string>;
+  listWorkspaceItems(input: {
+    organizationId: string;
+    actorId: string;
+    throughMonth: string;
+    limit: number;
+  }): Promise<SynthesizedItemRow[]>;
+  listChannelRecommendationRecords(input: {
+    organizationId: string;
+    actorId: string;
+    limit: number;
+  }): Promise<ChannelRecommendationRow[]>;
 };
 
 function query<T>(persistence: MarketWatchPersistence, table: string): QueryBuilder<T> {
@@ -327,6 +344,200 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       if (!result.data) return null;
       return mapRequest(result.data);
     },
+
+    async readOrganizationTimeZone(organizationId) {
+      const result = await query<Record<string, unknown>[]>(
+        persistence,
+        "organizations",
+      )
+        .select("default_timezone")
+        .eq("id", organizationId)
+        .limit(1);
+      if (result.error) readFailure();
+      const timeZone = (result.data ?? [])[0]?.default_timezone;
+      if (typeof timeZone !== "string" || timeZone.length === 0) {
+        throw new DomainError(
+          "DOMAIN_ERROR",
+          "The organization's timezone is not available.",
+        );
+      }
+      return timeZone;
+    },
+
+    async listWorkspaceItems(input) {
+      const result = await query<Record<string, unknown>[]>(
+        persistence,
+        "growth_intelligence_items",
+      )
+        .select(
+          "id,kind,narrative,item_fingerprint,evidence_fingerprint,support_grade,freshness,urgency,goal_alignment,activity_month,missing_input,created_at",
+        )
+        .eq("organization_id", input.organizationId)
+        .eq("status", "current")
+        .lte("activity_month", input.throughMonth)
+        .order("activity_month", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(clampLimit(input.limit));
+      if (result.error) readFailure();
+      const rows = result.data ?? [];
+      if (rows.length === 0) return [];
+      const itemIds = rows.map((row) => String(row.id));
+      const [decisions, preferences] = await Promise.all([
+        query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_decisions")
+          .select(
+            "growth_intelligence_item_id,decision,reason,snoozed_until,item_fingerprint,created_at",
+          )
+          .eq("organization_id", input.organizationId)
+          .in("growth_intelligence_item_id", itemIds)
+          .order("created_at", { ascending: false }),
+        query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_preferences")
+          .select("growth_intelligence_item_id,pinned")
+          .eq("organization_id", input.organizationId)
+          .eq("user_id", input.actorId)
+          .in("growth_intelligence_item_id", itemIds),
+      ]);
+      if (decisions.error) readFailure();
+      if (preferences.error) readFailure();
+      const latestDecision = new Map<string, Record<string, unknown>>();
+      for (const decision of (decisions.data ?? [])) {
+        const key = String(decision.growth_intelligence_item_id);
+        if (!latestDecision.has(key)) latestDecision.set(key, decision);
+      }
+      const pinned = new Set(
+        (preferences.data ?? [])
+          .filter((preference) => preference.pinned === true)
+          .map((preference) => String(preference.growth_intelligence_item_id)),
+      );
+      return rows.map((row) =>
+        mapWorkspaceItem(row, latestDecision.get(String(row.id)) ?? null, pinned.has(String(row.id))),
+      );
+    },
+
+    async listChannelRecommendationRecords(input) {
+      const result = await query<Record<string, unknown>[]>(
+        persistence,
+        "channel_recommendations",
+      )
+        .select(
+          "id,channel_id,branch_id,label,headline,detail,window_start,window_end,created_at",
+        )
+        .eq("organization_id", input.organizationId)
+        .order("created_at", { ascending: false })
+        .limit(clampLimit(input.limit));
+      if (result.error) readFailure();
+      const rows = result.data ?? [];
+      if (rows.length === 0) return [];
+      const recommendationIds = rows.map((row) => String(row.id));
+      const [decisions, preferences] = await Promise.all([
+        query<Record<string, unknown>[]>(persistence, "channel_recommendation_decisions")
+          .select("recommendation_id,decision,created_at")
+          .eq("organization_id", input.organizationId)
+          .in("recommendation_id", recommendationIds)
+          .order("created_at", { ascending: false }),
+        query<Record<string, unknown>[]>(persistence, "channel_recommendation_preferences")
+          .select("channel_recommendation_id,pinned")
+          .eq("organization_id", input.organizationId)
+          .eq("user_id", input.actorId)
+          .in("channel_recommendation_id", recommendationIds),
+      ]);
+      if (decisions.error) readFailure();
+      if (preferences.error) readFailure();
+      const latestDecision = new Map<string, Record<string, unknown>>();
+      for (const decision of (decisions.data ?? [])) {
+        const key = String(decision.recommendation_id);
+        if (!latestDecision.has(key)) latestDecision.set(key, decision);
+      }
+      const pinned = new Set(
+        (preferences.data ?? [])
+          .filter((preference) => preference.pinned === true)
+          .map((preference) => String(preference.channel_recommendation_id)),
+      );
+      return rows.map((row) =>
+        mapChannelRecommendationRecord(
+          row,
+          latestDecision.get(String(row.id)) ?? null,
+          pinned.has(String(row.id)),
+        ),
+      );
+    },
+  };
+}
+
+const WORKSPACE_ITEM_DECISIONS = new Set([
+  "acknowledged",
+  "pinned",
+  "unpinned",
+  "planned",
+  "snoozed",
+  "dismissed",
+  "resolved",
+]);
+
+function mapWorkspaceItem(
+  row: Record<string, unknown>,
+  decision: Record<string, unknown> | null,
+  pinned: boolean,
+): SynthesizedItemRow {
+  const kind = String(row.kind);
+  if (kind !== "insight" && kind !== "recommendation" && kind !== "data_gap") readFailure();
+  const decisionValue = decision ? String(decision.decision) : null;
+  if (decisionValue !== null && !WORKSPACE_ITEM_DECISIONS.has(decisionValue)) readFailure();
+  return {
+    id: String(row.id),
+    kind: kind as SynthesizedItemRow["kind"],
+    narrative: String(row.narrative),
+    fingerprint: String(row.item_fingerprint),
+    supportGrade: String(row.support_grade),
+    freshness: String(row.freshness),
+    urgency: String(row.urgency),
+    goalAlignment: String(row.goal_alignment),
+    activityMonth: String(row.activity_month),
+    generatedAt: String(row.created_at),
+    evidenceWindowStart: null,
+    evidenceWindowEnd: null,
+    marketObservedAt: null,
+    missingInput: row.missing_input === null ? null : String(row.missing_input),
+    decision: decisionValue as SynthesizedItemRow["decision"],
+    decidedAt: decision ? String(decision.created_at) : null,
+    snoozedUntil:
+      decision && decision.snoozed_until !== null && decision.snoozed_until !== undefined
+        ? String(decision.snoozed_until)
+        : null,
+    pinned,
+  };
+}
+
+const CHANNEL_DECISIONS = new Set(["acknowledged", "dismissed", "planned"]);
+
+function mapChannelRecommendationRecord(
+  row: Record<string, unknown>,
+  decision: Record<string, unknown> | null,
+  pinned: boolean,
+): ChannelRecommendationRow {
+  const label = String(row.label);
+  if (label !== "observation" && label !== "recommendation" && label !== "needs_data") {
+    readFailure();
+  }
+  const decisionValue = decision ? String(decision.decision) : null;
+  if (decisionValue !== null && !CHANNEL_DECISIONS.has(decisionValue)) readFailure();
+  return {
+    id: String(row.id),
+    channelId: String(row.channel_id),
+    branchId: row.branch_id === null ? null : String(row.branch_id),
+    label: label as ChannelRecommendationRow["label"],
+    headline: String(row.headline),
+    detail: String(row.detail),
+    windowStart: String(row.window_start),
+    windowEnd: String(row.window_end),
+    generatedAt: String(row.created_at),
+    decision:
+      decisionValue === null
+        ? null
+        : {
+            decision: decisionValue as "acknowledged" | "dismissed" | "planned",
+            createdAt: String(decision!.created_at),
+          },
+    pinned,
   };
 }
 

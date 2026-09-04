@@ -5,6 +5,8 @@ import { WORKSPACE_CHAPTERS } from "@/domain/analysis/copy";
 import {
   BAND_DETECTOR_KEYS,
   buildChannelWorkspaceView,
+  projectOrganizationRecommendationLane,
+  type OrganizationRecommendationRecord,
 } from "@/modules/analysis/application/read-model";
 import type {
   ChannelAnalysisRunRecord,
@@ -866,5 +868,77 @@ describe("buildChannelWorkspaceView", () => {
 
       expect(view.recommendations).toEqual([]);
     });
+  });
+});
+
+describe("projectOrganizationRecommendationLane", () => {
+  const record = (
+    overrides: Partial<OrganizationRecommendationRecord> = {},
+  ): OrganizationRecommendationRecord => ({
+    id: "rec-1",
+    channelId: "channel-1",
+    branchId: null,
+    label: "recommendation",
+    headline: "Extend Friday hours",
+    detail: "Friday evenings carry the strongest observed demand.",
+    windowStart: "2026-08-01",
+    windowEnd: "2026-08-31",
+    generatedAt: "2026-09-01T08:00:00.000Z",
+    decision: null,
+    pinned: false,
+    ...overrides,
+  });
+
+  it("groups records by label without copying them", () => {
+    const lanes = projectOrganizationRecommendationLane(
+      [
+        record(),
+        record({ id: "rec-2", label: "observation" }),
+        record({ id: "rec-3", label: "needs_data" }),
+      ],
+      "2026-09",
+    );
+
+    expect(lanes.recommendations.map((row) => row.id)).toEqual(["rec-1"]);
+    expect(lanes.insights.map((row) => row.id)).toEqual(["rec-2"]);
+    expect(lanes.dataGaps.map((row) => row.id)).toEqual(["rec-3"]);
+  });
+
+  it("marks an actionable earlier-window record as carried over with its age", () => {
+    const lanes = projectOrganizationRecommendationLane(
+      [record({ windowStart: "2026-07-01", windowEnd: "2026-07-31" })],
+      "2026-09",
+    );
+
+    expect(lanes.recommendations[0]!.actionable).toBe(true);
+    expect(lanes.recommendations[0]!.carriedOver).toBe(true);
+    expect(lanes.recommendations[0]!.ageLabel).toBe("2 months old");
+  });
+
+  it("marks decided records as not actionable while keeping them for the timeline", () => {
+    const lanes = projectOrganizationRecommendationLane(
+      [
+        record({
+          id: "rec-dismissed",
+          decision: { decision: "dismissed", createdAt: "2026-09-02T08:00:00.000Z" },
+        }),
+        record({
+          id: "rec-planned",
+          decision: { decision: "planned", createdAt: "2026-09-02T08:00:00.000Z" },
+        }),
+      ],
+      "2026-09",
+    );
+
+    expect(lanes.recommendations.map((row) => [row.id, row.actionable])).toEqual([
+      ["rec-dismissed", false],
+      ["rec-planned", false],
+    ]);
+  });
+
+  it("rejects a non-canonical activity month", () => {
+    expect(() => projectOrganizationRecommendationLane([record()], "September")).toThrow(
+      /canonical/,
+    );
   });
 });
