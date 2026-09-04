@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isOrganizationPath, organizationIdFromPathname, overviewPath } from "@/lib/routes";
+import {
+  growthIntelligencePath,
+  isOrganizationPath,
+  organizationIdFromPathname,
+  overviewPath,
+} from "@/lib/routes";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 
@@ -21,5 +26,12 @@ describe("organization route helpers", () => {
     expect(overviewPath(organizationId)).toBe(`/organizations/${organizationId}/overview`);
     expect(isOrganizationPath(`/organizations/${organizationId}/economics`)).toBe(true);
     expect(isOrganizationPath("/organizations/new")).toBe(false);
+  });
+
+  it("builds the canonical Growth Intelligence URL inside organization scope", () => {
+    expect(growthIntelligencePath(organizationId)).toBe(
+      `/organizations/${organizationId}/growth-intelligence`,
+    );
+    expect(organizationIdFromPathname(growthIntelligencePath(organizationId))).toBe(organizationId);
   });
 });
