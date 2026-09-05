@@ -179,4 +179,29 @@ describe("POST channel recommendation decisions", () => {
       }),
     );
   });
+
+  it("passes a future snooze horizon through to the member RPC", async () => {
+    const snoozedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const response = await POST(request({ decision: "snoozed", snoozedUntil }), { params });
+
+    expect(response.status).toBe(200);
+    expect(mocks.triageRecommendation).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: "snoozed", snoozedUntil }),
+      expect.anything(),
+    );
+  });
+
+  it("blocks a snooze without a horizon or with a past one on this side", async () => {
+    const missing = await POST(request({ decision: "snoozed" }), { params });
+    expect(missing.status).toBe(400);
+    const past = await POST(
+      request({
+        decision: "snoozed",
+        snoozedUntil: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      }),
+      { params },
+    );
+    expect(past.status).toBe(400);
+    expect(mocks.triageRecommendation).not.toHaveBeenCalled();
+  });
 });

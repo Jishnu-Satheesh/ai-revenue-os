@@ -433,11 +433,120 @@ describe("workspace reads", () => {
     expect(rows[0]!.decision).toEqual({
       decision: "acknowledged",
       createdAt: "2026-09-02T08:00:00.000Z",
+      snoozedUntil: null,
     });
   });
 
-  it("skips decision and pin lookups when there is nothing to resolve", async () => {
+  it("carries a stored channel snooze with its horizon instead of failing the read", async () => {
     const db = workspacePersistence({
+      channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
+      channel_recommendation_decisions: [
+        {
+          data: [
+            {
+              recommendation_id: "60000000-0000-4000-8000-000000000006",
+              decision: "snoozed",
+              snoozed_until: "2026-09-20T00:00:00.000Z",
+              created_at: "2026-09-02T08:00:00.000Z",
+            },
+          ],
+          error: null,
+        },
+      ],
+      channel_recommendation_preferences: [
+        {
+          data: [
+            {
+              channel_recommendation_id: "60000000-0000-4000-8000-000000000006",
+              user_id: actorId,
+              pinned: false,
+            },
+          ],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const rows = await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId,
+      limit: 100,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.decision).toEqual({
+      decision: "snoozed",
+      createdAt: "2026-09-02T08:00:00.000Z",
+      snoozedUntil: "2026-09-20T00:00:00.000Z",
+    });
+  });
+
+  it("carries the actor's channel preference horizon on the row", async () => {
+    const db = workspacePersistence({
+      channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
+      channel_recommendation_decisions: [{ data: [], error: null }],
+      channel_recommendation_preferences: [
+        {
+          data: [
+            {
+              channel_recommendation_id: "60000000-0000-4000-8000-000000000006",
+              user_id: actorId,
+              pinned: false,
+              snoozed_until: "2026-09-20T00:00:00.000Z",
+            },
+          ],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const rows = await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId,
+      limit: 100,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.preferenceSnoozedUntil).toBe("2026-09-20T00:00:00.000Z");
+  });
+
+  it("lists draft request states for the actor's workspace", async () => {
+    const db = workspacePersistence({
+      campaign_draft_requests: [
+        {
+          data: [
+            {
+              opportunity_id: "50000000-0000-4000-8000-000000000005",
+              status: "processing",
+              campaign_id: null,
+              created_at: "2026-09-03T08:00:00.000Z",
+              updated_at: "2026-09-03T09:00:00.000Z",
+            },
+          ],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const states = await repository.listDraftRequestStates({ organizationId });
+
+    expect(states).toEqual([
+      {
+        opportunityId: "50000000-0000-4000-8000-000000000005",
+        status: "processing",
+        campaignId: null,
+        requestedAt: "2026-09-03T08:00:00.000Z",
+        updatedAt: "2026-09-03T09:00:00.000Z",
+      },
+    ]);
+    const call = db.calls.find((entry) => entry.table === "campaign_draft_requests")!;
+    expect(call.filters).toContainEqual(["organization_id", organizationId]);
+  });
+
+  it("skips decision and pin lookups when there is nothing to resolve", async () => {    const db = workspacePersistence({
       growth_intelligence_items: [{ data: [], error: null }],
       channel_recommendations: [{ data: [], error: null }],
     });

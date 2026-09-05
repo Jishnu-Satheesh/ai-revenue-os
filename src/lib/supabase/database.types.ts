@@ -1319,6 +1319,37 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      campaign_draft_requests: {
+        Row: {
+          id: string;
+          organization_id: string;
+          opportunity_id: string;
+          opportunity_version: number;
+          action_key: string;
+          objective: string;
+          audience: string;
+          assertions: unknown;
+          idempotency_key: string;
+          actor_id: string;
+          status:
+            | "pending"
+            | "processing"
+            | "completed"
+            | "retryable_failed"
+            | "permanent_failed"
+            | "cancelled";
+          claim_token: string | null;
+          lease_expires_at: string | null;
+          attempt_count: number;
+          campaign_id: string | null;
+          failure_code: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       channel_recommendation_evaluations: {
         Row: {
           id: string;
@@ -2369,6 +2400,64 @@ export type Database = {
           p_reason: string | null;
           p_snoozed_until: string | null;
           p_item_fingerprint: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      request_campaign_draft_from_opportunity: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_opportunity_id: string;
+          p_opportunity_version: number;
+          p_action_key: string;
+          p_assertions: unknown;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      cancel_campaign_draft_request: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_request_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      claim_campaign_draft_request: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_lease_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_campaign_draft_request: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_retryable: boolean;
+          p_failure_code: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_campaign_draft_request: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_campaign_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      create_campaign_draft_from_request: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_idempotency_key: string;
         };
         Returns: Record<string, unknown>;
       };

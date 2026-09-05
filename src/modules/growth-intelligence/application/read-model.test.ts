@@ -30,6 +30,7 @@ function opportunity(overrides: Partial<OpportunityFeedItem> = {}): OpportunityF
     timeToImpactDays: 14,
     status: "proposed",
     expiresAt: "2026-10-01T00:00:00.000Z",
+    version: 1,
     ...overrides,
   };
 }
@@ -49,6 +50,7 @@ function recommendation(
     generatedAt: "2026-09-01T08:00:00.000Z",
     decision: null,
     pinned: false,
+    preferenceSnoozedUntil: null,
     ...overrides,
   };
 }
@@ -112,6 +114,92 @@ describe("buildGrowthIntelligenceView", () => {
       input({ opportunities: [opportunity({ actionKey: "campaign.meta_bundle_v1" })] }),
     );
     expect(view.priorityActions.opportunities[0]!.actionKey).toBe("campaign.meta_bundle_v1");
+  });
+
+  it("carries the draft request state and links the created draft", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        draftRequests: [
+          {
+            opportunityId: "50000000-0000-4000-8000-000000000005",
+            status: "processing",
+            campaignId: null,
+            requestedAt: "2026-09-03T08:00:00.000Z",
+            updatedAt: "2026-09-03T09:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    const card = view.priorityActions.opportunities[0]!;
+    expect(card.draftRequest).toMatchObject({ status: "processing", campaignId: null });
+    expect(view.timeline.map((event) => event.type)).toContain("draft-requested");
+  });
+
+  it("announces draft creation, retryable failure, and permanent failure distinctly", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        opportunities: [
+          opportunity({
+            id: "50000000-0000-4000-8000-000000000005",
+            status: "draft_created",
+          }),
+        ],
+        draftRequests: [
+          {
+            opportunityId: "50000000-0000-4000-8000-000000000005",
+            status: "completed",
+            campaignId: "40000000-0000-4000-8000-000000000004",
+            requestedAt: "2026-09-03T08:00:00.000Z",
+            updatedAt: "2026-09-03T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    const types = view.timeline.map((event) => event.type);
+    expect(types).toContain("draft-requested");
+    expect(types).toContain("draft-created");
+    const failed = buildGrowthIntelligenceView(
+      input({
+        draftRequests: [
+          {
+            opportunityId: "50000000-0000-4000-8000-000000000005",
+            status: "retryable_failed",
+            campaignId: null,
+            requestedAt: "2026-09-03T08:00:00.000Z",
+            updatedAt: "2026-09-03T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    expect(failed.timeline.map((event) => event.type)).toContain("retry");
+    const dead = buildGrowthIntelligenceView(
+      input({
+        draftRequests: [
+          {
+            opportunityId: "50000000-0000-4000-8000-000000000005",
+            status: "permanent_failed",
+            campaignId: null,
+            requestedAt: "2026-09-03T08:00:00.000Z",
+            updatedAt: "2026-09-03T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    expect(dead.timeline.map((event) => event.type)).toContain("draft-failed");
+  });
+
+  it("hides the actor's preference-snoozed channel row until its horizon passes", () => {
+    const snoozed = recommendation({ preferenceSnoozedUntil: "2026-09-20T00:00:00.000Z" });
+    const hidden = buildGrowthIntelligenceView(input({ recommendations: [snoozed] }));
+    expect(hidden.priorityActions.recommendations).toHaveLength(0);
+    expect(hidden.counts.recommendations).toBe(0);
+
+    const expired = buildGrowthIntelligenceView(
+      input({
+        recommendations: [recommendation({ preferenceSnoozedUntil: "2026-09-01T00:00:00.000Z" })],
+      }),
+    );
+    expect(expired.priorityActions.recommendations).toHaveLength(1);
   });
 
   it("carries an unresolved earlier-month item forward with an explicit age label", () => {
@@ -186,7 +274,11 @@ describe("buildGrowthIntelligenceView", () => {
       input({
         recommendations: [
           recommendation({
-            decision: { decision: "planned", createdAt: "2026-09-03T08:00:00.000Z" },
+            decision: {
+              decision: "planned",
+              snoozedUntil: null,
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
           }),
         ],
       }),

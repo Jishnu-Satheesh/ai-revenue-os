@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(23);
+select extensions.plan(27);
 
 select extensions.has_function(
   'public', 'decide_growth_intelligence_item',
@@ -125,6 +125,13 @@ insert into public.growth_intelligence_items (
   repeat('3', 64), repeat('4', 64),
   'city', 'ae:du', 'single_source', 'current', 'medium', 'none',
   '2026-08', 'weekend-channel-coverage'
+), (
+  'c9000000-0000-4000-8000-000000000503'::uuid, 'c9000000-0000-4000-8000-000000000201'::uuid,
+  'c9000000-0000-4000-8000-000000000401'::uuid, 'c9000000-0000-4000-8000-000000000302'::uuid,
+  'insight', 'Rainy Thursdays lift delivery orders across the city.',
+  repeat('5', 64), repeat('6', 64),
+  'city', 'ae:du', 'corroborated', 'current', 'medium', 'direct',
+  '2026-08', null
 );
 
 -- Governed triage ---------------------------------------------------------------
@@ -193,6 +200,58 @@ select extensions.throws_ok(
   $$,
   '22023', 'growth_intelligence_data_gap_resolution_forbidden',
   'a Data Gap cannot resolve by operator assertion; Task 17 owns deterministic reopening'
+);
+
+-- Kind-to-decision gating -------------------------------------------------------
+
+select extensions.is(
+  public.decide_growth_intelligence_item(
+    'c9000000-0000-4000-8000-000000000201'::uuid,
+    'c9000000-0000-4000-8000-000000000001'::uuid,
+    'c9000000-0000-4000-8000-000000000503'::uuid,
+    'acknowledged', null, null, repeat('5', 64)
+  ) ->> 'decision',
+  'acknowledged',
+  'an Insight accepts acknowledgement'
+);
+
+select extensions.throws_ok(
+  $$
+  select public.decide_growth_intelligence_item(
+    'c9000000-0000-4000-8000-000000000201'::uuid,
+    'c9000000-0000-4000-8000-000000000001'::uuid,
+    'c9000000-0000-4000-8000-000000000503'::uuid,
+    'planned', null, null, repeat('5', 64)
+  )
+  $$,
+  '22023', 'growth_intelligence_item_decision_invalid',
+  'an Insight cannot be planned; only a Recommendation records intent'
+);
+
+select extensions.throws_ok(
+  $$
+  select public.decide_growth_intelligence_item(
+    'c9000000-0000-4000-8000-000000000201'::uuid,
+    'c9000000-0000-4000-8000-000000000001'::uuid,
+    'c9000000-0000-4000-8000-000000000503'::uuid,
+    'snoozed', null, pg_catalog.now() + interval '7 days', repeat('5', 64)
+  )
+  $$,
+  '22023', 'growth_intelligence_item_decision_invalid',
+  'an Insight cannot be snoozed either'
+);
+
+select extensions.throws_ok(
+  $$
+  select public.decide_growth_intelligence_item(
+    'c9000000-0000-4000-8000-000000000201'::uuid,
+    'c9000000-0000-4000-8000-000000000001'::uuid,
+    'c9000000-0000-4000-8000-000000000502'::uuid,
+    'dismissed', 'No longer relevant.', null, repeat('3', 64)
+  )
+  $$,
+  '22023', 'growth_intelligence_item_decision_invalid',
+  'a Data Gap cannot be dismissed; it waits on evidence, not opinion'
 );
 
 reset role;
@@ -286,7 +345,7 @@ select extensions.throws_ok(
 select extensions.is(
   (select pg_catalog.count(*) from public.growth_intelligence_item_decisions
    where organization_id = 'c9000000-0000-4000-8000-000000000201'::uuid),
-  1::bigint,
+  2::bigint,
   'triage history stays append-only across decisions'
 );
 

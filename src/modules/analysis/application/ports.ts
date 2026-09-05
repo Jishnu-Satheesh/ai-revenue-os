@@ -103,9 +103,11 @@ export type ChannelFindingEvidenceRecord = {
  */
 export type ChannelRecommendationDecisionRecord = {
   recommendationId: string;
-  decision: "acknowledged" | "dismissed" | "planned";
+  decision: "acknowledged" | "dismissed" | "planned" | "snoozed";
   /** Required by storage when dismissing; null for every other answer. */
   reason: string | null;
+  /** Required by storage when snoozing; null for every other answer. */
+  snoozedUntil: string | null;
   actorId: string;
   /**
    * Snapshotted beside the answer by the database itself, resolved inside the

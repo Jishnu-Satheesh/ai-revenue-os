@@ -30,6 +30,10 @@
 
 **Control Plane** - Application layer that owns configuration, governance, business state, and user experience.
 
+**Governed Draft** - An internal, reversible Campaign created from a qualified Opportunity through the atomic draft-request path. It freezes the exact evidence, estimate, and assertions the operator saw. It is never generated, approved, scheduled, published, or measured by its creation.
+
+**Draft Request** - The durable per-organization-per-opportunity record (`pending`, `processing`, `completed`, `retryable_failed`, `permanent_failed`, `cancelled`) tracking a governed draft from admission to completion. Concurrent admissions return the same row.
+
 **Decision Cycle** - One evaluation pass for one organization from one trigger, carrying a single correlation ID and a slot budget. Runs sequential single-action decisions until the budget is spent.
 
 **Decision Engine** - System that detects, screens, values, ranks, and explains opportunities. It proposes; it never performs a side effect.

@@ -34,6 +34,7 @@ function item(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem
     timeToImpactDays: 7,
     status: "proposed",
     expiresAt: "2026-08-22T10:00:00.000Z",
+    version: 1,
     ...overrides,
   };
 }

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { marketProfileDocumentV1Schema } from "@/domain/growth-intelligence/schemas";
 import {
+  itemDecisionBodySchema,
   marketProfileDecisionBodySchema,
   marketProfileProposalBodySchema,
+  preferenceBodySchema,
+  preferenceRouteParamsSchema,
 } from "@/modules/growth-intelligence/application/api-schemas";
 
 const document = {
@@ -83,6 +86,49 @@ describe("Market Profile API schemas", () => {
         startResearch: true,
       }),
     ).toThrow();
+  });
+
+  it("binds an item decision to its kind-safe vocabulary and fingerprint", () => {
+    expect(
+      itemDecisionBodySchema.parse({
+        decision: "snoozed",
+        snoozedUntil: "2026-09-11T10:00:00.000Z",
+        itemFingerprint: "a".repeat(64),
+      }),
+    ).toMatchObject({ decision: "snoozed" });
+    expect(() =>
+      itemDecisionBodySchema.parse({ decision: "maybe", itemFingerprint: "a".repeat(64) }),
+    ).toThrow();
+    expect(() =>
+      itemDecisionBodySchema.parse({ decision: "snoozed", itemFingerprint: "a".repeat(64) }),
+    ).toThrow();
+    expect(() =>
+      itemDecisionBodySchema.parse({
+        decision: "dismissed",
+        reason: "x".repeat(501),
+        itemFingerprint: "a".repeat(64),
+      }),
+    ).toThrow();
+  });
+
+  it("binds a preference to a known source kind and an optional horizon", () => {
+    expect(
+      preferenceRouteParamsSchema.parse({
+        organizationId: "10000000-0000-4000-8000-000000000001",
+        sourceKind: "channel_recommendation",
+        sourceId: "60000000-0000-4000-8000-000000000006",
+      }),
+    ).toMatchObject({ sourceKind: "channel_recommendation" });
+    expect(() =>
+      preferenceRouteParamsSchema.parse({
+        organizationId: "10000000-0000-4000-8000-000000000001",
+        sourceKind: "campaign",
+        sourceId: "60000000-0000-4000-8000-000000000006",
+      }),
+    ).toThrow();
+    expect(
+      preferenceBodySchema.parse({ pinned: true, snoozedUntil: null }),
+    ).toEqual({ pinned: true, snoozedUntil: null });
   });
 
   it("binds a decision to an exact digest and bounded reason", () => {

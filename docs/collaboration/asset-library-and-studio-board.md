@@ -4495,3 +4495,100 @@ entry. No source, migration, or test file touched.
   first. UI-only checks (declare button, Reports tab) need only the app and a login.
 - Typecheck re-run 2026-09-05: same 6 errors in the same untracked Task 20 campaign-draft test
   file. Left untouched — the owning session's active work.
+
+### 2026-09-05 · muse-code · Task 21 done: atomic Campaign draft requests
+
+- Member service returning explicit `created`/`replayed` outcomes with zod shape refusal
+  before any RPC and tenant-scope error mapping; 5 red-first tests.
+- Migration `20260905110000` (table, member request + cancel on `authenticated`, worker
+  claim/fail/complete on `service_role`, lifecycle `draft_requested`/`draft_created`) plus
+  follow-up grant migration (member read policy shipped without its table grant — caught by
+  the suite, fixed forward). Both pushed; pgTAP suite 28/28 green, all five RPCs invoked
+  repeatedly (first-call rule).
+- Hand types narrowed (`campaign_draft_requests` Row, five RPC Args); lifecycle unions
+  extended in decisions ports.
+- Gates: full pgTAP 61 suites green; focused Decision suites, `tsc`, ESLint, prettier,
+  `git diff --check` clean.
+
+### 2026-09-05 · muse-code · Task 22 migration claim and review
+
+- Claimed `supabase/migrations/20260905130000_campaign_draft_frozen_snapshot_worker.sql`
+  before creating it. Carries: request objective/audience columns (staging table empty,
+  backfill only defensive) with the request RPC re-signed to 10 args (old overload
+  dropped); snapshot freeze columns on `campaign_source_snapshots`; worker RPC
+  `create_campaign_draft_from_request` (service_role only, claim-token fenced, atomic
+  brief+campaign+snapshot+completion+transition, exact redelivery replays).
+- Deviation from plan: the worker does not call the Campaign module service — the
+  existing create RPC gates on member `auth.uid()`, which a worker can never present.
+  A separate fenced worker RPC follows the repo's worker pattern instead; domain
+  schemas (qualification, snapshot content) are shared, not duplicated.
+- Pre-apply: dry-run lists only this migration; worker pgTAP suite written (12 assertions).
+
+### 2026-09-05 · muse-code · Task 22 done: frozen snapshot worker (one draft per Opportunity)
+
+- Frozen snapshot content schema (domain, strict, red-first); qualification admits
+  `draft_requested` governed drafts and refuses created drafts and cross-action states.
+- Worker RPC `create_campaign_draft_from_request` (service_role, claim-token fenced):
+  reloads all bound versions, permanent-fails moved prerequisites, commits
+  campaign + snapshot + request completion + `draft_created` atomically, replays exact
+  redelivery. No model, provider, publish, spend, approval, or gateway path.
+- Deviations from plan, both documented in the migrations: the worker does not call the
+  Campaign module service (its create RPC gates on member `auth.uid()`); drafts reference
+  the opportunity with objective/audience frozen into snapshot facts (campaigns table
+  enforces exactly one source); market claim linkage stays unresolved ids + verbatim
+  bundle until a later slice links it.
+- Repairs along the way: missing goal-metric value, `campaign_id = campaign_id`
+  self-assignment, dropped grant block (forward migrations, all pushed).
+- Workflow `create-from-opportunity` (claim/create/fail orchestration, red-first) plus
+  `campaign.create-from-opportunity` trigger task on its own lane.
+- Gates: worker pgTAP 12/12, full pgTAP 62 suites green; focused Vitest, `tsc`, ESLint,
+  prettier clean; full build running at entry time — confirm BUILD_ID before sign-off.
+
+### 2026-09-05 · muse-code · Task 23 done: draft CTA, retry states, truthful success
+
+- Route `POST .../opportunities/[opportunityId]/campaign-draft` (member, `campaign.create`,
+  exact version + identity, non-optimistic outcome, replay-safe retry), red-first with
+  viewer/stale/cross-tenant refusals.
+- `CampaignDraftAction` mounted on opportunity cards: intent form, pending/processing,
+  retryable retry, permanent/cancelled words, success link to the draft route; viewers get
+  nothing interactive; non-governed keys render nothing; approval language asserted absent.
+- Composed read carries draft request states (repository + service + cards) with draft
+  timeline events; draft-standing cards stay visible, terminal ones live in history.
+- Feed: governed entries carry no feedback actions (drafts are requested, never approved).
+- Opportunity version threaded feed item to card so the CTA names the exact version.
+- Gates: 293 tests across decisions/GI/components/routes green; `tsc`, ESLint, prettier
+  clean; full build running at entry time — confirm BUILD_ID before sign-off.
+
+### 2026-09-05 · muse-code · Task 24 note: hand mocks don't follow interfaces
+
+- Adding `listDraftRequestStates` to the workspace repository broke the GI GET route
+  test: its hand-built repository mock lacked the method, so the service threw and the
+  test read `body.workspace` as null. Fixed by extending the mock. Lesson: extending a
+  repository interface means grepping for hand mocks of that interface in the same change.
+
+### 2026-09-05 · muse-code · Task 24 done: full-loop proof and documentation close
+
+- E2E `growth-intelligence.spec.ts`: handoff boundary cases (unauthenticated draft
+  refusal without leakage, tenant-protected draft campaign address) pass against a local
+  server — 6 passed, 6 seed-gated skips. Seeded handoff cases written for the canary.
+- Runbook `docs/runbooks/growth-intelligence.md`: routine states, overdue/lease/failure
+  handling, refusal anomalies, kill switch, escalation, and the never-do list.
+- Verification doc `docs/verification/growth-intelligence/increment-4-campaign-handoff.md`:
+  machine evidence vs open operator proofs, same gate format as increments 1–3.
+- Doc maintenance per AGENTS.md section 9: module map (draft path), events list (two new
+  event names), glossary (governed draft, draft request), spec 005 (draft statuses).
+  MANIFEST needs no change (does not inventory these paths); progress-tracker is stale
+  since 08-09 on another branch — this board stays the record, noted rather than rewritten.
+- Gates: full Vitest 4107 passed / 1 failed-then-fixed (route hand mock, repaired,
+  8/8 on rerun); full pgTAP 62 suites green; `tsc`, ESLint (0 errors), prettier clean.
+
+### 2026-09-05 · muse-code · Task 24 done: loop proof and documentation close
+
+- E2E `growth-intelligence.spec.ts` extended with handoff boundary cases (6 passed,
+  6 seed-gated skips); runbook `docs/runbooks/growth-intelligence.md` written;
+  verification docs for increments 3 and 4 written with machine evidence and open
+  operator proofs; context (module map, events, glossary) and spec 005 updated to match
+  shipped behavior; MANIFEST needs nothing (it does not inventory these paths);
+  progress-tracker left alone (branch-stale since 08-09; this board is the record).
+- Final gates: full Vitest 4107 passed + 1 fixed-mid-run route mock (8/8 on rerun),
+  full pgTAP 62 suites green, `tsc` clean, lint 0 errors, `pnpm build` green at Task 23.

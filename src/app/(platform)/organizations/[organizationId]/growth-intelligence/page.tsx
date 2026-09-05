@@ -1,5 +1,7 @@
+import { GrowthIntelligenceWorkspace } from "@/components/growth-intelligence/growth-intelligence-workspace";
 import { MarketProfileReview } from "@/components/growth-intelligence/market-profile-review";
 import { MarketWatch } from "@/components/growth-intelligence/market-watch";
+import { parseWorkspaceMonth } from "@/components/growth-intelligence/query-options";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import type { MarketGeographicLayer } from "@/domain/growth-intelligence/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
@@ -9,12 +11,15 @@ import { DomainError } from "@/lib/errors";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
 import { buildMarketWatch } from "@/modules/growth-intelligence/application/market-watch";
 import { createMarketProfileService } from "@/modules/growth-intelligence/application/profile-service";
+import { createGrowthIntelligenceReadService } from "@/modules/growth-intelligence/application/read-service";
 import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/growth-intelligence/infrastructure/read-repository";
 import { createAuthenticatedMarketProfileRepository } from "@/modules/growth-intelligence/infrastructure/profile-repository";
+import { createDecisionRepository } from "@/modules/decisions/infrastructure/repository";
+import type { DecisionPersistence } from "@/modules/decisions/infrastructure/repository";
 
 type PageProps = {
   params: Promise<{ organizationId: string }>;
-  searchParams?: Promise<{ limit?: string; cursor?: string; geography?: string }>;
+  searchParams?: Promise<{ limit?: string; cursor?: string; geography?: string; month?: string }>;
 };
 
 function parseLimit(value: string | undefined): number {
@@ -42,6 +47,7 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
 
   const search = (await searchParams) ?? {};
   const limit = parseLimit(search.limit);
+  const activityMonth = parseWorkspaceMonth(search.month);
 
   const service = createMarketProfileService({
     repository: createAuthenticatedMarketProfileRepository(context.supabase),
@@ -83,12 +89,31 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
     allowBoundedQuotes: currentVersion?.document.sourcePolicy.allowBoundedQuotes ?? false,
   });
 
+  const readService = createGrowthIntelligenceReadService({
+    workspace: reads,
+    opportunities: createDecisionRepository(context.supabase as unknown as DecisionPersistence),
+  });
+  const view = await readService.getWorkspace({
+    organizationId: context.organizationId,
+    actorId: context.user.id,
+    activityMonth: activityMonth ?? undefined,
+  });
+
+  const marketWatch = (
+    <MarketWatch
+      organizationId={context.organizationId}
+      watch={{ ...watch, nextCursor: claims.nextCursor }}
+      canRetry={canManage}
+    />
+  );
+
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-8">
       <div>
         <h1 className="text-2xl font-semibold">Growth intelligence</h1>
         <p className="text-sm text-muted-foreground">
-          Cited market evidence for this organization. Opening this page never starts research.
+          What needs you next, what the evidence says, and what changed. Opening this page never
+          starts research.
         </p>
       </div>
       <MarketProfileReview
@@ -96,10 +121,12 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         profile={profile}
         canManage={canManage}
       />
-      <MarketWatch
+      <GrowthIntelligenceWorkspace
+        view={view}
         organizationId={context.organizationId}
-        watch={{ ...watch, nextCursor: claims.nextCursor }}
-        canRetry={canManage}
+        canManage={canManage}
+        marketWatch={marketWatch}
+        isCurrentMonth={activityMonth === null}
       />
     </div>
   );

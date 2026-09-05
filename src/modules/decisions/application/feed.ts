@@ -55,6 +55,7 @@ export type OpportunityFeedEntry = {
   id: string;
   decisionRecordId: string;
   playbookVersionId: string;
+  actionKey: string;
   title: string;
   summary: string;
   status: OpportunityStatus;
@@ -155,6 +156,7 @@ function toEntry(
     id: item.id,
     decisionRecordId: item.decisionRecordId,
     playbookVersionId: item.playbookVersionId,
+    actionKey: item.actionKey,
     title: item.title,
     summary: item.summary,
     status: item.status,
@@ -170,7 +172,13 @@ function toEntry(
     timeToImpactDays: item.timeToImpactDays,
     expiresAt: item.expiresAt,
     isExpired,
-    availableActions: blockedReason ? [] : OPPORTUNITY_ACTIONS,
+    // Governed drafts are requested through the draft endpoint, never answered
+    // through feedback: an Approve button here would promise an action the
+    // write path must refuse. Legacy entries keep their actions.
+    availableActions:
+      blockedReason || item.actionKey === "campaign.governed_draft_v1"
+        ? []
+        : OPPORTUNITY_ACTIONS,
     ...(blockedReason ? { blockedReason } : {}),
   };
 }

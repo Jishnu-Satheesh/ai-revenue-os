@@ -40,7 +40,7 @@ describe("Sidebar", () => {
       .map((entry) => entry.textContent?.replace("Soon", "").trim());
     expect(labels).toEqual([
       "Overview",
-      "Opportunities",
+      "Growth Intelligence",
       "Campaigns",
       "Business Memory",
       "Channels",
@@ -71,10 +71,10 @@ describe("Sidebar", () => {
       "href",
       `/organizations/${organizationId}/campaigns`,
     );
-    // Opportunities is built now, so it is a real organization-scoped link.
-    expect(screen.getByRole("link", { name: /Opportunities/ })).toHaveAttribute(
+    // Growth Intelligence is built now, so it is a real organization-scoped link.
+    expect(screen.getByRole("link", { name: /Growth Intelligence/ })).toHaveAttribute(
       "href",
-      `/organizations/${organizationId}/opportunities`,
+      `/organizations/${organizationId}/growth-intelligence`,
     );
     // An unbuilt destination must not be an anchor: the previous sidebar linked
     // these to routes that do not exist, so every click was a 404.

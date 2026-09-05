@@ -37,6 +37,7 @@ const DECISION_PAST_TENSE: Record<
   acknowledged: "Acknowledged",
   dismissed: "Dismissed",
   planned: "Marked planned",
+  snoozed: "Snoozed",
 };
 
 type DecisionKind = "acknowledged" | "dismissed" | "planned";
@@ -53,6 +54,8 @@ export function RecommendationControls({
   const [error, setError] = useState<string | null>(null);
   const [dismissOpen, setDismissOpen] = useState(false);
   const [dismissReason, setDismissReason] = useState("");
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [snoozeUntil, setSnoozeUntil] = useState("");
 
   async function answer(body: Record<string, unknown>, path: "decisions" | "feedback"): Promise<boolean> {
     setPending(true);
@@ -95,6 +98,20 @@ export function RecommendationControls({
   }
 
   const reasonLength = dismissReason.trim().length;
+
+  async function snooze() {
+    // The route repeats this check against the stored horizon; refusing early
+    // keeps a past time from ever leaving the page, in the route's own words.
+    const chosen = Date.parse(snoozeUntil);
+    if (snoozeUntil === "" || Number.isNaN(chosen) || chosen <= Date.now()) {
+      setError("A snooze needs a future time to hide until.");
+      return false;
+    }
+    return answer(
+      { decision: "snoozed", snoozedUntil: new Date(snoozeUntil).toISOString() },
+      "decisions",
+    );
+  }
 
   return (
     <section
@@ -164,6 +181,17 @@ export function RecommendationControls({
               “{recommendation.decision.reason}”
             </span>
           ) : null}
+          {recommendation.decision.decision === "snoozed" &&
+          recommendation.decision.snoozedUntil ? (
+            <span className="block font-normal">
+              until{" "}
+              {new Date(recommendation.decision.snoozedUntil).toLocaleDateString(undefined, {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+          ) : null}
         </p>
       ) : (
         <div className="flex items-center gap-2 pt-1">
@@ -218,6 +246,16 @@ export function RecommendationControls({
               size="sm"
               className="text-muted-foreground"
               disabled={pending}
+              onClick={() => setSnoozeOpen(true)}
+            >
+              Snooze
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              disabled={pending}
               onClick={() => setDismissOpen(true)}
             >
               Dismiss
@@ -225,6 +263,56 @@ export function RecommendationControls({
           </div>
         </div>
       )}
+
+      <Dialog open={snoozeOpen} onOpenChange={setSnoozeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Snooze this recommendation</DialogTitle>
+            <DialogDescription>
+              Hidden until the time below, then back in the queue. The horizon
+              travels with the answer so the record explains itself later.
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            type="datetime-local"
+            aria-label="Snooze until"
+            className="w-full rounded-lg border border-border bg-background p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={snoozeUntil}
+            onChange={(event) => setSnoozeUntil(event.target.value)}
+          />
+          {error ? (
+            <p role="alert" className="text-[11px] font-medium text-warning">
+              {error}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setSnoozeOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={pending || snoozeUntil === ""}
+              onClick={async () => {
+                // The dialog stays open on a refused answer: the chosen time
+                // outlives the failure and the reason is shown inline.
+                const recorded = await snooze();
+                if (recorded) {
+                  setSnoozeOpen(false);
+                  setSnoozeUntil("");
+                }
+              }}
+            >
+              Snooze
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dismissOpen} onOpenChange={setDismissOpen}>
         <DialogContent>

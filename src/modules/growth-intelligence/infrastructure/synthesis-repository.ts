@@ -169,6 +169,49 @@ function persistenceError(
   return new DomainError("DOMAIN_ERROR", messages[operation]);
 }
 
+/**
+ * Member-path refusals keep their meaning across the boundary: a viewer
+ * refusal reads as authorization, a superseded reading as a refreshable
+ * conflict, a missing record as scope, and a contract refusal as validation.
+ * Anything else keeps the safe generic message.
+ */
+function memberRpcError(
+  operation: "decide" | "preference",
+  error: { code?: string | null; message?: string | null },
+): DomainError {
+  if (error?.code === "42501") {
+    return new DomainError(
+      "AUTHORIZATION_ERROR",
+      "You do not have permission to change this intelligence.",
+    );
+  }
+  if (error?.code === "23505") {
+    return new DomainError(
+      "DOMAIN_ERROR",
+      "The item changed since you read it. Refresh and try again.",
+    );
+  }
+  if (error?.code === "22023") {
+    if (typeof error.message === "string" && error.message.includes("not_found")) {
+      return new DomainError(
+        "TENANT_SCOPE_ERROR",
+        "This record was not found. It may have been removed.",
+      );
+    }
+    return new DomainError(
+      "VALIDATION_ERROR",
+      "That answer is not one the platform can record.",
+    );
+  }
+  if (error?.code === "23503") {
+    return new DomainError(
+      "TENANT_SCOPE_ERROR",
+      "The named record was not found in this organization.",
+    );
+  }
+  return persistenceError(operation);
+}
+
 function runOutcome(data: unknown): { runId: string; status: string; replayed: boolean } {
   const parsed = z
     .object({ runId: uuidSchema, status: z.string(), replayed: z.boolean() })
@@ -183,9 +226,14 @@ export function createSynthesisRepository(persistence: SynthesisPersistence): Sy
     operation: "begin" | "complete" | "fail" | "decide" | "preference",
     name: string,
     args: Record<string, unknown>,
+    mapError?: (error: { code?: string | null; message?: string | null }) => DomainError,
   ) {
     const result = await persistence.rpc(name, args);
-    if (result.error) throw persistenceError(operation);
+    if (result.error) {
+      throw mapError
+        ? mapError(result.error as { code?: string | null; message?: string | null })
+        : persistenceError(operation);
+    }
     return result.data;
   }
 
@@ -264,15 +312,20 @@ export function createSynthesisRepository(persistence: SynthesisPersistence): Sy
 
     async decide(input) {
       const decision = decideInputSchema.parse(input);
-      const data = await invoke("decide", "decide_growth_intelligence_item", {
-        p_organization_id: decision.organizationId,
-        p_actor_id: decision.actorId,
-        p_item_id: decision.itemId,
-        p_decision: decision.decision,
-        p_reason: decision.reason,
-        p_snoozed_until: decision.snoozedUntil,
-        p_item_fingerprint: decision.itemFingerprint,
-      });
+      const data = await invoke(
+        "decide",
+        "decide_growth_intelligence_item",
+        {
+          p_organization_id: decision.organizationId,
+          p_actor_id: decision.actorId,
+          p_item_id: decision.itemId,
+          p_decision: decision.decision,
+          p_reason: decision.reason,
+          p_snoozed_until: decision.snoozedUntil,
+          p_item_fingerprint: decision.itemFingerprint,
+        },
+        (error) => memberRpcError("decide", error),
+      );
       const parsed = z
         .object({ decisionId: uuidSchema, decision: z.string() })
         .passthrough()
@@ -283,14 +336,19 @@ export function createSynthesisRepository(persistence: SynthesisPersistence): Sy
 
     async setPreference(input) {
       const preference = preferenceInputSchema.parse(input);
-      const data = await invoke("preference", "set_growth_intelligence_preference", {
-        p_organization_id: preference.organizationId,
-        p_actor_id: preference.actorId,
-        p_source_kind: preference.sourceKind,
-        p_source_id: preference.sourceId,
-        p_pinned: preference.pinned,
-        p_snoozed_until: preference.snoozedUntil,
-      });
+      const data = await invoke(
+        "preference",
+        "set_growth_intelligence_preference",
+        {
+          p_organization_id: preference.organizationId,
+          p_actor_id: preference.actorId,
+          p_source_kind: preference.sourceKind,
+          p_source_id: preference.sourceId,
+          p_pinned: preference.pinned,
+          p_snoozed_until: preference.snoozedUntil,
+        },
+        (error) => memberRpcError("preference", error),
+      );
       const parsed = z
         .object({ sourceKind: z.string(), pinned: z.boolean() })
         .passthrough()

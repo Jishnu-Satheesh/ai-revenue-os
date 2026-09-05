@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-24
 
-**Status:** Locked and approved for implementation planning
+**Status:** Superseded on 2026-09-02 by the report-anatomy redesign in `docs/design/overview-redesign/` (published canvas, plus the `.dc.html` artboards it is seeded from). This document remains historical evidence for the implementation it produced — `OrganizationIntelligenceCockpit`, `ChannelEconomicsOverview`, the Strategic Briefing builder and the three demo campaign previews — all of which were retired with that redesign. Its hierarchy is no longer an implementation requirement.
 
 **Route:** `/organizations/[organizationId]/overview`
 

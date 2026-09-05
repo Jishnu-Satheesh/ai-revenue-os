@@ -215,6 +215,45 @@ describe("Synthesis repository", () => {
     expect(result).toEqual({ sourceKind: "synthesis_item", pinned: true });
   });
 
+  it.each([
+    [{ code: "42501", message: "forbidden" }, "AUTHORIZATION_ERROR"],
+    [{ code: "23505", message: "stale" }, "DOMAIN_ERROR"],
+    [{ code: "22023", message: "growth_intelligence_item_decision_invalid" }, "VALIDATION_ERROR"],
+    [{ code: "22023", message: "growth_intelligence_item_not_found" }, "TENANT_SCOPE_ERROR"],
+    [{ code: "23503", message: "fk" }, "TENANT_SCOPE_ERROR"],
+  ])("maps a decide refusal %j to %s", async (error, code) => {
+    const rpc = vi.fn(async () => ({ data: null, error }));
+    const repository = createSynthesisRepository({ rpc } as never);
+
+    await expect(
+      repository.decide({
+        organizationId,
+        actorId,
+        itemId,
+        decision: "acknowledged",
+        reason: null,
+        snoozedUntil: null,
+        itemFingerprint: "1".repeat(64),
+      }),
+    ).rejects.toMatchObject({ name: "DomainError", code });
+  });
+
+  it("maps a preference refusal to authorization without leaking internals", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: { code: "42501", message: "no" } }));
+    const repository = createSynthesisRepository({ rpc } as never);
+
+    await expect(
+      repository.setPreference({
+        organizationId,
+        actorId,
+        sourceKind: "synthesis_item",
+        sourceId: itemId,
+        pinned: true,
+        snoozedUntil: null,
+      }),
+    ).rejects.toMatchObject({ name: "DomainError", code: "AUTHORIZATION_ERROR" });
+  });
+
   it("rejects the retired nested decision and preference wrappers before any RPC", async () => {
     const db = persistence();
     const repository = createSynthesisRepository(db.persistence);

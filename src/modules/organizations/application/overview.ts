@@ -1,7 +1,6 @@
 import type { CompletenessGrade } from "@/domain/economics/types";
 import { rollUpWindow, type LedgerEntry } from "@/domain/economics/rollup";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import type { DemoCampaignSummary } from "@/modules/campaigns/demo/fixtures";
 import type { EconomicsView } from "@/modules/economics/application/read-model";
 import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 import type { DigitalTwinSnapshot } from "@/modules/organizations/infrastructure/repository";
@@ -211,6 +210,98 @@ function economicsTakeaway(input: {
     : "The recorded days have complete cost evidence.";
 }
 
+/**
+ * The window's money, split into what the evidence can and cannot state.
+ *
+ * `costsRecordedMinor` sums only the costs actually recorded. Subtracting the
+ * kept floor from sales would look like a costs figure and would in fact be a
+ * guess about the days that recorded no costs at all, which is exactly the
+ * claim this platform does not make.
+ */
+export type OverviewMoneyScale = {
+  currency: string;
+  salesMinor: number;
+  costsRecordedMinor: number;
+  /** Contribution margin on the days that recorded enough to state one. */
+  keptFloorMinor: number;
+  /** The floor plus the at-most band the remaining days can support. */
+  keptCeilingMinor: number;
+  /** True when some day could only support a ceiling, so kept is a range. */
+  hasUnprovenBand: boolean;
+};
+
+export function buildOverviewMoneyScale(economics: OverviewEconomics): OverviewMoneyScale | null {
+  if (economics.state === "empty" || economics.currency === null) return null;
+
+  let salesMinor = 0;
+  let costsRecordedMinor = 0;
+  let keptFloorMinor = 0;
+  let keptCeilingMinor = 0;
+
+  for (const point of economics.trend) {
+    salesMinor += point.grossRevenueMinor;
+    if (point.contributionMarginMinor !== null) {
+      keptFloorMinor += point.contributionMarginMinor;
+      keptCeilingMinor += point.contributionMarginMinor;
+      costsRecordedMinor += point.grossRevenueMinor - point.contributionMarginMinor;
+    } else if (point.atMostMinor !== null) {
+      keptCeilingMinor += point.atMostMinor;
+    }
+  }
+
+  return {
+    currency: economics.currency,
+    salesMinor,
+    costsRecordedMinor,
+    keptFloorMinor,
+    keptCeilingMinor,
+    hasUnprovenBand: keptCeilingMinor > keptFloorMinor,
+  };
+}
+
+/**
+ * This window's recorded revenue against the window immediately before it.
+ *
+ * Both amounts are stored; no ratio is. A percentage is the caller's
+ * display-time division of the two, the same last-moment arithmetic the
+ * analysis surfaces do, so nothing here can be re-aggregated wrongly later.
+ *
+ * Null rather than zero when there is nothing to compare against: a change
+ * measured from a window that recorded no trade is not a change, and "+100%"
+ * against nothing is a claim the ledger does not support.
+ */
+export type OverviewComparison = {
+  currency: string;
+  currentMinor: number;
+  priorMinor: number;
+  deltaMinor: number;
+};
+
+export function buildOverviewComparison(input: {
+  economics: OverviewEconomics;
+  priorEntries: readonly LedgerEntry[];
+}): OverviewComparison | null {
+  const { economics, priorEntries } = input;
+  if (economics.state === "empty" || economics.currency === null) return null;
+  if (priorEntries.length === 0) return null;
+
+  // Mixed currencies cannot be summed into one comparison, and converting them
+  // would invent a rate the ledger never recorded.
+  const priorCurrencies = new Set(priorEntries.map((entry) => entry.currency));
+  if (priorCurrencies.size !== 1 || !priorCurrencies.has(economics.currency)) return null;
+
+  const currentMinor = sum(economics.trend.map((point) => point.grossRevenueMinor));
+  const priorMinor = sum(priorEntries.map((entry) => entry.grossRevenueMinor));
+  if (priorMinor <= 0) return null;
+
+  return {
+    currency: economics.currency,
+    currentMinor,
+    priorMinor,
+    deltaMinor: currentMinor - priorMinor,
+  };
+}
+
 export type OverviewIntegrationState =
   | { status: "disabled" | "failed" }
   | {
@@ -259,13 +350,6 @@ export function buildOverviewIntegration(snapshot: IntegrationHubSnapshot): Over
   };
 }
 
-export type StrategicBriefingItem = {
-  kind: "foundation" | "economics" | "operations";
-  conclusion: string;
-  evidence: string;
-  href: string;
-};
-
 export type OverviewActionItem = {
   kind: "foundation" | "integration" | "economics";
   title: string;
@@ -291,24 +375,28 @@ export function buildOverviewActionQueue(input: {
   const policiesMissing = input.readiness.sections.some(
     ({ key, complete }) => key === "policies" && !complete,
   );
+  // Copy here is written for a non-technical reader and stays industry-neutral:
+  // "items you sell", never "dishes". An industry pack supplies its own nouns.
   if (policiesMissing) {
     actions.push({
       kind: "foundation",
-      title: "Add an access policy",
-      impact: "Governed work cannot rely on a missing access boundary.",
+      title: "Nobody is named as the approver yet",
+      impact:
+        "Nothing this platform suggests can be acted on until a real person has to say yes.",
       ...(input.permissions.canManagePolicies
-        ? { href: "#organization-management", actionLabel: "Manage policies" }
+        ? { href: "#organization-management", actionLabel: "Name an approver" }
         : {}),
     });
   }
 
   if (input.integration.status === "ready" && input.integration.actionRequiredConnections > 0) {
+    const count = input.integration.actionRequiredConnections;
     actions.push({
       kind: "integration",
-      title: `${input.integration.actionRequiredConnections} connection${input.integration.actionRequiredConnections === 1 ? "" : "s"} needs attention`,
-      impact: "Stale, degraded, or revoked connections can interrupt fresh evidence.",
+      title: `${count} connection${count === 1 ? "" : "s"} stopped sending`,
+      impact: `What already arrived is safe. Nothing new will reach this page until ${count === 1 ? "it is" : "they are"} reconnected.`,
       href: `/organizations/${input.organizationId}/integrations`,
-      actionLabel: "Review integrations",
+      actionLabel: "Check the connection",
     });
   }
 
@@ -316,14 +404,19 @@ export function buildOverviewActionQueue(input: {
     !isEconomicsFailure(input.economics) &&
     (input.economics.gradeCounts.indicative > 0 || input.economics.gaps.length > 0)
   ) {
+    const { priced, applicable } = input.economics.coverage;
     actions.push({
       kind: "economics",
-      title: "Close economics evidence gaps",
-      impact: "Missing or weak costs limit the platform to margin ceilings or partial conclusions.",
+      title:
+        applicable > 0
+          ? `${applicable - priced} of ${applicable} costs are not recorded yet`
+          : "Some of what you sell has no cost recorded",
+      impact:
+        "Until they are in, we can only give you a range for what you kept — not one number.",
       ...(input.permissions.canManageCore
         ? {
             href: `/organizations/${input.organizationId}/onboarding?section=cost_structure`,
-            actionLabel: "Review cost structure",
+            actionLabel: "Add the missing costs",
           }
         : {}),
     });
@@ -333,80 +426,15 @@ export function buildOverviewActionQueue(input: {
     if (actions.length >= 3 || section.complete || section.key === "policies") continue;
     actions.push({
       kind: "foundation",
-      title: `Ground ${section.label.toLowerCase()}`,
+      title: `${section.label} is not on file yet`,
       impact: section.detail,
       ...(input.permissions.canManageCore
-        ? { href: "#organization-management", actionLabel: "Manage Digital Twin" }
+        ? { href: "#organization-management", actionLabel: "Add it" }
         : {}),
     });
   }
 
   return actions.slice(0, 3);
-}
-
-export function buildStrategicBriefing(input: {
-  readiness: DigitalTwinReadiness;
-  economics: OverviewEconomicsResult;
-  integration: OverviewIntegrationState;
-}): StrategicBriefingItem[] {
-  const items: StrategicBriefingItem[] = [];
-  if (input.readiness.missingLabels.length > 0) {
-    const [firstMissing] = input.readiness.missingLabels;
-    items.push({
-      kind: "foundation",
-      conclusion: `${firstMissing} is the next Digital Twin gap to ground.`,
-      evidence: `${input.readiness.groundedCount} of ${input.readiness.totalCount} readiness sections are grounded.`,
-      href: "#digital-twin-data",
-    });
-  }
-
-  if (isEconomicsFailure(input.economics)) {
-    items.push({
-      kind: "economics",
-      conclusion: "Channel performance could not be checked right now.",
-      evidence: "The economics read failed; no performance conclusion was substituted.",
-      href: "#channel-economics",
-    });
-  } else if (input.economics.state === "empty") {
-    items.push({
-      kind: "economics",
-      conclusion: "There is not enough recorded trade to compare channels yet.",
-      evidence: "The selected 30-day ledger window contains no rows.",
-      href: "#channel-economics",
-    });
-  } else if (input.economics.gradeCounts.indicative > 0) {
-    items.push({
-      kind: "economics",
-      conclusion: "Margin conclusions are limited by missing cost evidence.",
-      evidence: `${input.economics.gradeCounts.indicative} recorded day${input.economics.gradeCounts.indicative === 1 ? "" : "s"} can only support a ceiling.`,
-      href: "#channel-economics",
-    });
-  } else if (input.economics.gradeCounts.partial > 0) {
-    items.push({
-      kind: "economics",
-      conclusion: "Channel margin is usable, with some estimated cost evidence.",
-      evidence: `${input.economics.gradeCounts.partial} recorded day${input.economics.gradeCounts.partial === 1 ? "" : "s"} is graded partial.`,
-      href: "#channel-economics",
-    });
-  } else {
-    items.push({
-      kind: "economics",
-      conclusion: "Recorded channel economics are complete for this window.",
-      evidence: `${input.economics.gradeCounts.complete} recorded day${input.economics.gradeCounts.complete === 1 ? "" : "s"} has complete cost evidence.`,
-      href: "#channel-economics",
-    });
-  }
-
-  if (input.integration.status === "ready" && input.integration.actionRequiredConnections > 0) {
-    items.push({
-      kind: "operations",
-      conclusion: `${input.integration.actionRequiredConnections} integration connection${input.integration.actionRequiredConnections === 1 ? "" : "s"} needs attention.`,
-      evidence: `${input.integration.healthyConnections} of ${input.integration.totalConnections} connections are currently healthy.`,
-      href: "#integration-health",
-    });
-  }
-
-  return items.slice(0, 3);
 }
 
 export function getOverviewPermissions(role: OrganizationRole): {
@@ -419,14 +447,6 @@ export function getOverviewPermissions(role: OrganizationRole): {
     canManagePolicies: role === "owner" || role === "admin",
     canManageLifecycle: role === "owner" || role === "admin",
   };
-}
-
-export function selectRecentCampaigns(
-  campaigns: readonly DemoCampaignSummary[],
-): DemoCampaignSummary[] {
-  return [...campaigns]
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-    .slice(0, 3);
 }
 
 function sum(values: readonly number[]): number {

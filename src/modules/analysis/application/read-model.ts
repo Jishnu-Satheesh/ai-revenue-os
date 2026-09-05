@@ -146,8 +146,9 @@ export type WorkspaceRecommendationView = {
   limitations: readonly string[];
   citationFindingIds: readonly string[];
   decision: {
-    decision: "acknowledged" | "dismissed" | "planned";
+    decision: "acknowledged" | "dismissed" | "planned" | "snoozed";
     reason: string | null;
+    snoozedUntil: string | null;
     actorName: string;
     createdAt: string;
   } | null;
@@ -308,6 +309,7 @@ function toRecommendationView(
       ? {
           decision: decision.decision,
           reason: decision.reason,
+          snoozedUntil: decision.snoozedUntil,
           actorName: decision.actorName,
           createdAt: decision.createdAt,
         }
@@ -571,10 +573,17 @@ export type OrganizationRecommendationRecord = {
   generatedAt: string;
   /** The latest owning-module triage answer, if any. */
   decision: {
-    decision: "acknowledged" | "dismissed" | "planned";
+    decision: "acknowledged" | "dismissed" | "planned" | "snoozed";
+    snoozedUntil: string | null;
     createdAt: string;
   } | null;
   pinned: boolean;
+  /**
+   * The viewing actor's own preference horizon for this row; while future the
+   * composed Growth Intelligence view hides the row for that actor alone.
+   * Organization policy and other members' ordering never change.
+   */
+  preferenceSnoozedUntil: string | null;
 };
 
 export type OrganizationRecommendationLaneRecord = OrganizationRecommendationRecord & {

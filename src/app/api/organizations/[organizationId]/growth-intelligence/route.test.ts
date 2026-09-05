@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   readOrganizationTimeZone: vi.fn(),
   listWorkspaceItems: vi.fn(),
   listChannelRecommendationRecords: vi.fn(),
+  listDraftRequestStates: vi.fn(),
   listOpportunities: vi.fn(),
   warn: vi.fn(),
 }));
@@ -45,6 +46,7 @@ vi.mock("@/modules/growth-intelligence/infrastructure/read-repository", () => ({
     readOrganizationTimeZone: mocks.readOrganizationTimeZone,
     listWorkspaceItems: mocks.listWorkspaceItems,
     listChannelRecommendationRecords: mocks.listChannelRecommendationRecords,
+    listDraftRequestStates: mocks.listDraftRequestStates,
   }),
 }));
 vi.mock("@/modules/decisions/infrastructure/repository", () => ({
@@ -93,6 +95,7 @@ beforeEach(() => {
   mocks.readOrganizationTimeZone.mockResolvedValue("Asia/Dubai");
   mocks.listWorkspaceItems.mockResolvedValue([]);
   mocks.listChannelRecommendationRecords.mockResolvedValue([]);
+  mocks.listDraftRequestStates.mockResolvedValue([]);
   mocks.listOpportunities.mockResolvedValue([]);
 });
 

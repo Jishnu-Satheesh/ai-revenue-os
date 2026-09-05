@@ -12,6 +12,10 @@ import {
   parseCampaignVariantPayload,
 } from "@/workflows/campaigns/contracts";
 import {
+  createFromOpportunity,
+  createFromOpportunityPayloadSchema,
+} from "@/workflows/campaigns/create-from-opportunity";
+import {
   GENERATE_BUNDLE_MAX_DURATION_SECONDS,
   GENERATE_VARIANTS_MAX_DURATION_SECONDS,
   REVISE_BUNDLE_MAX_DURATION_SECONDS,
@@ -316,3 +320,103 @@ function campaignRouter() {
     imageModel: env.CAMPAIGN_IMAGE_MODEL,
   });
 }
+
+/**
+ * Draft requests are cheap database work, not generation: their own lane so a
+ * burst of admissions never queues behind image rendering, and generation
+ * never queues behind drafts.
+ */
+export const campaignDraftQueue = queue({
+  name: "campaign-drafts",
+  concurrencyLimit: 3,
+});
+
+export const createCampaignDraftTask = schemaTask({
+  id: "campaign.create-from-opportunity",
+  schema: createFromOpportunityPayloadSchema,
+  queue: campaignDraftQueue,
+  retry: {
+    maxAttempts: 5,
+    minTimeoutInMs: 2_000,
+    maxTimeoutInMs: 60_000,
+    factor: 2,
+  },
+  maxDuration: 120,
+  run: async (payload) => {
+    const parsed = createFromOpportunityPayloadSchema.parse(payload);
+    const supabase = createCampaignWorkerServiceClient();
+
+    const drafts = {
+      claim: async (input: {
+        organizationId: string;
+        requestId: string;
+        claimToken: string;
+        leaseSeconds: number;
+      }) => {
+        const { data, error } = await supabase.rpc("claim_campaign_draft_request", {
+          p_organization_id: input.organizationId,
+          p_request_id: input.requestId,
+          p_claim_token: input.claimToken,
+          p_lease_seconds: input.leaseSeconds,
+        });
+        if (error ?? !data) throw error ?? new Error("Draft claim returned nothing.");
+        return { status: String((data as { status: string }).status) };
+      },
+      create: async (input: {
+        organizationId: string;
+        requestId: string;
+        claimToken: string;
+        idempotencyKey: string;
+      }) => {
+        const { data, error } = await supabase.rpc("create_campaign_draft_from_request", {
+          p_organization_id: input.organizationId,
+          p_request_id: input.requestId,
+          p_claim_token: input.claimToken,
+          p_idempotency_key: input.idempotencyKey,
+        });
+        if (error ?? !data) throw error ?? new Error("Draft creation returned nothing.");
+        const outcome = data as {
+          campaignId: string;
+          sourceSnapshotId: string | null;
+          status: string;
+        };
+        return {
+          campaignId: outcome.campaignId,
+          sourceSnapshotId: outcome.sourceSnapshotId,
+          status: outcome.status,
+        };
+      },
+      fail: async (input: {
+        organizationId: string;
+        requestId: string;
+        claimToken: string;
+        retryable: boolean;
+        failureCode: string;
+      }) => {
+        const { data, error } = await supabase.rpc("fail_campaign_draft_request", {
+          p_organization_id: input.organizationId,
+          p_request_id: input.requestId,
+          p_claim_token: input.claimToken,
+          p_retryable: input.retryable,
+          p_failure_code: input.failureCode,
+        });
+        if (error ?? !data) throw error ?? new Error("Draft failure returned nothing.");
+        return { status: String((data as { status: string }).status) };
+      },
+    };
+
+    const result = await createFromOpportunity(drafts, parsed);
+
+    logger.info("campaign.draft_finished", {
+      organizationId: parsed.organizationId,
+      correlationId: parsed.correlationId,
+      outcome: result.outcome,
+      ...(result.outcome === "created" || result.outcome === "replayed"
+        ? { campaignId: result.campaignId }
+        : {}),
+      ...(result.outcome === "failed" ? { failureCode: result.failureCode } : {}),
+    });
+
+    return result;
+  },
+});

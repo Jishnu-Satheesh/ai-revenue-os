@@ -1,10 +1,9 @@
-import { OrganizationIntelligenceCockpit } from "@/components/organizations/organization-intelligence-cockpit";
+import { OverviewReport } from "@/components/organizations/overview-report";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { getDigitalTwin } from "@/domain/organizations/repository";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { logger } from "@/lib/logger";
-import { demoCampaigns } from "@/modules/campaigns/demo/fixtures";
 import { buildEconomicsView, resolveWindow } from "@/modules/economics/application/read-model";
 import {
   loadCatalogCoverage,
@@ -15,11 +14,11 @@ import { isIntegrationHubEnabled } from "@/modules/integrations/application/feat
 import {
   buildDigitalTwinReadiness,
   buildOverviewActionQueue,
+  buildOverviewComparison,
   buildOverviewEconomics,
   buildOverviewIntegration,
-  buildStrategicBriefing,
+  buildOverviewMoneyScale,
   getOverviewPermissions,
-  selectRecentCampaigns,
   type OverviewEconomics,
   type OverviewIntegrationState,
 } from "@/modules/organizations/application/overview";
@@ -48,18 +47,35 @@ export default async function OverviewPage({ params }: PageProps) {
     now: new Date(),
   });
 
-  const [[entriesResult, catalogResult], integrationSnapshotResult] = await Promise.all([
-    Promise.allSettled([
-      loadLedgerEntries(context.supabase, {
-        organizationId: context.organizationId,
-        branchId: null,
-        rangeStart: window.rangeStart,
-        rangeEndExclusive: window.rangeEndExclusive,
-      }),
-      loadCatalogCoverage(context.supabase, context.organizationId),
-    ]),
-    integrationSnapshotPromise,
-  ]);
+  const priorWindow = {
+    rangeStart: new Date(
+      window.rangeStart.getTime() - (window.rangeEndExclusive.getTime() - window.rangeStart.getTime()),
+    ),
+    rangeEndExclusive: window.rangeStart,
+  };
+
+  const [[entriesResult, catalogResult, priorEntriesResult], integrationSnapshotResult] =
+    await Promise.all([
+      Promise.allSettled([
+        loadLedgerEntries(context.supabase, {
+          organizationId: context.organizationId,
+          branchId: null,
+          rangeStart: window.rangeStart,
+          rangeEndExclusive: window.rangeEndExclusive,
+        }),
+        loadCatalogCoverage(context.supabase, context.organizationId),
+        // The window immediately before this one, same length and timezone.
+        // A failed read costs the comparison and nothing else, so it settles
+        // separately rather than failing the page.
+        loadLedgerEntries(context.supabase, {
+          organizationId: context.organizationId,
+          branchId: null,
+          rangeStart: priorWindow.rangeStart,
+          rangeEndExclusive: priorWindow.rangeEndExclusive,
+        }),
+      ]),
+      integrationSnapshotPromise,
+    ]);
 
   if (catalogResult.status === "rejected") {
     logger.warn("organization_overview.cost_coverage_failed", {
@@ -107,39 +123,51 @@ export default async function OverviewPage({ params }: PageProps) {
   }
 
   const readiness = buildDigitalTwinReadiness(snapshot);
-  const economicsForBriefing =
-    economics.status === "ready" ? economics.data : ({ status: "failed" } as const);
-  const integrationForBriefing: OverviewIntegrationState =
-    integration.status === "ready"
-      ? { status: "ready", ...integration.data }
-      : { status: integration.status };
   const reportingWindow: OverviewEconomics["window"] = {
     rangeStart: window.rangeStart.toISOString(),
     rangeEndExclusive: window.rangeEndExclusive.toISOString(),
     timeZone: window.timeZone,
   };
+  const economicsForActions =
+    economics.status === "ready" ? economics.data : ({ status: "failed" } as const);
+  const integrationForActions: OverviewIntegrationState =
+    integration.status === "ready"
+      ? { status: "ready", ...integration.data }
+      : { status: integration.status };
+
+  const scale = economics.status === "ready" ? buildOverviewMoneyScale(economics.data) : null;
+  const comparison =
+    economics.status === "ready" && priorEntriesResult.status === "fulfilled"
+      ? buildOverviewComparison({
+          economics: economics.data,
+          priorEntries: priorEntriesResult.value,
+        })
+      : null;
+
+  if (priorEntriesResult.status === "rejected") {
+    logger.warn("organization_overview.comparison_failed", {
+      organizationId: context.organizationId,
+      correlationId,
+    });
+  }
 
   return (
     <>
       <RegisterRouteLabel segment={context.organizationId} label={snapshot.organization.name} />
-      <OrganizationIntelligenceCockpit
+      <OverviewReport
         snapshot={snapshot}
         readiness={readiness}
         permissions={permissions}
         reportingWindow={reportingWindow}
         economics={economics}
         integration={integration}
-        campaigns={selectRecentCampaigns(demoCampaigns)}
-        briefing={buildStrategicBriefing({
-          readiness,
-          economics: economicsForBriefing,
-          integration: integrationForBriefing,
-        })}
+        scale={scale}
+        comparison={comparison}
         actions={buildOverviewActionQueue({
           organizationId: context.organizationId,
           readiness,
-          economics: economicsForBriefing,
-          integration: integrationForBriefing,
+          economics: economicsForActions,
+          integration: integrationForActions,
           permissions,
         })}
       />

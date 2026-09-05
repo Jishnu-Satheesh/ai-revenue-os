@@ -7,15 +7,17 @@ describe("Campaign generation Trigger registration", () => {
   it("registers all generation paths as identifier-only schema tasks on one queue", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
 
-    expect(source.match(/schemaTask\(\{/g)).toHaveLength(3);
+    expect(source.match(/schemaTask\(\{/g)).toHaveLength(4);
     for (const id of [
       'id: "campaign.generate-bundle"',
       'id: "campaign.revise-bundle"',
       'id: "campaign.generate-variants"',
+      'id: "campaign.create-from-opportunity"',
     ]) {
       expect(source).toContain(id);
     }
     expect(source.match(/queue: campaignGenerationQueue/g)).toHaveLength(3);
+    expect(source).toContain("queue: campaignDraftQueue");
     expect(source).toContain("campaignGenerationPayloadSchema");
     expect(source).toContain("campaignRevisionPayloadSchema");
     expect(source).toContain("campaignVariantPayloadSchema");
@@ -50,6 +52,7 @@ describe("Campaign generation Trigger registration", () => {
       "parseCampaignGenerationPayload(payload)",
       "parseCampaignRevisionPayload(payload)",
       "parseCampaignVariantPayload(payload)",
+      "createFromOpportunityPayloadSchema.parse(payload)",
     ]) {
       const parsedAt = source.indexOf(parser, source.indexOf("run: async"));
       const clientAt = source.indexOf("createCampaignWorkerServiceClient()", parsedAt);

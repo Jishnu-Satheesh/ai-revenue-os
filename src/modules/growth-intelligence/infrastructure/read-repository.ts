@@ -7,6 +7,7 @@ import { DomainError } from "@/lib/errors";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
   ChannelRecommendationRow,
+  DraftRequestState,
   SynthesizedItemRow,
 } from "@/modules/growth-intelligence/application/read-model";
 
@@ -166,6 +167,9 @@ export type GrowthIntelligenceReadRepository = {
     actorId: string;
     limit: number;
   }): Promise<ChannelRecommendationRow[]>;
+  listDraftRequestStates(input: {
+    organizationId: string;
+  }): Promise<DraftRequestState[]>;
 };
 
 function query<T>(persistence: MarketWatchPersistence, table: string): QueryBuilder<T> {
@@ -430,12 +434,12 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const recommendationIds = rows.map((row) => String(row.id));
       const [decisions, preferences] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "channel_recommendation_decisions")
-          .select("recommendation_id,decision,created_at")
+          .select("recommendation_id,decision,snoozed_until,created_at")
           .eq("organization_id", input.organizationId)
           .in("recommendation_id", recommendationIds)
           .order("created_at", { ascending: false }),
         query<Record<string, unknown>[]>(persistence, "channel_recommendation_preferences")
-          .select("channel_recommendation_id,pinned")
+          .select("channel_recommendation_id,pinned,snoozed_until")
           .eq("organization_id", input.organizationId)
           .eq("user_id", input.actorId)
           .in("channel_recommendation_id", recommendationIds),
@@ -452,13 +456,55 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .filter((preference) => preference.pinned === true)
           .map((preference) => String(preference.channel_recommendation_id)),
       );
+      const preferenceSnoozedUntil = new Map<string, string>();
+      for (const preference of (preferences.data ?? [])) {
+        const key = String(preference.channel_recommendation_id);
+        if (preferenceSnoozedUntil.has(key)) continue;
+        if (preference.snoozed_until === null || preference.snoozed_until === undefined) continue;
+        preferenceSnoozedUntil.set(key, String(preference.snoozed_until));
+      }
       return rows.map((row) =>
         mapChannelRecommendationRecord(
           row,
           latestDecision.get(String(row.id)) ?? null,
           pinned.has(String(row.id)),
+          preferenceSnoozedUntil.get(String(row.id)) ?? null,
         ),
       );
+    },
+
+    async listDraftRequestStates(input) {
+      const result = await query<Record<string, unknown>[]>(
+        persistence,
+        "campaign_draft_requests",
+      )
+        .select("opportunity_id,status,campaign_id,created_at,updated_at")
+        .eq("organization_id", input.organizationId)
+        .order("created_at", { ascending: false })
+        .limit(clampLimit(100));
+      if (result.error) readFailure();
+      const states: DraftRequestState[] = [];
+      for (const row of (result.data ?? []) as Record<string, unknown>[]) {
+        const status = String(row.status);
+        if (
+          status !== "pending" &&
+          status !== "processing" &&
+          status !== "completed" &&
+          status !== "retryable_failed" &&
+          status !== "permanent_failed" &&
+          status !== "cancelled"
+        ) {
+          readFailure();
+        }
+        states.push({
+          opportunityId: String(row.opportunity_id),
+          status: status as DraftRequestState["status"],
+          campaignId: row.campaign_id === null ? null : String(row.campaign_id),
+          requestedAt: String(row.created_at),
+          updatedAt: String(row.updated_at),
+        });
+      }
+      return states;
     },
   };
 }
@@ -507,12 +553,13 @@ function mapWorkspaceItem(
   };
 }
 
-const CHANNEL_DECISIONS = new Set(["acknowledged", "dismissed", "planned"]);
+const CHANNEL_DECISIONS = new Set(["acknowledged", "dismissed", "planned", "snoozed"]);
 
 function mapChannelRecommendationRecord(
   row: Record<string, unknown>,
   decision: Record<string, unknown> | null,
   pinned: boolean,
+  preferenceSnoozedUntil: string | null,
 ): ChannelRecommendationRow {
   const label = String(row.label);
   if (label !== "observation" && label !== "recommendation" && label !== "needs_data") {
@@ -534,10 +581,15 @@ function mapChannelRecommendationRecord(
       decisionValue === null
         ? null
         : {
-            decision: decisionValue as "acknowledged" | "dismissed" | "planned",
+            decision: decisionValue as "acknowledged" | "dismissed" | "planned" | "snoozed",
             createdAt: String(decision!.created_at),
+            snoozedUntil:
+              decision!.snoozed_until === null || decision!.snoozed_until === undefined
+                ? null
+                : String(decision!.snoozed_until),
           },
     pinned,
+    preferenceSnoozedUntil,
   };
 }
 

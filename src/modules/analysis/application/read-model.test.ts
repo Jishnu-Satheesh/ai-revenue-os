@@ -713,6 +713,7 @@ describe("buildChannelWorkspaceView", () => {
         recommendationId: "rec-1",
         decision: "acknowledged",
         reason: null,
+        snoozedUntil: null,
         actorId: "actor-1",
         actorName: "Dana",
         createdAt: "2026-02-02T09:00:00Z",
@@ -813,6 +814,7 @@ describe("buildChannelWorkspaceView", () => {
       expect(view.recommendations[0].decision).toEqual({
         decision: "dismissed",
         reason: "We already reuploaded January.",
+        snoozedUntil: null,
         actorName: "Omar",
         createdAt: "2026-02-03T11:30:00Z",
       });
@@ -886,6 +888,7 @@ describe("projectOrganizationRecommendationLane", () => {
     generatedAt: "2026-09-01T08:00:00.000Z",
     decision: null,
     pinned: false,
+    preferenceSnoozedUntil: null,
     ...overrides,
   });
 
@@ -920,11 +923,19 @@ describe("projectOrganizationRecommendationLane", () => {
       [
         record({
           id: "rec-dismissed",
-          decision: { decision: "dismissed", createdAt: "2026-09-02T08:00:00.000Z" },
+          decision: {
+            decision: "dismissed",
+            snoozedUntil: null,
+            createdAt: "2026-09-02T08:00:00.000Z",
+          },
         }),
         record({
           id: "rec-planned",
-          decision: { decision: "planned", createdAt: "2026-09-02T08:00:00.000Z" },
+          decision: {
+            decision: "planned",
+            snoozedUntil: null,
+            createdAt: "2026-09-02T08:00:00.000Z",
+          },
         }),
       ],
       "2026-09",

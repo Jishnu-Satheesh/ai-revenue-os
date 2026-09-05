@@ -213,7 +213,7 @@ New core tables, all carrying `organization_id` and RLS.
 
 - `opportunities` — title, summary, hypothesis, subject reference, playbook version, evidence bundle, assumptions, impact range with currency, confidence and its rationale, evidence tier, execution cost, time to impact, risk tier, approval path, guardrails, assertions, evaluation plan, expiry, status, and the originating decision record.
 
-Statuses follow the candidate states in `context/08-decision-engine.md`. V1 uses `proposed`, `awaiting_approval`, `approved`, `rejected`, `snoozed`, and `expired`; the execution and measurement states are written by later milestones.
+Statuses follow the candidate states in `context/08-decision-engine.md`. V1 uses `proposed`, `awaiting_approval`, `approved`, `rejected`, `snoozed`, and `expired`; the execution and measurement states are written by later milestones. The governed-draft milestone (spec 022 sections 10 and 18) adds `draft_requested` and `draft_created` for Campaign draft linkage; both are non-answerable and terminal for feedback purposes.
 
 **Artifact registry**
 

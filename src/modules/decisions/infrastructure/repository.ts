@@ -46,6 +46,7 @@ type OpportunityRow = {
   time_to_impact_days: number;
   status: OpportunityFeedItem["status"];
   expires_at: string;
+  version: number;
 };
 
 function decisionDatabaseError(): never {
@@ -87,6 +88,7 @@ function toFeedItem(row: OpportunityRow): OpportunityFeedItem {
     timeToImpactDays: row.time_to_impact_days,
     status: row.status,
     expiresAt: row.expires_at,
+    version: row.version,
   };
 }
 
@@ -99,7 +101,7 @@ export function createDecisionRepository(
       const { data, error } = await persistence
         .from("opportunities")
         .select(
-          "id,organization_id,decision_record_id,playbook_version_id,action_key,created_at,title,summary,evidence_tier,impact_low_minor,impact_high_minor,execution_cost_minor,expected_contribution_minor,currency,time_to_impact_days,status,expires_at",
+          "id,organization_id,decision_record_id,playbook_version_id,action_key,created_at,title,summary,evidence_tier,impact_low_minor,impact_high_minor,execution_cost_minor,expected_contribution_minor,currency,time_to_impact_days,status,expires_at,version",
         )
         .order("expected_contribution_minor", { ascending: false })
         .eq("organization_id", organizationId);

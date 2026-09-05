@@ -3,6 +3,7 @@ import type { DecisionReadPort } from "@/modules/decisions/application/ports";
 import {
   buildGrowthIntelligenceView,
   type ChannelRecommendationRow,
+  type DraftRequestState,
   type GrowthIntelligenceSection,
   type GrowthIntelligenceView,
   type SynthesizedItemRow,
@@ -26,6 +27,9 @@ export type GrowthIntelligenceWorkspaceRepository = {
     actorId: string;
     limit: number;
   }): Promise<readonly ChannelRecommendationRow[]>;
+  listDraftRequestStates(input: {
+    organizationId: string;
+  }): Promise<readonly DraftRequestState[]>;
 };
 
 export type GrowthIntelligenceReadDependencies = {
@@ -90,7 +94,7 @@ export function createGrowthIntelligenceReadService(dependencies: GrowthIntellig
           "The activity month must be a canonical YYYY-MM value.",
         );
       }
-      const [opportunityItems, recommendations, items] = await Promise.all([
+      const [opportunityItems, recommendations, items, draftRequests] = await Promise.all([
         opportunities.listOpportunities(input.organizationId),
         workspace.listChannelRecommendationRecords({
           organizationId: input.organizationId,
@@ -103,6 +107,7 @@ export function createGrowthIntelligenceReadService(dependencies: GrowthIntellig
           throughMonth: activityMonth,
           limit: WORKSPACE_PAGE_SIZE,
         }),
+        workspace.listDraftRequestStates({ organizationId: input.organizationId }),
       ]);
       return buildGrowthIntelligenceView({
         organizationId: input.organizationId,
@@ -113,6 +118,7 @@ export function createGrowthIntelligenceReadService(dependencies: GrowthIntellig
         opportunities: opportunityItems,
         recommendations,
         items,
+        draftRequests,
         sections: input.sections,
       });
     },

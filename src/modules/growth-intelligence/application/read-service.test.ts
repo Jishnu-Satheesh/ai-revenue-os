@@ -22,6 +22,7 @@ function workspace(
     readOrganizationTimeZone: vi.fn().mockResolvedValue("Asia/Dubai"),
     listWorkspaceItems: vi.fn().mockResolvedValue([]),
     listChannelRecommendationRecords: vi.fn().mockResolvedValue([]),
+    listDraftRequestStates: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }
@@ -108,6 +109,7 @@ describe("getGrowthIntelligence workspace", () => {
       timeToImpactDays: 14,
       status: "proposed",
       expiresAt: "2026-10-01T00:00:00.000Z",
+      version: 1,
     };
     const channelRow: ChannelRecommendationRow = {
       id: "60000000-0000-4000-8000-000000000006",
@@ -121,6 +123,7 @@ describe("getGrowthIntelligence workspace", () => {
       generatedAt: "2026-09-01T08:00:00.000Z",
       decision: null,
       pinned: false,
+      preferenceSnoozedUntil: null,
     };
     const itemRow: SynthesizedItemRow = {
       id: "70000000-0000-4000-8000-000000000007",
@@ -179,5 +182,52 @@ describe("getGrowthIntelligence workspace", () => {
     expect(listChannelRecommendationRecords).toHaveBeenCalledWith(
       expect.objectContaining({ actorId }),
     );
+  });
+
+  it("carries draft request states from the repository to the cards", async () => {
+    const listDraftRequestStates = vi.fn().mockResolvedValue([
+      {
+        opportunityId: "50000000-0000-4000-8000-000000000005",
+        status: "processing",
+        campaignId: null,
+        requestedAt: "2026-09-03T08:00:00.000Z",
+        updatedAt: "2026-09-03T09:00:00.000Z",
+      },
+    ]);
+    const read = service({
+      workspace: workspace({ listDraftRequestStates }),
+      opportunities: {
+        listOpportunities: vi.fn().mockResolvedValue([
+          {
+            id: "50000000-0000-4000-8000-000000000005",
+            organizationId,
+            decisionRecordId: "51000000-0000-4000-8000-000000000051",
+            playbookVersionId: "52000000-0000-4000-8000-000000000052",
+            actionKey: "campaign.governed_draft_v1",
+            createdAt: "2026-09-01T07:00:00.000Z",
+            title: "Shift budget",
+            summary: "Move spend.",
+            evidenceTier: "computed",
+            impactLowMinor: 100_00,
+            impactHighMinor: 400_00,
+            executionCostMinor: 50_00,
+            expectedContributionMinor: 300_00,
+            currency: "AED",
+            timeToImpactDays: 14,
+            status: "draft_requested",
+            expiresAt: "2026-10-01T00:00:00.000Z",
+            version: 1,
+          },
+        ]),
+      },
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(listDraftRequestStates).toHaveBeenCalledWith({ organizationId });
+    expect(view.priorityActions.opportunities).toHaveLength(1);
+    expect(view.priorityActions.opportunities[0]!.draftRequest).toMatchObject({
+      status: "processing",
+    });
   });
 });

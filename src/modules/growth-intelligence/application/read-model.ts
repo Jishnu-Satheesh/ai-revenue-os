@@ -79,6 +79,8 @@ type CardBase = {
   marketObservedAt: string | null;
   decision: string | null;
   decidedAt: string | null;
+  /** Required horizon while the decision is a snooze; null otherwise. */
+  snoozedUntil: string | null;
   pinned: boolean;
   /** True when an earlier month's unresolved row carries into this view. */
   carriedOver: boolean;
@@ -90,6 +92,32 @@ export type OpportunityCard = CardBase & {
   actionKey: string;
   status: OpportunityFeedItem["status"];
   expiresAt: string;
+  evidenceTier: OpportunityFeedItem["evidenceTier"];
+  impactLowMinor: number;
+  impactHighMinor: number;
+  expectedContributionMinor: number;
+  executionCostMinor: number;
+  currency: string;
+  timeToImpactDays: number;
+  /** Exact stored version the draft request names back. */
+  version: number;
+  /** The actor-visible draft request, if one was ever admitted. */
+  draftRequest: DraftRequestState | null;
+};
+
+/** Actor-visible draft request state, resolved by the repository. */
+export type DraftRequestState = {
+  opportunityId: string;
+  status:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "retryable_failed"
+    | "permanent_failed"
+    | "cancelled";
+  campaignId: string | null;
+  requestedAt: string;
+  updatedAt: string;
 };
 
 export type RecommendationCard = CardBase & {
@@ -102,10 +130,15 @@ export type InsightCard = CardBase & {
   supportGrade: string;
   freshness: string;
   urgency: string;
+  /** Owning channel for provenance links; null for synthesized cross-market insights. */
+  channelId: string | null;
+  branchId: string | null;
 };
 
 export type DataGapCard = CardBase & {
   missingInput: string;
+  /** Owning channel for the repair link; null for synthesized cross-market gaps. */
+  channelId: string | null;
 };
 
 export type TimelineEventType =
@@ -114,7 +147,11 @@ export type TimelineEventType =
   | "planned"
   | "snoozed"
   | "dismissed"
-  | "resolved";
+  | "resolved"
+  | "draft-requested"
+  | "retry"
+  | "draft-created"
+  | "draft-failed";
 
 export type TimelineEvent = {
   type: TimelineEventType;
@@ -133,6 +170,7 @@ export type GrowthIntelligenceViewInput = {
   opportunities: readonly OpportunityFeedItem[];
   recommendations: readonly ChannelRecommendationRow[];
   items: readonly SynthesizedItemRow[];
+  draftRequests?: readonly DraftRequestState[];
   sections?: readonly GrowthIntelligenceSection[];
 };
 
@@ -192,7 +230,10 @@ function compareOpportunities(left: OpportunityFeedItem, right: OpportunityFeedI
   return left.id.localeCompare(right.id);
 }
 
-function toOpportunityCard(item: OpportunityFeedItem): OpportunityCard {
+function toOpportunityCard(
+  item: OpportunityFeedItem,
+  draftRequest: DraftRequestState | null,
+): OpportunityCard {
   return {
     id: item.id,
     source: { kind: "opportunity", id: item.id },
@@ -203,13 +244,39 @@ function toOpportunityCard(item: OpportunityFeedItem): OpportunityCard {
     marketObservedAt: null,
     decision: null,
     decidedAt: null,
+    snoozedUntil: null,
     pinned: false,
     carriedOver: false,
     ageLabel: null,
     actionKey: item.actionKey,
     status: item.status,
     expiresAt: item.expiresAt,
+    evidenceTier: item.evidenceTier,
+    impactLowMinor: item.impactLowMinor,
+    impactHighMinor: item.impactHighMinor,
+    expectedContributionMinor: item.expectedContributionMinor,
+    executionCostMinor: item.executionCostMinor,
+    currency: item.currency,
+    timeToImpactDays: item.timeToImpactDays,
+    version: item.version,
+    draftRequest,
   };
+}
+
+/**
+ * A draft with visible standing keeps its card: pending, processing, a
+ * retryable failure awaiting its retry, and a completed draft with its link.
+ * Permanent failures and cancellations are terminal and live on in the
+ * timeline only.
+ */
+function isVisibleDraftRequest(request: DraftRequestState | undefined): boolean {
+  return (
+    request !== undefined &&
+    (request.status === "pending" ||
+      request.status === "processing" ||
+      request.status === "retryable_failed" ||
+      request.status === "completed")
+  );
 }
 
 function channelBase(row: OrganizationRecommendationLaneRecord) {
@@ -223,6 +290,7 @@ function channelBase(row: OrganizationRecommendationLaneRecord) {
     marketObservedAt: null,
     decision: row.decision?.decision ?? null,
     decidedAt: row.decision?.createdAt ?? null,
+    snoozedUntil: row.decision?.snoozedUntil ?? null,
     pinned: row.pinned,
     carriedOver: row.carriedOver,
     ageLabel: row.ageLabel,
@@ -243,12 +311,14 @@ function toInsightCardFromChannel(row: OrganizationRecommendationLaneRecord): In
     supportGrade: "contextual",
     freshness: "current",
     urgency: "low",
+    channelId: row.channelId,
+    branchId: row.branchId,
   };
 }
 
 function toDataGapCardFromChannel(row: OrganizationRecommendationLaneRecord): DataGapCard {
   if (row.label !== "needs_data") throw new Error("Data gap misrouted.");
-  return { ...channelBase(row), missingInput: row.detail };
+  return { ...channelBase(row), missingInput: row.detail, channelId: row.channelId };
 }
 
 function itemCarryOver(row: SynthesizedItemRow, activityMonth: string) {
@@ -271,6 +341,7 @@ function itemBase(row: SynthesizedItemRow, activityMonth: string) {
     marketObservedAt: row.marketObservedAt,
     decision: row.decision,
     decidedAt: row.decidedAt,
+    snoozedUntil: row.snoozedUntil,
     pinned: row.pinned,
     ...itemCarryOver(row, activityMonth),
   };
@@ -291,12 +362,14 @@ function toInsightCardFromItem(row: SynthesizedItemRow, activityMonth: string): 
     supportGrade: row.supportGrade,
     freshness: row.freshness,
     urgency: row.urgency,
+    channelId: null,
+    branchId: null,
   };
 }
 
 function toDataGapCardFromItem(row: SynthesizedItemRow, activityMonth: string): DataGapCard {
-  if (row.kind !== "data_gap") throw new Error("Item misrouted.");
-  return { ...itemBase(row, activityMonth), missingInput: row.missingInput ?? "unknown" };
+  if (row.kind !== "data_gap") throw new Error("Data gap misrouted.");
+  return { ...itemBase(row, activityMonth), missingInput: row.missingInput ?? "unknown", channelId: null };
 }
 
 function isVisibleItem(row: SynthesizedItemRow, now: Date): boolean {
@@ -366,26 +439,66 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
   const timeline: TimelineEvent[] = [];
   const wantTimeline = sections.has("timeline");
 
+  const requestsByOpportunity = new Map(
+    (input.draftRequests ?? []).map((request) => [request.opportunityId, request]),
+  );
   const opportunities =
     sections.has("opportunities") || wantTimeline
       ? [...input.opportunities]
           .filter(
             (item) =>
               item.organizationId === input.organizationId &&
-              ANSWERABLE_OPPORTUNITY_STATUSES.has(item.status) &&
-              !isExpiredOpportunity(item, input.now),
+              ((ANSWERABLE_OPPORTUNITY_STATUSES.has(item.status) &&
+                !isExpiredOpportunity(item, input.now)) ||
+                isVisibleDraftRequest(requestsByOpportunity.get(item.id))),
           )
           .sort(compareOpportunities)
-          .map(toOpportunityCard)
+          .map((item) => toOpportunityCard(item, requestsByOpportunity.get(item.id) ?? null))
       : [];
   if (wantTimeline) {
-    for (const card of opportunities) {
+    // History covers every organization opportunity, including terminal
+    // requests whose cards no longer stand. The lane above decides what the
+    // actor can still act on; this loop decides what happened.
+    for (const item of input.opportunities) {
+      if (item.organizationId !== input.organizationId) continue;
+      const source = { kind: "opportunity", id: item.id } as const;
       timeline.push({
         type: "generated",
-        source: card.source,
-        occurredAt: card.generatedAt,
+        source,
+        occurredAt: item.createdAt,
         reason: null,
       });
+      const draft = requestsByOpportunity.get(item.id);
+      if (draft) {
+        timeline.push({
+          type: "draft-requested",
+          source,
+          occurredAt: draft.requestedAt,
+          reason: null,
+        });
+        if (draft.status === "completed") {
+          timeline.push({
+            type: "draft-created",
+            source,
+            occurredAt: draft.updatedAt,
+            reason: null,
+          });
+        } else if (draft.status === "retryable_failed") {
+          timeline.push({
+            type: "retry",
+            source,
+            occurredAt: draft.updatedAt,
+            reason: null,
+          });
+        } else if (draft.status === "permanent_failed") {
+          timeline.push({
+            type: "draft-failed",
+            source,
+            occurredAt: draft.updatedAt,
+            reason: null,
+          });
+        }
+      }
     }
   }
 
@@ -393,8 +506,15 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
   // actionable rows stay in the lane, decided ones live on in the timeline.
   // A Channel Recommendation is never copied into growth_intelligence_items,
   // so identity stays with its source kind on every surface.
+  // An actor's own preference snooze hides the row for that actor alone while
+  // its horizon is future; organization policy and other members see no change.
+  const visibleRecommendations = input.recommendations.filter(
+    (row) =>
+      row.preferenceSnoozedUntil === null ||
+      new Date(row.preferenceSnoozedUntil).getTime() <= input.now.getTime(),
+  );
   const channelLanes = projectOrganizationRecommendationLane(
-    input.recommendations,
+    visibleRecommendations,
     input.activityMonth,
   );
   const recommendations: RecommendationCard[] = sections.has("recommendations")

@@ -651,7 +651,7 @@ export function createAuthenticatedChannelAnalysisRepository(
       const { data: decisions, error: decisionError } = await supabase
         .from("channel_recommendation_decisions")
         .select(
-          "id, recommendation_id, decision, dismissal_reason, actor_id, actor_display_name, created_at",
+          "id, recommendation_id, decision, dismissal_reason, snoozed_until, actor_id, actor_display_name, created_at",
         )
         .eq("organization_id", organizationId)
         .in("recommendation_id", [...recommendationIds])
@@ -719,6 +719,10 @@ export function createAuthenticatedChannelAnalysisRepository(
                       recommendationId: entry.recommendation_id,
                       decision: entry.decision,
                       reason: entry.dismissal_reason,
+                      snoozedUntil:
+                        entry.snoozed_until === null || entry.snoozed_until === undefined
+                          ? null
+                          : String(entry.snoozed_until),
                       actorId: entry.actor_id,
                       actorName: entry.actor_display_name,
                       createdAt: entry.created_at,

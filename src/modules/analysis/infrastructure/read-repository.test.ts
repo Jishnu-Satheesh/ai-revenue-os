@@ -172,6 +172,39 @@ describe("loadRecommendationsForRun", () => {
     expect(loaded[0].myFeedback).toBe(true);
   });
 
+  it("carries a stored snooze horizon on the mapped answer", async () => {
+    const { supabase } = stubClient({
+      channel_recommendations: { data: [recommendationRow()], error: null },
+      channel_recommendation_citations: { data: [], error: null },
+      channel_recommendation_decisions: {
+        data: [
+          decisionRow({
+            decision: "snoozed",
+            dismissal_reason: null,
+            snoozed_until: "2026-03-01T00:00:00.000Z",
+          }),
+        ],
+        error: null,
+      },
+      channel_recommendation_feedback: { data: [], error: null },
+    });
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: "viewer-1",
+    });
+
+    expect(loaded[0].decisions).toEqual([
+      expect.objectContaining({
+        decision: "snoozed",
+        snoozedUntil: "2026-03-01T00:00:00.000Z",
+      }),
+    ]);
+  });
+
   it("returns nothing at all when the run was never narrated", async () => {
     const { supabase } = stubClient({
       channel_recommendations: { data: [], error: null },

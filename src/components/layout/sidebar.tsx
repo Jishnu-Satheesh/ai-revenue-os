@@ -15,7 +15,7 @@ import {
   Waypoints,
 } from "lucide-react";
 
-import { organizationIdFromPathname, overviewPath } from "@/lib/routes";
+import { growthIntelligencePath, organizationIdFromPathname, overviewPath } from "@/lib/routes";
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
 import { SidebarIdentity } from "@/components/accounts/sidebar-identity";
 import {
@@ -48,9 +48,9 @@ type WorkspaceEntry = {
 const workspaceEntries: readonly WorkspaceEntry[] = [
   { label: "Overview", icon: LayoutDashboard, path: overviewPath },
   {
-    label: "Opportunities",
+    label: "Growth Intelligence",
     icon: Sparkles,
-    path: (id) => `/organizations/${id}/opportunities`,
+    path: growthIntelligencePath,
   },
   { label: "Campaigns", icon: Megaphone, path: (id) => `/organizations/${id}/campaigns` },
   { label: "Business Memory", icon: BrainCircuit, path: (id) => `/organizations/${id}/memory` },

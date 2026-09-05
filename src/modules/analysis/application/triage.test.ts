@@ -52,7 +52,59 @@ describe("triageRecommendation", () => {
       p_decision: "dismissed",
       p_dismissal_reason: "Already handled offline.",
       p_actor_id: ACTOR,
+      p_snoozed_until: null,
     });
+  });
+
+  it("sends the horizon beside a snoozed answer", async () => {
+    const { supabase, calls } = fakeRpcClient();
+    const snoozedUntil = "2026-09-11T10:00:00.000Z";
+
+    await triageRecommendation(
+      {
+        organizationId: ORGANIZATION,
+        recommendationId: RECOMMENDATION,
+        decision: "snoozed",
+        snoozedUntil,
+      },
+      { supabase, actorId: ACTOR },
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toMatchObject({
+      p_decision: "snoozed",
+      p_dismissal_reason: null,
+      p_snoozed_until: snoozedUntil,
+    });
+  });
+
+  it("blocks a snooze without a horizon before the database is reached", async () => {
+    const { supabase, calls } = fakeRpcClient();
+
+    await expect(
+      triageRecommendation(
+        { organizationId: ORGANIZATION, recommendationId: RECOMMENDATION, decision: "snoozed" },
+        { supabase, actorId: ACTOR },
+      ),
+    ).rejects.toMatchObject({ name: "DomainError", code: "VALIDATION_ERROR" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses a horizon riding along on an answer that is not a snooze", async () => {
+    const { supabase, calls } = fakeRpcClient();
+
+    await expect(
+      triageRecommendation(
+        {
+          organizationId: ORGANIZATION,
+          recommendationId: RECOMMENDATION,
+          decision: "acknowledged",
+          snoozedUntil: "2026-09-11T10:00:00.000Z",
+        },
+        { supabase, actorId: ACTOR },
+      ),
+    ).rejects.toMatchObject({ name: "DomainError", code: "VALIDATION_ERROR" });
+    expect(calls).toHaveLength(0);
   });
 
   it("stores no dismissal reason for an answer that is not a dismissal", async () => {

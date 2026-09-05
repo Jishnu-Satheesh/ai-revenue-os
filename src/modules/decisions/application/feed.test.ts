@@ -24,6 +24,7 @@ function item(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem
     timeToImpactDays: 7,
     status: "proposed",
     expiresAt: "2026-08-22T10:00:00.000Z",
+    version: 1,
     ...overrides,
   };
 }
@@ -47,14 +48,25 @@ describe("buildOpportunityFeed", () => {
     ]);
   });
 
-  it("omits a tier that has no opportunity rather than showing an empty heading", () => {
-    const feed = buildOpportunityFeed({
+  it("omits a tier that has no opportunity rather than showing an empty heading", () => {    const feed = buildOpportunityFeed({
       items: [item({ evidenceTier: "observed" })],
       role: "operator",
       now: NOW,
     });
 
     expect(feed.groups.map((group) => group.evidenceTier)).toEqual(["observed"]);
+  });
+
+  it("offers no feedback action on a governed-draft entry; drafts are requested, never approved", () => {
+    const feed = buildOpportunityFeed({
+      items: [item({ actionKey: "campaign.governed_draft_v1" })],
+      role: "operator",
+      now: NOW,
+    });
+
+    const entry = feed.groups[0]?.items[0];
+    expect(entry?.availableActions).toEqual([]);
+    expect(entry?.actionKey).toBe("campaign.governed_draft_v1");
   });
 
   it("ranks within a tier by expected contribution, then by the sooner impact", () => {

@@ -288,6 +288,8 @@ values
 
 grant select on decision_behavior_fixtures to service_role;
 
+
+
 -- Worker aggregate behavior --------------------------------------------------
 
 reset role;
