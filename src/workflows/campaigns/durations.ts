@@ -59,3 +59,15 @@ export const CAMPAIGN_DURATION_PAIRS = [
     leaseSeconds: REVISE_BUNDLE_LEASE_SECONDS,
   },
 ] as const;
+
+/**
+ * A render is CPU only: no model, no provider, no network beyond one object
+ * read and one object write. The measured composite is a few hundred
+ * milliseconds, so five minutes is generous rather than tight.
+ *
+ * It has no lease and so no entry in `CAMPAIGN_DURATION_PAIRS`. Nothing to
+ * fence: there is no run row to claim, and idempotency comes from the render
+ * digest, which is content-addressed. A duplicate delivery recomputes the same
+ * digest and the database replays the row it already has.
+ */
+export const RENDER_POSTER_MAX_DURATION_SECONDS = 300;

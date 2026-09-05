@@ -7,20 +7,26 @@ describe("Campaign generation Trigger registration", () => {
   it("registers all generation paths as identifier-only schema tasks on one queue", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
 
-    expect(source.match(/schemaTask\(\{/g)).toHaveLength(4);
+    expect(source.match(/schemaTask\(\{/g)).toHaveLength(5);
     for (const id of [
       'id: "campaign.generate-bundle"',
       'id: "campaign.revise-bundle"',
       'id: "campaign.generate-variants"',
       'id: "campaign.create-from-opportunity"',
+      'id: "campaign.render-poster"',
     ]) {
       expect(source).toContain(id);
     }
     expect(source.match(/queue: campaignGenerationQueue/g)).toHaveLength(3);
     expect(source).toContain("queue: campaignDraftQueue");
+    // Rendering has its own lane. It calls no model and spends nothing, so
+    // putting it behind image generation's concurrency of 1 would make the
+    // cheap half of the studio wait on the expensive half for no reason.
+    expect(source).toContain("queue: campaignRenderQueue");
     expect(source).toContain("campaignGenerationPayloadSchema");
     expect(source).toContain("campaignRevisionPayloadSchema");
     expect(source).toContain("campaignVariantPayloadSchema");
+    expect(source).toContain("campaignPosterRenderPayloadSchema");
   });
 
   it("wires variants through the same governed reference receipt and blueprint path as bundles", async () => {

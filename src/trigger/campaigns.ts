@@ -5,12 +5,20 @@ import { env } from "@/lib/env";
 import { createCampaignWorkerServiceClient } from "@/lib/supabase/service";
 import {
   campaignGenerationPayloadSchema,
+  campaignPosterRenderPayloadSchema,
   campaignRevisionPayloadSchema,
   campaignVariantPayloadSchema,
   parseCampaignGenerationPayload,
   parseCampaignRevisionPayload,
   parseCampaignVariantPayload,
 } from "@/workflows/campaigns/contracts";
+import { renderCampaignPoster } from "@/workflows/campaigns/render-poster";
+import {
+  createPosterRenderContextLoader,
+  createSupabaseCampaignObjectReader,
+} from "@/modules/campaigns/infrastructure/poster-context-reader";
+import { createPosterRenderStore } from "@/modules/campaigns/infrastructure/poster-render-repository";
+import { compositePoster } from "@/modules/campaigns/infrastructure/poster-compositor";
 import {
   createFromOpportunity,
   createFromOpportunityPayloadSchema,
@@ -18,6 +26,7 @@ import {
 import {
   GENERATE_BUNDLE_MAX_DURATION_SECONDS,
   GENERATE_VARIANTS_MAX_DURATION_SECONDS,
+  RENDER_POSTER_MAX_DURATION_SECONDS,
   REVISE_BUNDLE_MAX_DURATION_SECONDS,
 } from "@/workflows/campaigns/durations";
 import { generateCampaignBundle } from "@/workflows/campaigns/generate-bundle";
@@ -415,6 +424,61 @@ export const createCampaignDraftTask = schemaTask({
         ? { campaignId: result.campaignId }
         : {}),
       ...(result.outcome === "failed" ? { failureCode: result.failureCode } : {}),
+    });
+
+    return result;
+  },
+});
+
+/**
+ * Poster rendering gets its own lane.
+ *
+ * It does not belong on `campaign-generation`, whose concurrency of 1 exists to
+ * hold back expensive image generation. A render calls no model, spends
+ * nothing, and takes a few hundred milliseconds of CPU; queueing one behind an
+ * image generation would make the fast, free, deterministic half of the studio
+ * wait on the slow, costly half for no reason.
+ */
+export const campaignRenderQueue = queue({
+  name: "campaign-render",
+  concurrencyLimit: 4,
+});
+
+export const renderCampaignPosterTask = schemaTask({
+  id: "campaign.render-poster",
+  schema: campaignPosterRenderPayloadSchema,
+  queue: campaignRenderQueue,
+  retry,
+  maxDuration: RENDER_POSTER_MAX_DURATION_SECONDS,
+  run: async (payload, { signal }) => {
+    // Parsed by the schema above before a service-role client is constructed.
+    const supabase = createCampaignWorkerServiceClient();
+
+    const result = await renderCampaignPoster(payload, {
+      context: createPosterRenderContextLoader(
+        supabase as never,
+        createVariantContextLoader(supabase as never),
+      ),
+      plates: createSupabaseCampaignObjectReader(supabase),
+      composite: compositePoster,
+      storage: createSupabaseCampaignAssetStorage(supabase),
+      renders: createPosterRenderStore(supabase as never),
+      isCancelled: () => signal.aborted,
+    });
+
+    logger.info("campaign.poster_render_finished", {
+      organizationId: payload.organizationId,
+      campaignId: payload.campaignId,
+      correlationId: payload.correlationId,
+      script: payload.script,
+      templateKey: payload.templateKey,
+      status: result.status,
+      // The digest is safe to log: it identifies a render without carrying the
+      // words on it.
+      ...(result.status === "rendered" || result.status === "refused"
+        ? { renderDigest: result.renderDigest, replayed: result.replayed }
+        : { reason: result.reason }),
+      ...(result.status === "refused" ? { refusalCode: result.refusalCode } : {}),
     });
 
     return result;

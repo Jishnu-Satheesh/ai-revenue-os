@@ -36,6 +36,12 @@ type LogContext = {
     | "unpinned"
     | "resolved";
   runId?: string;
+  /**
+   * A poster render, identified by the sha256 over its own inputs. Safe here
+   * for the reason the allowlist exists: it names a render without carrying a
+   * single character of what was drawn on it.
+   */
+  renderDigest?: string;
   /** A canonical YYYY-MM analysis selection. Opaque calendar label. */
   month?: string;
   /** Inclusive local-date window bounds. Opaque calendar labels, like month. */

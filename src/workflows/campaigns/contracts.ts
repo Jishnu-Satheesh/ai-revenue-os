@@ -106,3 +106,43 @@ export type CampaignVariantPayload = z.infer<typeof campaignVariantPayloadSchema
 export function parseCampaignVariantPayload(payload: unknown): CampaignVariantPayload {
   return campaignVariantPayloadSchema.parse(payload);
 }
+
+/**
+ * What a poster render carries between the queue and the worker.
+ *
+ * This payload deviates from the identifiers-only rule above in exactly one
+ * field, `extra`, and the deviation is deliberate rather than overlooked.
+ *
+ * `extra` is the operator's own text for the one free box on a poster. Unlike a
+ * prompt or a brief, it is written to be printed on a public advertisement, so
+ * queue storage is not where it becomes exposed. There is no request table for
+ * a render to read it from -- the render tables are outputs, content-addressed
+ * and append-only -- and adding one to keep a string out of a payload would be
+ * a schema change to avoid an exposure that does not exist.
+ *
+ * It is bounded here and refused by `checkOperatorSlotText` before it is drawn.
+ * Everything else the worker needs, it reads from the database under its own
+ * credentials.
+ */
+export const campaignPosterRenderPayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  campaignId: uuidSchema,
+  bundleVersionId: uuidSchema,
+  plateAssetId: uuidSchema,
+  correlationId: uuidSchema,
+  templateKey: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .max(120),
+  templateVersion: z.number().int().positive(),
+  script: z.enum(["Latn", "Mlym", "Arab"]),
+  directionId: z.string().min(1).max(120),
+  channel: z.enum(["instagram", "facebook"]),
+  extra: z.string().max(200).nullable(),
+});
+
+export type CampaignPosterRenderPayload = z.infer<typeof campaignPosterRenderPayloadSchema>;
+
+export function parseCampaignPosterRenderPayload(payload: unknown): CampaignPosterRenderPayload {
+  return campaignPosterRenderPayloadSchema.parse(payload);
+}

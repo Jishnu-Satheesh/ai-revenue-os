@@ -3,6 +3,8 @@ import {
   type PosterTemplate,
   type PosterTextSlot,
 } from "@/domain/campaigns/poster-template";
+import { checkProseAgainstEvidence } from "@/domain/campaigns/derivation";
+import type { VariantDerivationFailure, VariantEvidence } from "@/domain/campaigns/derivation";
 import type {
   CampaignBundleManifest,
   CampaignChannel,
@@ -154,4 +156,27 @@ export function templateAvailability(
   }
 
   return missingSlots.length === 0 ? { available: true } : { available: false, missingSlots };
+}
+
+/**
+ * What the one free slot is allowed to say.
+ *
+ * `resolvePosterSlots` marks operator text `governed: false`, which is a label,
+ * not a fence. This is the fence. Spec 020 section 7.3 promises the free box
+ * "passes through `evaluateContentPolicy` exactly like every other piece of
+ * campaign copy" -- but that function walks a manifest's directions and hashtag
+ * sets and has nothing to say about a loose string, so it cannot keep the
+ * promise. The check that can is the one variant copy already answers to, and
+ * it is reused here rather than reinvented.
+ *
+ * Without this, "50% off" typed into the free box renders onto a poster no
+ * approval ever covered -- which is precisely the loophole the spec says the
+ * box is not.
+ */
+export function checkOperatorSlotText(
+  text: string,
+  evidence: VariantEvidence,
+): { admitted: true } | { admitted: false; failures: readonly VariantDerivationFailure[] } {
+  const failures = checkProseAgainstEvidence(text, evidence);
+  return failures.length === 0 ? { admitted: true } : { admitted: false, failures };
 }

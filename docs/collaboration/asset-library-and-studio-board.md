@@ -200,6 +200,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI19 | Growth Intelligence Task 18 workspace UI — new `src/app/(dashboard)/growth-intelligence/` workspace slice and workspace components under `src/modules/growth-intelligence/components/`; reroutes `/intelligence/opportunities`; no other routes touched. | muse-code | high | approved Growth Intelligence plan Task 18 | **in-progress** |
 | GI20 | Growth Intelligence Task 19 Increment 3 gate — no code changes; evidence only: typecheck, lint, build, focused Vitest, pgTAP `growth_intelligence_*`, a11y/contrast and keyboard checks, fresh in-private operator walkthrough. | muse-code | low | — | **in-progress** |
 | GI15 | Growth Intelligence Task 11 transactional report-current enqueue — claimed: new `supabase/migrations/20260904065759_enqueue_growth_intelligence_on_report_current.sql`, new `supabase/tests/database/growth_intelligence_evidence_enqueue_test.sql`, modify `src/modules/reports/application/dispatch.ts`, `dispatch.test.ts`, `src/modules/reports/application/service.ts`, `src/trigger/reports.ts`; Task 11 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No report/RPC signature change (rename-to-impl wrappers preserve signatures and grants), no RLS change, no `database.types.ts` shape change. | muse-code | high | approved Growth Intelligence plan Task 11; sweeper covers liveness, wake-up is latency-only | **in-progress** |
+| S5   | Studio Task 5: the render worker — claimed: new `src/workflows/campaigns/render-poster.ts` + test, new `src/modules/campaigns/infrastructure/poster-render-repository.ts` + test, new `src/modules/campaigns/infrastructure/poster-context-reader.ts` + test; modify `src/domain/campaigns/poster-slots.ts` (+ test), `src/domain/campaigns/derivation.ts` (extract `checkProseAgainstEvidence`), `src/workflows/campaigns/contracts.ts`, `src/workflows/campaigns/durations.ts`, `src/lib/logger.ts` (one opaque field), `src/trigger/campaigns.ts` + test (registration). No migration, no schema change, no `database.types.ts` change. | claude | high | S4 | **review — code green; `campaign.render-poster` registered but not deployed, so the dispatch proof is outstanding** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -4592,3 +4593,42 @@ entry. No source, migration, or test file touched.
   progress-tracker left alone (branch-stale since 08-09; this board is the record).
 - Final gates: full Vitest 4107 passed + 1 fixed-mid-run route mock (8/8 on rerun),
   full pgTAP 62 suites green, `tsc` clean, lint 0 errors, `pnpm build` green at Task 23.
+
+### 2026-09-05 · claude · Studio Task 5 done: the render worker, and two gaps closed on the way
+
+- `campaign.render-poster` **registered** in `src/trigger/campaigns.ts` on its own
+  `campaign-render` queue (concurrency 4). It is not on `campaign-generation`: a render
+  calls no model and spends nothing, and queueing it behind image generation's
+  concurrency of 1 would make the free half of the studio wait on the expensive half.
+  That makes five registered campaign tasks, not six unregistered ones.
+- **Gap 1, closed.** Spec 020 §7.3 promises the free `extra` box "passes through
+  `evaluateContentPolicy` exactly like every other piece of campaign copy". It cannot:
+  that function walks a manifest's directions and hashtag sets and has nothing to say
+  about a loose string. Nothing policed the free box. Extracted
+  `checkProseAgainstEvidence` from `derivation.ts` — the same restricted-term, ranking
+  and offer checks generated variant copy already answers to — and added
+  `checkOperatorSlotText`. "50% off today" in the free box is now refused, and the
+  refusal is recorded so the operator can read it. Six new domain tests.
+- **Gap 2, recorded not closed.** `campaign_poster_renders.plate_generation_run_id` has
+  no source: `campaign_assets` stores no run id and its `provenance` carries a model and
+  a prompt version but not a run. The reader writes null with a comment rather than a
+  guess. The column is nullable and documented for exactly this case.
+- Deviation from the identifiers-only payload rule, deliberate and documented in
+  `contracts.ts`: the payload carries `extra`, the operator's own poster text. It is
+  written to be printed on a public advertisement, so a queue is not where it becomes
+  exposed; there is no request table to read it from (the render tables are outputs,
+  content-addressed and append-only); and adding one to keep a bounded string out of a
+  payload would be a schema change against an exposure that does not exist.
+- A refusal carries a digest and is stored. An infrastructure fault (missing plate,
+  unreadable context, failed upload) records nothing — a missing plate is not a judgement
+  about anybody's creative, and a row saying `rendered` is a promise the poster can be
+  downloaded.
+- Gates: 925 campaign + trigger tests green (11 new worker, 5 new repository, 6 new
+  reader, 6 new domain), `tsc` clean, ESLint clean (the workflow takes the compositor as
+  an injected dependency — the restricted-import rule caught the direct import and was
+  right), prettier clean.
+- **Outstanding:** the plan requires proving registration by dispatching one run. Prod
+  worker is `20260901.4` with 19 tasks and has neither this task nor
+  `campaign.create-from-opportunity` nor any `growth-intelligence.*` worker. Deploying
+  would push the uncommitted Increment 4 work to production as well, so the dispatch
+  proof waits on the user's call rather than being taken unilaterally.
