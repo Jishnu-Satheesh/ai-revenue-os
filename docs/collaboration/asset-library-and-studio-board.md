@@ -4470,3 +4470,28 @@ entry. No source, migration, or test file touched.
 - Gates: 162 Decision/Domain tests green; full pgTAP 60 suites green post-revert;
   `tsc`, ESLint, `git diff --check`, prettier clean on new files. Replaced writer
   executed repeatedly by the suites (first-call rule); seed verified live.
+
+### 2026-09-05 · muse-code · Task 21 migration claim and review
+
+- Claimed `supabase/migrations/20260905110000_campaign_draft_requests_and_opportunity_lifecycle.sql`
+  before creating it. New `campaign_draft_requests` table (RLS forced, member select only,
+  no direct writes), five fenced RPCs (member request + cancel on `authenticated`, worker
+  claim/fail/complete on `service_role` only), Opportunity lifecycle extended with
+  `draft_requested`/`draft_created` (legacy values untouched).
+- Deviation from plan: a fifth member cancel RPC (plan named four) — cancellation needs an
+  authenticated actor path the worker fail path cannot speak for.
+- Pre-apply: dry-run lists only this migration; pgTAP suite written (28 assertions) and
+  red by construction pre-push (no such function); no existing staging rows touched
+  (table is new; status extension is additive).
+
+### 2026-09-05 · opencode · Worker-age check: the live-upload proof stays blocked on deploy
+
+- Prod Trigger worker is `20260901.4` (Sept 1), predating the entire reuse slice — verified
+  through the Trigger MCP (`get_current_worker`, plus a Sept 4 `report-package.profile` run on
+  the verification org showing Completed-with-failed-outcome, i.e. pre-honest-status code).
+- Consequence, stated as a sequencing constraint rather than a defect: any upload today profiles
+  through the shim (null fingerprint), matches no admission, and never auto-audits. The live
+  end-to-end proof and the auto-run browser check both require `git push` + worker redeploy
+  first. UI-only checks (declare button, Reports tab) need only the app and a login.
+- Typecheck re-run 2026-09-05: same 6 errors in the same untracked Task 20 campaign-draft test
+  file. Left untouched — the owning session's active work.
