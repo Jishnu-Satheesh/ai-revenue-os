@@ -200,7 +200,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI19 | Growth Intelligence Task 18 workspace UI — new `src/app/(dashboard)/growth-intelligence/` workspace slice and workspace components under `src/modules/growth-intelligence/components/`; reroutes `/intelligence/opportunities`; no other routes touched. | muse-code | high | approved Growth Intelligence plan Task 18 | **in-progress** |
 | GI20 | Growth Intelligence Task 19 Increment 3 gate — no code changes; evidence only: typecheck, lint, build, focused Vitest, pgTAP `growth_intelligence_*`, a11y/contrast and keyboard checks, fresh in-private operator walkthrough. | muse-code | low | — | **in-progress** |
 | GI15 | Growth Intelligence Task 11 transactional report-current enqueue — claimed: new `supabase/migrations/20260904065759_enqueue_growth_intelligence_on_report_current.sql`, new `supabase/tests/database/growth_intelligence_evidence_enqueue_test.sql`, modify `src/modules/reports/application/dispatch.ts`, `dispatch.test.ts`, `src/modules/reports/application/service.ts`, `src/trigger/reports.ts`; Task 11 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No report/RPC signature change (rename-to-impl wrappers preserve signatures and grants), no RLS change, no `database.types.ts` shape change. | muse-code | high | approved Growth Intelligence plan Task 11; sweeper covers liveness, wake-up is latency-only | **in-progress** |
-| S5   | Studio Task 5: the render worker — claimed: new `src/workflows/campaigns/render-poster.ts` + test, new `src/modules/campaigns/infrastructure/poster-render-repository.ts` + test, new `src/modules/campaigns/infrastructure/poster-context-reader.ts` + test; modify `src/domain/campaigns/poster-slots.ts` (+ test), `src/domain/campaigns/derivation.ts` (extract `checkProseAgainstEvidence`), `src/workflows/campaigns/contracts.ts`, `src/workflows/campaigns/durations.ts`, `src/lib/logger.ts` (one opaque field), `src/trigger/campaigns.ts` + test (registration). No migration, no schema change, no `database.types.ts` change. | claude | high | S4 | **review — code green; `campaign.render-poster` registered but not deployed, so the dispatch proof is outstanding** |
+| S5   | Studio Task 5: the render worker — claimed: new `src/workflows/campaigns/render-poster.ts` + test, new `src/modules/campaigns/infrastructure/poster-render-repository.ts` + test, new `src/modules/campaigns/infrastructure/poster-context-reader.ts` + test; modify `src/domain/campaigns/poster-slots.ts` (+ test), `src/domain/campaigns/derivation.ts` (extract `checkProseAgainstEvidence`), `src/workflows/campaigns/contracts.ts`, `src/workflows/campaigns/durations.ts`, `src/lib/logger.ts` (one opaque field), `src/trigger/campaigns.ts` + test (registration). No migration, no schema change, no `database.types.ts` change. | claude | high | S4 | **done — deployed as prod `20260905.1`; dispatch proved (`run_06g7299cuq19ti3t5rmb0ooq01`)** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -4632,3 +4632,27 @@ entry. No source, migration, or test file touched.
   `campaign.create-from-opportunity` nor any `growth-intelligence.*` worker. Deploying
   would push the uncommitted Increment 4 work to production as well, so the dispatch
   proof waits on the user's call rather than being taken unilaterally.
+
+### 2026-09-05 · claude · Task 5 dispatch proof, and the template table is empty
+
+- Deployed prod `20260905.1` on the user's explicit approval. The worker went from 19
+  registered tasks to 25: `campaign.render-poster`, `campaign.create-from-opportunity` and
+  the four `growth-intelligence.*` tasks had all been written and never deployed.
+- Deploy needed one repair first: the `trigger.dev` CLI was pinned at `4.5.10` while
+  `@trigger.dev/sdk` and `@trigger.dev/build` had moved to `4.5.14`, which aborts a deploy
+  outright. Bumped the CLI to `4.5.14`. Note the first CLI run reported
+  "Failed to upload deployment files / fetch failed" and **had in fact deployed**; check
+  `list_deploys` before retrying, or you will deploy twice.
+- Dispatch proof: `run_06g7299cuq19ti3t5rmb0ooq01`, 684ms, completed, returned
+  `{"status":"skipped","reason":"context_unavailable"}` against the pilot organization's
+  real campaign, version and plate asset. That is the correct answer and the useful one:
+  the task is registered, the schema accepted a real payload, the worker built its
+  service-role client, read staging, found no template and declined cleanly instead of
+  throwing into a retry.
+- **`campaign_poster_templates` has zero rows on staging.** Studio Task 2 says "Seed `core`
+  rows only" and the migration seeds the permission vocabulary and the storage bucket but
+  never inserts a template. Nothing can render until it does, so this blocks Tasks 9, 10
+  and 11 rather than being tidy-up. It needs a seed migration with real layouts for
+  `feed_image` and `image_story`.
+- Already done and not needing a Task 9 migration: `poster.render` is seeded by the Task 2
+  migration for owner, admin and operator, with viewer correctly absent.
