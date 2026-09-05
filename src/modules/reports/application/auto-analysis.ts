@@ -84,6 +84,19 @@ export type AutoAnalysisCollaborators = {
  * it cannot start a second audit. A dispatch that does not land is logged
  * and left: the button on the channel workspace still starts the same run
  * by hand, so a lost transport delays the audit rather than losing it.
+ *
+ * `requestAnalysis` is caught here, not merely relied on to swallow its own
+ * failures. In production it is `requestChannelAnalysis`, which today does
+ * catch everything and resolve to `false` -- but that is a property of one
+ * collaborator in another module, not of this function's contract, and this
+ * runs from `reports.ts` *after* the completion RPC has already committed
+ * the package's new status. An escape here would abort the Trigger.dev task,
+ * which retries; a retry re-claims a package that is no longer in the state
+ * the claim expects, and the auto-continuation is lost for good rather than
+ * merely delayed -- the exact hazard `advanceReportPackageOnAdmission`
+ * documents for the same reason. Catching here makes "a lost dispatch only
+ * delays the audit" true for every caller, not just the one collaborator
+ * that happens to behave today.
  */
 export async function dispatchAnalysisForCleanProjection(
   input: {
@@ -95,12 +108,28 @@ export async function dispatchAnalysisForCleanProjection(
 ): Promise<"dispatched" | "not_dispatched"> {
   const selected = selectAutoAnalysisInput(input.completion);
   if (selected === null) return "not_dispatched";
-  const dispatched = await collaborators.requestAnalysis({
-    ...selected,
-    organizationId: input.organizationId,
-    analysisRunId: crypto.randomUUID(),
-    correlationId: input.correlationId,
-  });
+  let dispatched: boolean;
+  try {
+    dispatched = await collaborators.requestAnalysis({
+      ...selected,
+      organizationId: input.organizationId,
+      analysisRunId: crypto.randomUUID(),
+      correlationId: input.correlationId,
+    });
+  } catch (error) {
+    // `errorCode` only, per the logger's closed allowlist -- the same reason
+    // `advanceReportPackageOnAdmission` logs `error.name` rather than
+    // `error.message` for the same kind of caught escape: a message is free
+    // text a collaborator wrote, and this stream never carries that.
+    logger.warn("report_package.analysis_auto_dispatch_failed", {
+      organizationId: input.organizationId,
+      channelId: selected.channelId,
+      branchId: selected.branchId,
+      correlationId: input.correlationId,
+      errorCode: error instanceof Error ? error.name : "unknown",
+    });
+    return "not_dispatched";
+  }
   if (!dispatched) return "not_dispatched";
   logger.info("report_package.analysis_auto_dispatched", {
     organizationId: input.organizationId,
