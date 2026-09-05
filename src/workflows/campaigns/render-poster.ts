@@ -137,7 +137,12 @@ export type RenderPosterResult =
     }
   | {
       status: "skipped";
-      reason: "context_unavailable" | "plate_unavailable" | "cancelled" | "upload_failed";
+      reason:
+        | "context_unavailable"
+        | "copy_unavailable"
+        | "plate_unavailable"
+        | "cancelled"
+        | "upload_failed";
     };
 
 /**
@@ -209,14 +214,33 @@ export async function renderCampaignPoster(
     ...fields,
   });
 
-  const resolution = resolvePosterSlots({
-    manifest: context.manifest,
-    directionId: payload.directionId,
-    channel: payload.channel,
-    placement: context.template.placement,
-    extra: payload.extra,
-    legalLine: context.legalLine,
-  });
+  /**
+   * `resolvePosterSlots` throws when the direction is unknown, or has no copy
+   * for this channel and placement. Both are reachable from a payload that is
+   * valid in shape -- a direction dropped by a newer version, a placement the
+   * campaign never wrote copy for -- so both decline like any other missing
+   * input. Letting the throw escape would spend the retry budget re-running work
+   * that cannot succeed, and leave the operator watching a spinner instead of
+   * reading a reason.
+   */
+  let resolution;
+  try {
+    resolution = resolvePosterSlots({
+      manifest: context.manifest,
+      directionId: payload.directionId,
+      channel: payload.channel,
+      placement: context.template.placement,
+      extra: payload.extra,
+      legalLine: context.legalLine,
+    });
+  } catch {
+    logger.warn("campaign.poster_copy_unavailable", {
+      organizationId: payload.organizationId,
+      campaignId: payload.campaignId,
+      correlationId: payload.correlationId,
+    });
+    return { status: "skipped", reason: "copy_unavailable" };
+  }
 
   // The one ungoverned string on the poster, checked before it is drawn rather
   // than after it is published.

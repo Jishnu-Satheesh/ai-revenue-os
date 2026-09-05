@@ -296,6 +296,36 @@ describe("renderCampaignPoster", () => {
     expect(recorded).toHaveLength(0);
   });
 
+  /**
+   * `resolvePosterSlots` throws when the direction is unknown or has no copy for
+   * this channel and placement. Both are reachable from a payload that is
+   * perfectly valid in shape -- a direction removed by a newer version, a
+   * placement the campaign never wrote copy for -- so they must decline like any
+   * other missing input. Letting the throw escape burns the retry budget
+   * re-running work that cannot succeed, and leaves the operator watching a
+   * spinner rather than reading a reason.
+   */
+  it("declines a direction the version does not have, rather than throwing", async () => {
+    const { dependencies: deps, recorded } = dependencies();
+
+    const result = await renderCampaignPoster(
+      payload({ directionId: "3f2504e0-0000-0000-0000-000000000000" }),
+      deps,
+    );
+
+    expect(result).toEqual({ status: "skipped", reason: "copy_unavailable" });
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("declines a placement the direction wrote no copy for", async () => {
+    const { dependencies: deps, recorded } = dependencies();
+
+    const result = await renderCampaignPoster(payload({ channel: "facebook" }), deps);
+
+    expect(result).toEqual({ status: "skipped", reason: "copy_unavailable" });
+    expect(recorded).toHaveLength(0);
+  });
+
   it("stops on cancellation without drawing or recording anything", async () => {
     const {
       dependencies: deps,
