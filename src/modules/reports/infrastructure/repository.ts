@@ -133,6 +133,8 @@ function reportProjectionDeclarationFailureMessage(cause: unknown): string {
       return "That figure is no longer in the declaration. Refresh the page and try again.";
     case "report projection output has no categorical values to declare":
       return "That figure counts numbers, not labels, so there is nothing to declare into.";
+    case "report projection output uses a label map":
+      return "That figure translates the provider's own words through a label map, so a one-click label can't be added directly. Ask an engineer to add both the label and its map entry in a hand-authored declaration.";
     case "report projection categorical value is already declared":
       return "That label is already declared. Approve the figures that carry it, or retry the projection.";
     case "report projection categorical value is invalid":

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(15);
+select extensions.plan(16);
 
 -- A way out of a refusal that does not require opening the source code. The
 -- projection still refuses an undeclared label -- folding it into "other"
@@ -49,7 +49,8 @@ insert into public.integration_report_packages (
 
 insert into public.report_contracts (id, organization_id, channel_id, report_type, outlet_grain, created_by) values
   ('a7000000-0000-4000-8000-000000000601'::uuid, 'a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000401'::uuid, 'Marketplace Cancellations Contract', 'branch', 'a7000000-0000-4000-8000-000000000001'::uuid),
-  ('a7000000-0000-4000-8000-000000000602'::uuid, 'a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000401'::uuid, 'Marketplace Minutes Contract', 'branch', 'a7000000-0000-4000-8000-000000000001'::uuid);
+  ('a7000000-0000-4000-8000-000000000602'::uuid, 'a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000401'::uuid, 'Marketplace Minutes Contract', 'branch', 'a7000000-0000-4000-8000-000000000001'::uuid),
+  ('a7000000-0000-4000-8000-000000000603'::uuid, 'a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000401'::uuid, 'Marketplace Cancellations Label-Mapped Contract', 'branch', 'a7000000-0000-4000-8000-000000000001'::uuid);
 
 -- The mapping the declaration is checked against: a date column and the two
 -- count columns the projection versions below read. Inserted directly,
@@ -69,11 +70,21 @@ insert into public.report_contract_versions (
    'a7000000-0000-4000-8000-000000000501'::uuid, 1, '3333333333333333333333333333333333333333333333333333333333333334', 1, 1,
    '{"sheets":[{"normalizedSheetName":"csv","fields":[{"canonicalField":"business_date","parser":"local_date","required":true},{"canonicalField":"cancel_reason","parser":"text","required":true},{"canonicalField":"closed_minutes","parser":"integer","required":true}]}]}'::jsonb,
    'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccd', 'AED', '[]'::jsonb, '[]'::jsonb,
-   'reviewed_ignore', 'human', 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000906'::uuid);
+   'reviewed_ignore', 'human', 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000906'::uuid),
+  ('a7000000-0000-4000-8000-000000000703'::uuid, 'a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000603'::uuid,
+   'a7000000-0000-4000-8000-000000000501'::uuid, 1, '3333333333333333333333333333333333333333333333333333333333333335', 1, 1,
+   '{"sheets":[{"normalizedSheetName":"csv","fields":[{"canonicalField":"business_date","parser":"local_date","required":true},{"canonicalField":"cancel_reason","parser":"text","required":true},{"canonicalField":"closed_minutes","parser":"integer","required":true}]}]}'::jsonb,
+   'ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccce', 'AED', '[]'::jsonb, '[]'::jsonb,
+   'reviewed_ignore', 'human', 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000907'::uuid);
 
 -- The approved run failed against ...801: March carries CLOSED, and only
 -- ITEM_UNAVAILABLE is declared. ...802 is the plain-count neighbour that
 -- proves declaring into an output with no vocabulary is a different refusal.
+-- ...803 shares ...801's contract but declares its cancel_reason output with
+-- a labelMap -- exactly the shape a provider writing prose, not codes, needs
+-- -- to prove appending a bare code there is refused distinctly rather than
+-- silently producing a document assert_report_projection_matches_contract
+-- would refuse anyway with a generic 22023.
 insert into public.report_projection_versions (
   id, organization_id, report_contract_version_id, version, projection_document, projection_digest,
   calculation_version, proposal_source, created_by, correlation_id
@@ -83,7 +94,10 @@ insert into public.report_projection_versions (
    'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 1, 'human', 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000911'::uuid),
   ('a7000000-0000-4000-8000-000000000802'::uuid, 'a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000702'::uuid,
    1, '{"schemaVersion":1,"outputKind":"period_grain","grain":"day","periodKey":{"normalizedSheetName":"csv","canonicalField":"business_date"},"outputs":[{"key":"closed_minutes","normalizedSheetName":"csv","canonicalField":"closed_minutes","metricKey":"operations.closed_minutes","valueKind":"count","aggregation":"sum"}]}'::jsonb,
-   '1010101010101010101010101010101010101010101010101010101010101010', 1, 'human', 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000912'::uuid);
+   '1010101010101010101010101010101010101010101010101010101010101010', 1, 'human', 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000912'::uuid),
+  ('a7000000-0000-4000-8000-000000000803'::uuid, 'a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000703'::uuid,
+   1, '{"schemaVersion":1,"outputKind":"period_grain","grain":"day","periodKey":{"normalizedSheetName":"csv","canonicalField":"business_date"},"outputs":[{"key":"cancel_reason","normalizedSheetName":"csv","canonicalField":"cancel_reason","metricKey":"order.avoidable_cancellation_reason","valueKind":"count","aggregation":"sum","categorical":{"dimensionKey":"cancelled_by","allowedValues":["ITEM_UNAVAILABLE"],"collectInjectedValues":false,"labelMap":{"item unavailable":"ITEM_UNAVAILABLE"}}}]}'::jsonb,
+   'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1, 'human', 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000914'::uuid);
 
 select extensions.has_function(
   'public', 'propose_governed_report_projection_with_declared_value',
@@ -136,6 +150,16 @@ select extensions.throws_ok(
   $$ select public.propose_governed_report_projection_with_declared_value('a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000801'::uuid, 'cancel_reason', 'ITEM_UNAVAILABLE', 'declare-categorical-duplicate-01', 'a7000000-0000-4000-8000-000000000927'::uuid) $$,
   '23514', 'report projection categorical value is already declared',
   'declaring what already governs changes nothing and says so'
+);
+-- ...803's cancel_reason output declares a labelMap. The document guard
+-- requires that map to reach every allowedValues entry, so appending a bare
+-- code here with no map entry naming it would leave a code nothing maps to
+-- -- refused distinctly, before ever reaching that guard, rather than as its
+-- generic 22023.
+select extensions.throws_ok(
+  $$ select public.propose_governed_report_projection_with_declared_value('a7000000-0000-4000-8000-000000000201'::uuid, 'a7000000-0000-4000-8000-000000000001'::uuid, 'a7000000-0000-4000-8000-000000000803'::uuid, 'cancel_reason', 'CLOSED', 'declare-categorical-labelmap-01', 'a7000000-0000-4000-8000-000000000931'::uuid) $$,
+  '23514', 'report projection output uses a label map',
+  'a label-mapped output refuses a bare declared code with its own distinguishable error'
 );
 
 -- Org B's owner holds the same permission in their own tenant, so the check

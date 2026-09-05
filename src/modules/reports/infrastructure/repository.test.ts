@@ -155,6 +155,29 @@ describe("report package repository", () => {
     );
   });
 
+  it("explains that a label-mapped output needs a hand-authored declaration instead", async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: "23514", message: "report projection output uses a label map" },
+    });
+
+    const repository = createAuthenticatedReportPackageRepository({ rpc } as never);
+
+    await expect(
+      repository.proposeProjectionWithDeclaredValue({
+        organizationId: "33333333-3333-4333-8333-333333333333",
+        actorId: "44444444-4444-4444-8444-444444444444",
+        projectionVersionId: "66666666-6666-4666-8666-666666666666",
+        outputKey: "cancel_reason",
+        value: "CLOSED",
+        idempotencyKey: "report-projection-declare-test",
+        correlationId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).rejects.toThrow(
+      "That figure translates the provider's own words through a label map, so a one-click label can't be added directly. Ask an engineer to add both the label and its map entry in a hand-authored declaration.",
+    );
+  });
+
   it("explains that only an owner or admin can resolve an ambiguous overlap", async () => {
     rpc.mockResolvedValue({
       data: null,
