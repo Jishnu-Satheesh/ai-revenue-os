@@ -57,6 +57,41 @@ function boundedCategoryValue(value: string): string {
 }
 
 /**
+ * The exact shape the declare route, its Zod boundary, and the database
+ * guard all require of a label (`^[A-Z][A-Z0-9_]{0,63}$`). Exported so the
+ * panel can decide, before ever building the Declare button, whether this
+ * refusal's own value could survive that boundary -- a raw provider label
+ * like `Closed by store` or `closed` never can, and offering the button
+ * anyway only replaces a nameless refusal with a named dead end.
+ */
+export const CATEGORY_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+/**
+ * Whether `value` is already shaped as a label the declare path can accept
+ * as written, with no translation.
+ *
+ * A truncated value already fails this on length alone -- see
+ * `isTruncatedCategoricalValue`, which exists as its own check only because
+ * the panel needs to say *why* the button is missing, not merely that it is.
+ */
+export function isDeclarableCategoricalValue(value: string): boolean {
+  return CATEGORY_CODE_PATTERN.test(value);
+}
+
+/**
+ * Whether `value` was cut short by `boundedCategoryValue` rather than being
+ * the provider's own text end to end.
+ *
+ * The addendum required this distinction explicitly: a value ending in the
+ * truncation marker may not be the provider's real label at all, so the
+ * panel must say it was cut rather than silently offering (or silently
+ * refusing) a label the provider may never have written.
+ */
+export function isTruncatedCategoricalValue(value: string): boolean {
+  return value.endsWith(TRUNCATION_MARKER);
+}
+
+/**
  * A categorical column carried a label the approved figures do not declare.
  *
  * Carries the label rather than only a code, for the reason ADR 0029 gives for
@@ -115,8 +150,10 @@ export type ParsedCategoricalRefusal = {
  * that does not parse returns null, and the panel falls back to the raw
  * detail with no button rather than a wrong one.
  */
+const CATEGORICAL_VALUE_NOT_DECLARED_CODE = "CATEGORICAL_VALUE_NOT_DECLARED";
+
 export function parseCategoricalRefusalDetail(detail: string): ParsedCategoricalRefusal | null {
-  const marker = "CATEGORICAL_VALUE_NOT_DECLARED: ";
+  const marker = `${CATEGORICAL_VALUE_NOT_DECLARED_CODE}: `;
   const markerIndex = detail.indexOf(marker);
   if (markerIndex < 0) return null;
   const remainder = detail.slice(markerIndex + marker.length);
@@ -129,4 +166,24 @@ export function parseCategoricalRefusalDetail(detail: string): ParsedCategorical
     value,
     dates: dates.length === 0 ? [] : dates.split(",").map((day) => day.trim()),
   };
+}
+
+/**
+ * Whether `detail` is the pre-Task-4 recording of this same refusal: `name:
+ * code`, composed by `failureDetail` before `ReportCategoricalValueNotDeclared`
+ * existed to name a label and its dates, so nothing follows the code at all.
+ *
+ * `parseCategoricalRefusalDetail` also returns null for this shape, but it
+ * returns null for a second, unrelated shape too: a detail that carries the
+ * marker yet fails to parse (malformed text after it). Those two nulls need
+ * different panel copy -- this one is a package refused before the platform
+ * could say which label, fixable by retrying the projection; the other is a
+ * shape nothing here can respond to usefully. Checking for the exact bare
+ * form, rather than merely "did not parse," is what tells them apart.
+ */
+export function isBareCategoricalValueNotDeclared(detail: string): boolean {
+  return (
+    detail === CATEGORICAL_VALUE_NOT_DECLARED_CODE ||
+    detail.endsWith(`: ${CATEGORICAL_VALUE_NOT_DECLARED_CODE}`)
+  );
 }

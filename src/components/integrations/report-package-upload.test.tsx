@@ -338,6 +338,41 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     await screen.findByText(/Why it stopped:/i);
     expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
   });
+
+  it("explains rather than dead-ends when the refusal names provider prose, not a code", async () => {
+    // The refusal carries the provider's text as written -- lowercase, spaced
+    // prose is the routine case, not the exception. The Zod boundary and the
+    // database guard both require a short uppercase code, so offering the
+    // Declare button here would only replace a nameless refusal with a named
+    // dead end.
+    const proseDetail =
+      "ReportCategoricalValueNotDeclared: CATEGORICAL_VALUE_NOT_DECLARED: cancel_reason: closed because the shop shut is not a declared value (2026-03-04)";
+    stubSnapshot(failedSnapshot(proseDetail));
+    renderUploadAs("owner");
+
+    await screen.findByText(/written as the provider.s own prose/i);
+    expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
+  });
+
+  it("explains rather than dead-ends when the refusal's label was truncated", async () => {
+    const truncatedValue = `${"A".repeat(64)}…`;
+    const truncatedDetail = `ReportCategoricalValueNotDeclared: CATEGORICAL_VALUE_NOT_DECLARED: cancel_reason: ${truncatedValue} is not a declared value (2026-03-04)`;
+    stubSnapshot(failedSnapshot(truncatedDetail));
+    renderUploadAs("owner");
+
+    await screen.findByText(/cut off before it reached the platform/i);
+    expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
+  });
+
+  it("points at retry rather than a dead end for the pre-Task-4 bare refusal", async () => {
+    // Nostaza's March package on staging reads exactly this string: recorded
+    // before this failure learned to name its label.
+    stubSnapshot(failedSnapshot("ReportProjectionError: CATEGORICAL_VALUE_NOT_DECLARED"));
+    renderUploadAs("owner");
+
+    await screen.findByText(/This refusal predates the detail the platform now records/i);
+    expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("ReportPackageUpload fixed channel", () => {

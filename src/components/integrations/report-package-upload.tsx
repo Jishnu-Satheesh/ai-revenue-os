@@ -29,6 +29,9 @@ import { Progress } from "@/components/ui/progress";
 import { ReportAdmissionApproval } from "@/components/integrations/report-admission-approval";
 import { ReportIntakeMapping, type RecognisedFamily } from "@/components/integrations/report-intake-mapping";
 import {
+  isBareCategoricalValueNotDeclared,
+  isDeclarableCategoricalValue,
+  isTruncatedCategoricalValue,
   parseCategoricalRefusalDetail,
   type ParsedCategoricalRefusal,
 } from "@/domain/reports/projection-error";
@@ -483,8 +486,58 @@ function CategoricalRefusalDeclaration({
       ),
   });
 
-  if (!refusal) return null;
+  if (!refusal) {
+    // A package refused before Task 4 recorded a name for this failure reads
+    // as the bare code, with nothing after it -- Nostaza's March package is
+    // in exactly this state on staging. The parser correctly declines to
+    // fabricate a label out of that, but leaving the operator with nothing
+    // just replaces one dead end with a more honest one. Retrying the
+    // projection re-runs it under the current code, which does name the
+    // label, after which this panel can offer Declare.
+    if (isBareCategoricalValueNotDeclared(failureDetail)) {
+      return (
+        <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+          <RotateCcw className="mt-0.5 size-3.5 shrink-0" />
+          This refusal predates the detail the platform now records, so the label it stopped on
+          cannot be shown here. Use Retry projection above -- it re-runs the same file and will
+          name the label, after which Declare appears here too.
+        </p>
+      );
+    }
+    return null;
+  }
   const dates = refusal.dates.length > 0 ? refusal.dates.join(", ") : "dates not recorded";
+  const outputLabel = refusal.outputKey.replaceAll("_", " ");
+  // The refusal carries the provider's text exactly as written, not a code
+  // (see ReportCategoricalValueNotDeclared / categoryLabel in projection.ts),
+  // so it routinely arrives lowercase, spaced, or cut short at 64 characters.
+  // The declare route's own Zod boundary and the database guard both require
+  // a short uppercase code, and offering the button on a value that cannot
+  // pass that boundary would only replace a nameless refusal with a named
+  // dead end -- exactly the failure mode this feature exists to remove.
+  if (isTruncatedCategoricalValue(refusal.value)) {
+    return (
+      <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+        The file uses a label starting {refusal.value} ({dates}), too long to record in full and
+        cut off before it reached the platform. It may not be the provider&rsquo;s exact text, so
+        it cannot be declared as shown. Ask an engineer to open the source file and add the full
+        label to this output&rsquo;s label map.
+      </p>
+    );
+  }
+  if (!isDeclarableCategoricalValue(refusal.value)) {
+    return (
+      <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+        The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
+        ({dates}), which is not a declared {outputLabel} value. It is written as the provider&rsquo;s
+        own prose, not a short code, so it cannot be declared with one click. Ask an engineer to add
+        it to this output&rsquo;s label map, translating it to a short code such as{" "}
+        <span className="font-mono">{outputLabel.toUpperCase().replaceAll(" ", "_")}</span>.
+      </p>
+    );
+  }
   if (!canDeclare) {
     return (
       <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
@@ -498,7 +551,7 @@ function CategoricalRefusalDeclaration({
     <div className="mt-2 space-y-2 rounded-md border p-2 text-xs">
       <p className="text-muted-foreground">
         The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
-        ({dates}), which is not a declared {refusal.outputKey.replaceAll("_", " ")} value.
+        ({dates}), which is not a declared {outputLabel} value.
         Declaring it proposes the figures again with that label counted -- nothing is approved
         until an owner or admin says so below.
       </p>
