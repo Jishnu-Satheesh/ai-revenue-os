@@ -146,3 +146,51 @@ export type CampaignPosterRenderPayload = z.infer<typeof campaignPosterRenderPay
 export function parseCampaignPosterRenderPayload(payload: unknown): CampaignPosterRenderPayload {
   return campaignPosterRenderPayloadSchema.parse(payload);
 }
+
+/**
+ * What a plate edit carries between the queue and the worker.
+ *
+ * This payload carries the operator's marked regions and their instructions,
+ * for the same reason `extra` is carried above and with the same discomfort:
+ * there is no request table for the worker to read them from, and the tables
+ * this feature does own are outputs -- `campaign_plate_edits` records an edit
+ * that already happened.
+ *
+ * What makes it acceptable rather than merely convenient is that the
+ * instruction is not a credential and not a secret. It is a sentence about a
+ * picture, destined for a public advertisement, and it is bounded here at the
+ * same 500 characters the database enforces. It is also, deliberately, the one
+ * thing in this payload the worker treats as untrusted data.
+ */
+export const campaignPlateEditPayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  campaignId: uuidSchema,
+  bundleVersionId: uuidSchema,
+  parentPlateAssetId: uuidSchema,
+  correlationId: uuidSchema,
+  /** The member who marked the regions. Recorded as the editor. */
+  editedBy: uuidSchema,
+  /** One edit per key per organization, enforced by the database. */
+  idempotencyKey: z.string().min(8).max(200),
+  annotations: z
+    .array(
+      z.strictObject({
+        ordinal: z.number().int().positive().max(8),
+        bounds: z.strictObject({
+          xPx: z.number().int().nonnegative().max(20_000),
+          yPx: z.number().int().nonnegative().max(20_000),
+          widthPx: z.number().int().positive().max(20_000),
+          heightPx: z.number().int().positive().max(20_000),
+        }),
+        instruction: z.string().trim().min(1).max(500),
+      }),
+    )
+    .min(1)
+    .max(8),
+});
+
+export type CampaignPlateEditPayload = z.infer<typeof campaignPlateEditPayloadSchema>;
+
+export function parseCampaignPlateEditPayload(payload: unknown): CampaignPlateEditPayload {
+  return campaignPlateEditPayloadSchema.parse(payload);
+}
