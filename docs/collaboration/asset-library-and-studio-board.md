@@ -4656,3 +4656,33 @@ entry. No source, migration, or test file touched.
   `feed_image` and `image_story`.
 - Already done and not needing a Task 9 migration: `poster.render` is seeded by the Task 2
   migration for owner, admin and operator, with viewer correctly absent.
+
+### 2026-09-05 · claude · Templates seeded, and the fonts were never shipped
+
+- **Seeded four core poster templates** (`20260905170000`), two per placement:
+  `core_feed_headline` and `core_feed_centred` at 1080x1080, `core_story_lower` and
+  `core_story_upper` at 1080x1920. Applied to staging and confirmed present. Only
+  `caption` and `footer` are ever required — `body` has no governed source, so a template
+  requiring it could never be offered.
+- The layouts are validated **by reading the migration file**, not a TypeScript copy of
+  it. With no local database to rehearse against, a layout the domain would reject has to
+  be caught before the push or it is caught in production. Proved the guard bites by
+  moving a box outside its safe area and watching it fail by name.
+- **Two defects the dispatch proof found, both invisible to the test suite:**
+  1. `resolvePosterSlots` throws for an unknown direction or a placement with no copy —
+     both reachable from a well-formed payload. The worker was letting that escape into
+     the retry budget. Now declines with `copy_unavailable`. Fixed with tests.
+  2. **The vendored fonts were never shipped to the worker.** Studio Task 1 says to add
+     the renderer to `trigger.config.ts` `external`, which was done, but marking it
+     external ships the code that draws and none of the files it draws with. The first
+     real deployed render died on `Could not register the vendored font
+     NotoSans-Regular.ttf`. Fixed with `additionalFiles({ files: ["./assets/fonts/**"] })`
+     plus `legacyDevProcessCwdBehaviour: false`.
+- That second one is worth dwelling on: it is exactly the failure `font-manifest.ts` was
+  written to prevent, and it behaved correctly — a hard stop rather than a fallback to
+  whatever fonts the container had, which is how a client's Malayalam becomes empty boxes
+  with a plausible measured width and no error. **No amount of local testing would have
+  caught it.** Only a deployed run does.
+- **Deploys from this machine are flaky.** The upload step fails with
+  `fetch failed (undefined undefined)` perhaps half the time, and has twice reported
+  failure after actually deploying. Always check `list_deploys` before retrying.
