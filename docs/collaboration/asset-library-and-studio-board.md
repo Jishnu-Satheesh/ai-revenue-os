@@ -201,6 +201,9 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | GI20 | Growth Intelligence Task 19 Increment 3 gate — no code changes; evidence only: typecheck, lint, build, focused Vitest, pgTAP `growth_intelligence_*`, a11y/contrast and keyboard checks, fresh in-private operator walkthrough. | muse-code | low | — | **in-progress** |
 | GI15 | Growth Intelligence Task 11 transactional report-current enqueue — claimed: new `supabase/migrations/20260904065759_enqueue_growth_intelligence_on_report_current.sql`, new `supabase/tests/database/growth_intelligence_evidence_enqueue_test.sql`, modify `src/modules/reports/application/dispatch.ts`, `dispatch.test.ts`, `src/modules/reports/application/service.ts`, `src/trigger/reports.ts`; Task 11 tracking in `docs/superpowers/plans/2026-08-31-growth-intelligence-implementation.md`; this board. No report/RPC signature change (rename-to-impl wrappers preserve signatures and grants), no RLS change, no `database.types.ts` shape change. | muse-code | high | approved Growth Intelligence plan Task 11; sweeper covers liveness, wake-up is latency-only | **in-progress** |
 | S5   | Studio Task 5: the render worker — claimed: new `src/workflows/campaigns/render-poster.ts` + test, new `src/modules/campaigns/infrastructure/poster-render-repository.ts` + test, new `src/modules/campaigns/infrastructure/poster-context-reader.ts` + test; modify `src/domain/campaigns/poster-slots.ts` (+ test), `src/domain/campaigns/derivation.ts` (extract `checkProseAgainstEvidence`), `src/workflows/campaigns/contracts.ts`, `src/workflows/campaigns/durations.ts`, `src/lib/logger.ts` (one opaque field), `src/trigger/campaigns.ts` + test (registration). No migration, no schema change, no `database.types.ts` change. | claude | high | S4 | **done — deployed as prod `20260905.1`; dispatch proved (`run_06g7299cuq19ti3t5rmb0ooq01`)** |
+| S6   | Studio Task 6: the verification pass — claimed: new `src/modules/campaigns/application/creative-verification.ts` + test | claude | high | S5 | **done — 13 tests; model reports, code decides** |
+| S7   | Studio Task 7: annotated editing domain + union compositing — claimed: new `src/domain/campaigns/plate-edit.ts` + test, new `src/modules/campaigns/infrastructure/plate-compositor.ts` + test | claude | high | S4 | **done — 28 tests; byte-identical guarantee proved to bite on a single leaked byte** |
+| S8   | Studio Task 8: the edit worker — claimed: new `src/workflows/campaigns/edit-plate.ts` + test, new `src/modules/campaigns/infrastructure/plate-edit-prompt.ts`, `src/workflows/campaigns/contracts.ts` | claude | high | S7 | **review — workflow + prompt done, 12 tests; adapters and `campaign.edit-plate` registration NOT done, see log** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -4686,3 +4689,87 @@ entry. No source, migration, or test file touched.
 - **Deploys from this machine are flaky.** The upload step fails with
   `fetch failed (undefined undefined)` perhaps half the time, and has twice reported
   failure after actually deploying. Always check `list_deploys` before retrying.
+
+## 2026-09-05 — "Start validation" did nothing on an admitted upload
+
+Reported as: uploading Talabat `Mar-2026.xlsx` (package `ae99b309`, org `859cf039`) left the
+package at `awaiting_validation`, and pressing **Start validation** answered *"Validation is
+ready but is not enabled for this organization yet."* The flag was on the whole time. **Two
+separate root causes, neither of which was the one the message named.**
+
+**1. The retry route could not name a contract version for an ADR 0046 admitted package.**
+`validation-retry/route.ts` resolved the contract version by looking for one whose
+`report_package_id` was *this* package. An admitted upload has none — that is the entire point
+of ADR 0046: the structure is approved once, so the approved version belongs to whichever
+earlier upload a person reviewed (here `e3d1a04c`, version 5). Staging confirmed it: zero
+contract versions and zero validation runs for `ae99b309`, with the governing version reachable
+only through `report_structure_admissions`. So `contractVersionId` was `undefined`, the dispatch
+was never attempted, and `validationQueued: false` came back **without the feature flag ever
+being consulted.** Fixed by `resolveValidationContractVersion`
+(`src/modules/reports/application/validation-contract-version.ts`), which tries the package's
+own validation run, then the admission it was admitted under, then a per-package approved
+version. The admission is read **by the id the package recorded, not by re-matching an active
+one** — revoking governs future uploads, not one already admitted, which is the same rule
+`advance_governed_report_package_on_admission`'s replay branch follows.
+
+**2. The Trigger prod worker's rollout lists were missing this organization entirely.**
+`GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS` and `GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS`
+in Trigger prod list only `9f566f3d,445af548,2dda45b8`. `.env.local` also has `859cf039`. So the
+web app and the worker disagreed about the same flag. That is why the automatic chain never ran:
+profiling completed, Link A admitted the package, then `requestReportPackageValidation` — running
+*inside the worker* — returned `false` and **logged nothing at all.**
+
+**The general lesson: a rollout list read from `process.env` is per-process, and this repo has
+two processes.** Check both before believing a flag is on.
+
+Consequences worth remembering:
+- **The claim RPC re-resolves the contract version itself** on the admission path
+  (`20260902176000`), so what the dispatch names barely matters there — but something valid must
+  be named, and `undefined` short-circuits the dispatch before the RPC is ever reached.
+- **The false toast was a reporting defect in its own right.** One boolean carried three
+  different causes — feature off, no approved structure, transport failed — and the UI asserted
+  the first. The route now returns a `reason` and the copy points at the actual next action.
+- Both flag guards in `reports/application/dispatch.ts` now log when they refuse. A package that
+  stops dead at `awaiting_validation` with no run, no failure and nothing in the trace is
+  otherwise undiagnosable.
+
+Verified end to end against staging: dispatching `report-package.validate` with the
+admission-resolved version `91a9dfca` returned `outcome: "validated"`, and `ae99b309` moved
+`awaiting_validation` → `awaiting_projection`. It then **stalled again at `awaiting_projection`
+with no projection run** — root cause 2, still live, because updating Trigger prod env vars was
+refused by this session's permission classifier. Left for the user to apply.
+
+### 2026-09-06 · claude · Tasks 6, 7 and 8, and why 8 is not registered
+
+- **Task 6 done.** `creative-verification.ts`: a model reports observations through a
+  strict Zod boundary and code decides the verdict. A report volunteering its own
+  `verified` field is refused rather than ignored — a model that has learned to do that
+  has a drifting prompt, worth failing loudly over. Unknown is not a pass: a blocking
+  checker that could not run blocks and names itself. Subject likeness is the one
+  exception and only because it could never have blocked, so its absence removes nothing.
+- **Task 7 done.** `plate-edit.ts` (caps, exact rectangle union by coordinate compression)
+  and `plate-compositor.ts` (the fence). The guarantee is arithmetic, not trust: outside
+  the union the blend weight is exactly zero so the output byte is the parent byte.
+  Asserted across six mask shapes including a band touching every edge, against a model
+  returning an unrelated image. **Proved the test bites** by leaking a single byte
+  (0 → 1) and watching it fail. Feathering is spent strictly inward so softening the seam
+  cannot soften the guarantee.
+- **Task 8 workflow done, deliberately not registered.** The worker, its prompt boundary
+  and 12 tests are committed. What is missing is the adapter set — context reader,
+  Gemini edit planner, `record_campaign_plate_edit` store, and the successor-version
+  writer — plus the `campaign.edit-plate` registration.
+  **Registering it now would be worse than leaving it**: a registered task with no
+  adapters throws on first dispatch, which is a louder version of the "five written,
+  never registered" problem this plan exists to avoid. It is claimed here so the next
+  session picks it up rather than rediscovering it.
+- **The design question Task 8 had to answer, resolved without a migration.** The edit
+  RPC needs `child_plate_asset_id` to exist in `campaign_assets`, and the *only* writer of
+  that table anywhere in the schema is `create_campaign_bundle_version`. So an edit cannot
+  append an asset to a version. It does not need to: assets are material by the release
+  train's own rule, so an edited plate is a **new version** with a new digest, and the
+  approval for the old one stops applying. `create_campaign_bundle_version` is already
+  granted to `service_role` and `created_by` is nullable, so a worker can call it. No new
+  migration, and the immutability model is respected rather than worked around.
+- Note for whoever wires it: the version writer must read back the new
+  `campaign_assets.id` for the edited asset key, because the edit RPC's FK is on the row
+  id and not on the manifest's asset key.
