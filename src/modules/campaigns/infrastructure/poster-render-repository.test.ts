@@ -114,6 +114,59 @@ describe("createPosterRenderStore", () => {
   });
 
   /**
+   * A JSON null is not an SQL null, and the difference is load-bearing here.
+   *
+   * The RPC reads `refusal_detail` with `->` rather than `->>`, so an explicit
+   * `null` in the payload arrives as JSONB `null` -- a real value whose
+   * `jsonb_typeof` is `'null'`. The column allows SQL NULL or an object and
+   * refuses that, so every successful render was rejected at the last step with
+   * a constraint violation the worker could only report as "could not be
+   * recorded". The key has to be absent, not null.
+   */
+  it("omits refusal detail entirely rather than sending a JSON null", async () => {
+    const { client, calls } = persistence({
+      data: {
+        render_id: "3f1d5e2a-0000-4000-8000-00000000000a",
+        state: "rendered",
+        replayed: false,
+      },
+      error: null,
+    });
+
+    await createPosterRenderStore(client).record(record());
+
+    const input = calls[0].args.input_render as Record<string, unknown>;
+    expect(Object.hasOwn(input, "refusal_detail")).toBe(false);
+  });
+
+  it("still sends refusal detail when there is one to send", async () => {
+    const { client, calls } = persistence({
+      data: {
+        render_id: "3f1d5e2a-0000-4000-8000-00000000000a",
+        state: "refused",
+        replayed: false,
+      },
+      error: null,
+    });
+
+    await createPosterRenderStore(client).record(
+      record({
+        state: "refused",
+        refusalCode: "glyph_not_covered",
+        refusalDetail: { script: "Mlym" },
+        outputStoragePath: null,
+        outputContentHash: null,
+        outputMimeType: null,
+        outputWidthPx: null,
+        outputHeightPx: null,
+      }),
+    );
+
+    const input = calls[0].args.input_render as Record<string, unknown>;
+    expect(input.refusal_detail).toEqual({ script: "Mlym" });
+  });
+
+  /**
    * A lost render is better than a render the table describes wrongly. The
    * digest is deterministic, so the same request can simply be made again.
    */

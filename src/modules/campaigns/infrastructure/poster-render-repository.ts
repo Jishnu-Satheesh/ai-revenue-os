@@ -51,7 +51,12 @@ export function createPosterRenderStore(persistence: PosterRenderPersistence): P
           render_digest: input.renderDigest,
           state: input.state,
           refusal_code: input.refusalCode,
-          refusal_detail: input.refusalDetail,
+          // Absent, not null, and the distinction is load-bearing. The RPC reads
+          // this one with `->` rather than `->>`, so an explicit null arrives as
+          // JSONB `null` -- a real value whose `jsonb_typeof` is 'null'. The
+          // column takes an SQL NULL or an object and refuses that, which
+          // rejected every successful render at the last step.
+          ...(input.refusalDetail === null ? {} : { refusal_detail: input.refusalDetail }),
           output_storage_path: input.outputStoragePath,
           output_content_hash: input.outputContentHash,
           output_mime_type: input.outputMimeType,
