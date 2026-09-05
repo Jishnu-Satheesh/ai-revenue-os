@@ -270,12 +270,15 @@ no AI narration, no provider or campaign actions, no OCR, and no model-read valu
   remote build network, so successful narration remains a release gate independent of the now
   proven deterministic Analysis result.
 
-### 4.1.8 Planned repeat-intake and in-place audit slice (2026-09-02)
+### 4.1.8 Delivered repeat-intake and in-place audit slice (2026-09-02 to 2026-09-04)
 
 Approved on 2026-09-02 after an operator loaded four months of Talabat's performance report for a
 paying client. The design is
 `docs/superpowers/specs/2026-09-02-governed-report-reuse-and-channel-intake-design.md`; the durable
-decision is ADR 0046.
+decision is ADR 0046. Implemented across 13 planned tasks on `feat/governed-channel-intelligence`,
+three inserted mid-flight, and closed out by this section. The full task-by-task record, including
+every ruling, defect, and incident named below, is
+`.superpowers/sdd/2026-09-02-governed-report-reuse-phase-1/progress.md`.
 
 What the live attempt exposed:
 
@@ -296,16 +299,19 @@ What the live attempt exposed:
 - The channel detail page accepts no window and displays the newest completed run, so a chosen
   month changed nothing on screen.
 
-Phase 1, ingestion:
+Phase 1, ingestion — delivered:
 
 - `structure_fingerprint` on packages, per section 8.1.
 - `report_structure_admissions` and the second admissible path in both claim functions, per
   section 8.2 and ADR 0046.
 - One approval screen replacing the four-step flow on an organization's first sight of a
   structure; report type derived from the recognised family.
-- A backfill granting admissions from mappings already approved, reporting what it will grant.
+- A backfill script (`scripts/backfill-report-structure-admissions.mjs`) granting admissions from
+  mappings already approved, reporting what it grants before it grants it.
 - A strict `YYYY-MM-DD` string accepted whatever encoding a contract declares. Ambiguous forms
-  still require a declaration; `03/04/2026` is not made guessable.
+  still require a declaration; `03/04/2026` is not made guessable. A declared `valueSeparator`
+  (Task 3B, not in the original plan — see "How the plan grew" below) lets one cell carry two
+  labels, which is what Talabat's own cancellation-reason column does.
 - A `ReportCategoricalValueNotDeclared` subclass carrying the label, output key and dates, on the
   `ReportControlTotalMismatch` precedent of ADR 0029, so the existing failure detail says something.
   A one-click declaration proposes an amended projection version for approval. Scoped to the
@@ -313,16 +319,127 @@ Phase 1, ingestion:
 - Governed refusals raised as non-retryable Trigger errors, so a refusal reads as `FAILED` without
   burning retries.
 
-Phase 2, the surfaces:
+Phase 2, the surfaces — two of three items delivered, as code that a person also had to hand off
+mid-plan and that this task's review round then had to repair (see "How the plan grew"):
 
-- A clean projection dispatches `channel-analysis.run` for its declared window, keyed on the
-  projection run. A `reconciliation_required` or `partially_projected` result does not, because an
-  audit of disputed figures would state a conclusion the platform cannot support.
-- The channel detail page accepts `?window=`, selects the run matching that window, and drives the
-  picker through the URL. A window with no completed run is named and offered, never answered with
-  another window's figures.
-- A Reports panel on the channel page carrying the whole intake with the channel fixed from route
-  context. The Integrations governed-reports view is unchanged.
+- **Delivered, reviewed, browser-unverified:** a clean projection dispatches `channel-analysis.run`
+  for its declared window, keyed on the projection run. A `reconciliation_required` or
+  `partially_projected` result does not, because an audit of disputed figures would state a
+  conclusion the platform cannot support.
+- **Not attempted in this plan:** the channel detail page accepting `?window=` and selecting the
+  run matching that window through the URL. The page's run selection is unchanged from before this
+  slice. This remains open, exactly as originally scoped for a later pass.
+- **Delivered, reviewed, browser-unverified:** a Reports tab on the channel page carrying the whole
+  intake with the channel fixed from route context. The Integrations governed-reports view is
+  unchanged.
+
+#### What was actually verified against staging
+
+- **The structure fingerprint collapses real uploads to one identity.** Computed from the client's
+  five real packages' own stored header-candidate digests: the January, February, March and April
+  2026 XLSX uploads — four different worksheet names (`jan_2026`, `feb_2026`, `mar_2026`,
+  `apr_2026`) — all fingerprint to `606b75133c29…`. The January CSV of the same report fingerprints
+  to a different identity, `1951b8d9a2cd…`, because its header names genuinely differ from the
+  XLSX's — the honest outcome the design predicted (CSV and XLSX are two structures, each admitted
+  once), not a defect.
+- **`fixtures/raw/Talabat/Jan-2026.csv` projects end to end**: CHECK_IN_REQUIRED 28, UNREACHABLE 3,
+  ITEM_UNAVAILABLE 7, gross 43800 minor units, 20 orders, 31 rows spanning 2026-01-01..31.
+- **A real package was claimed on staging through the admission path**: outcome `acquired`, the
+  admission's contract version returned, `admitted_under_admission_id` written, status advanced to
+  `validating`.
+- **Both service-role advance functions were called against staging**, each on a success path and a
+  refusal path: `advance_governed_report_package_on_admission` (awaiting_contract →
+  awaiting_validation) and `advance_admitted_report_package_to_projection` (validated →
+  awaiting_projection).
+- **The backfill granted the client's two admissions** (the CSV and the four-month XLSX structure)
+  and a second `--apply` run was a no-op (7 skipped, 0 new grants).
+
+#### What was not verified — stated plainly
+
+- **The live end-to-end upload was never performed.** Uploading a fresh file (for example
+  `fixtures/raw/Talabat/Mar-2026.xlsx`) and watching it reach `projected` with no approval screen —
+  the single most convincing proof this slice works — is outstanding. Do not read any statement in
+  this section as end-to-end verification; every item above was verified individually, not as one
+  live chain.
+- **Browser verification covered only the governed-report intake**, not the admission approval
+  screen or the channel Reports tab. An operator-role session (role `OPERATOR` on a real
+  organization) was exercised at 1440×900 and an emulated 390×844 mobile viewport: the intake
+  correctly shows no Approve control for an operator, the two-person approval note renders, there is
+  zero horizontal overflow at 390px, and the console carries zero errors and zero warnings at both
+  widths. The admission approval screen and the channel Reports tab were not reached, because the
+  verified account's organization has zero channels and zero report packages, and the organization
+  that does have real data is reachable only with the user's own credentials, which were not
+  requested.
+
+#### A compatibility shim is live on staging and must be removed
+
+`supabase/migrations/20260903125000_restore_profiling_completion_overload.sql` restores the
+six-argument `complete_governed_report_package_profiling`. An earlier migration in this same slice
+added a seventh argument and dropped the six-argument overload in the same migration; the Trigger.dev
+worker already deployed to the cloud still calls six arguments, so every profiling run in the
+deployed environment failed function-not-found and recorded a generic `PROFILE_FAILED` until this
+shim was pushed. The overload is a thin wrapper passing a null structure fingerprint — the honest
+value, since the deployed worker cannot compute one — so a package it profiles simply matches no
+admission until re-profiled, which is correct rather than degraded.
+
+**This overload must be dropped in a later migration once the Trigger worker is deployed with this
+branch's code.** Until then it is load-bearing for every new upload on staging. The lesson for future
+migrations that change a function signature the deployed worker calls: expand and contract as two
+migrations — add the new overload, deploy the worker, then drop the old one — never both in one
+migration. Every test passed throughout this defect's life, because tests exercise the code in the
+branch, not the code already running in the deployed worker.
+
+#### Residue on shared staging that cannot be removed
+
+Governed report packages and admissions cannot be hard-deleted by design. Verification across this
+slice (Tasks 2, 6, 7, 9C, and 12) left several synthetic packages and fixture organizations on
+staging — all clearly labelled, isolated, and carrying no real client data. One admission, in the
+`Task 7 admission-path claim verification` organization, could not even be revoked: that organization
+has zero memberships, so no session can satisfy the revoke RPC's requirement of a real owner or
+admin acting on themselves. This is the access-control protection working as designed, not a defect
+— the admission is inert, since no session can reach that organization and no real package anywhere
+carries its placeholder fingerprint.
+
+#### A caveat on Task 7's isolation proof
+
+Task 7's cross-organization isolation assertion is weaker than it looks. `report_structure_admissions`
+has a composite foreign key to `organization_channels(organization_id, id)`, so two organizations can
+never share a channel id — meaning that assertion would still pass even with its own organization
+filter removed. The isolation itself is real, but it rests on the schema design from Task 6, not on
+that pgTAP assertion. A future reader should not mistake the test for the protection.
+
+#### How the plan grew
+
+The plan added three tasks mid-flight and one repair round on work handed to it from outside the
+normal task sequence:
+
+- **Task 3B** ("a categorical cell that carries two labels"), inserted after Task 3. Task 3's own
+  acceptance test could not pass on the date fix alone: the January CSV writes two unavailability
+  reasons joined by a semicolon in one cell, and admitting that shape needed a new declared
+  `valueSeparator` field plus a forward migration replacing the database's own strict key allowlist
+  on the projection document — bigger than a clause inside Task 3, so it became its own task.
+- **Task 9B** ("let an admitted upload advance without asking again"), inserted after Task 9's wiring
+  was reviewed clean. Investigation found the automatic chain Task 9 wired had no way to actually
+  run: two required state transitions (`awaiting_contract` → `awaiting_validation` and `validated` →
+  `awaiting_projection`) had no non-human path in the database, so an admitted package's dispatch
+  would always return `not_ready`. Task 9B added the two service-role RPCs that supply them.
+- **Task 9C** ("restore the profiling signature the deployed worker calls"), inserted after Task 10's
+  implementer found fresh profiling failing generically on staging. This is the compatibility-shim
+  migration described above — a regression this plan itself caused by dropping a signature the
+  deployed worker still needed.
+- **One repair round on handed-off work.** After Task 10 completed, four additional commits landed
+  on this branch implementing the declare-a-label flow (Task 11), the auto-analysis dispatch, and the
+  channel Reports tab, without going through this plan's per-task review loop. A final review of
+  those four commits found 0 Critical, 5 Important, and 8 Minor issues; one repair round addressed
+  all 5 Important findings, verified independently rather than taken on the implementer's report.
+  That same review found another agent's Growth Intelligence changes committed inside two of those
+  four commits (`src/lib/logger.ts` and `database.types.ts` hunks unrelated to reports) — a violation
+  of this plan's path-limited `git add` rule. The commits are not rewritten: rebasing or splitting
+  commits on a branch another agent is actively committing to risks destroying their work to fix an
+  attribution error, a worse trade than a mis-attributed line in four commits on a shared branch. One
+  of those same commits' own board entry states "Growth Intelligence files are not touched," which is
+  not true as committed; that claim is corrected in the board entry accompanying this section rather
+  than left standing.
 
 ### 4.2 Release 2
 
