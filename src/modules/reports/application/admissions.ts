@@ -32,6 +32,18 @@ export type AdmissionService = {
     structureFingerprint: string;
     declaredCurrency: string;
   }): Promise<ReportStructureAdmission | null>;
+  /**
+   * The admission a package already recorded, deliberately *not* filtered by
+   * `active`. Revoking an admission governs future uploads (ADR 0046), not one
+   * that already went through it, so a package still carrying
+   * `admitted_under_admission_id` must keep resolving to the admission that
+   * admitted it -- the same rule
+   * `advance_governed_report_package_on_admission`'s replay branch follows.
+   */
+  findAdmissionById(input: {
+    organizationId: string;
+    admissionId: string;
+  }): Promise<ReportStructureAdmission | null>;
   grantAdmission(input: {
     organizationId: string;
     actorId: string;
@@ -170,6 +182,20 @@ export function createAdmissionService(client: AuthenticatedClient): AdmissionSe
       // drops one of those two safeguards still fails in this function
       // rather than quietly trusting the other -- see AGENTS.md's rule
       // against relying on RLS alone in a service that also reads directly.
+      if (!data || data.organization_id !== organizationId) return null;
+      return toAdmission(data);
+    },
+
+    async findAdmissionById({ organizationId, admissionId }) {
+      const { data, error } = await client
+        .from("report_structure_admissions")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", admissionId)
+        .maybeSingle();
+      if (error) persistenceFailure("The structure admission could not be read.", error);
+      // Belt and braces alongside RLS, for the reason `findActiveAdmission`
+      // gives above.
       if (!data || data.organization_id !== organizationId) return null;
       return toAdmission(data);
     },

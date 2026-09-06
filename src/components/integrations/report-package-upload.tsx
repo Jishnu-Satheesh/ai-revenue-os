@@ -93,6 +93,29 @@ function operationKey(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`;
 }
 
+/**
+ * Why validation did not start, in words that point at the next action.
+ *
+ * Every one of these used to read "not enabled for this organization yet",
+ * including the two cases where the feature was on the whole time -- so an
+ * operator whose upload was waiting on an approval, or on a transport that
+ * blinked, was sent to ask for a rollout that had already happened.
+ */
+function validationNotQueuedMessage(
+  reason: "feature_disabled" | "contract_unresolved" | "dispatch_failed" | undefined,
+): string {
+  switch (reason) {
+    case "contract_unresolved":
+      return "This upload has no approved column mapping yet, so validation cannot start. Approve its contract first.";
+    case "dispatch_failed":
+      return "Validation could not be queued just now. The upload is still waiting, so try again in a moment.";
+    case "feature_disabled":
+      return "Validation is ready but is not enabled for this organization yet.";
+    default:
+      return "Validation did not start. Refresh the page to see where this upload stands.";
+  }
+}
+
 function humanizeProjectionKey(key: string): string {
   const words = key.replaceAll("_", " ");
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
@@ -833,20 +856,21 @@ export function ReportPackageUpload({
 
   const retryValidation = useMutation({
     mutationFn: (packageId: string) =>
-      requestJson<{ reportPackage: ReportPackageRow; validationQueued: boolean }>(
-        `${reportPackagesPath(organizationId)}/${packageId}/validation-retry`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ idempotencyKey: operationKey("report-validation-retry") }),
-        },
-      ),
+      requestJson<{
+        reportPackage: ReportPackageRow;
+        validationQueued: boolean;
+        reason?: "feature_disabled" | "contract_unresolved" | "dispatch_failed";
+      }>(`${reportPackagesPath(organizationId)}/${packageId}/validation-retry`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idempotencyKey: operationKey("report-validation-retry") }),
+      }),
     onSuccess: (result) => {
-      toast.info(
-        result.validationQueued
-          ? "Validation was queued again."
-          : "Validation is ready but is not enabled for this organization yet.",
-      );
+      if (result.validationQueued) {
+        toast.info("Validation was queued again.");
+      } else {
+        toast.warning(validationNotQueuedMessage(result.reason));
+      }
       invalidate();
     },
     onError: (error) =>

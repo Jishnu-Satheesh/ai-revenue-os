@@ -117,6 +117,47 @@ describe("findActiveAdmission", () => {
   });
 });
 
+describe("findAdmissionById", () => {
+  it("returns no admission when the recorded id no longer exists", async () => {
+    const service = createAdmissionService(fakeClient({ rows: [] }) as never);
+    await expect(
+      service.findAdmissionById({ organizationId: ORGANIZATION_ID, admissionId: ADMISSION_ID }),
+    ).resolves.toBeNull();
+  });
+
+  it("never returns another organization's grant", async () => {
+    const service = createAdmissionService(
+      fakeClient({ rows: [admissionRow({ organization_id: OTHER_ORGANIZATION_ID })] }) as never,
+    );
+    await expect(
+      service.findAdmissionById({ organizationId: ORGANIZATION_ID, admissionId: ADMISSION_ID }),
+    ).resolves.toBeNull();
+  });
+
+  /**
+   * The point of looking an admission up by id rather than by re-matching an
+   * active one: revoking governs future uploads, not a package that already
+   * went through this admission. A revoked row must still resolve here, or a
+   * package admitted before the revocation could never be validated at all.
+   */
+  it("still resolves an admission that has since been revoked", async () => {
+    const service = createAdmissionService(
+      fakeClient({
+        rows: [
+          admissionRow({
+            active: false,
+            revoked_by: ACTOR_ID,
+            revoked_at: "2026-09-04T00:00:00.000Z",
+          }),
+        ],
+      }) as never,
+    );
+    await expect(
+      service.findAdmissionById({ organizationId: ORGANIZATION_ID, admissionId: ADMISSION_ID }),
+    ).resolves.toMatchObject({ id: ADMISSION_ID, contractVersionId: CONTRACT_VERSION_ID });
+  });
+});
+
 describe("grantAdmission", () => {
   const grantInput = {
     organizationId: ORGANIZATION_ID,

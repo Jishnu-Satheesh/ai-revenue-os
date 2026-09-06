@@ -63,7 +63,18 @@ export async function requestReportPackageValidation(input: {
   correlationId: string;
   validationRunId?: string;
 }): Promise<boolean> {
-  if (!isGovernedReportValidationEnabled(input.organizationId)) return false;
+  if (!isGovernedReportValidationEnabled(input.organizationId)) {
+    // Logged, not silent. This branch is the only way a package can reach
+    // `awaiting_validation` and then simply stop, with no run, no failure and
+    // nothing in the trace to say why -- and the rollout list is read from
+    // the environment of whichever process calls this, so the worker and the
+    // web app can disagree about it without anyone noticing.
+    logger.warn("report_package.validation_dispatch_disabled", {
+      organizationId: input.organizationId,
+      correlationId: input.correlationId,
+    });
+    return false;
+  }
   const validationRunId = input.validationRunId ?? crypto.randomUUID();
   // Keyed on the run, not on the package and contract. A key that is the same
   // string on every attempt makes Trigger de-duplicate the retry against the
@@ -106,7 +117,15 @@ export async function requestReportPackageProjection(input: {
   correlationId: string;
   projectionRunId?: string;
 }): Promise<boolean> {
-  if (!isGovernedReportProjectionEnabled(input.organizationId)) return false;
+  if (!isGovernedReportProjectionEnabled(input.organizationId)) {
+    // Same reasoning as the validation dispatch above: a package that stops
+    // at `awaiting_projection` for this reason leaves no other trace.
+    logger.warn("report_package.projection_dispatch_disabled", {
+      organizationId: input.organizationId,
+      correlationId: input.correlationId,
+    });
+    return false;
+  }
   const projectionRunId = input.projectionRunId ?? crypto.randomUUID();
   // Keyed on the run, for the reason `requestReportPackageValidation` gives.
   const idempotencyKey = `report-projection:${projectionRunId}`;
