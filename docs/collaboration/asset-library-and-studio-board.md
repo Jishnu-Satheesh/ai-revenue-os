@@ -4773,3 +4773,69 @@ refused by this session's permission classifier. Left for the user to apply.
 - Note for whoever wires it: the version writer must read back the new
   `campaign_assets.id` for the edited asset key, because the edit RPC's FK is on the row
   id and not on the manifest's asset key.
+
+### 2026-09-06 · claude · Tasks 8–11 finished, and four defects the browser found
+
+- **Task 8 is now registered.** The four adapters the previous entry named are written:
+  `plate-edit-context-reader.ts`, `plate-edit-planner.ts` (Gemini), `plate-edit-repository.ts`,
+  and `edited-version-writer.ts`. `campaign.edit-plate` is live in prod — worker
+  `v20260906.1`, 26 tasks, confirmed by `get_current_worker` rather than by the CLI, which
+  said "Build queued" for twenty minutes after the deploy had already landed. **Always check
+  `list_deploys`/`get_current_worker` before believing the CLI.** Third time this session.
+- The version writer reads the new `campaign_assets.id` back, as the previous entry warned.
+- **Masks moved to `campaign-masks`.** The edit workflow now takes two uploaders. A mask is
+  provenance — it says which pixels a model was allowed to touch — and the bucket the
+  platform publishes from is the wrong place for it. `createSupabaseCampaignAssetStorage`
+  takes an optional bucket, defaulting to the old one, so nothing else changed.
+- **Task 9 done.** Four routes. Reads are `campaign.read` so a viewer can see what a poster
+  would say; producing one is `poster.render`. `campaign.edit` covers editing — no new
+  permission, because the area already has two permission maps and a third spelling would
+  make the next reader guess.
+- **Task 10 and 11 done.** Studio page, template picker, script tabs, slot list, annotation
+  canvas, verification panel, refusal states. Browser gate passed at 1440×900 and 390×844,
+  no console errors, RTL correct, `scrollWidth == innerWidth` at both.
+
+**Four defects, all found by looking rather than by reasoning.**
+
+1. **The free-box fence did not hold.** `checkOperatorSlotText` claimed in its own comment
+   to stop "50% off" being typed onto a poster. It delegated to `checkProseAgainstEvidence`,
+   which refuses offer-ish wording only when the campaign records *no* offer — and
+   `lockedOfferRef` is an internal key like `lunch-set-menu-2026-09`. So any campaign
+   carrying any offer let an operator write any discount onto artwork nobody approved. Found
+   by a route test written to *prove* the fence. Now the words must be supported by the
+   pinned facts or by the offer text itself; a slug supports the words inside it and no more.
+   Generated variant copy is untouched — it answers to a derivation check the free box has no
+   equivalent of.
+2. **English UI copy was forced RTL** on the Arabic tab, moving full stops to the front of
+   sentences. `dir` belonged on the value, not on the list entry.
+3. **A toast promised the page would update when a render landed.** Nothing polls. Honest
+   copy plus a Refresh button.
+4. **`deriveRouteCrumbs` linked every uuid in the path as an organization**, so the campaign
+   crumb pointed at `/organizations/<campaignId>/overview`. Invisible while the campaign was
+   the last crumb — the last crumb's href is cleared — and clickable the moment the Studio was
+   added below it. Only the id directly after `organizations` is one now.
+
+**Two things pinned rather than resolved, both pre-existing:**
+
+- **`campaign.approve` disagrees between two maps.** `src/domain/campaigns/permissions.ts`
+  and `approve_campaign_bundle` both grant it to operator; the account catalogue grants it to
+  owner and admin only. The database wins today because no campaign route reads the
+  catalogue. Who may authorize spend is a policy question, not a typo to fix in whichever
+  file is open. `permissions.test.ts` asserts the divergence so it cannot widen silently.
+- **An edited plate keeps its parent's provenance.** The manifest can say a model generated
+  an image or the brand supplied one; it cannot say a model edited one under a mask.
+  `campaign_plate_edits` carries the full account. A provenance kind for an edit is a
+  manifest schema change with digest and approval consequences.
+
+**Non-Latin copy exists now.** The user authorised development fixtures, and
+`scripts/seed-non-latin-campaign-copy.ts` wrote bundle version **v3**
+(`bbc34c36-fee2-4a5e-b487-23a5741ca44c`) for the pilot campaign with Malayalam and Arabic
+copy — through `create_campaign_bundle_version`, so the digest still describes the document.
+Three posters rendered in prod, one per script; the Malayalam re-render replayed with a
+byte-identical output. Recorded with the exact strings in
+`docs/verification/campaigns/creative-studio-live-proof.md`.
+
+**Still owed:** a Malayalam reader and an Arabic reader must judge those two posters. The
+scrim question is still open — text is drawn with no backing, which reads badly on a pale
+plate. And `campaign.edit-plate` has never been dispatched for real: registered, wired, and
+proved against a hijacked model in test, but the Gemini round trip is unexercised.
