@@ -260,6 +260,24 @@ describe("route-aware app chrome", () => {
     ).toEqual(["Fixture Bakery", "Guided onboarding"]);
   });
 
+  /**
+   * A campaign id is not an organization id, and linking it as one sent an
+   * operator to an organization overview for an organization that does not
+   * exist. It stayed invisible while the campaign was the last crumb -- the
+   * last crumb's href is cleared -- and became clickable the moment a page was
+   * added below it.
+   */
+  it("links only the organization crumb, never a deeper id", () => {
+    const campaignId = "783ab4e1-279d-4fba-8dc1-1a33cd3df2e5";
+    const crumbs = deriveRouteCrumbs(
+      `/organizations/${organizationId}/campaigns/${campaignId}/studio`,
+    );
+
+    expect(crumbs[0]?.href).toBe(`/organizations/${organizationId}/overview`);
+    expect(crumbs.find((crumb) => crumb.label === campaignId)?.href).toBeUndefined();
+    expect(crumbs.every((crumb) => crumb.href === undefined || crumb === crumbs[0])).toBe(true);
+  });
+
   it("targets Overview from the organization crumb", () => {
     expect(deriveRouteCrumbs(`/organizations/${organizationId}/economics`)[0]?.href).toBe(
       `/organizations/${organizationId}/overview`,

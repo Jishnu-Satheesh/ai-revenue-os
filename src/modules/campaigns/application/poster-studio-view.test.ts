@@ -75,6 +75,7 @@ describe("toPosterStudioView", () => {
     const [offer] = result.offers;
     expect(offer.availability.available).toBe(false);
     if (offer.availability.available) return;
+    if (offer.availability.reason !== "missing_slots") throw new Error("wrong reason");
     expect(offer.availability.missingSlots).toEqual([
       { slot: "body", reason: "no_governed_source" },
     ]);
@@ -95,10 +96,24 @@ describe("toPosterStudioView", () => {
     expect(result.offers).toEqual([]);
   });
 
-  it("offers nothing for a placement the campaign wrote no copy for", () => {
+  /**
+   * A story template against a feed-only campaign is not missing, it is
+   * inapplicable -- and saying so is more use than vanishing. Hiding it is the
+   * easier implementation and leaves an operator hunting for a template that
+   * was never going to work.
+   */
+  it("offers a placement the campaign wrote no copy for, with that as the reason", () => {
     const result = view({ templates: [template({ placement: "image_story" })] });
 
-    expect(result.offers).toEqual([]);
+    expect(result.offers).toHaveLength(validManifest().directions.length);
+    const [offer] = result.offers;
+    expect(offer.availability.available).toBe(false);
+    if (offer.availability.available) return;
+    expect(offer.availability.reason).toBe("placement_not_in_campaign");
+    // No channel, because no copy names one. A channel guessed here would be
+    // the request body's channel, and the render would refuse on arrival.
+    expect(offer.channel).toBeNull();
+    expect(offer.slots).toEqual([]);
   });
 
   describe("scripts", () => {

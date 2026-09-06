@@ -1,9 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, Check, Download, Link2, Loader2, ShieldAlert } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Download,
+  Link2,
+  Loader2,
+  RefreshCw,
+  ShieldAlert,
+} from "lucide-react";
 
 import { AnnotationCanvas } from "@/components/campaigns/studio/annotation-canvas";
 import { VerificationPanel } from "@/components/campaigns/studio/verification-panel";
@@ -48,6 +57,11 @@ const SCRIPT_DIRECTION: Readonly<Record<RenderableScript, "ltr" | "rtl">> = {
   Latn: "ltr",
   Mlym: "ltr",
   Arab: "rtl",
+};
+
+const PLACEMENT_LABEL: Readonly<Record<string, string>> = {
+  feed_image: "the feed",
+  image_story: "stories",
 };
 
 const SLOT_LABEL: Readonly<Record<string, string>> = {
@@ -97,6 +111,8 @@ export function PosterStudio(props: PosterStudioProps) {
   const [templateKey, setTemplateKey] = useState<string | null>(null);
   const [extra, setExtra] = useState("");
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
 
   const plateByKey = useMemo(
     () => new Map(plates.map((plate) => [plate.assetKey, plate])),
@@ -156,7 +172,9 @@ export function PosterStudio(props: PosterStudioProps) {
         toast.error(body?.error?.message ?? "The poster could not be queued.");
         return;
       }
-      toast.success("Rendering. This page updates when it lands.");
+      // Not "this updates when it lands". Nothing here polls, and a promise the
+      // page does not keep teaches an operator to distrust the rest of it.
+      toast.success("Queued. Use Refresh above the posters when it lands.");
     } catch {
       toast.error("The poster could not be queued. Try again.");
     } finally {
@@ -237,22 +255,23 @@ export function PosterStudio(props: PosterStudioProps) {
             <TabsContent key={entry} value={entry} className="flex flex-col gap-4 pt-4">
               <SlotList offer={selected} script={entry} extra={extra} />
 
-              {selected?.availability.available === false ? (
+              {selected && selected.availability.available === false ? (
                 <Alert>
                   <ShieldAlert />
                   <AlertTitle>This template cannot render for this campaign</AlertTitle>
                   <AlertDescription>
-                    {selected.availability.missingSlots
-                      .map(
-                        (missing) =>
-                          `${SLOT_LABEL[missing.slot] ?? missing.slot}: ${
-                            missing.reason === "no_governed_source"
-                              ? "nothing in the approved campaign can supply it"
-                              : "not supplied"
-                          }`,
-                      )
-                      .join(". ")}
-                    .
+                    {selected.availability.reason === "placement_not_in_campaign"
+                      ? `This campaign wrote no copy for ${PLACEMENT_LABEL[selected.availability.placement]}, so there are no words for this template to draw.`
+                      : `${selected.availability.missingSlots
+                          .map(
+                            (missing) =>
+                              `${SLOT_LABEL[missing.slot] ?? missing.slot}: ${
+                                missing.reason === "no_governed_source"
+                                  ? "nothing in the approved campaign can supply it"
+                                  : "not supplied"
+                              }`,
+                          )
+                          .join(". ")}.`}
                   </AlertDescription>
                 </Alert>
               ) : null}
@@ -282,6 +301,7 @@ export function PosterStudio(props: PosterStudioProps) {
                     busy ||
                     !plate ||
                     selected === null ||
+                    selected.channel === null ||
                     selected.availability.available === false
                   }
                   onClick={queueRender}
@@ -321,18 +341,30 @@ export function PosterStudio(props: PosterStudioProps) {
             <h2 id="renders-heading" className="text-sm font-medium">
               Posters
             </h2>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                void navigator.clipboard?.writeText(shareUrl);
-                toast.success("Link to this campaign copied.");
-              }}
-            >
-              <Link2 />
-              Share
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={refreshing}
+                onClick={() => startRefresh(() => router.refresh())}
+              >
+                {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                Refresh
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(shareUrl);
+                  toast.success("Link to this campaign copied.");
+                }}
+              >
+                <Link2 />
+                Share
+              </Button>
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
             Sharing links to the campaign, never to the picture. A poster URL is a signed,
@@ -388,15 +420,16 @@ function TemplateCard(props: {
         )}
       </span>
       <span className="text-xs text-muted-foreground">
-        {props.offer.canvasWidthPx} × {props.offer.canvasHeightPx} · {props.offer.channel}
+        {props.offer.canvasWidthPx} × {props.offer.canvasHeightPx}
+        {props.offer.channel ? ` · ${props.offer.channel}` : ""}
       </span>
-      {!usable && props.offer.availability.available === false ? (
+      {props.offer.availability.available === false ? (
         <span className="text-xs text-muted-foreground">
-          Needs{" "}
-          {props.offer.availability.missingSlots
-            .map((missing) => SLOT_LABEL[missing.slot] ?? missing.slot)
-            .join(", ")}
-          , which this campaign does not supply.
+          {props.offer.availability.reason === "placement_not_in_campaign"
+            ? `No ${PLACEMENT_LABEL[props.offer.availability.placement]} copy in this campaign.`
+            : `Needs ${props.offer.availability.missingSlots
+                .map((missing) => SLOT_LABEL[missing.slot] ?? missing.slot)
+                .join(", ")}, which this campaign does not supply.`}
         </span>
       ) : null}
     </button>
@@ -419,14 +452,25 @@ function SlotList(props: {
           <dt className="text-xs font-medium text-muted-foreground">
             {SLOT_LABEL[slot.slot] ?? slot.slot}
           </dt>
-          <dd dir={direction} className="text-sm">
+          {/*
+            The direction goes on the value and never on the explanation. Both
+            are text in the same list, but only one of them is the campaign's
+            own words: forcing "Not supplied." right to left moved its full stop
+            to the front of the sentence, which is a bug an Arabic reader sees
+            immediately and an English one does not.
+          */}
+          <dd className="text-sm">
             {slot.value !== null ? (
-              <span className="whitespace-pre-line">{slot.value}</span>
+              <span dir={direction} className="block whitespace-pre-line">
+                {slot.value}
+              </span>
             ) : slot.slot === "extra" && props.extra.trim() !== "" ? (
-              <span className="whitespace-pre-line">{props.extra}</span>
+              <span dir={direction} className="block whitespace-pre-line">
+                {props.extra}
+              </span>
             ) : (
               <span className="text-muted-foreground">
-                {slot.value === null && "reason" in slot && slot.reason === "no_governed_source"
+                {"reason" in slot && slot.reason === "no_governed_source"
                   ? "Nothing in the approved campaign supplies this."
                   : "Not supplied."}
               </span>

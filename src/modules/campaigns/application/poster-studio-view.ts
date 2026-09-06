@@ -58,15 +58,41 @@ export type PosterStudioRender = {
  * offering a channel the campaign wrote no copy for would be offering a render
  * that can only refuse.
  */
+export type PosterStudioAvailability =
+  | { readonly available: true }
+  | {
+      readonly available: false;
+      readonly reason: "missing_slots";
+      readonly missingSlots: readonly {
+        readonly slot: string;
+        readonly reason: string;
+      }[];
+    }
+  | {
+      /**
+       * The template draws a placement this campaign wrote no copy for -- a
+       * story template against a campaign that only has feed copy.
+       *
+       * Returned rather than filtered out, which is the harder implementation
+       * and the better product. A story template that simply vanishes leaves an
+       * operator hunting for it; one that says "this campaign has no story
+       * copy" tells them what would have to change.
+       */
+      readonly available: false;
+      readonly reason: "placement_not_in_campaign";
+      readonly placement: CampaignPlacement;
+    };
+
 export type PosterStudioOffer = {
   readonly directionId: string;
   readonly templateKey: string;
   readonly templateVersion: number;
-  readonly channel: CampaignChannel;
+  /** Null when no copy exists for this template's placement. */
+  readonly channel: CampaignChannel | null;
   readonly placement: CampaignPlacement;
   readonly canvasWidthPx: number;
   readonly canvasHeightPx: number;
-  readonly availability: PosterTemplateAvailability;
+  readonly availability: PosterStudioAvailability;
   /** Exactly what would be drawn, so the picker can show it before rendering. */
   readonly slots: readonly ResolvedPosterSlot[];
 };
@@ -113,6 +139,20 @@ export type PosterStudioViewInput = {
   readonly legalLine?: string | null;
 };
 
+/** The domain's answer, widened with the reason only this layer can see. */
+function toStudioAvailability(availability: PosterTemplateAvailability): PosterStudioAvailability {
+  return availability.available
+    ? { available: true }
+    : {
+        available: false,
+        reason: "missing_slots",
+        missingSlots: availability.missingSlots.map((missing) => ({
+          slot: missing.slot,
+          reason: missing.reason,
+        })),
+      };
+}
+
 export function toPosterStudioView(input: PosterStudioViewInput): PosterStudioView {
   const { manifest } = input;
 
@@ -124,9 +164,28 @@ export function toPosterStudioView(input: PosterStudioViewInput): PosterStudioVi
       // is never offered as a new choice.
       if (template.state !== "active") continue;
 
-      for (const copy of direction.copy) {
-        if (copy.placement !== template.placement) continue;
+      const matching = direction.copy.filter((copy) => copy.placement === template.placement);
 
+      if (matching.length === 0) {
+        offers.push({
+          directionId: direction.id,
+          templateKey: template.key,
+          templateVersion: template.version,
+          channel: null,
+          placement: template.placement,
+          canvasWidthPx: template.canvasWidthPx,
+          canvasHeightPx: template.canvasHeightPx,
+          availability: {
+            available: false,
+            reason: "placement_not_in_campaign",
+            placement: template.placement,
+          },
+          slots: [],
+        });
+        continue;
+      }
+
+      for (const copy of matching) {
         const { slots } = resolvePosterSlots({
           manifest,
           directionId: direction.id,
@@ -144,7 +203,7 @@ export function toPosterStudioView(input: PosterStudioViewInput): PosterStudioVi
           placement: copy.placement,
           canvasWidthPx: template.canvasWidthPx,
           canvasHeightPx: template.canvasHeightPx,
-          availability: templateAvailability(template, slots),
+          availability: toStudioAvailability(templateAvailability(template, slots)),
           slots,
         });
       }
