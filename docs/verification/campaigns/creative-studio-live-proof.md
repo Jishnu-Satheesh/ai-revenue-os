@@ -216,6 +216,19 @@ which exists to stop a regeneration being filed as a correction, could be walked
 around by arithmetic. The worker now measures before admitting, with the same
 decoder the compositor uses.
 
+**Proved in production after the fix.** Worker `v20260906.3`, a region at
+`x 950, y 100, 100 × 100` — comfortably inside the 1080×1080 the row declares,
+and off the right-hand edge of the 1024×1024 that exists:
+
+```
+status:       refused
+refusalCode:  region_outside_plate
+detail:       Region 1 extends past the plate, which is 1024x1024.
+```
+
+The refusal names the size the bytes actually are. Before the fix the same
+request was admitted and silently clipped.
+
 **Existing rows are left alone.** Correcting a stored manifest changes its digest
 and therefore what an approval refers to. That is a decision with approval
 consequences, not a repair to make in passing.

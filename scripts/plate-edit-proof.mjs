@@ -64,12 +64,14 @@ if (plate.bundle_version_id !== bundleVersionId) {
 }
 
 // A modest region in the upper-left quadrant: big enough to be admitted, small
-// enough that the coverage ceiling is nowhere near.
+// enough that the coverage ceiling is nowhere near. Overridable, because the
+// interesting case is a region that fits the size the row declares and not the
+// size the bytes actually are.
 const bounds = {
-  xPx: Math.round(plate.width_px * 0.08),
-  yPx: Math.round(plate.height_px * 0.08),
-  widthPx: Math.round(plate.width_px * 0.28),
-  heightPx: Math.round(plate.height_px * 0.28),
+  xPx: Number(arg("x", Math.round(plate.width_px * 0.08))),
+  yPx: Number(arg("y", Math.round(plate.height_px * 0.08))),
+  widthPx: Number(arg("w", Math.round(plate.width_px * 0.28))),
+  heightPx: Number(arg("h", Math.round(plate.height_px * 0.28))),
 };
 
 console.log(`editing ${parentPlateAssetId} (${plate.width_px}x${plate.height_px})`);
