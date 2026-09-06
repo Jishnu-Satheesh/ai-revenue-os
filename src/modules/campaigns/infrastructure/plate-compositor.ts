@@ -177,3 +177,26 @@ function pixelsOf(
   context.drawImage(image, 0, 0);
   return context.getImageData(0, 0, widthPx, heightPx).data;
 }
+
+/**
+ * The real pixel size of an image, decoded.
+ *
+ * Beside the compositor deliberately: it is the same decoder, so the size this
+ * reports is exactly the size the composite will work in. Measuring somewhere
+ * else with something else would reintroduce the disagreement it exists to
+ * close.
+ *
+ * Returns `null` for bytes that will not decode, which the caller treats as an
+ * unreadable plate rather than as a zero-sized one.
+ */
+export async function measureImage(
+  bytes: Uint8Array,
+): Promise<{ widthPx: number; heightPx: number } | null> {
+  try {
+    const image = await loadImage(Buffer.from(bytes));
+    if (image.width <= 0 || image.height <= 0) return null;
+    return { widthPx: image.width, heightPx: image.height };
+  } catch {
+    return null;
+  }
+}

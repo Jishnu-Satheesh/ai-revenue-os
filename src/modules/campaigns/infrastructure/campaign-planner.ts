@@ -453,8 +453,13 @@ export function createCampaignPlanner(
         uploads.push({
           assetId: asset.id,
           storagePath: path,
-          // The hash of what was stored, not what the model said it made.
+          // What was stored, not what the model said it made. Intake decoded
+          // and re-encoded the bytes, so it is the only party here that knows
+          // the real size and type.
           contentHash: ingested.contentHash,
+          widthPx: ingested.widthPx,
+          heightPx: ingested.heightPx,
+          mimeType: ingested.mimeType,
           modelId: generated.image.modelId,
           promptVersionId: CAMPAIGN_IMAGE_PROMPT_VERSION,
         });

@@ -47,6 +47,15 @@ export type AnnotationCanvasProps = {
 
 export function AnnotationCanvas(props: AnnotationCanvasProps) {
   const surface = useRef<HTMLDivElement | null>(null);
+  /**
+   * The size the browser decoded, which is the size the worker will composite
+   * in. `campaign_assets` records a size too, and it has not always been a
+   * measurement -- generated assets declared 1080x1080 for bytes that are
+   * 1024x1024 -- so scaling by the row would hand the worker regions in a
+   * coordinate space the image does not have. The row is the fallback for the
+   * moment before the picture loads, not the authority.
+   */
+  const [natural, setNatural] = useState<{ widthPx: number; heightPx: number } | null>(null);
   const [regions, setRegions] = useState<Region[]>([]);
   const [drawing, setDrawing] = useState<{ xPct: number; yPct: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -103,6 +112,9 @@ export function AnnotationCanvas(props: AnnotationCanvasProps) {
     );
   }
 
+  const plateWidthPx = natural?.widthPx ?? props.plate.widthPx;
+  const plateHeightPx = natural?.heightPx ?? props.plate.heightPx;
+
   async function submit() {
     if (regions.length === 0) return;
     if (regions.some((region) => region.instruction.trim() === "")) {
@@ -126,10 +138,10 @@ export function AnnotationCanvas(props: AnnotationCanvasProps) {
               // Back to the plate's own pixels. The mask is rasterised from
               // these, so a browser-sized number here would move the mask.
               bounds: {
-                xPx: Math.round(region.xPct * props.plate.widthPx),
-                yPx: Math.round(region.yPct * props.plate.heightPx),
-                widthPx: Math.max(1, Math.round(region.widthPct * props.plate.widthPx)),
-                heightPx: Math.max(1, Math.round(region.heightPct * props.plate.heightPx)),
+                xPx: Math.round(region.xPct * plateWidthPx),
+                yPx: Math.round(region.yPct * plateHeightPx),
+                widthPx: Math.max(1, Math.round(region.widthPct * plateWidthPx)),
+                heightPx: Math.max(1, Math.round(region.heightPct * plateHeightPx)),
               },
               instruction: region.instruction.trim(),
             })),
@@ -185,6 +197,12 @@ export function AnnotationCanvas(props: AnnotationCanvasProps) {
             height={props.plate.heightPx}
             className="pointer-events-none h-auto w-full"
             unoptimized
+            onLoad={(event) => {
+              const img = event.currentTarget;
+              if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                setNatural({ widthPx: img.naturalWidth, heightPx: img.naturalHeight });
+              }
+            }}
           />
         ) : (
           <div className="flex aspect-square items-center justify-center p-6 text-center text-sm text-muted-foreground">

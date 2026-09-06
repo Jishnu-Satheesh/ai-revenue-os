@@ -15,7 +15,10 @@ import {
 } from "@/workflows/campaigns/contracts";
 import { renderCampaignPoster } from "@/workflows/campaigns/render-poster";
 import { editCampaignPlate } from "@/workflows/campaigns/edit-plate";
-import { compositeMaskedEdit } from "@/modules/campaigns/infrastructure/plate-compositor";
+import {
+  compositeMaskedEdit,
+  measureImage,
+} from "@/modules/campaigns/infrastructure/plate-compositor";
 import { buildPlateEditPrompt } from "@/modules/campaigns/infrastructure/plate-edit-prompt";
 import { createPlateEditContextLoader } from "@/modules/campaigns/infrastructure/plate-edit-context-reader";
 import { createGeminiPlateEditPlanner } from "@/modules/campaigns/infrastructure/plate-edit-planner";
@@ -522,6 +525,9 @@ export const editCampaignPlateTask = schemaTask({
           createVariantContextLoader(supabase as never),
         ),
         plates: createSupabaseCampaignObjectReader(supabase),
+        // The same decoder the compositor uses, so admission and composite
+        // measure the same picture.
+        measure: measureImage,
         planner: createGeminiPlateEditPlanner(),
         composite: compositeMaskedEdit,
         plateStorage: createSupabaseCampaignAssetStorage(supabase),

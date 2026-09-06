@@ -110,6 +110,15 @@ export type PlateEditUploader = {
 export type EditPlateDependencies = {
   context: PlateEditContextReader;
   plates: { read(storagePath: string): Promise<Uint8Array | null> };
+  /**
+   * The real pixel size of the bytes, decoded.
+   *
+   * Injected rather than imported: decoding is a native-module concern and a
+   * workflow takes its infrastructure as dependencies. It exists at all because
+   * `campaign_assets` records a size that has not always been a measurement --
+   * see the admission below.
+   */
+  measure: (bytes: Uint8Array) => Promise<{ widthPx: number; heightPx: number } | null>;
   planner: PlateEditPlanner;
   composite: (request: MaskedEditRequest) => Promise<MaskedEditResult>;
   /**
@@ -179,11 +188,43 @@ export async function editCampaignPlate(
   });
   if (context === null) return { status: "skipped", reason: "context_unavailable" };
 
-  // Admitted against the plate's real size, before a model is paid anything.
+  // Read before admitting, so the admission measures the picture it is about
+  // to change. Reading an object is not what makes an edit expensive -- the
+  // model call below is -- so nothing about "refuse before paying" is lost.
+  const parent = await dependencies.plates.read(context.parentStoragePath);
+  if (parent === null) return { status: "skipped", reason: "plate_unavailable" };
+
+  const measured = await dependencies.measure(parent);
+  if (measured === null) return { status: "skipped", reason: "plate_unavailable" };
+
+  /**
+   * The bytes decide, not the row.
+   *
+   * `campaign_assets.width_px` was, until the generation path was corrected, a
+   * model's claim rather than a measurement: every generated asset on staging
+   * declared 1080x1080 or 1080x1350 for images that are 1024x1024. Admitting
+   * against a size the compositor does not use lets a region be accepted that
+   * is partly off the real image, and records a coverage ratio computed over a
+   * different area than the ceiling was checked against -- so `union_too_large`,
+   * which exists to stop a regeneration being filed as a correction, could be
+   * walked around by arithmetic.
+   *
+   * A disagreement is worth seeing rather than swallowing, but it is not worth
+   * refusing an edit over: the edit operates on the bytes, and the bytes are
+   * what was measured.
+   */
+  if (measured.widthPx !== context.parentWidthPx || measured.heightPx !== context.parentHeightPx) {
+    logger.warn("campaign.plate_dimensions_disagree", {
+      organizationId: payload.organizationId,
+      campaignId: payload.campaignId,
+      correlationId: payload.correlationId,
+    });
+  }
+
   const admission = admitPlateEdit({
     annotations: payload.annotations,
-    plateWidthPx: context.parentWidthPx,
-    plateHeightPx: context.parentHeightPx,
+    plateWidthPx: measured.widthPx,
+    plateHeightPx: measured.heightPx,
   });
 
   if (!admission.admitted) {
@@ -194,22 +235,19 @@ export async function editCampaignPlate(
     };
   }
 
-  const parent = await dependencies.plates.read(context.parentStoragePath);
-  if (parent === null) return { status: "skipped", reason: "plate_unavailable" };
-
   if (dependencies.isCancelled()) return { status: "skipped", reason: "cancelled" };
 
   const drawn = await dependencies.planner.draw({
     prompt: buildPrompt({
       annotations: payload.annotations,
       negativeRules: context.negativeRules,
-      plateWidthPx: context.parentWidthPx,
-      plateHeightPx: context.parentHeightPx,
+      plateWidthPx: measured.widthPx,
+      plateHeightPx: measured.heightPx,
     }),
     parent,
     parentMimeType: context.parentMimeType,
-    widthPx: context.parentWidthPx,
-    heightPx: context.parentHeightPx,
+    widthPx: measured.widthPx,
+    heightPx: measured.heightPx,
     signal,
   });
 

@@ -34,6 +34,13 @@ import { dispatchPlateEdit } from "@/modules/campaigns/infrastructure/poster-dis
  * The regions are admitted here as well as in the worker. Not belt and braces:
  * refusing an unusable region in the request lets the operator fix it while
  * they are still looking at the canvas, instead of finding a refused row later.
+ *
+ * This check reads the size `campaign_assets` records, which is a declaration
+ * rather than a measurement -- the worker decodes the bytes and admits again
+ * against what it finds. So this one is advisory and the worker is
+ * authoritative, which is the safe direction: an over-large declared size can
+ * let a bad region through to a worker that refuses it, where an under-large
+ * one would reject a region that is genuinely inside the picture.
  */
 export async function POST(
   request: Request,

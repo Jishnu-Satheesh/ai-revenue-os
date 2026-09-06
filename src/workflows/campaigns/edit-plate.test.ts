@@ -72,6 +72,7 @@ function dependencies(overrides: Partial<EditPlateDependencies> = {}) {
   const base: EditPlateDependencies = {
     context: { read: async () => context() },
     plates: { read: async () => image("#8a5a2b") },
+    measure: async () => ({ widthPx: SIZE, heightPx: SIZE }),
     planner: {
       async draw(input) {
         prompts.push(input.prompt);
@@ -235,6 +236,43 @@ describe("editCampaignPlate", () => {
     if (result.status !== "refused") return;
     expect(result.refusalCode).toBe("region_outside_plate");
     expect(called).toBe(false);
+  });
+
+  /**
+   * The admission and the composite must measure the same picture.
+   *
+   * `campaign_assets` records a size, and until the generation path was fixed
+   * that size was a model's claim rather than a measurement -- every asset on
+   * staging declared 1080x1080 for bytes that are 1024x1024. Admitting against
+   * the declared size while compositing against the real one lets a region be
+   * accepted that is partly off the actual image, and records a coverage ratio
+   * computed over a different area than the one the ceiling was checked
+   * against. The bytes are what gets edited, so the bytes decide.
+   */
+  it("admits regions against the real image, not the size the row claims", async () => {
+    const deps = dependencies({
+      context: {
+        read: async () => context({ parentWidthPx: SIZE + 60, parentHeightPx: SIZE + 60 }),
+      },
+    });
+
+    // Inside a 260px plate as the row claims, outside the 200px one that exists.
+    const result = await run(
+      {
+        annotations: [
+          {
+            ordinal: 1,
+            bounds: { xPx: 150, yPx: 150, widthPx: 100, heightPx: 100 },
+            instruction: "Change this.",
+          },
+        ],
+      },
+      deps,
+    );
+
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusalCode).toBe("region_outside_plate");
   });
 
   it("refuses an edit that covers most of the plate, without calling the model", async () => {
