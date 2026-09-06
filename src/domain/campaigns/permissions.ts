@@ -19,6 +19,17 @@ export const campaignPermissions = [
   "campaign.approve",
   "campaign.schedule",
   "campaign.cancel",
+  /**
+   * Rendering an approved version as a poster. Named the same as the row in
+   * the account permission catalogue and granted to the same three roles, so
+   * this map and that one answer identically -- the property the variants
+   * route relies on for `campaign.edit`, kept rather than quietly broken by a
+   * fourth spelling.
+   *
+   * A viewer does not hold it. Reading a rendered poster is `campaign.read`;
+   * producing one spends a model call and adds a row nobody can delete.
+   */
+  "poster.render",
 ] as const;
 
 export type CampaignPermission = (typeof campaignPermissions)[number];

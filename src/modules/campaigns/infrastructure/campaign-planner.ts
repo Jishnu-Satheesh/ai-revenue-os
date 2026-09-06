@@ -495,27 +495,33 @@ export function createRevisionPlanner(
 }
 
 /** Supabase Storage, narrowed to the one operation the planner performs. */
-export function createSupabaseCampaignAssetStorage(client: {
-  storage: {
-    from(bucket: string): {
-      upload(
-        path: string,
-        body: Buffer,
-        options: { contentType: string; upsert: boolean },
-      ): Promise<{ error: { message?: string } | null }>;
+export function createSupabaseCampaignAssetStorage(
+  client: {
+    storage: {
+      from(bucket: string): {
+        upload(
+          path: string,
+          body: Buffer,
+          options: { contentType: string; upsert: boolean },
+        ): Promise<{ error: { message?: string } | null }>;
+      };
     };
-  };
-}): CampaignAssetStorage {
+  },
+  /**
+   * Which bucket the bytes land in. Defaults to the campaign asset bucket;
+   * plate-edit masks go to `campaign-masks`, which has its own policies and is
+   * never served as creative.
+   */
+  bucket: "campaign-assets" | "campaign-masks" = "campaign-assets",
+): CampaignAssetStorage {
   return {
     async upload(input) {
-      const { error } = await client.storage
-        .from("campaign-assets")
-        .upload(input.path, input.bytes, {
-          contentType: input.contentType,
-          // A retried attempt rewrites its own object rather than failing on a
-          // path it already created.
-          upsert: true,
-        });
+      const { error } = await client.storage.from(bucket).upload(input.path, input.bytes, {
+        contentType: input.contentType,
+        // A retried attempt rewrites its own object rather than failing on a
+        // path it already created.
+        upsert: true,
+      });
       // The provider message is not surfaced: storage errors can echo the path,
       // which carries tenant and campaign identifiers.
       return error ? { ok: false, reason: "upload_failed" } : { ok: true };

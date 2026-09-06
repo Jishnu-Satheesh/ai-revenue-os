@@ -80,7 +80,13 @@ function dependencies(overrides: Partial<EditPlateDependencies> = {}) {
       },
     },
     composite: compositeMaskedEdit,
-    storage: {
+    plateStorage: {
+      async upload(input) {
+        uploaded.push(input.path);
+        return { ok: true };
+      },
+    },
+    maskStorage: {
       async upload(input) {
         uploaded.push(input.path);
         return { ok: true };
@@ -158,9 +164,40 @@ describe("editCampaignPlate", () => {
     expect(deps.uploaded.some((path) => path.includes("/mask-"))).toBe(true);
   });
 
+  /**
+   * The mask says which pixels a model was allowed to touch. It is provenance,
+   * not creative, and putting it in the bucket the platform publishes from
+   * would make an internal artefact reachable as campaign artwork.
+   */
+  it("puts the plate and the mask in different stores", async () => {
+    const plates: string[] = [];
+    const masks: string[] = [];
+    const deps = dependencies({
+      plateStorage: {
+        async upload(input) {
+          plates.push(input.path);
+          return { ok: true };
+        },
+      },
+      maskStorage: {
+        async upload(input) {
+          masks.push(input.path);
+          return { ok: true };
+        },
+      },
+    });
+
+    await run({}, deps);
+
+    expect(plates).toHaveLength(1);
+    expect(masks).toHaveLength(1);
+    expect(plates[0]).toContain("/plate-");
+    expect(masks[0]).toContain("/mask-");
+  });
+
   it("records nothing when the edited plate could not be stored", async () => {
     const deps = dependencies({
-      storage: { upload: async () => ({ ok: false, reason: "upload_failed" }) },
+      plateStorage: { upload: async () => ({ ok: false, reason: "upload_failed" }) },
     });
 
     const result = await run({}, deps);

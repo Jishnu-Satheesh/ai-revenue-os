@@ -42,6 +42,11 @@ type LogContext = {
    * single character of what was drawn on it.
    */
   renderDigest?: string;
+  /**
+   * A poster template from the shared catalogue, such as `core_feed_headline`.
+   * A registry key chosen by a migration, never a tenant's own text.
+   */
+  templateKey?: string;
   /** A canonical YYYY-MM analysis selection. Opaque calendar label. */
   month?: string;
   /** Inclusive local-date window bounds. Opaque calendar labels, like month. */

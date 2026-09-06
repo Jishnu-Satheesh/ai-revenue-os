@@ -99,18 +99,29 @@ export type EditedVersionWriter = {
   }): Promise<{ bundleVersionId: string; assetId: string } | null>;
 };
 
+export type PlateEditUploader = {
+  upload(input: {
+    path: string;
+    bytes: Uint8Array;
+    contentType: string;
+  }): Promise<{ ok: true } | { ok: false; reason: string }>;
+};
+
 export type EditPlateDependencies = {
   context: PlateEditContextReader;
   plates: { read(storagePath: string): Promise<Uint8Array | null> };
   planner: PlateEditPlanner;
   composite: (request: MaskedEditRequest) => Promise<MaskedEditResult>;
-  storage: {
-    upload(input: {
-      path: string;
-      bytes: Uint8Array;
-      contentType: string;
-    }): Promise<{ ok: true } | { ok: false; reason: string }>;
-  };
+  /**
+   * Two buckets, deliberately. The edited plate is creative and belongs beside
+   * every other campaign asset; the union mask is provenance -- it says which
+   * pixels a model was allowed to touch -- and belongs in `campaign-masks`,
+   * which has its own policies and is never served as creative. One storage for
+   * both would put an internal artefact in the bucket the platform publishes
+   * from.
+   */
+  plateStorage: PlateEditUploader;
+  maskStorage: PlateEditUploader;
   versions: EditedVersionWriter;
   edits: PlateEditStore;
   isCancelled: () => boolean;
@@ -233,14 +244,14 @@ export async function editCampaignPlate(
   });
 
   // Both objects exist before any row points at either of them.
-  const storedPlate = await dependencies.storage.upload({
+  const storedPlate = await dependencies.plateStorage.upload({
     path: platePath,
     bytes: composited.png,
     contentType: "image/png",
   });
   if (!storedPlate.ok) return { status: "skipped", reason: "upload_failed" };
 
-  const storedMask = await dependencies.storage.upload({
+  const storedMask = await dependencies.maskStorage.upload({
     path: maskPath,
     bytes: composited.maskPng,
     contentType: "image/png",

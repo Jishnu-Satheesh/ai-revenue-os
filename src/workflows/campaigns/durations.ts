@@ -71,3 +71,16 @@ export const CAMPAIGN_DURATION_PAIRS = [
  * digest and the database replays the row it already has.
  */
 export const RENDER_POSTER_MAX_DURATION_SECONDS = 300;
+
+/**
+ * An edit calls an image model once and composites the answer, so unlike a
+ * render it waits on a provider. The planner's own timeout is two minutes; this
+ * ceiling has to sit above it with room for the object reads, the composite and
+ * the successor version write, or the task dies while the model is still
+ * answering and the operator sees a failure that was really a deadline.
+ *
+ * Like a render it holds no lease and has no entry in `CAMPAIGN_DURATION_PAIRS`.
+ * There is no run row to claim: the database enforces one edit per idempotency
+ * key per organization, and a duplicate delivery replays that row.
+ */
+export const EDIT_PLATE_MAX_DURATION_SECONDS = 600;

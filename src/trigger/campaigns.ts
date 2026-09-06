@@ -5,6 +5,7 @@ import { env } from "@/lib/env";
 import { createCampaignWorkerServiceClient } from "@/lib/supabase/service";
 import {
   campaignGenerationPayloadSchema,
+  campaignPlateEditPayloadSchema,
   campaignPosterRenderPayloadSchema,
   campaignRevisionPayloadSchema,
   campaignVariantPayloadSchema,
@@ -13,6 +14,13 @@ import {
   parseCampaignVariantPayload,
 } from "@/workflows/campaigns/contracts";
 import { renderCampaignPoster } from "@/workflows/campaigns/render-poster";
+import { editCampaignPlate } from "@/workflows/campaigns/edit-plate";
+import { compositeMaskedEdit } from "@/modules/campaigns/infrastructure/plate-compositor";
+import { buildPlateEditPrompt } from "@/modules/campaigns/infrastructure/plate-edit-prompt";
+import { createPlateEditContextLoader } from "@/modules/campaigns/infrastructure/plate-edit-context-reader";
+import { createGeminiPlateEditPlanner } from "@/modules/campaigns/infrastructure/plate-edit-planner";
+import { createPlateEditStore } from "@/modules/campaigns/infrastructure/plate-edit-repository";
+import { createEditedVersionWriter } from "@/modules/campaigns/infrastructure/edited-version-writer";
 import {
   createPosterRenderContextLoader,
   createSupabaseCampaignObjectReader,
@@ -26,6 +34,7 @@ import {
 import {
   GENERATE_BUNDLE_MAX_DURATION_SECONDS,
   GENERATE_VARIANTS_MAX_DURATION_SECONDS,
+  EDIT_PLATE_MAX_DURATION_SECONDS,
   RENDER_POSTER_MAX_DURATION_SECONDS,
   REVISE_BUNDLE_MAX_DURATION_SECONDS,
 } from "@/workflows/campaigns/durations";
@@ -479,6 +488,66 @@ export const renderCampaignPosterTask = schemaTask({
         ? { renderDigest: result.renderDigest, replayed: result.replayed }
         : { reason: result.reason }),
       ...(result.status === "refused" ? { refusalCode: result.refusalCode } : {}),
+    });
+
+    return result;
+  },
+});
+
+/**
+ * Editing a plate calls an image model, so it runs on its own queue rather than
+ * sharing the render queue. A batch of edits must not make a render -- which is
+ * CPU only and takes under a second -- wait behind a provider.
+ */
+export const campaignPlateEditQueue = queue({
+  name: "campaign-plate-edit",
+  concurrencyLimit: 2,
+});
+
+export const editCampaignPlateTask = schemaTask({
+  id: "campaign.edit-plate",
+  schema: campaignPlateEditPayloadSchema,
+  queue: campaignPlateEditQueue,
+  retry,
+  maxDuration: EDIT_PLATE_MAX_DURATION_SECONDS,
+  run: async (payload, { signal }) => {
+    // Parsed by the schema above before a service-role client is constructed.
+    const supabase = createCampaignWorkerServiceClient();
+
+    const result = await editCampaignPlate(
+      payload,
+      {
+        context: createPlateEditContextLoader(
+          supabase as never,
+          createVariantContextLoader(supabase as never),
+        ),
+        plates: createSupabaseCampaignObjectReader(supabase),
+        planner: createGeminiPlateEditPlanner(),
+        composite: compositeMaskedEdit,
+        plateStorage: createSupabaseCampaignAssetStorage(supabase),
+        // Provenance, not creative. Its own bucket, its own policies.
+        maskStorage: createSupabaseCampaignAssetStorage(supabase, "campaign-masks"),
+        versions: createEditedVersionWriter(
+          supabase as never,
+          createCampaignVersionWriter(supabase as unknown as CampaignPersistence),
+        ),
+        edits: createPlateEditStore(supabase as never),
+        isCancelled: () => signal.aborted,
+      },
+      buildPlateEditPrompt,
+      signal,
+    );
+
+    logger.info("campaign.plate_edit_finished", {
+      organizationId: payload.organizationId,
+      campaignId: payload.campaignId,
+      correlationId: payload.correlationId,
+      status: result.status,
+      ...(result.status === "edited"
+        ? { replayed: result.replayed, invalidatedApproval: result.invalidatedApproval }
+        : {}),
+      ...(result.status === "refused" ? { refusalCode: result.refusalCode } : {}),
+      ...(result.status === "skipped" ? { reason: result.reason } : {}),
     });
 
     return result;
