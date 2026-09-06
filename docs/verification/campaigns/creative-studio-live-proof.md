@@ -158,7 +158,71 @@ All four were found by looking, not by reasoning, and all four are fixed.
 
 ---
 
-## 5. What is still open
+## 5. The plate editor, exercised for real
+
+`campaign.edit-plate` was registered but never dispatched. It has been now, on
+organization `9f566f3d-61bd-497f-b77e-76a74f9d07c1`, against the plate of bundle
+version `d5946300-3dbe-4190-9021-eb85ab98b263`.
+
+- Region marked: `x 86, y 86, 302 × 302`
+- Instruction: "Make this area of the background a little darker."
+- Model: `gemini-3.1-flash-image`
+- Successor version `bcfc9710-ca2f-4932-9a2c-a664a147e336`, **v2**, parent
+  `d5946300…`, new digest `4af19a8f…`
+- Child asset `4d819945-435f-44ba-a9d3-4b68fb3389fa`, written by
+  `create_campaign_bundle_version` and read back by row id, as the edit's
+  foreign key requires
+- Mask stored in `campaign-masks`, edited plate in `campaign-assets`
+
+**The guarantee, measured on the real output rather than asserted.** Comparing
+the stored parent to the stored child, excluding a 24px band around the mark to
+allow for inward feathering:
+
+```
+pixels checked well outside the mark:  926,076
+differing outside:                           0
+differing inside the mark:      90,755 of 91,204
+```
+
+Not one pixel outside the operator's box moved, while 99.5% inside it changed.
+That is the compositor doing what the unit tests claim, against a real model
+rather than a stub. Files: `plate-edit-edited.png`, `plate-edit-union.png`.
+
+---
+
+## 6. A defect this edit uncovered
+
+The child asset came back **1024×1024** while `campaign_assets` declared the
+parent **1080×1080**. Measuring every asset on staging: **14 of 15 disagree with
+their own bytes.** The pilot organization's story assets declare 1080×1350 for
+images that are 1024×1024 — not merely the wrong scale but the wrong shape.
+
+The cause is in the generation path, not the Studio. A model writes `widthPx`
+and `heightPx` into the manifest it proposes, and those are a claim; intake
+decodes the bytes and knows the truth. `generate-bundle` already reconciled the
+manifest against storage for the content hash — its comment reads "a manifest
+whose hash disagrees with what is in storage would produce a digest that
+describes nothing" — and the same argument applies to the size and the type,
+which were missed. They are reconciled now.
+
+It matters because the dimensions are inside the digest an approval binds to. An
+approved manifest was describing an image nobody stored.
+
+For editing specifically, admission ran against the declared size while the
+compositor works on decoded bytes. Two sizes for one picture let a region be
+admitted that is partly off the real image, and recorded a coverage ratio
+computed over a different area than the ceiling checked — so `union_too_large`,
+which exists to stop a regeneration being filed as a correction, could be walked
+around by arithmetic. The worker now measures before admitting, with the same
+decoder the compositor uses.
+
+**Existing rows are left alone.** Correcting a stored manifest changes its digest
+and therefore what an approval refers to. That is a decision with approval
+consequences, not a repair to make in passing.
+
+---
+
+## 7. What is still open
 
 - **The Malayalam and Arabic posters need their readers.** Section 1 records the
   exact strings beside the images so the judgement is reviewable rather than
@@ -170,7 +234,8 @@ All four were found by looking, not by reasoning, and all four are fixed.
 - **Bilingual copy cannot render in a single-script poster.** Proven above, by
   refusal. Lifting it needs per-run font selection — a change to how text is
   drawn, not to how it is checked.
-- **`campaign.edit-plate` has not been exercised end to end.** It is registered
-  and live in production, and its adapters are wired, but no real edit has been
-  dispatched. The compositor guarantee is proved by test against a hijacked
-  model; the provider round trip is not yet proved against the real one.
+- **Fourteen stored assets still declare a size their bytes do not have.**
+  Generation is fixed, so new versions are correct. Whether to correct the
+  existing manifests is a decision with approval consequences — every corrected
+  manifest gets a new digest, and any approval against the old one stops
+  applying.

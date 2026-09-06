@@ -1,0 +1,69 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "title": "Overview \u2014 desktop",
+      "x": 0,
+      "y": 0,
+      "w": 1200,
+      "h": 3450
+    },
+    {
+      "file": "Mobile.dc.html",
+      "title": "Overview \u2014 phone",
+      "x": 1320,
+      "y": 0,
+      "w": 390,
+      "h": 6620
+    },
+    {
+      "file": "FirstWeek.dc.html",
+      "title": "Overview \u2014 first week, nothing recorded yet",
+      "x": 1830,
+      "y": 0,
+      "w": 1200,
+      "h": 2430
+    },
+    {
+      "file": "VerdictStates.dc.html",
+      "title": "The headline in all three honest states",
+      "x": 1830,
+      "y": 2550,
+      "w": 1200,
+      "h": 1420
+    }
+  ],
+  "annotations": [
+    {
+      "id": "note-language",
+      "x": -340,
+      "y": 0,
+      "w": 280,
+      "text": "SAME LANGUAGE AS THE CHANNEL WORKSPACE\n\nThis is not a card grid any more. It is the workspace's own report anatomy, chapter for chapter:\n\n\u2022 Full-bleed verdict band, then the Potential / Lost / Earned scale \u2014 224px box, 160px track, 2px bar tops, slate-200 base, emerald-500 for what is proven.\n\n\u2022 A run-status strip stating exactly what is on screen.\n\n\u2022 A flat chapter map, not a sticky tracker.\n\n\u2022 Each chapter: an 8-column card (11px uppercase title at 0.18em, state chip) beside a 4-column rail carrying one big mono figure, one calm sentence, the emerald advice box, and one way into the evidence.\n\n\u2022 The awaiting shelf and the dl footer close it, as they do there."
+    },
+    {
+      "id": "note-web",
+      "x": -340,
+      "y": 620,
+      "w": 280,
+      "text": "WHAT CAME FROM ELSEWHERE\n\nThree moves borrowed from good product overviews (Stripe, Linear, Mercury) that the workspace does not have yet:\n\n\u2022 A period comparison on the headline figure \u2014 +8.2% against the previous thirty days, with the prior figure named so it can be checked.\n\n\u2022 A busiest-day callout pinned to the actual peak, so the chart answers a question rather than just existing.\n\n\u2022 A last-updated stamp in the status strip.\n\nEverything else is the app's own vocabulary. No new colours, no new radii, no new type sizes."
+    },
+    {
+      "id": "note-range",
+      "x": -340,
+      "y": 1180,
+      "w": 280,
+      "text": "THE RANGE IS THE POINT\n\nThe old page said \"indicative margin upper bound\". A client heard nothing.\n\nThe headline now says: you kept AT LEAST X, and the truth is between X and Y. Same governance rule, said in money.\n\nThe dashed outline on the Kept bar is that ceiling drawn to scale, so the unproven part has a size.\n\nThree states, bottom right."
+    },
+    {
+      "id": "note-cut",
+      "x": -340,
+      "y": 1620,
+      "w": 280,
+      "text": "WHAT WAS CUT\n\n\u2022 Strategic Briefing \u2014 it restated the numbers below. Now it is the headline sentence and the rails.\n\n\u2022 Integration Health card \u2014 a broken connection is chapter 01; a working one is a line in chapter 05.\n\n\u2022 Digital Twin data dump and Organization Management \u2014 configuration is not an overview. Footer links.\n\n\u2022 Campaign ideas from demo fixtures \u2014 now on the awaiting shelf, naming what each one waits on."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

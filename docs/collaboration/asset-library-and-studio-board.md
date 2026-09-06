@@ -4839,3 +4839,83 @@ byte-identical output. Recorded with the exact strings in
 scrim question is still open — text is drawn with no backing, which reads badly on a pale
 plate. And `campaign.edit-plate` has never been dispatched for real: registered, wired, and
 proved against a hijacked model in test, but the Gemini round trip is unexercised.
+
+## 2026-09-06 — ADR 0046's admission path is only half-built
+
+The Mar-2026 package (`ae99b309`) was dispatched to `report-package.project` with the
+admission's own contract and projection versions. The worker answered **`not_ready`**, and the
+reason is a third defect, deeper than the rollout flag:
+
+`claim_governed_report_package_projection` compares
+`package_row.schema_fingerprint <> projection_binding.schema_fingerprint` **unconditionally**.
+
+That is exactly the comparison ADR 0046 exists to relax. When
+`20260902176000_admit_package_on_standing_admission.sql` taught the *validation* claim about
+admissions, it deliberately scoped both schema-fingerprint comparisons to the per-package path
+(`admission_row.id is null and ...`) and asserted `structure_fingerprint` plus
+`declared_currency` against the admission in their place — the migration says why in its own
+header: *"a provider renaming a worksheet is the entire reason this path exists."*
+
+**The projection claim never got that carve-out.** It contains no reference to admissions at
+all. Confirmed by evaluating every guard against staging:
+
+- package `schema_fingerprint`  `b69c1793…`
+- binding `schema_fingerprint`  `b7b73bea…`  ← the only guard that fails
+- contract binding id, currency, validation run, binding row: all match
+
+So an admitted upload validates cleanly, advances to `awaiting_projection`, and then **can never
+be projected by anything** — not the worker, and not the operator's "Request projection" button
+either, because the human request RPC moves the package but the claim still refuses it. The
+package strands permanently.
+
+This is the real answer to "why is it still waiting if the structure is known". The flag drift
+explained why the *dispatch* never fired; this explains why firing it by hand does not help.
+
+**Not fixed here.** Repairing it means forward-replacing a `security definer` claim RPC on shared
+staging — Tier 3 under AGENTS.md, so it needs an Execution Plan and approval first, not a patch
+written in the same afternoon it was found. The shape it should take is not in doubt: mirror the
+validation claim exactly, because those two functions must never disagree about what "matching"
+means.
+
+### 2026-09-06 · claude · the operator may approve, and every asset's size was a lie
+
+- **`campaign.approve` resolved by the product owner: an operator may approve.**
+  The account catalogue was the odd map out and the one nothing enforced — the
+  campaigns map and `approve_campaign_bundle` had both admitted an operator all
+  along. Migration `20260906090000` brings the catalogue into line and is applied to
+  staging; `permission_catalogue_test.sql` passes 28/28 against it. `campaign.publish`,
+  `budget.modify` and `policy.update` stay above the operator line, with tests on both
+  sides saying so. Two things the suites caught: `campaign.approve` ended up in both the
+  operator and admin bundles (admin inherits it now), and the pgTAP suite had been using
+  `campaign.approve` as its example of a permission that stops at the operator — an
+  example that is no longer above the line stops testing that the line exists, so it
+  points at `campaign.publish`.
+
+- **`campaign.edit-plate` dispatched for real.** Successor version written, child asset
+  read back by row id, mask in `campaign-masks`. The composite guarantee measured on the
+  real output rather than asserted: **926,076 pixels well outside the mark, zero differ**;
+  90,755 of 91,204 inside it changed. A real model, and not one pixel escaped the box.
+
+- **Every generated asset declares a size its bytes do not have.** Measured: 14 of 15 on
+  staging. Manifests state 1080x1080 and 1080x1350 for images that are all 1024x1024.
+  **The cause is in generation, not the Studio.** A model writes `widthPx`/`heightPx` into
+  the manifest it proposes; intake decodes the bytes and knew the truth and threw it away.
+  `generate-bundle` already reconciled `contentHash` against storage — "a manifest whose
+  hash disagrees with what is in storage would produce a digest that describes nothing" —
+  and the same argument applies to size and mime type, which were missed. Reconciled now.
+  This is inside the digest an approval binds to, so approved manifests have been
+  describing images nobody stored.
+
+- **The edit path's own version of it, which was mine.** `admitPlateEdit` ran against the
+  declared size while the compositor works on decoded bytes. A region could be admitted
+  that is partly off the real image, and the recorded coverage ratio was computed over a
+  different area than the ceiling was checked against — so `union_too_large` could be
+  walked around by arithmetic. The worker now reads and measures the plate before
+  admitting, using `measureImage` from the compositor module so admission and composite
+  share one decoder. Reading an object is not what makes an edit expensive, so nothing
+  about refusing before paying a model is lost. The annotation canvas had the same flaw a
+  layer up and now scales by the picture's decoded `naturalWidth`.
+
+- **Existing rows deliberately left alone.** Correcting a stored manifest changes its
+  digest and therefore what an approval refers to. Whoever picks this up: it is a backfill
+  with approval consequences, not a repair to slip into another change.

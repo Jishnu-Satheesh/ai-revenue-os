@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+  <style>
+    /* Tokens lifted verbatim from src/app/globals.css and tailwindcss/theme.css.
+       Nothing here is re-picked or rounded. */
+    :root {
+      --background: oklch(1 0 0);
+      --foreground: oklch(0.145 0 0);
+      --card: oklch(1 0 0);
+      --primary: oklch(0.508 0.118 165.612);
+      --primary-foreground: oklch(0.979 0.021 166.113);
+      --secondary: oklch(0.967 0.001 286.375);
+      --secondary-foreground: oklch(0.21 0.006 285.885);
+      --muted: oklch(0.97 0 0);
+      --muted-foreground: oklch(0.556 0 0);
+      --destructive: oklch(0.577 0.245 27.325);
+      --border: oklch(0.922 0 0);
+      --input: oklch(0.922 0 0);
+      --success: oklch(0.58 0.13 155);
+      --warning: oklch(0.72 0.14 80);
+      --danger: oklch(0.59 0.18 25);
+      --chart-1: oklch(0.845 0.143 164.978);
+      --chart-2: oklch(0.696 0.17 162.48);
+      --chart-3: oklch(0.596 0.145 163.225);
+      --chart-4: oklch(0.508 0.118 165.612);
+      --chart-5: oklch(0.432 0.095 166.913);
+      --emerald-50: oklch(97.9% 0.021 166.113);
+      --emerald-100: oklch(95% 0.052 163.051);
+      --emerald-200: oklch(90.5% 0.093 164.15);
+      --emerald-500: oklch(69.6% 0.17 162.48);
+      --emerald-600: oklch(59.6% 0.145 163.225);
+      --slate-200: oklch(92.9% 0.013 255.508);
+      --ring-hair: oklch(0.145 0 0 / 10%);
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: Manrope, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 20px;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { color: oklch(0.432 0.095 166.913); }
+    svg { display: block; }
+
+    /* Anatomy copied from the channel workspace and the channels register, so
+       this route reads as the same product rather than a cousin of it. */
+    .kicker { margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted-foreground); }
+    .card { border-radius: 14px; background: var(--card); box-shadow: 0 0 0 1px var(--ring-hair); display: flex; flex-direction: column; gap: 16px; padding: 16px 0; }
+    .card-pad { padding: 0 16px; }
+    .card-title { margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted-foreground); }
+    .card-desc { margin: 0; font-size: 12px; line-height: 17px; color: var(--muted-foreground); }
+    .chip { display: inline-flex; height: 20px; align-items: center; border-radius: 26px; padding: 0 8px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .chip-success { background: color-mix(in oklch, var(--success), transparent 88%); color: var(--success); }
+    .chip-warning { background: color-mix(in oklch, var(--warning), transparent 82%); color: var(--foreground); }
+    .chip-neutral { background: var(--muted); color: var(--muted-foreground); }
+    .chapter { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 24px; align-items: start; }
+    .rail { grid-column: span 4; display: flex; flex-direction: column; gap: 32px; }
+    .rail-figure { margin: 0; font-family: var(--mono); font-size: 36px; font-weight: 700; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; line-height: 1.05; }
+    .rail-reason { margin: 0; font-size: 15px; line-height: 24px; color: var(--muted-foreground); }
+    .rail-btn { display: inline-flex; height: 40px; width: 100%; align-items: center; justify-content: center; gap: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--background); font: inherit; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted-foreground); cursor: pointer; }
+    .advice { display: flex; flex-direction: column; gap: 20px; border-radius: 18px; border: 1px solid var(--emerald-100); background: color-mix(in oklch, var(--emerald-50), transparent 30%); padding: 24px; }
+    .navpill { display: block; white-space: nowrap; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+    .navpill:hover { background: var(--muted); color: var(--foreground); }
+    .split-track { display: flex; height: 32px; width: 100%; overflow: hidden; border-radius: 10px; background: var(--muted); }
+    .btn { display: inline-flex; height: 32px; align-items: center; gap: 6px; border-radius: 10px; padding: 0 12px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid transparent; }
+    .btn-primary { background: var(--primary); color: var(--primary-foreground); }
+    .btn-outline { border-color: var(--border); background: var(--background); color: var(--foreground); }
+    .btn-sm { height: 28px; font-size: 12.8px; border-radius: 8px; padding: 0 10px; }
+  </style>
+</helmet>
+
+<div style="display: flex; flex-direction: column; gap: 32px; padding: 40px 32px; max-width: 1200px; box-sizing: border-box">
+
+  <div style="display: flex; flex-direction: column; gap: 6px">
+    <p class="kicker">Reference</p>
+    <h1 style="margin: 0; font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.025em">The headline, in all three honest states</h1>
+    <p style="margin: 0; max-width: 76ch; font-size: 14px; line-height: 21px; color: var(--muted-foreground)">
+      The band at the top of the route always answers the same question — “how did I do?” — but it may only say as much as the evidence supports. These are the three things it can say. The scale beneath it is the channel workspace's own Potential / Lost / Earned anatomy, in this route's terms.
+    </p>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <span style="display: inline-flex; height: 22px; align-items: center; border-radius: 26px; padding: 0 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; background: color-mix(in oklch, var(--success), transparent 88%); color: var(--success)">A · EVERY DAY COSTED</span>
+      <p style="margin: 0; font-size: 13px; color: var(--muted-foreground)">One number, stated plainly. No hedging, because none is needed.</p>
+    </div>
+    <section style="border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--emerald-50), transparent 60%); padding: 36px 32px">
+      <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 32px; align-items: center">
+        <div style="grid-column: span 7; display: flex; flex-direction: column; gap: 18px; min-width: 0">
+          <div style="display: flex; align-items: center; gap: 10px"><span style="display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 9px; background: var(--emerald-100); color: var(--emerald-600)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><p class="kicker">Zaytoun Kitchens · last 30 days</p></div>
+          <p style="margin: 0; max-width: 24ch; font-size: 36px; line-height: 1.12; font-weight: 700; letter-spacing: -0.03em; text-wrap: pretty">You took in <span style="font-family: var(--mono); font-weight: 700; color: var(--emerald-600); font-variant-numeric: tabular-nums; white-space: nowrap">AED 435,550</span> and kept <span style="font-family: var(--mono); font-weight: 700; color: var(--emerald-600); font-variant-numeric: tabular-nums; white-space: nowrap">AED 118,940</span> of it.</p>
+          
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="display: inline-flex; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card); padding: 5px 12px; font-size: 11px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 9999px; background: var(--success)"></span>All 30 days fully costed</span></div>
+        </div>
+        <div style="grid-column: span 5; min-width: 0"><div role="img" aria-label="Sales AED 435,550; costs AED 316,610; kept AED 118,940." style="position: relative; display: flex; height: 224px; width: 100%; align-items: flex-end; gap: 12px; padding: 0 24px 16px; box-sizing: border-box"><span aria-hidden="true" style="position: absolute; bottom: 32px; left: 0; right: 0; height: 1px; background: var(--border)"></span><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--foreground)">AED 435,550</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 100%; border-radius: 2px 2px 0 0; background: var(--slate-200)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Sales</span></div><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--foreground)">AED 316,610</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 72.7%; border-radius: 2px 2px 0 0; background: var(--slate-200)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Costs</span></div><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--emerald-600)">AED 118,940</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 27.3%; border-radius: 2px 2px 0 0; background: var(--emerald-500)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--emerald-600)">Kept</span></div></div></div>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <span style="display: inline-flex; height: 22px; align-items: center; border-radius: 26px; padding: 0 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; background: color-mix(in oklch, var(--warning), transparent 82%); color: var(--foreground)">B · SOME DAYS MISSING COSTS</span>
+      <p style="margin: 0; font-size: 13px; color: var(--muted-foreground)">A floor plus a range, and a dashed ceiling showing where “kept” could reach.</p>
+    </div>
+    <section style="border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--emerald-50), transparent 60%); padding: 36px 32px">
+      <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 32px; align-items: center">
+        <div style="grid-column: span 7; display: flex; flex-direction: column; gap: 18px; min-width: 0">
+          <div style="display: flex; align-items: center; gap: 10px"><span style="display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 9px; background: var(--emerald-100); color: var(--emerald-600)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><p class="kicker">Zaytoun Kitchens · last 30 days</p></div>
+          <p style="margin: 0; max-width: 24ch; font-size: 36px; line-height: 1.12; font-weight: 700; letter-spacing: -0.03em; text-wrap: pretty">You took in <span style="font-family: var(--mono); font-weight: 700; color: var(--emerald-600); font-variant-numeric: tabular-nums; white-space: nowrap">AED 435,550</span>, and kept at least <span style="font-family: var(--mono); font-weight: 700; color: var(--emerald-600); font-variant-numeric: tabular-nums; white-space: nowrap">AED 102,360</span> of it.</p>
+          <p style="margin: 0; max-width: 56ch; font-size: 14px; line-height: 22px; color: var(--muted-foreground)">Eight of the thirty days are missing cost figures, so the real answer is between <span style="font-family: var(--mono); font-weight: 600; color: var(--foreground); white-space: nowrap">AED 102,360</span> and <span style="font-family: var(--mono); font-weight: 600; color: var(--foreground); white-space: nowrap">AED 141,900</span>.</p>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><span style="display: inline-flex; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card); padding: 5px 12px; font-size: 11px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 9999px; background: var(--success)"></span>22 of 30 days fully costed</span></div>
+        </div>
+        <div style="grid-column: span 5; min-width: 0"><div role="img" aria-label="Sales AED 435,550; costs AED 333,190; kept at least AED 102,360, with a dashed ceiling at AED 141,900." style="position: relative; display: flex; height: 224px; width: 100%; align-items: flex-end; gap: 12px; padding: 0 24px 16px; box-sizing: border-box"><span aria-hidden="true" style="position: absolute; bottom: 32px; left: 0; right: 0; height: 1px; background: var(--border)"></span><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--foreground)">AED 435,550</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 100%; border-radius: 2px 2px 0 0; background: var(--slate-200)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Sales</span></div><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--foreground)">AED 333,190</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 76.5%; border-radius: 2px 2px 0 0; background: var(--slate-200)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Costs</span></div><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--emerald-600)">AED 102,360</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div aria-hidden="true" style="position: absolute; left: 0; right: 0; bottom: 0; height: 32.6%; border: 1px dashed var(--emerald-500); border-radius: 2px 2px 0 0"></div><div style="width: 100%; height: 23.5%; border-radius: 2px 2px 0 0; background: var(--emerald-500)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--emerald-600)">Kept</span></div></div></div>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <span style="display: inline-flex; height: 22px; align-items: center; border-radius: 26px; padding: 0 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; background: var(--muted); color: var(--muted-foreground)">C · SALES ONLY, NO COSTS</span>
+      <p style="margin: 0; font-size: 13px; color: var(--muted-foreground)">Says what it knows, refuses the rest out loud, and names the one thing that would fix it.</p>
+    </div>
+    <section style="border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--emerald-50), transparent 60%); padding: 36px 32px">
+      <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 32px; align-items: center">
+        <div style="grid-column: span 7; display: flex; flex-direction: column; gap: 18px; min-width: 0">
+          <div style="display: flex; align-items: center; gap: 10px"><span style="display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 9px; background: var(--muted); color: var(--muted-foreground)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><p class="kicker">Zaytoun Kitchens · last 30 days</p></div>
+          <p style="margin: 0; max-width: 24ch; font-size: 36px; line-height: 1.12; font-weight: 700; letter-spacing: -0.03em; text-wrap: pretty">You took in <span style="font-family: var(--mono); font-weight: 700; color: var(--emerald-600); font-variant-numeric: tabular-nums; white-space: nowrap">AED 435,550</span>. We cannot yet tell you what you kept.</p>
+          <p style="margin: 0; max-width: 56ch; font-size: 14px; line-height: 22px; color: var(--muted-foreground)">No dish costs have been recorded, so there is no honest way to turn sales into profit. Add them and this sentence gains its second half.</p>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px"><button class="btn btn-primary">Add dish costs</button><span style="display: inline-flex; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card); padding: 5px 12px; font-size: 11px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 9999px; background: var(--warning)"></span>0 of 30 days costed</span></div>
+        </div>
+        <div style="grid-column: span 5; min-width: 0"><div role="img" aria-label="Sales AED 435,550. Costs and kept cannot be stated for this window." style="position: relative; display: flex; height: 224px; width: 100%; align-items: flex-end; gap: 12px; padding: 0 24px 16px; box-sizing: border-box"><span aria-hidden="true" style="position: absolute; bottom: 32px; left: 0; right: 0; height: 1px; background: var(--border)"></span><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--foreground)">AED 435,550</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 100%; border-radius: 2px 2px 0 0; background: var(--slate-200)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Sales</span></div><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--muted-foreground)">—</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 100%; border-radius: 2px 2px 0 0; border: 1px dashed var(--border); background: repeating-linear-gradient(135deg, var(--muted) 0 5px, transparent 5px 10px)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Costs</span></div><div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px"><span style="font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--muted-foreground)">—</span><div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end"><div style="width: 100%; height: 100%; border-radius: 2px 2px 0 0; border: 1px dashed var(--border); background: repeating-linear-gradient(135deg, var(--muted) 0 5px, transparent 5px 10px)"></div></div><span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Kept</span></div></div></div>
+      </div>
+    </section>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

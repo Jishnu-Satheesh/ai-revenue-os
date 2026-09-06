@@ -1,0 +1,606 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+  <style>
+    /* Tokens lifted verbatim from src/app/globals.css and tailwindcss/theme.css.
+       Nothing here is re-picked or rounded. */
+    :root {
+      --background: oklch(1 0 0);
+      --foreground: oklch(0.145 0 0);
+      --card: oklch(1 0 0);
+      --primary: oklch(0.508 0.118 165.612);
+      --primary-foreground: oklch(0.979 0.021 166.113);
+      --secondary: oklch(0.967 0.001 286.375);
+      --secondary-foreground: oklch(0.21 0.006 285.885);
+      --muted: oklch(0.97 0 0);
+      --muted-foreground: oklch(0.556 0 0);
+      --destructive: oklch(0.577 0.245 27.325);
+      --border: oklch(0.922 0 0);
+      --input: oklch(0.922 0 0);
+      --success: oklch(0.58 0.13 155);
+      --warning: oklch(0.72 0.14 80);
+      --danger: oklch(0.59 0.18 25);
+      --chart-1: oklch(0.845 0.143 164.978);
+      --chart-2: oklch(0.696 0.17 162.48);
+      --chart-3: oklch(0.596 0.145 163.225);
+      --chart-4: oklch(0.508 0.118 165.612);
+      --chart-5: oklch(0.432 0.095 166.913);
+      --emerald-50: oklch(97.9% 0.021 166.113);
+      --emerald-100: oklch(95% 0.052 163.051);
+      --emerald-200: oklch(90.5% 0.093 164.15);
+      --emerald-500: oklch(69.6% 0.17 162.48);
+      --emerald-600: oklch(59.6% 0.145 163.225);
+      --slate-200: oklch(92.9% 0.013 255.508);
+      --ring-hair: oklch(0.145 0 0 / 10%);
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: Manrope, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 20px;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { color: oklch(0.432 0.095 166.913); }
+    svg { display: block; }
+
+    /* Anatomy copied from the channel workspace and the channels register, so
+       this route reads as the same product rather than a cousin of it. */
+    .kicker { margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted-foreground); }
+    .card { border-radius: 14px; background: var(--card); box-shadow: 0 0 0 1px var(--ring-hair); display: flex; flex-direction: column; gap: 16px; padding: 16px 0; }
+    .card-pad { padding: 0 16px; }
+    .card-title { margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted-foreground); }
+    .card-desc { margin: 0; font-size: 12px; line-height: 17px; color: var(--muted-foreground); }
+    .chip { display: inline-flex; height: 20px; align-items: center; border-radius: 26px; padding: 0 8px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .chip-success { background: color-mix(in oklch, var(--success), transparent 88%); color: var(--success); }
+    .chip-warning { background: color-mix(in oklch, var(--warning), transparent 82%); color: var(--foreground); }
+    .chip-neutral { background: var(--muted); color: var(--muted-foreground); }
+    .chapter { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+    .rail { display: flex; flex-direction: column; gap: 20px; }
+    .rail-figure { margin: 0; font-family: var(--mono); font-size: 32px; font-weight: 700; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; line-height: 1.05; }
+    .rail-reason { margin: 0; font-size: 15px; line-height: 24px; color: var(--muted-foreground); }
+    .rail-btn { display: inline-flex; min-height: 44px; width: 100%; align-items: center; justify-content: center; gap: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--background); font: inherit; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted-foreground); cursor: pointer; }
+    .advice { display: flex; flex-direction: column; gap: 20px; border-radius: 18px; border: 1px solid var(--emerald-100); background: color-mix(in oklch, var(--emerald-50), transparent 30%); padding: 24px; }
+    .navpill { display: block; white-space: nowrap; border-radius: 8px; padding: 11px 12px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+    .navpill:hover { background: var(--muted); color: var(--foreground); }
+    .split-track { display: flex; height: 32px; width: 100%; overflow: hidden; border-radius: 10px; background: var(--muted); }
+    .btn { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; border-radius: 10px; padding: 0 12px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid transparent; }
+    .btn-primary { background: var(--primary); color: var(--primary-foreground); }
+    .btn-outline { border-color: var(--border); background: var(--background); color: var(--foreground); }
+    .btn-sm { min-height: 44px; font-size: 12.8px; border-radius: 8px; padding: 0 10px; }
+  </style>
+</helmet>
+
+<div style="display: flex; flex-direction: column; gap: 28px; padding: 24px 16px 32px; width: 390px; box-sizing: border-box">
+
+  <!-- ══════════════ VERDICT BAND ══════════════
+       Full-bleed, exactly as the channel workspace does it: negative margins
+       escape the shell padding so the tint runs edge to edge. -->
+  <section aria-label="Where you stand" style="margin: -24px -16px 0; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--emerald-50), transparent 60%); padding: 32px 16px 36px">
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px">
+
+      <div style="display: flex; flex-direction: column; gap: 24px; min-width: 0">
+        <div style="display: flex; align-items: center; gap: 10px">
+          <span style="display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 10px; background: var(--emerald-100); color: var(--emerald-600)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+          </span>
+          <p class="kicker">Zaytoun Kitchens · last 30 days</p>
+        </div>
+
+        <p style="margin: 0; font-size: 30px; line-height: 1.1; font-weight: 700; letter-spacing: -0.03em; text-wrap: pretty">
+          You took in <span style="font-family: var(--mono); font-weight: 700; color: var(--emerald-600); font-variant-numeric: tabular-nums; white-space: nowrap">AED 435,550</span> and kept at least <span style="font-family: var(--mono); font-weight: 700; color: var(--emerald-600); font-variant-numeric: tabular-nums; white-space: nowrap">AED 102,360</span> of it.
+        </p>
+
+        <p style="margin: 0; max-width: 56ch; font-size: 15px; line-height: 24px; color: var(--muted-foreground)">
+          Eight of the thirty days are missing cost figures, so what you really kept is somewhere between
+          <span style="font-family: var(--mono); font-weight: 600; color: var(--foreground); font-variant-numeric: tabular-nums">AED 102,360</span> and
+          <span style="font-family: var(--mono); font-weight: 600; color: var(--foreground); font-variant-numeric: tabular-nums">AED 141,900</span>. Fill them in and the range becomes one number.
+        </p>
+
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+          <span style="display: inline-flex; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card); padding: 5px 12px; font-size: 11px; font-weight: 600">
+            <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 9999px; background: var(--success)"></span>22 of 30 days fully costed
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card); padding: 5px 12px; font-size: 11px; font-weight: 600">
+            <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 9999px; background: var(--success)"></span>Your own records — nothing estimated
+          </span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px; min-width: 0">
+        <!-- The workspace's Potential / Lost / Earned scale, in this route's terms.
+             Fixed 160px track so each share resolves against real pixels. -->
+        <div role="img" aria-label="Sales AED 435,550; costs AED 333,190; kept AED 102,360, and up to AED 141,900 once the missing cost figures are in." style="position: relative; display: flex; height: 224px; width: 100%; align-items: flex-end; gap: 12px; padding: 0 24px 16px; box-sizing: border-box">
+          <span aria-hidden="true" style="position: absolute; bottom: 32px; left: 0; right: 0; height: 1px; background: var(--border)"></span>
+
+          <div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px">
+            <span style="font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--foreground)">435,550</span>
+            <div style="display: flex; height: 160px; width: 100%; align-items: flex-end">
+              <div style="width: 100%; height: 100%; border-radius: 2px 2px 0 0; background: var(--slate-200)"></div>
+            </div>
+            <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Sales</span>
+          </div>
+
+          <div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px">
+            <span style="font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--foreground)">333,190</span>
+            <div style="display: flex; height: 160px; width: 100%; align-items: flex-end">
+              <div style="width: 100%; height: 76.5%; border-radius: 2px 2px 0 0; background: var(--slate-200)"></div>
+            </div>
+            <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Costs</span>
+          </div>
+
+          <div style="display: flex; flex: 1; flex-direction: column; align-items: center; gap: 12px">
+            <span style="font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--emerald-600)">102,360</span>
+            <div style="position: relative; display: flex; height: 160px; width: 100%; align-items: flex-end">
+              <!-- Everything above the solid bar is unproven, drawn to the ceiling
+                   the evidence allows. An empty outline, never a filled bar. -->
+              <div aria-hidden="true" style="position: absolute; left: 0; right: 0; bottom: 0; height: 32.6%; border: 1px dashed var(--emerald-500); border-radius: 2px 2px 0 0"></div>
+              <div style="width: 100%; height: 23.5%; border-radius: 2px 2px 0 0; background: var(--emerald-500)"></div>
+            </div>
+            <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--emerald-600)">Kept</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px">
+          <p style="margin: 0; max-width: 30ch; font-size: 11px; line-height: 16px; color: var(--muted-foreground)">The dashed outline is the ceiling — where “kept” could reach once the missing costs are entered.</p>
+          <span style="display: inline-flex; height: 36px; align-items: center; gap: 8px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card); padding: 0 12px 0 14px; font-size: 12px; font-weight: 600; box-shadow: 0 1px 2px oklch(0.145 0 0 / 5%)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M17 14h-6"/><path d="M13 18H7"/><path d="M7 14h.01"/><path d="M17 18h.01"/></svg>
+            3 Aug – 1 Sep 2026
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ WHAT IS ON SCREEN, STATED EXACTLY ══════════════ -->
+  <div aria-label="Reporting status" style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); padding: 12px 16px; font-size: 12px">
+    <span class="chip chip-success">Showing</span>
+    <span style="color: var(--muted-foreground)">your own records for <span style="font-family: var(--mono)">2026-08-03</span> to <span style="font-family: var(--mono)">2026-09-01</span> · Asia/Dubai · day by day</span>
+    <span class="chip chip-warning">1 connection stopped</span>
+    <span style="color: var(--muted-foreground)">Last report added 1 Sep, 09:14</span>
+  </div>
+
+  <!-- ══════════════ CHAPTER MAP ══════════════ -->
+  <nav aria-label="Overview sections">
+    <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px">
+      <li><a class="navpill" href="#needs-you">What needs you</a></li>
+      <li><a class="navpill" href="#money-in">Money in</a></li>
+      <li><a class="navpill" href="#mix">Which places</a></li>
+      <li><a class="navpill" href="#solidity">How solid</a></li>
+      <li><a class="navpill" href="#profile">What we know</a></li>
+      <li><a class="navpill" href="#changed">What changed</a></li>
+    </ul>
+  </nav>
+
+  <section aria-label="Overview chapters" style="display: flex; flex-direction: column; gap: 40px">
+
+    <!-- ───────── 01 · WHAT NEEDS YOU ───────── -->
+    <section id="needs-you" class="chapter">
+      <div class="card">
+        <div class="card-pad" style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <p class="card-title">01 · What needs you</p>
+            <p class="card-desc">Each one is holding back a number on this page.</p>
+          </div>
+          <span class="chip chip-warning">Needs you</span>
+        </div>
+        <div class="card-pad">
+          <div style="display: flex; flex-direction: column; border-radius: 14px; border: 1px solid var(--border); overflow: hidden">
+
+            <div style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px 12px; align-items: start; padding: 14px">
+              <span style="display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 9px; background: color-mix(in oklch, var(--warning), transparent 82%); color: oklch(0.52 0.11 80)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>
+              </span>
+              <span style="display: flex; min-width: 0; flex-direction: column; gap: 2px">
+                <span style="font-size: 13px; font-weight: 600">12 of your 31 dishes have no cost recorded</span>
+                <span style="font-size: 11px; line-height: 16px; color: var(--muted-foreground)">Like knowing what came through the till but not what the ingredients cost. Blocks one profit number.</span>
+              </span>
+              <button class="btn btn-primary" style="grid-column: 1 / -1; width: 100%; justify-content: center">Add dish costs</button>
+            </div>
+            <div style="height: 1px; background: var(--border)"></div>
+
+            <div style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px 12px; align-items: start; padding: 14px">
+              <span style="display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 9px; background: color-mix(in oklch, var(--warning), transparent 82%); color: oklch(0.52 0.11 80)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 15V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V9"/><path d="M21 21v-2h-4"/><path d="M3 5h4V3"/></svg>
+              </span>
+              <span style="display: flex; min-width: 0; flex-direction: column; gap: 2px">
+                <span style="font-size: 13px; font-weight: 600">Deliveroo needs signing in again</span>
+                <span style="font-size: 11px; line-height: 16px; color: var(--muted-foreground)">Access expired 28 August. Sales up to then are safely in; nothing new will arrive.</span>
+              </span>
+              <button class="btn btn-outline" style="grid-column: 1 / -1; width: 100%; justify-content: center">Sign in again</button>
+            </div>
+            <div style="height: 1px; background: var(--border)"></div>
+
+            <div style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px 12px; align-items: start; padding: 14px">
+              <span style="display: flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 9px; background: var(--muted); color: var(--muted-foreground)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+              </span>
+              <span style="display: flex; min-width: 0; flex-direction: column; gap: 2px">
+                <span style="font-size: 13px; font-weight: 600">Nobody is named as the approver</span>
+                <span style="font-size: 11px; line-height: 16px; color: var(--muted-foreground)">Nothing suggested here can be acted on until a real person has to say yes.</span>
+              </span>
+              <button class="btn btn-outline" style="grid-column: 1 / -1; width: 100%; justify-content: center">Name an approver</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="rail" aria-label="What needs you, in figures">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <p class="rail-figure">3 open</p>
+          <p class="rail-reason">Three things are holding a number back on this page, and none of them can be done for you.</p>
+        </div>
+        <button class="rail-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>
+          Inspect what each one blocks
+        </button>
+      </aside>
+    </section>
+
+    <!-- ───────── 02 · MONEY IN ───────── -->
+    <section id="money-in" class="chapter">
+      <div class="card">
+        <div class="card-pad" style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <p class="card-title">02 · What came in, day by day</p>
+            <p class="card-desc">Every point is one trading day, exactly as recorded. Days the provider left blank are absent, not zero.</p>
+          </div>
+          <span class="chip chip-success">Reported</span>
+        </div>
+        <div class="card-pad" style="display: flex; flex-direction: column; gap: 20px">
+          <div style="position: relative">
+            <svg viewBox="0 0 511 170" width="100%" height="150" preserveAspectRatio="none" role="img" aria-label="Daily recorded sales from 3 August to 1 September 2026, between AED 8,610 and AED 20,050 a day. The final eight days are shaded because their cost figures are missing." style="overflow: visible">
+              <defs>
+                <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--chart-2)" stop-opacity="0.26"/>
+                  <stop offset="100%" stop-color="var(--chart-2)" stop-opacity="0.02"/>
+                </linearGradient>
+                <pattern id="uncosted" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                  <line x1="0" y1="0" x2="0" y2="7" stroke="var(--warning)" stroke-opacity="0.32" stroke-width="2.5"/>
+                </pattern>
+              </defs>
+              <line x1="0" y1="12" x2="511" y2="12" stroke="var(--border)" stroke-width="1"/>
+              <line x1="0" y1="80" x2="511" y2="80" stroke="var(--border)" stroke-width="1"/>
+              <line x1="0" y1="148" x2="511" y2="148" stroke="var(--border)" stroke-width="1"/>
+              <rect x="387.7" y="0" width="123.3" height="148" fill="url(#uncosted)"/>
+              <path d="M 0 64.6 C 2.9 63.7 11.7 63.5 17.6 59.5 C 23.5 55.5 29.3 42.1 35.2 40.3 C 41.1 38.5 47 46 52.9 48.8 C 58.8 51.5 64.6 61.1 70.5 56.8 C 76.4 52.5 82.2 30.4 88.1 23.2 C 94 16 99.8 7.2 105.7 13.7 C 111.6 20.2 117.4 53.3 123.3 62 C 129.2 70.7 135.1 68.8 141 65.7 C 146.9 62.6 152.7 45.5 158.6 43.5 C 164.5 41.5 170.3 51.1 176.2 53.5 C 182.1 55.9 187.9 63.3 193.8 58 C 199.7 52.7 205.5 29.8 211.4 21.5 C 217.3 13.2 223.2 2.6 229.1 8 C 235 13.4 240.8 44.8 246.7 53.9 C 252.6 63 258.4 65.3 264.3 62.5 C 270.2 59.7 276 40 281.9 37.1 C 287.8 34.2 293.7 42.8 299.6 45.1 C 305.5 47.4 311.3 55.4 317.2 50.9 C 323.1 46.4 328.9 24.7 334.8 17.8 C 340.7 10.9 346.5 1.6 352.4 9.3 C 358.3 17 364.1 54.1 370 63.8 C 375.9 73.5 381.8 70.3 387.7 67.6 C 393.6 64.9 399.4 49.6 405.3 47.6 C 411.2 45.6 417 53.5 422.9 55.4 C 428.8 57.3 434.6 63.8 440.5 59 C 446.4 54.2 452.2 33.6 458.1 26.4 C 464 19.2 469.9 7 475.8 15.8 C 481.7 24.6 487.5 67.4 493.4 79.4 C 499.3 91.4 508.1 86.5 511 87.9 L 511 148 L 0 148 Z" fill="url(#salesFill)"/>
+              <path d="M 0 64.6 C 2.9 63.7 11.7 63.5 17.6 59.5 C 23.5 55.5 29.3 42.1 35.2 40.3 C 41.1 38.5 47 46 52.9 48.8 C 58.8 51.5 64.6 61.1 70.5 56.8 C 76.4 52.5 82.2 30.4 88.1 23.2 C 94 16 99.8 7.2 105.7 13.7 C 111.6 20.2 117.4 53.3 123.3 62 C 129.2 70.7 135.1 68.8 141 65.7 C 146.9 62.6 152.7 45.5 158.6 43.5 C 164.5 41.5 170.3 51.1 176.2 53.5 C 182.1 55.9 187.9 63.3 193.8 58 C 199.7 52.7 205.5 29.8 211.4 21.5 C 217.3 13.2 223.2 2.6 229.1 8 C 235 13.4 240.8 44.8 246.7 53.9 C 252.6 63 258.4 65.3 264.3 62.5 C 270.2 59.7 276 40 281.9 37.1 C 287.8 34.2 293.7 42.8 299.6 45.1 C 305.5 47.4 311.3 55.4 317.2 50.9 C 323.1 46.4 328.9 24.7 334.8 17.8 C 340.7 10.9 346.5 1.6 352.4 9.3 C 358.3 17 364.1 54.1 370 63.8 C 375.9 73.5 381.8 70.3 387.7 67.6 C 393.6 64.9 399.4 49.6 405.3 47.6 C 411.2 45.6 417 53.5 422.9 55.4 C 428.8 57.3 434.6 63.8 440.5 59 C 446.4 54.2 452.2 33.6 458.1 26.4 C 464 19.2 469.9 7 475.8 15.8 C 481.7 24.6 487.5 67.4 493.4 79.4 C 499.3 91.4 508.1 86.5 511 87.9" fill="none" stroke="var(--chart-3)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+              <circle cx="229.1" cy="8" r="3.5" fill="var(--chart-3)" stroke="var(--card)" stroke-width="2"/>
+            </svg>
+            <span style="position: absolute; left: 44.8%; top: -8px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; border-radius: 9999px; border: 1px solid var(--border); background: var(--card); padding: 3px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; box-shadow: 0 1px 2px oklch(0.145 0 0 / 6%)">
+              <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 9999px; background: var(--chart-3)"></span>
+              Busiest day · 16 Aug · <span style="font-family: var(--mono); font-variant-numeric: tabular-nums">AED 20,050</span>
+            </span>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">
+            <span>2026-08-03</span><span>2026-08-17</span><span>2026-09-01</span>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 11px; color: var(--muted-foreground)">
+            <span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: var(--chart-3)"></span>Sales recorded</span>
+            <span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: repeating-linear-gradient(45deg, color-mix(in oklch, var(--warning), transparent 55%) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1px var(--border)"></span>Cost figures still missing</span>
+          </div>
+        </div>
+      </div>
+
+      <aside class="rail" aria-label="What came in, in figures">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <p class="rail-figure" style="color: var(--emerald-600)">AED 435,550</p>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: color-mix(in oklch, var(--success), transparent 88%); padding: 3px 9px; font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--success)">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+              +8.2%
+            </span>
+            <span style="font-size: 12px; color: var(--muted-foreground)">on the 30 days before</span>
+          </div>
+          <p class="rail-reason">Up from <span style="font-family: var(--mono); font-weight: 600; color: var(--foreground)">AED 402,540</span> in the previous thirty days. Both windows have sales recorded for every day, so the two are comparable.</p>
+        </div>
+        <button class="rail-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>
+          Inspect 30 daily records
+        </button>
+      </aside>
+    </section>
+
+    <!-- ───────── 03 · WHICH PLACES ───────── -->
+    <section id="mix" class="chapter">
+      <div class="card">
+        <div class="card-pad" style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <p class="card-title">03 · Which places brought it in</p>
+            <p class="card-desc">Share of every place with a recorded revenue figure for this window.</p>
+          </div>
+          <span class="chip chip-success">Reported</span>
+        </div>
+        <div class="card-pad" style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px">
+          <svg viewBox="0 0 160 160" width="100%" height="176" role="img" aria-label="Talabat 39%, Deliveroo 22%, Noon Food 14%, your own website 13%, walk-in and phone 12% of AED 435,550 recorded." style="max-width: 168px; margin: 0 auto">
+            <path d="M 81.22 10.01 A 70 70 0 0 1 126.67 132.17 L 110.67 114.29 A 46 46 0 0 0 80.8 34.01 Z" fill="var(--chart-1)"/>
+            <path d="M 124.82 133.77 A 70 70 0 0 1 37.17 135.37 L 51.86 116.39 A 46 46 0 0 0 109.45 115.34 Z" fill="var(--chart-2)"/>
+            <path d="M 35.27 133.84 A 70 70 0 0 1 10.01 81.37 L 34.01 80.9 A 46 46 0 0 0 50.6 115.38 Z" fill="var(--chart-3)"/>
+            <path d="M 10.01 78.92 A 70 70 0 0 1 29.77 31.25 L 46.99 47.96 A 46 46 0 0 0 34.01 79.29 Z" fill="var(--chart-4)"/>
+            <path d="M 31.5 29.52 A 70 70 0 0 1 78.78 10.01 L 79.2 34.01 A 46 46 0 0 0 48.13 46.83 Z" fill="var(--chart-5)"/>
+          </svg>
+
+          <ul style="list-style: none; margin: 0; padding: 0; display: flex; min-width: 0; flex-direction: column; gap: 2px" aria-label="Recorded revenue legend">
+            <li style="display: flex; align-items: center; gap: 10px; border-radius: 8px; padding: 7px 8px; background: var(--muted)">
+              <span aria-hidden="true" style="width: 10px; height: 10px; flex-shrink: 0; border-radius: 2px; background: var(--chart-1)"></span>
+              <span style="min-width: 0; flex: 1">
+                <span style="display: block; font-size: 13px; font-weight: 600">Talabat</span>
+                <span style="display: block; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">AED 168,400 · 39%</span>
+              </span>
+            </li>
+            <li style="display: flex; align-items: center; gap: 10px; border-radius: 8px; padding: 7px 8px">
+              <span aria-hidden="true" style="width: 10px; height: 10px; flex-shrink: 0; border-radius: 2px; background: var(--chart-2)"></span>
+              <span style="min-width: 0; flex: 1">
+                <span style="display: block; font-size: 13px; font-weight: 600">Deliveroo</span>
+                <span style="display: block; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">AED 96,220 · 22%</span>
+              </span>
+            </li>
+            <li style="display: flex; align-items: center; gap: 10px; border-radius: 8px; padding: 7px 8px">
+              <span aria-hidden="true" style="width: 10px; height: 10px; flex-shrink: 0; border-radius: 2px; background: var(--chart-3)"></span>
+              <span style="min-width: 0; flex: 1">
+                <span style="display: block; font-size: 13px; font-weight: 600">Noon Food</span>
+                <span style="display: block; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">AED 61,900 · 14%</span>
+              </span>
+            </li>
+            <li style="display: flex; align-items: center; gap: 10px; border-radius: 8px; padding: 7px 8px">
+              <span aria-hidden="true" style="width: 10px; height: 10px; flex-shrink: 0; border-radius: 2px; background: var(--chart-4)"></span>
+              <span style="min-width: 0; flex: 1">
+                <span style="display: block; font-size: 13px; font-weight: 600">Your own website</span>
+                <span style="display: block; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">AED 54,760 · 13%</span>
+              </span>
+            </li>
+            <li style="display: flex; align-items: center; gap: 10px; border-radius: 8px; padding: 7px 8px">
+              <span aria-hidden="true" style="width: 10px; height: 10px; flex-shrink: 0; border-radius: 2px; background: var(--chart-5)"></span>
+              <span style="min-width: 0; flex: 1">
+                <span style="display: block; font-size: 13px; font-weight: 600">Walk-in and phone</span>
+                <span style="display: block; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">AED 54,270 · 12%</span>
+              </span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <aside class="rail" aria-label="Channel mix, in figures">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <p class="rail-figure">39% Talabat</p>
+          <p class="rail-reason">Nearly two in every five dirhams came through one marketplace. That is a comparison of what each place recorded — not a claim that one earns you more than another.</p>
+          <p class="rail-reason" style="font-size: 13px">Which is actually most profitable depends on the dish costs still outstanding.</p>
+        </div>
+        <button class="rail-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2.5"/><path d="m10.2 6.3-3.9 3.9"/><circle cx="4.5" cy="12" r="2.5"/><path d="M7 12h10"/><circle cx="19.5" cy="12" r="2.5"/><path d="m13.8 17.7 3.9-3.9"/><circle cx="12" cy="19.5" r="2.5"/></svg>
+          Open all channels
+        </button>
+      </aside>
+    </section>
+
+    <!-- ───────── 04 · HOW SOLID ───────── -->
+    <section id="solidity" class="chapter">
+      <div class="card">
+        <div class="card-pad" style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <p class="card-title">04 · How solid these numbers are</p>
+            <p class="card-desc">The same thirty days, graded by what evidence sits behind each one.</p>
+          </div>
+          <span class="chip chip-warning">Needs data</span>
+        </div>
+        <div class="card-pad" style="display: flex; flex-direction: column; gap: 20px">
+
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px">
+              <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground)">Days with sales and every cost recorded</span>
+              <span style="font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums">22 of 30</span>
+            </div>
+            <div role="img" aria-label="Days with sales and every cost recorded: 22 of 30." class="split-track">
+              <div style="display: flex; height: 100%; width: 73%; align-items: center; justify-content: flex-start; background: var(--chart-2); padding: 0 12px">
+                <span style="font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff">73%</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px">
+              <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground)">Days where some dish costs are missing</span>
+              <span style="font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums">6 of 30</span>
+            </div>
+            <div role="img" aria-label="Days where some dish costs are missing: 6 of 30." class="split-track">
+              <div style="display: flex; height: 100%; width: 20%; align-items: center; justify-content: flex-start; background: var(--warning); padding: 0 12px">
+                <span style="font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff">20%</span>
+              </div>
+            </div>
+            <p style="margin: 0; font-size: 11px; line-height: 16px; color: var(--muted-foreground)">Profit for these days is close, but not final.</p>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px">
+              <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-foreground)">Days with sales only, no costs at all</span>
+              <span style="font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums">2 of 30</span>
+            </div>
+            <div role="img" aria-label="Days with sales only and no costs at all: 2 of 30." class="split-track">
+              <div style="display: flex; height: 100%; width: 7%; align-items: center; justify-content: flex-end; background: color-mix(in oklch, var(--foreground), transparent 65%); padding: 0 12px"></div>
+            </div>
+            <p style="margin: 0; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px; color: var(--muted-foreground)">7% of the base. No profit is claimed for these days at all.</p>
+          </div>
+        </div>
+      </div>
+
+      <aside class="rail" aria-label="How solid the numbers are, in figures">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <p class="rail-figure">22 of 30</p>
+          <p class="rail-reason">Twenty-two days can state an exact profit. The other eight are why the headline is a range instead of one number.</p>
+        </div>
+        <section class="advice" aria-label="Recommendation">
+          <div style="display: flex; gap: 16px">
+            <span aria-hidden="true" style="display: flex; width: 40px; height: 40px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 14px; background: var(--emerald-500); color: #fff">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+            </span>
+            <div style="display: flex; min-width: 0; flex-direction: column; gap: 6px">
+              <p style="margin: 0; font-size: 13px; font-weight: 500; line-height: 21px">Twelve dish costs stand between you and a single profit figure.</p>
+              <p style="margin: 0; font-size: 13px; line-height: 21px; color: var(--muted-foreground)">All eight incomplete days involve at least one of those twelve dishes, so entering them closes every gap at once.</p>
+            </div>
+          </div>
+          <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; line-height: 18px">
+            <li style="display: flex; gap: 6px"><span aria-hidden="true" style="color: var(--muted-foreground)">→</span><span>Open the dish list and fill in the twelve marked ones</span></li>
+          </ul>
+          <p style="margin: 0; font-size: 11px; font-style: italic; line-height: 17px; color: var(--muted-foreground)">This closes a gap in evidence. It does not change what you earned.</p>
+        </section>
+        <button class="rail-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>
+          Inspect the 8 incomplete days
+        </button>
+      </aside>
+    </section>
+
+    <!-- ───────── 05 · WHAT WE KNOW ───────── -->
+    <section id="profile" class="chapter">
+      <div class="card">
+        <div class="card-pad" style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <p class="card-title">05 · What we know about you</p>
+            <p class="card-desc">The more of this is on file, the more specific the advice above can get.</p>
+          </div>
+          <span class="chip chip-warning">Needs data</span>
+        </div>
+        <div class="card-pad" style="display: flex; flex-direction: column; gap: 16px">
+          <ul style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px">
+            <li style="display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; background: color-mix(in oklch, var(--success), transparent 94%); padding: 10px 12px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-top: 2px; flex-shrink: 0"><path d="M20 6 9 17l-5-5"/></svg>
+              <span style="min-width: 0"><span style="display: block; font-size: 13px; font-weight: 600">Who you are</span><span style="display: block; font-size: 11px; color: var(--muted-foreground)">Restaurant · AED · Asia/Dubai</span></span>
+            </li>
+            <li style="display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; background: color-mix(in oklch, var(--success), transparent 94%); padding: 10px 12px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-top: 2px; flex-shrink: 0"><path d="M20 6 9 17l-5-5"/></svg>
+              <span style="min-width: 0"><span style="display: block; font-size: 13px; font-weight: 600">Your branches</span><span style="display: block; font-size: 11px; color: var(--muted-foreground)">4 kitchens, all open</span></span>
+            </li>
+            <li style="display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; background: color-mix(in oklch, var(--success), transparent 94%); padding: 10px 12px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-top: 2px; flex-shrink: 0"><path d="M20 6 9 17l-5-5"/></svg>
+              <span style="min-width: 0"><span style="display: block; font-size: 13px; font-weight: 600">How you make money</span><span style="display: block; font-size: 11px; color: var(--muted-foreground)">Told to us during setup</span></span>
+            </li>
+            <li style="display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; background: color-mix(in oklch, var(--success), transparent 94%); padding: 10px 12px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-top: 2px; flex-shrink: 0"><path d="M20 6 9 17l-5-5"/></svg>
+              <span style="min-width: 0"><span style="display: block; font-size: 13px; font-weight: 600">What you are aiming for</span><span style="display: block; font-size: 11px; color: var(--muted-foreground)">3 goals with numbers on them</span></span>
+            </li>
+            <li style="display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; background: var(--muted); padding: 10px 12px; box-shadow: inset 0 0 0 1px var(--border)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.62 0.13 80)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-top: 2px; flex-shrink: 0"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"/><path d="M13.9 21.818a10 10 0 0 1-3.8 0"/><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"/><path d="M2.182 13.9a10 10 0 0 1 0-3.8"/><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"/><path d="M21.818 10.1a10 10 0 0 1 0 3.8"/><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"/><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"/></svg>
+              <span style="min-width: 0"><span style="display: block; font-size: 13px; font-weight: 600">What each dish costs you</span><span style="display: block; font-size: 11px; color: var(--muted-foreground)">19 of 31 dishes done</span></span>
+            </li>
+            <li style="display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; background: var(--muted); padding: 10px 12px; box-shadow: inset 0 0 0 1px var(--border)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.62 0.13 80)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-top: 2px; flex-shrink: 0"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"/><path d="M13.9 21.818a10 10 0 0 1-3.8 0"/><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"/><path d="M2.182 13.9a10 10 0 0 1 0-3.8"/><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"/><path d="M21.818 10.1a10 10 0 0 1 0 3.8"/><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"/><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"/></svg>
+              <span style="min-width: 0"><span style="display: block; font-size: 13px; font-weight: 600">Who can approve what</span><span style="display: block; font-size: 11px; color: var(--muted-foreground)">Nobody named yet</span></span>
+            </li>
+          </ul>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--border); padding-top: 14px">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><path d="M19 15V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V9"/><path d="M21 21v-2h-4"/><path d="M3 5h4V3"/></svg>
+              <p style="margin: 0; font-size: 12px; color: var(--muted-foreground)"><span style="font-weight: 600; color: var(--foreground)">3 of 4 connections working.</span> Deliveroo stopped on 28 August.</p>
+            </div>
+            <a href="#" style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; flex-shrink: 0">Integration Hub
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <aside class="rail" aria-label="What we know about you, in figures">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <p class="rail-figure">4 of 6</p>
+          <p class="rail-reason">Four of the six things we ask for are on file. The two that are not are the same two blocking the profit figure and the approvals.</p>
+        </div>
+        <button class="rail-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>
+          Open your business profile
+        </button>
+      </aside>
+    </section>
+  </section>
+
+  <!-- ══════════════ WHAT CHANGED ══════════════ -->
+  <section id="changed" aria-label="What changed recently" style="display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--border); padding-top: 32px">
+    <p class="kicker">What changed recently</p>
+    <div style="display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; border: 1px solid var(--border); background: var(--card)">
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 12px 14px">
+        <span style="display: flex; min-width: 0; flex-direction: column; gap: 2px">
+          <span style="font-size: 12px; font-weight: 600">August Talabat report added</span>
+          <span style="font-size: 11px; line-height: 16px; color: var(--muted-foreground)">31 days of sales, approved and written to your records</span>
+        </span>
+        <span class="chip chip-success" style="justify-self: start">Nadia</span>
+        <span style="font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">1 Sep, 09:14</span>
+      </div>
+      <div style="height: 1px; background: var(--border)"></div>
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 12px 14px">
+        <span style="display: flex; min-width: 0; flex-direction: column; gap: 2px">
+          <span style="font-size: 12px; font-weight: 600">Costs entered for 8 dishes</span>
+          <span style="font-size: 11px; line-height: 16px; color: var(--muted-foreground)">Moved 5 days from “partly costed” to “fully costed”</span>
+        </span>
+        <span class="chip chip-success" style="justify-self: start">You</span>
+        <span style="font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">30 Aug, 16:40</span>
+      </div>
+      <div style="height: 1px; background: var(--border)"></div>
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 12px 14px">
+        <span style="display: flex; min-width: 0; flex-direction: column; gap: 2px">
+          <span style="font-size: 12px; font-weight: 600">Deliveroo access expired</span>
+          <span style="font-size: 11px; line-height: 16px; color: var(--muted-foreground)">No sales lost — but nothing new arrives until it is signed back in</span>
+        </span>
+        <span class="chip chip-neutral" style="justify-self: start">Automatic</span>
+        <span style="font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted-foreground)">28 Aug, 07:02</span>
+      </div>
+    </div>
+    <button class="btn btn-outline btn-sm" style="align-self: flex-start">See everything that changed</button>
+  </section>
+
+  <!-- ══════════════ NOT READY YET ══════════════
+       The workspace's "awaiting other reports" shelf: what this page will hold
+       later, each naming what it waits on rather than promising "soon". -->
+  <section aria-label="Not ready yet" style="display: flex; flex-direction: column; gap: 16px; border-radius: 14px; border: 1px solid var(--border); background: color-mix(in oklch, var(--muted), transparent 70%); padding: 24px">
+    <div style="display: flex; align-items: center; gap: 8px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <p class="kicker">Not ready yet</p>
+    </div>
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px">
+      <article style="display: flex; flex-direction: column; gap: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); padding: 16px">
+        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">What to promote next</span>
+        <p style="margin: 0; font-size: 11px; line-height: 17px; color: var(--muted-foreground)">Waits on one full month where every day has its costs. Right now that is 22 days of 30.</p>
+      </article>
+      <article style="display: flex; flex-direction: column; gap: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); padding: 16px">
+        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">Which dishes actually pay</span>
+        <p style="margin: 0; font-size: 11px; line-height: 17px; color: var(--muted-foreground)">Waits on the 12 outstanding dish costs. A ranking missing a third of the menu would mislead more than it helps.</p>
+      </article>
+      <article style="display: flex; flex-direction: column; gap: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); padding: 16px">
+        <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground)">How you compare to similar kitchens</span>
+        <p style="margin: 0; font-size: 11px; line-height: 17px; color: var(--muted-foreground)">Waits on enough comparable restaurants in your area agreeing to share. Not yet reached.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════════════ FOOTER ══════════════ -->
+  <footer style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--border); padding-top: 24px; font-size: 12px">
+    <dl style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 24px; margin: 0">
+      <div style="display: flex; gap: 6px"><dt style="color: var(--muted-foreground)">Organization</dt><dd style="margin: 0; font-family: var(--mono)">zaytoun-kitchens</dd></div>
+      <div style="display: flex; gap: 6px"><dt style="color: var(--muted-foreground)">Currency</dt><dd style="margin: 0; font-family: var(--mono)">AED</dd></div>
+      <div style="display: flex; gap: 6px"><dt style="color: var(--muted-foreground)">Timezone</dt><dd style="margin: 0; font-family: var(--mono)">Asia/Dubai</dd></div>
+      <div style="display: flex; gap: 6px"><dt style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Basis</dt><dd style="margin: 0"><span class="chip chip-neutral">Your own records · no estimates</span></dd></div>
+    </dl>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <button class="btn btn-outline btn-sm">Manage organization</button>
+      <button class="btn btn-sm" style="background: transparent; color: var(--foreground)">Guided onboarding</button>
+    </div>
+  </footer>
+
+</div>
+</x-dc>
+</body>
+</html>
