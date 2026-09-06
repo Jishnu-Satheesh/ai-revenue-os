@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { Megaphone } from "lucide-react";
+import Link from "next/link";
+import { Megaphone, Palette } from "lucide-react";
 
 import { type AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
 import { type OutcomeProofData } from "@/components/campaigns/outcome-proof";
@@ -7,6 +8,7 @@ import { type LearningProposalData } from "@/components/campaigns/learning-revie
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { toGeneration } from "@/modules/campaigns/application/studio-view";
@@ -114,16 +116,32 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
       <RegisterRouteLabel segment={resolved.campaignId} label={view.title} />
 
-      <div className="flex shrink-0 items-start gap-3">
-        <span className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-          <Megaphone />
-        </span>
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{view.title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {view.sourceLabel} · version {view.versionNumber} · {organization.name}
-          </p>
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+            <Megaphone />
+          </span>
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">{view.title}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {view.sourceLabel} · version {view.versionNumber} · {organization.name}
+            </p>
+          </div>
         </div>
+        {/*
+          The Studio is a sub-page rather than a section: the control room asks
+          whether this should be approved, and the Studio asks what it looks
+          like printed. Reachable from here because a page nothing links to is
+          a page nobody finds.
+        */}
+        <Button asChild variant="outline">
+          <Link
+            href={`/organizations/${context.organizationId}/campaigns/${resolved.campaignId}/studio?version=${view.versionId}`}
+          >
+            <Palette />
+            Creative Studio
+          </Link>
+        </Button>
       </div>
 
       <Alert>

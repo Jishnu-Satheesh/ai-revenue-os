@@ -36,6 +36,13 @@ export type PosterStudioRender = {
   readonly renderDigest: string;
   readonly textValues: Readonly<Record<string, string>>;
   readonly refusalCode: string | null;
+  /**
+   * Exactly what `evaluateCreativeVerification` recorded, passed through
+   * untouched. The surface reports it rather than summarising it: a panel that
+   * decided for itself what "verified" meant would be a second opinion nobody
+   * asked for, sitting where the first one belongs.
+   */
+  readonly verification: Readonly<Record<string, unknown>>;
   readonly outputStoragePath: string | null;
   readonly outputWidthPx: number | null;
   readonly outputHeightPx: number | null;

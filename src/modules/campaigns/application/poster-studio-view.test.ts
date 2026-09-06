@@ -156,6 +156,7 @@ describe("toPosterStudioView", () => {
       renderDigest: "a".repeat(64),
       textValues: { caption: "Lunch that pays for itself." },
       refusalCode: "text_does_not_fit",
+      verification: {},
       outputStoragePath: null,
       outputWidthPx: null,
       outputHeightPx: null,

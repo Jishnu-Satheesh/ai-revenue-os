@@ -39,7 +39,7 @@ const TEMPLATE_COLUMNS =
   "key, version, placement, canvas_width_px, canvas_height_px, layout, owner_scope, pack_slug, organization_id, state";
 
 const RENDER_COLUMNS =
-  "id, template_key, template_version, script, state, render_digest, text_values, refusal_code, output_storage_path, output_width_px, output_height_px, rendered_at";
+  "id, template_key, template_version, script, state, render_digest, text_values, refusal_code, verification, output_storage_path, output_width_px, output_height_px, rendered_at";
 
 /**
  * Bounded because this is a screen, not an export. A version with hundreds of
@@ -48,6 +48,12 @@ const RENDER_COLUMNS =
  * somebody used it.
  */
 const RENDER_LIMIT = 200;
+
+/**
+ * Short, because a signed URL is a bearer token for one object. Long enough to
+ * look at a poster and decide; not long enough to be worth pasting anywhere.
+ */
+const PREVIEW_TTL_SECONDS = 600;
 
 const renderRowSchema = z.object({
   id: z.string().uuid(),
@@ -58,6 +64,7 @@ const renderRowSchema = z.object({
   render_digest: z.string(),
   text_values: z.record(z.string(), z.string()),
   refusal_code: z.string().nullable(),
+  verification: z.record(z.string(), z.unknown()).default({}),
   output_storage_path: z.string().nullable(),
   output_width_px: z.number().int().nullable(),
   output_height_px: z.number().int().nullable(),
@@ -93,6 +100,7 @@ function toRender(row: Row): PosterStudioRender | null {
     renderDigest: value.render_digest,
     textValues: value.text_values,
     refusalCode: value.refusal_code,
+    verification: value.verification,
     outputStoragePath: value.output_storage_path,
     outputWidthPx: value.output_width_px,
     outputHeightPx: value.output_height_px,
@@ -108,9 +116,7 @@ function toRender(row: Row): PosterStudioRender | null {
  * has to be describable, and a catalogue that hid it would leave that render
  * pointing at a template the screen says does not exist.
  */
-export async function readPosterTemplates(
-  persistence: PosterStudioPersistence,
-): Promise<{
+export async function readPosterTemplates(persistence: PosterStudioPersistence): Promise<{
   templates: readonly PosterTemplate[];
   unreadable: { key: string; version: number }[];
 }> {
@@ -194,4 +200,131 @@ async function readRenders(
     renders.push(render);
   }
   return renders;
+}
+
+export type PosterStudioPlate = {
+  /** Stable across versions. What the manifest and the directions name. */
+  readonly assetKey: string;
+  /** This version's row. What a render or an edit request must name. */
+  readonly assetId: string;
+  readonly previewUrl: string | null;
+  readonly widthPx: number;
+  readonly heightPx: number;
+};
+
+export type PosterStudioAssetPersistence = {
+  from(table: "campaign_assets"): {
+    select(columns: string): {
+      eq(
+        column: string,
+        value: string,
+      ): { eq(column: string, value: string): Awaitable } & Awaitable;
+    };
+  };
+};
+
+type Awaitable = PromiseLike<{ data: Row[] | null; error: { message?: string } | null }>;
+
+export type PosterStudioStorage = {
+  storage: {
+    from(bucket: "campaign-assets"): {
+      createSignedUrls(
+        paths: string[],
+        expiresIn: number,
+      ): Promise<{ data: { path: string | null; signedUrl: string }[] | null; error: unknown }>;
+    };
+  };
+};
+
+const plateRowSchema = z.object({
+  id: z.string().uuid(),
+  asset_key: z.string().uuid(),
+  storage_path: z.string().min(1),
+  width_px: z.number().int().positive(),
+  height_px: z.number().int().positive(),
+});
+
+/**
+ * Signed URLs for a set of storage paths.
+ *
+ * A failure returns nothing signed rather than throwing, on the same reasoning
+ * the campaign studio already uses: a page that refuses to render because a
+ * thumbnail could not be signed is worse than one that says the artwork is
+ * unavailable. The words, the refusals and the history are all still there.
+ */
+async function signed(
+  storage: PosterStudioStorage,
+  paths: readonly string[],
+): Promise<Readonly<Record<string, string>>> {
+  if (paths.length === 0) return {};
+  const { data, error } = await storage.storage
+    .from("campaign-assets")
+    .createSignedUrls([...paths], PREVIEW_TTL_SECONDS);
+  if (error || !data) return {};
+
+  const urls: Record<string, string> = {};
+  for (const entry of data) {
+    // A per-path failure comes back as a row with no path rather than an error,
+    // so one unsignable object costs its own preview and no more.
+    if (entry.path && entry.signedUrl) urls[entry.path] = entry.signedUrl;
+  }
+  return urls;
+}
+
+/**
+ * The plates of one version, with the row id a render or edit must name.
+ *
+ * The two identifiers are deliberately different and both are returned: the
+ * manifest names an asset by a key that survives every version, while a render
+ * and an edit point at the per-version row. A surface that had only the key
+ * would have to guess, and would guess the wrong version's plate the first time
+ * a revision landed.
+ */
+export async function readPosterStudioPlates(
+  persistence: PosterStudioAssetPersistence,
+  storage: PosterStudioStorage,
+  organizationId: string,
+  bundleVersionId: string,
+): Promise<readonly PosterStudioPlate[]> {
+  const { data, error } = await persistence
+    .from("campaign_assets")
+    .select("id, asset_key, storage_path, width_px, height_px")
+    .eq("organization_id", organizationId)
+    .eq("bundle_version_id", bundleVersionId);
+  if (error) return [];
+
+  const rows = (data ?? [])
+    .map((row) => plateRowSchema.safeParse(row))
+    .flatMap((parsed) => (parsed.success ? [parsed.data] : []));
+
+  const urls = await signed(
+    { storage: storage.storage },
+    rows.map((row) => row.storage_path),
+  );
+
+  return rows.map((row) => ({
+    assetKey: row.asset_key,
+    assetId: row.id,
+    previewUrl: urls[row.storage_path] ?? null,
+    widthPx: row.width_px,
+    heightPx: row.height_px,
+  }));
+}
+
+/** Signed previews for the posters a version has already produced. */
+export async function readRenderPreviews(
+  storage: PosterStudioStorage,
+  renders: readonly PosterStudioRender[],
+): Promise<Readonly<Record<string, string>>> {
+  const paths = renders
+    .map((render) => render.outputStoragePath)
+    .filter((path): path is string => path !== null);
+  const urls = await signed(storage, paths);
+
+  const byRenderId: Record<string, string> = {};
+  for (const render of renders) {
+    const url = render.outputStoragePath ? urls[render.outputStoragePath] : undefined;
+    if (url) byRenderId[render.id] = url;
+  }
+  return byRenderId;
 }
