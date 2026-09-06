@@ -7,7 +7,7 @@ describe("Campaign generation Trigger registration", () => {
   it("registers all generation paths as identifier-only schema tasks on one queue", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
 
-    expect(source.match(/schemaTask\(\{/g)).toHaveLength(6);
+    expect(source.match(/schemaTask\(\{/g)).toHaveLength(11);
     for (const id of [
       'id: "campaign.generate-bundle"',
       'id: "campaign.revise-bundle"',
@@ -15,6 +15,14 @@ describe("Campaign generation Trigger registration", () => {
       'id: "campaign.create-from-opportunity"',
       'id: "campaign.render-poster"',
       'id: "campaign.edit-plate"',
+      // The execution loop. Five workers were written and tested months before
+      // anything registered them, so a campaign could be approved and drawn and
+      // then nothing published it, measured it, or said what happened.
+      'id: "campaign.dispatch-due-actions"',
+      'id: "campaign.collect-metrics"',
+      'id: "campaign.allocation-cycle"',
+      'id: "campaign.settle-outcome"',
+      'id: "campaign.propose-learning"',
     ]) {
       expect(source).toContain(id);
     }
@@ -28,11 +36,16 @@ describe("Campaign generation Trigger registration", () => {
     // behind the render queue would make the cheap half of the studio wait on
     // a provider -- the same reason rendering is not on the generation queue.
     expect(source).toContain("queue: campaignPlateEditQueue");
+    // A fourth lane. Sweeps are long and frequent; a render is short and
+    // somebody is watching it.
+    expect(source).toContain("queue: campaignExecutionQueue");
     expect(source).toContain("campaignGenerationPayloadSchema");
     expect(source).toContain("campaignRevisionPayloadSchema");
     expect(source).toContain("campaignVariantPayloadSchema");
     expect(source).toContain("campaignPosterRenderPayloadSchema");
     expect(source).toContain("campaignPlateEditPayloadSchema");
+    expect(source).toContain("campaignSweepPayloadSchema");
+    expect(source).toContain("campaignCyclePayloadSchema");
   });
 
   it("wires variants through the same governed reference receipt and blueprint path as bundles", async () => {

@@ -196,4 +196,42 @@ describe("the sweep is bounded and interruptible", () => {
 
     expect(result).toMatchObject({ considered: 0, published: 0, outcomes: [] });
   });
+
+  /**
+   * The state of any deployment whose provider is not connected: the gateway
+   * raises "no adapter is installed" rather than returning a status. Letting
+   * that escape would abandon every remaining action because the first one
+   * named a tool this build cannot perform, and would retry the whole sweep to
+   * reach the same wall.
+   */
+  it("records a gateway that raised and carries on with the rest of the batch", async () => {
+    const second = action({ actionRunId: "e1000000-0000-4000-8000-000000000002" });
+    const result = await run(
+      deps({
+        due: { listDue: vi.fn(async () => [action(), second]) },
+        gateway: {
+          execute: vi.fn(async (input: { actionRunId: string }) => {
+            if (input.actionRunId === action().actionRunId) {
+              throw new Error("No adapter is installed for meta.publish_image.");
+            }
+            return {
+              status: "published" as const,
+              receiptId: "r2",
+              externalReference: "17841_media_10",
+            };
+          }),
+        },
+      }),
+    );
+
+    expect(result.considered).toBe(2);
+    expect(result.outcomes[0]).toMatchObject({
+      actionRunId: action().actionRunId,
+      result: "failed",
+      // The gateway's own words: paraphrasing loses which tool was missing.
+      detail: "No adapter is installed for meta.publish_image.",
+    });
+    expect(result.outcomes[1]?.result).toBe("published");
+    expect(result.published).toBe(1);
+  });
 });

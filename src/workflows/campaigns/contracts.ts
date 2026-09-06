@@ -194,3 +194,32 @@ export type CampaignPlateEditPayload = z.infer<typeof campaignPlateEditPayloadSc
 export function parseCampaignPlateEditPayload(payload: unknown): CampaignPlateEditPayload {
   return campaignPlateEditPayloadSchema.parse(payload);
 }
+
+/**
+ * The execution loop's payloads.
+ *
+ * Identifiers and bounds only, in keeping with the rule the generation payloads
+ * follow: nothing here carries business text, so a replayed message cannot
+ * smuggle different work than the run was authorized for. Every one of these
+ * workers reads what it needs from storage.
+ */
+export const campaignSweepPayloadSchema = z.strictObject({
+  /** How many rows one sweep may take. Bounded by the database function too. */
+  limit: z.number().int().positive().max(500).optional(),
+});
+export type CampaignSweepPayload = z.infer<typeof campaignSweepPayloadSchema>;
+
+/**
+ * One organization per run, deliberately.
+ *
+ * The allocation, settlement and learning workers each state that they carry no
+ * state from one campaign into the next. Running them per organization keeps
+ * that true at the next level up: one tenant's slow settlement cannot delay
+ * another's, and a failure is scoped to the tenant it happened in.
+ */
+export const campaignCyclePayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  /** Present only to make a cycle reproducible; generated otherwise. */
+  cycleId: uuidSchema.optional(),
+});
+export type CampaignCyclePayload = z.infer<typeof campaignCyclePayloadSchema>;

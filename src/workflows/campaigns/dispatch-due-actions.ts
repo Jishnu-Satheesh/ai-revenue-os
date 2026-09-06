@@ -131,18 +131,44 @@ export async function dispatchDueActions(
       continue;
     }
 
-    const result = await dependencies.gateway.execute(
-      {
-        organizationId: action.organizationId,
+    /**
+     * One action's failure is not the sweep's failure.
+     *
+     * The gateway raises rather than returns for conditions that are about the
+     * deployment rather than the action -- no adapter installed for the tool,
+     * most obviously, which is the state of any deployment whose provider is
+     * not connected yet. Letting that escape would abandon every remaining
+     * action in the batch because the first one named a tool this build cannot
+     * perform, and would retry the whole sweep to reach the same wall.
+     *
+     * So it is recorded against the action it belongs to and the sweep goes on.
+     * The run row keeps whatever state the gateway left it in; nothing here
+     * marks an action as done that was not done.
+     */
+    let result: ExecuteActionResult;
+    try {
+      result = await dependencies.gateway.execute(
+        {
+          organizationId: action.organizationId,
+          actionRunId: action.actionRunId,
+          toolKey: plan.toolKey,
+          capabilityKey: plan.capabilityKey,
+          idempotencyKey: plan.idempotencyKey,
+          requestDigest: plan.requestDigest,
+          assertedFacts: plan.assertedFacts,
+        },
+        signal,
+      );
+    } catch (error) {
+      outcomes.push({
         actionRunId: action.actionRunId,
-        toolKey: plan.toolKey,
-        capabilityKey: plan.capabilityKey,
-        idempotencyKey: plan.idempotencyKey,
-        requestDigest: plan.requestDigest,
-        assertedFacts: plan.assertedFacts,
-      },
-      signal,
-    );
+        result: "failed",
+        // The error's own words: the gateway states what it could not do, and
+        // paraphrasing loses which tool was missing.
+        detail: error instanceof Error ? error.message : "The gateway could not execute this.",
+      });
+      continue;
+    }
 
     outcomes.push(await interpret({ action, result, dependencies, now }));
     if (result.status === "published") published += 1;
