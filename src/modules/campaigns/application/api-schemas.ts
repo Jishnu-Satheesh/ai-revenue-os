@@ -143,3 +143,65 @@ export const brandAssetCompleteRequestSchema = z.strictObject({
   versionId: uuidSchema,
 });
 export type BrandAssetCompleteRequest = z.infer<typeof brandAssetCompleteRequestSchema>;
+
+/**
+ * A render names the version it was read against, like a variant run does.
+ *
+ * The reason is the same and it is not ceremony: the poster quotes words from a
+ * manifest, and an operator working in a tab left open since yesterday would
+ * otherwise render whatever happened to be latest by the time the request
+ * landed -- publishing a sentence nobody approved under a version number
+ * somebody did.
+ *
+ * `extra` is the one free box. It is ungoverned text, so the route policies it
+ * against the campaign's own evidence before anything is queued; the bound here
+ * is only the column's.
+ */
+export const posterRenderRequestSchema = z.strictObject({
+  bundleVersionId: uuidSchema,
+  bundleDigest: sha256HexSchema,
+  plateAssetId: uuidSchema,
+  directionId: uuidSchema,
+  channel: z.enum(["instagram", "facebook"]),
+  templateKey: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/, "A template key is lower snake case.")
+    .max(120),
+  templateVersion: z.number().int().positive(),
+  script: z.enum(["Latn", "Mlym", "Arab"]),
+  extra: z.string().trim().min(1).max(200).nullable().default(null),
+});
+export type PosterRenderRequest = z.infer<typeof posterRenderRequestSchema>;
+
+/**
+ * An edit names the version too, and for a sharper reason: it creates a
+ * successor and revokes whatever approval stood against the parent. Doing that
+ * to a version the operator was not looking at is not a stale read, it is
+ * withdrawing an approval by accident.
+ *
+ * The regions and their instructions are bounded here at what the database
+ * stores. The instructions are operator prose destined for a model, and every
+ * layer below treats them as data rather than instruction.
+ */
+export const plateEditRequestSchema = z.strictObject({
+  bundleVersionId: uuidSchema,
+  bundleDigest: sha256HexSchema,
+  parentPlateAssetId: uuidSchema,
+  annotations: z
+    .array(
+      z.strictObject({
+        ordinal: z.number().int().positive().max(8),
+        bounds: z.strictObject({
+          xPx: z.number().int().nonnegative().max(20_000),
+          yPx: z.number().int().nonnegative().max(20_000),
+          widthPx: z.number().int().positive().max(20_000),
+          heightPx: z.number().int().positive().max(20_000),
+        }),
+        instruction: z.string().trim().min(1).max(500),
+      }),
+    )
+    .min(1)
+    .max(8),
+  idempotencyKey: idempotencyKeySchema,
+});
+export type PlateEditRequest = z.infer<typeof plateEditRequestSchema>;

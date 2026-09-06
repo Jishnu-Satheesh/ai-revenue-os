@@ -204,6 +204,50 @@ describe("checkOperatorSlotText", () => {
     expect(checkOperatorSlotText("Open until 11pm", evidence)).toEqual({ admitted: true });
   });
 
+  /**
+   * The hole this fence was written to close, and did not.
+   *
+   * `checkProseAgainstEvidence` refuses offer-ish language only when the
+   * campaign records no offer. `lockedOfferRef` is an internal key such as
+   * `lunch-set-menu-2026-09`, never a sentence a customer reads -- so under
+   * that rule alone, any campaign carrying any offer let an operator type any
+   * discount onto artwork nobody approved.
+   */
+  it("refuses a discount even when the campaign records some other offer", () => {
+    const withOffer = { ...evidence, offer: "lunch-set-menu-2026-09" };
+
+    const result = checkOperatorSlotText("50% off this week only", withOffer);
+
+    expect(result.admitted).toBe(false);
+    if (result.admitted) return;
+    expect(result.failures.map((failure) => failure.code)).toContain("invented_offer");
+  });
+
+  it("admits an offer the pinned evidence actually states", () => {
+    const stated = {
+      ...evidence,
+      offer: "lunch-set-menu-2026-09",
+      factText: "al noor kitchen serves a free dessert with every lunch set menu",
+    };
+
+    expect(checkOperatorSlotText("Free dessert with lunch", stated)).toEqual({ admitted: true });
+  });
+
+  /** A slug supports the words inside it, and no others. */
+  it("lets a readable offer support its own wording", () => {
+    expect(
+      checkOperatorSlotText("Free delivery this week", { ...evidence, offer: "free delivery" }),
+    ).toEqual({ admitted: true });
+  });
+
+  it("refuses a price the evidence does not state", () => {
+    const withOffer = { ...evidence, offer: "lunch-set-menu-2026-09" };
+
+    const result = checkOperatorSlotText("Two for one all week", withOffer);
+
+    expect(result.admitted).toBe(false);
+  });
+
   it("refuses the discount the spec names, on a campaign with no offer", () => {
     const result = checkOperatorSlotText("50% off today", evidence);
 
