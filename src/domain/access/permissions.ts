@@ -210,6 +210,17 @@ const operatorPermissions = [
   "memory.promote_fact",
   "campaign.create",
   "campaign.edit",
+  /**
+   * Approving the exact version that will run. Held by an operator, matching
+   * `approve_campaign_bundle`, which has always admitted one, and the campaigns
+   * module's own map, which has always granted it. See migration
+   * `20260906090000`.
+   *
+   * `campaign.publish`, `budget.modify` and `policy.update` stay above the
+   * operator line: approving what will run is a different act from moving money
+   * or pushing to a public account.
+   */
+  "campaign.approve",
   "poster.render",
   "asset.manage",
   "asset.review",
@@ -229,7 +240,7 @@ const adminPermissions = [
   "integration.disconnect",
   "memory.read_sensitive",
   "opportunity.approve",
-  "campaign.approve",
+  // `campaign.approve` is inherited from the operator bundle above.
   "campaign.publish",
   "policy.update",
   "budget.modify",

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(27);
+select extensions.plan(28);
 
 -- Structure -----------------------------------------------------------------
 
@@ -110,13 +110,23 @@ select extensions.ok(
   ),
   'but an operator can still write memory'
 );
+-- Approving the exact version that will run is an operator's job, and always
+-- was in practice: `approve_campaign_bundle` admits one. The catalogue caught up
+-- in `20260906090000`.
+select extensions.ok(
+  exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'operator' and permission_key = 'campaign.approve'
+  ),
+  'an operator can approve a campaign version'
+);
 select extensions.ok(
   not exists (
     select 1 from public.organization_role_permissions
     where organization_role = 'operator'
-      and permission_key in ('campaign.approve', 'campaign.publish', 'budget.modify', 'policy.update')
+      and permission_key in ('campaign.publish', 'budget.modify', 'policy.update')
   ),
-  'an operator cannot approve, publish, or move money'
+  'but an operator still cannot publish or move money'
 );
 select extensions.ok(
   not exists (
@@ -192,8 +202,11 @@ select extensions.ok(
   private.has_organization_permission('bc000000-0000-4000-8000-000000000a01'::uuid, 'memory.write'),
   'a permission resolves through the account-derived organization role'
 );
+-- `campaign.publish`, not `campaign.approve`: approval moved to the operator in
+-- `20260906090000`, and an example that is no longer above the line stops
+-- testing that the line exists.
 select extensions.ok(
-  not private.has_organization_permission('bc000000-0000-4000-8000-000000000a01'::uuid, 'campaign.approve'),
+  not private.has_organization_permission('bc000000-0000-4000-8000-000000000a01'::uuid, 'campaign.publish'),
   'and stops where that role stops'
 );
 select extensions.ok(

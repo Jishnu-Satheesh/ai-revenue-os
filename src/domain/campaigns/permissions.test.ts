@@ -45,25 +45,6 @@ const ROLE_ENFORCED_ONLY: readonly string[] = [
   "campaign.cancel",
 ];
 
-/**
- * A live contradiction, pinned rather than resolved here.
- *
- * This map grants `campaign.approve` to operator, and so does the database:
- * `approve_campaign_bundle` admits `['owner', 'admin', 'operator']`. The
- * account catalogue grants it to owner and admin only. The effective behaviour
- * today is the database's -- an operator can approve -- because no campaign
- * route consults the catalogue.
- *
- * Which is right is a policy question about who may authorize spend and
- * publication, not a typo to correct in whichever file is open. Resolving it
- * means changing either the catalogue or the RPC and its pgTAP suite, and the
- * decision belongs with the people who set the spend policy. It is asserted
- * here so the disagreement stays visible and cannot widen.
- */
-const KNOWN_DIVERGENCE: Readonly<Record<string, readonly OrganizationRole[]>> = {
-  "campaign.approve": ["owner", "admin"],
-};
-
 describe("the campaign permission map and the account catalogue", () => {
   it("names every campaign permission in the catalogue, bar those enforced by role", () => {
     const known = new Set<string>(organizationPermissions);
@@ -74,7 +55,7 @@ describe("the campaign permission map and the account catalogue", () => {
 
   it("grants each shared campaign permission to the same roles in both maps", () => {
     const shared = campaignPermissions.filter(
-      (permission) => !ROLE_ENFORCED_ONLY.includes(permission) && !(permission in KNOWN_DIVERGENCE),
+      (permission) => !ROLE_ENFORCED_ONLY.includes(permission),
     );
     expect(shared.length).toBeGreaterThan(0);
 
@@ -87,16 +68,34 @@ describe("the campaign permission map and the account catalogue", () => {
     }
   });
 
-  it("holds the approval divergence exactly where it is", () => {
-    for (const [permission, catalogueRoles] of Object.entries(KNOWN_DIVERGENCE)) {
-      const inCatalogue = ROLES.filter((role) =>
-        organizationRolePermissions[role].includes(permission as OrganizationPermission),
-      );
-      expect(inCatalogue, `${permission} moved in the account catalogue`).toEqual(catalogueRoles);
-    }
-
-    // What the database enforces, and therefore what actually happens today.
+  /**
+   * Resolved 2026-09-06 by the product owner: an operator may approve.
+   *
+   * The three maps disagreed for weeks. This module and
+   * `approve_campaign_bundle` both admitted an operator; the account catalogue
+   * did not, and was the one nothing enforced. Migration `20260906090000`
+   * brought it into line, so this now asserts agreement rather than pinning a
+   * divergence.
+   */
+  it("lets an operator approve, in both maps and in the database's own role list", () => {
     expect([...rolesWith("campaign.approve")]).toEqual(["owner", "admin", "operator"]);
+    expect(
+      ROLES.filter((role) => organizationRolePermissions[role].includes("campaign.approve")),
+    ).toEqual(["owner", "admin", "operator"]);
+  });
+
+  /**
+   * The operator boundary did not move wholesale. Approving the exact version
+   * that will run is a different act from moving money or pushing to a public
+   * account, and those stay above the line.
+   */
+  it("keeps publishing and money above the operator line", () => {
+    for (const permission of ["campaign.publish", "budget.modify", "policy.update"] as const) {
+      expect(
+        organizationRolePermissions.operator.includes(permission as OrganizationPermission),
+        `${permission} should stay above operator`,
+      ).toBe(false);
+    }
   });
 
   /** Admitting a role the function then refuses is a 403 that reads as a bug. */
