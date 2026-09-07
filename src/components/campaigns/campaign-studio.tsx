@@ -369,6 +369,28 @@ function VersionChangeSummary({
   );
 }
 
+/**
+ * Why an approval was revoked, in the operator's terms.
+ *
+ * `superseded_by_new_version` is the ordinary path, not an exception: creating
+ * a version revokes the approval in the same statement, so anyone who edits a
+ * plate or revises copy arrives here. A bare "this approval was revoked" reads
+ * as something done to them by someone else, when the cause is usually their
+ * own last action.
+ */
+function revokedDetail(
+  reason: Extract<StudioApproval, { status: "revoked" }>["revokedReason"],
+): string {
+  switch (reason) {
+    case "superseded_by_new_version":
+      return "A newer version of this campaign replaced the one that was approved, so the approval retired with it. Review the current version and approve again.";
+    case "capability_lost":
+      return "A provider capability this campaign depends on was lost, so the approval was revoked.";
+    default:
+      return "This approval was revoked by an operator and no longer authorizes execution.";
+  }
+}
+
 function approvalCopy(approval: StudioApproval): { label: string; detail: string } {
   switch (approval.status) {
     case "live":
@@ -395,10 +417,7 @@ function approvalCopy(approval: StudioApproval): { label: string; detail: string
     case "revoked":
       return {
         label: "Approval revoked",
-        detail:
-          approval.revokedReason === "capability_lost"
-            ? "A provider capability this campaign depends on was lost, so the approval was revoked."
-            : "This approval was revoked and no longer authorizes execution.",
+        detail: revokedDetail(approval.revokedReason),
       };
   }
 }

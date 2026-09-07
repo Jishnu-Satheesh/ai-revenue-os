@@ -180,6 +180,22 @@ describe("approval is bound to the exact version on screen", () => {
     expect(screen.getByText(/covers an earlier version/i)).toBeInTheDocument();
   });
 
+  it("says a new version retired the approval, rather than leaving 'revoked' to be read as blame", () => {
+    // This is the common case, not an edge one: creating a version revokes the
+    // approval in the same statement, so an operator who edits a plate lands
+    // here. "This approval was revoked" invites "by whom?", and the honest
+    // answer is their own edit.
+    const view = studioView(
+      approvalFor({
+        revokedAt: "2026-08-15T11:00:00",
+        revokedReason: "superseded_by_new_version",
+      }),
+    );
+    renderStudio(view);
+
+    expect(screen.getByText(/a newer version/i)).toBeInTheDocument();
+  });
+
   it("names capability loss as the reason when an approval was revoked for it", () => {
     const view = studioView(
       approvalFor({ revokedAt: "2026-08-15T11:00:00", revokedReason: "capability_lost" }),
