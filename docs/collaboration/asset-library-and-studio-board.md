@@ -4919,3 +4919,40 @@ means.
 - **Existing rows deliberately left alone.** Correcting a stored manifest changes its
   digest and therefore what an approval refers to. Whoever picks this up: it is a backfill
   with approval consequences, not a repair to slip into another change.
+
+### 2026-09-06 · muse-spark · Mar-2026 CLOSED refusal fixed by governance; retry exposed a claim defect (approved Tier 3 repair in progress)
+
+- **The refusal itself worked as designed.** Mar-2026 (`c9609054`, Talabat, Al Noor Kitchen)
+  failed projection with `CATEGORICAL_VALUE_NOT_DECLARED: avoidable_cancel_reason: CLOSED
+  is not a declared value (2026-03-31)`; Trigger recorded FAILED via `AbortTaskRunError`.
+  Verified the fixture byte-matches the upload (sha256 `9ca8f54b…ffd8c8) and that the
+  `CLOSED` sits in its own column with no ragged-row shift, so it is new provider
+  vocabulary, not misaligned data.
+- **Declare → approve → retry completed in the browser**, all copy behaving as specified:
+  Declare proposed Figures v2 (`allowedValues` now `ITEM_UNAVAILABLE, CLOSED`), approval
+  rebound the active binding to v2, Retry moved the package to `awaiting_projection`.
+- **The retry then stalled on a second, distinct defect.** `claim_governed_report_package_projection`
+  returns `conflict` whenever the requested versions differ from the failed run's versions,
+  checked before the failed-run recovery branch — so a retry under a newly approved
+  projection version can never claim. Distinct from the 2026-09-06 admission carve-out
+  note above (unconditional `schema_fingerprint` comparison); that one is untouched here.
+- **Claimed for this repair:** `supabase/migrations/20260906120000_projection_claim_admits_version_changed_retry.sql`,
+  `supabase/tests/database/governed_report_projection_retry_after_redeclaration_test.sql`.
+  No app code, no `database.types.ts` (RPC signature unchanged). User-approved plan:
+  failed + `awaiting_projection` retries skip the version-mismatch conflict and fall through
+  to the existing fresh-claim validation (active binding, contract match, fingerprint,
+  currency, object identity all retained).
+- **Done 2026-09-06, verified end to end.** Migration pushed (dry-run showed only this
+  file pending); new suite 9/9 green on staging, plus neighbours green
+  (`governed_report_projection`, `declare_categorical_value`, `period_grain_projection`).
+  The test failed first exactly as production did (`conflict` on the v2 retry). Mar-2026
+  then projected: 242 observations, `CLOSED` counted on 2026-03-31, package `projected`.
+  Browser: Reports tab shows Mar-2026 Projected; March analysis run completed with 18
+  findings — verdict "earned AED 14, lost AED 24 to preventable cancellations", every
+  cancellation attributed to CLOSED with cited records. Two corrections to earlier notes:
+  the Trigger fleet is healthy (the analysis dispatched from the browser completed in
+  about a minute), so the retry stall was purely the claim bug; and the `projected`
+  status copy reads "exact-range evidence ready" for period-grain runs too — pre-existing
+  wording, left alone. Temp owner password used for the browser session was rotated to an
+  unknown value afterwards; scratch retry script deleted.
+
