@@ -5,12 +5,17 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   reportRequest: vi.fn(),
   runReportRoute: vi.fn(),
+  requestReportPackageValidation: vi.fn(),
 }));
 
 vi.mock("@/modules/reports/application/api", () => ({
   reportPackageRouteParamsSchema: {},
   reportRequest: mocks.reportRequest,
   runReportRoute: mocks.runReportRoute,
+}));
+
+vi.mock("@/modules/reports/application/dispatch", () => ({
+  requestReportPackageValidation: mocks.requestReportPackageValidation,
 }));
 
 import { POST } from "@/app/api/organizations/[organizationId]/report-packages/[packageId]/admission/route";
@@ -89,6 +94,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.reportRequest.mockResolvedValue(requestBody);
   mocks.runReportRoute.mockResolvedValue(new Response("ok"));
+  mocks.requestReportPackageValidation.mockResolvedValue(true);
 });
 
 describe("POST report structure admission", () => {
@@ -196,6 +202,59 @@ describe("POST report structure admission", () => {
 
     expect(result.status).toBe(409);
     expect((result.body as { error: { message: string } }).error.message).toMatch(/has not been profiled yet/);
+  });
+
+  /**
+   * The upload that earned the admission has to start too.
+   *
+   * Every *later* upload of this structure is carried by profiling, which
+   * finds the standing admission and dispatches validation itself. The file
+   * the operator was looking at when they pressed Approve was profiled before
+   * the admission existed, so nothing in that path reaches it: without this
+   * dispatch it sits at `awaiting_validation` with no run, no failure, and
+   * nothing on the page to say why.
+   */
+  it("starts validation for the very upload that earned the admission", async () => {
+    const handler = await capturedHandler();
+    const context = baseContext("admin");
+
+    const result = await handler(context);
+
+    expect(mocks.requestReportPackageValidation).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      packageId: PACKAGE_ID,
+      contractVersionId: CONTRACT_VERSION_ID,
+      correlationId: CORRELATION_ID,
+    });
+    expect((result.body as { validationQueued: boolean }).validationQueued).toBe(true);
+  });
+
+  // The grant is what the operator asked for and it is already recorded. A
+  // transport that would not take the follow-on dispatch is worth reporting,
+  // not worth throwing away an approval over -- the Retry button on the
+  // package covers it.
+  it("still reports the grant when the validation dispatch does not land", async () => {
+    mocks.requestReportPackageValidation.mockResolvedValue(false);
+    const handler = await capturedHandler();
+
+    const result = await handler(baseContext("admin"));
+
+    expect(result.status).toBe(200);
+    expect((result.body as { admission: { id: string } }).admission.id).toBe(ADMISSION_ID);
+    expect((result.body as { validationQueued: boolean }).validationQueued).toBe(false);
+  });
+
+  it("dispatches nothing when the grant itself failed", async () => {
+    const handler = await capturedHandler();
+    const context = baseContext("admin", {
+      admissionService: admissionService({
+        grantAdmission: vi.fn().mockRejectedValue(new UnprofiledReportPackageError()),
+      }),
+    });
+
+    await handler(context);
+
+    expect(mocks.requestReportPackageValidation).not.toHaveBeenCalled();
   });
 
   it("leaves the package on the manual path when an intermediate step fails, without granting anything", async () => {
