@@ -4956,3 +4956,69 @@ means.
   wording, left alone. Temp owner password used for the browser session was rotated to an
   unknown value afterwards; scratch retry script deleted.
 
+### 2026-09-06 · muse-spark · Per-section AI panels + Channels Month/Year picker (user-approved plan, in progress)
+
+- **Claimed:** `src/components/analysis/channel-workspace.tsx`,
+  `src/components/analysis/recommendation-controls.tsx` (or a new adjacent component),
+  `src/workflows/analysis/run-channel-recommendations.ts` + `src/trigger/recommendations.ts`
+  (only if chapter scoping is missing), a new narrow generate route under
+  `src/app/api/organizations/[organizationId]/channels/[channelId]/` (only if reuse is
+  impossible), a new shared `MonthYearPicker` component, `src/components/channels/channels-rollup.tsx`,
+  `src/modules/analysis/application/channels-overview.ts` (month mapping only).
+- **Scope as approved:** every chapter keeps its exact UI; a missing advice slot gains a
+  same-styled Generate AI recommendation button scoped to that section; `needs_data`
+  chapters keep deterministic wording, guaranteed present; Channels picker matches the
+  audit look while `?window=` params and links keep working.
+- **Mid-build correction (user re-approved):** the narrator fence files one narration
+  per analysis run, so section-only regeneration is refused. Chosen scope: the button
+  appears only when the run has zero narrations (re-fires the existing generate task
+  for that run); where a narration exists but skipped the chapter, a same-slot
+  explainer names the gap. Narrator `needs_data` rule untouched.
+- **Done 2026-09-06, verified.** 114 tests green across workspace, picker, rollup,
+  dispatch, new recommendations route, read-model and channels-overview suites;
+  typecheck clean; lint 0 errors. Browser: Channels page shows Year/Month pickers with
+  the window caption; March Talabat shows 3 advice panels plus honest explainers on
+  Funnel, Money and Trust — the exact gap reported. No migration. Temp browser
+  credential rotated to an unknown value afterwards.
+
+### 2026-09-06 · muse-spark · Review of the advice-gap + picker work found four real defects (fixed)
+
+- **The typecheck claim in the note above was wrong.** `pnpm typecheck` failed on
+  `channel-workspace.test.tsx` (TS2493: a `vi.fn(async () => …)` has an empty argument tuple,
+  so `mock.calls[0]?.[0]` cannot be indexed). An incremental `tsc` almost certainly made it
+  look clean. Typed the mock as `vi.fn<typeof fetch>`. Whoever reads a "typecheck clean" line
+  next: run it cold.
+- **The Channels month picker hid windows.** Windows are declared as start + end + *grain*
+  (day, week, month, span), so one month can hold several. Keying the picker by start month
+  alone left every window but the newest-ending one unreachable. Now the month picks a
+  *group*, and a month holding more than one window shows a second control naming the exact
+  ranges; a month holding one keeps the caption. `?window=` untouched either way.
+- **The Generate button could disarm itself for thirty days.** Trigger clears the
+  idempotency key of a run that *failed*, but the narrator returns `skipped` when the fence
+  refuses it — a run that *succeeds*, and a successful run keeps its key for thirty days by
+  default. One unlucky press would leave the button reporting "Advice requested" and doing
+  nothing until the key expired. Added `idempotencyKeyTTL: "5m"`.
+- **Two state defects in the advice slot.** The per-chapter request state meant one press
+  left the other chapters' buttons looking unpressed, and it survived a month switch
+  (`router.push("?month=")` is a soft navigation, so nothing remounts) — February inherited
+  March's answer. State now lives in `ChannelWorkspace`, stored beside the run id it was
+  made for. The same staleness existed in `MonthYearPicker`'s year override; it is now
+  remembered against the month it was picked over, so browser Back no longer blanks the
+  Month control.
+- **Smaller repairs.** The needs_data explainer repeated the sentence the rail already
+  printed above it (visible on Money, which the rail's generic block draws); `ChapterRail`'s
+  doc comment had been orphaned above `AdviceGap`; the route found its run by scanning
+  `loadRuns`, which is capped at `MAX_RUNS = 10`, so a run older than a channel's ten most
+  recent answered "not found" — added `loadRun` to `ChannelAnalysisReadPort` and the
+  repository, reading by id scoped to organization and channel.
+- **Also claimed:** `src/modules/analysis/application/ports.ts`,
+  `src/modules/analysis/infrastructure/read-repository.ts`,
+  `src/components/analysis/month-year-picker(.test).tsx`.
+- **Verified 2026-09-06.** Full suite 4321 passed / 6 skipped across 422 files; typecheck
+  clean (cold); lint 0 errors. The two regression tests were checked against the old
+  behaviour and do fail on it. Prettier disagrees with ~90 files repo-wide including ones
+  nobody touched — pre-existing, left alone; only the files changed here were formatted.
+- **Not verified in a browser.** The `chrome-devtools` MCP server timed out on connect this
+  session, so the rollup's new second control and the reworked advice slots have not been
+  seen rendered. That check is still owed.
+

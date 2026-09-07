@@ -4,7 +4,6 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  CalendarRange,
   CircleDashed,
   Clock,
   Database,
@@ -12,6 +11,7 @@ import {
   Fingerprint,
   LayoutTemplate,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 
 import {
@@ -19,6 +19,7 @@ import {
   CancellationImpact,
   RetentionVisual,
 } from "@/components/analysis/operations-visuals";
+import { MonthYearPicker } from "@/components/analysis/month-year-picker";
 import { RecommendationControls } from "@/components/analysis/recommendation-controls";
 import {
   figureToneClass,
@@ -33,13 +34,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   Sheet,
@@ -114,22 +108,6 @@ const FINDING_CHAPTER_IDS: ReadonlySet<string> = new Set([
   "funnel",
   "retention",
 ]);
-
-/** The twelve month names the Month control always shows, whatever the year. */
-const MONTH_OPTIONS = [
-  { value: "01", label: "January" },
-  { value: "02", label: "February" },
-  { value: "03", label: "March" },
-  { value: "04", label: "April" },
-  { value: "05", label: "May" },
-  { value: "06", label: "June" },
-  { value: "07", label: "July" },
-  { value: "08", label: "August" },
-  { value: "09", label: "September" },
-  { value: "10", label: "October" },
-  { value: "11", label: "November" },
-  { value: "12", label: "December" },
-] as const;
 
 /**
  * Short labels for the bars a chapter draws. Long headlines belong to the
@@ -494,12 +472,6 @@ function VerdictBand({
     () => (monthHorizon ? enumerateAnalysisMonths(monthHorizon) : []),
     [monthHorizon],
   );
-  const years = useMemo(() => [...new Set(months.map((month) => month.slice(0, 4)))], [months]);
-  const selectedYear = selectedMonth?.slice(0, 4) ?? years[years.length - 1] ?? null;
-  const [year, setYear] = useState<string | null>(null);
-  const activeYear = year ?? selectedYear;
-  const selectable = (month: string) =>
-    monthHorizon !== null && month >= monthHorizon.firstMonth && month <= monthHorizon.lastMonth;
   return (
     <section
       aria-label="Marketplace audit verdict"
@@ -562,61 +534,11 @@ function VerdictBand({
           <div className="mt-auto flex flex-col gap-2">
             {months.length > 0 && selectedMonth ? (
               <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={activeYear ?? undefined}
-                    onValueChange={(next) => {
-                      setYear(next);
-                      const firstInYear = months.find((month) => month.slice(0, 4) === next);
-                      if (firstInYear && firstInYear !== selectedMonth) {
-                        onSelectMonth(firstInYear);
-                      }
-                    }}
-                  >
-                    <SelectTrigger
-                      aria-label="Year to analyse"
-                      className="h-9 rounded-full border-border bg-card pl-3.5 pr-3 text-xs font-semibold shadow-sm"
-                    >
-                      <CalendarRange
-                        aria-hidden="true"
-                        className="size-3.5 text-muted-foreground"
-                      />
-                      <SelectValue placeholder="Year" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={selectedMonth} onValueChange={onSelectMonth}>
-                    <SelectTrigger
-                      aria-label="Month to analyse"
-                      className="h-9 rounded-full border-border bg-card pl-3.5 pr-3 text-xs font-semibold shadow-sm"
-                    >
-                      <SelectValue placeholder="Month" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {/* All twelve names stay visible so the control reads as
-                          a calendar; pairs outside the reported horizon are
-                          disabled rather than hidden. */}
-                      {MONTH_OPTIONS.map((option) => {
-                        const value = `${activeYear}-${option.value}`;
-                        return (
-                          <SelectItem
-                            key={option.value}
-                            value={value}
-                            disabled={!selectable(value)}
-                          >
-                            {option.label}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <MonthYearPicker
+                  months={months}
+                  selectedMonth={selectedMonth}
+                  onSelectMonth={onSelectMonth}
+                />
                 <p className="text-[11px] leading-snug text-muted-foreground">
                   {formatAnalysisMonth(selectedMonth)}
                   {timeZone ? `, in ${timeZone}` : null}. An approved report declared this month.
@@ -1002,6 +924,117 @@ function chapterRailSummary(chapter: WorkspaceChapterView): {
 }
 
 /**
+ * What the advice slot needs when a chapter has no advice of its own.
+ *
+ * One object rather than six props because every chapter is handed the same
+ * set unchanged, and because the ask itself belongs to the run, not to the
+ * chapter: the fence files one narration per run, so a press in Cancellations
+ * and a press in Funnel are the same press. The workspace owns the state and
+ * every gap reads it, which is why pressing one button settles them all.
+ */
+type NarrationRequestState = "idle" | "pending" | "requested" | "failed";
+
+type AdviceGapState = {
+  /** True when the run carries any narration at all. */
+  runHasNarrations: boolean;
+  /** True when this member may ask for one and there is a run to ask about. */
+  canRequest: boolean;
+  requestState: NarrationRequestState;
+  onRequest: () => void;
+};
+
+/**
+ * What fills the advice slot when the narrator wrote no advice for the
+ * chapter. Never a recommendation: where the chapter itself says its inputs
+ * are missing, the detector's own sentence is the explanation, and where a
+ * narration exists but skipped the chapter, the gap is named rather than
+ * papered over. A button appears only when the run has no narrations at all,
+ * because the fence files one narration per run and a second submission for
+ * the same run is refused -- pressing it then could never fill anything.
+ */
+function AdviceGap({
+  chapter,
+  railReason,
+  gap,
+}: {
+  chapter: WorkspaceChapterView;
+  /** The sentence the rail already printed above, so this never repeats it. */
+  railReason: string | null;
+  gap: AdviceGapState;
+}) {
+  const needsData =
+    chapter.state === "needs_data" &&
+    chapter.findings.length > 0 &&
+    chapter.findings.every((finding) => finding.kind === "needs_data");
+  const quoted = needsData
+    ? (chapter.findings.find((finding) => finding.detail)?.detail ?? null)
+    : null;
+  // The rail prints the featured finding's own words a few lines above. When
+  // that is already this sentence, printing it again reads as a stutter, not
+  // as emphasis.
+  const missingSentence = quoted && quoted !== railReason ? quoted : null;
+
+  // An input that was never reported cannot be advised on, by the model or by
+  // anyone else. The detector already said what is missing; this only adds
+  // that no advice follows from it yet.
+  if (needsData) {
+    return (
+      <div className="flex flex-col gap-3">
+        {missingSentence ? (
+          <p className="text-[15px] leading-relaxed text-muted-foreground">{missingSentence}</p>
+        ) : null}
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          No advice was written for this section yet. It appears once the missing evidence is
+          reported and analysed.
+        </p>
+      </div>
+    );
+  }
+
+  if (!gap.runHasNarrations && gap.canRequest) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 w-full justify-center gap-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest text-muted-foreground"
+          disabled={gap.requestState === "pending" || gap.requestState === "requested"}
+          onClick={gap.onRequest}
+        >
+          <Sparkles aria-hidden="true" className="size-4" />
+          {gap.requestState === "pending"
+            ? "Generating…"
+            : gap.requestState === "requested"
+              ? "Advice requested"
+              : "Generate AI recommendation"}
+        </Button>
+        {gap.requestState === "requested" ? (
+          // Said plainly because it is not this section that was asked for.
+          // The narrator reads the whole run at once and decides which
+          // sections it can cite, so it may fill this one, several, or none.
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Advice requested for this analysis. The narrator reads every section&apos;s findings
+            together and writes only what it can cite, so it may not reach this one. Refresh in a
+            moment to see what it wrote.
+          </p>
+        ) : null}
+        {gap.requestState === "failed" ? (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            The advice could not be started. Try again in a moment.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <p className="text-[15px] leading-relaxed text-muted-foreground">
+      No advice was written for this section in this run.
+    </p>
+  );
+}
+
+/**
  * The approved draft's chapter rail: one big figure, one calm reason, the AI
  * advice box drawn in the platform's green house style, and one way into the
  * evidence. The advice is the narrated recommendation for this chapter; the
@@ -1012,11 +1045,13 @@ function ChapterRail({
   recommendations,
   onInspect,
   organizationId,
+  adviceGap,
 }: {
   chapter: WorkspaceChapterView;
   recommendations: readonly WorkspaceRecommendationView[];
   onInspect: (findingId: string) => void;
   organizationId: string;
+  adviceGap: AdviceGapState;
 }) {
   const summary = chapterRailSummary(chapter);
   // The green box is the advice slot, so only advice goes in it. Narration
@@ -1070,7 +1105,9 @@ function ChapterRail({
 
       {advice ? (
         <RecommendationControls organizationId={organizationId} recommendation={advice} />
-      ) : null}
+      ) : (
+        <AdviceGap chapter={chapter} railReason={summary.reason} gap={adviceGap} />
+      )}
 
       {inspectFinding ? (
         <Button
@@ -1130,6 +1167,54 @@ export function ChannelWorkspace({
       router.push(`?month=${month}`);
     },
     [router],
+  );
+
+  /**
+   * Asking the narrator to wake for the displayed run.
+   *
+   * Held here, not in each chapter's slot, for two reasons. One press narrates
+   * the whole run, so every gap must show the same answer rather than five
+   * buttons that still look unpressed. And the month picker is a soft history
+   * change -- this component is not remounted -- so the run the ask was made
+   * for is stored beside it. Switching months therefore shows an idle button
+   * again instead of February inheriting March's "Advice requested".
+   */
+  const runId = view.run?.id ?? null;
+  const [narrationRequest, setNarrationRequest] = useState<{
+    runId: string;
+    state: NarrationRequestState;
+  } | null>(null);
+  const narrationState: NarrationRequestState =
+    narrationRequest && narrationRequest.runId === runId ? narrationRequest.state : "idle";
+
+  const requestNarration = useCallback(() => {
+    if (!runId) return;
+    setNarrationRequest((current) =>
+      current?.runId === runId && current.state === "pending"
+        ? current
+        : { runId, state: "pending" },
+    );
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/organizations/${organizationId}/channels/${channel.id}/analysis-runs/${runId}/recommendations`,
+          { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+        );
+        setNarrationRequest({ runId, state: response.ok ? "requested" : "failed" });
+      } catch {
+        setNarrationRequest({ runId, state: "failed" });
+      }
+    })();
+  }, [channel.id, organizationId, runId]);
+
+  const adviceGap = useMemo<AdviceGapState>(
+    () => ({
+      runHasNarrations: view.recommendations.length > 0,
+      canRequest: canRunAnalysis && runId !== null,
+      requestState: narrationState,
+      onRequest: requestNarration,
+    }),
+    [canRunAnalysis, narrationState, requestNarration, runId, view.recommendations.length],
   );
 
   const allFindings = useMemo<WorkspaceFindingView[]>(
@@ -1382,6 +1467,7 @@ export function ChannelWorkspace({
               onInspect={inspect}
               recommendations={chapterRecommendations(chapter)}
               organizationId={organizationId}
+              adviceGap={adviceGap}
               allFindings={allFindings}
               run={view.run}
             />
@@ -1514,6 +1600,7 @@ function ChapterShell({
   onInspect,
   recommendations,
   organizationId,
+  adviceGap,
   allFindings,
   run,
 }: {
@@ -1525,6 +1612,7 @@ function ChapterShell({
   onInspect: (findingId: string) => void;
   recommendations: readonly WorkspaceRecommendationView[];
   organizationId: string;
+  adviceGap: AdviceGapState;
   allFindings: readonly WorkspaceFindingView[];
   run: WorkspaceRunView | null;
 }) {
@@ -1599,6 +1687,7 @@ function ChapterShell({
         recommendations={recommendations}
         onInspect={onInspect}
         organizationId={organizationId}
+        adviceGap={adviceGap}
       />
     </section>
   );

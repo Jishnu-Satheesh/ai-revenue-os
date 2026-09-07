@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelsRollup } from "@/components/channels/channels-rollup";
 import type { ChannelsOverviewView } from "@/modules/analysis/application/channels-overview";
+
+const mockPush = vi.hoisted(() => vi.fn());
 
 // The component reads and updates the `window` query param through the app
 // router. Mocked the same way the sibling economics client test does it: a
 // real `URLSearchParams` so `.toString()` behaves, and a spyable `push`.
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: mockPush }),
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -34,6 +36,25 @@ const WINDOW = {
   grain: "day" as const,
   label: "2026-01-01 to 2026-02-28",
   value: "2026-01-01..2026-02-28..day",
+};
+
+const WINDOW_MARCH = {
+  windowStart: "2026-03-01",
+  windowEnd: "2026-03-31",
+  grain: "day" as const,
+  label: "2026-03-01 to 2026-03-31",
+  value: "2026-03-01..2026-03-31..day",
+};
+
+// A second window that starts in the same month as `WINDOW_MARCH`. Windows are
+// declared as start, end and grain, so this is ordinary -- a weekly package
+// beside a monthly one -- and it must stay pickable.
+const WINDOW_MARCH_WEEK = {
+  windowStart: "2026-03-02",
+  windowEnd: "2026-03-08",
+  grain: "week" as const,
+  label: "2026-03-02 to 2026-03-08",
+  value: "2026-03-02..2026-03-08..week",
 };
 
 function view(overrides: Partial<ChannelsOverviewView> = {}): ChannelsOverviewView {
@@ -90,6 +111,10 @@ function view(overrides: Partial<ChannelsOverviewView> = {}): ChannelsOverviewVi
 }
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  mockPush.mockClear();
+});
 
 describe("ChannelsRollup", () => {
   it("presents the selected window as one report canvas", () => {
@@ -195,6 +220,75 @@ describe("ChannelsRollup", () => {
     expect(screen.getByText(/nothing has been measured/)).toBeTruthy();
     // A zero would read as "you earned nothing", which is a different claim.
     expect(screen.queryByText("AED 0.00")).toBeNull();
+  });
+
+  it("picks the window through Year and Month selects like the audit page", () => {
+    render(<ChannelsRollup view={view()} organizationId="org-1" />);
+
+    // One window in the month, so the month names it outright.
+    expect(screen.queryByLabelText("Window to report on")).toBeNull();
+    expect(screen.getByLabelText("Year to analyse")).toBeTruthy();
+    expect(screen.getByLabelText("Month to analyse")).toBeTruthy();
+  });
+
+  it("selecting a month navigates with that month's window value", async () => {
+    render(
+      <ChannelsRollup
+        view={view({ windows: [WINDOW_MARCH, WINDOW], selectedWindow: WINDOW })}
+        organizationId="org-1"
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByLabelText("Month to analyse"), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const march = within(await screen.findByRole("listbox")).getByRole("option", {
+      name: "March",
+    });
+    fireEvent.click(march);
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    expect(mockPush.mock.calls[0]?.[0]).toContain("window=2026-03-01..2026-03-31..day");
+  });
+
+  it("keeps every window of a shared month pickable, not just the newest", async () => {
+    render(
+      <ChannelsRollup
+        view={view({
+          windows: [WINDOW_MARCH, WINDOW_MARCH_WEEK, WINDOW],
+          selectedWindow: WINDOW_MARCH,
+        })}
+        organizationId="org-1"
+      />,
+    );
+
+    // Two windows start in March, so the month alone cannot say which is meant
+    // and the exact ranges are offered beside it.
+    const windowPicker = screen.getByLabelText("Window to report on");
+    fireEvent.pointerDown(windowPicker, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    const options = within(await screen.findByRole("listbox")).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "2026-03-01 to 2026-03-31",
+      "2026-03-02 to 2026-03-08",
+    ]);
+
+    fireEvent.click(options[1] as HTMLElement);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    expect(mockPush.mock.calls[0]?.[0]).toContain("window=2026-03-02..2026-03-08..week");
+  });
+
+  it("captions the single window of a month instead of asking a question with one answer", () => {
+    render(
+      <ChannelsRollup
+        view={view({ windows: [WINDOW_MARCH, WINDOW], selectedWindow: WINDOW_MARCH })}
+        organizationId="org-1"
+      />,
+    );
+
+    expect(screen.queryByLabelText("Window to report on")).toBeNull();
+    expect(screen.getByText("2026-03-01 to 2026-03-31")).toBeTruthy();
   });
 
   it("renders nothing measurable when the organization has imported no windows", () => {

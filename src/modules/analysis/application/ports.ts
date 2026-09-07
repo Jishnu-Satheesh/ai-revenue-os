@@ -213,6 +213,21 @@ export type ChannelAnalysisReadPort = {
   }): Promise<ChannelAnalysisRunRecord[]>;
 
   /**
+   * Exactly one run, by id, scoped to the organization and the channel.
+   *
+   * Separate from `loadRuns` because that list is capped at what a page shows.
+   * A caller acting on a named run -- a retry, a re-narration -- must not be
+   * told the run does not exist merely because ten newer ones do. Null covers
+   * both "no such run" and "not this channel's run", so nothing about another
+   * channel's state leaks to the caller.
+   */
+  loadRun(input: {
+    organizationId: string;
+    channelId: string;
+    analysisRunId: string;
+  }): Promise<ChannelAnalysisRunRecord | null>;
+
+  /**
    * The open findings of exactly one run.
    *
    * Scoped to a run rather than to a channel on purpose. Findings from two runs

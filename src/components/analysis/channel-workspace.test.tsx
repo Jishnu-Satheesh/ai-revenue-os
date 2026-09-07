@@ -101,7 +101,7 @@ function metricEvidence(
 
 const MONTH_HORIZON = { firstMonth: "2025-12", lastMonth: "2026-02" };
 
-function renderWorkspace(input: {
+type WorkspaceInput = {
   runs?: ChannelAnalysisRunRecord[];
   findings?: ChannelFindingRecord[];
   evidence?: ChannelFindingEvidenceRecord[];
@@ -109,14 +109,18 @@ function renderWorkspace(input: {
   monthHorizon?: { firstMonth: string; lastMonth: string } | null;
   selectedMonth?: string | null;
   recommendations?: import("@/modules/analysis/application/ports").ChannelRecommendationRecord[];
-}) {
+};
+
+/** The element on its own, so a test can re-render the same instance with a
+ *  different month's view -- which is what the month picker actually does. */
+function workspaceElement(input: WorkspaceInput) {
   const view = buildChannelWorkspaceView({
     runs: input.runs ?? [run()],
     findings: input.findings ?? [],
     evidence: input.evidence ?? [],
     recommendations: input.recommendations ?? [],
   });
-  render(
+  return (
     <ChannelWorkspace
       organizationId="org-1"
       channel={CHANNEL}
@@ -127,8 +131,12 @@ function renderWorkspace(input: {
       canRunAnalysis={input.canRunAnalysis ?? true}
       channelsHref="/organizations/org-1/channels"
       economicsHref="/organizations/org-1/economics"
-    />,
+    />
   );
+}
+
+function renderWorkspace(input: WorkspaceInput) {
+  return render(workspaceElement(input));
 }
 
 /** Opens a pill-style select, whose options live in a Radix portal. */
@@ -831,5 +839,255 @@ describe("ChannelWorkspace", () => {
     renderWorkspace({});
 
     expect(screen.getByText("No connection implied")).toBeTruthy();
+  });
+
+  describe("advice gaps", () => {
+    /** The detector's own words for a chapter whose evidence never arrived. */
+    const NEEDS_DATA_SENTENCE = "No approved report has written evidence for these days yet.";
+
+    const cancellationChapter = () => ({
+      runs: [
+        run({ detectorVersions: [{ key: "orders.cancellation_loss", calculationVersion: 1 }] }),
+      ],
+      findings: [
+        finding({
+          id: "finding-cancel",
+          detectorKey: "orders.cancellation_loss",
+          code: "ORDER_CANCELLATION_LOSS",
+          kind: "observation",
+          metricKey: "order.avoidable_cancellation_count",
+        }),
+      ],
+    });
+
+    /** Two chapters that both lack advice, so both draw the same button. */
+    const twoChapters = () => ({
+      runs: [
+        run({
+          detectorVersions: [
+            { key: "orders.cancellation_loss", calculationVersion: 1 },
+            { key: "funnel.stage_conversion", calculationVersion: 1 },
+          ],
+        }),
+      ],
+      findings: [
+        finding({
+          id: "finding-cancel",
+          detectorKey: "orders.cancellation_loss",
+          code: "ORDER_CANCELLATION_LOSS",
+          kind: "observation",
+          metricKey: "order.avoidable_cancellation_count",
+        }),
+        finding({
+          id: "finding-funnel",
+          detectorKey: "funnel.stage_conversion",
+          code: "FUNNEL_STAGE_CONVERSION",
+          kind: "observation",
+          metricKey: "funnel.impressions",
+        }),
+      ],
+    });
+
+    /**
+     * A chapter whose inputs were never reported: no model may advise on it.
+     *
+     * Money rather than Cancellations, because Money is drawn by the rail's
+     * generic block -- the one that prints the featured finding's own sentence
+     * -- which is where a second copy of that sentence could appear.
+     */
+    const needsDataChapter = () => ({
+      runs: [
+        run({ detectorVersions: [{ key: "economics.commission_share", calculationVersion: 1 }] }),
+      ],
+      findings: [
+        finding({
+          id: "finding-money",
+          detectorKey: "economics.commission_share",
+          code: "COMMISSION_SHARE_OF_REVENUE",
+          kind: "needs_data",
+          needsDataReason: "NO_GOVERNED_EVIDENCE_IN_WINDOW",
+          valueKind: null,
+          valueNumerator: null,
+          valueDenominator: null,
+        }),
+      ],
+    });
+
+    it("shows a Generate AI recommendation button where a chapter has findings but the run has no narrations", () => {
+      renderWorkspace({ ...cancellationChapter(), recommendations: [] });
+
+      const rail = screen.getByRole("complementary", { name: "Cancellations figures" });
+      expect(
+        within(rail).getByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeTruthy();
+    });
+
+    it("shows no button where advice already exists", () => {
+      renderWorkspace({
+        ...cancellationChapter(),
+        recommendations: [
+          {
+            id: "rec-action",
+            analysisRunId: "run-1",
+            channelId: CHANNEL.id,
+            branchId: "branch-1",
+            label: "recommendation",
+            headline: "Mark items out of stock before service.",
+            detail: "Cancellations land after the order is accepted.",
+            supportedActions: [],
+            limitations: [],
+            citationFindingIds: ["finding-cancel"],
+            resultDigest: "b".repeat(64),
+            decisions: [],
+            myFeedback: null,
+            createdAt: "2026-02-01T00:05:00Z",
+          },
+        ],
+      });
+
+      const rail = screen.getByRole("complementary", { name: "Cancellations figures" });
+      expect(
+        within(rail).queryByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeNull();
+    });
+
+    it("explains the gap without a button where narration exists but skipped the chapter", () => {
+      renderWorkspace({
+        ...cancellationChapter(),
+        recommendations: [
+          {
+            id: "rec-loose",
+            analysisRunId: "run-1",
+            channelId: CHANNEL.id,
+            branchId: "branch-1",
+            label: "observation",
+            headline: "Nothing here anchors to a chapter",
+            detail: "Its citations name findings this page does not show.",
+            supportedActions: [],
+            limitations: [],
+            citationFindingIds: ["finding-gone"],
+            resultDigest: "e".repeat(64),
+            decisions: [],
+            myFeedback: null,
+            createdAt: "2026-02-01T00:05:00Z",
+          },
+        ],
+      });
+
+      const rail = screen.getByRole("complementary", { name: "Cancellations figures" });
+      expect(
+        within(rail).queryByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeNull();
+      expect(within(rail).getByText(/no advice was written for this section/i)).toBeTruthy();
+    });
+
+    it("requests narration for the displayed run when the button is pressed", async () => {
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      renderWorkspace({ ...cancellationChapter(), recommendations: [] });
+
+      fireEvent.click(screen.getByRole("button", { name: /Generate AI recommendation/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+        "/api/organizations/org-1/channels/channel-1/analysis-runs/run-1/recommendations",
+      );
+      vi.unstubAllGlobals();
+    });
+
+    it("settles every section's button on one press, because one press narrates the run", async () => {
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      renderWorkspace({ ...twoChapters(), recommendations: [] });
+
+      const buttons = screen.getAllByRole("button", { name: /Generate AI recommendation/i });
+      expect(buttons.length).toBeGreaterThan(1);
+      fireEvent.click(buttons[0] as HTMLElement);
+
+      await waitFor(() =>
+        expect(screen.getAllByRole("button", { name: /Advice requested/i }).length).toBe(
+          buttons.length,
+        ),
+      );
+      // The narration is filed per run, so a second section must not queue a
+      // second ask -- and must not still look unpressed.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: /Generate AI recommendation/i })).toBeNull();
+      vi.unstubAllGlobals();
+    });
+
+    it("says the narrator reads the whole run, not only the section pressed", async () => {
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      renderWorkspace({ ...cancellationChapter(), recommendations: [] });
+
+      fireEvent.click(screen.getByRole("button", { name: /Generate AI recommendation/i }));
+
+      expect(await screen.findByText(/reads every section's findings together/i)).toBeTruthy();
+      vi.unstubAllGlobals();
+    });
+
+    it("quotes the missing-evidence sentence once, not twice, on a needs_data chapter", () => {
+      renderWorkspace({ ...needsDataChapter(), recommendations: [] });
+
+      const rail = screen.getByRole("complementary", { name: "Money figures" });
+      // The rail's generic block already prints the featured finding's own
+      // words above the advice slot. Printing them again inside it read as a
+      // stutter -- this is the Money chapter, where that block is what draws.
+      expect(within(rail).getAllByText(NEEDS_DATA_SENTENCE)).toHaveLength(1);
+      expect(within(rail).getByText(/appears once the missing evidence is reported/i)).toBeTruthy();
+      expect(
+        within(rail).queryByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeNull();
+    });
+
+    it("does not carry one month's request into the month switched to", async () => {
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const { rerender } = renderWorkspace({ ...cancellationChapter(), recommendations: [] });
+
+      fireEvent.click(screen.getByRole("button", { name: /Generate AI recommendation/i }));
+      await screen.findByRole("button", { name: /Advice requested/i });
+
+      // The month picker pushes history rather than remounting, so the next
+      // month arrives as new props on the same component. February must not
+      // inherit January's answer.
+      rerender(
+        workspaceElement({
+          runs: [
+            run({
+              id: "run-2",
+              detectorVersions: [{ key: "orders.cancellation_loss", calculationVersion: 1 }],
+            }),
+          ],
+          findings: cancellationChapter().findings.map((entry) => ({
+            ...entry,
+            analysisRunId: "run-2",
+          })),
+          recommendations: [],
+        }),
+      );
+
+      expect(screen.getByRole("button", { name: /Generate AI recommendation/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Advice requested/i })).toBeNull();
+      vi.unstubAllGlobals();
+    });
+
+    it("offers no button to a member who may not run the analysis", () => {
+      renderWorkspace({ ...cancellationChapter(), recommendations: [], canRunAnalysis: false });
+
+      const rail = screen.getByRole("complementary", { name: "Cancellations figures" });
+      expect(
+        within(rail).queryByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeNull();
+      expect(within(rail).getByText(/no advice was written for this section/i)).toBeTruthy();
+    });
   });
 });

@@ -198,6 +198,52 @@ function toFindingRecord(row: ChannelFindingRow): ChannelFindingRecord {
   };
 }
 
+/** The columns a run record is built from, named once so the list a single
+ *  run is read with cannot drift from the list the page's list is read with. */
+const CHANNEL_RUN_COLUMNS =
+  "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at";
+
+type ChannelAnalysisRunRow = Pick<
+  Database["public"]["Tables"]["channel_analysis_runs"]["Row"],
+  | "id"
+  | "channel_id"
+  | "branch_id"
+  | "window_start"
+  | "window_end"
+  | "period_grain"
+  | "window_timezone"
+  | "registry_version"
+  | "detector_versions"
+  | "status"
+  | "finding_count"
+  | "observation_count"
+  | "needs_data_count"
+  | "safe_failure_code"
+  | "started_at"
+  | "completed_at"
+>;
+
+function toRunRecord(row: ChannelAnalysisRunRow): ChannelAnalysisRunRecord {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    branchId: row.branch_id,
+    windowStart: row.window_start,
+    windowEnd: row.window_end,
+    periodGrain: row.period_grain as AnalysisGrain,
+    windowTimezone: row.window_timezone,
+    registryVersion: row.registry_version,
+    detectorVersions: toDetectorVersions(row.detector_versions),
+    status: row.status,
+    findingCount: row.finding_count,
+    observationCount: row.observation_count,
+    needsDataCount: row.needs_data_count,
+    safeFailureCode: row.safe_failure_code,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+  };
+}
+
 export function createAuthenticatedChannelAnalysisRepository(
   supabase: AnalysisClient,
 ): ChannelAnalysisReadPort {
@@ -205,9 +251,7 @@ export function createAuthenticatedChannelAnalysisRepository(
     async loadRuns({ organizationId, channelId, limit }) {
       const { data, error } = await supabase
         .from("channel_analysis_runs")
-        .select(
-          "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at",
-        )
+        .select(CHANNEL_RUN_COLUMNS)
         .eq("organization_id", organizationId)
         .eq("channel_id", channelId)
         .order("started_at", { ascending: false })
@@ -215,26 +259,26 @@ export function createAuthenticatedChannelAnalysisRepository(
 
       if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
 
-      return (data ?? []).map(
-        (row): ChannelAnalysisRunRecord => ({
-          id: row.id,
-          channelId: row.channel_id,
-          branchId: row.branch_id,
-          windowStart: row.window_start,
-          windowEnd: row.window_end,
-          periodGrain: row.period_grain as AnalysisGrain,
-          windowTimezone: row.window_timezone,
-          registryVersion: row.registry_version,
-          detectorVersions: toDetectorVersions(row.detector_versions),
-          status: row.status,
-          findingCount: row.finding_count,
-          observationCount: row.observation_count,
-          needsDataCount: row.needs_data_count,
-          safeFailureCode: row.safe_failure_code,
-          startedAt: row.started_at,
-          completedAt: row.completed_at,
-        }),
-      );
+      return (data ?? []).map(toRunRecord);
+    },
+
+    async loadRun({ organizationId, channelId, analysisRunId }) {
+      // Named rather than found in `loadRuns`: that list is capped at what a
+      // page shows, so a run past the cap would read as absent to anyone
+      // acting on it. The channel filter travels here for the same reason it
+      // travels there -- a run of another channel must read as absent, not as
+      // a refusal that names which channel it belongs to.
+      const { data, error } = await supabase
+        .from("channel_analysis_runs")
+        .select(CHANNEL_RUN_COLUMNS)
+        .eq("organization_id", organizationId)
+        .eq("channel_id", channelId)
+        .eq("id", analysisRunId)
+        .maybeSingle();
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      return data ? toRunRecord(data) : null;
     },
 
     async loadFindingsForRun({ organizationId, analysisRunId }) {
