@@ -145,6 +145,17 @@ export type GeneratedAssetUpload = {
   assetId: string;
   storagePath: string;
   contentHash: string;
+  /**
+   * Measured from the stored bytes by intake, never the size that was asked
+   * for and never the size the planner claimed. An image model returns whatever
+   * it returns: asking for 1024x1792 and recording 1024x1792 for an image that
+   * came back 1024x1024 puts a false shape inside the digest an approval binds
+   * to.
+   */
+  widthPx: number;
+  heightPx: number;
+  /** Also measured. Intake re-encodes, so the stored type is the true one. */
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
   /** The provider model that returned the stored bytes, never the planner's claim. */
   modelId: string;
   /** The deterministic prompt contract used to request those bytes. */
@@ -536,13 +547,19 @@ export async function generateCampaignBundle(
       return failWith("asset_generation_incomplete", "Not every image could be produced.");
     }
 
-    // The stored bytes decide the content hash. A manifest whose hash disagrees
-    // with what is in storage would produce a digest that describes nothing.
+    // The stored bytes decide the content hash, the pixel size and the type. A
+    // manifest that disagrees with what is in storage on any of them produces a
+    // digest that describes nothing -- and the size is the one an operator can
+    // actually see is wrong, because a poster composed for a shape the image
+    // does not have is visibly cropped.
     const reconciled: CampaignBundleManifest = {
       ...manifest,
       assets: manifest.assets.map((asset) => ({
         ...asset,
         contentHash: uploaded.get(asset.id)!.contentHash,
+        widthPx: uploaded.get(asset.id)!.widthPx,
+        heightPx: uploaded.get(asset.id)!.heightPx,
+        mimeType: uploaded.get(asset.id)!.mimeType,
         provenance:
           asset.provenance.kind === "generated"
             ? {

@@ -234,3 +234,99 @@ describe("runChannelAnalysis", () => {
     expect(deps.loadEvidence).not.toHaveBeenCalled();
   });
 });
+
+const monthlyPayload = {
+  organizationId: ORGANIZATION,
+  channelId: CHANNEL,
+  branchId: null,
+  windowStart: "2026-02-01",
+  windowEnd: "2026-02-28",
+  periodGrain: "day" as const,
+  windowTimezone: "Asia/Dubai",
+  month: "2026-02",
+  analysisRunId: RUN,
+  correlationId: CORRELATION,
+  idempotencyKey: "channel-analysis-run-0001",
+};
+
+function monthlyDependencies(
+  overrides: Partial<ChannelAnalysisDependencies> = {},
+): ChannelAnalysisDependencies {
+  return {
+    ...dependencies(),
+    loadMonthHorizon: vi.fn(async () => ({ firstMonth: "2026-01", lastMonth: "2026-03" })),
+    ...overrides,
+  };
+}
+
+describe("runChannelAnalysis monthly dispatch", () => {
+  it("claims with the evidence digest and cache key it just computed", async () => {
+    const deps = monthlyDependencies();
+    const result = await runChannelAnalysis(monthlyPayload, deps);
+
+    expect(result.outcome).toBe("completed");
+    expect(deps.loadMonthHorizon).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      channelId: CHANNEL,
+    });
+    const claimCall = vi.mocked(deps.claim).mock.calls[0][0];
+    expect(claimCall.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(claimCall.cacheKey).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("returns the reused run without writing when the claim reports a cache hit", async () => {
+    const deps = monthlyDependencies({
+      claim: vi.fn(async () => ({
+        outcome: "cached" as const,
+        analysisRunId: "reused-run-id",
+      })),
+    });
+
+    expect(await runChannelAnalysis(monthlyPayload, deps)).toEqual({
+      outcome: "cached",
+      analysisRunId: "reused-run-id",
+    });
+    expect(deps.complete).not.toHaveBeenCalled();
+    expect(deps.fail).not.toHaveBeenCalled();
+  });
+
+  it("fails when the payload window is not the month it names", async () => {
+    const deps = monthlyDependencies();
+
+    const result = await runChannelAnalysis({ ...monthlyPayload, windowEnd: "2026-02-27" }, deps);
+
+    expect(result.outcome).toBe("failed");
+    expect(deps.claim).not.toHaveBeenCalled();
+    expect(deps.complete).not.toHaveBeenCalled();
+  });
+
+  it("fails when the month has no known timeline", async () => {
+    const deps = monthlyDependencies({ loadMonthHorizon: vi.fn(async () => null) });
+
+    const result = await runChannelAnalysis(monthlyPayload, deps);
+
+    expect(result.outcome).toBe("failed");
+    expect(deps.claim).not.toHaveBeenCalled();
+    expect(deps.fail).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "EVIDENCE_UNAVAILABLE" }),
+    );
+  });
+
+  it("fails when the claim binds a different timezone than the key was computed under", async () => {
+    const deps = monthlyDependencies({
+      claim: vi.fn(async (input) => ({
+        outcome: "acquired" as const,
+        windowTimezone: "Asia/Kolkata",
+        boundDetectors: input.detectors,
+      })),
+    });
+
+    const result = await runChannelAnalysis(monthlyPayload, deps);
+
+    expect(result.outcome).toBe("failed");
+    expect(deps.complete).not.toHaveBeenCalled();
+    expect(deps.fail).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "WINDOW_CONTEXT_UNAVAILABLE" }),
+    );
+  });
+});

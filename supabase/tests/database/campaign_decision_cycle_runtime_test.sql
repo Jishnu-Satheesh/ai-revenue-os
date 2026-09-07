@@ -111,6 +111,7 @@ as $$
       'opportunity', pg_catalog.jsonb_build_object(
         'id', opportunity_id,
         'playbookVersionId', decision_context #>> '{playbook,version_id}',
+        'actionKey', decision_context #>> '{playbook,action_key}',
         'candidateFingerprint', fingerprint,
         'title', 'Controlled campaign recommendation',
         'summary', 'A bounded recommendation used to test final admission.',
@@ -1062,7 +1063,7 @@ select extensions.lives_ok(
   $$
     insert into public.opportunities (
       id, organization_id, decision_record_id, playbook_version_id,
-      candidate_fingerprint, title, summary, hypothesis, subject_kind,
+      action_key, candidate_fingerprint, title, summary, hypothesis, subject_kind,
       subject_ref, evidence_bundle, impact_low_minor, impact_high_minor,
       confidence, confidence_rationale, evidence_tier, execution_cost_minor,
       expected_contribution_minor, currency, time_to_impact_days, risk_tier,
@@ -1073,6 +1074,7 @@ select extensions.lives_ok(
       'd5c50000-0000-4000-8000-000000000101'::uuid,
       seed.record_id,
       'd5c50000-0000-4000-8000-000000000602'::uuid,
+      'generic.admission_probe_v1',
       repeat('7', 64),
       'Generic admission probe',
       'Two active generic proposals share one fingerprint',

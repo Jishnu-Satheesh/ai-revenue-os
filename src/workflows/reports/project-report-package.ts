@@ -219,7 +219,7 @@ function assertObjectIdentity(
   }
 }
 
-async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
+export async function readCsvRows(buffer: Buffer): Promise<unknown[][]> {
   const rows: unknown[][] = [];
   const parser = Readable.from([buffer]).pipe(
     parse({
@@ -328,9 +328,14 @@ function safeSourceDigest(output: ProjectionOutput): string {
  *
  * The error's own name and message, and for our own typed failures the code
  * they carry, because a code alone says which category the failure belongs to
- * and not which thing went wrong. Bounded to the column's 300 characters, and
- * carrying identifiers only: a workbook value must never reach a record an
- * operator reads, and none of the errors raised on this path carries one.
+ * and not which thing went wrong. Bounded to the column's 300 characters.
+ *
+ * Every error on this path carries identifiers only, with one deliberate
+ * exception: `ReportCategoricalValueNotDeclared` also carries the offending
+ * value, because a category label is a provider's own declared vocabulary
+ * (`CLOSED`, `ITEM_UNAVAILABLE`) rather than a customer value, and it is
+ * itself bounded to 64 characters before it ever reaches here. No other
+ * error's message carries workbook content.
  */
 function failureDetail(error: unknown): string | undefined {
   if (!(error instanceof Error)) return undefined;

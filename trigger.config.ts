@@ -1,9 +1,15 @@
 import { defineConfig } from "@trigger.dev/sdk";
+import { additionalFiles } from "@trigger.dev/build/extensions/core";
 
 export default defineConfig({
   project: process.env.TRIGGER_PROJECT_REF!,
   dirs: ["./src/trigger"],
   runtime: "node-22",
+  // So `process.cwd()` is the build directory in dev as well as in production.
+  // `font-manifest.ts` resolves the vendored fonts from cwd, and a dev worker
+  // that resolved them from somewhere else would prove nothing about the
+  // deployed one.
+  legacyDevProcessCwdBehaviour: false,
   retries: {
     enabledInDev: false,
     default: {
@@ -29,5 +35,15 @@ export default defineConfig({
     // at runtime. Bundling it risks the same shape of failure as the two above:
     // a build that succeeds and a worker that dies on the first render.
     external: ["sharp", "@napi-rs/canvas", "fontkit"],
+    // The fonts are inputs to a render, not assets of a website, so they have
+    // to be in the image the worker runs from. Marking the renderer external
+    // ships the code that draws and none of the files it draws with: the first
+    // real deployed render failed with "Could not register the vendored font
+    // NotoSans-Regular.ttf", which is the font registry refusing to fall back
+    // rather than quietly rendering a client's Malayalam as empty boxes.
+    //
+    // The paths are preserved relative to this file's directory, which is what
+    // lets `font-manifest.ts` keep resolving them from `process.cwd()`.
+    extensions: [additionalFiles({ files: ["./assets/fonts/**"] })],
   },
 });

@@ -139,6 +139,11 @@ function uploadsFor(manifest: ReturnType<typeof validManifest>) {
     assetId: asset.id,
     storagePath: `${ORGANIZATION_ID}/${CAMPAIGN_ID}/v/${asset.id}.png`,
     contentHash: String(index + 1).repeat(64),
+    // Deliberately unlike the manifest's 1080x1080 png. An image model returns
+    // whatever it returns, and this is what intake measured.
+    widthPx: 1024,
+    heightPx: 1024,
+    mimeType: "image/jpeg" as const,
     modelId: "gemini-image-actual",
     promptVersionId: "campaign-image-prompt-v1",
   }));
@@ -529,6 +534,30 @@ describe("generateCampaignBundle", () => {
     expect(result).toMatchObject({ status: "failed", failureCode: "asset_generation_incomplete" });
     expect(publish).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The size and the type are decided by the bytes, exactly as the hash is.
+   *
+   * A model writes `widthPx` and `heightPx` into the manifest it proposes, and
+   * those are a claim. Every generated asset on staging carried one: manifests
+   * stating 1080x1080 and 1080x1350 for images that are all 1024x1024 -- the
+   * second not merely the wrong scale but the wrong shape, sitting inside the
+   * digest an approval binds to.
+   */
+  it("publishes the size and type of the bytes, not the size the model claimed", async () => {
+    await generateCampaignBundle(PAYLOAD, generateDeps(), new AbortController().signal);
+
+    const published = publish.mock.calls[0]?.[0] as {
+      manifest: ReturnType<typeof validManifest>;
+    };
+
+    expect(validManifest().assets[0]?.widthPx).toBe(1080);
+    expect(published.manifest.assets[0]).toMatchObject({
+      widthPx: 1024,
+      heightPx: 1024,
+      mimeType: "image/jpeg",
+    });
   });
 
   it("publishes the hash of the bytes that were actually stored", async () => {

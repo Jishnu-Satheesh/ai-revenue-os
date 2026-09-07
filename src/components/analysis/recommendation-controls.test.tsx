@@ -77,6 +77,7 @@ describe("RecommendationControls", () => {
           decision: {
             decision: "planned",
             reason: null,
+            snoozedUntil: null,
             actorName: "Sara",
             createdAt: "2026-08-24T10:00:00Z",
           },
@@ -95,6 +96,7 @@ describe("RecommendationControls", () => {
           decision: {
             decision: "dismissed",
             reason: "We already do this offline",
+            snoozedUntil: null,
             actorName: "Omar",
             createdAt: "2026-08-24T10:00:00Z",
           },
@@ -151,6 +153,61 @@ describe("RecommendationControls", () => {
     );
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("posts a snooze with its future horizon and refreshes", async () => {
+    render(<RecommendationControls organizationId="org-1" recommendation={recommendation()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+    const horizon = screen.getByLabelText("Snooze until") as HTMLInputElement;
+    const dialog = screen.getByRole("dialog");
+    const submit = within(dialog).getByRole("button", { name: "Snooze" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(horizon, { target: { value: "2026-10-01T09:00" } });
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    const call = vi.mocked(fetch).mock.calls[0]!;
+    expect(call[0]).toBe("/api/organizations/org-1/channel-recommendations/rec-1/decisions");
+    const posted = JSON.parse((call[1] as RequestInit).body as string) as {
+      decision: string;
+      snoozedUntil: string;
+    };
+    expect(posted.decision).toBe("snoozed");
+    expect(new Date(posted.snoozedUntil).getTime()).toBe(new Date("2026-10-01T09:00").getTime());
+  });
+
+  it("refuses a past horizon with the route's own wording", async () => {
+    render(<RecommendationControls organizationId="org-1" recommendation={recommendation()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+    const horizon = screen.getByLabelText("Snooze until") as HTMLInputElement;
+    fireEvent.change(horizon, { target: { value: "2020-01-01T09:00" } });
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Snooze" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("future time"), {
+      timeout: 4_000,
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("shows a standing snooze with its horizon", () => {
+    render(
+      <RecommendationControls
+        organizationId="org-1"
+        recommendation={recommendation({
+          decision: {
+            decision: "snoozed",
+            reason: null,
+            snoozedUntil: "2026-10-01T09:00:00.000Z",
+            actorName: "Sara",
+            createdAt: "2026-08-24T10:00:00Z",
+          },
+        })}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
+    expect(screen.getByText(/Snoozed · Sara ·/)).toBeTruthy();
+    expect(screen.getByText(/until/)).toBeTruthy();
   });
 
   it("never carries the forbidden legacy labels", () => {

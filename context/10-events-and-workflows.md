@@ -29,6 +29,8 @@ Use stable past-tense names:
 - `data.ingestion_completed`
 - `signal.detected`
 - `opportunity.proposed`
+- `growth_intelligence.item_triaged`
+- `campaign.draft_requested`
 - `approval.granted`
 - `execution.started`
 - `tool.invocation_succeeded`

@@ -17,11 +17,38 @@ import type {
 } from "@/domain/reports/schemas";
 import { hasReportPermission } from "@/domain/reports/permissions";
 import { DomainError } from "@/lib/errors";
+import {
+  hasEnqueuedGrowthIntelligenceRequests,
+  wakeGrowthIntelligenceDispatch,
+} from "@/modules/reports/application/dispatch";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import type { ReportPackageRepository } from "@/modules/reports/application/ports";
 
 export type ReportContractProposal = z.output<typeof proposeReportContractSchema>;
 export type ReportProjectionProposal = z.output<typeof proposeReportProjectionSchema>;
+
+/**
+ * Best-effort Growth Intelligence wake-up after an overlap resolution.
+ *
+ * The resolution RPCs merge `growthIntelligenceRequests` into their returned
+ * document only on a real `resolved` outcome. Anything else — a replay, a
+ * conflict, a not-ready — enqueued nothing, so the sweeper gets no nudge.
+ */
+async function wakeGrowthIntelligenceIfResolved(
+  organizationId: string,
+  correlationId: string,
+  result: unknown,
+): Promise<void> {
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    (result as { outcome?: unknown }).outcome !== "resolved" ||
+    !hasEnqueuedGrowthIntelligenceRequests(result)
+  ) {
+    return;
+  }
+  await wakeGrowthIntelligenceDispatch({ organizationId, correlationId });
+}
 
 /**
  * The checked-in definition a proposal named, or a refusal.
@@ -59,7 +86,6 @@ function assertPermission(
   }
 }
 
-
 /**
  * Where a proposed shape came from, and what provenance to record for it.
  *
@@ -74,7 +100,6 @@ type ResolvedContractProposal = {
   proposalSource: "human" | "library";
   providerDefinitionKey: string | null;
 };
-
 
 async function resolveContractProposal(
   context: AuthenticatedReportContext,
@@ -249,7 +274,12 @@ export function createReportPackageService(repository: ReportPackageRepository) 
     ) {
       assertPermission(context, "report.contract_approve");
       const resolvedPackageId = packageIdSchema.parse(packageId);
-      const resolved = await resolveContractProposal(context, resolvedPackageId, proposal, repository);
+      const resolved = await resolveContractProposal(
+        context,
+        resolvedPackageId,
+        proposal,
+        repository,
+      );
       return repository.proposeContract({
         organizationId: context.organizationId,
         actorId: context.actorId,
@@ -289,7 +319,12 @@ export function createReportPackageService(repository: ReportPackageRepository) 
     ) {
       assertPermission(context, "report.contract_approve");
       const resolvedVersionId = packageIdSchema.parse(contractVersionId);
-      const resolved = await resolveProjectionProposal(context, resolvedVersionId, proposal, repository);
+      const resolved = await resolveProjectionProposal(
+        context,
+        resolvedVersionId,
+        proposal,
+        repository,
+      );
       return repository.proposeProjection({
         organizationId: context.organizationId,
         actorId: context.actorId,
@@ -302,14 +337,57 @@ export function createReportPackageService(repository: ReportPackageRepository) 
       });
     },
 
-    async decideProjection(context: AuthenticatedReportContext, projectionVersionId: string, decision: "approved" | "rejected", reason: string | undefined, idempotencyKey: string) {
+    async proposeProjectionWithDeclaredValue(
+      context: AuthenticatedReportContext,
+      projectionVersionId: string,
+      outputKey: string,
+      value: string,
+      idempotencyKey: string,
+    ) {
       assertPermission(context, "report.contract_approve");
-      return repository.decideProjection({ organizationId: context.organizationId, actorId: context.actorId, projectionVersionId: packageIdSchema.parse(projectionVersionId), decision, reason, idempotencyKey, correlationId: context.correlationId });
+      return repository.proposeProjectionWithDeclaredValue({
+        organizationId: context.organizationId,
+        actorId: context.actorId,
+        projectionVersionId: packageIdSchema.parse(projectionVersionId),
+        outputKey,
+        value,
+        idempotencyKey,
+        correlationId: context.correlationId,
+      });
     },
 
-    async requestProjection(context: AuthenticatedReportContext, packageId: string, idempotencyKey: string) {
+    async decideProjection(
+      context: AuthenticatedReportContext,
+      projectionVersionId: string,
+      decision: "approved" | "rejected",
+      reason: string | undefined,
+      idempotencyKey: string,
+    ) {
+      assertPermission(context, "report.contract_approve");
+      return repository.decideProjection({
+        organizationId: context.organizationId,
+        actorId: context.actorId,
+        projectionVersionId: packageIdSchema.parse(projectionVersionId),
+        decision,
+        reason,
+        idempotencyKey,
+        correlationId: context.correlationId,
+      });
+    },
+
+    async requestProjection(
+      context: AuthenticatedReportContext,
+      packageId: string,
+      idempotencyKey: string,
+    ) {
       assertPermission(context, "report.retry");
-      return repository.requestProjection({ organizationId: context.organizationId, actorId: context.actorId, packageId: packageIdSchema.parse(packageId), idempotencyKey, correlationId: context.correlationId });
+      return repository.requestProjection({
+        organizationId: context.organizationId,
+        actorId: context.actorId,
+        packageId: packageIdSchema.parse(packageId),
+        idempotencyKey,
+        correlationId: context.correlationId,
+      });
     },
 
     async resolveProjectionOverlap(
@@ -319,7 +397,7 @@ export function createReportPackageService(repository: ReportPackageRepository) 
       idempotencyKey: string,
     ) {
       assertPermission(context, "report.contract_approve");
-      return repository.resolveProjectionOverlap({
+      const result = await repository.resolveProjectionOverlap({
         organizationId: context.organizationId,
         actorId: context.actorId,
         reconciliationId: packageIdSchema.parse(reconciliationId),
@@ -327,6 +405,8 @@ export function createReportPackageService(repository: ReportPackageRepository) 
         idempotencyKey,
         correlationId: context.correlationId,
       });
+      await wakeGrowthIntelligenceIfResolved(context.organizationId, context.correlationId, result);
+      return result;
     },
 
     async resolveProjectionOverlapGroup(
@@ -336,7 +416,7 @@ export function createReportPackageService(repository: ReportPackageRepository) 
       idempotencyKey: string,
     ) {
       assertPermission(context, "report.contract_approve");
-      return repository.resolveProjectionOverlapGroup({
+      const result = await repository.resolveProjectionOverlapGroup({
         organizationId: context.organizationId,
         actorId: context.actorId,
         reconciliationId: packageIdSchema.parse(reconciliationId),
@@ -344,6 +424,8 @@ export function createReportPackageService(repository: ReportPackageRepository) 
         idempotencyKey,
         correlationId: context.correlationId,
       });
+      await wakeGrowthIntelligenceIfResolved(context.organizationId, context.correlationId, result);
+      return result;
     },
   };
 }

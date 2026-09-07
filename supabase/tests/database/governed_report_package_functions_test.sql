@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(17);
+select extensions.plan(18);
 
 insert into auth.users (id)
 values ('d1000000-0000-4000-8000-000000000001'::uuid);
@@ -157,6 +157,7 @@ select extensions.throws_ok(
       'd1000000-0000-4000-8000-000000000601'::uuid,
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       '[{"sheetPosition":1,"sheetName":"CSV","normalizedSheetName":"csv","rowCount":1,"populatedCellCount":1,"expandedBytes":4,"headerCandidates":[{"rowPosition":1,"normalizedHeaders":["orphaned_without_a_digest"]}],"hasFormula":false,"hasMergedCells":false,"hasRepeatedHeader":false}]'::jsonb
     )
   $$,
@@ -172,6 +173,7 @@ select extensions.lives_ok(
       'd1000000-0000-4000-8000-000000000601'::uuid,
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       '[{"sheetPosition":1,"sheetName":"CSV","normalizedSheetName":"csv","rowCount":1,"populatedCellCount":1,"expandedBytes":4,"headerCandidateDigests":[{"rowPosition":1,"fieldCount":1,"digest":"b8a78c345cafa060523a4409ef977a18a6e035cf3ede56b295f302332819ae6e","normalizedHeaderDigests":["1f47dd5317fab65368164a12f027f7d16bbe2d3eddfedf05be115fc693324a73"]}],"hasFormula":false,"hasMergedCells":false,"hasRepeatedHeader":false}]'::jsonb
     )
   $$,
@@ -187,6 +189,14 @@ select extensions.is(
   (select schema_fingerprint from public.integration_report_packages where id = (select (package ->> 'id')::uuid from report_package_execution)),
   'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   'profile completion stores the supplied structural fingerprint once'
+);
+-- The column reuse across Tasks 6-9 is keyed on. Nothing above proves the
+-- update statement actually writes it -- only that the column exists and
+-- that the 7-argument call is accepted.
+select extensions.is(
+  (select structure_fingerprint from public.integration_report_packages where id = (select (package ->> 'id')::uuid from report_package_execution)),
+  'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  'profile completion persists the supplied structure fingerprint'
 );
 -- A profile keeps column names, and nothing from under them. The names let an
 -- operator map an export the platform does not recognise, which a one-way

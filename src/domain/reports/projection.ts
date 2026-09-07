@@ -11,11 +11,12 @@ import { ungroupNumber } from "@/domain/reports/number-format";
 import { transposePeriodColumns } from "@/domain/reports/transpose";
 import { findTotalsRow } from "@/domain/reports/totals-row";
 import {
+  ReportCategoricalValueNotDeclared,
   ReportControlTotalMismatch,
   ReportProjectionError,
 } from "@/domain/reports/projection-error";
 
-export { ReportControlTotalMismatch, ReportProjectionError };
+export { ReportCategoricalValueNotDeclared, ReportControlTotalMismatch, ReportProjectionError };
 
 const normalizedIdentifierSchema = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
 const metricKeySchema = z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/);
@@ -126,6 +127,22 @@ const reportProjectionOutputSchema = z
         labelMap: z
           .record(z.string().min(1).max(128), z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/))
           .optional(),
+        /**
+         * The character a provider uses when one cell carries two labels.
+         *
+         * Talabat's spreadsheet export writes a day's second closure reason
+         * into an injected cell, which the ragged-row rule already reads. Its
+         * CSV export cannot shift cells, so it joins both reasons into one:
+         * `CHECK_IN_REQUIRED;UNREACHABLE`. Only the first is counted, which is
+         * the rule this output already follows for the spreadsheet -- the
+         * provider's own summary counts each day once, by its first-listed
+         * reason.
+         *
+         * Declared rather than detected, like every other reading rule here. A
+         * contract that does not set it is unchanged: a cell carrying a
+         * separator stays undeclared and refuses the import.
+         */
+        valueSeparator: z.string().min(1).max(4).optional(),
         /**
          * Also read this field's labels out of the cells a ragged row injects.
          * Talabat continues its reason list into the cells it inserts, so the
@@ -567,6 +584,21 @@ function labelLookupFor(
 }
 
 /**
+ * What a category cell resolves to, under the declared rules.
+ *
+ * An undeclared value is a `CategoryReading`, not a throw, on purpose:
+ * `categoryLabel` runs inside a per-row loop, and refusing on the first
+ * offending row can only ever tell an operator that a code, not a row or a
+ * value, went wrong. The caller collects every "undeclared" reading across
+ * the whole sheet and refuses once, after the loop, with the value and every
+ * day it appeared on. See `ReportCategoricalValueNotDeclared`.
+ */
+type CategoryReading =
+  | { kind: "label"; code: string }
+  | { kind: "absent" }
+  | { kind: "undeclared"; value: string };
+
+/**
  * The category label a cell carries, under the declared rules.
  *
  * Cells the contract calls absent say nothing -- Keeta writes `-` in this
@@ -577,31 +609,52 @@ function labelLookupFor(
  *
  * Any other text has to resolve to a declared label: through the declared
  * label map where the column carries prose, and otherwise by reading the cell
- * as the code itself. Either way a category nobody approved refuses the import
- * instead of quietly becoming part of a breakdown an operator will read as
- * complete.
+ * as the code itself. A malformed cell -- a formula, a date, an object --
+ * throws immediately, because it is not a value at all and no declaration
+ * could fix it. A category nobody approved is different: it comes back as
+ * `undeclared`, carrying the text as the file wrote it, so the caller can
+ * refuse the whole import once, naming every day the value appeared on
+ * instead of only the first.
  */
 function categoryLabel(
   value: unknown,
   allowed: readonly string[],
+  separator: string | undefined,
   labels: ReadonlyMap<string, string> | null,
   absentMarkers: readonly string[] | undefined,
-): string | null {
-  if (isAbsentValue(value, absentMarkers)) return null;
-  if (typeof value === "number") return null;
+): CategoryReading {
+  if (isAbsentValue(value, absentMarkers)) return { kind: "absent" };
+  if (typeof value === "number") return { kind: "absent" };
   if (isFormula(value) || value instanceof Date || typeof value === "object") {
     throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
   }
   const text = String(value).trim();
-  if (text.length === 0) return null;
+  if (text.length === 0) return { kind: "absent" };
+  // Only the first label is counted. See the field's declaration. "First"
+  // means the first *listed* reason, not the first character position: a
+  // cell whose leading slot is empty -- ";UNREACHABLE" -- still names one
+  // reason, in second position, and it is not undeclared, merely displaced.
+  // Refusing it over an empty slot would dead-end an operator over nothing;
+  // silently dropping it would be exactly the discard this codebase refuses.
+  // A cell that lists nothing at all -- only separators, or only whitespace
+  // between them -- has no first listed reason and stays absent, same as a
+  // blank cell.
+  const first = separator
+    ? (text
+        .split(separator)
+        .map((segment) => segment.trim())
+        .find((segment) => segment.length > 0) ?? "")
+    : text;
+  if (first.length === 0) return { kind: "absent" };
   if (labels) {
-    const code = labels.get(text.toLowerCase());
-    if (code === undefined) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
-    return code;
+    const code = labels.get(first.toLowerCase());
+    // Carries the text as written, not the code it would have mapped to had
+    // it been declared -- the written text is the value a person has to go
+    // add to the declaration.
+    return code === undefined ? { kind: "undeclared", value: first } : { kind: "label", code };
   }
-  const code = text.toUpperCase();
-  if (!allowed.includes(code)) throw new ReportProjectionError("CATEGORICAL_VALUE_NOT_DECLARED");
-  return code;
+  const code = first.toUpperCase();
+  return allowed.includes(code) ? { kind: "label", code } : { kind: "undeclared", value: first };
 }
 
 function stringValue(value: unknown, code: string): string {
@@ -1248,6 +1301,16 @@ export function projectPeriodGrainMetrics(input: {
   const totals = new Map<string, Map<string, { total: string; contributors: number }>>();
   const categoryCounts = new Map<string, Map<string, number>>();
   let absentRowCount = 0;
+  // Refusing on the first offending row would only ever tell an operator a
+  // code, because the row loop has not yet seen the rest of the sheet. Every
+  // undeclared value is collected here across every row instead, keyed so two
+  // different outputs can never be confused for one another, and the single
+  // refusal thrown after the loop names the value and every day it appeared
+  // on. See `ReportCategoricalValueNotDeclared`.
+  const undeclaredCategoryValues = new Map<
+    string,
+    { outputKey: string; value: string; periods: Set<string> }
+  >();
 
   for (let rowIndex = rule.dataStartRow - 1; rowIndex < sheetRows.length; rowIndex += 1) {
     // The provider's own total is not a period, and it carries no date to be
@@ -1292,13 +1355,29 @@ export function projectPeriodGrainMetrics(input: {
           }
         }
         for (const cell of cells) {
-          const label = categoryLabel(
+          const reading = categoryLabel(
             cell,
             output.categorical.allowedValues,
+            output.categorical.valueSeparator,
             labels,
             absentMarkers,
           );
-          if (label === null) continue;
+          if (reading.kind === "absent") continue;
+          if (reading.kind === "undeclared") {
+            // Collected rather than thrown here -- see undeclaredCategoryValues
+            // above. The whole projection is refused regardless; this only
+            // decides what the operator is told about it.
+            const key = `${output.key}\u0000${reading.value}`;
+            const entry = undeclaredCategoryValues.get(key) ?? {
+              outputKey: output.key,
+              value: reading.value,
+              periods: new Set<string>(),
+            };
+            entry.periods.add(periodStart);
+            undeclaredCategoryValues.set(key, entry);
+            continue;
+          }
+          const label = reading.code;
           byCategory.set(
             `${output.key}\u0000${label}`,
             (byCategory.get(`${output.key}\u0000${label}`) ?? 0) + 1,
@@ -1343,6 +1422,22 @@ export function projectPeriodGrainMetrics(input: {
         contributors: running.contributors + 1,
       });
     }
+  }
+
+  if (undeclaredCategoryValues.size > 0) {
+    // Several values can be undeclared at once. Refusing for the
+    // lowest-sorted one is an arbitrary tie-break but a deterministic one --
+    // fixing it is the fastest way to see whichever offender is next, the same
+    // way a control-total mismatch is fixed one output at a time.
+    const [offender] = [...undeclaredCategoryValues.values()].sort(
+      (left, right) =>
+        left.value.localeCompare(right.value) || left.outputKey.localeCompare(right.outputKey),
+    );
+    throw new ReportCategoricalValueNotDeclared(
+      offender.outputKey,
+      offender.value,
+      [...offender.periods].sort(),
+    );
   }
 
   const observations: PeriodGrainObservation[] = [];

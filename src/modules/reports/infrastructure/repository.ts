@@ -117,6 +117,35 @@ function reportOverlapResolutionFailureMessage(cause: unknown): string {
   return "The overlap could not be resolved. Refresh the evidence and try again.";
 }
 
+/**
+ * Plain words for the declare path's own refusals. The shared proposal
+ * messages do not fit: there is no document being hand-authored here, only
+ * one label being named into an existing one.
+ */
+function reportProjectionDeclarationFailureMessage(cause: unknown): string {
+  const message = messageFromCause(cause);
+  switch (message) {
+    case "report projection categorical value declaration is not authorized":
+      return "You do not have permission to declare a label. Ask an organization owner or admin for access.";
+    case "report projection version was not found":
+      return "The figures this refusal came from are no longer here. Refresh the page and try again.";
+    case "report projection output was not found":
+      return "That figure is no longer in the declaration. Refresh the page and try again.";
+    case "report projection output has no categorical values to declare":
+      return "That figure counts numbers, not labels, so there is nothing to declare into.";
+    case "report projection output uses a label map":
+      return "That figure translates the provider's own words through a label map, so a one-click label can't be added directly. Ask an engineer to add both the label and its map entry in a hand-authored declaration.";
+    case "report projection categorical value is already declared":
+      return "That label is already declared. Approve the figures that carry it, or retry the projection.";
+    case "report projection categorical value is invalid":
+      return "That label cannot be declared as written. Only short uppercase labels qualify; longer provider prose needs a label map in a hand-authored declaration.";
+    case "idempotency key conflicts with another projection proposal":
+      return "This declaration request was already used with different details. Refresh the page and try again.";
+    default:
+      return "The label could not be declared. Refresh the evidence and try again.";
+  }
+}
+
 export function createAuthenticatedReportPackageRepository(
   supabase: AuthenticatedClient,
 ): ReportPackageRepository {
@@ -422,6 +451,32 @@ export function createAuthenticatedReportPackageRepository(
         p_provider_definition_key: providerDefinitionKey,
       });
       if (error || !data) persistenceFailure(reportProjectionProposalFailureMessage(error), error);
+      return data;
+    },
+
+    async proposeProjectionWithDeclaredValue({
+      organizationId,
+      actorId,
+      projectionVersionId,
+      outputKey,
+      value,
+      idempotencyKey,
+      correlationId,
+    }) {
+      const { data, error } = await supabase.rpc(
+        "propose_governed_report_projection_with_declared_value",
+        {
+          p_organization_id: organizationId,
+          p_actor_id: actorId,
+          p_report_projection_version_id: projectionVersionId,
+          p_output_key: outputKey,
+          p_value: value,
+          p_idempotency_key: idempotencyKey,
+          p_correlation_id: correlationId,
+        },
+      );
+      if (error || !data)
+        persistenceFailure(reportProjectionDeclarationFailureMessage(error), error);
       return data;
     },
 

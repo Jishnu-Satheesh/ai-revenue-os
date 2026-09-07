@@ -142,8 +142,28 @@ function checkWords(
   variant: CampaignCreativeVariant,
   evidence: VariantEvidence,
 ): VariantDerivationFailure[] {
+  return checkProseAgainstEvidence(
+    `${variant.hook} ${variant.caption} ${variant.callToAction}`,
+    evidence,
+  );
+}
+
+/**
+ * The three ways a piece of campaign prose can outrun the evidence behind it:
+ * a term the organization forbids, a ranking nobody awarded, and an offer the
+ * campaign never recorded.
+ *
+ * Exported because generated variant copy is not the only prose that reaches a
+ * customer. A poster's one operator-authored slot reaches one too, and spec 020
+ * section 7.3 requires it to be policed on the same vocabulary. Two independent
+ * sets of rules would drift, and the half that drifted would be the one nobody
+ * was reading.
+ */
+export function checkProseAgainstEvidence(
+  words: string,
+  evidence: VariantEvidence,
+): VariantDerivationFailure[] {
   const failures: VariantDerivationFailure[] = [];
-  const words = `${variant.hook} ${variant.caption} ${variant.callToAction}`;
   const haystack = `${evidence.factText} ${evidence.offer ?? ""}`.toLowerCase();
 
   for (const term of evidence.restrictedTerms) {

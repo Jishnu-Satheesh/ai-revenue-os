@@ -1,0 +1,8 @@
+{
+  "mcpAllowlist": [
+    "ironbee-devtools:*"
+  ],
+  "terminalAllowlist": [
+    "ironbee"
+  ]
+}

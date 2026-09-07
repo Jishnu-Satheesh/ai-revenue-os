@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(42);
+select extensions.plan(48);
 
 -- The human fence: the two RPCs through which a member answers what the
 -- narrator said. Everything here is exercised as real member sessions --
@@ -19,11 +19,11 @@ select extensions.has_function('public', 'record_channel_recommendation_feedback
 -- User-facing by design: members hold execute; the narrator's workers and the
 -- anonymous public hold none. service_role especially must not be able to
 -- triage on anyone's behalf -- these paths exist because a person answered.
-select extensions.ok(pg_catalog.has_function_privilege('authenticated', 'public.triage_channel_recommendation(uuid,uuid,text,text,uuid)', 'execute'), 'members hold the triage path');
+select extensions.ok(pg_catalog.has_function_privilege('authenticated', 'public.triage_channel_recommendation(uuid,uuid,text,text,uuid,timestamptz)', 'execute'), 'members hold the triage path');
 select extensions.ok(pg_catalog.has_function_privilege('authenticated', 'public.record_channel_recommendation_feedback(uuid,uuid,boolean,uuid)', 'execute'), 'and the feedback path');
-select extensions.ok(not pg_catalog.has_function_privilege('anon', 'public.triage_channel_recommendation(uuid,uuid,text,text,uuid)', 'execute'), 'anonymous callers hold neither');
+select extensions.ok(not pg_catalog.has_function_privilege('anon', 'public.triage_channel_recommendation(uuid,uuid,text,text,uuid,timestamptz)', 'execute'), 'anonymous callers hold neither');
 select extensions.ok(not pg_catalog.has_function_privilege('anon', 'public.record_channel_recommendation_feedback(uuid,uuid,boolean,uuid)', 'execute'), 'not the triage path');
-select extensions.ok(not pg_catalog.has_function_privilege('service_role', 'public.triage_channel_recommendation(uuid,uuid,text,text,uuid)', 'execute'), 'nor the service worker');
+select extensions.ok(not pg_catalog.has_function_privilege('service_role', 'public.triage_channel_recommendation(uuid,uuid,text,text,uuid,timestamptz)', 'execute'), 'nor the service worker');
 select extensions.ok(not pg_catalog.has_function_privilege('service_role', 'public.record_channel_recommendation_feedback(uuid,uuid,boolean,uuid)', 'execute'), 'on either path');
 
 -- Fixtures -----------------------------------------------------------------------
@@ -62,6 +62,8 @@ select extensions.has_column('public', 'channel_recommendation_decisions', 'acto
   'every answer carries its actor''s name as it read at answer time');
 select extensions.col_not_null('public', 'channel_recommendation_decisions', 'actor_display_name',
   'an unnamed answer is not an answer; the fallback is a value, never null');
+select extensions.has_column('public', 'channel_recommendation_decisions', 'snoozed_until',
+  'a snooze carries the horizon it hides until');
 
 insert into public.branches (id, organization_id, name, slug, kind, timezone, currency)
 values ('fb220000-0000-4000-8000-000000000301'::uuid, 'fb220000-0000-4000-8000-000000000201'::uuid, 'Dubai outlet', 'decisions-dubai', 'physical', 'Asia/Dubai', 'AED');
@@ -114,9 +116,10 @@ insert into public.channel_recommendations (
 
 create or replace function pg_temp.triage(
   p_org text, p_rec text, p_decision text, p_reason text default null,
-  p_actor text default 'fb220000-0000-4000-8000-000000000001')
+  p_actor text default 'fb220000-0000-4000-8000-000000000001',
+  p_snoozed_until timestamptz default null)
 returns void language sql as $$
-  select public.triage_channel_recommendation(p_org::uuid, p_rec::uuid, p_decision, p_reason, p_actor::uuid);
+  select public.triage_channel_recommendation(p_org::uuid, p_rec::uuid, p_decision, p_reason, p_actor::uuid, p_snoozed_until);
 $$;
 
 create or replace function pg_temp.vote(
@@ -228,10 +231,46 @@ select extensions.throws_ok(
   '42501', 'channel recommendation triage is not authorized',
   'a viewer reads the narration but does not triage it');
 
+-- Snooze ---------------------------------------------------------------------------------
+
+set local request.jwt.claim.sub = 'fb220000-0000-4000-8000-000000000001';
+select extensions.lives_ok(
+  $$ select pg_temp.triage('fb220000-0000-4000-8000-000000000201', 'fb220000-0000-4000-8000-000000000801',
+       'snoozed', null, 'fb220000-0000-4000-8000-000000000001', pg_catalog.now() + interval '7 days') $$,
+  'an owner snoozes the narration with a future horizon');
+
+select extensions.is((
+  select snoozed_until is not null from public.channel_recommendation_decisions
+  where organization_id = 'fb220000-0000-4000-8000-000000000201'::uuid
+    and recommendation_id = 'fb220000-0000-4000-8000-000000000801'::uuid
+    and decision = 'snoozed'
+), true, 'the horizon travels with the snooze answer');
+
+select extensions.throws_ok(
+  $$ select pg_temp.triage('fb220000-0000-4000-8000-000000000201', 'fb220000-0000-4000-8000-000000000801',
+       'snoozed') $$,
+  '22023', 'channel recommendation snooze horizon is not valid',
+  'a snooze without a horizon is refused');
+
+select extensions.throws_ok(
+  $$ select pg_temp.triage('fb220000-0000-4000-8000-000000000201', 'fb220000-0000-4000-8000-000000000801',
+       'acknowledged', null, 'fb220000-0000-4000-8000-000000000001', pg_catalog.now() + interval '7 days') $$,
+  '22023', 'channel recommendation snooze horizon is not valid',
+  'any other answer carrying a horizon is refused');
+
+select extensions.throws_ok(
+  $$ select pg_temp.triage('fb220000-0000-4000-8000-000000000201', 'fb220000-0000-4000-8000-000000000801',
+       'snoozed', null, 'fb220000-0000-4000-8000-000000000001', pg_catalog.now() - interval '1 hour') $$,
+  '22023', 'channel recommendation snooze is not future',
+  'a horizon in the past is refused');
+
 select extensions.is((
   select count(*)::integer from public.channel_recommendation_decisions
   where organization_id = 'fb220000-0000-4000-8000-000000000201'::uuid
-), 3, 'every accepted answer sits in the log; every refused one stayed out');
+), 4, 'every accepted answer sits in the log; every refused one stayed out');
+
+-- The feedback section below votes as the viewer again.
+set local request.jwt.claim.sub = 'fb220000-0000-4000-8000-000000000003';
 
 -- Feedback -----------------------------------------------------------------------------
 
@@ -329,7 +368,7 @@ select extensions.is((select count(*)::integer from public.channel_recommendatio
 set local request.jwt.claim.sub = 'fb220000-0000-4000-8000-000000000001';
 
 select extensions.is((select count(*)::integer from public.channel_recommendation_decisions
-  where organization_id = 'fb220000-0000-4000-8000-000000000201'::uuid), 3,
+  where organization_id = 'fb220000-0000-4000-8000-000000000201'::uuid), 4,
   'while the organization''s own members read every answer');
 select extensions.is((select count(*)::integer from public.channel_recommendation_feedback
   where organization_id = 'fb220000-0000-4000-8000-000000000201'::uuid), 1,

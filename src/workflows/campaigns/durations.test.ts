@@ -2,9 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import {
   CAMPAIGN_DURATION_PAIRS,
+  EDIT_PLATE_MAX_DURATION_SECONDS,
   GENERATE_BUNDLE_LEASE_SECONDS,
   GENERATE_BUNDLE_MAX_DURATION_SECONDS,
+  RENDER_POSTER_MAX_DURATION_SECONDS,
 } from "@/workflows/campaigns/durations";
+
+/**
+ * The two Studio workers hold no lease, so the pair rules above say nothing
+ * about them. What still has to hold is that each ceiling outlives the slowest
+ * thing the task waits on -- otherwise the task is killed mid-call and the
+ * operator reads a failure that was really a deadline.
+ */
+describe("the Studio workers outlive what they wait on", () => {
+  it("gives an edit room for the image model's own two-minute timeout", () => {
+    // The planner aborts at 120s. The ceiling has to cover that plus the object
+    // reads, the composite and the successor version write.
+    expect(EDIT_PLATE_MAX_DURATION_SECONDS).toBeGreaterThanOrEqual(300);
+    expect(EDIT_PLATE_MAX_DURATION_SECONDS).toBeGreaterThan(RENDER_POSTER_MAX_DURATION_SECONDS);
+  });
+});
 
 describe("a generation lease outlives the task it fences", () => {
   it.each(CAMPAIGN_DURATION_PAIRS)(

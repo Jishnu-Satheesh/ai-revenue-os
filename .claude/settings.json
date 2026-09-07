@@ -1,0 +1,15 @@
+{
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "mcp__trigger__trigger_task",
+      "mcp__trigger__wait_for_run_to_complete",
+      "mcp__trigger__deploy",
+      "Bash(node_modules/.bin/trigger deploy:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

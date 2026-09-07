@@ -1,4 +1,6 @@
 import { campaignBundleManifestSchema } from "@/domain/campaigns/schemas";
+import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
+import type { VariantEvidence } from "@/domain/campaigns/derivation";
 import type { VariantContextReader } from "@/workflows/campaigns/generate-variants";
 import { verifiedChannelLimits } from "@/modules/campaigns/application/verified-limits";
 
@@ -74,20 +76,36 @@ export function createVariantContextLoader(
               revokedAt: approval.revoked_at === null ? null : String(approval.revoked_at),
             }
           : null,
-        evidence: {
-          offer: manifest.generationPolicy.lockedOfferRef,
-          factKeys: manifest.generationPolicy.lockedAssertionKeys,
-          // Flattened once, lowercased, so a claim check is a substring test
-          // over exactly the text this campaign was built on and nothing else.
-          factText: flattenFacts(facts).toLowerCase(),
-          restrictedTerms: readStrings(facts.restrictedTerms),
-        },
+        evidence: toVariantEvidence(manifest, facts),
         limits: verifiedChannelLimits().instagram ?? {
           maxHashtags: null,
           maxCopyCharacters: null,
         },
       };
     },
+  };
+}
+
+/**
+ * What a piece of prose is allowed to lean on.
+ *
+ * Exported because two callers need the same answer: the variant worker, which
+ * checks generated copy, and the Studio's render route, which checks the one
+ * free text box an operator can type into. Two builders of this would eventually
+ * disagree about what the campaign's evidence is, and the free box is exactly
+ * where that disagreement would be exploited.
+ */
+export function toVariantEvidence(
+  manifest: CampaignBundleManifest,
+  facts: Record<string, unknown>,
+): VariantEvidence {
+  return {
+    offer: manifest.generationPolicy.lockedOfferRef,
+    factKeys: manifest.generationPolicy.lockedAssertionKeys,
+    // Flattened once, lowercased, so a claim check is a substring test over
+    // exactly the text this campaign was built on and nothing else.
+    factText: flattenFacts(facts).toLowerCase(),
+    restrictedTerms: readStrings(facts.restrictedTerms),
   };
 }
 

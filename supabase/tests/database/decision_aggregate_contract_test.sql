@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(18);
+select extensions.plan(21);
 
 insert into auth.users (id)
 values ('da4a0000-0000-4000-8000-000000000001'::uuid);
@@ -49,7 +49,7 @@ values (
   'da4a0000-0000-4000-8000-000000000005'::uuid,
   'da4a0000-0000-4000-8000-000000000002'::uuid,
   'da4a0000-0000-4000-8000-000000000004'::uuid,
-  '1.0.0', 'A test action improves the registered metric.', '{"action":"testing"}'::jsonb,
+  '1.0.0', 'A test action improves the registered metric.', '{"action":"testing","action_key":"testing.decision_v1"}'::jsonb,
   1, 'testing.metric', 7, true
 );
 
@@ -175,6 +175,7 @@ values (
     'opportunity', jsonb_build_object(
       'id', 'da4a0000-0000-4000-8000-000000000010',
       'playbookVersionId', 'da4a0000-0000-4000-8000-000000000005',
+      'actionKey', 'testing.decision_v1',
       'candidateFingerprint', repeat('a', 64), 'title', 'Focused opportunity',
       'summary', 'Proves the aggregate write.', 'hypothesis', 'The fixture should persist.',
       'subjectKind', 'branch', 'subjectRef', 'branch-1',
@@ -217,6 +218,38 @@ select extensions.is(
   (select count(*)::bigint from public.opportunities where organization_id = 'da4a0000-0000-4000-8000-000000000002'::uuid),
   1::bigint,
   'the selected aggregate writes exactly one opportunity'
+);
+select extensions.is(
+  (
+    select action_key
+    from public.opportunities
+    where organization_id = 'da4a0000-0000-4000-8000-000000000002'::uuid
+  ),
+  'testing.decision_v1'::text,
+  'the stored opportunity carries the worker-selected action key, not a read-time default'
+);
+select extensions.throws_ok(
+  $$
+    select public.persist_decision_aggregate(
+      'da4a0000-0000-4000-8000-000000000002'::uuid,
+      jsonb_set(
+        (select payload from decision_aggregate_fixtures where kind = 'selected'),
+        '{opportunity,actionKey}', '"NOT A KEY"'::jsonb
+      )
+    )
+  $$,
+  '22023', null,
+  'a malformed opportunity action key rejects the aggregate'
+);
+select extensions.throws_ok(
+  $$
+    select public.persist_decision_aggregate(
+      'da4a0000-0000-4000-8000-000000000002'::uuid,
+      (select payload #- '{opportunity,actionKey}' from decision_aggregate_fixtures where kind = 'selected')
+    )
+  $$,
+  '22023', null,
+  'a missing opportunity action key rejects the aggregate'
 );
 select extensions.is(
   (

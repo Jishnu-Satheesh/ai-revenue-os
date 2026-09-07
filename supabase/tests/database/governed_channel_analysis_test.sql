@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(60);
+select extensions.plan(69);
 
 -- The fenced write path for deterministic channel findings. Exercised against
 -- real runs with real leases, because everything worth checking here -- the
@@ -73,6 +73,16 @@ returns jsonb language sql as $$
     'f1000000-0000-4000-8000-000000000301'::uuid, date '2026-01-01', date '2026-01-05', 'day',
     p_run::uuid, 1, p_detectors, p_metrics, p_key, p_token::uuid,
     'f1000000-0000-4000-8000-000000000701'::uuid);
+$$;
+
+create or replace function pg_temp.claim_cached(p_run text, p_key text, p_token text, p_digest text, p_cache_key text)
+returns jsonb language sql as $$
+  select public.claim_channel_analysis(
+    'f1000000-0000-4000-8000-000000000201'::uuid, 'f1000000-0000-4000-8000-000000000401'::uuid,
+    'f1000000-0000-4000-8000-000000000301'::uuid, date '2026-01-01', date '2026-01-05', 'day',
+    p_run::uuid, 1, '[{"key":"evidence.period_coverage","calculationVersion":1}]'::jsonb,
+    '["revenue.gross"]'::jsonb, p_key, p_token::uuid,
+    'f1000000-0000-4000-8000-000000000701'::uuid, p_digest, p_cache_key);
 $$;
 
 create or replace function pg_temp.finding(p_overrides jsonb default '{}'::jsonb)
@@ -239,12 +249,29 @@ select extensions.lives_ok(
 select extensions.is((select safe_failure_code from public.channel_analysis_runs where id = 'f1000000-0000-4000-8000-000000000605'::uuid), 'EVIDENCE_UNAVAILABLE', 'and says why');
 select extensions.is((select count(*)::integer from public.channel_findings where analysis_run_id = 'f1000000-0000-4000-8000-000000000605'::uuid), 0, 'a failed run leaves no finding behind');
 
+-- Content-addressed reuse ----------------------------------------------------------
+
+select extensions.is((pg_temp.claim_cached('f1000000-0000-4000-8000-000000000606', 'channel-analysis-run-000006', 'f1000000-0000-4000-8000-000000000806', repeat('1', 64), repeat('2', 64)) ->> 'outcome'), 'acquired', 'a run carrying an evidence digest and cache key is claimed normally');
+select extensions.is((select evidence_digest from public.channel_analysis_runs where id = 'f1000000-0000-4000-8000-000000000606'::uuid), repeat('1', 64), 'the claim stores the evidence digest it was given');
+select extensions.is((select cache_key from public.channel_analysis_runs where id = 'f1000000-0000-4000-8000-000000000606'::uuid), repeat('2', 64), 'and the cache key');
+select extensions.lives_ok(
+  $$ select pg_temp.complete('f1000000-0000-4000-8000-000000000606', 'f1000000-0000-4000-8000-000000000806', jsonb_build_array(pg_temp.finding())) $$,
+  'the digest-carrying run completes');
+select extensions.is((pg_temp.claim_cached('f1000000-0000-4000-8000-000000000607', 'channel-analysis-run-000007', 'f1000000-0000-4000-8000-000000000807', repeat('1', 64), repeat('2', 64)) ->> 'outcome'), 'cached', 'an identical cache key reuses the completed run instead of starting a new one');
+select extensions.is((pg_temp.claim_cached('f1000000-0000-4000-8000-000000000607', 'channel-analysis-run-000007', 'f1000000-0000-4000-8000-000000000807', repeat('1', 64), repeat('2', 64)) ->> 'analysisRunId'), 'f1000000-0000-4000-8000-000000000606', 'and names the run it reuses');
+select extensions.is((select count(*)::integer from public.channel_analysis_runs where id = 'f1000000-0000-4000-8000-000000000607'::uuid), 0, 'a cache hit writes no new run row');
+select extensions.is((pg_temp.claim_cached('f1000000-0000-4000-8000-000000000608', 'channel-analysis-run-000008', 'f1000000-0000-4000-8000-000000000808', repeat('3', 64), repeat('4', 64)) ->> 'outcome'), 'acquired', 'changed evidence misses the cache and starts a new run');
+select extensions.throws_ok(
+  $$ select pg_temp.claim_cached('f1000000-0000-4000-8000-000000000609', 'channel-analysis-run-000009', 'f1000000-0000-4000-8000-000000000809', 'not-a-digest', repeat('2', 64)) $$,
+  '22023', 'channel analysis request is invalid',
+  'a digest that is not hex is refused before any run exists');
+
 -- Tenant isolation -------------------------------------------------------------------
 
 reset role;
 set local role authenticated;
 set local request.jwt.claim.sub = 'f1000000-0000-4000-8000-000000000001';
-select extensions.is((select count(*)::integer from public.channel_findings where organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid), 4, 'an owner reads their own findings');
+select extensions.is((select count(*)::integer from public.channel_findings where organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid), 5, 'an owner reads their own findings, including the cache-test run above');
 
 set local request.jwt.claim.sub = 'f1000000-0000-4000-8000-000000000002';
 select extensions.is((select count(*)::integer from public.channel_analysis_runs where organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid), 0, 'a member of another organization cannot read these runs');

@@ -63,6 +63,47 @@ describe("opportunity qualification", () => {
     expect(result.decisionRecordId).toBe("44444444-4444-4444-8444-444444444444");
   });
 
+  it("qualifies a draft-requested governed opportunity for the draft action", () => {
+    const result = qualifyCampaignSource({
+      organizationId,
+      source: {
+        kind: "decision_opportunity",
+        opportunity: opportunity({
+          status: "draft_requested",
+          actionKey: "campaign.governed_draft_v1",
+        }),
+      },
+      now,
+    });
+
+    expect(result.outcome).toBe("qualified");
+  });
+
+  it("refuses a governed draft that is not requested and a requested meta bundle", () => {
+    const created = qualifyCampaignSource({
+      organizationId,
+      source: {
+        kind: "decision_opportunity",
+        opportunity: opportunity({
+          status: "draft_created",
+          actionKey: "campaign.governed_draft_v1",
+        }),
+      },
+      now,
+    });
+    expect(created).toEqual({ outcome: "blocked", reason: "opportunity_not_proposed" });
+
+    const requestedMeta = qualifyCampaignSource({
+      organizationId,
+      source: {
+        kind: "decision_opportunity",
+        opportunity: opportunity({ status: "draft_requested" }),
+      },
+      now,
+    });
+    expect(requestedMeta).toEqual({ outcome: "blocked", reason: "opportunity_not_proposed" });
+  });
+
   it("snapshots the opportunity's exact assertions rather than changing it", () => {
     const live = opportunity();
     const result = qualifyCampaignSource({

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { posterTemplateSchema } from "@/domain/campaigns/poster-template";
-import { resolvePosterSlots, templateAvailability } from "@/domain/campaigns/poster-slots";
+import {
+  checkOperatorSlotText,
+  resolvePosterSlots,
+  templateAvailability,
+} from "@/domain/campaigns/poster-slots";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
 
 function resolve(overrides: Record<string, unknown> = {}) {
@@ -177,5 +181,114 @@ describe("templateAvailability", () => {
     });
 
     expect(templateAvailability(optionalBody, resolve().slots)).toEqual({ available: true });
+  });
+});
+
+/**
+ * The free box is the one place operator prose reaches a poster, and spec 020
+ * section 7.3 promises it is policed like every other piece of campaign copy.
+ * `evaluateContentPolicy` cannot keep that promise -- it walks a manifest's
+ * directions and hashtag sets and has nothing to say about a loose string -- so
+ * the check the spec describes lives here, reusing the vocabulary
+ * `checkVariantDerivation` already refuses generated copy on.
+ */
+describe("checkOperatorSlotText", () => {
+  const evidence = {
+    offer: null,
+    factKeys: [],
+    factText: "al noor kitchen serves kerala food in deira",
+    restrictedTerms: ["authentic"],
+  };
+
+  it("admits ordinary operator text", () => {
+    expect(checkOperatorSlotText("Open until 11pm", evidence)).toEqual({ admitted: true });
+  });
+
+  /**
+   * The hole this fence was written to close, and did not.
+   *
+   * `checkProseAgainstEvidence` refuses offer-ish language only when the
+   * campaign records no offer. `lockedOfferRef` is an internal key such as
+   * `lunch-set-menu-2026-09`, never a sentence a customer reads -- so under
+   * that rule alone, any campaign carrying any offer let an operator type any
+   * discount onto artwork nobody approved.
+   */
+  it("refuses a discount even when the campaign records some other offer", () => {
+    const withOffer = { ...evidence, offer: "lunch-set-menu-2026-09" };
+
+    const result = checkOperatorSlotText("50% off this week only", withOffer);
+
+    expect(result.admitted).toBe(false);
+    if (result.admitted) return;
+    expect(result.failures.map((failure) => failure.code)).toContain("invented_offer");
+  });
+
+  it("admits an offer the pinned evidence actually states", () => {
+    const stated = {
+      ...evidence,
+      offer: "lunch-set-menu-2026-09",
+      factText: "al noor kitchen serves a free dessert with every lunch set menu",
+    };
+
+    expect(checkOperatorSlotText("Free dessert with lunch", stated)).toEqual({ admitted: true });
+  });
+
+  /** A slug supports the words inside it, and no others. */
+  it("lets a readable offer support its own wording", () => {
+    expect(
+      checkOperatorSlotText("Free delivery this week", { ...evidence, offer: "free delivery" }),
+    ).toEqual({ admitted: true });
+  });
+
+  it("refuses a price the evidence does not state", () => {
+    const withOffer = { ...evidence, offer: "lunch-set-menu-2026-09" };
+
+    const result = checkOperatorSlotText("Two for one all week", withOffer);
+
+    expect(result.admitted).toBe(false);
+  });
+
+  it("refuses the discount the spec names, on a campaign with no offer", () => {
+    const result = checkOperatorSlotText("50% off today", evidence);
+
+    expect(result.admitted).toBe(false);
+    if (result.admitted) return;
+    expect(result.failures.map((failure) => failure.code)).toContain("invented_offer");
+  });
+
+  it("refuses a ranking claim the pinned evidence never made", () => {
+    const result = checkOperatorSlotText("Voted best restaurant in Deira", evidence);
+
+    expect(result.admitted).toBe(false);
+    if (result.admitted) return;
+    expect(result.failures.map((failure) => failure.code)).toContain("unsourced_claim");
+  });
+
+  it("refuses a restricted term the organization forbids", () => {
+    const result = checkOperatorSlotText("Authentic Kerala flavours", evidence);
+
+    expect(result.admitted).toBe(false);
+    if (result.admitted) return;
+    expect(result.failures.map((failure) => failure.code)).toContain("restricted_term");
+  });
+
+  /**
+   * An offer the campaign actually recorded is not an invention. Refusing it
+   * would make the governed path unusable for the campaigns most likely to want
+   * a poster.
+   */
+  it("admits offer wording when the campaign records an offer", () => {
+    expect(
+      checkOperatorSlotText("Free delivery this week", { ...evidence, offer: "free delivery" }),
+    ).toEqual({ admitted: true });
+  });
+
+  it("admits a ranking claim the pinned evidence supports", () => {
+    expect(
+      checkOperatorSlotText("Voted best restaurant in Deira", {
+        ...evidence,
+        factText: "voted best restaurant in deira by gulf news 2026",
+      }),
+    ).toEqual({ admitted: true });
   });
 });

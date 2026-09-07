@@ -47,9 +47,18 @@ describe("organization role permissions", () => {
     );
   });
 
-  it("stops an operator short of approving, publishing, and moving money", () => {
+  /**
+   * Approving the exact version that will run is an operator's job -- decided
+   * 2026-09-06, and always true of `approve_campaign_bundle`, which admits one.
+   * Publishing to a public account and moving money are not, and the boundary
+   * still sits between them.
+   */
+  it("lets an operator approve a campaign version", () => {
+    expect(hasOrganizationPermission("operator", "campaign.approve")).toBe(true);
+  });
+
+  it("stops an operator short of publishing and moving money", () => {
     for (const permission of [
-      "campaign.approve",
       "campaign.publish",
       "budget.modify",
       "policy.update",
@@ -86,7 +95,8 @@ describe("organization role permissions", () => {
       expect(hasOrganizationPermission(role, "growth_intelligence.manage")).toBe(true);
     }
     expect(hasOrganizationPermission("operator", "campaign.create")).toBe(true);
-    expect(hasOrganizationPermission("operator", "campaign.approve")).toBe(false);
+    // Approval moved to the operator on 2026-09-06; publishing did not.
+    expect(hasOrganizationPermission("operator", "campaign.publish")).toBe(false);
   });
 
   it("keeps sensitive memory above the operator line", () => {

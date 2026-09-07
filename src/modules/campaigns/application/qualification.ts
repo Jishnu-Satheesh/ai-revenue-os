@@ -1,4 +1,5 @@
 import { CAMPAIGN_META_BUNDLE_ACTION_KEY } from "@/modules/decisions/playbooks/meta-campaign-v1";
+import { GOVERNED_CAMPAIGN_DRAFT_ACTION_KEY } from "@/modules/decisions/playbooks/governed-campaign-draft-v1";
 
 /**
  * The boundary where both entry points converge.
@@ -18,7 +19,9 @@ export type OpportunityStatus =
   | "approved"
   | "rejected"
   | "snoozed"
-  | "expired";
+  | "expired"
+  | "draft_requested"
+  | "draft_created";
 
 export type CampaignAssertion = { key: string; expectedOutcome: string };
 
@@ -84,10 +87,21 @@ export function qualifyCampaignSource(input: {
   }
 
   if (opportunity.status !== "proposed") {
-    return { outcome: "blocked", reason: "opportunity_not_proposed" };
+    // A governed draft is built from a requested opportunity, never from a
+    // proposed one: the draft request is the authorization to spend the freeze.
+    // Anything else — including an already-created draft — cannot qualify again.
+    if (
+      opportunity.actionKey !== GOVERNED_CAMPAIGN_DRAFT_ACTION_KEY ||
+      opportunity.status !== "draft_requested"
+    ) {
+      return { outcome: "blocked", reason: "opportunity_not_proposed" };
+    }
   }
 
-  if (opportunity.actionKey !== CAMPAIGN_META_BUNDLE_ACTION_KEY) {
+  if (
+    opportunity.actionKey !== CAMPAIGN_META_BUNDLE_ACTION_KEY &&
+    opportunity.actionKey !== GOVERNED_CAMPAIGN_DRAFT_ACTION_KEY
+  ) {
     return { outcome: "blocked", reason: "action_not_campaign" };
   }
 

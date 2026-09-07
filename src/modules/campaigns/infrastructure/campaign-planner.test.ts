@@ -211,6 +211,32 @@ describe("campaign planner", () => {
     });
   });
 
+  /**
+   * The same argument the content hash already answers to, applied to the rest
+   * of what the bytes decide.
+   *
+   * A model writes `widthPx`, `heightPx` and `mimeType` into the manifest it
+   * proposes, and those are a claim rather than a measurement. Intake decodes
+   * the bytes and knows the truth; before this it threw the truth away, so a
+   * manifest could state 1080x1350 for an image that is 1024x1024 -- not merely
+   * the wrong scale but the wrong shape, inside the digest an approval binds to.
+   */
+  it("measures the bytes it stored, not what the model claimed about them", async () => {
+    const manifest = validManifest();
+
+    const result = await planner().materializeAssets({
+      context: generationContext(),
+      manifest,
+      signal: new AbortController().signal,
+      imageGuidance: imageGuidance(),
+    });
+
+    const upload = result.uploads[0];
+    expect(upload?.widthPx).toBeGreaterThan(0);
+    expect(upload?.heightPx).toBeGreaterThan(0);
+    expect(upload?.mimeType).toMatch(/^image\/(png|jpeg|webp)$/);
+  });
+
   it("writes under the tenant's own folder, which is what the storage policy checks", async () => {
     await planner().materializeAssets({
       context: generationContext(),

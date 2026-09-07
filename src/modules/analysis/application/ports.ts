@@ -103,9 +103,11 @@ export type ChannelFindingEvidenceRecord = {
  */
 export type ChannelRecommendationDecisionRecord = {
   recommendationId: string;
-  decision: "acknowledged" | "dismissed" | "planned";
+  decision: "acknowledged" | "dismissed" | "planned" | "snoozed";
   /** Required by storage when dismissing; null for every other answer. */
   reason: string | null;
+  /** Required by storage when snoozing; null for every other answer. */
+  snoozedUntil: string | null;
   actorId: string;
   /**
    * Snapshotted beside the answer by the database itself, resolved inside the
@@ -191,6 +193,17 @@ export type AnalysedWindowKey = {
   grain: AnalysisGrain;
 };
 
+/**
+ * The contiguous month horizon a channel's declared packages cover, as
+ * canonical `YYYY-MM` bounds. A package with no current rows still
+ * contributes its declared dates: otherwise a gap disappears from the picker
+ * precisely when it is useful to inspect.
+ */
+export type AnalysisMonthTimeline = {
+  firstMonth: string;
+  lastMonth: string;
+};
+
 export type ChannelAnalysisReadPort = {
   /** Most recent first. Includes running and failed runs, so the page can say so. */
   loadRuns(input: {
@@ -198,6 +211,21 @@ export type ChannelAnalysisReadPort = {
     channelId: string;
     limit: number;
   }): Promise<ChannelAnalysisRunRecord[]>;
+
+  /**
+   * Exactly one run, by id, scoped to the organization and the channel.
+   *
+   * Separate from `loadRuns` because that list is capped at what a page shows.
+   * A caller acting on a named run -- a retry, a re-narration -- must not be
+   * told the run does not exist merely because ten newer ones do. Null covers
+   * both "no such run" and "not this channel's run", so nothing about another
+   * channel's state leaks to the caller.
+   */
+  loadRun(input: {
+    organizationId: string;
+    channelId: string;
+    analysisRunId: string;
+  }): Promise<ChannelAnalysisRunRecord | null>;
 
   /**
    * The open findings of exactly one run.
@@ -272,4 +300,25 @@ export type ChannelAnalysisReadPort = {
    * something without loading every window's findings to discover which can.
    */
   loadAnalysedWindowKeys(input: { organizationId: string }): Promise<AnalysedWindowKey[]>;
+
+  /**
+   * The month horizon for one channel's picker, or null when the channel has
+   * no projected package. Two bounded rows, never a full package listing.
+   */
+  loadAnalysisMonthTimeline(input: {
+    organizationId: string;
+    channelId: string | null;
+  }): Promise<AnalysisMonthTimeline | null>;
+
+  /**
+   * The server-resolved monthly input: the month's own window, the
+   * organization's zone, and the finest grain the month's packages wrote. Null
+   * when the month is outside the known timeline or nothing declares it.
+   */
+  resolveMonthInput(input: { organizationId: string; channelId: string; month: string }): Promise<{
+    windowStart: string;
+    windowEnd: string;
+    timeZone: string;
+    grain: AnalysisGrain;
+  } | null>;
 };

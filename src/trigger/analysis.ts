@@ -2,6 +2,7 @@ import { logger, schemaTask, tasks } from "@trigger.dev/sdk";
 
 import { createAnalysisWorkerServiceClient } from "@/lib/supabase/service";
 import { createChannelAnalysisEvidenceRepository } from "@/modules/analysis/infrastructure/evidence-repository";
+import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { createGovernedMetricWindowRepository } from "@/modules/metrics/infrastructure/repository";
 import type { channelRecommendationsTask } from "@/trigger/recommendations";
 import {
@@ -36,8 +37,12 @@ export const channelAnalysisTask = schemaTask({
       supabase,
       createGovernedMetricWindowRepository(supabase),
     );
+    const reads = createAuthenticatedChannelAnalysisRepository(supabase);
 
     const result = await runChannelAnalysis(payload, {
+      async loadMonthHorizon(input) {
+        return reads.loadAnalysisMonthTimeline(input);
+      },
       async claim(input) {
         const data = await rpc<Record<string, unknown> | null>("claim_channel_analysis", {
           p_organization_id: input.organizationId,
@@ -53,8 +58,15 @@ export const channelAnalysisTask = schemaTask({
           p_idempotency_key: input.idempotencyKey,
           p_claim_token: input.claimToken,
           p_correlation_id: input.correlationId,
+          p_evidence_digest: input.evidenceDigest,
+          p_cache_key: input.cacheKey,
         });
         const outcome = typeof data?.outcome === "string" ? data.outcome : "conflict";
+        if (outcome === "cached") {
+          const analysisRunId = data?.analysisRunId;
+          if (typeof analysisRunId !== "string") return { outcome: "conflict" as const };
+          return { outcome: "cached" as const, analysisRunId };
+        }
         if (outcome !== "acquired") {
           return {
             outcome: outcome as
@@ -106,7 +118,18 @@ export const channelAnalysisTask = schemaTask({
 
     // A completed detector run wakes the narrator (ADR 0037). The dispatch is
     // best-effort by design: a missed narration must never fail the run that
-    // already counted, and the claim fence makes a duplicate wake harmless.
+    // already counted, and the claim fence makes a duplicate wake harmless. A
+    // cache hit reuses a run that was narrated when it first completed, so it
+    // wakes nobody.
+    if (result.outcome === "cached") {
+      logger.info("channel_analysis.run_cache_hit", {
+        organizationId: payload.organizationId,
+        channelId: payload.channelId,
+        analysisRunId: result.analysisRunId,
+        correlationId: payload.correlationId,
+      });
+      return result;
+    }
     if (result.outcome === "completed") {
       try {
         await tasks.trigger<typeof channelRecommendationsTask>("channel-recommendations.generate", {

@@ -13,6 +13,7 @@ import {
   type AuthenticatedReportContext,
 } from "@/modules/reports/application/service";
 import { createAuthenticatedReportPackageRepository } from "@/modules/reports/infrastructure/repository";
+import { createAdmissionService } from "@/modules/reports/application/admissions";
 
 export const organizationReportRouteParamsSchema = z.object({ organizationId: z.string().uuid() });
 export const reportPackageRouteParamsSchema = organizationReportRouteParamsSchema.extend({
@@ -70,6 +71,11 @@ function responseForError(error: unknown): NextResponse {
 
 type ReportRouteContext = AuthenticatedReportContext & {
   service: ReturnType<typeof createReportPackageService>;
+  // Built from the same authenticated client as `service`, for the one route
+  // (granting a standing admission) that needs a second, differently-shaped
+  // set of operations against report data. Everything else keeps using
+  // `service` alone.
+  admissionService: ReturnType<typeof createAdmissionService>;
 };
 
 export async function runReportRoute<TParams>(input: {
@@ -91,12 +97,14 @@ export async function runReportRoute<TParams>(input: {
     const service = createReportPackageService(
       createAuthenticatedReportPackageRepository(organization.supabase),
     );
+    const admissionService = createAdmissionService(organization.supabase);
     const result = await input.handler({
       organizationId,
       actorId: organization.user.id,
       role: organization.membership.role as OrganizationRole,
       correlationId,
       service,
+      admissionService,
       params,
     });
     const response = NextResponse.json(result.body, { status: result.status ?? 200 });

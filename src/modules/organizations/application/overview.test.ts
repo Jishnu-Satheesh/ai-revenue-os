@@ -7,13 +7,12 @@ import type { EconomicsView } from "@/modules/economics/application/read-model";
 import {
   buildDigitalTwinReadiness,
   buildOverviewActionQueue,
+  buildOverviewComparison,
   buildOverviewEconomics,
   buildOverviewIntegration,
-  buildStrategicBriefing,
+  buildOverviewMoneyScale,
   getOverviewPermissions,
-  selectRecentCampaigns,
 } from "@/modules/organizations/application/overview";
-import { demoCampaigns } from "@/modules/campaigns/demo/fixtures";
 import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
@@ -184,34 +183,102 @@ describe("overview economics", () => {
   });
 });
 
-describe("overview intelligence", () => {
-  it("explains evidence limitations without lift, causal, benchmark, or forecast claims", () => {
-    const entries = [
-      ledgerEntry({
-        completenessGrade: "indicative",
-        contributionMarginMinor: null,
-        atMostMinor: 4_000,
+describe("overview money scale", () => {
+  it("sums only the costs that were recorded, never sales minus the kept floor", () => {
+    const scale = buildOverviewMoneyScale(
+      buildOverviewEconomics({
+        view: economicsView(),
+        entries: [
+          ledgerEntry({ grossRevenueMinor: 10_000, contributionMarginMinor: 3_000 }),
+          ledgerEntry({
+            periodStart: new Date("2026-08-11T20:00:00.000Z"),
+            grossRevenueMinor: 8_000,
+            completenessGrade: "indicative",
+            contributionMarginMinor: null,
+            atMostMinor: 2_500,
+          }),
+        ],
       }),
-    ];
-    const briefing = buildStrategicBriefing({
-      readiness: buildDigitalTwinReadiness(snapshot()),
-      economics: buildOverviewEconomics({ view: economicsView(), entries }),
-      integration: {
-        status: "ready",
-        totalConnections: 2,
-        healthyConnections: 1,
-        actionRequiredConnections: 1,
-      },
-    });
-
-    expect(briefing).toHaveLength(3);
-    expect(briefing.map(({ kind }) => kind)).toEqual(["foundation", "economics", "operations"]);
-    expect(briefing.map(({ conclusion }) => conclusion).join(" ")).not.toMatch(
-      /lift|causal|benchmark|forecast/i,
     );
-    expect(briefing[1]?.conclusion).toMatch(/limited/i);
+
+    // Sales counts both days; costs count only the day that recorded them.
+    // 18,000 - 3,000 would read as 15,000 of costs and be a guess about day two.
+    expect(scale).toEqual({
+      currency: "AED",
+      salesMinor: 18_000,
+      costsRecordedMinor: 7_000,
+      keptFloorMinor: 3_000,
+      keptCeilingMinor: 5_500,
+      hasUnprovenBand: true,
+    });
   });
 
+  it("closes the band when every recorded day can state a margin", () => {
+    const scale = buildOverviewMoneyScale(
+      buildOverviewEconomics({
+        view: economicsView(),
+        entries: [ledgerEntry({ grossRevenueMinor: 10_000, contributionMarginMinor: 3_000 })],
+      }),
+    );
+
+    expect(scale).toMatchObject({ keptFloorMinor: 3_000, keptCeilingMinor: 3_000 });
+    expect(scale?.hasUnprovenBand).toBe(false);
+  });
+
+  it("states no scale at all for a window with no recorded trade", () => {
+    expect(
+      buildOverviewMoneyScale(buildOverviewEconomics({ view: economicsView(), entries: [] })),
+    ).toBeNull();
+  });
+});
+
+describe("overview comparison", () => {
+  const current = () =>
+    buildOverviewEconomics({
+      view: economicsView(),
+      entries: [ledgerEntry({ grossRevenueMinor: 12_000 })],
+    });
+
+  it("stores both amounts and their difference, and never a ratio", () => {
+    const comparison = buildOverviewComparison({
+      economics: current(),
+      priorEntries: [ledgerEntry({ grossRevenueMinor: 10_000 })],
+    });
+
+    expect(comparison).toEqual({
+      currency: "AED",
+      currentMinor: 12_000,
+      priorMinor: 10_000,
+      deltaMinor: 2_000,
+    });
+    // The percentage is the caller's display-time division of the two.
+    expect(comparison).not.toHaveProperty("deltaRatio");
+  });
+
+  it("refuses a comparison against a window that recorded nothing", () => {
+    expect(buildOverviewComparison({ economics: current(), priorEntries: [] })).toBeNull();
+  });
+
+  it("refuses a comparison when the prior window is in another currency", () => {
+    expect(
+      buildOverviewComparison({
+        economics: current(),
+        priorEntries: [ledgerEntry({ grossRevenueMinor: 10_000, currency: "KWD" })],
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses a comparison when this window recorded nothing", () => {
+    expect(
+      buildOverviewComparison({
+        economics: buildOverviewEconomics({ view: economicsView(), entries: [] }),
+        priorEntries: [ledgerEntry({ grossRevenueMinor: 10_000 })],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("overview intelligence", () => {
   it("prioritizes blocking policy, integration, and economics gaps with role-valid actions", () => {
     const readiness = buildDigitalTwinReadiness(snapshot());
     const entries = [
@@ -236,7 +303,7 @@ describe("overview intelligence", () => {
 
     expect(actions.map(({ kind }) => kind)).toEqual(["foundation", "integration", "economics"]);
     expect(actions[0]).toMatchObject({
-      title: "Add an access policy",
+      title: "Nobody is named as the approver yet",
       href: "#organization-management",
     });
     expect(actions[1]?.href).toBe(`/organizations/${organizationId}/integrations`);
@@ -273,17 +340,6 @@ describe("overview intelligence", () => {
       });
     },
   );
-
-  it("selects exactly the latest three campaign previews without mutating the fixture list", () => {
-    const before = demoCampaigns.map(({ id }) => id);
-
-    expect(selectRecentCampaigns(demoCampaigns).map(({ title }) => title)).toEqual([
-      "Weekday evening demand lift",
-      "New location announcement",
-      "Early-week lunch trial",
-    ]);
-    expect(demoCampaigns.map(({ id }) => id)).toEqual(before);
-  });
 
   it("orders action-required integrations first and exposes only safe presentation fields", () => {
     const connection = (

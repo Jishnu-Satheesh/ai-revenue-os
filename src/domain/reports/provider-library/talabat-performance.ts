@@ -320,6 +320,7 @@ export const talabatPerformance: ProviderReportDefinition = {
           dimensionKey: "reason_code",
           allowedValues: ["CHECK_IN_REQUIRED", "UNREACHABLE"],
           collectInjectedValues: false,
+          valueSeparator: ";",
         },
       },
       {

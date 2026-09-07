@@ -7,7 +7,11 @@ import {
   profileXlsxBuffer,
   runReportPackageProfiling,
 } from "@/workflows/reports/profile-report-package";
+import type { ReportProfilingDependencies } from "@/workflows/reports/profile-report-package";
 import type { ReportPackageRow } from "@/modules/reports/application/ports";
+
+const ORGANIZATION_ID = "10000000-0000-4000-8000-000000000002";
+const PACKAGE_ID = "10000000-0000-4000-8000-000000000001";
 
 function reportPackage(): ReportPackageRow {
   return {
@@ -33,6 +37,9 @@ function reportPackage(): ReportPackageRow {
     parser_version: 1,
     fingerprint_version: 1,
     schema_fingerprint: null,
+    structure_version: 1,
+    structure_fingerprint: null,
+    admitted_under_admission_id: null,
     status: "uploaded",
     safe_failure_code: null,
     safe_failure_at: null,
@@ -47,7 +54,91 @@ function reportPackage(): ReportPackageRow {
   };
 }
 
+/**
+ * A profiling run whose worksheet name is the only thing that varies.
+ *
+ * The buffer is built inside `claim`, the one call every run makes first, so
+ * its byte length is known before `stat` and `download` need to agree with it
+ * -- ExcelJS's output size depends on the worksheet name, so it cannot be
+ * precomputed outside an async call.
+ */
+function profilingDependencies(options: {
+  sheetName: string;
+  completions: Array<{ schemaFingerprint: string; structureFingerprint: string }>;
+}): ReportProfilingDependencies {
+  const contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  let buffer: Buffer | undefined;
+  return {
+    async claim() {
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet(options.sheetName);
+      sheet.addRow(["date", "gross_sales", "successful_orders"]);
+      sheet.addRow([new Date("2026-01-01T00:00:00.000Z"), 100, 5]);
+      sheet.addRow([new Date("2026-01-02T00:00:00.000Z"), 120, 6]);
+      buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+      return {
+        outcome: "acquired",
+        reportPackage: {
+          ...reportPackage(),
+          id: PACKAGE_ID,
+          organization_id: ORGANIZATION_ID,
+          file_kind: "xlsx",
+          declared_content_type: contentType,
+          original_filename: "report.xlsx",
+          declared_content_length: buffer.byteLength,
+        },
+      };
+    },
+    objectStore: {
+      async stat() {
+        return {
+          id: reportPackage().storage_object_id!,
+          metadata: { size: buffer!.byteLength, mimetype: contentType },
+        };
+      },
+      async download() {
+        return buffer!;
+      },
+    },
+    async complete(input) {
+      options.completions.push({
+        schemaFingerprint: input.schemaFingerprint,
+        structureFingerprint: input.structureFingerprint,
+      });
+    },
+    async fail() {
+      throw new Error("profiling was expected to succeed");
+    },
+  };
+}
+
 describe("governed report package profiling", () => {
+  it("records a structure fingerprint that ignores the worksheet name", async () => {
+    const completions: Array<{ schemaFingerprint: string; structureFingerprint: string }> = [];
+    const runFor = async (sheetName: string) => {
+      await runReportPackageProfiling(
+        { organizationId: ORGANIZATION_ID, packageId: PACKAGE_ID, idempotencyKey: "k".repeat(20) },
+        profilingDependencies({ sheetName, completions }),
+      );
+    };
+
+    await runFor("Talabat-Jan-Feb-2026-Performance-Report");
+    await runFor("Mar-2026");
+
+    expect(completions).toHaveLength(2);
+    // The schema fingerprint is allowed to differ -- it identifies an exact
+    // profiled shape, worksheet name included, and is recorded on rows that
+    // outlive this code.
+    expect(completions[0].schemaFingerprint).not.toBe(completions[1].schemaFingerprint);
+    // A real digest, not an absent field the two runs happen to agree on --
+    // `toBe` alone would still pass if `complete` were never given the field
+    // at all, since `undefined === undefined`.
+    expect(completions[0].structureFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    // The structure fingerprint is what reuse is keyed on, and these are the
+    // same report.
+    expect(completions[0].structureFingerprint).toBe(completions[1].structureFingerprint);
+  });
+
   it("counts CSV rows and populated cells without retaining rows", async () => {
     await expect(profileCsvBuffer(Buffer.from("\ufeffa,b\n1,\n,2\n", "utf8"))).resolves.toEqual([
       expect.objectContaining({

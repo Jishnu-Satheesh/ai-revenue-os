@@ -10,8 +10,8 @@ import { assertGovernedChannelAnalysisEnabled } from "@/modules/integrations/app
 import type { OrganizationRole } from "@/domain/organizations/types";
 
 /**
- * Answer one recommendation: acknowledged, planned, or dismissed with a
- * reason. The answer is appended where it happened -- the definer function
+ * Answer one recommendation: acknowledged, planned, snoozed with a horizon,
+ * or dismissed with a reason. The answer is appended where it happened -- the definer function
  * re-checks actor, membership, and tenant inside the database; this route only
  * decides who is allowed to ask and what shape an answer may take.
  */
@@ -28,6 +28,11 @@ const bodySchema = z.discriminatedUnion("decision", [
     decision: z.literal("dismissed"),
     /** Why it is being dismissed; a dismissal without one says nothing. */
     reason: z.string().min(3),
+  }).strict(),
+  z.object({
+    decision: z.literal("snoozed"),
+    /** The future time the narration hides until. */
+    snoozedUntil: z.string().datetime({ offset: true }),
   }).strict(),
 ]);
 
@@ -61,12 +66,18 @@ export async function POST(
     }
 
     const body = bodySchema.parse(await request.json().catch(() => ({})));
+    // The schema already guarantees a parseable instant; this only refuses one
+    // that is not in the future, before the member RPC repeats the check.
+    if (body.decision === "snoozed" && Date.parse(body.snoozedUntil) <= Date.now()) {
+      throw new DomainError("VALIDATION_ERROR", "A snooze needs a future time to hide until.");
+    }
     await triageRecommendation(
       {
         organizationId: routeParams.organizationId,
         recommendationId: routeParams.recommendationId,
         decision: body.decision,
         reason: body.decision === "dismissed" ? body.reason : undefined,
+        snoozedUntil: body.decision === "snoozed" ? body.snoozedUntil : undefined,
       },
       { supabase: context.supabase, actorId: context.user.id },
     );

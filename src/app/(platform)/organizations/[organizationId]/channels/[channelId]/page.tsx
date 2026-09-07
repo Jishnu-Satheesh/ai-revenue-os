@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { ChannelWorkspace } from "@/components/analysis/channel-workspace";
 import { ChannelDetail } from "@/components/channels/channel-detail";
 import { ChannelSetupPanel } from "@/components/channels/channels-management";
+import { ReportPackageUpload } from "@/components/integrations/report-package-upload";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
+import { analysisMonthBounds } from "@/domain/analysis/calendar";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { buildChannelWorkspaceView } from "@/modules/analysis/application/read-model";
@@ -26,8 +28,10 @@ import { isGovernedChannelAnalysisEnabled } from "@/modules/integrations/applica
  */
 export default async function ChannelDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ organizationId: string; channelId: string }>;
+  searchParams?: Promise<{ month?: string }>;
 }) {
   const { channelId } = await params;
   const context = await getOrganizationContext(params);
@@ -54,20 +58,42 @@ export default async function ChannelDetailPage({
   let workspace: React.ReactNode | null = null;
   if (analysisAvailable) {
     const analysis = createAuthenticatedChannelAnalysisRepository(context.supabase);
-    const [runs, evidenceWindows] = await Promise.all([
+    const [runs, timeline] = await Promise.all([
       analysis.loadRuns({ organizationId: context.organizationId, channelId, limit: 10 }),
-      analysis.loadEvidenceWindows({
+      analysis.loadAnalysisMonthTimeline({
         organizationId: context.organizationId,
         channelId,
-        limit: 24,
       }),
     ]);
+
+    // The month in the URL selects the question; the latest reported month is
+    // the default. A month outside the known timeline falls back to it rather
+    // than showing a run that answered something else.
+    const requestedMonth = (await searchParams)?.month;
+    const selectedMonth =
+      timeline === null
+        ? null
+        : requestedMonth !== undefined &&
+            requestedMonth >= timeline.firstMonth &&
+            requestedMonth <= timeline.lastMonth
+          ? requestedMonth
+          : timeline.lastMonth;
+    const bounds = selectedMonth ? analysisMonthBounds(selectedMonth) : null;
 
     // Findings are read for the one run the page is about to display, so every
     // figure on the page was computed for the window the page names. Reading them
     // by channel returns every run's answers at once, and the newest run's window
-    // then sits above another run's numbers.
-    const displayedRun = runs.find((run) => run.status === "completed") ?? null;
+    // then sits above another run's numbers. A month with no completed run yet
+    // shows the workspace in its not-analysed state, never another month's run.
+    const displayedRun =
+      bounds === null
+        ? null
+        : (runs.find(
+            (run) =>
+              run.status === "completed" &&
+              run.windowStart === bounds.windowStart &&
+              run.windowEnd === bounds.windowEnd,
+          ) ?? null);
     const findings = displayedRun
       ? await analysis.loadFindingsForRun({
           organizationId: context.organizationId,
@@ -104,10 +130,12 @@ export default async function ChannelDetailPage({
           status: channel.status,
         }}
         view={view}
-        // The windows this channel actually holds governed evidence for. A
-        // window counted back from today reaches an uploaded report only by
-        // coincidence, because reports arrive covering periods already past.
-        evidenceWindows={evidenceWindows}
+        // The months this channel's declared packages cover. A month counted
+        // back from today reaches an uploaded report only by coincidence,
+        // because reports arrive covering periods already past.
+        monthHorizon={timeline}
+        selectedMonth={selectedMonth}
+        timeZone={displayedRun?.windowTimezone ?? organization.default_timezone}
         canRunAnalysis={hasOrganizationPermission(role, "channel.manage")}
         channelsHref={`/organizations/${context.organizationId}/channels`}
         economicsHref={`/organizations/${context.organizationId}/channels`}
@@ -122,6 +150,22 @@ export default async function ChannelDetailPage({
       <ChannelDetail
         channelName={channel.display_name}
         workspace={workspace}
+        reports={
+          // Intake where the work happens: the same governed-reports flow as
+          // the Integrations view, with the channel fixed from the route so
+          // the form is shorter and every upload lands on this channel. An
+          // operator uploads, an owner or admin approves, and the audit
+          // starts on its own after a clean projection.
+          hasOrganizationPermission(role, "report.upload") ||
+          hasOrganizationPermission(role, "report.contract_approve") ? (
+            <ReportPackageUpload
+              organizationId={context.organizationId}
+              role={role}
+              timeZone={organization.default_timezone}
+              fixedChannelId={channel.id}
+            />
+          ) : null
+        }
         defaultTab={analysisAvailable ? "analysis" : "setup"}
         setup={
           <ChannelSetupPanel

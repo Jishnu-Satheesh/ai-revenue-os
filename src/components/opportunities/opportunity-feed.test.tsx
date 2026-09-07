@@ -21,6 +21,8 @@ function item(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem
     organizationId: ORGANIZATION_ID,
     decisionRecordId: "33333333-3333-4333-8333-333333333333",
     playbookVersionId: "44444444-4444-4444-8444-444444444444",
+    actionKey: "campaign.meta_bundle_v1",
+    createdAt: "2026-08-01T10:00:00.000Z",
     title: "Run a governed Meta campaign",
     summary: "A bounded recommendation with a registered measurement plan.",
     evidenceTier: "computed",
@@ -32,6 +34,7 @@ function item(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem
     timeToImpactDays: 7,
     status: "proposed",
     expiresAt: "2026-08-22T10:00:00.000Z",
+    version: 1,
     ...overrides,
   };
 }

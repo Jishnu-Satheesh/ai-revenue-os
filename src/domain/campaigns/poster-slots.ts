@@ -3,6 +3,8 @@ import {
   type PosterTemplate,
   type PosterTextSlot,
 } from "@/domain/campaigns/poster-template";
+import { checkProseAgainstEvidence } from "@/domain/campaigns/derivation";
+import type { VariantDerivationFailure, VariantEvidence } from "@/domain/campaigns/derivation";
 import type {
   CampaignBundleManifest,
   CampaignChannel,
@@ -155,3 +157,68 @@ export function templateAvailability(
 
   return missingSlots.length === 0 ? { available: true } : { available: false, missingSlots };
 }
+
+/**
+ * What the one free slot is allowed to say.
+ *
+ * `resolvePosterSlots` marks operator text `governed: false`, which is a label,
+ * not a fence. This is the fence. Spec 020 section 7.3 promises the free box
+ * "passes through `evaluateContentPolicy` exactly like every other piece of
+ * campaign copy" -- but that function walks a manifest's directions and hashtag
+ * sets and has nothing to say about a loose string, so it cannot keep the
+ * promise. The check that can is the one variant copy already answers to, and
+ * it is reused here rather than reinvented.
+ *
+ * Without this, "50% off" typed into the free box renders onto a poster no
+ * approval ever covered -- which is precisely the loophole the spec says the
+ * box is not.
+ */
+export function checkOperatorSlotText(
+  text: string,
+  evidence: VariantEvidence,
+): { admitted: true } | { admitted: false; failures: readonly VariantDerivationFailure[] } {
+  const failures = [...checkProseAgainstEvidence(text, evidence)];
+
+  /**
+   * The free box is held to a stricter offer rule than generated copy, and the
+   * difference is deliberate.
+   *
+   * `checkProseAgainstEvidence` refuses offer-ish language only when the
+   * campaign records no offer at all. That is right for generated variant copy,
+   * which is derived from the manifest and checked against it phrase by phrase.
+   * It is not enough here: `lockedOfferRef` is an internal key such as
+   * `lunch-set-menu-2026-09`, not a sentence a customer reads, so its mere
+   * presence says nothing about whether "50% off" was ever agreed. Under the
+   * shared rule alone, any campaign that records any offer would let an
+   * operator type any discount onto artwork nobody approved -- which is exactly
+   * the loophole this function exists to close.
+   *
+   * So the *words* have to be supported, by the pinned facts or by the offer
+   * itself. The offer stays in the haystack because the field genuinely holds
+   * a readable phrase sometimes -- "free delivery" -- and refusing that would
+   * make the governed path unusable for the campaigns most likely to want a
+   * poster. What no longer counts is a slug: `lunch-set-menu-2026-09` supports
+   * the words "lunch set menu" and nothing else, which is exactly right.
+   */
+  const offerish = OPERATOR_OFFER.exec(text);
+  const supported = `${evidence.factText} ${evidence.offer ?? ""}`.toLowerCase();
+  if (offerish && !supported.includes(offerish[0].toLowerCase())) {
+    failures.push({
+      code: "invented_offer",
+      detail: `The free line promises "${offerish[0]}", which neither the campaign's pinned evidence nor its recorded offer states.`,
+    });
+  }
+
+  return failures.length === 0 ? { admitted: true } : { admitted: false, failures };
+}
+
+/**
+ * Offer-shaped language in operator prose.
+ *
+ * Kept beside the check that uses it rather than shared with `derivation.ts`:
+ * this list may tighten as operators find new ways to phrase a discount, and
+ * tightening it must not silently start refusing generated copy that a
+ * different set of guarantees already covers.
+ */
+const OPERATOR_OFFER =
+  /\b(half[- ]price|free|discount|\d+\s*%\s*off|\d+\s*(?:aed|usd|inr)\b|bogo|buy one|two for one|complimentary|special offer|deal)\b/i;

@@ -73,6 +73,10 @@ Converts raw events and metric changes into normalized business signals.
 ### Decision Engine
 
 Detects, ranks, and explains opportunities. Initially recommendation-only.
+Qualified opportunities become governed Campaign drafts through the atomic
+draft-request path (`campaign_draft_requests`, fenced member and worker RPCs);
+draft creation freezes the exact evidence into a source snapshot and never
+publishes, approves, or spends.
 
 ### Playbook Engine
 

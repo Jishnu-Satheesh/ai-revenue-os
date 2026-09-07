@@ -164,6 +164,7 @@ const PRIVATE_RPC_ONLY_TABLES = new Set([
   "report_contract_write_operations",
   "integration_report_projection_operations",
   "report_projection_write_operations",
+  "report_structure_admission_write_operations",
   "tool_gateway_operations",
 ]);
 

@@ -78,7 +78,7 @@ language sql as $fn$
     'd1000000-0000-4000-8000-000000000101'::uuid,
     'd1000000-0000-4000-8000-000000000401'::uuid,
     'd1000000-0000-4000-8000-000000000601'::uuid,
-    repeat('a', 64), repeat('b', 64), p_sheets);
+    repeat('a', 64), repeat('b', 64), repeat('c', 64), p_sheets);
 $fn$;
 
 -- Noon's shape: a field row, then two description rows, then the figures.

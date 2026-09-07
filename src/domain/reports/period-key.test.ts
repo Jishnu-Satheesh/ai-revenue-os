@@ -112,10 +112,11 @@ describe("reading the date a row belongs to", () => {
   describe("refusing what it cannot read", () => {
     it("will not read one encoding as another", () => {
       // The contract states the encoding because the value cannot. `03/04/2026`
-      // is two different days depending on who exported it.
+      // is two different days depending on who exported it. But ISO format is
+      // unambiguous, so it is read under any encoding.
       expect(() => parsePeriodKey("20260131", "iso_date")).toThrow(ReportProjectionError);
-      expect(() => parsePeriodKey("2026-01-31", "compact_date")).toThrow(ReportProjectionError);
-      expect(() => parsePeriodKey("2026-01-31", "text_date")).toThrow(ReportProjectionError);
+      expect(() => parsePeriodKey("03/04/2026", "compact_date")).toThrow(ReportProjectionError);
+      expect(() => parsePeriodKey("03/04/2026", "text_date")).toThrow(ReportProjectionError);
     });
 
     it("rejects a date that does not exist rather than rolling it forward", () => {
@@ -193,6 +194,38 @@ describe("the period a date falls in", () => {
     it("needs no declared period, because the value carries its own year", () => {
       // Unlike `01/Jan`, nothing here is inferred from the package.
       expect(parsePeriodKey("Aug 2026", "month_year")).toBe("2026-08-01");
+    });
+  });
+
+  describe("unambiguous ISO text", () => {
+    // Talabat exports the same report as XLSX and as CSV. The XLSX carries a
+    // spreadsheet date cell, so the contract declares `excel_serial`; the CSV
+    // writes `2026-01-01` as text. One recipe, two encodings, and the CSV was
+    // refused outright.
+    it("is read under an excel_serial declaration", () => {
+      expect(parsePeriodKey("2026-01-01", "excel_serial")).toBe("2026-01-01");
+    });
+
+    it("is read under a compact_date declaration", () => {
+      expect(parsePeriodKey("2026-01-31", "compact_date")).toBe("2026-01-31");
+    });
+
+    it("still rejects an impossible day", () => {
+      expect(() => parsePeriodKey("2026-02-31", "excel_serial")).toThrow(/INVALID_LOCAL_DATE/);
+    });
+
+    it("does not make an ambiguous form guessable", () => {
+      // The third of April or the fourth of March. No amount of cleverness can
+      // tell which, so the declaration still governs.
+      expect(() => parsePeriodKey("03/04/2026", "excel_serial")).toThrow(/INVALID_LOCAL_DATE/);
+    });
+
+    it("leaves a real serial working", () => {
+      expect(parsePeriodKey(46023, "excel_serial")).toBe("2026-01-01");
+    });
+
+    it("does not swallow a compact date that is not ISO", () => {
+      expect(parsePeriodKey("20260131", "compact_date")).toBe("2026-01-31");
     });
   });
 });

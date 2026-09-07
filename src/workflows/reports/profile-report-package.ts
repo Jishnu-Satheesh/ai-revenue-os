@@ -5,8 +5,14 @@ import ExcelJS from "exceljs";
 import { parse } from "csv-parse";
 import * as yauzl from "yauzl";
 
-import { normalizeReportStructureIdentifier } from "@/domain/reports/contracts";
-import { createReportSchemaFingerprint } from "@/domain/reports/document-digest";
+import {
+  normalizeReportStructureIdentifier,
+  REPORT_STRUCTURE_VERSION,
+} from "@/domain/reports/contracts";
+import {
+  createReportSchemaFingerprint,
+  createReportStructureFingerprint,
+} from "@/domain/reports/document-digest";
 import { reconstructPdfGrid } from "@/domain/reports/pdf-grid";
 import {
   TRANSPOSED_HEADER_ROW_POSITION,
@@ -530,6 +536,7 @@ export type ReportProfilingDependencies = {
     claimToken: string;
     contentSha256: string;
     schemaFingerprint: string;
+    structureFingerprint: string;
     sheets: SheetManifestInput[];
   }): Promise<void>;
   fail(input: {
@@ -603,11 +610,29 @@ export async function runReportPackageProfiling(
         hasRepeatedHeader: sheet.hasRepeatedHeader,
       })),
     });
+    // The same profile, read without the worksheet name. See ADR 0046.
+    const structureFingerprint = createReportStructureFingerprint({
+      structureVersion: REPORT_STRUCTURE_VERSION,
+      outletGrain: "branch",
+      parserVersion: claim.reportPackage.parser_version,
+      sheets: sheets.map((sheet) => ({
+        position: sheet.sheetPosition,
+        headerCandidateDigests: sheet.headerCandidateDigests.map((candidate) => ({
+          rowPosition: candidate.rowPosition,
+          fieldCount: candidate.fieldCount,
+          digest: candidate.digest,
+        })),
+        hasFormula: sheet.hasFormula,
+        hasMergedCells: sheet.hasMergedCells,
+        hasRepeatedHeader: sheet.hasRepeatedHeader,
+      })),
+    });
     await dependencies.complete({
       ...payload,
       claimToken,
       contentSha256,
       schemaFingerprint,
+      structureFingerprint,
       sheets,
     });
     return { outcome: "profiled" };

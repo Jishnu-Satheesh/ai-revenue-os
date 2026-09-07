@@ -20,9 +20,38 @@ type LogContext = {
   channelId?: string;
   /** A recommendation the narrator produced. Opaque. */
   recommendationId?: string;
+  /** A synthesized intelligence item. Opaque. */
+  itemId?: string;
+  /** Which store a presentation preference names. Bounded vocabulary. */
+  sourceKind?: "synthesis_item" | "channel_recommendation" | "opportunity";
+  /** The preferred record. Opaque. */
+  sourceId?: string;
   /** Which answer a member gave. Bounded vocabulary, never their reason text. */
-  decisionKind?: "acknowledged" | "dismissed" | "planned";
+  decisionKind?:
+    | "acknowledged"
+    | "dismissed"
+    | "planned"
+    | "snoozed"
+    | "pinned"
+    | "unpinned"
+    | "resolved";
   runId?: string;
+  /**
+   * A poster render, identified by the sha256 over its own inputs. Safe here
+   * for the reason the allowlist exists: it names a render without carrying a
+   * single character of what was drawn on it.
+   */
+  renderDigest?: string;
+  /**
+   * A poster template from the shared catalogue, such as `core_feed_headline`.
+   * A registry key chosen by a migration, never a tenant's own text.
+   */
+  templateKey?: string;
+  /** A canonical YYYY-MM analysis selection. Opaque calendar label. */
+  month?: string;
+  /** Inclusive local-date window bounds. Opaque calendar labels, like month. */
+  windowStart?: string;
+  windowEnd?: string;
   workerId?: string;
   durationMs?: number;
   errorCode?: string;

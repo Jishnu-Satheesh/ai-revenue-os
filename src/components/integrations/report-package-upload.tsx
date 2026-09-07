@@ -26,7 +26,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { ReportIntakeMapping } from "@/components/integrations/report-intake-mapping";
+import { ReportAdmissionApproval } from "@/components/integrations/report-admission-approval";
+import { ReportIntakeMapping, type RecognisedFamily } from "@/components/integrations/report-intake-mapping";
+import {
+  isBareCategoricalValueNotDeclared,
+  isDeclarableCategoricalValue,
+  isTruncatedCategoricalValue,
+  parseCategoricalRefusalDetail,
+  type ParsedCategoricalRefusal,
+} from "@/domain/reports/projection-error";
 import { summarizeReportProjection } from "@/domain/reports/projection-copy";
 import {
   Select,
@@ -83,6 +91,29 @@ async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T
 
 function operationKey(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`;
+}
+
+/**
+ * Why validation did not start, in words that point at the next action.
+ *
+ * Every one of these used to read "not enabled for this organization yet",
+ * including the two cases where the feature was on the whole time -- so an
+ * operator whose upload was waiting on an approval, or on a transport that
+ * blinked, was sent to ask for a rollout that had already happened.
+ */
+function validationNotQueuedMessage(
+  reason: "feature_disabled" | "contract_unresolved" | "dispatch_failed" | undefined,
+): string {
+  switch (reason) {
+    case "contract_unresolved":
+      return "This upload has no approved column mapping yet, so validation cannot start. Approve its contract first.";
+    case "dispatch_failed":
+      return "Validation could not be queued just now. The upload is still waiting, so try again in a moment.";
+    case "feature_disabled":
+      return "Validation is ready but is not enabled for this organization yet.";
+    default:
+      return "Validation did not start. Refresh the page to see where this upload stands.";
+  }
 }
 
 function humanizeProjectionKey(key: string): string {
@@ -367,11 +398,215 @@ function safeValidationCodes(value: unknown): string[] {
     : [];
 }
 
+type ReportFamilyRecognition = { sheets: unknown[]; recognisedFamilies: RecognisedFamily[] };
+
+/**
+ * Which of the two mapping experiences a selected upload gets.
+ *
+ * Exactly one recognised family collapses the old propose-then-approve pair
+ * into the single standing-admission screen from ADR 0046. Zero families, or
+ * more than one -- Keeta's exports all share a sheet name and differ only in
+ * their columns, so several can match -- falls back to the guided flow,
+ * which already lets an approver choose among candidates rather than this
+ * step guessing on their behalf.
+ *
+ * An operator reaches this too: they hold `report.upload` and `report.retry`
+ * but not `report.contract_approve`, so they can select an upload and see
+ * what it needs, even though only the admission screen (not the guided form,
+ * which would just be refused on submit) tells them anything useful to look
+ * at while they wait for an owner or admin.
+ */
+function ReportContractStep({
+  organizationId,
+  packageId,
+  canApprove,
+  onDone,
+}: Readonly<{
+  organizationId: string;
+  packageId: string;
+  canApprove: boolean;
+  onDone: () => void;
+}>) {
+  const recognition = useQuery({
+    queryKey: ["report-recognised-families", organizationId, packageId],
+    queryFn: () =>
+      requestJson<ReportFamilyRecognition>(
+        `${reportPackagesPath(organizationId)}/${packageId}/recognised-families`,
+      ),
+  });
+
+  if (recognition.isPending) {
+    return <p className="text-sm text-muted-foreground">Reading the file&rsquo;s structure…</p>;
+  }
+
+  const families = recognition.isError ? [] : (recognition.data?.recognisedFamilies ?? []);
+
+  if (families.length === 1) {
+    return (
+      <ReportAdmissionApproval
+        organizationId={organizationId}
+        packageId={packageId}
+        family={families[0]}
+        canApprove={canApprove}
+        onAdmitted={onDone}
+      />
+    );
+  }
+
+  if (!canApprove) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        This upload still needs an owner or admin to say what its columns mean. Nothing is read
+        until they do.
+      </p>
+    );
+  }
+
+  return <ReportIntakeMapping organizationId={organizationId} packageId={packageId} onProposed={onDone} />;
+}
+
+/**
+ * The way out of a categorical refusal, offered where the refusal is read.
+ *
+ * The run stopped because a label the provider wrote is not in the approved
+ * vocabulary. Declaring it proposes the label into the figures as a new,
+ * unapproved version -- the existing Approve control below still has to pass
+ * it before anything is read. An operator without approval permission sees
+ * who must act instead of a button that would only be refused.
+ */
+function CategoricalRefusalDeclaration({
+  organizationId,
+  projectionVersionId,
+  failureDetail,
+  canDeclare,
+}: Readonly<{
+  organizationId: string;
+  projectionVersionId: string;
+  failureDetail: string;
+  canDeclare: boolean;
+}>) {
+  const queryClient = useQueryClient();
+  const refusal: ParsedCategoricalRefusal | null = parseCategoricalRefusalDetail(failureDetail);
+  const declareLabel = useMutation({
+    mutationFn: () =>
+      requestJson(
+        `/api/organizations/${organizationId}/report-projections/${projectionVersionId}/declarations`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ outputKey: refusal?.outputKey, value: refusal?.value }),
+        },
+      ),
+    onSuccess: () => {
+      toast.success(
+        "Label proposed into the figures. Approve the new version below, then retry the projection.",
+      );
+      void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
+    },
+    onError: (error) =>
+      toast.error(
+        error instanceof Error ? error.message : "The label could not be declared.",
+      ),
+  });
+
+  if (!refusal) {
+    // A package refused before Task 4 recorded a name for this failure reads
+    // as the bare code, with nothing after it -- Nostaza's March package is
+    // in exactly this state on staging. The parser correctly declines to
+    // fabricate a label out of that, but leaving the operator with nothing
+    // just replaces one dead end with a more honest one. Retrying the
+    // projection re-runs it under the current code, which does name the
+    // label, after which this panel can offer Declare.
+    if (isBareCategoricalValueNotDeclared(failureDetail)) {
+      return (
+        <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+          <RotateCcw className="mt-0.5 size-3.5 shrink-0" />
+          This refusal predates the detail the platform now records, so the label it stopped on
+          cannot be shown here. Use Retry projection above -- it re-runs the same file and will
+          name the label, after which Declare appears here too.
+        </p>
+      );
+    }
+    return null;
+  }
+  const dates = refusal.dates.length > 0 ? refusal.dates.join(", ") : "dates not recorded";
+  const outputLabel = refusal.outputKey.replaceAll("_", " ");
+  // The refusal carries the provider's text exactly as written, not a code
+  // (see ReportCategoricalValueNotDeclared / categoryLabel in projection.ts),
+  // so it routinely arrives lowercase, spaced, or cut short at 64 characters.
+  // The declare route's own Zod boundary and the database guard both require
+  // a short uppercase code, and offering the button on a value that cannot
+  // pass that boundary would only replace a nameless refusal with a named
+  // dead end -- exactly the failure mode this feature exists to remove.
+  if (isTruncatedCategoricalValue(refusal.value)) {
+    return (
+      <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+        The file uses a label starting {refusal.value} ({dates}), too long to record in full and
+        cut off before it reached the platform. It may not be the provider&rsquo;s exact text, so
+        it cannot be declared as shown. Ask an engineer to open the source file and add the full
+        label to this output&rsquo;s label map.
+      </p>
+    );
+  }
+  if (!isDeclarableCategoricalValue(refusal.value)) {
+    return (
+      <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+        The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
+        ({dates}), which is not a declared {outputLabel} value. It is written as the provider&rsquo;s
+        own prose, not a short code, so it cannot be declared with one click. Ask an engineer to add
+        it to this output&rsquo;s label map, translating it to a short code such as{" "}
+        <span className="font-mono">{outputLabel.toUpperCase().replaceAll(" ", "_")}</span>.
+      </p>
+    );
+  }
+  if (!canDeclare) {
+    return (
+      <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+        <Lock className="mt-0.5 size-3.5 shrink-0" />
+        The file uses the label {refusal.value} ({dates}), which nobody has declared yet. An
+        owner or admin declares it once, then the figures can be approved and read.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 space-y-2 rounded-md border p-2 text-xs">
+      <p className="text-muted-foreground">
+        The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
+        ({dates}), which is not a declared {outputLabel} value.
+        Declaring it proposes the figures again with that label counted -- nothing is approved
+        until an owner or admin says so below.
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={declareLabel.isPending}
+        onClick={() => declareLabel.mutate()}
+      >
+        <UserCheck data-icon="inline-start" />{" "}
+        {declareLabel.isPending ? "Declaring…" : `Declare "${refusal.value}" as a value we count`}
+      </Button>
+    </div>
+  );
+}
+
 export function ReportPackageUpload({
   organizationId,
   role,
   timeZone,
-}: Readonly<{ organizationId: string; role: OrganizationRole; timeZone: string }>) {
+  fixedChannelId,
+}: Readonly<{
+  organizationId: string;
+  role: OrganizationRole;
+  timeZone: string;
+  /**
+   * The channel page fixes the channel from the route, so the form is
+   * shorter and every upload lands where the operator is standing. Absent
+   * on the Integrations view, which behaves exactly as before.
+   */
+  fixedChannelId?: string;
+}>) {
   const queryClient = useQueryClient();
   const [channelId, setChannelId] = useState("");
   const [branchId, setBranchId] = useState("");
@@ -387,6 +622,7 @@ export function ReportPackageUpload({
   const canUpload = hasReportPermission(role, "report.upload");
   const canRetry = hasReportPermission(role, "report.retry");
   const canApproveContract = hasReportPermission(role, "report.contract_approve");
+  const effectiveChannelId = fixedChannelId ?? channelId;
 
   const snapshot = useQuery({
     queryKey: ["report-packages", organizationId],
@@ -394,9 +630,89 @@ export function ReportPackageUpload({
   });
 
   const view = useMemo(() => toSnapshotView(snapshot.data), [snapshot.data]);
+  // The channel page answers for one channel, so it lists only that
+  // channel's uploads. The Integrations view keeps answering for all of them.
+  const visiblePackages = fixedChannelId
+    ? view.packages.filter((reportPackage) => reportPackage.channel_id === fixedChannelId)
+    : view.packages;
+  // Versions belong to a channel through their package. A fixed view hides
+  // every other channel's mappings and figures rather than offering
+  // approvals for work happening elsewhere.
+  const contractVersionVisible = (version: { report_package_id: string }): boolean =>
+    !fixedChannelId ||
+    view.packages.some(
+      (reportPackage) =>
+        reportPackage.id === version.report_package_id &&
+        reportPackage.channel_id === fixedChannelId,
+    );
+  const projectionVersionVisible = (version: { report_contract_version_id: string }): boolean => {
+    if (!fixedChannelId) return true;
+    const contractVersion = view.contractVersions.find(
+      (candidate) => candidate.id === version.report_contract_version_id,
+    );
+    return contractVersion ? contractVersionVisible(contractVersion) : false;
+  };
   const activeBranches = view.branches;
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
+
+  /**
+   * The report type this channel is already known to carry, if -- and only
+   * if -- every upload of it that was ever recognised as a known library
+   * family and approved agrees on both which family and which exact text.
+   *
+   * Recognition itself cannot run before this file is even uploaded -- it
+   * reads a profile that does not exist until after the upload completes --
+   * so this does not repeat that check. It reuses its outcome: the exact,
+   * immutable `report_type` text a prior approved upload for this channel
+   * recorded. That text, not the library's own name for the family, is what
+   * `grant_governed_report_structure_admission`'s binding match compares
+   * every later upload against, so reusing it verbatim (rather than typing it
+   * again and risking "Performance report" one month and "Performance
+   * Report" the next) is what keeps a channel's admission usable at all. See
+   * ADR 0046: "a reuse key with a hand-typed component is not a key."
+   *
+   * A channel is not guaranteed to carry only one family -- Keeta's own
+   * exports can match several definitions -- and which family *this* upload
+   * turns out to be is not knowable before it is profiled. Picking the first
+   * approved family found would silently mislabel every later upload of a
+   * second family, and the field is read-only, so an operator could not even
+   * correct it: a narrower repeat of the exact defect this plan exists to
+   * close. So this disqualifies itself -- returns null, falling back to the
+   * free-text input -- the moment the channel's history is ambiguous either
+   * about which family (more than one distinct `provider_definition_key`) or
+   * about which spelling (more than one distinct `report_type` text within
+   * one family). Only a channel whose entire approved-library history agrees
+   * on one family and one spelling is confident enough to show read-only.
+   */
+  const recognisedReportTypeForChannel = useMemo(() => {
+    if (!effectiveChannelId) return null;
+    const approvedLibraryReportTypes = view.contractVersions.flatMap((version) => {
+      if (!version.provider_definition_key) return [];
+      const owningPackage = view.packages.find(
+        (candidate) => candidate.id === version.report_package_id,
+      );
+      if (!owningPackage || owningPackage.channel_id !== effectiveChannelId) return [];
+      const approved = view.contractDecisions.some(
+        (decision) =>
+          decision.report_contract_version_id === version.id && decision.decision === "approved",
+      );
+      if (!approved) return [];
+      return [{ familyKey: version.provider_definition_key, reportType: owningPackage.report_type }];
+    });
+    if (approvedLibraryReportTypes.length === 0) return null;
+    const distinctFamilies = new Set(approvedLibraryReportTypes.map((entry) => entry.familyKey));
+    const distinctReportTypes = new Set(approvedLibraryReportTypes.map((entry) => entry.reportType));
+    if (distinctFamilies.size > 1 || distinctReportTypes.size > 1) return null;
+    return approvedLibraryReportTypes[0].reportType;
+  }, [effectiveChannelId, view.contractVersions, view.packages, view.contractDecisions]);
+
+  // What actually gets submitted: the derived value once the channel's report
+  // type is known, the hand-typed one otherwise. Computed at render rather
+  // than synced into state, so there is no moment where the free-text field's
+  // last-typed value and the derived one could disagree about what a submit
+  // sends.
+  const effectiveReportType = recognisedReportTypeForChannel ?? reportType;
 
   const selectedProjectionContract = view.contractVersions.find(
     (version) => version.id === projectionContractVersionId,
@@ -444,9 +760,9 @@ export function ReportPackageUpload({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            channelId,
+            channelId: effectiveChannelId,
             branchId,
-            reportType,
+            reportType: effectiveReportType,
             periodStart,
             periodEnd,
             currency,
@@ -540,20 +856,21 @@ export function ReportPackageUpload({
 
   const retryValidation = useMutation({
     mutationFn: (packageId: string) =>
-      requestJson<{ reportPackage: ReportPackageRow; validationQueued: boolean }>(
-        `${reportPackagesPath(organizationId)}/${packageId}/validation-retry`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ idempotencyKey: operationKey("report-validation-retry") }),
-        },
-      ),
+      requestJson<{
+        reportPackage: ReportPackageRow;
+        validationQueued: boolean;
+        reason?: "feature_disabled" | "contract_unresolved" | "dispatch_failed";
+      }>(`${reportPackagesPath(organizationId)}/${packageId}/validation-retry`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idempotencyKey: operationKey("report-validation-retry") }),
+      }),
     onSuccess: (result) => {
-      toast.info(
-        result.validationQueued
-          ? "Validation was queued again."
-          : "Validation is ready but is not enabled for this organization yet.",
-      );
+      if (result.validationQueued) {
+        toast.info("Validation was queued again.");
+      } else {
+        toast.warning(validationNotQueuedMessage(result.reason));
+      }
       invalidate();
     },
     onError: (error) =>
@@ -733,18 +1050,25 @@ export function ReportPackageUpload({
           >
             <div className="space-y-2">
               <Label htmlFor="report-channel">Business channel</Label>
-              <Select value={channelId} onValueChange={setChannelId}>
-                <SelectTrigger id="report-channel">
-                  <SelectValue placeholder="Select channel" />
-                </SelectTrigger>
-                <SelectContent>
-                  {view.channels.map((channel) => (
-                    <SelectItem key={channel.id} value={channel.id}>
-                      {channel.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {fixedChannelId ? (
+                <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium">
+                  {view.channels.find((channel) => channel.id === fixedChannelId)?.display_name ??
+                    "This channel"}
+                </p>
+              ) : (
+                <Select value={channelId} onValueChange={setChannelId}>
+                  <SelectTrigger id="report-channel">
+                    <SelectValue placeholder="Select channel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {view.channels.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>
+                        {channel.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-branch">Branch / outlet</Label>
@@ -763,14 +1087,29 @@ export function ReportPackageUpload({
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-type">Report type</Label>
-              <Input
-                id="report-type"
-                value={reportType}
-                onChange={(event) => setReportType(event.target.value)}
-                maxLength={120}
-                placeholder="e.g. Marketplace settlement"
-                required
-              />
+              {recognisedReportTypeForChannel ? (
+                <>
+                  <p
+                    id="report-type"
+                    className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium"
+                  >
+                    {recognisedReportTypeForChannel}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    This channel already reads a known report. Every upload of it is filed under
+                    the same type automatically.
+                  </p>
+                </>
+              ) : (
+                <Input
+                  id="report-type"
+                  value={reportType}
+                  onChange={(event) => setReportType(event.target.value)}
+                  maxLength={120}
+                  placeholder="e.g. Marketplace settlement"
+                  required
+                />
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-currency">Declared currency</Label>
@@ -829,7 +1168,11 @@ export function ReportPackageUpload({
               <Button
                 type="submit"
                 disabled={
-                  upload.isPending || snapshot.isLoading || !channelId || !branchId || !currency
+                  upload.isPending ||
+                  snapshot.isLoading ||
+                  !effectiveChannelId ||
+                  !branchId ||
+                  !currency
                 }
               >
                 <UploadCloud data-icon="inline-start" />{" "}
@@ -844,9 +1187,11 @@ export function ReportPackageUpload({
         )}
 
         <div className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">1 · Recent uploads</h3>
-          {view.packages.length ? (
-            view.packages.map((reportPackage) => {
+          <h3 className="text-sm font-medium">
+            {fixedChannelId ? "1 · This channel's uploads" : "1 · Recent uploads"}
+          </h3>
+          {visiblePackages.length ? (
+            visiblePackages.map((reportPackage) => {
               const latestValidation = view.validationRuns.find(
                 (run) => run.report_package_id === reportPackage.id,
               );
@@ -1042,10 +1387,18 @@ export function ReportPackageUpload({
                     the error's own words, recorded by the run that failed.
                   */}
                   {latestProjection?.status === "failed" && latestProjection.failure_detail ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">Why it stopped: </span>
-                      {latestProjection.failure_detail}
-                    </p>
+                    <>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">Why it stopped: </span>
+                        {latestProjection.failure_detail}
+                      </p>
+                      <CategoricalRefusalDeclaration
+                        organizationId={organizationId}
+                        projectionVersionId={latestProjection.report_projection_version_id}
+                        failureDetail={latestProjection.failure_detail}
+                        canDeclare={canApproveContract}
+                      />
+                    </>
                   ) : null}
                 </div>
               );
@@ -1062,8 +1415,8 @@ export function ReportPackageUpload({
               An owner or admin decides. Until then the file has been profiled and nothing more.
             </p>
           </div>
-          {view.contractVersions.length ? (
-            view.contractVersions.map((version) => {
+          {view.contractVersions.filter(contractVersionVisible).length ? (
+            view.contractVersions.filter(contractVersionVisible).map((version) => {
               const decision = view.contractDecisions.find(
                 (item) => item.report_contract_version_id === version.id,
               );
@@ -1162,9 +1515,11 @@ export function ReportPackageUpload({
               );
             })
           ) : (
-            <p className="text-sm text-muted-foreground">Nothing has been mapped yet.</p>
+            <p className="text-sm text-muted-foreground">
+              {fixedChannelId ? "Nothing has been mapped for this channel yet." : "Nothing has been mapped yet."}
+            </p>
           )}
-          {canApproveContract ? (
+          {canApproveContract || canUpload ? (
             <div className="space-y-3 rounded-lg border border-dashed p-4">
               <div className="space-y-2">
                 <Label htmlFor="report-contract-package">Which upload are you mapping?</Label>
@@ -1173,7 +1528,7 @@ export function ReportPackageUpload({
                     <SelectValue placeholder="Select an upload waiting to be mapped" />
                   </SelectTrigger>
                   <SelectContent>
-                    {view.packages
+                    {visiblePackages
                       .filter((reportPackage) => reportPackage.status === "awaiting_contract")
                       .map((reportPackage) => (
                         <SelectItem key={reportPackage.id} value={reportPackage.id}>
@@ -1184,11 +1539,12 @@ export function ReportPackageUpload({
                 </Select>
               </div>
               {proposalPackageId ? (
-                <ReportIntakeMapping
+                <ReportContractStep
                   key={proposalPackageId}
                   organizationId={organizationId}
                   packageId={proposalPackageId}
-                  onProposed={() => {
+                  canApprove={canApproveContract}
+                  onDone={() => {
                     setProposalPackageId("");
                     invalidate();
                   }}
@@ -1206,7 +1562,7 @@ export function ReportPackageUpload({
               A separate decision, because it is a separate consequence: this is what enters the
               ledger and drives every figure downstream. No workbook value appears here.
             </p>
-            {view.projectionVersions.map((version) => {
+            {view.projectionVersions.filter(projectionVersionVisible).map((version) => {
               const decision = view.projectionDecisions.find(
                 (item) => item.report_projection_version_id === version.id,
               );
@@ -1310,6 +1666,7 @@ export function ReportPackageUpload({
                     </SelectTrigger>
                     <SelectContent>
                       {view.contractVersions
+                        .filter(contractVersionVisible)
                         .filter((version) =>
                           view.contractDecisions.some(
                             (decision) =>

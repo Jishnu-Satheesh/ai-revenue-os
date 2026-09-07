@@ -370,6 +370,43 @@ export type ReportSchemaFingerprintInput = {
   }>;
 };
 
+/**
+ * The version of the structure digest below. Bump it only when the inputs
+ * change: existing admissions are keyed on the digest and would silently stop
+ * matching, which is a migration, not a refactor.
+ */
+export const REPORT_STRUCTURE_VERSION = 1;
+
+/**
+ * What makes two uploads the same report.
+ *
+ * Deliberately smaller than `ReportSchemaFingerprintInput`. The worksheet name
+ * is gone, because Talabat names its tab after the export range and a digest
+ * containing it changes every month for a file whose columns never move. The
+ * report type is gone because it is operator-supplied text. The declared
+ * currency is gone because it is matched explicitly at admission, where a
+ * mismatch can be refused by name instead of vanishing as a non-match.
+ *
+ * `digest` already covers the ordered column names of its row, so the names
+ * themselves are not repeated here.
+ */
+export type ReportStructureFingerprintInput = {
+  structureVersion: number;
+  outletGrain: "branch";
+  parserVersion: number;
+  sheets: Array<{
+    position: number;
+    headerCandidateDigests: Array<{
+      rowPosition: number;
+      fieldCount: number;
+      digest: string;
+    }>;
+    hasFormula: boolean;
+    hasMergedCells: boolean;
+    hasRepeatedHeader: boolean;
+  }>;
+};
+
 export function normalizeReportStructureIdentifier(input: string): string {
   const normalized = input
     .normalize("NFKD")

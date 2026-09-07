@@ -44,6 +44,8 @@ export type ReportProjectionBindingRow =
   Database["public"]["Tables"]["report_projection_bindings"]["Row"];
 export type ReportProjectionRunRow =
   Database["public"]["Tables"]["integration_report_projection_runs"]["Row"];
+export type ReportStructureAdmissionRow =
+  Database["public"]["Tables"]["report_structure_admissions"]["Row"];
 export type ReportProjectionReconciliationGroup = {
   representative_reconciliation_id: string;
   organization_id: string;
@@ -177,6 +179,20 @@ export type ReportPackageRepository = {
     projectionDocument: unknown;
     proposalSource: "human" | "library";
     providerDefinitionKey: string | null;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<ReportProjectionVersionRow>;
+  /**
+   * The one-click exit from a categorical refusal: appends one label to one
+   * output's vocabulary and proposes the result. Grants nothing -- approval
+   * still goes through decideProjection.
+   */
+  proposeProjectionWithDeclaredValue(input: {
+    organizationId: string;
+    actorId: string;
+    projectionVersionId: string;
+    outputKey: string;
+    value: string;
     idempotencyKey: string;
     correlationId: string;
   }): Promise<ReportProjectionVersionRow>;

@@ -21,3 +21,8 @@ export function isOrganizationPath(pathname: string): boolean {
 export function overviewPath(organizationId: string): string {
   return `/organizations/${organizationId}/overview`;
 }
+
+/** The canonical read-only Market Watch surface. It never triggers research. */
+export function growthIntelligencePath(organizationId: string): string {
+  return `/organizations/${organizationId}/growth-intelligence`;
+}

@@ -106,3 +106,120 @@ export type CampaignVariantPayload = z.infer<typeof campaignVariantPayloadSchema
 export function parseCampaignVariantPayload(payload: unknown): CampaignVariantPayload {
   return campaignVariantPayloadSchema.parse(payload);
 }
+
+/**
+ * What a poster render carries between the queue and the worker.
+ *
+ * This payload deviates from the identifiers-only rule above in exactly one
+ * field, `extra`, and the deviation is deliberate rather than overlooked.
+ *
+ * `extra` is the operator's own text for the one free box on a poster. Unlike a
+ * prompt or a brief, it is written to be printed on a public advertisement, so
+ * queue storage is not where it becomes exposed. There is no request table for
+ * a render to read it from -- the render tables are outputs, content-addressed
+ * and append-only -- and adding one to keep a string out of a payload would be
+ * a schema change to avoid an exposure that does not exist.
+ *
+ * It is bounded here and refused by `checkOperatorSlotText` before it is drawn.
+ * Everything else the worker needs, it reads from the database under its own
+ * credentials.
+ */
+export const campaignPosterRenderPayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  campaignId: uuidSchema,
+  bundleVersionId: uuidSchema,
+  plateAssetId: uuidSchema,
+  correlationId: uuidSchema,
+  templateKey: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .max(120),
+  templateVersion: z.number().int().positive(),
+  script: z.enum(["Latn", "Mlym", "Arab"]),
+  directionId: z.string().min(1).max(120),
+  channel: z.enum(["instagram", "facebook"]),
+  extra: z.string().max(200).nullable(),
+});
+
+export type CampaignPosterRenderPayload = z.infer<typeof campaignPosterRenderPayloadSchema>;
+
+export function parseCampaignPosterRenderPayload(payload: unknown): CampaignPosterRenderPayload {
+  return campaignPosterRenderPayloadSchema.parse(payload);
+}
+
+/**
+ * What a plate edit carries between the queue and the worker.
+ *
+ * This payload carries the operator's marked regions and their instructions,
+ * for the same reason `extra` is carried above and with the same discomfort:
+ * there is no request table for the worker to read them from, and the tables
+ * this feature does own are outputs -- `campaign_plate_edits` records an edit
+ * that already happened.
+ *
+ * What makes it acceptable rather than merely convenient is that the
+ * instruction is not a credential and not a secret. It is a sentence about a
+ * picture, destined for a public advertisement, and it is bounded here at the
+ * same 500 characters the database enforces. It is also, deliberately, the one
+ * thing in this payload the worker treats as untrusted data.
+ */
+export const campaignPlateEditPayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  campaignId: uuidSchema,
+  bundleVersionId: uuidSchema,
+  parentPlateAssetId: uuidSchema,
+  correlationId: uuidSchema,
+  /** The member who marked the regions. Recorded as the editor. */
+  editedBy: uuidSchema,
+  /** One edit per key per organization, enforced by the database. */
+  idempotencyKey: z.string().min(8).max(200),
+  annotations: z
+    .array(
+      z.strictObject({
+        ordinal: z.number().int().positive().max(8),
+        bounds: z.strictObject({
+          xPx: z.number().int().nonnegative().max(20_000),
+          yPx: z.number().int().nonnegative().max(20_000),
+          widthPx: z.number().int().positive().max(20_000),
+          heightPx: z.number().int().positive().max(20_000),
+        }),
+        instruction: z.string().trim().min(1).max(500),
+      }),
+    )
+    .min(1)
+    .max(8),
+});
+
+export type CampaignPlateEditPayload = z.infer<typeof campaignPlateEditPayloadSchema>;
+
+export function parseCampaignPlateEditPayload(payload: unknown): CampaignPlateEditPayload {
+  return campaignPlateEditPayloadSchema.parse(payload);
+}
+
+/**
+ * The execution loop's payloads.
+ *
+ * Identifiers and bounds only, in keeping with the rule the generation payloads
+ * follow: nothing here carries business text, so a replayed message cannot
+ * smuggle different work than the run was authorized for. Every one of these
+ * workers reads what it needs from storage.
+ */
+export const campaignSweepPayloadSchema = z.strictObject({
+  /** How many rows one sweep may take. Bounded by the database function too. */
+  limit: z.number().int().positive().max(500).optional(),
+});
+export type CampaignSweepPayload = z.infer<typeof campaignSweepPayloadSchema>;
+
+/**
+ * One organization per run, deliberately.
+ *
+ * The allocation, settlement and learning workers each state that they carry no
+ * state from one campaign into the next. Running them per organization keeps
+ * that true at the next level up: one tenant's slow settlement cannot delay
+ * another's, and a failure is scoped to the tenant it happened in.
+ */
+export const campaignCyclePayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  /** Present only to make a cycle reproducible; generated otherwise. */
+  cycleId: uuidSchema.optional(),
+});
+export type CampaignCyclePayload = z.infer<typeof campaignCyclePayloadSchema>;

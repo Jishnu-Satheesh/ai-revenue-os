@@ -8,7 +8,9 @@ export type OpportunityStatus =
   | "approved"
   | "rejected"
   | "snoozed"
-  | "expired";
+  | "expired"
+  | "draft_requested"
+  | "draft_created";
 
 /** Safe feed projection: evidence payloads and worker inputs stay server-side. */
 export type OpportunityFeedItem = {
@@ -16,6 +18,13 @@ export type OpportunityFeedItem = {
   organizationId: string;
   decisionRecordId: string;
   playbookVersionId: string;
+  /**
+   * The action key stored on the playbook definition, read through the
+   * version join. Callers must never substitute a code default: the stored
+   * value is what the Decision Engine actually selected.
+   */
+  actionKey: string;
+  createdAt: string;
   title: string;
   summary: string;
   evidenceTier: "computed" | "observed" | "prior";
@@ -27,6 +36,8 @@ export type OpportunityFeedItem = {
   timeToImpactDays: number;
   status: OpportunityStatus;
   expiresAt: string;
+  /** Exact version the draft request must name back. */
+  version: number;
 };
 
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
@@ -162,7 +173,10 @@ export const decisionCycleContextSchema = z.strictObject({
       definitionId: z.string().uuid(),
       versionId: z.string().uuid(),
       semanticVersion: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
-      actionKey: z.literal("campaign.meta_bundle_v1"),
+      actionKey: z.union([
+        z.literal("campaign.meta_bundle_v1"),
+        z.literal("campaign.governed_draft_v1"),
+      ]),
       requiredCapabilityKeys: z.array(registeredKeySchema).max(50),
       requiredEvidenceKeys: z.array(registeredKeySchema).max(50),
       riskClass: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
@@ -234,6 +248,12 @@ export const decisionOpportunitySchema = z
   .strictObject({
     id: z.string().uuid(),
     playbookVersionId: z.string().uuid(),
+    /**
+     * Stamped by the worker from the selected playbook version's stored
+     * action definition and persisted on the opportunity row, so reads
+     * return the stored identity instead of a code default.
+     */
+    actionKey: registeredKeySchema,
     candidateFingerprint: sha256HexSchema,
     title: z.string().min(1).max(240),
     summary: z.string().min(1).max(4000),
@@ -265,7 +285,16 @@ export const decisionOpportunitySchema = z
       .max(50),
     evaluationPlan: nonEmptyBoundedJsonObjectSchema,
     expiresAt: z.string().datetime({ offset: true }),
-    status: z.enum(["proposed", "awaiting_approval", "approved", "rejected", "snoozed", "expired"]),
+    status: z.enum([
+      "proposed",
+      "awaiting_approval",
+      "approved",
+      "rejected",
+      "snoozed",
+      "expired",
+      "draft_requested",
+      "draft_created",
+    ]),
   })
   .refine((opportunity) => opportunity.impactHighMinor >= opportunity.impactLowMinor, {
     path: ["impactHighMinor"],

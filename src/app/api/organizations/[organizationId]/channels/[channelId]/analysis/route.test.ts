@@ -26,6 +26,16 @@ vi.mock("@/lib/api/organization-context", async () => {
 vi.mock("@/modules/analysis/application/dispatch", () => ({
   requestChannelAnalysis: mocks.requestChannelAnalysis,
 }));
+
+const repositoryMocks = vi.hoisted(() => ({
+  resolveMonthInput: vi.fn(),
+}));
+
+vi.mock("@/modules/analysis/infrastructure/read-repository", () => ({
+  createAuthenticatedChannelAnalysisRepository: vi.fn(() => ({
+    resolveMonthInput: repositoryMocks.resolveMonthInput,
+  })),
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { info: mocks.info, warn: vi.fn(), error: vi.fn() },
 }));
@@ -44,12 +54,7 @@ function request(body: unknown) {
   });
 }
 
-const validBody = {
-  windowStart: "2026-01-01",
-  windowEnd: "2026-01-31",
-  periodGrain: "day",
-  branchId: null,
-};
+const validBody = { month: "2026-02" };
 
 const params = Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL });
 
@@ -63,24 +68,56 @@ beforeEach(() => {
     supabase: {},
   });
   mocks.requestChannelAnalysis.mockResolvedValue(true);
+  repositoryMocks.resolveMonthInput.mockResolvedValue({
+    windowStart: "2026-02-01",
+    windowEnd: "2026-02-28",
+    timeZone: "Asia/Dubai",
+    grain: "day",
+  });
 });
 
 describe("POST channel analysis", () => {
-  it("starts a run and returns the run id it created", async () => {
+  it("resolves the month server-side and dispatches it", async () => {
     const response = await POST(request(validBody), { params });
 
     expect(response.status).toBe(202);
     const body = (await response.json()) as { analysisRunId: string };
     expect(body.analysisRunId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(repositoryMocks.resolveMonthInput).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      channelId: CHANNEL,
+      month: "2026-02",
+    });
     expect(mocks.requestChannelAnalysis).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: ORGANIZATION,
         channelId: CHANNEL,
-        windowStart: "2026-01-01",
-        windowEnd: "2026-01-31",
+        branchId: null,
+        windowStart: "2026-02-01",
+        windowEnd: "2026-02-28",
         periodGrain: "day",
+        month: "2026-02",
+        windowTimezone: "Asia/Dubai",
       }),
     );
+  });
+
+  it("refuses a month outside the channel's known timeline", async () => {
+    repositoryMocks.resolveMonthInput.mockResolvedValue(null);
+
+    const response = await POST(request({ month: "2026-09" }), { params });
+
+    expect(response.status).toBe(400);
+    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("refuses caller-supplied dates, which cannot bypass the resolver", async () => {
+    const response = await POST(request({ month: "2026-02", windowStart: "2026-02-01" }), {
+      params,
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
   it("refuses a member whose role cannot retry governed work", async () => {
@@ -120,17 +157,14 @@ describe("POST channel analysis", () => {
     expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
-  it("refuses a window that ends before it starts", async () => {
-    const response = await POST(
-      request({ ...validBody, windowStart: "2026-01-31", windowEnd: "2026-01-01" }),
-      { params },
-    );
+  it("refuses a month that is not canonical", async () => {
+    const response = await POST(request({ month: "2026-13" }), { params });
 
     expect(response.status).toBe(400);
     expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
-  it("refuses a grain no governed projection writes", async () => {
+  it("refuses a grain no caller may name, since the server resolves it", async () => {
     const response = await POST(request({ ...validBody, periodGrain: "hour" }), { params });
 
     expect(response.status).toBe(400);

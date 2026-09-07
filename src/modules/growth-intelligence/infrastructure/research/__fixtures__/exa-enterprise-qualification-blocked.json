@@ -1,0 +1,15 @@
+{
+  "provider": "exa",
+  "status": "blocked",
+  "reviewedAt": "2026-09-01",
+  "blockers": [
+    "commercial_approval_missing",
+    "enterprise_terms_unexecuted",
+    "zero_retention_unverified",
+    "derived_claim_storage_rights_unverified",
+    "credential_missing",
+    "controlled_canary_missing"
+  ],
+  "retention": "not evidenced for this deployment",
+  "canary": "not executed"
+}

@@ -24,6 +24,20 @@ describe("decision aggregate", () => {
     );
   });
 
+  it("admits the governed-draft playbook beside the meta bundle playbook", () => {
+    const context = contextFixture();
+    const parsed = decisionCycleContextSchema.parse({
+      ...context,
+      playbook: {
+        ...context.playbook,
+        actionKey: "campaign.governed_draft_v1",
+        requiredCapabilityKeys: [],
+        riskClass: 1,
+      },
+    });
+    expect(parsed.playbook?.actionKey).toBe("campaign.governed_draft_v1");
+  });
+
   it("rejects unknown candidate and opportunity fields at the worker boundary", () => {
     const aggregate = selectedAggregate();
 
@@ -257,6 +271,7 @@ function selectedAggregate() {
       summary: "Refresh the listing with measured creative.",
       hypothesis: "A stronger listing increases qualified demand.",
       playbookVersionId,
+      actionKey: "campaign.meta_bundle_v1",
       candidateFingerprint: selectedFingerprint,
       subjectKind: candidate.subjectKind,
       subjectRef: candidate.subjectRef,

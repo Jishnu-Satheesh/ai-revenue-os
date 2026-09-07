@@ -11,6 +11,8 @@ function item(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem
     organizationId: "22222222-2222-4222-8222-222222222222",
     decisionRecordId: "33333333-3333-4333-8333-333333333333",
     playbookVersionId: "44444444-4444-4444-8444-444444444444",
+    actionKey: "campaign.meta_bundle_v1",
+    createdAt: "2026-08-01T10:00:00.000Z",
     title: "Run a governed Meta campaign",
     summary: "A bounded recommendation with a registered measurement plan.",
     evidenceTier: "computed",
@@ -22,6 +24,7 @@ function item(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem
     timeToImpactDays: 7,
     status: "proposed",
     expiresAt: "2026-08-22T10:00:00.000Z",
+    version: 1,
     ...overrides,
   };
 }
@@ -45,14 +48,25 @@ describe("buildOpportunityFeed", () => {
     ]);
   });
 
-  it("omits a tier that has no opportunity rather than showing an empty heading", () => {
-    const feed = buildOpportunityFeed({
+  it("omits a tier that has no opportunity rather than showing an empty heading", () => {    const feed = buildOpportunityFeed({
       items: [item({ evidenceTier: "observed" })],
       role: "operator",
       now: NOW,
     });
 
     expect(feed.groups.map((group) => group.evidenceTier)).toEqual(["observed"]);
+  });
+
+  it("offers no feedback action on a governed-draft entry; drafts are requested, never approved", () => {
+    const feed = buildOpportunityFeed({
+      items: [item({ actionKey: "campaign.governed_draft_v1" })],
+      role: "operator",
+      now: NOW,
+    });
+
+    const entry = feed.groups[0]?.items[0];
+    expect(entry?.availableActions).toEqual([]);
+    expect(entry?.actionKey).toBe("campaign.governed_draft_v1");
   });
 
   it("ranks within a tier by expected contribution, then by the sooner impact", () => {
@@ -189,5 +203,20 @@ describe("buildOpportunityFeed", () => {
         organizationId: "22222222-2222-4222-8222-222222222222",
       }),
     ).toThrow(/organization/i);
+  });
+
+  it("keeps a future draft lifecycle state out of the answerable queue without failing", () => {
+    const feed = buildOpportunityFeed({
+      items: [
+        item({
+          status: "draft_requested" as OpportunityFeedItem["status"],
+        }),
+      ],
+      role: "operator",
+      now: NOW,
+    });
+
+    expect(feed.groups).toEqual([]);
+    expect(feed.totalCount).toBe(0);
   });
 });

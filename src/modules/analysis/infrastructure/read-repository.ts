@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { resolveAnalysisMonth } from "@/domain/analysis/calendar";
 import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
 import { toCalendarDate } from "@/domain/metrics/periods";
 import type { Database } from "@/lib/supabase/database.types";
@@ -197,16 +198,60 @@ function toFindingRecord(row: ChannelFindingRow): ChannelFindingRecord {
   };
 }
 
+/** The columns a run record is built from, named once so the list a single
+ *  run is read with cannot drift from the list the page's list is read with. */
+const CHANNEL_RUN_COLUMNS =
+  "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at";
+
+type ChannelAnalysisRunRow = Pick<
+  Database["public"]["Tables"]["channel_analysis_runs"]["Row"],
+  | "id"
+  | "channel_id"
+  | "branch_id"
+  | "window_start"
+  | "window_end"
+  | "period_grain"
+  | "window_timezone"
+  | "registry_version"
+  | "detector_versions"
+  | "status"
+  | "finding_count"
+  | "observation_count"
+  | "needs_data_count"
+  | "safe_failure_code"
+  | "started_at"
+  | "completed_at"
+>;
+
+function toRunRecord(row: ChannelAnalysisRunRow): ChannelAnalysisRunRecord {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    branchId: row.branch_id,
+    windowStart: row.window_start,
+    windowEnd: row.window_end,
+    periodGrain: row.period_grain as AnalysisGrain,
+    windowTimezone: row.window_timezone,
+    registryVersion: row.registry_version,
+    detectorVersions: toDetectorVersions(row.detector_versions),
+    status: row.status,
+    findingCount: row.finding_count,
+    observationCount: row.observation_count,
+    needsDataCount: row.needs_data_count,
+    safeFailureCode: row.safe_failure_code,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+  };
+}
+
 export function createAuthenticatedChannelAnalysisRepository(
   supabase: AnalysisClient,
 ): ChannelAnalysisReadPort {
-  return {
+  const repository: ChannelAnalysisReadPort = {
     async loadRuns({ organizationId, channelId, limit }) {
       const { data, error } = await supabase
         .from("channel_analysis_runs")
-        .select(
-          "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at",
-        )
+        .select(CHANNEL_RUN_COLUMNS)
         .eq("organization_id", organizationId)
         .eq("channel_id", channelId)
         .order("started_at", { ascending: false })
@@ -214,26 +259,26 @@ export function createAuthenticatedChannelAnalysisRepository(
 
       if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
 
-      return (data ?? []).map(
-        (row): ChannelAnalysisRunRecord => ({
-          id: row.id,
-          channelId: row.channel_id,
-          branchId: row.branch_id,
-          windowStart: row.window_start,
-          windowEnd: row.window_end,
-          periodGrain: row.period_grain as AnalysisGrain,
-          windowTimezone: row.window_timezone,
-          registryVersion: row.registry_version,
-          detectorVersions: toDetectorVersions(row.detector_versions),
-          status: row.status,
-          findingCount: row.finding_count,
-          observationCount: row.observation_count,
-          needsDataCount: row.needs_data_count,
-          safeFailureCode: row.safe_failure_code,
-          startedAt: row.started_at,
-          completedAt: row.completed_at,
-        }),
-      );
+      return (data ?? []).map(toRunRecord);
+    },
+
+    async loadRun({ organizationId, channelId, analysisRunId }) {
+      // Named rather than found in `loadRuns`: that list is capped at what a
+      // page shows, so a run past the cap would read as absent to anyone
+      // acting on it. The channel filter travels here for the same reason it
+      // travels there -- a run of another channel must read as absent, not as
+      // a refusal that names which channel it belongs to.
+      const { data, error } = await supabase
+        .from("channel_analysis_runs")
+        .select(CHANNEL_RUN_COLUMNS)
+        .eq("organization_id", organizationId)
+        .eq("channel_id", channelId)
+        .eq("id", analysisRunId)
+        .maybeSingle();
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      return data ? toRunRecord(data) : null;
     },
 
     async loadFindingsForRun({ organizationId, analysisRunId }) {
@@ -498,6 +543,40 @@ export function createAuthenticatedChannelAnalysisRepository(
       return keys;
     },
 
+    async loadAnalysisMonthTimeline({ organizationId, channelId }) {
+      // The horizon comes from declared package dates, not from surviving
+      // evidence rows: a package whose rows were all superseded still declares
+      // the month, and a gap month must stay selectable. Two bounded rows.
+      const earliestBase = supabase
+        .from("integration_report_packages")
+        .select("declared_period_start")
+        .eq("organization_id", organizationId)
+        .eq("status", "projected")
+        .not("declared_period_start", "is", null);
+      const latestBase = supabase
+        .from("integration_report_packages")
+        .select("declared_period_end")
+        .eq("organization_id", organizationId)
+        .eq("status", "projected")
+        .not("declared_period_end", "is", null);
+      const earliestScoped =
+        channelId === null ? earliestBase : earliestBase.eq("channel_id", channelId);
+      const latestScoped = channelId === null ? latestBase : latestBase.eq("channel_id", channelId);
+      const { data: earliestRows, error: earliestError } = await earliestScoped
+        .order("declared_period_start", { ascending: true })
+        .limit(1);
+      if (earliestError) throw new ChannelAnalysisReadError(earliestError.code ?? "unknown");
+      const { data: latestRows, error: latestError } = await latestScoped
+        .order("declared_period_end", { ascending: false })
+        .limit(1);
+      if (latestError) throw new ChannelAnalysisReadError(latestError.code ?? "unknown");
+
+      const earliest = (earliestRows ?? [])[0]?.declared_period_start;
+      const latest = (latestRows ?? [])[0]?.declared_period_end;
+      if (typeof earliest !== "string" || typeof latest !== "string") return null;
+      return { firstMonth: earliest.slice(0, 7), lastMonth: latest.slice(0, 7) };
+    },
+
     async loadEvidence({ organizationId, findingIds }) {
       if (findingIds.length === 0) return [];
 
@@ -616,7 +695,7 @@ export function createAuthenticatedChannelAnalysisRepository(
       const { data: decisions, error: decisionError } = await supabase
         .from("channel_recommendation_decisions")
         .select(
-          "id, recommendation_id, decision, dismissal_reason, actor_id, actor_display_name, created_at",
+          "id, recommendation_id, decision, dismissal_reason, snoozed_until, actor_id, actor_display_name, created_at",
         )
         .eq("organization_id", organizationId)
         .in("recommendation_id", [...recommendationIds])
@@ -684,6 +763,10 @@ export function createAuthenticatedChannelAnalysisRepository(
                       recommendationId: entry.recommendation_id,
                       decision: entry.decision,
                       reason: entry.dismissal_reason,
+                      snoozedUntil:
+                        entry.snoozed_until === null || entry.snoozed_until === undefined
+                          ? null
+                          : String(entry.snoozed_until),
                       actorId: entry.actor_id,
                       actorName: entry.actor_display_name,
                       createdAt: entry.created_at,
@@ -696,5 +779,61 @@ export function createAuthenticatedChannelAnalysisRepository(
           }),
         );
     },
+
+    async resolveMonthInput({ organizationId, channelId, month }) {
+      const timeline = await repository.loadAnalysisMonthTimeline({
+        organizationId,
+        channelId,
+      });
+      if (timeline === null) return null;
+      let bounds: { windowStart: string; windowEnd: string };
+      try {
+        bounds = resolveAnalysisMonth(month, timeline);
+      } catch {
+        // Outside the known timeline: a normal empty state for the caller,
+        // not a row the database failed to return.
+        return null;
+      }
+
+      const { data: orgRows, error: orgError } = await supabase
+        .from("organizations")
+        .select("default_timezone")
+        .eq("id", organizationId)
+        .limit(1);
+      if (orgError) throw new ChannelAnalysisReadError(orgError.code ?? "unknown");
+      const timeZone = (orgRows ?? [])[0]?.default_timezone;
+      if (typeof timeZone !== "string" || timeZone.length === 0) return null;
+
+      // The grain the month's own packages wrote, by current-row majority
+      // with ties breaking finer. Packages outside the month still vote when
+      // nothing declares it: an empty month inherits the channel's known
+      // primary grain, and a channel with no packages at all resolves day
+      // grain so the coverage detector can state that no evidence exists.
+      const windows = await repository.loadEvidenceWindows({
+        organizationId,
+        channelId,
+        limit: MAX_EVIDENCE_WINDOWS,
+      });
+      const overlapping = windows.filter(
+        (candidate) =>
+          candidate.windowStart <= bounds.windowEnd && candidate.windowEnd >= bounds.windowStart,
+      );
+      const pool = overlapping.length > 0 ? overlapping : windows;
+      if (pool.length === 0) return { ...bounds, timeZone, grain: "day" };
+      const fineness: readonly AnalysisGrain[] = ["day", "week", "month", "span"];
+      const counts = new Map<AnalysisGrain, number>();
+      for (const candidate of pool) {
+        counts.set(
+          candidate.grain,
+          (counts.get(candidate.grain) ?? 0) + candidate.governedRowCount,
+        );
+      }
+      const [grain] = [...counts.entries()].sort(
+        (left, right) =>
+          right[1] - left[1] || fineness.indexOf(left[0]) - fineness.indexOf(right[0]),
+      )[0];
+      return { ...bounds, timeZone, grain };
+    },
   };
+  return repository;
 }

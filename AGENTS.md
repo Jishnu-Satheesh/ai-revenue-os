@@ -172,12 +172,13 @@ When implementation contradicts documentation, stop and resolve the contradictio
 
 ## 10. Coordination and the collaboration board
 
-**Growth Intelligence belongs to another agent. Do not touch it.** As of 2026-09-01 that is the one
-live claim in this repository: `src/domain/growth-intelligence/`,
+**Growth Intelligence is owned by this session as of 2026-09-04.** The user directed a resume
+of the interrupted Growth Intelligence work, no peer sessions are active, and the prior
+`2026-09-01` reservation is released. That covers `src/domain/growth-intelligence/`,
 `src/modules/growth-intelligence/`, the `growth_intelligence_*` migration and pgTAP suites,
-`specs/022-growth-intelligence.md`, and ADR 0044. Leave their uncommitted changes in the working
-tree alone, never commit them, and do not resolve the `database.types.ts` drift their unapplied
-migration causes — that is theirs.
+`specs/022-growth-intelligence.md`, and ADR 0044, including the uncommitted changes in the working
+tree. Verify the Task 13 staging state before building on it, and keep `database.types.ts` edits
+narrow per the shared-tree rules.
 
 **Everything else has one agent.** The two-thread arrangement in
 `docs/collaboration/asset-library-and-studio-board.md` and its older `in-progress` rows are

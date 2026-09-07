@@ -102,6 +102,82 @@ describe("report package repository", () => {
     );
   });
 
+  it("calls the declare RPC with the refused version, output, and label", async () => {
+    rpc.mockResolvedValue({ data: { id: "new-version" }, error: null });
+
+    const repository = createAuthenticatedReportPackageRepository({ rpc } as never);
+
+    await expect(
+      repository.proposeProjectionWithDeclaredValue({
+        organizationId: "33333333-3333-4333-8333-333333333333",
+        actorId: "44444444-4444-4444-8444-444444444444",
+        projectionVersionId: "66666666-6666-4666-8666-666666666666",
+        outputKey: "cancel_reason",
+        value: "CLOSED",
+        idempotencyKey: "report-projection-declare-test",
+        correlationId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).resolves.toEqual({ id: "new-version" });
+    expect(rpc).toHaveBeenCalledWith("propose_governed_report_projection_with_declared_value", {
+      p_organization_id: "33333333-3333-4333-8333-333333333333",
+      p_actor_id: "44444444-4444-4444-8444-444444444444",
+      p_report_projection_version_id: "66666666-6666-4666-8666-666666666666",
+      p_output_key: "cancel_reason",
+      p_value: "CLOSED",
+      p_idempotency_key: "report-projection-declare-test",
+      p_correlation_id: "55555555-5555-4555-8555-555555555555",
+    });
+  });
+
+  it("explains that an already-declared label changes nothing", async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: "23514",
+        message: "report projection categorical value is already declared",
+      },
+    });
+
+    const repository = createAuthenticatedReportPackageRepository({ rpc } as never);
+
+    await expect(
+      repository.proposeProjectionWithDeclaredValue({
+        organizationId: "33333333-3333-4333-8333-333333333333",
+        actorId: "44444444-4444-4444-8444-444444444444",
+        projectionVersionId: "66666666-6666-4666-8666-666666666666",
+        outputKey: "cancel_reason",
+        value: "ITEM_UNAVAILABLE",
+        idempotencyKey: "report-projection-declare-test",
+        correlationId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).rejects.toThrow(
+      "That label is already declared. Approve the figures that carry it, or retry the projection.",
+    );
+  });
+
+  it("explains that a label-mapped output needs a hand-authored declaration instead", async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: "23514", message: "report projection output uses a label map" },
+    });
+
+    const repository = createAuthenticatedReportPackageRepository({ rpc } as never);
+
+    await expect(
+      repository.proposeProjectionWithDeclaredValue({
+        organizationId: "33333333-3333-4333-8333-333333333333",
+        actorId: "44444444-4444-4444-8444-444444444444",
+        projectionVersionId: "66666666-6666-4666-8666-666666666666",
+        outputKey: "cancel_reason",
+        value: "CLOSED",
+        idempotencyKey: "report-projection-declare-test",
+        correlationId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).rejects.toThrow(
+      "That figure translates the provider's own words through a label map, so a one-click label can't be added directly. Ask an engineer to add both the label and its map entry in a hand-authored declaration.",
+    );
+  });
+
   it("explains that only an owner or admin can resolve an ambiguous overlap", async () => {
     rpc.mockResolvedValue({
       data: null,

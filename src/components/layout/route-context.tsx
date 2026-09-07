@@ -78,11 +78,20 @@ export function deriveRouteCrumbs(
   const crumbs: RouteCrumb[] = [];
   for (const [index, segment] of segments.entries()) {
     if (segment === "organizations" && uuidPattern.test(segments[index + 1] ?? "")) continue;
-    const isOrganization = uuidPattern.test(segment);
+    /**
+     * Only the id directly after `organizations` is an organization.
+     *
+     * Testing "is this a uuid" alone linked every id in the path to
+     * `/organizations/<that id>/overview` -- so a campaign crumb pointed at an
+     * organization overview for an organization that does not exist. It stayed
+     * invisible while the campaign was the last crumb, because the last crumb's
+     * href is cleared; adding a page below the campaign made it clickable.
+     */
+    const isOrganization = uuidPattern.test(segment) && segments[index - 1] === "organizations";
     crumbs.push({
       label: labelForSegment(segment, labels),
       // Only link to routes that exist: Overview is the organization's landing
-      // surface.
+      // surface. Every other segment is a label, not a link.
       href: isOrganization ? overviewPath(segment) : undefined,
       current: false,
     });

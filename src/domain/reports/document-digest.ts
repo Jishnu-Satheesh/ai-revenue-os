@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   ReportContractDocument,
   ReportSchemaFingerprintInput,
+  ReportStructureFingerprintInput,
 } from "@/domain/reports/contracts";
 import type {
   ExactRangeProjectionOutput,
@@ -40,6 +41,37 @@ function canonicalize(value: unknown): string {
 
 export function createReportSchemaFingerprint(input: ReportSchemaFingerprintInput): string {
   return createHash("sha256").update(canonicalize(input)).digest("hex");
+}
+
+/**
+ * Identifies a report by its columns, so one approval covers every month of it.
+ *
+ * Sheets are sorted by position rather than trusted in arrival order, because
+ * the profile's order is an implementation detail of three different readers
+ * and this digest is recorded against rows that outlive all of them.
+ */
+export function createReportStructureFingerprint(input: ReportStructureFingerprintInput): string {
+  const canonical = {
+    structureVersion: input.structureVersion,
+    outletGrain: input.outletGrain,
+    parserVersion: input.parserVersion,
+    sheets: [...input.sheets]
+      .sort((left, right) => left.position - right.position)
+      .map((sheet) => ({
+        position: sheet.position,
+        hasFormula: sheet.hasFormula,
+        hasMergedCells: sheet.hasMergedCells,
+        hasRepeatedHeader: sheet.hasRepeatedHeader,
+        headerCandidateDigests: [...sheet.headerCandidateDigests]
+          .sort((left, right) => left.rowPosition - right.rowPosition)
+          .map((candidate) => ({
+            rowPosition: candidate.rowPosition,
+            fieldCount: candidate.fieldCount,
+            digest: candidate.digest,
+          })),
+      })),
+  };
+  return createHash("sha256").update(canonicalize(canonical)).digest("hex");
 }
 
 export function createReportContractDocumentDigest(document: ReportContractDocument): string {

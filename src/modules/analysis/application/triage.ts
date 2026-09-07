@@ -29,13 +29,20 @@ const idsSchema = z.object({
 });
 
 /**
- * One valid answer. A dismissal carries why; nothing else may carry a reason,
- * because storage gives the column nowhere to sit on any other row kind.
+ * One valid answer. A dismissal carries why; a snooze carries the future
+ * horizon it hides until; nothing else may carry either, because storage
+ * gives the columns nowhere to sit on any other row kind.
  */
 const triageAnswerSchema = z.discriminatedUnion("decision", [
   z.object({ decision: z.literal("acknowledged") }).strict(),
   z.object({ decision: z.literal("planned") }).strict(),
   z.object({ decision: z.literal("dismissed"), reason: z.string().min(3) }).strict(),
+  z
+    .object({
+      decision: z.literal("snoozed"),
+      snoozedUntil: z.string().datetime({ offset: true }),
+    })
+    .strict(),
 ]);
 
 export type TriageAnswer = z.infer<typeof triageAnswerSchema>;
@@ -88,25 +95,32 @@ export async function triageRecommendation(
     decision: TriageAnswer["decision"];
     /** Only read when the decision is `dismissed`; refused otherwise. */
     reason?: string;
+    /** Only read when the decision is `snoozed`; refused otherwise. */
+    snoozedUntil?: string;
   },
   actorContext: RecommendationActorContext,
 ): Promise<{ recommendationId: string }> {
-  // The answer is validated on its own: a reason riding along on an answer
-  // that cannot carry one is refused exactly like a missing one, and the ids
-  // are checked separately so their presence cannot mask an invalid answer.
-  const valid =
-    idsSchema.safeParse(input).success &&
-    triageAnswerSchema.safeParse(
-      input.reason === undefined
-        ? { decision: input.decision }
-        : { decision: input.decision, reason: input.reason },
-    ).success;
+  // The answer is validated on its own: a reason or horizon riding along on
+  // an answer that cannot carry one is refused exactly like a missing one,
+  // and the ids are checked separately so their presence cannot mask an
+  // invalid answer.
+  const answer =
+    input.reason === undefined && input.snoozedUntil === undefined
+      ? { decision: input.decision }
+      : input.snoozedUntil === undefined
+        ? { decision: input.decision, reason: input.reason }
+        : input.reason === undefined
+          ? { decision: input.decision, snoozedUntil: input.snoozedUntil }
+          : { decision: input.decision, reason: input.reason, snoozedUntil: input.snoozedUntil };
+  const valid = idsSchema.safeParse(input).success && triageAnswerSchema.safeParse(answer).success;
   if (!valid) {
     throw new DomainError(
       "VALIDATION_ERROR",
       input.decision === "dismissed"
         ? "A dismissal needs a short reason of at least three characters."
-        : "That answer is not one the platform can record.",
+        : input.decision === "snoozed"
+          ? "A snooze needs the future time it hides until."
+          : "That answer is not one the platform can record.",
     );
   }
 
@@ -120,6 +134,10 @@ export async function triageRecommendation(
           ? input.reason
           : null,
       p_actor_id: actorContext.actorId,
+      p_snoozed_until:
+        input.decision === "snoozed" && typeof input.snoozedUntil === "string"
+          ? input.snoozedUntil
+          : null,
     }),
   );
 

@@ -4,6 +4,7 @@ import type { ReportContractDocument } from "@/domain/reports/contracts";
 import {
   projectPeriodGrainMetrics,
   reportProjectionDocumentSchema,
+  ReportCategoricalValueNotDeclared,
   type ReportProjectionDocument,
 } from "@/domain/reports/projection";
 
@@ -235,9 +236,18 @@ describe("projecting a column the provider writes in sentences", () => {
   it("refuses a label the map does not carry", () => {
     // The day a provider adds a category is the day the breakdown starts to
     // rot. Refusing turns that into a contract revision instead of silence.
-    expect(() => project([["2026-01-01", "Cancelled by courier", null, 1]], mapped())).toThrow(
-      "CATEGORICAL_VALUE_NOT_DECLARED",
-    );
+    let thrown: unknown;
+    try {
+      project([["2026-01-01", "Cancelled by courier", null, 1]], mapped());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ReportCategoricalValueNotDeclared);
+    const failure = thrown as ReportCategoricalValueNotDeclared;
+    expect(failure.code).toBe("CATEGORICAL_VALUE_NOT_DECLARED");
+    // Carried as the provider wrote it, not the code it would have mapped to
+    // had the map declared it.
+    expect(failure.value).toBe("Cancelled by courier");
   });
 
   it("tags the observation with the declared dimension key", () => {

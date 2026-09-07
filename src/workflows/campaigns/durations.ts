@@ -59,3 +59,54 @@ export const CAMPAIGN_DURATION_PAIRS = [
     leaseSeconds: REVISE_BUNDLE_LEASE_SECONDS,
   },
 ] as const;
+
+/**
+ * A render is CPU only: no model, no provider, no network beyond one object
+ * read and one object write. The measured composite is a few hundred
+ * milliseconds, so five minutes is generous rather than tight.
+ *
+ * It has no lease and so no entry in `CAMPAIGN_DURATION_PAIRS`. Nothing to
+ * fence: there is no run row to claim, and idempotency comes from the render
+ * digest, which is content-addressed. A duplicate delivery recomputes the same
+ * digest and the database replays the row it already has.
+ */
+export const RENDER_POSTER_MAX_DURATION_SECONDS = 300;
+
+/**
+ * An edit calls an image model once and composites the answer, so unlike a
+ * render it waits on a provider. The planner's own timeout is two minutes; this
+ * ceiling has to sit above it with room for the object reads, the composite and
+ * the successor version write, or the task dies while the model is still
+ * answering and the operator sees a failure that was really a deadline.
+ *
+ * Like a render it holds no lease and has no entry in `CAMPAIGN_DURATION_PAIRS`.
+ * There is no run row to claim: the database enforces one edit per idempotency
+ * key per organization, and a duplicate delivery replays that row.
+ */
+export const EDIT_PLATE_MAX_DURATION_SECONDS = 600;
+
+/**
+ * The execution loop's ceilings.
+ *
+ * None of these hold a lease, so none appear in `CAMPAIGN_DURATION_PAIRS`.
+ * Their idempotency comes from the rows they work on: an action run is claimed
+ * by the Tool Gateway, a metric observation is content-compared by its RPC, an
+ * outcome is keyed on its plan digest, and a learning proposal replays on the
+ * campaign it belongs to. A duplicate delivery finds work already done rather
+ * than a claim it has to respect.
+ */
+
+/** A sweep of up to 500 actions, each a provider round trip. */
+export const DISPATCH_DUE_ACTIONS_MAX_DURATION_SECONDS = 1_800;
+
+/** Provider insight reads, one window per published subject. */
+export const COLLECT_METRICS_MAX_DURATION_SECONDS = 1_800;
+
+/** Reads and arithmetic over one organization's live campaigns. No provider. */
+export const ALLOCATION_CYCLE_MAX_DURATION_SECONDS = 600;
+
+/** Reads and arithmetic over one organization's finished campaigns. No provider. */
+export const SETTLE_OUTCOME_MAX_DURATION_SECONDS = 600;
+
+/** Up to two model drafts per settled campaign, so it waits on a provider. */
+export const PROPOSE_LEARNING_MAX_DURATION_SECONDS = 1_200;
