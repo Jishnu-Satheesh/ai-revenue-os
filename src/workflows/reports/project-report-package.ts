@@ -16,6 +16,7 @@ import {
 import {
   projectExactRangeMetrics,
   projectPeriodGrainMetrics,
+  readContractSheet,
   ReportControlTotalMismatch,
   ReportProjectionError,
   reportProjectionDocumentSchema,
@@ -290,6 +291,16 @@ export async function readWorkbookRows(
   }
 }
 
+/**
+ * Which column a figure was read from, for the lineage record.
+ *
+ * The rows handed in have to be the rows the projector read, not the rows the
+ * file arrived as. On a rotated statement those are different grids: the
+ * projector transposes, and this lookup used not to, so it searched row one of
+ * a profit and loss -- the company's own name -- for `food_items`, found
+ * nothing, and refused the import. `readContractSheet` is the one place that
+ * knows which grid a contract means; every caller here goes through it.
+ */
 function findColumn(
   rows: readonly (readonly unknown[])[],
   headerRow: number,
@@ -469,7 +480,11 @@ export async function runReportPackageProjection(
           const prepared: PeriodGrainObservationPayload = {
             ...observation,
             metricDefinitionId: definition.id,
-            sourceColumnOrdinal: findColumn(source.rows, rule.headerRow, field.sourceHeader),
+            sourceColumnOrdinal: findColumn(
+              readContractSheet(rule, source).rows,
+              rule.headerRow,
+              field.sourceHeader,
+            ),
             sourceDigest: "",
           };
           return { ...prepared, sourceDigest: safePeriodSourceDigest(prepared) };
@@ -516,7 +531,11 @@ export async function runReportPackageProjection(
       const prepared: ProjectionOutput = {
         ...output,
         metricDefinitionId: definition.id,
-        sourceColumnOrdinal: findColumn(source.rows, rule.headerRow, field.sourceHeader),
+        sourceColumnOrdinal: findColumn(
+          readContractSheet(rule, source).rows,
+          rule.headerRow,
+          field.sourceHeader,
+        ),
         sourceDigest: "",
       };
       return { ...prepared, sourceDigest: safeSourceDigest(prepared) };
@@ -575,7 +594,10 @@ export async function runReportPackageProjection(
         correlationId: payload.correlationId,
         errorName: error instanceof Error ? error.name : "unknown",
         errorMessage: error instanceof Error ? error.message.slice(0, 300) : String(error),
-        stackTop: error instanceof Error ? error.stack?.split("\n").slice(1, 4).join(" | ").slice(0, 400) : undefined,
+        stackTop:
+          error instanceof Error
+            ? error.stack?.split("\n").slice(1, 4).join(" | ").slice(0, 400)
+            : undefined,
       });
     }
     await dependencies.fail({

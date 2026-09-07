@@ -27,7 +27,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ReportAdmissionApproval } from "@/components/integrations/report-admission-approval";
-import { ReportIntakeMapping, type RecognisedFamily } from "@/components/integrations/report-intake-mapping";
+import {
+  ReportIntakeMapping,
+  type RecognisedFamily,
+} from "@/components/integrations/report-intake-mapping";
 import {
   isBareCategoricalValueNotDeclared,
   isDeclarableCategoricalValue,
@@ -462,7 +465,13 @@ function ReportContractStep({
     );
   }
 
-  return <ReportIntakeMapping organizationId={organizationId} packageId={packageId} onProposed={onDone} />;
+  return (
+    <ReportIntakeMapping
+      organizationId={organizationId}
+      packageId={packageId}
+      onProposed={onDone}
+    />
+  );
 }
 
 /**
@@ -504,9 +513,7 @@ function CategoricalRefusalDeclaration({
       void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
     },
     onError: (error) =>
-      toast.error(
-        error instanceof Error ? error.message : "The label could not be declared.",
-      ),
+      toast.error(error instanceof Error ? error.message : "The label could not be declared."),
   });
 
   if (!refusal) {
@@ -522,8 +529,8 @@ function CategoricalRefusalDeclaration({
         <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
           <RotateCcw className="mt-0.5 size-3.5 shrink-0" />
           This refusal predates the detail the platform now records, so the label it stopped on
-          cannot be shown here. Use Retry projection above -- it re-runs the same file and will
-          name the label, after which Declare appears here too.
+          cannot be shown here. Use Retry projection above -- it re-runs the same file and will name
+          the label, after which Declare appears here too.
         </p>
       );
     }
@@ -542,10 +549,10 @@ function CategoricalRefusalDeclaration({
     return (
       <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
         <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-        The file uses a label starting {refusal.value} ({dates}), too long to record in full and
-        cut off before it reached the platform. It may not be the provider&rsquo;s exact text, so
-        it cannot be declared as shown. Ask an engineer to open the source file and add the full
-        label to this output&rsquo;s label map.
+        The file uses a label starting {refusal.value} ({dates}), too long to record in full and cut
+        off before it reached the platform. It may not be the provider&rsquo;s exact text, so it
+        cannot be declared as shown. Ask an engineer to open the source file and add the full label
+        to this output&rsquo;s label map.
       </p>
     );
   }
@@ -553,11 +560,13 @@ function CategoricalRefusalDeclaration({
     return (
       <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
         <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-        The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
-        ({dates}), which is not a declared {outputLabel} value. It is written as the provider&rsquo;s
-        own prose, not a short code, so it cannot be declared with one click. Ask an engineer to add
-        it to this output&rsquo;s label map, translating it to a short code such as{" "}
-        <span className="font-mono">{outputLabel.toUpperCase().replaceAll(" ", "_")}</span>.
+        The file uses the label <span className="font-medium text-foreground">
+          {refusal.value}
+        </span>{" "}
+        ({dates}), which is not a declared {outputLabel} value. It is written as the
+        provider&rsquo;s own prose, not a short code, so it cannot be declared with one click. Ask
+        an engineer to add it to this output&rsquo;s label map, translating it to a short code such
+        as <span className="font-mono">{outputLabel.toUpperCase().replaceAll(" ", "_")}</span>.
       </p>
     );
   }
@@ -565,8 +574,8 @@ function CategoricalRefusalDeclaration({
     return (
       <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
         <Lock className="mt-0.5 size-3.5 shrink-0" />
-        The file uses the label {refusal.value} ({dates}), which nobody has declared yet. An
-        owner or admin declares it once, then the figures can be approved and read.
+        The file uses the label {refusal.value} ({dates}), which nobody has declared yet. An owner
+        or admin declares it once, then the figures can be approved and read.
       </p>
     );
   }
@@ -574,9 +583,8 @@ function CategoricalRefusalDeclaration({
     <div className="mt-2 space-y-2 rounded-md border p-2 text-xs">
       <p className="text-muted-foreground">
         The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
-        ({dates}), which is not a declared {outputLabel} value.
-        Declaring it proposes the figures again with that label counted -- nothing is approved
-        until an owner or admin says so below.
+        ({dates}), which is not a declared {outputLabel} value. Declaring it proposes the figures
+        again with that label counted -- nothing is approved until an owner or admin says so below.
       </p>
       <Button
         size="sm"
@@ -698,21 +706,49 @@ export function ReportPackageUpload({
           decision.report_contract_version_id === version.id && decision.decision === "approved",
       );
       if (!approved) return [];
-      return [{ familyKey: version.provider_definition_key, reportType: owningPackage.report_type }];
+      return [
+        { familyKey: version.provider_definition_key, reportType: owningPackage.report_type },
+      ];
     });
     if (approvedLibraryReportTypes.length === 0) return null;
     const distinctFamilies = new Set(approvedLibraryReportTypes.map((entry) => entry.familyKey));
-    const distinctReportTypes = new Set(approvedLibraryReportTypes.map((entry) => entry.reportType));
+    const distinctReportTypes = new Set(
+      approvedLibraryReportTypes.map((entry) => entry.reportType),
+    );
     if (distinctFamilies.size > 1 || distinctReportTypes.size > 1) return null;
     return approvedLibraryReportTypes[0].reportType;
   }, [effectiveChannelId, view.contractVersions, view.packages, view.contractDecisions]);
 
+  /**
+   * The operator saying "this is not that report", for the one channel they
+   * said it about.
+   *
+   * The derivation above only disqualifies itself once a second family has
+   * *already* been uploaded and approved. The upload that introduces the
+   * second family arrives while the channel still agrees on one, so without
+   * this the field is read-only and names the wrong report -- and being
+   * read-only, there is no way to correct it. Keeta alone sends three
+   * different exports to one channel.
+   *
+   * Stored as the channel it applies to rather than a bare flag, so changing
+   * the channel drops it: an override declared for Keeta must not silently
+   * govern the next upload to Talabat.
+   */
+  const [reportTypeOverrideChannelId, setReportTypeOverrideChannelId] = useState<string | null>(
+    null,
+  );
+  const overridingReportType =
+    reportTypeOverrideChannelId !== null && reportTypeOverrideChannelId === effectiveChannelId;
+
   // What actually gets submitted: the derived value once the channel's report
-  // type is known, the hand-typed one otherwise. Computed at render rather
-  // than synced into state, so there is no moment where the free-text field's
-  // last-typed value and the derived one could disagree about what a submit
-  // sends.
-  const effectiveReportType = recognisedReportTypeForChannel ?? reportType;
+  // type is known and the operator has not said otherwise, the hand-typed one
+  // otherwise. Computed at render rather than synced into state, so there is
+  // no moment where the free-text field's last-typed value and the derived one
+  // could disagree about what a submit sends.
+  const effectiveReportType =
+    overridingReportType || recognisedReportTypeForChannel === null
+      ? reportType
+      : recognisedReportTypeForChannel;
 
   const selectedProjectionContract = view.contractVersions.find(
     (version) => version.id === projectionContractVersionId,
@@ -1007,8 +1043,13 @@ export function ReportPackageUpload({
           }),
         },
       );
-      if (response.resolution.outcome !== "resolved" && response.resolution.outcome !== "completed") {
-        throw new Error("This field was already resolved differently. Refresh to see the recorded choice.");
+      if (
+        response.resolution.outcome !== "resolved" &&
+        response.resolution.outcome !== "completed"
+      ) {
+        throw new Error(
+          "This field was already resolved differently. Refresh to see the recorded choice.",
+        );
       }
       return response;
     },
@@ -1017,7 +1058,9 @@ export function ReportPackageUpload({
       invalidate();
     },
     onError: (error) =>
-      toast.error(error instanceof Error ? error.message : "The field decision could not be saved."),
+      toast.error(
+        error instanceof Error ? error.message : "The field decision could not be saved.",
+      ),
   });
 
   return (
@@ -1087,7 +1130,7 @@ export function ReportPackageUpload({
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-type">Report type</Label>
-              {recognisedReportTypeForChannel ? (
+              {recognisedReportTypeForChannel !== null && !overridingReportType ? (
                 <>
                   <p
                     id="report-type"
@@ -1096,19 +1139,46 @@ export function ReportPackageUpload({
                     {recognisedReportTypeForChannel}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    This channel already reads a known report. Every upload of it is filed under
-                    the same type automatically.
+                    This channel already reads a known report. Every upload of it is filed under the
+                    same type automatically.
                   </p>
+                  {/*
+                    One provider can send a channel several different exports,
+                    and the first upload of a second one arrives before
+                    anything can know it is different. Reusing the derived
+                    text is still the default, because a reuse key that gets
+                    retyped stops being a key.
+                  */}
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setReportTypeOverrideChannelId(effectiveChannelId)}
+                  >
+                    This is a different report
+                  </Button>
                 </>
               ) : (
-                <Input
-                  id="report-type"
-                  value={reportType}
-                  onChange={(event) => setReportType(event.target.value)}
-                  maxLength={120}
-                  placeholder="e.g. Marketplace settlement"
-                  required
-                />
+                <>
+                  <Input
+                    id="report-type"
+                    value={reportType}
+                    onChange={(event) => setReportType(event.target.value)}
+                    maxLength={120}
+                    placeholder="e.g. Marketplace settlement"
+                    required
+                  />
+                  {overridingReportType ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs"
+                      onClick={() => setReportTypeOverrideChannelId(null)}
+                    >
+                      Use this channel&rsquo;s known report type instead
+                    </Button>
+                  ) : null}
+                </>
               )}
             </div>
             <div className="space-y-2">
@@ -1516,7 +1586,9 @@ export function ReportPackageUpload({
             })
           ) : (
             <p className="text-sm text-muted-foreground">
-              {fixedChannelId ? "Nothing has been mapped for this channel yet." : "Nothing has been mapped yet."}
+              {fixedChannelId
+                ? "Nothing has been mapped for this channel yet."
+                : "Nothing has been mapped yet."}
             </p>
           )}
           {canApproveContract || canUpload ? (

@@ -84,10 +84,19 @@ describe("governed report package projection", () => {
           reportPackage: packageRow,
           contractVersion: contract,
           projectionVersion: projection,
-          metricDefinitions: [{ id: "77777777-7777-4777-8777-777777777777", key: "revenue.gross", value_kind: "money" }],
+          metricDefinitions: [
+            {
+              id: "77777777-7777-4777-8777-777777777777",
+              key: "revenue.gross",
+              value_kind: "money",
+            },
+          ],
         }),
         objectStore: {
-          stat: async () => ({ id: "storage-object", metadata: { size: 21, mimetype: "text/csv" } }),
+          stat: async () => ({
+            id: "storage-object",
+            metadata: { size: 21, mimetype: "text/csv" },
+          }),
           download: async () => input,
         },
         complete: async (value) => {
@@ -163,14 +172,71 @@ describe("governed report package projection", () => {
     const completions: unknown[] = [];
     const result = await runReportPackageProjection(
       {
-        organizationId: packageRow.organization_id, packageId: packageRow.id,
-        contractVersionId: "33333333-3333-4333-8333-333333333333", projectionVersionId: "44444444-4444-4444-8444-444444444444",
-        projectionRunId: "55555555-5555-4555-8555-555555555555", correlationId: "66666666-6666-4666-8666-666666666666", idempotencyKey: "report-projection-private-xlsx-test",
+        organizationId: packageRow.organization_id,
+        packageId: packageRow.id,
+        contractVersionId: "33333333-3333-4333-8333-333333333333",
+        projectionVersionId: "44444444-4444-4444-8444-444444444444",
+        projectionRunId: "55555555-5555-4555-8555-555555555555",
+        correlationId: "66666666-6666-4666-8666-666666666666",
+        idempotencyKey: "report-projection-private-xlsx-test",
       },
       {
-        claim: async () => ({ outcome: "acquired", reportPackage: { ...packageRow, file_kind: "xlsx" as const, declared_content_length: buffer.byteLength, content_sha256: (await import("node:crypto")).createHash("sha256").update(buffer).digest("hex"), declared_content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, contractVersion: { mapping_document: { ...contract.mapping_document, sheets: [{ ...contract.mapping_document.sheets[0], normalizedSheetName: "settlement" }] } }, projectionVersion: { projection_document: { ...projection.projection_document, outputs: [{ ...projection.projection_document.outputs[0], normalizedSheetName: "settlement" }] } }, metricDefinitions: [{ id: "77777777-7777-4777-8777-777777777777", key: "revenue.gross", value_kind: "money" }] }),
-        objectStore: { stat: async () => ({ id: "storage-object", metadata: { size: buffer.byteLength, mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } }), download: async () => buffer },
-        complete: async (value) => { completions.push(value); }, completePeriodGrain: async () => { throw new Error("must not complete a series"); }, fail: async () => { throw new Error("must not fail"); },
+        claim: async () => ({
+          outcome: "acquired",
+          reportPackage: {
+            ...packageRow,
+            file_kind: "xlsx" as const,
+            declared_content_length: buffer.byteLength,
+            content_sha256: (await import("node:crypto"))
+              .createHash("sha256")
+              .update(buffer)
+              .digest("hex"),
+            declared_content_type:
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          },
+          contractVersion: {
+            mapping_document: {
+              ...contract.mapping_document,
+              sheets: [
+                { ...contract.mapping_document.sheets[0], normalizedSheetName: "settlement" },
+              ],
+            },
+          },
+          projectionVersion: {
+            projection_document: {
+              ...projection.projection_document,
+              outputs: [
+                { ...projection.projection_document.outputs[0], normalizedSheetName: "settlement" },
+              ],
+            },
+          },
+          metricDefinitions: [
+            {
+              id: "77777777-7777-4777-8777-777777777777",
+              key: "revenue.gross",
+              value_kind: "money",
+            },
+          ],
+        }),
+        objectStore: {
+          stat: async () => ({
+            id: "storage-object",
+            metadata: {
+              size: buffer.byteLength,
+              mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            },
+          }),
+          download: async () => buffer,
+        },
+        complete: async (value) => {
+          completions.push(value);
+        },
+        completePeriodGrain: async () => {
+          throw new Error("must not complete a series");
+        },
+        fail: async () => {
+          throw new Error("must not fail");
+        },
       },
     );
     expect(result.outcome).toBe("projected");
@@ -179,13 +245,23 @@ describe("governed report package projection", () => {
 
   async function runWith(
     projectionDocument: unknown,
-    options: { input?: Buffer; mappingDocument?: unknown } = {},
+    options: {
+      input?: Buffer;
+      mappingDocument?: unknown;
+      /** For a report that does not cover the fixture's default January. */
+      declaredPeriod?: { start: string; end: string };
+    } = {},
   ) {
     const input = options.input ?? Buffer.from("net_sales\n12.34\n0.66\n");
     const failures: { code: string; detail?: string }[] = [];
     const completions: unknown[] = [];
     const seriesCompletions: {
-      observations: { periodStart: string; periodEnd: string; valueNumerator: string }[];
+      observations: {
+        periodStart: string;
+        periodEnd: string;
+        valueNumerator: string;
+        sourceColumnOrdinal: number;
+      }[];
       absentRowCount: number;
     }[] = [];
     const result = await runReportPackageProjection(
@@ -204,16 +280,34 @@ describe("governed report package projection", () => {
           reportPackage: {
             ...packageRow,
             declared_content_length: input.byteLength,
-            content_sha256: (await import("node:crypto")).createHash("sha256").update(input).digest("hex"),
+            content_sha256: (await import("node:crypto"))
+              .createHash("sha256")
+              .update(input)
+              .digest("hex"),
+            ...(options.declaredPeriod
+              ? {
+                  declared_period_start: options.declaredPeriod.start,
+                  declared_period_end: options.declaredPeriod.end,
+                }
+              : {}),
           },
-          contractVersion: { mapping_document: options.mappingDocument ?? contract.mapping_document },
+          contractVersion: {
+            mapping_document: options.mappingDocument ?? contract.mapping_document,
+          },
           projectionVersion: { projection_document: projectionDocument },
           metricDefinitions: [
-            { id: "77777777-7777-4777-8777-777777777777", key: "revenue.gross", value_kind: "money" },
+            {
+              id: "77777777-7777-4777-8777-777777777777",
+              key: "revenue.gross",
+              value_kind: "money",
+            },
           ],
         }),
         objectStore: {
-          stat: async () => ({ id: "storage-object", metadata: { size: input.byteLength, mimetype: "text/csv" } }),
+          stat: async () => ({
+            id: "storage-object",
+            metadata: { size: input.byteLength, mimetype: "text/csv" },
+          }),
           download: async () => input,
         },
         complete: async (value) => {
@@ -236,7 +330,13 @@ describe("governed report package projection", () => {
       {
         ...contract.mapping_document.sheets[0],
         fields: [
-          { canonicalField: "period_date", sourceHeader: "date", parser: "local_date", required: true, dateEncoding: "iso_date" },
+          {
+            canonicalField: "period_date",
+            sourceHeader: "date",
+            parser: "local_date",
+            required: true,
+            dateEncoding: "iso_date",
+          },
           { ...contract.mapping_document.sheets[0].fields[0], required: false },
         ],
       },
@@ -259,6 +359,96 @@ describe("governed report package projection", () => {
       },
     ],
   };
+
+  /**
+   * A statement whose periods are its column headings, projected end to end.
+   *
+   * The projector has rotated these since ADR 0045, but the lineage step
+   * beside it -- the one that records which column each figure was read from --
+   * still read the file as it arrived. On a rotated sheet those are different
+   * grids, so it searched row one for `daily_sales`, found the company's name
+   * there instead, and refused the whole import as
+   * `PROJECTION_PROCESSING_FAILED`. Every real profit and loss failed this way,
+   * which is to say the entire rotated path was dead on the only file it exists
+   * for.
+   */
+  const rotatedContract = {
+    ...contract.mapping_document,
+    sheets: [
+      {
+        ...contract.mapping_document.sheets[0],
+        recordOrientation: "period_columns",
+        headerRow: 1,
+        dataStartRow: 2,
+        periodHeaderRow: 1,
+        fields: [
+          {
+            canonicalField: "period_month",
+            sourceHeader: "report_period",
+            parser: "local_date",
+            dateEncoding: "month_year",
+            required: true,
+          },
+          {
+            canonicalField: "net_sales",
+            sourceHeader: "daily_sales",
+            parser: "money",
+            financialSign: "positive",
+            required: true,
+          },
+        ],
+      },
+    ],
+  };
+
+  const rotatedProjection = {
+    schemaVersion: 1,
+    outputKind: "period_grain",
+    grain: "month",
+    periodKey: { normalizedSheetName: "csv", canonicalField: "period_month" },
+    outputs: [
+      {
+        key: "gross_revenue",
+        normalizedSheetName: "csv",
+        canonicalField: "net_sales",
+        metricKey: "revenue.gross",
+        valueKind: "money",
+        aggregation: "sum",
+      },
+    ],
+  };
+
+  it("projects a rotated statement, recording lineage against the grid it actually read", async () => {
+    const { result, failures, seriesCompletions } = await runWith(rotatedProjection, {
+      // Column one names the accounts; each later column is a month. Row one
+      // carries the month headings, and the account column's own heading is
+      // the company name -- which is exactly what the old lineage lookup
+      // found when it went looking for `daily_sales` along that row.
+      input: Buffer.from("Nostaza Restaurant LLC,May 2026,Jun 2026\nDaily Sales,100.00,200.00\n"),
+      mappingDocument: rotatedContract,
+      declaredPeriod: { start: "2026-05-01", end: "2026-06-30" },
+    });
+
+    expect(failures).toEqual([]);
+    expect(result.outcome).toBe("projected");
+    expect(seriesCompletions[0].observations).toEqual([
+      expect.objectContaining({
+        key: "gross_revenue",
+        periodStart: "2026-05-01",
+        periodEnd: "2026-05-31",
+        valueNumerator: "10000",
+      }),
+      expect.objectContaining({
+        periodStart: "2026-06-01",
+        periodEnd: "2026-06-30",
+        valueNumerator: "20000",
+      }),
+    ]);
+    // The ordinal names a column of the rotated grid, because that is the grid
+    // the figure was read from. Naming a column of the file as it arrived would
+    // point at a month heading rather than at the account.
+    expect(seriesCompletions[0].observations[0].sourceColumnOrdinal).toBeGreaterThan(0);
+  });
 
   it("writes a daily declaration into the metrics ledger instead of refusing it", async () => {
     // Three of the five report families the platform knows are one row per day.
@@ -404,7 +594,10 @@ describe("governed report package projection", () => {
         claim: async () => {
           throw new Error(`state transition failed: ${"x".repeat(500)}`);
         },
-        objectStore: { stat: async () => ({ id: "", metadata: {} }), download: async () => Buffer.from("") },
+        objectStore: {
+          stat: async () => ({ id: "", metadata: {} }),
+          download: async () => Buffer.from(""),
+        },
         complete: async () => {},
         completePeriodGrain: async () => {},
         fail: async (value) => {

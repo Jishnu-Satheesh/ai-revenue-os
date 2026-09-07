@@ -32,8 +32,7 @@ const snapshot = {
       period_timezone: "Asia/Dubai",
       file_kind: "xlsx",
       original_filename: "performance.xlsx",
-      declared_content_type:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      declared_content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       declared_content_length: 1_024,
       storage_bucket_id: "governed-report-packages",
       storage_path: `${ORGANIZATION_ID}/performance.xlsx`,
@@ -164,11 +163,15 @@ describe("ReportPackageUpload reconciliation actions", () => {
     expect(within(action).getByText(/source field/i)).toHaveTextContent("gross_sales");
     expect(within(action).getByText(/earlier Performance upload/i)).toBeInTheDocument();
     expect(within(action).getByText("1 Jan 2026 – 15 Feb 2026")).toBeInTheDocument();
-    expect(within(action).getByRole("button", { name: /use this upload's revenue/i })).toBeEnabled();
+    expect(
+      within(action).getByRole("button", { name: /use this upload's revenue/i }),
+    ).toBeEnabled();
     expect(within(action).getByRole("button", { name: /keep existing revenue/i })).toBeEnabled();
 
     const projectionSummary = screen.getByText(/653 records checked/i);
-    expect(action.compareDocumentPosition(projectionSummary)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(action.compareDocumentPosition(projectionSummary)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(screen.queryByText(/non overlapping/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/matching record/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/evidence eeeee/i)).not.toBeInTheDocument();
@@ -228,11 +231,13 @@ describe("ReportPackageUpload reconciliation actions", () => {
     } as unknown as ReportPackageSnapshot;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify(snapshotWithoutCount), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        })),
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(snapshotWithoutCount), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
     );
 
     renderUpload();
@@ -290,7 +295,9 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot(FAILURE_DETAIL));
     renderUploadAs("owner");
 
-    const button = await screen.findByRole("button", { name: /Declare "CLOSED" as a value we count/i });
+    const button = await screen.findByRole("button", {
+      name: /Declare "CLOSED" as a value we count/i,
+    });
     expect(button).toBeEnabled();
     expect(screen.getByText(/which is not a declared cancel reason value/i)).toBeInTheDocument();
   });
@@ -453,8 +460,7 @@ describe("ReportPackageUpload report type derivation", () => {
       period_timezone: "Asia/Dubai",
       file_kind: "xlsx",
       original_filename: "performance.xlsx",
-      declared_content_type:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      declared_content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       declared_content_length: 1_024,
       storage_bucket_id: "governed-report-packages",
       storage_path: `${ORGANIZATION_ID}/performance.xlsx`,
@@ -586,6 +592,44 @@ describe("ReportPackageUpload report type derivation", () => {
     expect(screen.queryByText("Marketplace performance")).not.toBeInTheDocument();
     expect(screen.queryByText("Delivery orders")).not.toBeInTheDocument();
   });
+
+  /**
+   * The gap the disqualification above cannot close on its own.
+   *
+   * It only notices a second family once that family has already been
+   * uploaded and approved. The upload that *introduces* it arrives while the
+   * channel still agrees on one family, so the field is read-only and names
+   * the wrong report -- and being read-only, an operator cannot say so. A
+   * channel that carries several of a provider's exports has to be able to
+   * declare the second one the first time it is sent.
+   */
+  it("lets an operator declare a different report when the channel's known one is not what they are sending", async () => {
+    stubFetch(recognisedSnapshot());
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+
+    expect(await screen.findByText("Marketplace performance")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /different report/i }));
+
+    const field = await screen.findByRole("textbox", { name: /^report type$/i });
+    expect(field).toHaveValue("");
+    expect(screen.queryByText("Marketplace performance")).not.toBeInTheDocument();
+  });
+
+  it("goes back to the channel's known report type, so the reuse key is never retyped by accident", async () => {
+    stubFetch(recognisedSnapshot());
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+    fireEvent.click(await screen.findByRole("button", { name: /different report/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /known report/i }));
+
+    expect(await screen.findByText("Marketplace performance")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /^report type$/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("ReportPackageUpload reached by an operator", () => {
@@ -667,7 +711,11 @@ describe("ReportPackageUpload reached by an operator", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={queryClient}>
-        <ReportPackageUpload organizationId={ORGANIZATION_ID} role="operator" timeZone="Asia/Dubai" />
+        <ReportPackageUpload
+          organizationId={ORGANIZATION_ID}
+          role="operator"
+          timeZone="Asia/Dubai"
+        />
       </QueryClientProvider>,
     );
   }
@@ -678,16 +726,15 @@ describe("ReportPackageUpload reached by an operator", () => {
         key: "noon.sales.period",
         provider: "Noon",
         reportType: "sales_period_summary",
-        summary: "Sales and successful orders for the whole reporting period, from Noon's sales export.",
+        summary:
+          "Sales and successful orders for the whole reporting period, from Noon's sales export.",
         reads: ["revenue.gross", "transactions.count"],
         columns: ["sales", "successful_orders"],
       },
     ]);
     renderAsOperator();
 
-    fireEvent.click(
-      await screen.findByRole("combobox", { name: /which upload are you mapping/i }),
-    );
+    fireEvent.click(await screen.findByRole("combobox", { name: /which upload are you mapping/i }));
     fireEvent.click(
       await screen.findByRole("option", { name: /marketplace performance · 2026-03-01/i }),
     );
@@ -704,15 +751,15 @@ describe("ReportPackageUpload reached by an operator", () => {
     stubFetchWithRecognition([]);
     renderAsOperator();
 
-    fireEvent.click(
-      await screen.findByRole("combobox", { name: /which upload are you mapping/i }),
-    );
+    fireEvent.click(await screen.findByRole("combobox", { name: /which upload are you mapping/i }));
     fireEvent.click(
       await screen.findByRole("option", { name: /marketplace performance · 2026-03-01/i }),
     );
 
     expect(
-      await screen.findByText(/this upload still needs an owner or admin to say what its columns mean/i),
+      await screen.findByText(
+        /this upload still needs an owner or admin to say what its columns mean/i,
+      ),
     ).toBeInTheDocument();
     // The guided mapping form (sheet/column questions) never renders for an
     // operator -- proposing a mapping requires report.contract_approve too,

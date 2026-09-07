@@ -880,8 +880,17 @@ function reconcileControlTotals(
  * A statement whose periods are its column headings is rotated here, once, and
  * everything after this point reads cells without knowing the difference. See
  * `@/domain/reports/transpose`.
+ *
+ * Exported because "everything after this point" turned out to include a
+ * caller outside this module. The projection worker records which column each
+ * figure came from, and it was reading the raw grid at the contract's declared
+ * header row while the projector read the rotated one -- so on a rotated
+ * statement it looked for `food_items` along row one, found the company's own
+ * name there instead, and stopped the whole import with
+ * `PROJECTION_PROCESSING_FAILED`. Anything that needs to say where a figure sat
+ * has to read the sheet through this, not around it.
  */
-function readContractSheet(
+export function readContractSheet(
   rule: ReportContractDocument["sheets"][number],
   source: { rows: readonly (readonly unknown[])[] },
 ): { rows: readonly (readonly unknown[])[]; ambiguousLabels: ReadonlySet<string> | null } {
