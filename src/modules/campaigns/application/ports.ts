@@ -143,6 +143,17 @@ export type CampaignReadPort = {
     campaignId: string,
   ): Promise<GenerationRunSnapshot | null>;
   getLiveApproval(organizationId: string, campaignId: string): Promise<CampaignApproval | null>;
+  /**
+   * The most recent approval whatever became of it, for surfaces that explain
+   * rather than authorize.
+   *
+   * Never use this to decide whether something may happen -- that is
+   * `getLiveApproval`, which refuses to return a revoked row at all. This one
+   * exists because "an approval was superseded when you edited the plate" and
+   * "nothing has ever been approved here" are different sentences, and the
+   * screen was saying the second when the first was true.
+   */
+  getLatestApproval(organizationId: string, campaignId: string): Promise<CampaignApproval | null>;
 };
 
 /** Human acts performed inside a session, re-authorized in the database. */

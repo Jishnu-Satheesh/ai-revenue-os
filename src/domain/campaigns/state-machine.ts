@@ -41,7 +41,12 @@ const TRANSITIONS: Readonly<Record<CampaignState, readonly CampaignState[]>> = {
   ready_for_review: ["draft", "needs_data", "approved", "blocked", "cancelled"],
   // Approval does not schedule anything by itself; scheduling is a separate
   // act inside the approved envelope, and policy may still block it.
-  approved: ["scheduled", "blocked", "cancelled"],
+  //
+  // `ready_for_review` is the way back out, and only one thing takes it: a new
+  // bundle version revoking the approval that made this state true. It is not a
+  // reopening -- `draft` stays unreachable -- it is the campaign returning to
+  // the reviewer it already passed, now carrying a version nobody has agreed to.
+  approved: ["ready_for_review", "scheduled", "blocked", "cancelled"],
   scheduled: ["executing", "blocked", "cancelled", "failed"],
   executing: ["measuring", "partially_completed", "blocked", "cancelled", "failed"],
   // Some actions published and some did not. Measurement still runs, because

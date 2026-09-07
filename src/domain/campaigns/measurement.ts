@@ -330,27 +330,54 @@ export function computeVerdict(input: VerdictInput): Outcome {
  * Causal, impact, and overclaim language that drafted wording must not contain
  * unless the verdict actually supports it. Each entry names the concept so a
  * violation can be reported by label rather than as a bare regex match.
+ *
+ * `says` is the same rule in words a model can act on. The label is an
+ * identifier -- "resulted-in", "roas-roi" -- and feeding that back to a drafter
+ * as its only correction names a concept without saying what to change. Both
+ * the prompt's rules and the repair pass are built from this field, so a
+ * pattern added here cannot end up enforced but never explained.
  */
-export const OVERCLAIM_PATTERNS: readonly { label: string; pattern: RegExp }[] = [
-  { label: "causation", pattern: /\bcaus(e|ed|ing|es|al|ality|ation)\b/i },
-  { label: "impact", pattern: /\bimpact(ed|ing|s|ful)?\b/i },
-  { label: "effect", pattern: /\beffect(ed|ing|s|ive)?\b/i },
-  { label: "lift", pattern: /\blift(ed|ing|s)?\b/i },
-  { label: "increase", pattern: /\bincreas(e|ed|ing|es)?\b/i },
-  { label: "growth", pattern: /\bgrow(n|ing|th|s)?\b/i },
-  { label: "drive", pattern: /\bdr(iv|ove)(n|s|ing)?\b/i },
-  { label: "improve", pattern: /\bimprov(e|ed|ing|ement|ements)?\b/i },
-  { label: "boost", pattern: /\bboost(ed|ing|s)?\b/i },
-  { label: "resulted-in", pattern: /\bresult(ed|ing|s)?\s+in\b/i },
-  { label: "led-to", pattern: /\bled\s+to\b/i },
-  { label: "because", pattern: /\bbecause\b/i },
-  { label: "roas-roi", pattern: /\b(roas|roi)\b/i },
-  { label: "conversion", pattern: /\bconversion(s)?\b|\bconvert(ed|ing|s)?\b/i },
-  { label: "win", pattern: /\b(won|winning|wins?)\b/i },
-  { label: "outperform", pattern: /\boutperform(ed|ing|s)?\b/i },
-  { label: "significant", pattern: /\bsignificant(ly)?\b/i },
-  { label: "proven", pattern: /\bprov(en|ed|e|ing)\b/i },
+export const OVERCLAIM_PATTERNS: readonly { label: string; says: string; pattern: RegExp }[] = [
+  {
+    label: "causation",
+    says: 'the words "cause", "caused" or "causal"',
+    pattern: /\bcaus(e|ed|ing|es|al|ality|ation)\b/i,
+  },
+  { label: "impact", says: 'the word "impact"', pattern: /\bimpact(ed|ing|s|ful)?\b/i },
+  { label: "effect", says: 'the word "effect"', pattern: /\beffect(ed|ing|s|ive)?\b/i },
+  { label: "lift", says: 'the word "lift"', pattern: /\blift(ed|ing|s)?\b/i },
+  { label: "increase", says: 'the word "increase"', pattern: /\bincreas(e|ed|ing|es)?\b/i },
+  { label: "growth", says: 'the words "grow" or "growth"', pattern: /\bgrow(n|ing|th|s)?\b/i },
+  { label: "drive", says: 'the words "drive" or "drove"', pattern: /\bdr(iv|ove)(n|s|ing)?\b/i },
+  { label: "improve", says: 'the word "improve"', pattern: /\bimprov(e|ed|ing|ement|ements)?\b/i },
+  { label: "boost", says: 'the word "boost"', pattern: /\bboost(ed|ing|s)?\b/i },
+  {
+    label: "resulted-in",
+    says: 'the phrase "resulted in"',
+    pattern: /\bresult(ed|ing|s)?\s+in\b/i,
+  },
+  { label: "led-to", says: 'the phrase "led to"', pattern: /\bled\s+to\b/i },
+  { label: "because", says: 'the word "because"', pattern: /\bbecause\b/i },
+  { label: "roas-roi", says: '"ROAS" or "ROI"', pattern: /\b(roas|roi)\b/i },
+  {
+    label: "conversion",
+    says: 'the words "conversion" or "converted"',
+    pattern: /\bconversion(s)?\b|\bconvert(ed|ing|s)?\b/i,
+  },
+  {
+    label: "win",
+    says: 'the words "won", "win" or "winning"',
+    pattern: /\b(won|winning|wins?)\b/i,
+  },
+  { label: "outperform", says: 'the word "outperform"', pattern: /\boutperform(ed|ing|s)?\b/i },
+  { label: "significant", says: 'the word "significant"', pattern: /\bsignificant(ly)?\b/i },
+  { label: "proven", says: 'the words "prove" or "proven"', pattern: /\bprov(en|ed|e|ing)\b/i },
 ];
+
+/** The plain-language form of one violation label, for a drafter's repair pass. */
+export function overclaimGuidance(label: string): string {
+  return OVERCLAIM_PATTERNS.find((entry) => entry.label === label)?.says ?? label;
+}
 
 export type WordingViolation = { label: string };
 

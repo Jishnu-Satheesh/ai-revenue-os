@@ -105,6 +105,29 @@ describe("campaign read repository", () => {
 
     expect(calls).toContainEqual({ method: "is", args: ["revoked_at", null] });
   });
+
+  it("reads a revoked approval for display, because history is not authorization", async () => {
+    // `getLiveApproval` filters revoked rows in SQL so that nothing can mistake
+    // "an approval exists" for permission. Feeding the same read to the screen
+    // told an operator "nothing has been approved for this campaign yet" on the
+    // very page whose change summary said an approval had been invalidated.
+    const { persistence, calls } = persistenceFor([]);
+
+    await createCampaignReadRepository(persistence).getLatestApproval(ORGANIZATION_ID, CAMPAIGN_ID);
+
+    expect(calls).not.toContainEqual({ method: "is", args: ["revoked_at", null] });
+    expect(calls).toContainEqual({ method: "eq", args: ["campaign_id", CAMPAIGN_ID] });
+    expect(calls).toContainEqual({ method: "eq", args: ["organization_id", ORGANIZATION_ID] });
+  });
+
+  it("returns the most recent approval when a campaign has several", async () => {
+    const { persistence, calls } = persistenceFor([]);
+
+    await createCampaignReadRepository(persistence).getLatestApproval(ORGANIZATION_ID, CAMPAIGN_ID);
+
+    expect(calls).toContainEqual({ method: "order", args: ["approved_at", { ascending: false }] });
+    expect(calls).toContainEqual({ method: "limit", args: [1] });
+  });
 });
 
 describe("campaign review writes", () => {

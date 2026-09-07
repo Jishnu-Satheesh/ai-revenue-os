@@ -248,6 +248,28 @@ export function createCampaignReadRepository(
       return row ? toApproval(row) : null;
     },
 
+    /**
+     * The latest approval including revoked ones, for display only.
+     *
+     * Deliberately does not filter `revoked_at`: the caller is explaining what
+     * happened, not deciding what may happen. `approvalStatus` still reports a
+     * revoked row as not approved, so a display path cannot accidentally become
+     * an authorization path by reading this instead.
+     */
+    async getLatestApproval(organizationId, campaignId) {
+      if (!organizationId || !campaignId) campaignDatabaseError();
+      const { data, error } = await persistence
+        .from("campaign_approvals")
+        .select(APPROVAL_COLUMNS)
+        .order("approved_at", { ascending: false })
+        .limit(1)
+        .eq("organization_id", organizationId)
+        .eq("campaign_id", campaignId);
+      if (error) campaignDatabaseError();
+      const [row] = data ?? [];
+      return row ? toApproval(row) : null;
+    },
+
     async recordAttestation(input) {
       const validated = attestationInputSchema.parse(input);
       const { data, error } = await persistence.rpc("record_campaign_visual_attestation", {

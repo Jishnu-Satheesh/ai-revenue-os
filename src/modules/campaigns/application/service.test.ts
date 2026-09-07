@@ -32,6 +32,7 @@ const getCampaign = vi.fn();
 const listVersions = vi.fn();
 const getVersion = vi.fn();
 const getLiveApproval = vi.fn();
+const getLatestApproval = vi.fn();
 const recordAttestation = vi.fn();
 const approve = vi.fn();
 
@@ -43,6 +44,7 @@ function service(now = new Date("2026-08-15T10:00:00.000Z")) {
       listVersions,
       getVersion,
       getLiveApproval,
+      getLatestApproval,
       latestGenerationRun: vi.fn(async () => null),
     },
     review: { recordAttestation, approve },
@@ -97,6 +99,7 @@ beforeEach(() => {
     listVersions,
     getVersion,
     getLiveApproval,
+    getLatestApproval,
     recordAttestation,
     approve,
   ]) {
@@ -358,7 +361,7 @@ describe("createCampaignService.timeline", () => {
       { id: "f0000000-0000-4000-8000-000000000002", version: 2, digest: "b".repeat(64) },
       { id: VERSION_ID, version: 1, digest: "a".repeat(64) },
     ]);
-    getLiveApproval.mockResolvedValue({
+    getLatestApproval.mockResolvedValue({
       bundleVersionId: VERSION_ID,
       bundleDigest: "a".repeat(64),
       expiresAt: "2027-01-01T00:00:00.000Z",
@@ -376,7 +379,7 @@ describe("createCampaignService.timeline", () => {
   it("reports an approval covering the latest version as valid", async () => {
     getCampaign.mockResolvedValue({ id: CAMPAIGN_ID, organizationId: ORGANIZATION_ID });
     listVersions.mockResolvedValue([{ id: VERSION_ID, version: 1, digest: "a".repeat(64) }]);
-    getLiveApproval.mockResolvedValue({
+    getLatestApproval.mockResolvedValue({
       bundleVersionId: VERSION_ID,
       bundleDigest: "a".repeat(64),
       expiresAt: "2027-01-01T00:00:00.000Z",

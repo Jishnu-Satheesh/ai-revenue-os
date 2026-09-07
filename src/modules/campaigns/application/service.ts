@@ -192,7 +192,11 @@ export function createCampaignService(dependencies: CampaignServiceDependencies)
       }
 
       const versions = await dependencies.read.listVersions(organizationId, campaignId);
-      const live = await dependencies.read.getLiveApproval(organizationId, campaignId);
+      // A read for a reviewer, so it carries revoked approvals too and lets
+      // `approvalStatus` say which kind of "not approved" this is. The status
+      // object never reports a revoked row as approved, so nothing downstream
+      // can read permission out of it.
+      const live = await dependencies.read.getLatestApproval(organizationId, campaignId);
       const latest = versions[0];
 
       return {

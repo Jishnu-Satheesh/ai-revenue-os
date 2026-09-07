@@ -58,6 +58,7 @@ function readPort(overrides: Partial<CampaignReadPort> = {}): CampaignReadPort {
     listVersions: vi.fn(async () => [summaryOf(detail)]),
     getVersion: vi.fn(async () => detail),
     getLiveApproval: vi.fn(async () => null),
+    getLatestApproval: vi.fn(async () => null),
     latestGenerationRun: vi.fn(async () => null),
     ...overrides,
   };
@@ -155,6 +156,38 @@ describe("reading one campaign", () => {
     });
 
     expect(view).toMatchObject({ versionNumber: 1, digest: "a".repeat(64) });
+  });
+
+  it("explains a superseded approval instead of claiming none ever existed", async () => {
+    // The operator approved version 1, then edited a plate. The approval was
+    // revoked as superseded, and the Studio read the live-only approval, so the
+    // page said "nothing has been approved for this campaign yet" beside a
+    // panel saying an approval had just been invalidated. A reviewer cannot act
+    // on a screen that contradicts itself.
+    const detail = version();
+    const superseded = {
+      id: "a0000000-0000-4000-8000-000000000001",
+      campaignId: manifestIds.campaign,
+      bundleVersionId: "b0000000-0000-4000-8000-000000000009",
+      bundleDigest: "b".repeat(64),
+      approvedBy: "u0000000-0000-4000-8000-000000000001",
+      approvedAt: "2026-08-14T10:00:00.000Z",
+      expiresAt: "2026-08-21T10:00:00.000Z",
+      actionKeys: [],
+      revokedAt: "2026-08-15T09:00:00.000Z",
+      revokedReason: "superseded_by_new_version" as const,
+    };
+    const read = readPort({
+      getVersion: vi.fn(async () => detail),
+      getLatestApproval: vi.fn(async () => superseded),
+    });
+
+    const view = await readStudioView(read, ORGANIZATION_ID, manifestIds.campaign, { clock: NOW });
+
+    expect(view?.approval).toMatchObject({ status: "revoked" });
+    // The authorization read stays untouched, so nothing can mistake this for
+    // permission to execute.
+    expect(read.getLiveApproval).not.toHaveBeenCalled();
   });
 
   it("returns nothing for a campaign the session cannot see", async () => {
