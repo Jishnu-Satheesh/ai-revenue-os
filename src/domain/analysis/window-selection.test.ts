@@ -92,3 +92,122 @@ describe("isWindowCovered", () => {
     expect(isWindowCovered("2026-01-01", "2026-01-04", [])).toBe(false);
   });
 });
+
+import { defaultAnalysisWindow } from "@/domain/analysis/window-selection";
+
+const daily = (windowStart: string, windowEnd: string) => ({
+  windowStart,
+  windowEnd,
+  grain: "day" as const,
+  governedRowCount: 100,
+});
+
+describe("defaultAnalysisWindow", () => {
+  it("has no answer for a channel with nothing declared", () => {
+    expect(defaultAnalysisWindow({ today: "2026-09-07", windows: [] })).toBeNull();
+  });
+
+  it("opens on the last seven days when a daily report covers them", () => {
+    expect(
+      defaultAnalysisWindow({ today: "2026-09-07", windows: [daily("2026-06-01", "2026-09-30")] }),
+    ).toEqual({ from: "2026-09-01", to: "2026-09-07" });
+  });
+
+  it("falls back to the last seven covered days on a daily channel", () => {
+    // Keeta's real shape. Today is September; the reports stop on 28 February.
+    // Counting seven days back from today reaches nothing, so the default has
+    // to walk back to where the evidence actually ends.
+    expect(
+      defaultAnalysisWindow({ today: "2026-09-07", windows: [daily("2026-01-01", "2026-02-28")] }),
+    ).toEqual({ from: "2026-02-22", to: "2026-02-28" });
+  });
+
+  it("opens on the last whole month for a monthly channel", () => {
+    // The offline store's profit and loss: one figure per month, May to August.
+    // Seven days ending 31 August would contain no whole month, so the page
+    // would open on the grain warning. It opens on August instead.
+    expect(
+      defaultAnalysisWindow({
+        today: "2026-09-07",
+        windows: [
+          {
+            windowStart: "2026-05-01",
+            windowEnd: "2026-08-31",
+            grain: "month",
+            governedRowCount: 16,
+          },
+        ],
+      }),
+    ).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+  });
+
+  it("opens on the whole span for a channel that files one figure", () => {
+    // Noon reported a single figure for the whole of January and February.
+    // Any narrower default would be a window that figure cannot fill.
+    expect(
+      defaultAnalysisWindow({
+        today: "2026-09-07",
+        windows: [
+          {
+            windowStart: "2026-01-01",
+            windowEnd: "2026-02-28",
+            grain: "span",
+            governedRowCount: 2,
+          },
+        ],
+      }),
+    ).toEqual({ from: "2026-01-01", to: "2026-02-28" });
+  });
+
+  it("opens on the last whole week for a weekly channel", () => {
+    // Weeks start Monday. 2026-02-28 is a Saturday, so the last whole week
+    // inside the declaration is Monday 16 to Sunday 22 February.
+    expect(
+      defaultAnalysisWindow({
+        today: "2026-09-07",
+        windows: [
+          {
+            windowStart: "2026-01-05",
+            windowEnd: "2026-02-28",
+            grain: "week",
+            governedRowCount: 40,
+          },
+        ],
+      }),
+    ).toEqual({ from: "2026-02-16", to: "2026-02-22" });
+  });
+
+  it("refuses to reach behind the start of a short declaration", () => {
+    // A three-day report cannot yield a seven-day default.
+    expect(
+      defaultAnalysisWindow({ today: "2026-09-07", windows: [daily("2026-02-26", "2026-02-28")] }),
+    ).toEqual({ from: "2026-02-26", to: "2026-02-28" });
+  });
+
+  it("prefers the latest declaration when a channel has several", () => {
+    expect(
+      defaultAnalysisWindow({
+        today: "2026-09-07",
+        windows: [daily("2026-01-01", "2026-02-28"), daily("2026-05-01", "2026-06-30")],
+      }),
+    ).toEqual({ from: "2026-06-24", to: "2026-06-30" });
+  });
+
+  it("does not open on seven days when those days are monthly-reported", () => {
+    // The last seven days are covered, but by a report that files one figure a
+    // month. Opening there would open on a warning, so the month wins.
+    expect(
+      defaultAnalysisWindow({
+        today: "2026-09-07",
+        windows: [
+          {
+            windowStart: "2026-01-01",
+            windowEnd: "2026-09-30",
+            grain: "month",
+            governedRowCount: 9,
+          },
+        ],
+      }),
+    ).toEqual({ from: "2026-09-01", to: "2026-09-30" });
+  });
+});

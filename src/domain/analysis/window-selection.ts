@@ -1,4 +1,9 @@
-import { addLocalDays, localDaysBetween } from "@/domain/analysis/calendar";
+import {
+  addLocalDays,
+  localDaysBetween,
+  enumerateLocalPeriodStarts,
+  localPeriodEnd,
+} from "@/domain/analysis/calendar";
 import type { AnalysisGrain } from "@/domain/analysis/types";
 
 /**
@@ -85,4 +90,72 @@ export function isWindowCovered(
   // the database would have accepted -- the opposite of what this guard is for.
   if (span < 0 || span > MAX_ANALYSIS_WINDOW_DAYS) return false;
   return segments.some((segment) => segment.start <= from && to <= segment.end);
+}
+
+/** A picked range, both ends inclusive. */
+export type AnalysisWindowSelection = { from: string; to: string };
+
+/** The latest declaration wins; a tie breaks to the finer grain. */
+const GRAIN_FINENESS: readonly AnalysisGrain[] = ["day", "week", "month", "span"];
+
+function latestWindow(windows: readonly CoverageWindow[]): CoverageWindow | null {
+  const [latest] = [...windows].sort(
+    (left, right) =>
+      right.windowEnd.localeCompare(left.windowEnd) ||
+      GRAIN_FINENESS.indexOf(left.grain) - GRAIN_FINENESS.indexOf(right.grain),
+  );
+  return latest ?? null;
+}
+
+/**
+ * The last whole period a declaration contains, or the whole declaration when
+ * it contains none.
+ *
+ * A span is one figure for one range, so its "last period" is the range itself:
+ * there is nothing narrower that figure can fill.
+ */
+function lastWholePeriod(window: CoverageWindow): AnalysisWindowSelection {
+  if (window.grain === "span") return { from: window.windowStart, to: window.windowEnd };
+  if (window.grain === "day") {
+    // Seven days ending where the evidence ends, never reaching behind its start.
+    const from = addLocalDays(window.windowEnd, -6);
+    return {
+      from: from < window.windowStart ? window.windowStart : from,
+      to: window.windowEnd,
+    };
+  }
+  const starts = enumerateLocalPeriodStarts(window.windowStart, window.windowEnd, window.grain);
+  const last = starts[starts.length - 1];
+  if (last === undefined) return { from: window.windowStart, to: window.windowEnd };
+  return { from: last, to: localPeriodEnd(last, window.grain) };
+}
+
+/**
+ * What the picker opens on.
+ *
+ * The last seven days when they are covered *by a daily report* -- the grain
+ * check is not incidental. Reports arrive covering periods already past, so on
+ * this platform the recent past is usually unreported, and where it is
+ * reported it may be reported as one monthly figure. Opening on seven days of
+ * a monthly report would open the page on the warning in
+ * `describeGrainMismatch`, which is a complaint, not an answer.
+ *
+ * Otherwise the most recent window the channel can actually answer: seven days
+ * on a daily channel, the last whole month on a monthly one, the whole span on
+ * a channel that files a single figure.
+ */
+export function defaultAnalysisWindow(input: {
+  today: string;
+  windows: readonly CoverageWindow[];
+}): AnalysisWindowSelection | null {
+  if (input.windows.length === 0) return null;
+
+  const dayGrained = input.windows.filter((window) => window.grain === "day");
+  const recent = { from: addLocalDays(input.today, -6), to: input.today };
+  if (isWindowCovered(recent.from, recent.to, mergeCoverageSegments(dayGrained))) {
+    return recent;
+  }
+
+  const latest = latestWindow(input.windows);
+  return latest === null ? null : lastWholePeriod(latest);
 }
