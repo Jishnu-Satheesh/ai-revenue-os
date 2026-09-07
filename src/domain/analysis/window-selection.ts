@@ -80,6 +80,9 @@ export function isWindowCovered(
   segments: readonly CoverageSegment[],
 ): boolean {
   const span = localDaysBetween(from, to);
-  if (span < 0 || span >= MAX_ANALYSIS_WINDOW_DAYS) return false;
+  // `>` not `>=`: the database's own check is `window_end - window_start <= 400`,
+  // so a span of exactly 400 is legal. Refusing it here would reject a window
+  // the database would have accepted -- the opposite of what this guard is for.
+  if (span < 0 || span > MAX_ANALYSIS_WINDOW_DAYS) return false;
   return segments.some((segment) => segment.start <= from && to <= segment.end);
 }

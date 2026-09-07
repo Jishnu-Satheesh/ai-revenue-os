@@ -79,6 +79,15 @@ describe("isWindowCovered", () => {
     expect(MAX_ANALYSIS_WINDOW_DAYS).toBe(400);
   });
 
+  it("accepts a range at exactly the ceiling, and refuses one past it", () => {
+    // The database's check is `window_end - window_start <= 400`, so 400 is
+    // legal and 401 is not. Refusing 400 here would reject a window the
+    // database would have taken, which is the opposite of this guard's job.
+    const wide = mergeCoverageSegments([w("2024-01-01", "2027-12-31")]);
+    expect(isWindowCovered("2026-01-01", "2027-02-05", wide)).toBe(true);
+    expect(isWindowCovered("2026-01-01", "2027-02-06", wide)).toBe(false);
+  });
+
   it("refuses anything when nothing is declared", () => {
     expect(isWindowCovered("2026-01-01", "2026-01-04", [])).toBe(false);
   });
