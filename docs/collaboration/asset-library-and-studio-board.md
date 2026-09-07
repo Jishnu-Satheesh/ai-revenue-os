@@ -5022,3 +5022,29 @@ means.
   session, so the rollup's new second control and the reworked advice slots have not been
   seen rendered. That check is still owed.
 
+### 2026-09-06 · muse-code · Canary seed: Al Noor Kitchen workspace is live on staging
+
+- Seeded Al Noor Kitchen (`2dda45b8…`) only; Nostaza left untouched for the user's
+  real-time test. Seed chain, all labelled `canary-seed` with `c0ffee00-…` ids:
+  enabled market profile v1 (operator proposal, valid v1 document) → succeeded research
+  request + completed run → 2 claims + 1 source + 1 supports link + 2 observed events →
+  succeeded synthesis request + completed run (3 items) → 1 insight, 1 recommendation,
+  1 data gap for 2026-09. Inserts went through the repo's own zod/digest helpers.
+- Verified: every CHECK/FK passed on insert; owner holds `growth_intelligence.read`
+  (+ `.manage`), and each table in the workspace path has an authenticated SELECT
+  policy keyed to membership — the signed-in owner will see the items. Service-role
+  cannot read the two triage tables (no grant); that is hardening, not a bug.
+- Deliberately NOT seeded: opportunities and draft requests. Faking them would drag
+  in decision_records/playbook_versions and prove nothing — the user clicks the live
+  draft CTA instead, which exercises the real Task 21–23 path.
+- Temp seed/verify scripts removed from the tree; rerun is idempotent by fixed ids.
+
+### 2026-09-06 · muse-code · Fix: opportunities missing authenticated SELECT grant
+
+- User's GI page failed on every org with "Decision data could not be loaded or
+  saved" from `listOpportunities`. Root cause: RLS is on and the member-read policy
+  exists, but no `GRANT SELECT ... TO authenticated` was ever issued — the only
+  table in the workspace path without one. The rollout env gate was a wrong early
+  guess; the pasted terminal stack corrected it.
+- Repair migration `20260906130000_opportunity_member_read_grant.sql` pushed to
+  staging (grant only, row scope unchanged). Verified the grant is live.
