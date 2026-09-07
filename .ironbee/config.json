@@ -1,0 +1,25 @@
+{
+  "verification": {
+    "enable": true,
+    "auto": false,
+    "strict": false
+  },
+  "browser": {
+    "enable": true
+  },
+  "node": {
+    "enable": true
+  },
+  "python": {
+    "enable": false
+  },
+  "backend": {
+    "enable": true
+  },
+  "android": {
+    "enable": false
+  },
+  "terminal": {
+    "enable": false
+  }
+}
