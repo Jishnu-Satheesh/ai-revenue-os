@@ -203,7 +203,8 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S5   | Studio Task 5: the render worker — claimed: new `src/workflows/campaigns/render-poster.ts` + test, new `src/modules/campaigns/infrastructure/poster-render-repository.ts` + test, new `src/modules/campaigns/infrastructure/poster-context-reader.ts` + test; modify `src/domain/campaigns/poster-slots.ts` (+ test), `src/domain/campaigns/derivation.ts` (extract `checkProseAgainstEvidence`), `src/workflows/campaigns/contracts.ts`, `src/workflows/campaigns/durations.ts`, `src/lib/logger.ts` (one opaque field), `src/trigger/campaigns.ts` + test (registration). No migration, no schema change, no `database.types.ts` change. | claude | high | S4 | **done — deployed as prod `20260905.1`; dispatch proved (`run_06g7299cuq19ti3t5rmb0ooq01`)** |
 | S6   | Studio Task 6: the verification pass — claimed: new `src/modules/campaigns/application/creative-verification.ts` + test | claude | high | S5 | **done — 13 tests; model reports, code decides** |
 | S7   | Studio Task 7: annotated editing domain + union compositing — claimed: new `src/domain/campaigns/plate-edit.ts` + test, new `src/modules/campaigns/infrastructure/plate-compositor.ts` + test | claude | high | S4 | **done — 28 tests; byte-identical guarantee proved to bite on a single leaked byte** |
-| S8   | Studio Task 8: the edit worker — claimed: new `src/workflows/campaigns/edit-plate.ts` + test, new `src/modules/campaigns/infrastructure/plate-edit-prompt.ts`, `src/workflows/campaigns/contracts.ts` | claude | high | S7 | **review — workflow + prompt done, 12 tests; adapters and `campaign.edit-plate` registration NOT done, see log** |
+| S8   | Studio Task 8: the edit worker — claimed: new `src/workflows/campaigns/edit-plate.ts` + test, new `src/modules/campaigns/infrastructure/plate-edit-prompt.ts`, `src/workflows/campaigns/contracts.ts` | claude | high | S7 | **done — adapters written and `campaign.edit-plate` registered 2026-09-06; dispatched for real, 926,076 pixels outside the mark unchanged. Row was stale until 2026-09-07** |
+| S9   | Execution-loop deploy + proof, and the four defects a real-member browser walk found — claimed: `supabase/migrations/20260907050000_*`, `20260907051500_*`, `src/domain/campaigns/{measurement,state-machine}.ts`, `src/modules/campaigns/{application/{ports,service},infrastructure/{repository,studio-reader,learning-drafter}}.ts`, `src/components/campaigns/campaign-studio.tsx` | claude | high | S8 | **done — prod `v20260907.2`; 5/5 workers reached a verdict; both migrations applied and the replaced function executed on staging; 4333 tests, typecheck, lint and format green; browser gate passed at 1440 and 390** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -5048,3 +5049,191 @@ means.
   guess; the pasted terminal stack corrected it.
 - Repair migration `20260906130000_opportunity_member_read_grant.sql` pushed to
   staging (grant only, row scope unchanged). Verified the grant is live.
+
+### 2026-09-07 · codex · Growth Intelligence UI redesign discovery and visual design
+
+- **Claimed for design work:** `docs/superpowers/specs/2026-09-07-growth-intelligence-ui-redesign.md`,
+  `.superdesign/growth-intelligence/`, `.superdesign/resume.json`, and this board.
+  Application code, schemas, and workers remain unchanged pending a concrete approved execution plan.
+- **User-approved structure:** four tabs: Overview, Recommendations, Your actions, Insights & market.
+  Overview orders organization performance, previous-action progress, then Top Recommendations
+  with a More link to the Recommendations tab. Channel and location filters are required.
+- **User-approved interactions:** load fresh available metrics on opening; show last fetched time
+  and reporting period; manual Refresh/Retry. This supersedes the initial one-minute update idea.
+  Reuse Channel Audit Acknowledge, Planned, helpful/not-helpful feedback, and Snooze semantics.
+  Planned is recorded intent; campaign preparation uses actual saved status.
+- **Communication:** user reported async questions did not display. Ask questions directly in chat.
+- **Discovery:** the current workspace lacks performance reads and actionable previous-item titles;
+  synthesized-item feedback needs a saved contract, whereas Channel Recommendation feedback exists.
+  Current provider mappings include sales, listing/menu views, order counts and cancellations;
+  these must not be relabelled as website sessions or verified fulfillment.
+- **Verification boundary:** code and design-context inspection only so far. Chrome MCP could not
+  start because no display server was available. No authenticated browser or new staging verification
+  has occurred. Existing `tsconfig.tsbuildinfo` and `scripts/_scratch-q.mjs` changes are unrelated.
+
+### 2026-09-07 · claude · The execution loop is registered in prod, and four defects the browser found
+
+**The five execution-loop workers were written, registered in code, and never deployed.**
+`get_current_worker` reported 26 tasks; none of `dispatch-due-actions`, `collect-metrics`,
+`allocation-cycle`, `settle-outcome` or `propose-learning` was among them. Deployed as
+`v20260907.1` (31 tasks), later `v20260907.2`. **The deploy tool went silent for 30 minutes
+on both attempts and the deploy had already landed both times** — fourth and fifth occurrence
+this session. Always confirm with `list_deploys`/`get_current_worker`; never believe the CLI.
+
+**All five reached a verdict** (`scripts/execution-loop-proof.mjs`):
+
+- `dispatch-due-actions` — 0 considered, nothing queued.
+- `collect-metrics` — 1 considered, refused `meta.metrics_capability_blocked`.
+- `allocation-cycle` — **FAILED by design**, naming the four unset `CAMPAIGN_ALLOCATION_*`
+  variables. This is the AGENTS.md prohibition on unconfigured budget action working, but it
+  does mean the fast loop is inert until the product owner supplies four numbers.
+- `settle-outcome` — settled 1: `execution_only`, replay wrote `restated`, so it is idempotent.
+- `propose-learning` — drafted, then **refused its own draft** for overclaim `because`.
+
+**Four defects, all found by walking the campaign in a browser as a real member rather than as
+the service role.** That distinction is the lesson: every earlier proof of the render and edit
+workers passed because scripts sign with the service role.
+
+1. **Every poster and every edited plate was invisible to the operator.** The `campaign-assets`
+   read policy pinned `cardinality(foldername) = 3`, exact when generated plates were the only
+   objects in the bucket. The Studio writes a folder deeper — `.../version/posters/` and
+   `.../version/edits/` — so a member-signed URL returned "Object not found" for everything the
+   Studio has ever produced. The annotation canvas reported the plate as unsignable and disabled
+   itself, so a plate could be edited exactly once and never again. Migration
+   `20260907050000` admits exactly those two prefixes, not "four or fewer", so an undesigned
+   path still fails loudly. Verified: own-org 4-folder object signs, 3-folder still signs,
+   another tenant's refused, `.../secrets/` refused.
+2. **A campaign claimed an approval it did not hold.** `state-machine.ts` says `approved` means
+   "an approval row currently covers the version this campaign is on — nothing more", and
+   staging held `783ab4e1` in `approved` with its only approval revoked as superseded a day
+   earlier. `create_campaign_bundle_version` revoked and then touched only `updated_at`.
+   Migration `20260907051500` forward-replaces it; only `approved` moves, and only to
+   `ready_for_review`, because every later state describes execution that really happened.
+   **Executed against staging inside a rolled-back transaction** — applying a plpgsql function
+   proves nothing, per the rule this repo learned twice.
+3. **The same screen contradicted itself.** `getLiveApproval` filters revoked rows in SQL, right
+   for authorization and wrong for explanation, so the page said "nothing has been approved for
+   this campaign yet" beside a panel saying an approval had just been invalidated. Added
+   `getLatestApproval`, display-only; the plate-edit route's authorization read is untouched.
+   Also: the reachable copy was the vaguest one — creating a version revokes the approval, so
+   operators land on `revoked`, which read as blame. It now names the new version as the cause.
+4. **The learning loop could never propose.** The prompt never named the vocabulary that ends
+   the attempt, and the repair pass fed back bare labels like `resulted-in`. Both are now built
+   from `OVERCLAIM_PATTERNS`, so a pattern cannot be enforced but never explained. The fence is
+   unchanged. **First proposal ever written**: `d243c523` — "This campaign reached only 1 of the
+   3 planned exposures, and no observation of the primary metric was recorded during the 14-day
+   window..." No causal language, and actually useful.
+
+**Browser gate passed at 1440×900 and 390×844**, both pages, no horizontal overflow. One console
+error at both widths: `GET /api/account` 403. **Not a defect and not campaign-scoped** — the
+`frontend-verify@example.com` fixture has an `organization_memberships` row but no
+`account_memberships` row, so the account boundary correctly refuses it. Worth knowing that any
+operator without an account membership sees the same console noise.
+
+**Not pushed by me:** `20260907060000_growth_intelligence_item_feedback.sql` is another session's
+uncommitted work in this shared tree. Both my `db:migrations:dry-run` runs listed exactly one
+pending migration — my own — so `--include-all` never carried theirs. It shows as applied on
+staging; whoever owns it applied it.
+
+**Still open, and why the module is not "done" outright:**
+
+- The four `CAMPAIGN_ALLOCATION_*` thresholds are a product decision, not a code gap.
+- Publishing has no adapter (`adapters: []`) and Meta App Review is client-owned, so nothing can
+  post today. `dispatch-due-actions` is registered but deliberately not scheduled.
+- Unchanged from 2026-09-06: a Malayalam and an Arabic reader still have to judge the two
+  posters; the scrim question; a provenance kind for an edited plate; and the manifest size
+  backfill, which changes digests an approval binds to.
+
+### 2026-09-07 · codex · Growth Intelligence production UI implementation
+
+- **Scope claimed:** `src/domain/growth-intelligence/`, `src/modules/growth-intelligence/`,
+  the Growth Intelligence page and API routes, narrow generated database types, and focused
+  tests needed to ship the approved four-tab redesign.
+- **Approved behavior:** organization-wide performance opens first; previous actions and their
+  progress follow; Top Recommendations appear on Overview with a More link; the full tabs are
+  Overview, Recommendations, Your actions, and Insights & market. The page shows its reporting
+  window and last fetch time, and offers a manual refresh that keeps the current figures visible
+  if refresh fails.
+- **Governed writes:** synthesized items gain member-scoped helpful feedback through the already
+  applied `20260907060000_growth_intelligence_item_feedback.sql` RPC. Existing decision and
+  preference paths remain the authority for Acknowledge, Planned, Snooze, Dismiss, like, and
+  dislike.
+- **Data boundary:** performance is built from the existing organization channel evidence read
+  model. No invented sessions, fulfillment, orders, weekly trend, or menu metrics will be shown
+  when the evidence contract does not provide them.
+- **Implemented:** the route now loads organization-wide evidence bands and renders the approved
+  four-tab journey. Overview opens with performance, named prior actions, and three Top
+  Recommendations with a More link. Recommendation and insight cards save Channel-owned or
+  synthesized-item decisions and helpfulness through their respective governed routes.
+- **Refresh contract:** a successful server read advances the displayed fetch timestamp. A failed
+  performance read is isolated from the rest of the workspace; the client retains its previous
+  figures and timestamp and changes Refresh to Retry.
+- **Verification:** hosted `growth_intelligence_item_feedback_test.sql` passes 17/17; the full
+  Vitest run passes 4,349 tests with 6 skipped; cold typecheck and production build pass; full lint
+  has 0 errors and 31 pre-existing warnings. Authenticated browser acceptance remains manual.
+
+### 2026-09-07 — Nostaza: the other four channels reported, and five defects that stopped them
+
+**What was asked.** Nostaza (`859cf039`) had only Talabat under Channels. Do Keeta, Noon,
+EatEasily and Offline Store from `fixtures/raw`, creating channels where missing, and fix whatever
+breaks on the way rather than reporting it and stopping.
+
+**Done.** Four channels created through the real API. Six reports uploaded, approved, validated and
+projected through the operator UI and its own routes: Keeta billing (84 observations), Keeta orders
+(158), Keeta restaurant daily (554), Noon sales (2), EatEasily branch sales (2, an honest zero —
+that export genuinely records no activity for Jan–Feb), Offline Store profit and loss (16). Every
+projection auto-started its channel analysis and every analysis produced findings and
+recommendations. The Offline Store figures reconcile to the statement's own totals.
+
+**Five defects, all found by doing it rather than by reading it.**
+
+1. **A rotated statement could not be profiled at all.** ADR 0045 files the rotated candidate at
+   row position zero and migration `20260901193000` taught the contract gate to look there, but
+   `complete_governed_report_package_profiling` and `assert_report_header_candidates` still
+   demanded rows 1..250000 and capped a sheet at five candidates while the profiler appends the
+   rotated one outside that cap. Every export whose first column reads as a statement failed on
+   upload as `PROFILE_FAILED`. Fixed by `20260907120000`; `20260907130000` is the second half —
+   `jsonb_typeof` of an absent key is NULL, so the strictness the first migration intended never
+   fired. pgTAP `governed_report_profile_headers_test.sql` now covers both, 13/13.
+2. **The upload that earned an admission went nowhere.** Granting a standing admission approves a
+   contract and projection and moves the package to `awaiting_validation` — and stopped. Later
+   uploads are carried by profiling (Link A); the file the operator was looking at was profiled
+   before the admission existed, so nothing reached it. No run, no failure, nothing on the page.
+   The admission route now makes the same dispatch the manual decision route makes.
+3. **`pdfjs-dist` was bundled into the Trigger worker.** In Node pdf.js loads its worker with a
+   fully dynamic `await import("./pdf.worker.mjs")`, relative to the importing module — fine from
+   `node_modules`, impossible from inside a bundle. The first PDF the platform was ever given
+   failed as `UNREADABLE_WORKBOOK` while the same file read perfectly under vitest. Now external,
+   beside `fontkit` and for the same reason. Asserted against the build config, because no
+   in-process test can reach it.
+4. **The projection lineage step read a different grid from the projector.** It looked for
+   `food_items` along row one of a profit and loss — the company's own name — and refused the
+   import as `PROJECTION_PROCESSING_FAILED`. `readContractSheet` is now exported and is the only
+   way either half reads a sheet.
+5. **A channel could not be told it carries a second report.** The derived report type disqualifies
+   itself once a channel has carried two families, but only after the second is already approved.
+   The upload that introduces it was filed under the first family's name with no way to correct a
+   read-only field. Keeta alone sends three exports to one channel. There is now an override, with
+   the derived text still the default.
+
+**Open, not fixed — the channel workspace cannot display a run whose window is not exactly one
+calendar month.** `page.tsx` selects `displayedRun` by exact equality against
+`analysisMonthBounds(selectedMonth)`. Every report declaring a multi-month period (Keeta orders and
+restaurant, Noon, EatEasily, Offline Store) produces a run whose window is Jan 1 – Feb 28 or
+May 1 – Aug 31, which no month equals, so `findings` is `[]` and the page shows "not analysed" for
+every month while the run, its findings and its recommendations sit in the database. Separately,
+the "Showing analysis of …" label is built from `runs` rather than from `displayedRun`, so on Keeta
+January it names the Jan–Feb window while displaying the January run — and on Keeta February the
+verdict, the label and the chapters contradict each other outright. Two candidate fixes: let the
+workspace display a run that covers the selected month (contradicts the invariant that comment
+defends), or split auto-analysis into one run per declared month (matches the month-indexed model,
+larger change). Not started; awaiting a decision.
+
+**Also worth knowing.** `pnpm format` reformats the whole repository, and this tree has several
+sessions' uncommitted work in it. Running it reflowed ~70 files nobody in this session had touched.
+Their content is intact and the commits here were path-limited to this session's own files, but do
+not run `pnpm format` in a shared tree without expecting that.
+
+**Verification.** Full Vitest 4,357 passed / 6 skipped across 424 files; cold typecheck clean; lint
+0 errors and 31 pre-existing warnings; pgTAP suites pass. Every fix was exercised against staging
+through the real routes, not only in tests.
