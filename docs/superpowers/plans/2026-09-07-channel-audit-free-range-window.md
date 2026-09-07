@@ -1863,7 +1863,8 @@ The second independent admissibility check. This is what makes browser-supplied 
 **Files:**
 - Modify: `src/workflows/analysis/run-channel-analysis.ts`
 - Modify: `src/trigger/analysis.ts:41-44`
-- Test: `src/workflows/analysis/run-channel-analysis.test.ts`
+- Modify: `src/modules/analysis/application/dispatch.ts:20-40`
+- Test: `src/workflows/analysis/run-channel-analysis.test.ts`, `src/modules/analysis/application/dispatch.test.ts`
 
 **Interfaces:**
 - Consumes: `isWindowCovered`, `mergeCoverageSegments` (Task 1), `createWindowAnalysisCacheKey` (Task 4), `loadCoverageSegments` (Task 5).
@@ -1971,16 +1972,27 @@ In `src/trigger/analysis.ts`, replace the `loadMonthHorizon` dependency:
       },
 ```
 
+**And in the same commit, `src/modules/analysis/application/dispatch.ts`.** The
+schema above is `.strict()`, and `requestChannelAnalysis` still forwards a
+`month` field into the payload it triggers. A commit that removes `month` from
+the schema while its only caller still sends it leaves a dispatch the worker
+rejects, so the two change together. In `requestChannelAnalysis`: delete
+`month` from both the input type and the triggered payload, and make
+`windowTimezone: string` required rather than optional.
+
+Update `dispatch.test.ts` accordingly — any test passing `month` is asserting a
+payload shape that no longer exists.
+
 - [ ] **Step 4: Run the tests and watch them pass**
 
-Run: `pnpm vitest run src/workflows/analysis src/trigger`
+Run: `pnpm vitest run src/workflows/analysis src/trigger src/modules/analysis/application/dispatch.test.ts`
 Expected: PASS. Update any existing test that passed `month` in a payload.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-pnpm prettier --write src/workflows/analysis/run-channel-analysis.ts src/workflows/analysis/run-channel-analysis.test.ts src/trigger/analysis.ts
-git add src/workflows/analysis src/trigger/analysis.ts
+pnpm prettier --write src/workflows/analysis/run-channel-analysis.ts src/workflows/analysis/run-channel-analysis.test.ts src/trigger/analysis.ts src/modules/analysis/application/dispatch.ts src/modules/analysis/application/dispatch.test.ts
+git add src/workflows/analysis src/trigger/analysis.ts src/modules/analysis/application/dispatch.ts src/modules/analysis/application/dispatch.test.ts
 git commit -m "feat(analysis): make the worker re-decide the window under its own lease
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
@@ -1993,8 +2005,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 Without this, picking the exact range an auto-run already computed recomputes it from scratch — and the run that fixes the Nostaza display defect stays uncached.
 
 **Files:**
-- Modify: `src/modules/analysis/application/dispatch.ts:20-40`
 - Modify: `src/modules/reports/application/auto-analysis.ts`
+- Modify: `src/trigger/reports.ts`
 - Test: `src/modules/reports/application/auto-analysis.test.ts`
 
 **Interfaces:**
@@ -2084,7 +2096,7 @@ In `auto-analysis.ts`, add `periodTimezone: unknown` to `ProjectionCompletionSum
   return { channelId, branchId, windowStart, windowEnd, periodGrain, windowTimezone: periodTimezone };
 ```
 
-In `dispatch.ts`, make `windowTimezone` required and delete the `month` field from `requestChannelAnalysis`'s input type and from the payload it triggers.
+`dispatch.ts` already requires `windowTimezone` and no longer carries `month` — Task 9 did that, because the payload's schema and its only caller are one interface.
 
 In `src/trigger/reports.ts:683`, confirm the completion row passed as `completion` includes `period_timezone`; map it to `periodTimezone` if the property name differs. Check with:
 
@@ -2100,8 +2112,8 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-pnpm prettier --write src/modules/reports/application/auto-analysis.ts src/modules/reports/application/auto-analysis.test.ts src/modules/analysis/application/dispatch.ts src/trigger/reports.ts
-git add src/modules/reports/application/auto-analysis.ts src/modules/reports/application/auto-analysis.test.ts src/modules/analysis/application/dispatch.ts src/trigger/reports.ts
+pnpm prettier --write src/modules/reports/application/auto-analysis.ts src/modules/reports/application/auto-analysis.test.ts src/trigger/reports.ts
+git add src/modules/reports/application/auto-analysis.ts src/modules/reports/application/auto-analysis.test.ts src/trigger/reports.ts
 git commit -m "fix(analysis): let an auto-dispatched run be reused instead of recomputed
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
@@ -2392,7 +2404,13 @@ describe("the window range picker", () => {
   it("names the selected range on its trigger", async () => {
     setup();
 
-    expect(screen.getByRole("button", { name: /1 Jan.*4 Jan.*2026/i })).toBeInTheDocument();
+    // `formatWindow` renders exact recorded dates, never a month name -- its
+    // own comment says so, and every other date on this workspace reads the
+    // same way. A picker with a second date language would be worse than a
+    // verbose label.
+    expect(
+      screen.getByRole("button", { name: /2026-01-01 to 2026-01-04/ }),
+    ).toBeInTheDocument();
   });
 
   it("offers Last 7 days disabled, and says why", async () => {
@@ -2401,7 +2419,7 @@ describe("the window range picker", () => {
     // Hiding it would leave an operator wondering; showing it disabled answers
     // the question before it is asked.
     const { user } = setup();
-    await user.click(screen.getByRole("button", { name: /1 Jan/i }));
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
 
     const preset = screen.getByRole("button", { name: /last 7 days/i });
     expect(preset).toBeDisabled();
@@ -2410,7 +2428,7 @@ describe("the window range picker", () => {
 
   it("applies a preset that does fall inside coverage", async () => {
     const { onApply, user } = setup();
-    await user.click(screen.getByRole("button", { name: /1 Jan/i }));
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
     await user.click(screen.getByRole("button", { name: /all reported/i }));
     await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
@@ -2421,17 +2439,17 @@ describe("the window range picker", () => {
 
   it("warns before applying a range the reports cannot resolve", async () => {
     const { user } = setup({ selected: { from: "2026-08-01", to: "2026-08-04" } });
-    await user.click(screen.getByRole("button", { name: /1 Aug/i }));
+    await user.click(screen.getByRole("button", { name: /2026-08-01/ }));
 
     const warning = screen.getByRole("status");
     expect(within(warning).getByText(/one figure per month/i)).toBeInTheDocument();
-    expect(within(warning).getByText(/1 May.*31 Aug/i)).toBeInTheDocument();
+    expect(within(warning).getByText(/2026-05-01.*2026-08-31/)).toBeInTheDocument();
   });
 
   it("widens to the range that works in one click", async () => {
     const { onApply, user } = setup({ selected: { from: "2026-08-01", to: "2026-08-04" } });
-    await user.click(screen.getByRole("button", { name: /1 Aug/i }));
-    await user.click(screen.getByRole("button", { name: /use 1 – 31 aug/i }));
+    await user.click(screen.getByRole("button", { name: /2026-08-01/ }));
+    await user.click(screen.getByRole("button", { name: /use 2026-08-01 to 2026-08-31/i }));
     await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
     expect(onApply).toHaveBeenCalledWith({ from: "2026-08-01", to: "2026-08-31" });
@@ -2439,14 +2457,14 @@ describe("the window range picker", () => {
 
   it("does not warn when one of several reports can answer", async () => {
     const { user } = setup({ selected: { from: "2026-01-01", to: "2026-01-04" } });
-    await user.click(screen.getByRole("button", { name: /1 Jan/i }));
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
 
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("does not apply anything while the workspace is busy", async () => {
     const { onApply, user } = setup({ disabled: true });
-    await user.click(screen.getByRole("button", { name: /1 Jan/i }));
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
 
     expect(onApply).not.toHaveBeenCalled();
   });
@@ -2466,7 +2484,7 @@ Create `src/components/analysis/window-range-picker.tsx`. It is a client compone
 - Presets are computed against `segments`; one that is not covered renders `disabled` with an `aria-describedby` note reading *"No approved report covers those dates."*
 - *All reported* resolves to the **one segment containing the current selection**, never the union across a gap.
 - The warning renders only when `describeGrainMismatch` returns a value, inside `role="status"`, naming the grain in plain words (`"one figure per month"`, `"one figure for the whole period"`) and the declared range.
-- The widen button's label names the suggested range, and selecting it sets the draft selection without applying it.
+- The widen button's label names the suggested range through `formatWindow`, so it reads "Use 2026-08-01 to 2026-08-31"; selecting it sets the draft selection without applying it.
 - Apply calls `onApply` with the draft and closes the popover; it is `disabled` when `props.disabled` is set or when the draft is not covered.
 - Dates render through the existing `formatWindow` helper in `@/components/analysis/format` so this control reads the same as the rest of the workspace.
 
@@ -2676,7 +2694,7 @@ it("posts the picked range, not a month", async () => {
   const user = userEvent.setup();
   renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
 
-  await user.click(screen.getByRole("button", { name: /1 Jan/i }));
+  await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
   await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
   expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
@@ -2693,7 +2711,7 @@ it("shows the loader instead of telling the operator to refresh", async () => {
   const user = userEvent.setup();
   renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
 
-  await user.click(screen.getByRole("button", { name: /1 Jan/i }));
+  await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
   await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
   expect(await screen.findByText(/reading approved reports/i)).toBeInTheDocument();
@@ -2712,7 +2730,7 @@ it("says plainly when the organization is over its allowance", async () => {
   const user = userEvent.setup();
   renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
 
-  await user.click(screen.getByRole("button", { name: /1 Jan/i }));
+  await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
   await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
   expect(await screen.findByText(/started a lot of analyses/i)).toBeInTheDocument();
@@ -2782,7 +2800,83 @@ In `page.tsx`, replace the month block (lines 58–95). Read coverage and eviden
           ) ?? null);
 ```
 
-Pass `segments`, `coverageWindows` and `selectedWindow` to `ChannelWorkspace` in place of `monthHorizon` and `selectedMonth`. Add a small `todayInZone` helper beside the page, or reuse an existing one if `grep -rn "todayInZone\|toZonedTime" src/lib src/domain` finds one.
+**Then wire the run cache in — without it, Task 7 ships dead and spec §5.1 is
+unimplemented.**
+
+First, the cache key needs a field the read model currently drops.
+`channel_analysis_runs.result_digest` exists in the database, but
+`ChannelAnalysisRunRecord` (`ports.ts:12-30`) does not carry it. Add
+`resultDigest: string | null` to that type and select `result_digest` in both
+`loadRuns` and `loadRun` in `read-repository.ts`. It is null exactly when the
+run is still `running`, which the `status = 'running'` check on the table
+already guarantees — so a null digest means "not finished", and the code below
+treats it as uncacheable rather than as an error.
+ The findings, the evidence and the recommendation *text* for a
+completed run are immutable, so they go through `readCachedRunPayload`. The
+viewer's own accept and dismiss decisions do **not**: they are read outside the
+cache and merged on top, because caching them under a run id would show one
+operator another's choices.
+
+```tsx
+    const cached =
+      displayedRun === null || displayedRun.resultDigest === null
+        ? null
+        : await readCachedRunPayload({
+            organizationId: context.organizationId,
+            analysisRunId: displayedRun.id,
+            resultDigest: displayedRun.resultDigest,
+            load: async () => {
+              const runFindings = await analysis.loadFindingsForRun({
+                organizationId: context.organizationId,
+                analysisRunId: displayedRun.id,
+              });
+              const [runEvidence, runRecommendations] = await Promise.all([
+                analysis.loadEvidence({
+                  organizationId: context.organizationId,
+                  findingIds: runFindings.map((finding) => finding.id),
+                }),
+                // `viewerId: null` asks for the recommendations without any
+                // viewer's decisions attached. That is what makes this payload
+                // safe to share between operators.
+                analysis.loadRecommendationsForRun({
+                  organizationId: context.organizationId,
+                  analysisRunId: displayedRun.id,
+                  viewerId: null,
+                }),
+              ]);
+              return { findings: runFindings, evidence: runEvidence, recommendations: runRecommendations };
+            },
+          });
+```
+
+`loadRecommendationsForRun` currently requires a `viewerId: string`. Widen it to
+`string | null` in `ports.ts` and, in `read-repository.ts:714`, skip the
+`channel_recommendation_decisions` read entirely when it is null, returning
+recommendations with empty decisions. Then read this viewer's decisions
+separately and merge them onto `cached.recommendations` before calling
+`buildChannelWorkspaceView`. Add a port for that read if none exists.
+
+If this wiring plus the picker swap makes Task 14 too large to review as one
+diff, split the cache wiring into its own commit within the task rather than
+dropping it.
+
+Pass `segments`, `coverageWindows` and `selectedWindow` to `ChannelWorkspace` in place of `monthHorizon` and `selectedMonth`.
+
+No `todayInZone` helper exists. Add this one beside the page, matching the
+idiom already at `src/domain/metrics/csv-projection.ts:277`:
+
+```tsx
+/**
+ * Today, as the organization's own calendar reads it.
+ *
+ * `en-CA` renders `YYYY-MM-DD`, which is the shape every date on this page
+ * already uses. Reading "today" in the server's zone instead would shift the
+ * default window by a day for anything either side of midnight in Dubai.
+ */
+function todayInZone(timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
+}
+```
 
 - [ ] **Step 4: Rewrite the workspace's control**
 
