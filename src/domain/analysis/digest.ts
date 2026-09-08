@@ -110,7 +110,7 @@ export function createMonthlyAnalysisCacheKey(input: {
  * every run cached under the old scheme recomputes once, which is correct --
  * a month's arithmetic must never be reused under a range's heading.
  */
-const ANALYSIS_RESOLVER_VERSION = 2;
+export const ANALYSIS_RESOLVER_VERSION = 2;
 
 /**
  * The identity of one analysable question: who is asking, about which channel

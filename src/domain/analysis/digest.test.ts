@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ANALYSIS_RESOLVER_VERSION,
   MONTHLY_ANALYSIS_RESOLVER_VERSION,
   createAnalysisEvidenceDigest,
   createMonthlyAnalysisCacheKey,
@@ -224,15 +225,47 @@ describe("createWindowAnalysisCacheKey", () => {
   });
 
   it("does not collide with a key the monthly resolver would have produced", () => {
-    // The resolver version is bumped, so every run cached under the old scheme
-    // recomputes once rather than being reused under a heading it never
-    // answered. This asserts the bump actually happened.
-    const asMonth = createWindowAnalysisCacheKey({
+    // The real comparison, not a hash-shaped literal. January 2026 as a month
+    // and January 2026 as a window are the same question asked two ways; the
+    // two resolvers must still answer with different keys, or a run cached
+    // under the retired scheme would be served for a window nobody analysed.
+    const monthly = createMonthlyAnalysisCacheKey({
+      ...base,
+      month: "2026-01",
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-31",
+    });
+    const windowed = createWindowAnalysisCacheKey({
       ...base,
       windowStart: "2026-01-01",
       windowEnd: "2026-01-31",
     });
-    expect(asMonth).not.toBe("d41d8cd98f00b204e9800998ecf8427e".repeat(2));
-    expect(createWindowAnalysisCacheKey(base)).not.toBe(asMonth);
+
+    expect(windowed).not.toBe(monthly);
+  });
+
+  it("pins the resolver version, so a deliberate invalidation stays deliberate", () => {
+    // The sibling suite pins MONTHLY_ANALYSIS_RESOLVER_VERSION the same way.
+    // Without this, `resolverVersion` could be dropped from the hashed object
+    // entirely and every test would still pass -- and the one lever that can
+    // invalidate every cached answer at once would be gone unnoticed.
+    expect(ANALYSIS_RESOLVER_VERSION).toBe(2);
+  });
+
+  it("misses when the organization or channel changes", () => {
+    // Tenant scope is part of the question's identity. The database also scopes
+    // the lookup by organization, so this is the inner of two fences -- but a
+    // key that ignored either would make the outer fence the only one.
+    const key = createWindowAnalysisCacheKey(base);
+
+    expect(
+      createWindowAnalysisCacheKey({
+        ...base,
+        organizationId: "22222222-2222-4222-8222-222222222222",
+      }),
+    ).not.toBe(key);
+    expect(
+      createWindowAnalysisCacheKey({ ...base, channelId: "33333333-3333-4333-8333-333333333333" }),
+    ).not.toBe(key);
   });
 });
