@@ -40,6 +40,8 @@
     "@tanstack/react-form": "^1.33.3",
     "@tanstack/react-query": "^5.101.4",
     "@trigger.dev/sdk": "4.5.16",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.4",
     "ai": "5.0.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
