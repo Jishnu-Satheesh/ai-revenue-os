@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 
-import { marketProfileDocumentV1Schema } from "@/domain/growth-intelligence/schemas";
+import {
+  marketProfileDocumentV1Schema,
+  marketProfileDocumentV2Schema,
+} from "@/domain/growth-intelligence/schemas";
 import { toPublicError } from "@/lib/errors";
 
 const idempotencyKeySchema = z.string().trim().min(16).max(200);
@@ -40,6 +43,17 @@ export const marketProfileDecisionRouteParamsSchema = marketProfileRouteParamsSc
   .extend({ versionId: z.string().uuid() })
   .strict();
 
+export const startBranchResearchBodySchema = z
+  .object({
+    branchId: z.string().uuid(),
+    document: marketProfileDocumentV2Schema,
+    expectedCurrentVersionId: z.string().uuid().nullable(),
+    idempotencyKey: idempotencyKeySchema,
+  })
+  .strict();
+
+export type StartBranchResearchBody = z.infer<typeof startBranchResearchBodySchema>;
+
 const itemFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
 
 const itemReasonSchema = z.string().trim().min(1).max(500);
@@ -68,6 +82,10 @@ export const itemDecisionBodySchema = z.discriminatedUnion("decision", [
 ]);
 
 export type ItemDecisionBody = z.infer<typeof itemDecisionBodySchema>;
+
+export const itemFeedbackBodySchema = z.object({ helpful: z.boolean() }).strict();
+
+export type ItemFeedbackBody = z.infer<typeof itemFeedbackBodySchema>;
 
 export const itemDecisionRouteParamsSchema = marketProfileRouteParamsSchema
   .extend({ itemId: z.string().uuid() })

@@ -5237,3 +5237,82 @@ not run `pnpm format` in a shared tree without expecting that.
 **Verification.** Full Vitest 4,357 passed / 6 skipped across 424 files; cold typecheck clean; lint
 0 errors and 31 pre-existing warnings; pgTAP suites pass. Every fix was exercised against staging
 through the real routes, not only in tests.
+
+### 2026-09-08 · codex · Market monitoring and completed-research design
+
+- **Claimed documentation:**
+  `docs/superpowers/specs/2026-09-08-market-monitoring-research-completion-design.md`,
+  `specs/022-growth-intelligence.md`, ADR 0047, and this board.
+- **Approved experience:** replace the header action with the prototype's **Market monitoring**
+  control and one review dialog; select one active branch; edit up to 20 topics and five competitor
+  leads; keep canonical branch data unchanged; automatically update active-run status; place cited
+  outcomes in **Insights & market** and derived actions in **Recommendations**.
+- **Discovered production gap:** the present Exa adapter is deliberately unavailable, the research
+  scope ignores competitors, confirmation enqueues an organization-scoped request, research stores
+  no claims, and completion has no immediate synthesis handoff. A modal-only correction would be
+  misleading.
+- **Approved architecture:** Gemini Grounding with Google Search and optional URL Context, followed
+  by a separate validated claim-extraction stage; branch-scoped request lineage; a durable
+  `market_evidence_changed` synthesis handoff; no fifth workspace tab. Provider enablement remains
+  gated by billing, data-handling, citation, bounded-cost, and live-canary evidence.
+- **Status:** design approved in chat; written contract prepared for user review before the
+  execution plan and implementation.
+
+### 2026-09-08 · codex · Resolve Market monitoring design review gaps
+
+- **Claimed documentation:** the 2026-09-08 Market monitoring design, Spec 022, ADR 0047,
+  `docs/superpowers/plans/2026-09-08-market-monitoring-research-completion.md`, and this board.
+- **Authorization:** user requested solutions for all six significant review gaps, revised written
+  design, and an execution plan. This is documentation work; implementation approval is pending.
+- **Correction to the preceding entry:** Google Search grounding is no longer the proposed
+  persistent-evidence provider. Its published terms conflict with automated evidence reuse.
+  Proposed replacement: Brave Search under explicit storage/reuse rights, with Gemini analysis;
+  account-specific rights and retention evidence remain a release requirement.
+- **Scope:** independent branch profiles; pipeline-level progress; atomic research-to-synthesis
+  handoff; branch-fenced business evidence; deterministic coverage, spend reservations and recovery.
+  Preserve existing unrelated worktree changes and existing immutable v1 history.
+- **Result:** revised design/ADR 0047/Spec 022 and a 12-task execution plan, including exact test
+  scenarios, tenant/branch checks, retention, launch prerequisites and forward-compatible rollback.
+  Proposed defaults are 26 primary searches plus two retries, USD 1 per pipeline and USD 5 per
+  organization local day. Missing locality is completed as research-only context in the dialog;
+  no unverified canonical-location repair link is promised.
+- **Verification:** documentation formatting, relative links, placeholder scan and diff whitespace
+  checked. No feature code, staging migration, provider purchase or live research performed.
+
+### 2026-09-08 · codex · Market monitoring implementation handoff
+
+- **Claimed:** `docs/superpowers/prompts/2026-09-08-market-monitoring-implementation-handoff.md`
+  and this board, at the user's explicit request for a detailed successor-agent prompt.
+- **Handoff state:** revised design and 12-task plan are written but implementation approval is
+  pending. Preserve their uncommitted revisions; commit 9c01270 contains the superseded design.
+  No application code, database migration or paid provider work was performed by this design pass.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 1 baseline (12-task plan)
+
+- **Claimed:** `docs/verification/growth-intelligence/2026-09-08-market-monitoring.md` (new) and
+  this board. User approved the revised plan with "Approve, start Task 1".
+- **Scope:** read-only baseline only. No migration, provider call, paid canary, or feature code.
+- **Baseline:** HEAD 481ca76 on feat/governed-channel-intelligence; 111 dirty paths preserved
+  untouched; staging migrations 242/242 in sync, none pending; GI vitest 40 files / 334 tests
+  green; typecheck has 5 pre-existing errors in unrelated channel month-window files, 0 GI.
+- **Provider:** no Brave key configured — Brave qualification blocked; Gemini key names present
+  but model/rate/bounds qualification still pending. Fixture-based implementation only.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 2 domain contracts (12-task plan)
+
+- **Claimed files (Task 2 only):** `src/domain/growth-intelligence/types.ts`, `schemas.ts`,
+  `profile-digest.ts`, `request-fingerprint.ts`, `errors.ts`, `index.ts`,
+  `src/domain/growth-intelligence/research-pipeline.ts` (new) and `research-pipeline.test.ts`
+  (new), `src/modules/growth-intelligence/application/ports.ts`, `api-schemas.ts`,
+  `src/modules/growth-intelligence/infrastructure/research/ports.ts`, plus test extensions in
+  `schemas.test.ts`, `profile-digest.test.ts`, `request-fingerprint.test.ts` and
+  `application/api-schemas.test.ts`. Report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-2-report.md`.
+- **Scope:** typed contracts only (v2 branch profile + union, nine pipeline stages, coverage
+  entry, start input/result, validated retrieval result). No database, UI, or provider calls.
+  Pre-existing uncommitted `itemFeedbackBodySchema` lines in `api-schemas.ts` belong to another
+  session and are preserved untouched.
+- **Status:** done — GI vitest 33 files / 351 tests green; typecheck shows only the 5 pre-existing
+  channel errors plus one anticipated trigger-adapter coupling documented in the task report for
+  Tasks 6/8. One self-caused board incident (prettier reflow + checkout) repaired by verbatim
+  reconstruction; board diff is additive-only.

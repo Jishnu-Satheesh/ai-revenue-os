@@ -140,4 +140,19 @@ describe("createGrowthIntelligenceRequestFingerprint", () => {
 
     expect(() => createGrowthIntelligenceRequestFingerprint(value)).toThrow(/bucket/i);
   });
+
+  it("stays frozen while pipeline contracts are introduced alongside it", () => {
+    expect(createGrowthIntelligenceRequestFingerprint(input())).toBe(
+      "83ff7ff74b7da6205d7f09cb66c95d83bec41516160e4eef7bdde618719e262f",
+    );
+  });
+
+  it("rejects unknown fields instead of silently widening the bound scope", () => {
+    expect(() =>
+      createGrowthIntelligenceRequestFingerprint({
+        ...input(),
+        pipelineId: "99999999-9999-4999-8999-999999999999",
+      } as GrowthIntelligenceRequestFingerprintInput),
+    ).toThrow();
+  });
 });

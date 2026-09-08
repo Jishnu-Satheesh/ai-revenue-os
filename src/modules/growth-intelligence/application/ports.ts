@@ -1,5 +1,8 @@
 import type { EventPublisher } from "@/domain/events/types";
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 
 export type MarketProfileProposalContext = {
   publicIdentity: {
@@ -128,4 +131,21 @@ export type MarketProfileServiceDependencies = {
   proposalProvider?: MarketProfileProposalProvider;
   events: EventPublisher;
   now?: () => Date;
+};
+
+export type StartBranchResearchInput = {
+  organizationId: string;
+  actorId: string;
+  branchId: string;
+  document: MarketProfileDocumentV2;
+  expectedCurrentVersionId: string | null;
+  idempotencyKey: string;
+  correlationId: string;
+};
+
+export type StartBranchResearchResult = {
+  outcome: "started" | "existing_active" | "replayed";
+  profileVersionId: string;
+  pipelineId: string;
+  researchRequestId: string;
 };
