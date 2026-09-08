@@ -212,8 +212,6 @@ describe("defaultAnalysisWindow", () => {
   });
 });
 
-import { describeGrainMismatch } from "@/domain/analysis/window-selection";
-
 describe("describeGrainMismatch", () => {
   const monthly = {
     windowStart: "2026-05-01",
