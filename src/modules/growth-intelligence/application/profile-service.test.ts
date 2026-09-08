@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EventPublisher } from "@/domain/events/types";
 import { marketProfileDocumentV1Schema } from "@/domain/growth-intelligence/schemas";
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import type {
   MarketProfileProposalContext,
   MarketProfileProposalProvider,
@@ -80,8 +83,52 @@ const readProposalContext = vi.fn();
 const findProposalReplay = vi.fn();
 const propose = vi.fn();
 const decide = vi.fn();
+const startBranchResearch = vi.fn();
 const generate = vi.fn();
 const publish = vi.fn();
+
+const branchId = "60000000-0000-4000-8000-000000000006";
+
+const branchDocument: MarketProfileDocumentV2 = {
+  schemaVersion: 2,
+  branchId,
+  publicIdentity: {
+    approvedName: "Malabar Table",
+    domains: ["malabartable.example"],
+    publicUrls: ["https://malabartable.example/"],
+  },
+  nicheDescriptors: ["Kerala cuisine"],
+  geographies: [
+    {
+      layer: "trade_area",
+      locationRef: "trade-area:dubai-marina",
+      name: "Dubai Marina",
+      branchId,
+    },
+    { layer: "city", locationRef: "city:dubai", name: "Dubai", countryCode: "AE" },
+    {
+      layer: "country",
+      locationRef: "country:ae",
+      name: "United Arab Emirates",
+      countryCode: "AE",
+    },
+  ],
+  competitors: [],
+  topics: [{ key: "kerala-cuisine", label: "Kerala cuisine", provenance: "operator" }],
+  sourcePolicy: {
+    excludedDomains: [],
+    excludedPublishers: [],
+    excludedCompetitorKeys: [],
+    allowBoundedQuotes: false,
+    maxQuotationCharacters: 0,
+  },
+  cadence: {
+    timeZone: "Asia/Dubai",
+    dailyLocalTime: "06:00",
+    weeklyDay: "monday",
+    weeklyLocalTime: "07:00",
+  },
+};
 
 function service() {
   const repository: MarketProfileRepository = {
@@ -90,6 +137,7 @@ function service() {
     findProposalReplay,
     propose,
     decide,
+    startBranchResearch,
   };
   const proposalProvider: MarketProfileProposalProvider = {
     modelProvider: "google",
@@ -368,5 +416,109 @@ describe("MarketProfileService", () => {
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({ eventName: "market_profile.disabled" }),
     );
+  });
+
+  it("starts branch research for one branch and emits the start event once", async () => {
+    startBranchResearch.mockResolvedValue({
+      outcome: "started",
+      profileVersionId: versionId,
+      pipelineId: "70000000-0000-4000-8000-000000000007",
+      researchRequestId: "80000000-0000-4000-8000-000000000008",
+    });
+
+    const result = await service().startBranchResearch({
+      organizationId,
+      actorId,
+      branchId,
+      document: branchDocument,
+      expectedCurrentVersionId: null,
+      idempotencyKey: "branch-research-0001",
+      correlationId,
+    });
+
+    expect(result.outcome).toBe("started");
+    expect(startBranchResearch).toHaveBeenCalledWith({
+      organizationId,
+      actorId,
+      branchId,
+      document: expect.objectContaining({ schemaVersion: 2, branchId }),
+      profileDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      expectedCurrentVersionId: null,
+      idempotencyKey: "branch-research-0001",
+      correlationId,
+    });
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "growth_intelligence.research_started",
+        payload: {
+          profileVersionId: versionId,
+          pipelineId: "70000000-0000-4000-8000-000000000007",
+          researchRequestId: "80000000-0000-4000-8000-000000000008",
+        },
+      }),
+    );
+  });
+
+  it("emits no start event when the scope converges on existing work", async () => {
+    startBranchResearch.mockResolvedValue({
+      outcome: "existing_active",
+      profileVersionId: versionId,
+      pipelineId: "70000000-0000-4000-8000-000000000007",
+      researchRequestId: "80000000-0000-4000-8000-000000000008",
+    });
+
+    const result = await service().startBranchResearch({
+      organizationId,
+      actorId,
+      branchId,
+      document: branchDocument,
+      expectedCurrentVersionId: null,
+      idempotencyKey: "branch-research-0002",
+      correlationId,
+    });
+
+    expect(result.outcome).toBe("existing_active");
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("rejects a v1 document at the branch start entry point", async () => {
+    await expect(
+      service().startBranchResearch({
+        organizationId,
+        actorId,
+        branchId,
+        document: { ...branchDocument, schemaVersion: 1 } as never,
+        expectedCurrentVersionId: null,
+        idempotencyKey: "branch-research-0001",
+        correlationId,
+      }),
+    ).rejects.toThrow();
+    expect(startBranchResearch).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("rejects a document bound to another branch without persisting anything", async () => {
+    const otherBranch = "90000000-0000-4000-8000-000000000009";
+    const foreignDocument = {
+      ...branchDocument,
+      branchId: otherBranch,
+      geographies: branchDocument.geographies.map((geography) =>
+        geography.layer === "trade_area" ? { ...geography, branchId: otherBranch } : geography,
+      ),
+    };
+    await expect(
+      service().startBranchResearch({
+        organizationId,
+        actorId,
+        branchId,
+        document: foreignDocument as never,
+        expectedCurrentVersionId: null,
+        idempotencyKey: "branch-research-0001",
+        correlationId,
+      }),
+    ).rejects.toThrow("The reviewed scope does not match the selected branch.");
+    expect(startBranchResearch).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   });
 });

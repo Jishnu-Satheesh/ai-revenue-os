@@ -118,4 +118,34 @@ describe("GET Market Profile", () => {
     });
     expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain("raw_customer_payload");
   });
+
+  it("reads the legacy organization scope when no branch is selected", async () => {
+    const response = await GET(new Request("https://example.test/market-profile"), {
+      params: Promise.resolve({ organizationId }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.read).toHaveBeenCalledWith({ organizationId, branchId: null });
+  });
+
+  it("pins the read to the selected branch scope", async () => {
+    const branchId = "60000000-0000-4000-8000-000000000006";
+    const response = await GET(
+      new Request(`https://example.test/market-profile?branchId=${branchId}`),
+      { params: Promise.resolve({ organizationId }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.read).toHaveBeenCalledWith({ organizationId, branchId });
+  });
+
+  it("rejects an invalid branch selector without touching the service", async () => {
+    const response = await GET(
+      new Request("https://example.test/market-profile?branchId=not-a-branch"),
+      { params: Promise.resolve({ organizationId }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.read).not.toHaveBeenCalled();
+  });
 });

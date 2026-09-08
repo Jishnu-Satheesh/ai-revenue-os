@@ -1,12 +1,20 @@
 import { createHash } from "node:crypto";
 
-import { marketProfileDocumentV1Schema } from "@/domain/growth-intelligence/schemas";
+import {
+  marketProfileDocumentV1Schema,
+  marketProfileDocumentV2Schema,
+} from "@/domain/growth-intelligence/schemas";
 import { createMarketProfileDigest } from "@/domain/growth-intelligence/profile-digest";
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import { DomainError } from "@/lib/errors";
 import type {
   MarketProfileProposalContext,
+  MarketProfileScope,
   MarketProfileServiceDependencies,
+  StartBranchResearchInput,
 } from "@/modules/growth-intelligence/application/ports";
 
 type ProposeInput = {
@@ -120,8 +128,8 @@ export function createMarketProfileService(dependencies: MarketProfileServiceDep
   }
 
   return {
-    read(organizationId: string) {
-      return dependencies.repository.read(organizationId);
+    read(scope: MarketProfileScope) {
+      return dependencies.repository.read(scope);
     },
 
     async propose(input: ProposeInput) {
@@ -144,7 +152,12 @@ export function createMarketProfileService(dependencies: MarketProfileServiceDep
         if (!provider) {
           throw new DomainError("INTEGRATION_ERROR", "Market Profile discovery is not configured.");
         }
-        const context = await dependencies.repository.readProposalContext(input.organizationId);
+        const context = await dependencies.repository.readProposalContext({
+          organizationId: input.organizationId,
+          // Legacy AI proposals stay on the explicit null-branch organization
+          // scope. Branch research starts through startBranchResearch instead.
+          branchId: null,
+        });
         proposalContext = {
           source: "ai",
           modelProvider: provider.modelProvider,
@@ -233,6 +246,35 @@ export function createMarketProfileService(dependencies: MarketProfileServiceDep
             decisionId: outcome.decisionId,
             profileVersionId: outcome.profileVersionId,
             ...(outcome.requestId ? { requestId: outcome.requestId } : {}),
+          },
+        });
+      }
+      return outcome;
+    },
+
+    async startBranchResearch(input: StartBranchResearchInput) {
+      const document: MarketProfileDocumentV2 = marketProfileDocumentV2Schema.parse(input.document);
+      if (document.branchId !== input.branchId) {
+        throw new DomainError(
+          "DOMAIN_ERROR",
+          "The reviewed scope does not match the selected branch.",
+        );
+      }
+      const outcome = await dependencies.repository.startBranchResearch({
+        ...input,
+        document,
+        profileDigest: createMarketProfileDigest(document),
+      });
+      if (outcome.outcome === "started") {
+        await publish({
+          organizationId: input.organizationId,
+          actorId: input.actorId,
+          correlationId: input.correlationId,
+          eventName: "growth_intelligence.research_started",
+          payload: {
+            profileVersionId: outcome.profileVersionId,
+            pipelineId: outcome.pipelineId,
+            researchRequestId: outcome.researchRequestId,
           },
         });
       }

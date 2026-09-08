@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { createEventPublisher } from "@/domain/events/publisher";
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { DomainError, toPublicError } from "@/lib/errors";
@@ -9,12 +10,13 @@ import { logger } from "@/lib/logger";
 import {
   marketProfileApiErrorResponse,
   marketProfileCorrelationState,
+  startBranchResearchBodySchema,
 } from "@/modules/growth-intelligence/application/api-schemas";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
 import { createMarketProfileService } from "@/modules/growth-intelligence/application/profile-service";
 import { createAuthenticatedMarketProfileRepository } from "@/modules/growth-intelligence/infrastructure/profile-repository";
 
-export async function GET(
+export async function POST(
   request: Request,
   { params }: { params: Promise<{ organizationId: string }> },
 ) {
@@ -32,42 +34,61 @@ export async function GET(
     if (
       !hasOrganizationPermission(
         context.membership.role as OrganizationRole,
-        "growth_intelligence.read",
+        "growth_intelligence.manage",
       )
     ) {
       throw new DomainError(
         "AUTHORIZATION_ERROR",
-        "You do not have permission to read Market Intelligence for this organization.",
+        "You do not have permission to start Market Research for this organization.",
       );
     }
     correlationId = correlation.parseAfterAuthorization();
 
-    // Explicit scope only: a branchId query selects that branch's profile,
-    // otherwise the legacy organization profile. Never a silent singleton.
-    const branchIdParam = new URL(request.url).searchParams.get("branchId");
-    const branchId =
-      branchIdParam === null
-        ? null
-        : /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-              branchIdParam,
-            )
-          ? branchIdParam
-          : null;
-    if (branchIdParam !== null && branchId === null) {
-      throw new DomainError("VALIDATION_ERROR", "The selected branch is not valid.");
+    const body = startBranchResearchBodySchema.parse(await request.json().catch(() => ({})));
+    if (body.document.branchId !== body.branchId) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "The reviewed scope does not match the selected branch.",
+      );
     }
-
     const service = createMarketProfileService({
       repository: createAuthenticatedMarketProfileRepository(context.supabase),
       events: createEventPublisher(),
     });
-    const marketProfile = await service.read({ organizationId, branchId });
-    const response = NextResponse.json({ marketProfile });
+    const research = await service.startBranchResearch({
+      organizationId,
+      actorId: context.user.id,
+      branchId: body.branchId,
+      document: body.document,
+      expectedCurrentVersionId: body.expectedCurrentVersionId,
+      idempotencyKey: body.idempotencyKey,
+      correlationId,
+    });
+    const response = NextResponse.json(
+      { research, correlationId },
+      { status: research.outcome === "started" ? 201 : 200 },
+    );
     response.headers.set("x-correlation-id", correlationId);
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {
-    logger.warn("growth_intelligence.market_profile_api_failed", {
+    // Version and idempotency conflicts are typed outcomes, never success:
+    // the client keeps the operator's edits and offers retry guidance.
+    if (error instanceof GrowthIntelligenceError) {
+      logger.warn("growth_intelligence.market_profile_research_conflict", {
+        organizationId,
+        correlationId,
+        errorCode: error.code,
+      });
+      const response = NextResponse.json(
+        { error: { code: error.code, message: error.message } },
+        { status: 422 },
+      );
+      response.headers.set("x-correlation-id", correlationId);
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    logger.warn("growth_intelligence.market_profile_research_api_failed", {
       organizationId,
       correlationId,
       errorCode: toPublicError(error).code,

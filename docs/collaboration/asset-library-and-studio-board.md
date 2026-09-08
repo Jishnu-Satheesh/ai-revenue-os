@@ -5353,3 +5353,42 @@ through the real routes, not only in tests.
   dry-run review, hosted pgTAP, staged validator/proposal execution with safe counts only,
   narrow `database.types.ts` edit for branch scope plus pipeline lineage, coverage test,
   path-limited commit of Task 3 files only, and the task report.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 4 atomic branch start + scoped reads + due scheduling (12-task plan)
+
+- **Claimed files (Task 4 only):** new migration
+  `supabase/migrations/*_growth_intelligence_branch_research_start.sql`, new pgTAP suite
+  `supabase/tests/database/growth_intelligence_branch_research_start_test.sql`,
+  `src/modules/growth-intelligence/application/profile-service.ts` and `ports.ts`,
+  `src/modules/growth-intelligence/infrastructure/profile-repository.ts` (and
+  `profile-proposal-provider.ts` only if a real change proves necessary),
+  plus their tests,
+  `src/app/api/organizations/[organizationId]/market-profile/route.ts`,
+  `proposals/route.ts`, `versions/[versionId]/decisions/route.ts` with route tests,
+  new `src/app/api/organizations/[organizationId]/market-profile/research/route.ts` and
+  `route.test.ts`, narrow `src/lib/supabase/database.types.ts` touch if the migration adds
+  exposed columns (none planned), minimal scope-pinning in
+  `src/trigger/growth-intelligence.ts` (`readApprovedProfile` only; the Task 6/8 marker
+  stays untouched), report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-4-report.md`,
+  and this board. No UI, workflow, consolidation, or synthesis file is in scope; other
+  sessions' dirty paths are preserved untouched and will not be staged, formatted,
+  stashed, or pushed. No branch rows outside tests; no seed/enablement changes.
+- **Status:** in-progress — red API/SQL tests first, then one-transaction start RPC,
+  scoped reads, due/report-current rescope, green tests + typecheck + hosted pgTAP,
+  staged PL/pgSQL execution, path-limited commit.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 4 resumed (same claim, forced-caller amendment)
+
+- Resuming the Task 4 claim above in a fresh session. Found substantial prior-session
+  work on disk (three `growth_intelligence_branch_research_start*` migrations already
+  paired Local|Remote on staging, pgTAP suite, research route + test, service/repository/
+  trigger diffs). Remaining: typecheck repairs, forced-caller rescope, route-test
+  coverage, green suites, hosted pgTAP, staged PL/pgSQL execution, path-limited commit.
+- **Claim amendment (additive, compile-forced):** the scoped `read(scope)` signature
+  breaks two legacy organization-scope callers, so they each get a one-line explicit
+  legacy-null rescope (`{ organizationId, branchId: null }`, behavior-preserving):
+  `src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx`
+  and `src/app/api/organizations/[organizationId]/growth-intelligence/route.ts`.
+  Also adding branch-scope cases to the already-claimed market-profile `route.test.ts`.
+  No other file enters scope; other sessions' lines in those files are preserved.

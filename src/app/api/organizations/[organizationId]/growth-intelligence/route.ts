@@ -111,7 +111,8 @@ export async function GET(
       repository: createAuthenticatedMarketProfileRepository(context.supabase),
       events: createEventPublisher(),
     });
-    const profile = await service.read(organizationId);
+    // Legacy organization scope: this read surface predates branch profiles.
+    const profile = await service.read({ organizationId, branchId: null });
     const currentVersionId = profile.profile?.currentVersionId ?? null;
 
     const reads = createAuthenticatedGrowthIntelligenceReadRepository(context.supabase);

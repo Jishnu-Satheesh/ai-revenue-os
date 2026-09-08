@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import {
   createAuthenticatedMarketProfileRepository,
   type MarketProfilePersistence,
@@ -46,6 +49,44 @@ const document: MarketProfileDocumentV1 = {
 
 type QueryResult = { data: unknown; error: unknown };
 
+const branchIdFixture = "60000000-0000-4000-8000-000000000006";
+
+const branchDocument: MarketProfileDocumentV2 = {
+  schemaVersion: 2,
+  branchId: branchIdFixture,
+  publicIdentity: {
+    approvedName: "Malabar Table",
+    domains: ["malabartable.example"],
+    publicUrls: ["https://malabartable.example/"],
+  },
+  nicheDescriptors: ["Kerala cuisine"],
+  geographies: [
+    {
+      layer: "trade_area",
+      locationRef: "trade-area:dubai-marina",
+      name: "Dubai Marina",
+      branchId: branchIdFixture,
+    },
+    { layer: "city", locationRef: "city:dubai", name: "Dubai", countryCode: "AE" },
+    { layer: "country", locationRef: "country:ae", name: "UAE", countryCode: "AE" },
+  ],
+  competitors: [],
+  topics: [{ key: "kerala-cuisine", label: "Kerala cuisine", provenance: "operator" }],
+  sourcePolicy: {
+    excludedDomains: [],
+    excludedPublishers: [],
+    excludedCompetitorKeys: [],
+    allowBoundedQuotes: false,
+    maxQuotationCharacters: 0,
+  },
+  cadence: {
+    timeZone: "Asia/Dubai",
+    dailyLocalTime: "06:00",
+    weeklyDay: "monday",
+    weeklyLocalTime: "07:00",
+  },
+};
+
 function persistence(input: { results?: Record<string, QueryResult[]>; rpcResult?: QueryResult }) {
   const queues = new Map(
     Object.entries(input.results ?? {}).map(([table, results]) => [table, [...results]]),
@@ -60,6 +101,10 @@ function persistence(input: { results?: Record<string, QueryResult[]>; rpcResult
     const builder = {
       select: vi.fn(() => builder),
       eq: vi.fn((key: string, value: unknown) => {
+        filters.push([key, value]);
+        return builder;
+      }),
+      is: vi.fn((key: string, value: unknown) => {
         filters.push([key, value]);
         return builder;
       }),
@@ -131,7 +176,10 @@ describe("authenticated Market Profile repository", () => {
       },
     });
 
-    const result = await createAuthenticatedMarketProfileRepository(db.client).read(organizationId);
+    const result = await createAuthenticatedMarketProfileRepository(db.client).read({
+      organizationId,
+      branchId: null,
+    });
 
     expect(result.profile).toMatchObject({
       id: profileId,
@@ -224,9 +272,10 @@ describe("authenticated Market Profile repository", () => {
       },
     });
 
-    const result = await createAuthenticatedMarketProfileRepository(db.client).readProposalContext(
+    const result = await createAuthenticatedMarketProfileRepository(db.client).readProposalContext({
       organizationId,
-    );
+      branchId: null,
+    });
 
     expect(result).toEqual({
       publicIdentity: {
@@ -329,6 +378,226 @@ describe("authenticated Market Profile repository", () => {
       replayed: true,
       isRevision: true,
     });
+  });
+
+  it("maps a branch start idempotency conflict to safe domain copy", async () => {
+    const db = persistence({
+      rpcResult: {
+        data: null,
+        error: {
+          code: "23505",
+          message: "market_profile_start_idempotency_conflict: raw detail",
+        },
+      },
+    });
+
+    await expect(
+      createAuthenticatedMarketProfileRepository(db.client).startBranchResearch({
+        organizationId,
+        actorId,
+        branchId: "60000000-0000-4000-8000-000000000006",
+        document: branchDocument,
+        profileDigest: "c".repeat(64),
+        expectedCurrentVersionId: null,
+        idempotencyKey: "branch-research-0001",
+        correlationId,
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_IDEMPOTENCY_CONFLICT" });
+
+    expect(db.rpc).toHaveBeenCalledWith("start_branch_market_research", {
+      p_organization_id: organizationId,
+      p_actor_id: actorId,
+      p_branch_id: "60000000-0000-4000-8000-000000000006",
+      p_profile_document: branchDocument,
+      p_profile_digest: "c".repeat(64),
+      p_expected_current_version_id: null,
+      p_idempotency_key: "branch-research-0001",
+      p_correlation_id: correlationId,
+    });
+  });
+
+  it("maps a stale expected branch version to a version conflict", async () => {
+    const db = persistence({
+      rpcResult: {
+        data: null,
+        error: { code: "23505", message: "market_profile_version_conflict" },
+      },
+    });
+
+    await expect(
+      createAuthenticatedMarketProfileRepository(db.client).startBranchResearch({
+        organizationId,
+        actorId,
+        branchId: "60000000-0000-4000-8000-000000000006",
+        document: branchDocument,
+        profileDigest: "c".repeat(64),
+        expectedCurrentVersionId: versionId,
+        idempotencyKey: "branch-research-0001",
+        correlationId,
+      }),
+    ).rejects.toMatchObject({ code: "PROFILE_VERSION_CONFLICT" });
+  });
+
+  it("returns the started branch pipeline from the start RPC", async () => {
+    const pipelineId = "70000000-0000-4000-8000-000000000007";
+    const researchRequestId = "80000000-0000-4000-8000-000000000008";
+    const db = persistence({
+      rpcResult: {
+        data: {
+          outcome: "started",
+          profileVersionId: versionId,
+          pipelineId,
+          researchRequestId,
+        },
+        error: null,
+      },
+    });
+
+    const result = await createAuthenticatedMarketProfileRepository(db.client).startBranchResearch({
+      organizationId,
+      actorId,
+      branchId: "60000000-0000-4000-8000-000000000006",
+      document: branchDocument,
+      profileDigest: "c".repeat(64),
+      expectedCurrentVersionId: null,
+      idempotencyKey: "branch-research-0001",
+      correlationId,
+    });
+
+    expect(result).toEqual({
+      outcome: "started",
+      profileVersionId: versionId,
+      pipelineId,
+      researchRequestId,
+    });
+  });
+
+  it("pins a branch read to that exact branch scope", async () => {
+    const branchId = "60000000-0000-4000-8000-000000000006";
+    const db = persistence({
+      results: {
+        organization_market_profiles: [
+          {
+            data: {
+              id: profileId,
+              current_version_id: versionId,
+              enabled: true,
+              next_daily_research_due_at: null,
+              next_weekly_synthesis_due_at: null,
+            },
+            error: null,
+          },
+        ],
+        organization_market_profile_versions: [{ data: [], error: null }],
+        organization_market_profile_decisions: [{ data: [], error: null }],
+      },
+    });
+
+    await createAuthenticatedMarketProfileRepository(db.client).read({
+      organizationId,
+      branchId,
+    });
+
+    const profileCall = db.calls.find((call) => call.table === "organization_market_profiles");
+    expect(profileCall?.filters).toContainEqual(["organization_id", organizationId]);
+    expect(profileCall?.filters).toContainEqual(["branch_id", branchId]);
+    for (const call of db.calls) {
+      if (call.table === "organization_market_profiles") continue;
+      expect(call.filters).toContainEqual(["market_profile_id", profileId]);
+    }
+  });
+
+  it("pins a legacy read to the explicit null branch scope", async () => {
+    const db = persistence({
+      results: {
+        organization_market_profiles: [{ data: null, error: null }],
+      },
+    });
+
+    const result = await createAuthenticatedMarketProfileRepository(db.client).read({
+      organizationId,
+      branchId: null,
+    });
+
+    expect(result).toEqual({ profile: null, versions: [], decisions: [] });
+    const profileCall = db.calls.find((call) => call.table === "organization_market_profiles");
+    expect(profileCall?.filters).toContainEqual(["organization_id", organizationId]);
+    expect(
+      profileCall?.filters.some(
+        (filter) => filter[0] === "branch_id" && (filter[1] === null || filter[1] === "is-null"),
+      ),
+    ).toBe(true);
+  });
+
+  it("scopes AI proposal context to one branch without shared onboarding locality", async () => {
+    const branchId = "60000000-0000-4000-8000-000000000006";
+    const db = persistence({
+      results: {
+        organizations: [
+          {
+            data: {
+              name: "Malabar Table",
+              industry: "restaurant",
+              country_code: "AE",
+              default_timezone: "Asia/Dubai",
+            },
+            error: null,
+          },
+        ],
+        business_profiles: [
+          {
+            data: { business_model: "Kerala restaurant", value_proposition: "Family dining" },
+            error: null,
+          },
+        ],
+        branches: [
+          {
+            data: [
+              {
+                id: branchId,
+                name: "Dubai Marina",
+                timezone: "Asia/Dubai",
+                service_area: { city: "Dubai Marina" },
+              },
+            ],
+            error: null,
+          },
+        ],
+        onboarding_section_states: [
+          {
+            data: [
+              {
+                section_key: "products_services",
+                payload: { items: ["Appam"], categories: [] },
+              },
+              {
+                section_key: "branches_operations",
+                payload: { serviceArea: ["Deira shared area"] },
+              },
+            ],
+            error: null,
+          },
+        ],
+      },
+    });
+
+    const result = await createAuthenticatedMarketProfileRepository(db.client).readProposalContext({
+      organizationId,
+      branchId,
+    });
+
+    expect(result.locations).toEqual([
+      {
+        branchId,
+        name: "Dubai Marina",
+        serviceAreas: ["Dubai Marina"],
+        countryCode: "AE",
+        timeZone: "Asia/Dubai",
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(/Deira shared area/);
+    const branchCall = db.calls.find((call) => call.table === "branches");
+    expect(branchCall?.filters).toContainEqual(["id", branchId]);
   });
 
   it("maps a stale exact-version decision to safe domain copy", async () => {

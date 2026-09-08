@@ -53,7 +53,8 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
     repository: createAuthenticatedMarketProfileRepository(context.supabase),
     events: createEventPublisher(),
   });
-  const profile = await service.read(context.organizationId);
+  // Legacy organization scope: this workspace surface predates branch profiles.
+  const profile = await service.read({ organizationId: context.organizationId, branchId: null });
   const currentVersionId = profile.profile?.currentVersionId ?? null;
 
   const reads = createAuthenticatedGrowthIntelligenceReadRepository(context.supabase);

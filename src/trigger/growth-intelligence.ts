@@ -160,12 +160,20 @@ function createRequestOperations(supabase: WorkerClient): MarketResearchClaim {
 async function readApprovedProfile(
   supabase: WorkerClient,
   organizationId: string,
+  branchId: string | null = null,
 ): Promise<ApprovedMarketProfileView | null> {
-  const { data: profile, error: profileError } = await supabase
+  // Exact scope only: a set branch reads its own profile, null reads the
+  // legacy organization profile. Never read by organization alone — the first
+  // branch row in an organization would make maybeSingle() throw. Branch
+  // pipeline work threads its request branch through here in Tasks 8/9; until
+  // then the legacy null scope preserves existing worker behavior exactly.
+  let profileQuery = supabase
     .from("organization_market_profiles")
     .select("id, current_version_id, enabled")
-    .eq("organization_id", organizationId)
-    .maybeSingle();
+    .eq("organization_id", organizationId);
+  profileQuery =
+    branchId === null ? profileQuery.is("branch_id", null) : profileQuery.eq("branch_id", branchId);
+  const { data: profile, error: profileError } = await profileQuery.maybeSingle();
   if (profileError) throw new Error("The Market Profile could not be loaded.");
   if (!profile || !profile.current_version_id) return null;
   const { data: version, error: versionError } = await supabase
@@ -243,8 +251,8 @@ function createResearchDependencies(signal: AbortSignal) {
   return {
     requests: createRequestOperations(supabase),
     profiles: {
-      readCurrent: (input: { organizationId: string }) =>
-        readApprovedProfile(supabase, input.organizationId),
+      readCurrent: (input: { organizationId: string; branchId?: string | null }) =>
+        readApprovedProfile(supabase, input.organizationId, input.branchId ?? null),
     },
     evidence: createMarketEvidenceRepository(supabase as unknown as MarketEvidencePersistence),
     adapter: getQualifiedMarketResearchAdapter(),
@@ -490,8 +498,8 @@ function createSynthesisDependencies(signal: AbortSignal) {
   return {
     requests: createRequestOperations(supabase),
     profiles: {
-      readCurrent: (input: { organizationId: string }) =>
-        readApprovedProfile(supabase, input.organizationId),
+      readCurrent: (input: { organizationId: string; branchId?: string | null }) =>
+        readApprovedProfile(supabase, input.organizationId, input.branchId ?? null),
     },
     synthesize: (synthesisInput: Parameters<typeof service.synthesize>[0]) =>
       service.synthesize(synthesisInput),

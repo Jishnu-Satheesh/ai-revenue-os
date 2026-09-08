@@ -1,5 +1,6 @@
 import type { EventPublisher } from "@/domain/events/types";
 import type {
+  MarketProfileDocument,
   MarketProfileDocumentV1,
   MarketProfileDocumentV2,
 } from "@/domain/growth-intelligence/types";
@@ -28,7 +29,7 @@ export type MarketProfileVersionView = {
   id: string;
   profileId: string;
   version: number;
-  document: MarketProfileDocumentV1;
+  document: MarketProfileDocument;
   digest: string;
   proposalSource: "operator" | "ai" | "system";
   createdAt: string;
@@ -54,6 +55,17 @@ export type MarketProfileView = {
   decisions: MarketProfileDecisionView[];
 };
 
+/**
+ * Every Market Profile read names its scope explicitly. A null branch is the
+ * legacy organization scope; a set branch is that branch's independent
+ * profile. Organization-only reads are forbidden: the first branch row in an
+ * organization would otherwise make a singleton read throw.
+ */
+export type MarketProfileScope = {
+  organizationId: string;
+  branchId: string | null;
+};
+
 export type MarketProfileProposalOutcome = {
   profileId: string;
   profileVersionId: string;
@@ -72,8 +84,8 @@ export type MarketProfileDecisionOutcome = {
 };
 
 export type MarketProfileRepository = {
-  read(organizationId: string): Promise<MarketProfileView>;
-  readProposalContext(organizationId: string): Promise<MarketProfileProposalContext>;
+  read(scope: MarketProfileScope): Promise<MarketProfileView>;
+  readProposalContext(scope: MarketProfileScope): Promise<MarketProfileProposalContext>;
   findProposalReplay(input: {
     organizationId: string;
     actorId: string;
@@ -113,6 +125,11 @@ export type MarketProfileRepository = {
     idempotencyKey: string;
     correlationId: string;
   }): Promise<MarketProfileDecisionOutcome>;
+  startBranchResearch(
+    input: StartBranchResearchInput & {
+      profileDigest: string;
+    },
+  ): Promise<StartBranchResearchResult>;
 };
 
 export type MarketProfileProposalProvider = {

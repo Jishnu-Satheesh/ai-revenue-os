@@ -6,8 +6,10 @@ import { z } from "zod";
 
 import {
   compareCanonicalText,
+  marketProfileDocumentSchema,
   marketProfileDocumentV1Schema,
 } from "@/domain/growth-intelligence/schemas";
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { DomainError } from "@/lib/errors";
 import type { Database } from "@/lib/supabase/database.types";
 import type {
@@ -18,12 +20,14 @@ import type {
   MarketProfileRepository,
   MarketProfileVersionView,
   MarketProfileView,
+  StartBranchResearchResult,
 } from "@/modules/growth-intelligence/application/ports";
 
 type QueryResult<T> = PromiseLike<{ data: T; error: unknown }>;
 type QueryBuilder<T> = QueryResult<T> & {
   select(columns: string): QueryBuilder<T>;
   eq(column: string, value: unknown): QueryBuilder<T>;
+  is(column: string, value: null): QueryBuilder<T>;
   in(column: string, values: readonly unknown[]): QueryBuilder<T>;
   order(column: string, options?: { ascending?: boolean }): QueryBuilder<T>;
   limit(count: number): QueryBuilder<T>;
@@ -57,6 +61,15 @@ const decisionOutcomeSchema = z
   })
   .strict();
 
+const startBranchResearchOutcomeSchema = z
+  .object({
+    outcome: z.enum(["started", "existing_active", "replayed"]),
+    profileVersionId: z.string().uuid(),
+    pipelineId: z.string().uuid(),
+    researchRequestId: z.string().uuid(),
+  })
+  .strict();
+
 function query<T>(persistence: MarketProfilePersistence, table: string): QueryBuilder<T> {
   return persistence.from(table) as QueryBuilder<T>;
 }
@@ -65,7 +78,7 @@ function databaseFailure(message: string, cause?: unknown): never {
   throw new DomainError("DOMAIN_ERROR", message, cause);
 }
 
-function mutationFailure(operation: "propose" | "decide", error: unknown): never {
+function mutationFailure(operation: "propose" | "decide" | "start", error: unknown): never {
   const message =
     typeof (error as { message?: unknown } | null)?.message === "string"
       ? (error as { message: string }).message
@@ -73,6 +86,18 @@ function mutationFailure(operation: "propose" | "decide", error: unknown): never
 
   if (message.includes("market_profile_version_not_found")) {
     throw new DomainError("DOMAIN_ERROR", "This Market Profile version is no longer available.");
+  }
+  if (message.includes("market_profile_version_conflict")) {
+    throw new GrowthIntelligenceError(
+      "PROFILE_VERSION_CONFLICT",
+      "The reviewed settings are no longer current. Review the latest settings and try again.",
+    );
+  }
+  if (message.includes("market_profile_start_idempotency_conflict")) {
+    throw new GrowthIntelligenceError(
+      "RESEARCH_IDEMPOTENCY_CONFLICT",
+      "This retry key was already used for different research settings. Start again with a new retry key.",
+    );
   }
   if (message.includes("market_profile_version_not_decidable")) {
     throw new DomainError("DOMAIN_ERROR", "This Market Profile version can no longer be decided.");
@@ -83,10 +108,24 @@ function mutationFailure(operation: "propose" | "decide", error: unknown): never
       "This retry key was already used for a different Market Profile change.",
     );
   }
+  if (message.includes("market_profile_branch_not_found")) {
+    throw new DomainError(
+      "DOMAIN_ERROR",
+      "The selected branch is no longer available for research.",
+    );
+  }
+  if (message.includes("market_profile_start_forbidden")) {
+    throw new DomainError(
+      "AUTHORIZATION_ERROR",
+      "You do not have permission to start research for this organization.",
+    );
+  }
   databaseFailure(
     operation === "propose"
       ? "The Market Profile proposal could not be saved."
-      : "The Market Profile decision could not be saved.",
+      : operation === "start"
+        ? "The branch research could not be started."
+        : "The Market Profile decision could not be saved.",
     error,
   );
 }
@@ -215,28 +254,39 @@ export function createAuthenticatedMarketProfileRepository(
   const persistence = client as unknown as MarketProfilePersistence;
 
   return {
-    async read(organizationId): Promise<MarketProfileView> {
-      const profileResult = await query<ProfileRow>(persistence, "organization_market_profiles")
+    async read(scope): Promise<MarketProfileView> {
+      const { organizationId, branchId } = scope;
+      let profileQuery = query<ProfileRow>(persistence, "organization_market_profiles")
         .select(
           "id,current_version_id,enabled,next_daily_research_due_at,next_weekly_synthesis_due_at",
         )
-        .eq("organization_id", organizationId)
-        .maybeSingle();
+        .eq("organization_id", organizationId);
+      // Exact scope only: a set branch reads its own profile, null reads the
+      // legacy organization profile. Never read by organization alone — the
+      // first branch row would make maybeSingle() throw.
+      profileQuery =
+        branchId === null
+          ? profileQuery.is("branch_id", null)
+          : profileQuery.eq("branch_id", branchId);
+      const profileResult = await profileQuery.maybeSingle();
       if (profileResult.error)
         databaseFailure("The Market Profile could not be loaded.", profileResult.error);
       if (!profileResult.data) return { profile: null, versions: [], decisions: [] };
 
+      const profileId = profileResult.data.id;
       const [versionsResult, decisionsResult] = await Promise.all([
         query<VersionRow[]>(persistence, "organization_market_profile_versions")
           .select(
             "id,market_profile_id,version,profile_document,profile_digest,proposal_source,created_at",
           )
           .eq("organization_id", organizationId)
+          .eq("market_profile_id", profileId)
           .order("version", { ascending: false })
           .limit(50),
         query<DecisionRow[]>(persistence, "organization_market_profile_decisions")
           .select("id,market_profile_version_id,decision,reason,created_at")
           .eq("organization_id", organizationId)
+          .eq("market_profile_id", profileId)
           .order("created_at", { ascending: false })
           .limit(100),
       ]);
@@ -253,7 +303,7 @@ export function createAuthenticatedMarketProfileRepository(
           id: row.id,
           profileId: row.market_profile_id,
           version: row.version,
-          document: marketProfileDocumentV1Schema.parse(row.profile_document),
+          document: marketProfileDocumentSchema.parse(row.profile_document),
           digest: row.profile_digest,
           proposalSource: row.proposal_source,
           createdAt: row.created_at,
@@ -282,7 +332,8 @@ export function createAuthenticatedMarketProfileRepository(
       };
     },
 
-    async readProposalContext(organizationId): Promise<MarketProfileProposalContext> {
+    async readProposalContext(scope): Promise<MarketProfileProposalContext> {
+      const { organizationId, branchId } = scope;
       type OrganizationRow = {
         name: string;
         industry: string;
@@ -301,6 +352,15 @@ export function createAuthenticatedMarketProfileRepository(
       };
       type SectionRow = { section_key: string; payload: unknown };
 
+      let branchesQuery = query<BranchRow[]>(persistence, "branches")
+        .select("id,name,timezone,service_area")
+        .eq("organization_id", organizationId)
+        .eq("is_active", true);
+      // A branch scope reads that branch only. The shared onboarding locality
+      // is never copied into a branch: each branch researches its own
+      // confirmed service area.
+      if (branchId !== null) branchesQuery = branchesQuery.eq("id", branchId);
+
       const [organizationResult, businessProfileResult, branchesResult, sectionsResult] =
         await Promise.all([
           query<OrganizationRow>(persistence, "organizations")
@@ -311,11 +371,7 @@ export function createAuthenticatedMarketProfileRepository(
             .select("business_model,value_proposition")
             .eq("organization_id", organizationId)
             .maybeSingle(),
-          query<BranchRow[]>(persistence, "branches")
-            .select("id,name,timezone,service_area")
-            .eq("organization_id", organizationId)
-            .eq("is_active", true)
-            .order("created_at", { ascending: true }),
+          branchesQuery.order("created_at", { ascending: true }),
           query<SectionRow[]>(persistence, "onboarding_section_states")
             .select("section_key,payload")
             .eq("organization_id", organizationId)
@@ -338,6 +394,12 @@ export function createAuthenticatedMarketProfileRepository(
         databaseFailure("Confirmed business context could not be loaded.", failure.error);
       const organization = organizationResult.data;
       if (!organization) databaseFailure("Confirmed business context is not available.");
+      if (branchId !== null && (branchesResult.data ?? []).length === 0) {
+        throw new DomainError(
+          "DOMAIN_ERROR",
+          "The selected branch is no longer available for research.",
+        );
+      }
 
       const sections = new Map(
         (sectionsResult.data ?? []).map((section) => [
@@ -368,7 +430,9 @@ export function createAuthenticatedMarketProfileRepository(
         branchId: branch.id,
         name: branch.name.slice(0, 160),
         serviceAreas: uniqueBoundedStrings(
-          [...serviceAreaStrings(branch.service_area), ...sharedServiceAreas],
+          branchId === null
+            ? [...serviceAreaStrings(branch.service_area), ...sharedServiceAreas]
+            : serviceAreaStrings(branch.service_area),
           30,
           160,
         ),
@@ -435,6 +499,23 @@ export function createAuthenticatedMarketProfileRepository(
       if (result.error) mutationFailure("decide", result.error);
       const parsed = decisionOutcomeSchema.safeParse(result.data);
       if (!parsed.success) databaseFailure("The saved Market Profile decision was not usable.");
+      return parsed.data;
+    },
+
+    async startBranchResearch(input): Promise<StartBranchResearchResult> {
+      const result = await persistence.rpc("start_branch_market_research", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_branch_id: input.branchId,
+        p_profile_document: input.document,
+        p_profile_digest: input.profileDigest,
+        p_expected_current_version_id: input.expectedCurrentVersionId,
+        p_idempotency_key: input.idempotencyKey,
+        p_correlation_id: input.correlationId,
+      });
+      if (result.error) mutationFailure("start", result.error);
+      const parsed = startBranchResearchOutcomeSchema.safeParse(result.data);
+      if (!parsed.success) databaseFailure("The started branch research was not usable.");
       return parsed.data;
     },
   };
