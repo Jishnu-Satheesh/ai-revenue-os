@@ -5323,3 +5323,33 @@ through the real routes, not only in tests.
   `src/trigger/growth-intelligence.ts:555` (Tasks 6/8 must remove it); v2 geography proven
   to reject a fourth entry; retrieval excerpts now require non-empty text; union keeps
   `z.union` with the frozen-type reason documented.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 3 branch profiles + pipeline lineage (12-task plan)
+
+- **Claimed files (Task 3 only):** one new migration
+  `supabase/migrations/*_growth_intelligence_branch_profiles.sql`, new pgTAP suite
+  `supabase/tests/database/growth_intelligence_branch_profiles_test.sql`, narrow edits to
+  `src/lib/supabase/database.types.ts` and `src/lib/supabase/database.types.test.ts`, report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-3-report.md`, and this
+  board. No application, worker, or UI file is in scope; other sessions' dirty paths are preserved
+  untouched and will not be staged, formatted, stashed, or pushed.
+- **Scope:** nullable branch scope on organization profiles with partial uniqueness, v2 document
+  validator beside the frozen v1 validator, research-pipeline envelope with deferred circular
+  lineage to requests, scoped proposal wrapper repair, RLS/grants/indexes. Later tasks extend
+  with their own forward migrations (start RPC, budget/retention, completion, synthesis checks).
+- **Status:** in-progress — pgTAP red suite first, then schema, dry-run review, push of only this
+  slice, hosted pgTAP, staged validator/proposal execution, narrow types edit plus coverage test.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 3 resumed (same claim, no new files)
+
+- Resuming the Task 3 claim above in a fresh session. Found the two drafted migrations
+  (`20260908094147_growth_intelligence_branch_profiles.sql`,
+  `20260908095344_growth_intelligence_branch_profiles_repair.sql`) and the pgTAP suite
+  already on disk and already applied to shared staging (migration list shows Local|Remote
+  in sync, none pending), plus a pre-existing unrelated `growth_intelligence_item_feedback`
+  hunk in `database.types.ts` that is preserved verbatim and carried in the same file commit
+  with attribution noted in the report (its migration and test files stay untracked for their
+  owning session). Remaining work:
+  dry-run review, hosted pgTAP, staged validator/proposal execution with safe counts only,
+  narrow `database.types.ts` edit for branch scope plus pipeline lineage, coverage test,
+  path-limited commit of Task 3 files only, and the task report.

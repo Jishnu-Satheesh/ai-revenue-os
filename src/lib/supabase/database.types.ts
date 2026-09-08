@@ -68,6 +68,7 @@ export type Database = {
         Row: {
           id: string;
           organization_id: string;
+          branch_id: string | null;
           current_version_id: string | null;
           enabled: boolean;
           next_daily_research_due_at: string | null;
@@ -149,6 +150,8 @@ export type Database = {
           business_evidence_digest: string | null;
           market_profile_version_id: string;
           source_policy_digest: string;
+          pipeline_id: string | null;
+          phase: "research" | "synthesis" | null;
           research_rule_version: string;
           local_time_bucket: string;
           synthesis_version_tuple: string | null;
@@ -170,6 +173,36 @@ export type Database = {
           last_transition_actor_type: Database["public"]["Enums"]["audit_actor_type"];
           last_transition_actor_id: string | null;
           correlation_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_research_pipelines: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string;
+          market_profile_id: string;
+          market_profile_version_id: string;
+          scope_digest: string;
+          research_request_id: string | null;
+          synthesis_request_id: string | null;
+          stage:
+            | "queued"
+            | "researching"
+            | "preparing_insights"
+            | "ready"
+            | "partial"
+            | "no_findings"
+            | "research_failed"
+            | "synthesis_failed"
+            | "cancelled";
+          coverage: Record<string, unknown>[];
+          stage_changed_at: string;
+          safe_failure_code: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -415,6 +448,19 @@ export type Database = {
           snoozed_until: string | null;
           item_fingerprint: string;
           created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_item_feedback: {
+        Row: {
+          organization_id: string;
+          growth_intelligence_item_id: string;
+          actor_id: string;
+          helpful: boolean;
+          created_at: string;
+          updated_at: string;
         };
         Insert: never;
         Update: never;
@@ -2402,6 +2448,15 @@ export type Database = {
           p_item_fingerprint: string;
         };
         Returns: Record<string, unknown>;
+      };
+      record_growth_intelligence_item_feedback: {
+        Args: {
+          p_organization_id: string;
+          p_item_id: string;
+          p_helpful: boolean;
+          p_actor_id: string;
+        };
+        Returns: undefined;
       };
       request_campaign_draft_from_opportunity: {
         Args: {
