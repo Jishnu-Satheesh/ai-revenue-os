@@ -333,5 +333,9 @@ export type ChannelAnalysisReadPort = {
     channelId: string;
     windowStart: string;
     windowEnd: string;
-  }): Promise<{ id: string; status: string; recommendationCount: number } | null>;
+  }): Promise<{
+    id: string;
+    status: "running" | "completed" | "failed";
+    recommendationCount: number;
+  } | null>;
 };

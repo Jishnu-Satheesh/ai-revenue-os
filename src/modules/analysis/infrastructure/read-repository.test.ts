@@ -318,6 +318,7 @@ function supabaseStub(dataByTable: Record<string, unknown[]> = {}) {
   const from = (table: string) => {
     const filters: [string, unknown][] = [];
     queries.push({ table, filters });
+    const rows = dataByTable[table] ?? [];
     const builder = {
       select: () => builder,
       eq: (column: string, value: unknown) => {
@@ -328,14 +329,21 @@ function supabaseStub(dataByTable: Record<string, unknown[]> = {}) {
       in: () => builder,
       order: () => builder,
       limit: () => builder,
+      // Terminal like the real client's: resolves directly rather than
+      // returning `builder`, and narrows to one row (or null) instead of the
+      // array `then` below resolves with.
+      maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null } as QueryResult),
       then: (
-        onFulfilled: (value: QueryResult) => unknown,
+        onFulfilled: (value: QueryResult & { count: number }) => unknown,
         onRejected?: (reason: unknown) => unknown,
       ) =>
-        Promise.resolve({ data: dataByTable[table] ?? [], error: null } as QueryResult).then(
-          onFulfilled,
-          onRejected,
-        ),
+        Promise.resolve({
+          data: rows,
+          error: null,
+          // Only meaningful for a `{ count: "exact", head: true }` select; a
+          // caller not asking for a count simply ignores this field.
+          count: rows.length,
+        } as QueryResult & { count: number }).then(onFulfilled, onRejected),
     };
     return builder;
   };
@@ -556,6 +564,43 @@ describe("loadAnalysedWindowKeys", () => {
       { windowStart: "2026-02-01", windowEnd: "2026-02-28", grain: "day" },
       { windowStart: "2026-01-01", windowEnd: "2026-01-31", grain: "day" },
     ]);
+  });
+});
+
+describe("loadRunForWindow", () => {
+  it("scopes both queries to the organization and to this channel", async () => {
+    // The status endpoint the Channel Audit loader polls every second reads
+    // through this method. A run or recommendation count belonging to
+    // another organization -- or another channel in this same organization
+    // -- must never surface through it.
+    const supabase = supabaseStub({
+      channel_analysis_runs: [{ id: "run-1", status: "completed" }],
+      channel_recommendations: [{ id: "rec-1" }],
+    });
+    const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+
+    const result = await repository.loadRunForWindow({
+      organizationId: ORGANIZATION,
+      channelId: "channel-1",
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-04",
+    });
+
+    const runsQuery = supabase.queries.find((query) => query.table === "channel_analysis_runs");
+    expect(runsQuery).toBeDefined();
+    expect(runsQuery?.filters).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(runsQuery?.filters).toContainEqual(["channel_id", "channel-1"]);
+    expect(runsQuery?.filters).toContainEqual(["window_start", "2026-01-01"]);
+    expect(runsQuery?.filters).toContainEqual(["window_end", "2026-01-04"]);
+
+    const recommendationsQuery = supabase.queries.find(
+      (query) => query.table === "channel_recommendations",
+    );
+    expect(recommendationsQuery).toBeDefined();
+    expect(recommendationsQuery?.filters).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(recommendationsQuery?.filters).toContainEqual(["analysis_run_id", "run-1"]);
+
+    expect(result).toEqual({ id: "run-1", status: "completed", recommendationCount: 1 });
   });
 });
 
