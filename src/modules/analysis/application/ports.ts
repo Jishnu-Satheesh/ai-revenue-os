@@ -320,4 +320,18 @@ export type ChannelAnalysisReadPort = {
     timeZone: string;
     grain: AnalysisGrain;
   } | null>;
+
+  /**
+   * The newest run for exactly this window, and whether its narration landed.
+   *
+   * Exactly this window, never one that merely covers it: two windows are two
+   * questions, and showing one window's figures under another's heading is the
+   * defect this whole change exists to remove.
+   */
+  loadRunForWindow(input: {
+    organizationId: string;
+    channelId: string;
+    windowStart: string;
+    windowEnd: string;
+  }): Promise<{ id: string; status: string; recommendationCount: number } | null>;
 };

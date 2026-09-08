@@ -814,6 +814,37 @@ export function createAuthenticatedChannelAnalysisRepository(
       )[0];
       return { ...bounds, timeZone, grain };
     },
+
+    async loadRunForWindow({ organizationId, channelId, windowStart, windowEnd }) {
+      // Exactly this window, via the same `(organization_id, channel_id,
+      // window_start desc, created_at desc)` index `loadRuns` uses -- an
+      // equality match on its leading columns, newest first if re-analysis
+      // ever produced more than one run for the same declared range.
+      const { data: run, error: runError } = await supabase
+        .from("channel_analysis_runs")
+        .select("id, status")
+        .eq("organization_id", organizationId)
+        .eq("channel_id", channelId)
+        .eq("window_start", windowStart)
+        .eq("window_end", windowEnd)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+      if (!run) return null;
+
+      // The narrator is a second fenced worker that writes rows here only
+      // after the run above is `completed` (ADR 0037), so a `completed` run
+      // with zero rows is still waiting on it, not finished.
+      const { count, error: countError } = await supabase
+        .from("channel_recommendations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("analysis_run_id", run.id);
+      if (countError) throw new ChannelAnalysisReadError(countError.code ?? "unknown");
+
+      return { id: run.id, status: run.status, recommendationCount: count ?? 0 };
+    },
   };
   return repository;
 }
