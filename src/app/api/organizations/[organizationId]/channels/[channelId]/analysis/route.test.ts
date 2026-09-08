@@ -46,6 +46,7 @@ vi.mock("@/lib/cache/rate-limit", () => ({
 }));
 
 import { POST } from "@/app/api/organizations/[organizationId]/channels/[channelId]/analysis/route";
+import { DomainError } from "@/lib/errors";
 
 const ORGANIZATION = "44444444-4444-4444-8444-444444444444";
 const CHANNEL = "55555555-5555-4555-8555-555555555555";
@@ -98,6 +99,19 @@ describe("POST channel analysis, by window", () => {
         windowTimezone: "Asia/Dubai",
       }),
     );
+  });
+
+  it("refuses an organization the slice is not enabled for", async () => {
+    mocks.assertEnabled.mockImplementation(() => {
+      throw new DomainError("FEATURE_NOT_AVAILABLE", "Not enabled.");
+    });
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
   it("refuses a range the reports do not cover", async () => {
@@ -178,16 +192,32 @@ describe("POST channel analysis, by window", () => {
     });
   });
 
-  it("lets a member without report.retry start a run", async () => {
-    // The role gate is deliberately gone; the rate limit is the control that
-    // replaces it. See ADR 0047.
+  it("refuses a member whose role cannot retry governed work", async () => {
+    // Authorization and the rate limit are orthogonal controls: a caller who
+    // may not act at all must be refused before either the coverage read or
+    // the allowance is touched, so they cannot burn allowance that belongs to
+    // callers who may act.
     mocks.getOrganizationContext.mockResolvedValue(contextWithRole("viewer"));
 
     const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
       params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
     });
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(403);
+    expect(repositoryMocks.resolveWindowInput).not.toHaveBeenCalled();
+    expect(rateMocks.consume).not.toHaveBeenCalled();
+  });
+
+  it("says the run did not start rather than reporting a success nobody got", async () => {
+    mocks.requestChannelAnalysis.mockResolvedValue(false);
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/could not be started/i);
   });
 });
 

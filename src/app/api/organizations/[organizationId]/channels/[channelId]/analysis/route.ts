@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { apiErrorResponse, getOrganizationContext } from "@/lib/api/organization-context";
 import { consumeAnalysisRunAllowance } from "@/lib/cache/rate-limit";
 import { localDaysBetween } from "@/domain/analysis/calendar";
@@ -10,6 +11,7 @@ import { logger } from "@/lib/logger";
 import { requestChannelAnalysis } from "@/modules/analysis/application/dispatch";
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { assertGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
+import type { OrganizationRole } from "@/domain/organizations/types";
 
 /**
  * Start a deterministic analysis of one channel over a picked date range.
@@ -20,10 +22,10 @@ import { assertGovernedChannelAnalysisEnabled } from "@/modules/integrations/app
  * result. A range the reports do not cover is refused here, before any work
  * starts.
  *
- * This route no longer gates on a role -- any member who can see the channel
- * may ask. Starting a run costs a detector pass and an AI narration, so an
- * organization-scoped rate limit is the control that replaces the role gate.
- * See ADR 0047.
+ * Authorization and cost control are orthogonal and both apply, in that
+ * order: `report.retry` decides who may ask at all, and an organization-scoped
+ * rate limit caps how often someone who may ask can spend a detector pass and
+ * an AI narration. Neither substitutes for the other. See ADR 0047.
  *
  * This route starts work; it does not decide anything. The claim RPC re-resolves
  * the channel, the branch timezone, and the metric vocabulary, and refuses a
@@ -86,6 +88,16 @@ export async function POST(
     // reach it through a hand-typed URL.
     assertGovernedChannelAnalysisEnabled(routeParams.organizationId);
 
+    // Running an analysis recomputes over evidence that already exists. It
+    // writes no evidence of its own, which is why it sits with retry rather
+    // than with contract approval.
+    if (!hasOrganizationPermission(context.membership.role as OrganizationRole, "report.retry")) {
+      throw new DomainError(
+        "AUTHORIZATION_ERROR",
+        "You do not have permission to run an analysis for this organization.",
+      );
+    }
+
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     // Channel-wide: the picker names no branch, so the run analyses every
     // branch this channel trades through.
@@ -106,8 +118,8 @@ export async function POST(
 
     // After coverage, never before: a mistyped date must not cost the
     // organization part of its allowance. Starting a run costs a detector
-    // pass and an AI narration, and this route no longer gates that on a
-    // role, so this is the control that replaces it. Reading an
+    // pass and an AI narration; the permission check above already decided
+    // this caller may ask at all, and this caps how often. Reading an
     // already-computed range never reaches here.
     if (!(await consumeAnalysisRunAllowance(routeParams.organizationId))) {
       throw new DomainError(
