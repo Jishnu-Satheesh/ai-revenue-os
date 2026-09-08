@@ -100,9 +100,10 @@ export type BraveSearchAttemptRecord = {
 /**
  * Durable run state. Everything the bounds depend on travels here, so a
  * restarted worker resumes within the same ceilings: attempt indexes continue
- * (replay-safe), consumed retries/bytes accumulate, and completed
- * observations (supported / searched_no_usable_evidence) are never re-called.
- * Only incomplete slots (not_started, failed, skipped_*) run again.
+ * (replay-safe), consumed retries/bytes accumulate, the original start time
+ * is inherited (no fresh deadline per resume), and completed observations
+ * (supported / searched_no_usable_evidence) are never re-called. Only
+ * incomplete slots (not_started, failed, skipped_*) run again.
  */
 export type BraveSearchDurableState = {
   attempts: BraveSearchAttemptRecord[];
@@ -111,6 +112,7 @@ export type BraveSearchDurableState = {
   consumedResponseBytes: number;
   consumedRetries: number;
   sourceUrls: string[];
+  startedAt: number;
 };
 
 export type BraveSearchStopReason =
@@ -194,7 +196,7 @@ const BUDGET_EXHAUSTED_CODES: ReadonlySet<GrowthIntelligenceErrorCode> = new Set
   "RESEARCH_BUDGET_OVERRUN_BLOCKED",
 ]);
 
-function emptyDurableState(): BraveSearchDurableState {
+function emptyDurableState(startedAt: number): BraveSearchDurableState {
   return {
     attempts: [],
     coverage: [],
@@ -202,6 +204,7 @@ function emptyDurableState(): BraveSearchDurableState {
     consumedResponseBytes: 0,
     consumedRetries: 0,
     sourceUrls: [],
+    startedAt,
   };
 }
 
@@ -217,7 +220,22 @@ function cloneDurableState(state: BraveSearchDurableState): BraveSearchDurableSt
     consumedResponseBytes: state.consumedResponseBytes,
     consumedRetries: state.consumedRetries,
     sourceUrls: [...state.sourceUrls],
+    startedAt: state.startedAt,
   };
+}
+
+/**
+ * Resolves a coverage key against the run plan. Coverage always follows the
+ * plan, so a miss is a programmer error that fails closed instead of
+ * mislabeling a skipped slot.
+ */
+export function requirePlannedSlot(
+  plan: readonly ResearchQuerySlot[],
+  slotKey: string,
+): ResearchQuerySlot {
+  const planned = plan.find((slot) => slot.slotKey === slotKey);
+  if (!planned) throw new Error("Brave search coverage must follow the run plan.");
+  return planned;
 }
 
 function excerptTotalCharacters(sources: readonly ResearchRetrievedSource[]): number {
@@ -238,6 +256,10 @@ export async function runBraveSearchResearch(
   input: BraveSearchRunInput,
 ): Promise<BraveSearchRunOutput> {
   const request = researchRequestSchema.parse(input.request);
+  // The run plan is authoritative for coverage: request.maxQueries is the
+  // legacy trigger ceiling (1–3) and cannot bound this run's cost. Reconciling
+  // the request shape belongs to Task 8's rewiring alongside the trigger
+  // marker; until then the 26-slot plan cap above is the enforced ceiling.
   if (input.plan.length < 1 || input.plan.length > RESEARCH_BUDGET_LIMITS.maxPrimarySearches) {
     throw new Error("Brave search runs exactly the planned primary slots.");
   }
@@ -248,8 +270,10 @@ export async function runBraveSearchResearch(
 
   const now = input.now ?? (() => new Date());
   const deadlineMs = input.deadlineMs ?? BRAVE_SEARCH_DEADLINE_MS;
-  const startedAt = now().getTime();
-  const state = input.resumeFrom ? cloneDurableState(input.resumeFrom) : emptyDurableState();
+  const startedAt = input.resumeFrom ? input.resumeFrom.startedAt : now().getTime();
+  const state = input.resumeFrom
+    ? cloneDurableState(input.resumeFrom)
+    : emptyDurableState(startedAt);
   const seenUrls = new Set(state.sourceUrls);
   const stats: BraveSearchRunStats = {
     callsIssued: 0,
@@ -285,8 +309,7 @@ export async function runBraveSearchResearch(
   const markRemaining = (slotKeys: readonly string[], outcome: ResearchCoverageOutcome) => {
     for (const slotKey of slotKeys) {
       if (!coverageBySlot.has(slotKey)) {
-        const kind = input.plan.find((slot) => slot.slotKey === slotKey)?.kind ?? "topic";
-        recordSlot({ slotKey, kind, text: "", maxResults: 1 }, outcome, []);
+        recordSlot(requirePlannedSlot(input.plan, slotKey), outcome, []);
       }
     }
   };
@@ -545,11 +568,14 @@ export async function runBraveSearchResearch(
         break;
       }
 
-      record.usage = { kind: "reported", microsUsd: 0 };
+      // The attempt stays unknown until its settlement is confirmed: only a
+      // confirmed receipt may record reported usage, so a refused settlement
+      // keeps the full worst case reserved instead of understating liability.
       if (!(await settleReported(attemptId))) {
         stopOnSettlementFailure(slot, slotAttemptIds, remainingKeys);
         break;
       }
+      record.usage = { kind: "reported", microsUsd: 0 };
 
       const candidates = parsed.results.slice(
         0,
@@ -614,9 +640,9 @@ export async function runBraveSearchResearch(
         slotSupported += 1;
       }
       if (slotExhausted) {
-        // Retention budget ran out mid-slot: a slot with no admitted source
-        // is failed, never supported — truncation implies no coverage.
-        recordSlot(slot, slotSupported > 0 ? "supported" : "failed", slotAttemptIds);
+        // Retention budget ran out mid-slot: truncation never implies
+        // supported coverage, even when this slot already admitted sources.
+        recordSlot(slot, "failed", slotAttemptIds);
         stopReason = "source_budget";
         stopped = true;
         markRemaining(remainingKeys, "not_started");

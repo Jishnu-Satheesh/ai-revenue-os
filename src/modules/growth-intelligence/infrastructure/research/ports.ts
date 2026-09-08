@@ -34,7 +34,27 @@ const publicDomainSchema = z
 export const researchCompetitorLeadSchema = z
   .object({
     name: boundedText(160),
-    publicUrl: z.string().trim().min(1).max(2_048).optional(),
+    publicUrl: z
+      .string()
+      .trim()
+      .min(1)
+      .max(2_048)
+      .refine(
+        (value) => {
+          try {
+            const url = new URL(value);
+            return (
+              (url.protocol === "http:" || url.protocol === "https:") &&
+              !url.username &&
+              !url.password
+            );
+          } catch {
+            return false;
+          }
+        },
+        { message: "A competitor website must be a public HTTP URL without credentials." },
+      )
+      .optional(),
     locationHint: boundedText(240).optional(),
   })
   .strict();

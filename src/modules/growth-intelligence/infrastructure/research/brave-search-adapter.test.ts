@@ -12,6 +12,7 @@ import {
   BRAVE_WEB_SEARCH_ENDPOINT,
   buildBraveSearchRequestUrl,
   createBraveSearchAdapter,
+  requirePlannedSlot,
   runBraveSearchResearch,
   type BraveSearchDurableState,
   type BraveSearchSpender,
@@ -328,6 +329,35 @@ describe("retry, timeout, and malformed responses", () => {
     expect(events.filter((event) => event.type === "settle")).toHaveLength(1);
   });
 
+  it("leaves usage unknown when the success settlement is refused", async () => {
+    const { spender } = createFakeSpender({
+      settle: () => {
+        throw new GrowthIntelligenceError(
+          "RESEARCH_BUDGET_UNAVAILABLE",
+          "Research spend could not be reserved.",
+        );
+      },
+    });
+    const transport = createProgrammedTransport(() =>
+      jsonResponse([validResult("https://guide.example/refused")]),
+    );
+
+    const output = await runBraveSearchResearch({
+      request: baseRequest(),
+      plan: [slot("topic:refused"), slot("topic:after")],
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+    });
+
+    expect(output.stopReason).toBe("settlement_failed");
+    expect(output.result.coverage.map((entry) => entry.outcome)).toEqual(["failed", "not_started"]);
+    expect(output.result.attempts[0]?.usage).toEqual({ kind: "unknown" });
+    expect(output.durableState.attempts[0]?.usage).toEqual({ kind: "unknown" });
+    expect(output.result.sources).toHaveLength(0);
+  });
+
   it("fails a response over the streaming bound instead of parsing it", async () => {
     const transport = createProgrammedTransport((call, input) => {
       expect(input.maxResponseBytes).toBe(1024);
@@ -420,6 +450,7 @@ describe("source filtering and truncation", () => {
         { length: 40 },
         (_, index) => `https://directory.example/held-${index}`,
       ),
+      startedAt: FIXED_NOW.getTime(),
     };
     const { spender } = createFakeSpender();
     const transport = createProgrammedTransport(() =>
@@ -457,6 +488,7 @@ describe("source filtering and truncation", () => {
       consumedResponseBytes: 0,
       consumedRetries: 0,
       sourceUrls: sources.map((source) => source.sourceUrl),
+      startedAt: FIXED_NOW.getTime(),
     };
     const { spender } = createFakeSpender();
     const transport = createProgrammedTransport(() =>
@@ -477,6 +509,48 @@ describe("source filtering and truncation", () => {
     expect(output.result.coverage[0]?.outcome).toBe("failed");
     expect(output.result.coverage[1]?.outcome).toBe("not_started");
     expect(output.result.coverage.every((entry) => entry.outcome !== "supported")).toBe(true);
+  });
+
+  it("marks a slot failed when source exhaustion truncates it after admissions", async () => {
+    const heldSources = Array.from({ length: 39 }, (_, index) => ({
+      sourceUrl: `https://directory.example/almost-full-${index}`,
+      domain: "directory.example",
+      excerptText: `Held snippet ${index}.`,
+      excerptDigest: `${"d".repeat(63)}${index % 10}`,
+      retrievedAt: FIXED_NOW.toISOString(),
+    }));
+    const held: BraveSearchDurableState = {
+      attempts: [],
+      coverage: [],
+      sources: heldSources,
+      consumedResponseBytes: 0,
+      consumedRetries: 0,
+      sourceUrls: heldSources.map((source) => source.sourceUrl),
+      startedAt: FIXED_NOW.getTime(),
+    };
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport(() =>
+      jsonResponse([
+        validResult("https://guide.example/cut-first", "First snippet admitted."),
+        validResult("https://guide.example/cut-second", "Second snippet truncated away."),
+      ]),
+    );
+
+    const output = await runBraveSearchResearch({
+      request: baseRequest(),
+      plan: [slot("topic:cut"), slot("topic:after-cut")],
+      transport,
+      spender,
+      gate: gate(true),
+      resumeFrom: held,
+      now: () => FIXED_NOW,
+    });
+
+    expect(transport.calls).toBe(1);
+    expect(output.stopReason).toBe("source_budget");
+    expect(output.result.sources).toHaveLength(40);
+    expect(output.result.coverage[0]?.outcome).toBe("failed");
+    expect(output.result.coverage[1]?.outcome).toBe("not_started");
   });
 });
 
@@ -720,6 +794,54 @@ describe("restart resumption and the 28-attempt ceiling", () => {
     expect(resumed.result.attempts.length).toBeLessThanOrEqual(
       RESEARCH_BUDGET_LIMITS.maxPrimarySearches + RESEARCH_BUDGET_LIMITS.maxRetryAttempts,
     );
+  });
+
+  it("inherits the original start time on resume so the deadline still binds", async () => {
+    const started = new Date("2026-09-08T10:00:00.000Z");
+    const { spender: firstSpender } = createFakeSpender();
+    const firstTransport = createProgrammedTransport((call) =>
+      jsonResponse([validResult(`https://guide.example/early-${call}`)]),
+    );
+    const first = await runBraveSearchResearch({
+      request: baseRequest(),
+      plan: [slot("topic:alpha")],
+      transport: firstTransport,
+      spender: firstSpender,
+      gate: gate(true),
+      now: () => started,
+    });
+    expect(first.result.coverage[0]?.outcome).toBe("supported");
+    expect(first.durableState.startedAt).toBe(started.getTime());
+
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport((call) =>
+      jsonResponse([validResult(`https://guide.example/late-${call}`)]),
+    );
+    const resumed = await runBraveSearchResearch({
+      request: baseRequest(),
+      plan: [slot("topic:alpha"), slot("topic:beta")],
+      transport,
+      spender,
+      gate: gate(true),
+      resumeFrom: first.durableState,
+      now: () => new Date("2026-09-08T10:09:00.000Z"),
+    });
+
+    expect(transport.calls).toBe(0);
+    expect(resumed.stopReason).toBe("deadline");
+    expect(resumed.durableState.startedAt).toBe(started.getTime());
+    expect(resumed.result.coverage.map((entry) => entry.outcome)).toEqual([
+      "supported",
+      "not_started",
+    ]);
+  });
+
+  it("refuses coverage keys outside the run plan", () => {
+    const plan = [slot("topic:known")];
+
+    expect(requirePlannedSlot(plan, "topic:known").kind).toBe("topic");
+    expect(() => requirePlannedSlot(plan, "competitor:ghost")).toThrow(/run plan/);
+    expect(() => requirePlannedSlot(plan, "local_market")).toThrow(/run plan/);
   });
 
   it("holds the 28-attempt ceiling including failures, then stops a resumed run", async () => {

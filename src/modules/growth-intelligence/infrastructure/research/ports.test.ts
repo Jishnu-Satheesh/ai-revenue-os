@@ -254,4 +254,35 @@ describe("approved research scope", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects non-public competitor website shapes", () => {
+    const base = {
+      publicBusinessName: "Cochin Kitchen",
+      approvedDomains: [],
+      niches: ["Kerala cuisine"],
+      city: "Dubai",
+      countryCode: "AE",
+      topics: ["weekend dining"],
+    };
+
+    for (const publicUrl of [
+      "javascript:alert(1)",
+      "ftp://files.example/menu",
+      "https://cook:secret@guide.example/",
+      "not a url",
+    ]) {
+      expect(() =>
+        approvedResearchScopeSchema.parse({
+          ...base,
+          competitors: [{ name: "Azure Dhow", publicUrl }],
+        }),
+      ).toThrow(/public HTTP/i);
+    }
+
+    const parsed = approvedResearchScopeSchema.parse({
+      ...base,
+      competitors: [{ name: "Azure Dhow", publicUrl: "https://azure-dhow.example.org/menu" }],
+    });
+    expect(parsed.competitors[0]?.publicUrl).toBe("https://azure-dhow.example.org/menu");
+  });
 });
