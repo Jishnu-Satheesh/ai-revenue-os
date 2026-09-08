@@ -56,55 +56,6 @@ export function createFindingCalculationDigest(input: {
 }
 
 /**
- * The monthly resolver version. A completed run is reusable only under the
- * resolver that bound it; bumping this retires every cached run at once.
- */
-export const MONTHLY_ANALYSIS_RESOLVER_VERSION = 1;
-
-/**
- * The content address of one monthly analysis: every input that could change
- * its answer, and nothing else. A late correction, a held reconciliation, a
- * supersession, or a newly projected row changes the evidence digest and
- * makes the prior run ineligible immediately. No TTL, no wall clock.
- */
-export function createMonthlyAnalysisCacheKey(input: {
-  organizationId: string;
-  channelId: string | null;
-  branchId: string | null;
-  month: string;
-  windowStart: string;
-  windowEnd: string;
-  timeZone: string;
-  grain: "day" | "week" | "month" | "span";
-  registryVersion: number;
-  detectorVersions: readonly { key: string; calculationVersion: number }[];
-  metricKeys: readonly string[];
-  evidenceDigest: string;
-}): string {
-  return createHash("sha256")
-    .update(
-      canonicalize({
-        resolverVersion: MONTHLY_ANALYSIS_RESOLVER_VERSION,
-        organizationId: input.organizationId,
-        channelId: input.channelId,
-        branchId: input.branchId,
-        month: input.month,
-        windowStart: input.windowStart,
-        windowEnd: input.windowEnd,
-        timeZone: input.timeZone,
-        grain: input.grain,
-        registryVersion: input.registryVersion,
-        detectorVersions: [...input.detectorVersions].sort((left, right) =>
-          left.key.localeCompare(right.key),
-        ),
-        metricKeys: [...input.metricKeys].sort(),
-        evidenceDigest: input.evidenceDigest,
-      }),
-    )
-    .digest("hex");
-}
-
-/**
  * Version 2 drops the month label. A key minted under version 1 named a
  * calendar month; this one names a window. Bumping rather than reusing means
  * every run cached under the old scheme recomputes once, which is correct --

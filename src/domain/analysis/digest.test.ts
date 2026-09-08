@@ -2,86 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   ANALYSIS_RESOLVER_VERSION,
-  MONTHLY_ANALYSIS_RESOLVER_VERSION,
   createAnalysisEvidenceDigest,
-  createMonthlyAnalysisCacheKey,
   createWindowAnalysisCacheKey,
 } from "@/domain/analysis/digest";
-
-const base = {
-  organizationId: "11111111-1111-4111-8111-111111111111",
-  channelId: "22222222-2222-4222-8222-222222222222",
-  branchId: null,
-  month: "2026-02",
-  windowStart: "2026-02-01",
-  windowEnd: "2026-02-28",
-  timeZone: "Asia/Dubai",
-  grain: "day",
-  registryVersion: 9,
-  detectorVersions: [{ key: "revenue.window_gross", calculationVersion: 3 }],
-  metricKeys: ["revenue.gross"],
-  evidenceDigest: "a".repeat(64),
-} as const;
-
-describe("monthly analysis cache key", () => {
-  it("is a stable sha256 hex value", () => {
-    const first = createMonthlyAnalysisCacheKey({ ...base });
-    const second = createMonthlyAnalysisCacheKey({ ...base });
-    expect(first).toBe(second);
-    expect(first).toMatch(/^[a-f0-9]{64}$/);
-  });
-
-  it("pins the resolver version it was computed under", () => {
-    expect(MONTHLY_ANALYSIS_RESOLVER_VERSION).toBe(1);
-  });
-
-  it("misses when any provenance input changes", () => {
-    const hit = createMonthlyAnalysisCacheKey({ ...base });
-    expect(createMonthlyAnalysisCacheKey({ ...base, month: "2026-03" })).not.toBe(hit);
-    expect(createMonthlyAnalysisCacheKey({ ...base, timeZone: "Asia/Kolkata" })).not.toBe(hit);
-    expect(createMonthlyAnalysisCacheKey({ ...base, grain: "week" })).not.toBe(hit);
-    expect(createMonthlyAnalysisCacheKey({ ...base, registryVersion: 8 })).not.toBe(hit);
-    expect(
-      createMonthlyAnalysisCacheKey({
-        ...base,
-        detectorVersions: [{ key: "revenue.window_gross", calculationVersion: 4 }],
-      }),
-    ).not.toBe(hit);
-    expect(
-      createMonthlyAnalysisCacheKey({
-        ...base,
-        metricKeys: ["revenue.rejection_loss"],
-      }),
-    ).not.toBe(hit);
-    expect(createMonthlyAnalysisCacheKey({ ...base, evidenceDigest: "b".repeat(64) })).not.toBe(
-      hit,
-    );
-  });
-
-  it("changes when the month bounds change but nothing else does", () => {
-    const january = createMonthlyAnalysisCacheKey({ ...base, month: "2026-01" });
-    const february = createMonthlyAnalysisCacheKey({ ...base, month: "2026-02" });
-    expect(january).not.toBe(february);
-  });
-
-  it("orders detector and definition tuples before hashing", () => {
-    const ordered = createMonthlyAnalysisCacheKey({
-      ...base,
-      detectorVersions: [
-        { key: "a.first", calculationVersion: 1 },
-        { key: "b.second", calculationVersion: 2 },
-      ],
-    });
-    const reversed = createMonthlyAnalysisCacheKey({
-      ...base,
-      detectorVersions: [
-        { key: "b.second", calculationVersion: 2 },
-        { key: "a.first", calculationVersion: 1 },
-      ],
-    });
-    expect(reversed).toBe(ordered);
-  });
-});
 
 const evidencePoint = {
   normalizedMetricId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -224,31 +147,12 @@ describe("createWindowAnalysisCacheKey", () => {
     );
   });
 
-  it("does not collide with a key the monthly resolver would have produced", () => {
-    // The real comparison, not a hash-shaped literal. January 2026 as a month
-    // and January 2026 as a window are the same question asked two ways; the
-    // two resolvers must still answer with different keys, or a run cached
-    // under the retired scheme would be served for a window nobody analysed.
-    const monthly = createMonthlyAnalysisCacheKey({
-      ...base,
-      month: "2026-01",
-      windowStart: "2026-01-01",
-      windowEnd: "2026-01-31",
-    });
-    const windowed = createWindowAnalysisCacheKey({
-      ...base,
-      windowStart: "2026-01-01",
-      windowEnd: "2026-01-31",
-    });
-
-    expect(windowed).not.toBe(monthly);
-  });
-
   it("pins the resolver version, so a deliberate invalidation stays deliberate", () => {
-    // The sibling suite pins MONTHLY_ANALYSIS_RESOLVER_VERSION the same way.
     // Without this, `resolverVersion` could be dropped from the hashed object
     // entirely and every test would still pass -- and the one lever that can
-    // invalidate every cached answer at once would be gone unnoticed.
+    // invalidate every cached answer at once would be gone unnoticed. It is
+    // pinned at 2 rather than 1 because version 1 named a calendar month; the
+    // resolver that minted it, and its cache key function, are retired.
     expect(ANALYSIS_RESOLVER_VERSION).toBe(2);
   });
 
