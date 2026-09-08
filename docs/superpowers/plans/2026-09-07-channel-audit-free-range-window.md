@@ -164,6 +164,15 @@ describe("isWindowCovered", () => {
     expect(MAX_ANALYSIS_WINDOW_DAYS).toBe(400);
   });
 
+  it("accepts a range at exactly the ceiling, and refuses one past it", () => {
+    // The database's check is `window_end - window_start <= 400`, so 400 is
+    // legal and 401 is not. Refusing 400 here would reject a window the
+    // database would have taken, which is the opposite of this guard's job.
+    const wide = mergeCoverageSegments([w("2024-01-01", "2026-12-31")]);
+    expect(isWindowCovered("2026-01-01", "2027-02-05", wide)).toBe(true);
+    expect(isWindowCovered("2026-01-01", "2027-02-06", wide)).toBe(false);
+  });
+
   it("refuses anything when nothing is declared", () => {
     expect(isWindowCovered("2026-01-01", "2026-01-04", [])).toBe(false);
   });
@@ -262,7 +271,10 @@ export function isWindowCovered(
   segments: readonly CoverageSegment[],
 ): boolean {
   const span = localDaysBetween(from, to);
-  if (span < 0 || span >= MAX_ANALYSIS_WINDOW_DAYS) return false;
+  // `>` not `>=`: the database's own check is `window_end - window_start <= 400`,
+  // so a span of exactly 400 is legal. Refusing it here would reject a window
+  // the database would have accepted -- the opposite of what this guard is for.
+  if (span < 0 || span > MAX_ANALYSIS_WINDOW_DAYS) return false;
   return segments.some((segment) => segment.start <= from && to <= segment.end);
 }
 ```
@@ -569,6 +581,36 @@ describe("describeGrainMismatch", () => {
     });
   });
 
+  it("blames the declaration carrying the most governed rows", () => {
+    // Two declarations, both too coarse to answer, different sizes. The
+    // warning names the one the operator is most likely to recognise, which
+    // is the one that produced the most rows -- not whichever sorted first.
+    const mismatch = describeGrainMismatch({
+      from: "2026-08-01",
+      to: "2026-08-04",
+      windows: [
+        { windowStart: "2026-01-01", windowEnd: "2026-12-31", grain: "month", governedRowCount: 12 },
+        { windowStart: "2026-07-01", windowEnd: "2026-09-30", grain: "month", governedRowCount: 900 },
+      ],
+    });
+
+    expect(mismatch?.declaredStart).toBe("2026-07-01");
+    expect(mismatch?.declaredEnd).toBe("2026-09-30");
+  });
+
+  it("breaks a tie on row count by blaming the finer declaration", () => {
+    const mismatch = describeGrainMismatch({
+      from: "2026-08-01",
+      to: "2026-08-04",
+      windows: [
+        { windowStart: "2026-01-01", windowEnd: "2026-12-31", grain: "span", governedRowCount: 40 },
+        { windowStart: "2026-07-01", windowEnd: "2026-09-30", grain: "month", governedRowCount: 40 },
+      ],
+    });
+
+    expect(mismatch?.grain).toBe("month");
+  });
+
   it("says nothing when the whole span is asked for", () => {
     expect(
       describeGrainMismatch({ from: "2026-01-01", to: "2026-02-28", windows: [span] }),
@@ -733,7 +775,19 @@ Widens the content-addressed key from a month to any window, and proves the vers
 **Interfaces:**
 - Consumes: `canonicalize` (module-private in `digest.ts`).
 - Produces: `createWindowAnalysisCacheKey(input: { organizationId: string; channelId: string | null; branchId: string | null; windowStart: string; windowEnd: string; timeZone: string; grain: AnalysisGrain; registryVersion: number; detectorVersions: readonly { key: string; calculationVersion: number }[]; metricKeys: readonly string[]; evidenceDigest: string }): string` — note: **no `month` field**.
-- Removes: `createMonthlyAnalysisCacheKey`.
+- Leaves `createMonthlyAnalysisCacheKey` in place and untouched. Task 9 switches its
+  call site and deletes it then.
+
+**Why add rather than rename.** `createMonthlyAnalysisCacheKey` has one caller,
+`run-channel-analysis.ts:468`, and that call site belongs to Task 9. Renaming here
+would leave `pnpm typecheck` failing across Tasks 5, 6, 7 and 8 — five commits that
+do not build, no usable type gate during the tasks that change a port interface and
+an API route, and no way to bisect if something goes wrong. Task 3 has already shown
+that a broken build hides comfortably behind a green Vitest run, because Vitest strips
+types rather than checking them. So the new function is added beside the old one, both
+exist for five tasks, and Task 9 removes the old one in the same commit that stops
+calling it. The cost is one briefly-unused export; the benefit is that every commit on
+this branch compiles.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -885,7 +939,13 @@ Delete any test in `digest.test.ts` that referenced `createMonthlyAnalysisCacheK
 - [ ] **Step 4: Run the tests and watch them pass**
 
 Run: `pnpm vitest run src/domain/analysis/digest.test.ts`
-Expected: PASS. `pnpm typecheck` will still fail at `run-channel-analysis.ts:468` — that call site is Task 9's job. Note the error and continue.
+Expected: PASS.
+
+Then run `npx tsc --noEmit` and expect **zero errors**. Because this task adds
+`createWindowAnalysisCacheKey` beside `createMonthlyAnalysisCacheKey` rather than
+replacing it, the existing call site at `run-channel-analysis.ts:468` still resolves
+and the build stays green. If typecheck reports an error here, you have removed or
+renamed the old function — put it back.
 
 - [ ] **Step 5: Commit**
 
@@ -1759,7 +1819,8 @@ const bodySchema = z
     if (span < 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "The end date is before the start." });
     }
-    if (span >= MAX_ANALYSIS_WINDOW_DAYS) {
+    // `>` not `>=`, matching the database's `<= 400` check exactly. See Task 1.
+    if (span > MAX_ANALYSIS_WINDOW_DAYS) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "That range is wider than one analysis can cover. Pick a shorter period.",
@@ -1863,6 +1924,8 @@ The second independent admissibility check. This is what makes browser-supplied 
 **Files:**
 - Modify: `src/workflows/analysis/run-channel-analysis.ts`
 - Modify: `src/trigger/analysis.ts:41-44`
+- Modify: `src/domain/analysis/digest.ts` (delete `createMonthlyAnalysisCacheKey`)
+- Modify: `src/domain/analysis/digest.test.ts` (delete its tests)
 - Modify: `src/modules/analysis/application/dispatch.ts:20-40`
 - Test: `src/workflows/analysis/run-channel-analysis.test.ts`, `src/modules/analysis/application/dispatch.test.ts`
 
@@ -1971,6 +2034,13 @@ In `src/trigger/analysis.ts`, replace the `loadMonthHorizon` dependency:
         return reads.loadCoverageSegments(input);
       },
 ```
+
+**And in the same commit, delete `createMonthlyAnalysisCacheKey` from
+`src/domain/analysis/digest.ts`.** Task 4 added `createWindowAnalysisCacheKey` beside
+it deliberately, so that every commit between then and now would compile. This is the
+commit that stops calling the old one, so this is the commit that removes it. Delete
+its tests too, and confirm `npx tsc --noEmit` is clean afterwards — a leftover caller
+would surface here.
 
 **And in the same commit, `src/modules/analysis/application/dispatch.ts`.** The
 schema above is `.strict()`, and `requestChannelAnalysis` still forwards a
