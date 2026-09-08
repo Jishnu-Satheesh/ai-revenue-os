@@ -1347,12 +1347,24 @@ export function ChannelWorkspace({
     [channel.id, organizationId],
   );
 
-  // The loader is done when the range is ready: re-read the page, which now
-  // has a completed run for the applied window, and take the loader down.
+  // The loader is done when the applied range is ready. When the applied
+  // range differs from the URL's window, navigate to it so the page displays
+  // the run that just finished; a same-window ready keeps today's behavior
+  // exactly (refresh, with no extra history entry).
   const handleLoaderReady = useCallback(() => {
+    const ready = appliedWindow;
     setAppliedWindow(null);
+    if (
+      ready !== null &&
+      (selectedWindow === null ||
+        ready.from !== selectedWindow.from ||
+        ready.to !== selectedWindow.to)
+    ) {
+      router.push(`?from=${encodeURIComponent(ready.from)}&to=${encodeURIComponent(ready.to)}`);
+      return;
+    }
     router.refresh();
-  }, [router]);
+  }, [appliedWindow, router, selectedWindow]);
 
   return (
     // Sized to its content, not to the viewport: the shell's `main` scrolls,

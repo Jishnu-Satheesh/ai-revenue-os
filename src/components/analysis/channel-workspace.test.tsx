@@ -3,7 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const routerMock = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
+
+vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
 
 import { ChannelWorkspace } from "@/components/analysis/channel-workspace";
 import type {
@@ -826,6 +828,58 @@ describe("ChannelWorkspace", () => {
     await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
     expect(await screen.findByText(/started a lot of analyses/i)).toBeInTheDocument();
+  });
+
+  it("navigates to the applied range when its run is ready", async () => {
+    // The URL names Jan 1-4 but the operator applies "All reported"
+    // (Jan 1-31): re-reading the URL's window after ready would show the old
+    // run, so ready must navigate to the applied range instead.
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        if (typeof url === "string" && url.includes("/analysis/status")) {
+          return { ok: true, json: async () => ({ stage: "ready" }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /all reported/i }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() =>
+      expect(routerMock.push).toHaveBeenCalledWith("?from=2026-01-01&to=2026-01-31"),
+    );
+    expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it("refreshes in place when the applied range is already displayed", async () => {
+    // Same-window ready keeps today's behavior exactly: refresh, with no
+    // extra history entry from a push.
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        if (typeof url === "string" && url.includes("/analysis/status")) {
+          return { ok: true, json: async () => ({ stage: "ready" }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("says there is no reported range rather than offering a dead control", () => {
