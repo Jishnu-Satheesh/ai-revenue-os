@@ -105,6 +105,59 @@ export function createMonthlyAnalysisCacheKey(input: {
 }
 
 /**
+ * Version 2 drops the month label. A key minted under version 1 named a
+ * calendar month; this one names a window. Bumping rather than reusing means
+ * every run cached under the old scheme recomputes once, which is correct --
+ * a month's arithmetic must never be reused under a range's heading.
+ */
+const ANALYSIS_RESOLVER_VERSION = 2;
+
+/**
+ * The identity of one analysable question: who is asking, about which channel
+ * and window, in which zone, at which grain, with which arithmetic, over which
+ * evidence.
+ *
+ * `evidenceDigest` is the ingredient that makes this a cache key rather than a
+ * bookmark. A correction, a supersession, a held decision, a new projection or
+ * a detector version change all move it, so a completed run stops matching the
+ * moment its inputs stop being the current ones. See ADR 0043 and ADR 0047.
+ */
+export function createWindowAnalysisCacheKey(input: {
+  organizationId: string;
+  channelId: string | null;
+  branchId: string | null;
+  windowStart: string;
+  windowEnd: string;
+  timeZone: string;
+  grain: "day" | "week" | "month" | "span";
+  registryVersion: number;
+  detectorVersions: readonly { key: string; calculationVersion: number }[];
+  metricKeys: readonly string[];
+  evidenceDigest: string;
+}): string {
+  return createHash("sha256")
+    .update(
+      canonicalize({
+        resolverVersion: ANALYSIS_RESOLVER_VERSION,
+        organizationId: input.organizationId,
+        channelId: input.channelId,
+        branchId: input.branchId,
+        windowStart: input.windowStart,
+        windowEnd: input.windowEnd,
+        timeZone: input.timeZone,
+        grain: input.grain,
+        registryVersion: input.registryVersion,
+        detectorVersions: [...input.detectorVersions].sort((left, right) =>
+          left.key.localeCompare(right.key),
+        ),
+        metricKeys: [...input.metricKeys].sort(),
+        evidenceDigest: input.evidenceDigest,
+      }),
+    )
+    .digest("hex");
+}
+
+/**
  * The fingerprint of the exact candidate evidence one analysis pass read.
  *
  * Built from the loader's output rather than from the database directly, so

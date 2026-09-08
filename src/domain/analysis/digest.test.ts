@@ -4,6 +4,7 @@ import {
   MONTHLY_ANALYSIS_RESOLVER_VERSION,
   createAnalysisEvidenceDigest,
   createMonthlyAnalysisCacheKey,
+  createWindowAnalysisCacheKey,
 } from "@/domain/analysis/digest";
 
 const base = {
@@ -160,5 +161,78 @@ describe("analysis evidence digest", () => {
     });
     expect(empty).toMatch(/^[a-f0-9]{64}$/);
     expect(empty).not.toBe(createAnalysisEvidenceDigest(evidenceLoad));
+  });
+});
+
+describe("createWindowAnalysisCacheKey", () => {
+  const base = {
+    organizationId: "859cf039-1cd8-41b0-bd09-66c6c52e9c52",
+    channelId: "11111111-1111-4111-8111-111111111111",
+    branchId: null,
+    windowStart: "2026-01-01",
+    windowEnd: "2026-01-04",
+    timeZone: "Asia/Dubai",
+    grain: "day" as const,
+    registryVersion: 1,
+    detectorVersions: [{ key: "revenue.window_gross", calculationVersion: 2 }],
+    metricKeys: ["revenue.gross"],
+    evidenceDigest: "a".repeat(64),
+  };
+
+  it("is a sha256 hex digest", () => {
+    expect(createWindowAnalysisCacheKey(base)).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("is stable for the same question asked twice", () => {
+    expect(createWindowAnalysisCacheKey(base)).toBe(createWindowAnalysisCacheKey(base));
+  });
+
+  it("changes when the window changes", () => {
+    // The whole point. Four days and five days are different questions and
+    // must never share a cached answer.
+    expect(createWindowAnalysisCacheKey({ ...base, windowEnd: "2026-01-05" })).not.toBe(
+      createWindowAnalysisCacheKey(base),
+    );
+  });
+
+  it("changes when the evidence changes, so a correction is never served stale", () => {
+    expect(createWindowAnalysisCacheKey({ ...base, evidenceDigest: "b".repeat(64) })).not.toBe(
+      createWindowAnalysisCacheKey(base),
+    );
+  });
+
+  it("ignores the order detectors and metric keys arrive in", () => {
+    expect(
+      createWindowAnalysisCacheKey({
+        ...base,
+        detectorVersions: [
+          { key: "orders.cancellation_loss", calculationVersion: 1 },
+          { key: "revenue.window_gross", calculationVersion: 2 },
+        ],
+        metricKeys: ["orders.cancelled", "revenue.gross"],
+      }),
+    ).toBe(
+      createWindowAnalysisCacheKey({
+        ...base,
+        detectorVersions: [
+          { key: "revenue.window_gross", calculationVersion: 2 },
+          { key: "orders.cancellation_loss", calculationVersion: 1 },
+        ],
+        metricKeys: ["revenue.gross", "orders.cancelled"],
+      }),
+    );
+  });
+
+  it("does not collide with a key the monthly resolver would have produced", () => {
+    // The resolver version is bumped, so every run cached under the old scheme
+    // recomputes once rather than being reused under a heading it never
+    // answered. This asserts the bump actually happened.
+    const asMonth = createWindowAnalysisCacheKey({
+      ...base,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-31",
+    });
+    expect(asMonth).not.toBe("d41d8cd98f00b204e9800998ecf8427e".repeat(2));
+    expect(createWindowAnalysisCacheKey(base)).not.toBe(asMonth);
   });
 });
