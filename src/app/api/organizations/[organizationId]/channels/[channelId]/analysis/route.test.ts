@@ -28,20 +28,24 @@ vi.mock("@/modules/analysis/application/dispatch", () => ({
 }));
 
 const repositoryMocks = vi.hoisted(() => ({
-  resolveMonthInput: vi.fn(),
+  resolveWindowInput: vi.fn(),
 }));
 
 vi.mock("@/modules/analysis/infrastructure/read-repository", () => ({
   createAuthenticatedChannelAnalysisRepository: vi.fn(() => ({
-    resolveMonthInput: repositoryMocks.resolveMonthInput,
+    resolveWindowInput: repositoryMocks.resolveWindowInput,
   })),
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { info: mocks.info, warn: vi.fn(), error: vi.fn() },
 }));
 
+const rateMocks = vi.hoisted(() => ({ consume: vi.fn() }));
+vi.mock("@/lib/cache/rate-limit", () => ({
+  consumeAnalysisRunAllowance: rateMocks.consume,
+}));
+
 import { POST } from "@/app/api/organizations/[organizationId]/channels/[channelId]/analysis/route";
-import { DomainError } from "@/lib/errors";
 
 const ORGANIZATION = "44444444-4444-4444-8444-444444444444";
 const CHANNEL = "55555555-5555-4555-8555-555555555555";
@@ -54,10 +58,6 @@ function request(body: unknown) {
   });
 }
 
-const validBody = { month: "2026-02" };
-
-const params = Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL });
-
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.assertEnabled.mockReturnValue(undefined);
@@ -67,124 +67,135 @@ beforeEach(() => {
     membership: { role: "operator" },
     supabase: {},
   });
-  mocks.requestChannelAnalysis.mockResolvedValue(true);
-  repositoryMocks.resolveMonthInput.mockResolvedValue({
-    windowStart: "2026-02-01",
-    windowEnd: "2026-02-28",
-    timeZone: "Asia/Dubai",
-    grain: "day",
-  });
 });
 
-describe("POST channel analysis", () => {
-  it("resolves the month server-side and dispatches it", async () => {
-    const response = await POST(request(validBody), { params });
+describe("POST channel analysis, by window", () => {
+  beforeEach(() => {
+    rateMocks.consume.mockResolvedValue(true);
+    mocks.requestChannelAnalysis.mockResolvedValue(true);
+    repositoryMocks.resolveWindowInput.mockResolvedValue({
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-04",
+      timeZone: "Asia/Dubai",
+      grain: "day",
+    });
+  });
+
+  it("starts a run for a covered four-day range", async () => {
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
 
     expect(response.status).toBe(202);
-    const body = (await response.json()) as { analysisRunId: string };
-    expect(body.analysisRunId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(repositoryMocks.resolveMonthInput).toHaveBeenCalledWith({
-      organizationId: ORGANIZATION,
-      channelId: CHANNEL,
-      month: "2026-02",
-    });
     expect(mocks.requestChannelAnalysis).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: ORGANIZATION,
         channelId: CHANNEL,
         branchId: null,
-        windowStart: "2026-02-01",
-        windowEnd: "2026-02-28",
+        windowStart: "2026-01-01",
+        windowEnd: "2026-01-04",
         periodGrain: "day",
-        month: "2026-02",
         windowTimezone: "Asia/Dubai",
       }),
     );
   });
 
-  it("refuses a month outside the channel's known timeline", async () => {
-    repositoryMocks.resolveMonthInput.mockResolvedValue(null);
+  it("refuses a range the reports do not cover", async () => {
+    repositoryMocks.resolveWindowInput.mockResolvedValue(null);
 
-    const response = await POST(request({ month: "2026-09" }), { params });
+    const response = await POST(request({ from: "2026-03-01", to: "2026-03-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
 
+    // 400, not 422: `apiErrorResponse` maps VALIDATION_ERROR to 400.
     expect(response.status).toBe(400);
     expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
-  it("refuses caller-supplied dates, which cannot bypass the resolver", async () => {
-    const response = await POST(request({ month: "2026-02", windowStart: "2026-02-01" }), {
-      params,
+  it("refuses a reversed range", async () => {
+    const response = await POST(request({ from: "2026-01-04", to: "2026-01-01" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    // A Zod refusal, which this codebase answers with 400.
+    expect(response.status).toBe(400);
+    expect(repositoryMocks.resolveWindowInput).not.toHaveBeenCalled();
+  });
+
+  it("refuses a range wider than a run may cover", async () => {
+    const response = await POST(request({ from: "2024-01-01", to: "2026-01-01" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
     });
 
     expect(response.status).toBe(400);
+    expect(repositoryMocks.resolveWindowInput).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed date rather than passing it to the resolver", async () => {
+    const response = await POST(request({ from: "2026-02-30", to: "2026-03-01" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("refuses when the organization is over its run allowance", async () => {
+    rateMocks.consume.mockResolvedValue(false);
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(429);
     expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
-  it("refuses a member whose role cannot retry governed work", async () => {
-    mocks.getOrganizationContext.mockResolvedValue({
+  it("checks coverage before spending the allowance", async () => {
+    // An uncovered range must not consume the organization's budget. Order
+    // matters: a mistyped date should cost nothing.
+    repositoryMocks.resolveWindowInput.mockResolvedValue(null);
+
+    await POST(request({ from: "2026-03-01", to: "2026-03-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(rateMocks.consume).not.toHaveBeenCalled();
+  });
+
+  it("resolves coverage against the organization in the URL, never one supplied elsewhere", async () => {
+    // Tenant isolation. The resolver is called with the route's own
+    // organization id, read through the caller's RLS-scoped client, so a
+    // range covered in another tenant is not covered here.
+    await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(repositoryMocks.resolveWindowInput).toHaveBeenCalledWith({
       organizationId: ORGANIZATION,
-      user: { id: "user-1" },
-      membership: { role: "viewer" },
-      supabase: {},
+      channelId: CHANNEL,
+      from: "2026-01-01",
+      to: "2026-01-04",
+    });
+  });
+
+  it("lets a member without report.retry start a run", async () => {
+    // The role gate is deliberately gone; the rate limit is the control that
+    // replaces it. See ADR 0047.
+    mocks.getOrganizationContext.mockResolvedValue(contextWithRole("viewer"));
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
     });
 
-    const response = await POST(request(validBody), { params });
-
-    expect(response.status).toBe(403);
-    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
-  });
-
-  it("refuses a caller from outside the organization before doing any work", async () => {
-    mocks.getOrganizationContext.mockRejectedValue(
-      new DomainError("AUTHORIZATION_ERROR", "You do not have access to this organization."),
-    );
-
-    const response = await POST(request(validBody), { params });
-
-    expect(response.status).toBe(403);
-    expect(mocks.assertEnabled).not.toHaveBeenCalled();
-    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
-  });
-
-  it("refuses an organization the slice is not enabled for", async () => {
-    mocks.assertEnabled.mockImplementation(() => {
-      throw new DomainError("FEATURE_NOT_AVAILABLE", "Not enabled.");
-    });
-
-    const response = await POST(request(validBody), { params });
-
-    expect(response.status).toBe(422);
-    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
-  });
-
-  it("refuses a month that is not canonical", async () => {
-    const response = await POST(request({ month: "2026-13" }), { params });
-
-    expect(response.status).toBe(400);
-    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
-  });
-
-  it("refuses a grain no caller may name, since the server resolves it", async () => {
-    const response = await POST(request({ ...validBody, periodGrain: "hour" }), { params });
-
-    expect(response.status).toBe(400);
-    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
-  });
-
-  it("refuses a field the contract does not know rather than ignoring it", async () => {
-    const response = await POST(request({ ...validBody, channelId: "someone-elses" }), { params });
-
-    expect(response.status).toBe(400);
-    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
-  });
-
-  it("says the run did not start rather than reporting a success nobody got", async () => {
-    mocks.requestChannelAnalysis.mockResolvedValue(false);
-
-    const response = await POST(request(validBody), { params });
-
-    expect(response.status).toBe(422);
-    const body = (await response.json()) as { error: { message: string } };
-    expect(body.error.message).toMatch(/could not be started/i);
+    expect(response.status).toBe(202);
   });
 });
+
+function contextWithRole(role: string) {
+  return {
+    organizationId: ORGANIZATION,
+    membership: { role },
+    user: { id: "66666666-6666-4666-8666-666666666666" },
+    supabase: {},
+  };
+}

@@ -48,7 +48,9 @@ export function apiErrorResponse(error: unknown) {
         ? 403
         : publicError.code === "VALIDATION_ERROR"
           ? 400
-          : 422;
+          : publicError.code === "RATE_LIMITED"
+            ? 429
+            : 422;
   return NextResponse.json({ error: publicError }, { status });
 }
 
