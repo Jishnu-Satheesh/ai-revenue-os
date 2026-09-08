@@ -30,7 +30,7 @@ import { cacheGet, cacheSet } from "@/lib/cache/redis";
  * Also deliberately not cached anywhere: the question "has this range been
  * analysed?". That is one indexed query, and caching it keyed on a date range
  * is exactly how a client is served an audit the reports have since
- * contradicted. See ADR 0043 and ADR 0047.
+ * contradicted. See ADR 0043 and ADR 0048.
  */
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 

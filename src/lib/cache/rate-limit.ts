@@ -9,10 +9,10 @@ import { logger } from "@/lib/logger";
  * How many analyses one organization may start for windows that are not
  * already computed.
  *
- * Starting a run costs a detector pass and an AI narration, and the Channel
- * Audit no longer gates that on a role -- anyone who can see the channel can
- * ask. This is the control that replaces the role gate. Cached windows do not
- * count against it, so reading is always free and unlimited.
+ * Starting a run costs a detector pass and an AI narration. Authorization
+ * answers who may start one (report.retry/channel.manage gate kept); this
+ * limiter answers how often, fails open. Neither substitutes for the other.
+ * Cached windows do not count, so reading stays free and unlimited.
  */
 const RUNS_PER_HOUR = 30;
 

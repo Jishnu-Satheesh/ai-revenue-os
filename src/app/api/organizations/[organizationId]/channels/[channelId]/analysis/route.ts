@@ -25,7 +25,7 @@ import type { OrganizationRole } from "@/domain/organizations/types";
  * Authorization and cost control are orthogonal and both apply, in that
  * order: `report.retry` decides who may ask at all, and an organization-scoped
  * rate limit caps how often someone who may ask can spend a detector pass and
- * an AI narration. Neither substitutes for the other. See ADR 0047.
+ * an AI narration. Neither substitutes for the other. See ADR 0048.
  *
  * This route starts work; it does not decide anything. The claim RPC re-resolves
  * the channel, the branch timezone, and the metric vocabulary, and refuses a
@@ -44,7 +44,7 @@ const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
  *
  * The dates are the operator's, but their admissibility is not: the resolver
  * below re-decides it against the channel's declared coverage, and the worker
- * decides it a second time under its lease. See ADR 0047.
+ * decides it a second time under its lease. See ADR 0048.
  */
 const bodySchema = z
   .object({

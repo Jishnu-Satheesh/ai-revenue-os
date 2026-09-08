@@ -71,7 +71,7 @@ export const ANALYSIS_RESOLVER_VERSION = 2;
  * `evidenceDigest` is the ingredient that makes this a cache key rather than a
  * bookmark. A correction, a supersession, a held decision, a new projection or
  * a detector version change all move it, so a completed run stops matching the
- * moment its inputs stop being the current ones. See ADR 0043 and ADR 0047.
+ * moment its inputs stop being the current ones. See ADR 0043 and ADR 0048.
  */
 export function createWindowAnalysisCacheKey(input: {
   organizationId: string;
