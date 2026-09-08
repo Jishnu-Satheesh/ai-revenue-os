@@ -16,7 +16,6 @@ import { periodStartFor } from "@/domain/reports/period-key";
  */
 
 const LOCAL_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const ANALYSIS_MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
 /** A year of days is the widest window a run may cover. */
 const MAX_PERIODS = 400;
 const MS_PER_DAY = 86_400_000;
@@ -90,94 +89,6 @@ export function nextLocalPeriodStart(start: string, grain: PeriodAnalysisGrain):
 
 export function previousLocalPeriodStart(start: string, grain: PeriodAnalysisGrain): string {
   return localPeriodStart(addLocalDays(start, -1), grain);
-}
-
-/**
- * A channel analysis selection is one local calendar month, carried as a
- * canonical `YYYY-MM` value. The server derives the window; the picker never
- * supplies raw dates, so an invented past or future window cannot enter
- * through this path.
- */
-export function parseAnalysisMonth(value: string): { year: number; month: number } {
-  const match = ANALYSIS_MONTH.exec(value);
-  if (!match) throw new ChannelAnalysisError("INVALID_ANALYSIS_MONTH");
-  return { year: Number(match[1]), month: Number(match[2]) };
-}
-
-/** The inclusive first and last local dates of a canonical analysis month. */
-export function analysisMonthBounds(month: string): { windowStart: string; windowEnd: string } {
-  const { year, month: monthNumber } = parseAnalysisMonth(month);
-  const windowStart = `${year}-${pad(monthNumber)}-01`;
-  return { windowStart, windowEnd: localPeriodEnd(windowStart, "month") };
-}
-
-export type AnalysisMonthHorizon = {
-  /** First canonical month the channel's declared packages cover, inclusive. */
-  firstMonth: string;
-  /** Last canonical month the channel's declared packages cover, inclusive. */
-  lastMonth: string;
-};
-
-/**
- * The server-side month check: the selection must be canonical and inside the
- * channel's known timeline. String comparison is exact here because both sides
- * are canonical `YYYY-MM` values that `parseAnalysisMonth` already validated.
- */
-export function resolveAnalysisMonth(
-  month: string,
-  horizon: AnalysisMonthHorizon,
-): { windowStart: string; windowEnd: string } {
-  parseAnalysisMonth(month);
-  parseAnalysisMonth(horizon.firstMonth);
-  parseAnalysisMonth(horizon.lastMonth);
-  if (month < horizon.firstMonth || month > horizon.lastMonth) {
-    throw new ChannelAnalysisError("ANALYSIS_MONTH_OUT_OF_HORIZON");
-  }
-  return analysisMonthBounds(month);
-}
-
-/** A picker shows a decade of months at most; anything wider is a data bug. */
-const MAX_HORIZON_MONTHS = 120;
-
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-] as const;
-
-/**
- * Every canonical month a horizon covers, oldest first. The Year control
- * lists the distinct years; the Month control always shows the twelve names
- * and disables the pairs outside the edges.
- */
-export function enumerateAnalysisMonths(horizon: AnalysisMonthHorizon): string[] {
-  const first = parseAnalysisMonth(horizon.firstMonth);
-  const last = parseAnalysisMonth(horizon.lastMonth);
-  const total = (last.year - first.year) * 12 + (last.month - first.month);
-  if (total < 0 || total >= MAX_HORIZON_MONTHS) {
-    throw new ChannelAnalysisError("ANALYSIS_HORIZON_UNSHOWABLE");
-  }
-  const months: string[] = [];
-  for (let step = 0; step <= total; step += 1) {
-    const index = first.year * 12 + (first.month - 1) + step;
-    months.push(`${Math.floor(index / 12)}-${pad((index % 12) + 1)}`);
-  }
-  return months;
-}
-
-/** "February 2026". A calendar label, so no timezone is consulted. */
-export function formatAnalysisMonth(month: string): string {
-  const { year, month: monthNumber } = parseAnalysisMonth(month);
-  return `${MONTH_NAMES[monthNumber - 1]} ${year}`;
 }
 
 /**

@@ -5447,3 +5447,35 @@ through the real routes, not only in tests.
   evidence admission provenance, domain work-scope/quote/retention schemas,
   `.env.example` names only), focused vitest + hosted pgTAP + per-RPC staging
   probes, path-limited commit. No paid calls, no enablement, gates stay OFF.
+### 2026-09-08 · muse-spark · Free-range window Task 15: ADR filed, month helpers retired
+
+- **Claimed files (Task 15 only):** created
+  `adrs/0048-a-free-range-window-over-a-content-addressed-cache.md`; modified
+  `src/domain/analysis/calendar.ts`, `src/domain/analysis/calendar.test.ts`,
+  and this board. No other production files; no migration, no
+  `database.types.ts`, no growth-intelligence files.
+- **Retired:** `parseAnalysisMonth`, `resolveAnalysisMonth`,
+  `analysisMonthBounds`, `enumerateAnalysisMonths`, `formatAnalysisMonth`,
+  `ANALYSIS_MONTH`, `MONTH_NAMES`, `MAX_HORIZON_MONTHS`, `AnalysisMonthHorizon`
+  plus their tests. All period-arithmetic exports untouched. Zero remaining
+  imports repo-wide. `month-year-picker.tsx` untouched (carries its own month
+  names; channels list page still uses it).
+- **ADR number is 0048, not 0047:** `adrs/0047-*` was already taken by the
+  unrelated branch-scoped market-research ADR. The spec (§11) and code comments
+  in `analysis/route.ts`, `digest.ts`, `view-cache.ts` cite "ADR 0047" from the
+  spec — the new ADR records that the binding record lives at 0048.
+- **Role gate KEPT, not removed:** the route still requires `report.retry` and
+  the page still gates run control on `channel.manage`; the per-organization
+  rate limit was added alongside as the how-often control. Widening who may
+  spend AI budget is an open product decision with the user. The plan brief's
+  "gate removed" line is wrong and was not recorded.
+- **One-time cache recompute:** the window cache key dropped `month` and its
+  resolver version was bumped, so previously cached runs recompute once on
+  first pick — deliberate, not a surprise run count.
+- **Owed / not verified:** worker deploy (`pnpm dlx trigger.dev@latest deploy`)
+  and the browser proof (Keeta 22–28 Feb default, 1–4 Jan run + cache hit,
+  Offline Store grain warning, Noon whole-span default, March unselectable,
+  auto-run visibility) — excluded from this task by controller ruling.
+- **Status:** done — calendar + month-year-picker focused suites green,
+  typecheck clean, lint with no new errors; report at
+  `.superpowers/sdd/2026-09-07-channel-audit-free-range-window/task-15-report.md`.
