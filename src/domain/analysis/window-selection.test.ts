@@ -211,3 +211,99 @@ describe("defaultAnalysisWindow", () => {
     ).toEqual({ from: "2026-09-01", to: "2026-09-30" });
   });
 });
+
+import { describeGrainMismatch } from "@/domain/analysis/window-selection";
+
+describe("describeGrainMismatch", () => {
+  const monthly = {
+    windowStart: "2026-05-01",
+    windowEnd: "2026-08-31",
+    grain: "month" as const,
+    governedRowCount: 16,
+  };
+  const span = {
+    windowStart: "2026-01-01",
+    windowEnd: "2026-02-28",
+    grain: "span" as const,
+    governedRowCount: 2,
+  };
+
+  it("says nothing when a daily report can answer a four-day question", () => {
+    expect(
+      describeGrainMismatch({
+        from: "2026-01-01",
+        to: "2026-01-04",
+        windows: [daily("2026-01-01", "2026-02-28")],
+      }),
+    ).toBeNull();
+  });
+
+  it("warns when four days are asked of a monthly report, and names the month", () => {
+    expect(
+      describeGrainMismatch({ from: "2026-08-01", to: "2026-08-04", windows: [monthly] }),
+    ).toEqual({
+      grain: "month",
+      declaredStart: "2026-05-01",
+      declaredEnd: "2026-08-31",
+      suggested: { from: "2026-08-01", to: "2026-08-31" },
+    });
+  });
+
+  it("warns when part of a single-figure span is asked for, and offers the whole span", () => {
+    // Noon reported one figure for 1 January to 28 February. Four days of it
+    // is not a smaller answer; it is no answer.
+    expect(
+      describeGrainMismatch({ from: "2026-01-01", to: "2026-01-04", windows: [span] }),
+    ).toEqual({
+      grain: "span",
+      declaredStart: "2026-01-01",
+      declaredEnd: "2026-02-28",
+      suggested: { from: "2026-01-01", to: "2026-02-28" },
+    });
+  });
+
+  it("says nothing when the whole span is asked for", () => {
+    expect(
+      describeGrainMismatch({ from: "2026-01-01", to: "2026-02-28", windows: [span] }),
+    ).toBeNull();
+  });
+
+  it("says nothing when a whole month is asked of a monthly report", () => {
+    expect(
+      describeGrainMismatch({ from: "2026-08-01", to: "2026-08-31", windows: [monthly] }),
+    ).toBeNull();
+  });
+
+  it("warns on a part-month that straddles two months", () => {
+    // 15 July to 15 August contains no whole month, so a monthly report has
+    // nothing to put in it. The suggestion widens to both whole months.
+    expect(
+      describeGrainMismatch({ from: "2026-07-15", to: "2026-08-15", windows: [monthly] }),
+    ).toEqual({
+      grain: "month",
+      declaredStart: "2026-05-01",
+      declaredEnd: "2026-08-31",
+      suggested: { from: "2026-07-01", to: "2026-08-31" },
+    });
+  });
+
+  it("stays quiet when any one of several reports can answer", () => {
+    // Keeta files three families at once. One daily report is enough to make
+    // a four-day question answerable, whatever the others do.
+    expect(
+      describeGrainMismatch({
+        from: "2026-01-01",
+        to: "2026-01-04",
+        windows: [monthly, span, daily("2026-01-01", "2026-02-28")],
+      }),
+    ).toBeNull();
+  });
+
+  it("says nothing about a range no report overlaps", () => {
+    // That is a coverage problem, refused by isWindowCovered. Two complaints
+    // about one mistake is one too many.
+    expect(
+      describeGrainMismatch({ from: "2026-03-01", to: "2026-03-04", windows: [monthly] }),
+    ).toBeNull();
+  });
+});

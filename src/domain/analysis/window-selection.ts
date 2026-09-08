@@ -3,6 +3,7 @@ import {
   localDaysBetween,
   enumerateLocalPeriodStarts,
   localPeriodEnd,
+  localPeriodStart,
 } from "@/domain/analysis/calendar";
 import type { AnalysisGrain } from "@/domain/analysis/types";
 
@@ -158,4 +159,80 @@ export function defaultAnalysisWindow(input: {
 
   const latest = latestWindow(input.windows);
   return latest === null ? null : lastWholePeriod(latest);
+}
+
+/** Why a picked range would come back empty, and the range that would not. */
+export type GrainMismatch = {
+  grain: AnalysisGrain;
+  declaredStart: string;
+  declaredEnd: string;
+  suggested: AnalysisWindowSelection;
+};
+
+function overlaps(window: CoverageWindow, from: string, to: string): boolean {
+  return window.windowStart <= to && from <= window.windowEnd;
+}
+
+/**
+ * Whether this declaration can put at least one whole period inside the range.
+ *
+ * A period counts only when it lies entirely inside both the range and the
+ * declaration, which is the same rule `enumerateLocalPeriodStarts` applies:
+ * reporting a week the caller asked about four days of would claim a gap
+ * nobody has.
+ */
+function canAnswer(window: CoverageWindow, from: string, to: string): boolean {
+  if (window.grain === "span") {
+    // One figure for one range. It fits only if the whole of it is asked for.
+    return from <= window.windowStart && window.windowEnd <= to;
+  }
+  const grain = window.grain;
+  return enumerateLocalPeriodStarts(from, to, grain).some(
+    (start) => start >= window.windowStart && localPeriodEnd(start, grain) <= window.windowEnd,
+  );
+}
+
+/** The narrowest range containing the picked one that this declaration can fill. */
+function widenFor(window: CoverageWindow, from: string, to: string): AnalysisWindowSelection {
+  if (window.grain === "span") return { from: window.windowStart, to: window.windowEnd };
+  const grain = window.grain;
+  const start = localPeriodStart(from, grain);
+  const end = localPeriodEnd(localPeriodStart(to, grain), grain);
+  return {
+    from: start < window.windowStart ? window.windowStart : start,
+    to: end > window.windowEnd ? window.windowEnd : end,
+  };
+}
+
+/**
+ * Why a picked range would come back empty, or null when it would not.
+ *
+ * Silent unless *every* overlapping declaration is too coarse: a channel filing
+ * three report families at once needs only one of them to be able to answer.
+ * Silent too when nothing overlaps at all -- that is a coverage refusal, and
+ * two complaints about one mistake is one too many.
+ *
+ * The declaration blamed is the one carrying the most governed rows, so the
+ * warning names the report the operator is most likely to recognise.
+ */
+export function describeGrainMismatch(input: {
+  from: string;
+  to: string;
+  windows: readonly CoverageWindow[];
+}): GrainMismatch | null {
+  const overlapping = input.windows.filter((window) => overlaps(window, input.from, input.to));
+  if (overlapping.length === 0) return null;
+  if (overlapping.some((window) => canAnswer(window, input.from, input.to))) return null;
+
+  const [blamed] = [...overlapping].sort(
+    (left, right) =>
+      right.governedRowCount - left.governedRowCount ||
+      GRAIN_FINENESS.indexOf(left.grain) - GRAIN_FINENESS.indexOf(right.grain),
+  );
+  return {
+    grain: blamed.grain,
+    declaredStart: blamed.windowStart,
+    declaredEnd: blamed.windowEnd,
+    suggested: widenFor(blamed, input.from, input.to),
+  };
 }
