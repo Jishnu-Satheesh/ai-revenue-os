@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import { ChannelWorkspace } from "@/components/analysis/channel-workspace";
+import type {
+  AnalysisWindowSelection,
+  CoverageSegment,
+  CoverageWindow,
+} from "@/domain/analysis/window-selection";
 import { buildChannelWorkspaceView } from "@/modules/analysis/application/read-model";
 import type {
   ChannelAnalysisRunRecord,
@@ -33,6 +39,7 @@ function run(overrides: Partial<ChannelAnalysisRunRecord> = {}): ChannelAnalysis
     registryVersion: 1,
     detectorVersions: [{ key: "evidence.period_coverage", calculationVersion: 1 }],
     status: "completed",
+    resultDigest: "d".repeat(64),
     findingCount: 0,
     observationCount: 1,
     needsDataCount: 0,
@@ -99,20 +106,27 @@ function metricEvidence(
   } as ChannelFindingEvidenceRecord;
 }
 
-const MONTH_HORIZON = { firstMonth: "2025-12", lastMonth: "2026-02" };
+const COVERAGE_SEGMENTS: CoverageSegment[] = [{ start: "2026-01-01", end: "2026-01-31" }];
+
+const COVERAGE_WINDOWS: CoverageWindow[] = [
+  { windowStart: "2026-01-01", windowEnd: "2026-01-31", grain: "day", governedRowCount: 31 },
+];
+
+const SELECTED_WINDOW: AnalysisWindowSelection = { from: "2026-01-01", to: "2026-01-04" };
 
 type WorkspaceInput = {
   runs?: ChannelAnalysisRunRecord[];
   findings?: ChannelFindingRecord[];
   evidence?: ChannelFindingEvidenceRecord[];
   canRunAnalysis?: boolean;
-  monthHorizon?: { firstMonth: string; lastMonth: string } | null;
-  selectedMonth?: string | null;
+  segments?: CoverageSegment[];
+  coverageWindows?: CoverageWindow[];
+  selectedWindow?: AnalysisWindowSelection | null;
   recommendations?: import("@/modules/analysis/application/ports").ChannelRecommendationRecord[];
 };
 
 /** The element on its own, so a test can re-render the same instance with a
- *  different month's view -- which is what the month picker actually does. */
+ *  different window's view -- which is what a refresh actually does. */
 function workspaceElement(input: WorkspaceInput) {
   const view = buildChannelWorkspaceView({
     runs: input.runs ?? [run()],
@@ -125,8 +139,9 @@ function workspaceElement(input: WorkspaceInput) {
       organizationId="org-1"
       channel={CHANNEL}
       view={view}
-      monthHorizon={input.monthHorizon === undefined ? MONTH_HORIZON : input.monthHorizon}
-      selectedMonth={input.selectedMonth === undefined ? "2026-01" : input.selectedMonth}
+      segments={input.segments ?? COVERAGE_SEGMENTS}
+      coverageWindows={input.coverageWindows ?? COVERAGE_WINDOWS}
+      selectedWindow={input.selectedWindow === undefined ? SELECTED_WINDOW : input.selectedWindow}
       timeZone="Asia/Dubai"
       canRunAnalysis={input.canRunAnalysis ?? true}
       channelsHref="/organizations/org-1/channels"
@@ -137,18 +152,6 @@ function workspaceElement(input: WorkspaceInput) {
 
 function renderWorkspace(input: WorkspaceInput) {
   return render(workspaceElement(input));
-}
-
-/** Opens a pill-style select, whose options live in a Radix portal. */
-async function openPicker(label: string) {
-  // Radix opens the listbox from pointerdown only when the event looks like a
-  // primary click, which jsdom's synthetic event does not do on its own.
-  fireEvent.pointerDown(screen.getByLabelText(label), {
-    button: 0,
-    ctrlKey: false,
-    pointerType: "mouse",
-  });
-  return within(await screen.findByRole("listbox")).getAllByRole("option");
 }
 
 beforeAll(() => {
@@ -762,77 +765,74 @@ describe("ChannelWorkspace", () => {
     expect(screen.queryByText(/last attempt failed/i)).toBeNull();
   });
 
-  it("hides the run control from a member who may not start one", () => {
+  it("disables the range control for a member who may not start one", () => {
     renderWorkspace({ canRunAnalysis: false });
 
-    expect(screen.queryByRole("button", { name: "Run analysis" })).toBeNull();
+    // The picker stays visible so the selected range still reads, but a
+    // viewer who may not spend AI budget cannot apply a run from it.
+    expect(screen.getByRole("button", { name: /2026-01-01/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^apply$/i })).toBeNull();
   });
 
-  it("offers twelve month names with out-of-horizon pairs disabled", async () => {
-    renderWorkspace({});
+  // Month-picker coverage lives with the picker itself: the workspace now
+  // offers any range the reports cover, and the run it starts is pinned by
+  // "posts the picked range, not a month" above.
 
-    const options = await openPicker("Month to analyse");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
-    ]);
-    // The horizon runs December 2025 to February 2026; within 2026 only
-    // January and February are selectable.
-    const disabled = options
-      .filter((option) => option.getAttribute("aria-disabled") === "true")
-      .map((option) => option.textContent);
-    expect(disabled).toEqual([
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
-    ]);
-  });
-
-  it("offers only the years the reported horizon covers", async () => {
-    renderWorkspace({});
-
-    const options = await openPicker("Year to analyse");
-    expect(options.map((option) => option.textContent)).toEqual(["2025", "2026"]);
-  });
-
-  it("starts the run for the selected month and nothing else", async () => {
-    const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) =>
-        new Response(JSON.stringify({ analysisRunId: "run-9" }), { status: 202 }),
-    );
+  it("posts the picked range, not a month", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal("fetch", fetchMock);
-    renderWorkspace({ selectedMonth: "2026-02" });
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
-    expect(JSON.parse(init?.body as string)).toEqual({ month: "2026-02" });
-    vi.unstubAllGlobals();
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      from: "2026-01-01",
+      to: "2026-01-04",
+    });
   });
 
-  it("says there is no reported month rather than offering a dead control", () => {
-    renderWorkspace({ monthHorizon: null, selectedMonth: null });
+  it("shows the loader instead of telling the operator to refresh", async () => {
+    // The message this replaces read "refresh in a moment to see the result",
+    // which asked the operator to do the waiting themselves.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
 
-    expect(screen.getByText(/no reported month to analyse yet/i)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Run analysis" })).toBeNull();
-    expect(screen.queryByLabelText("Month to analyse")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/reading approved reports/i)).toBeInTheDocument();
+    expect(screen.queryByText(/refresh in a moment/i)).not.toBeInTheDocument();
+  });
+
+  it("says plainly when the organization is over its allowance", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: { message: "This organization has started a lot of analyses" },
+        }),
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/started a lot of analyses/i)).toBeInTheDocument();
+  });
+
+  it("says there is no reported range rather than offering a dead control", () => {
+    renderWorkspace({ segments: [], coverageWindows: [], selectedWindow: null });
+
+    expect(screen.getByText(/no reported range to analyse yet/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^apply$/i })).toBeNull();
   });
 
   it("does not imply a provider connection from a channel", () => {
@@ -1046,7 +1046,7 @@ describe("ChannelWorkspace", () => {
       ).toBeNull();
     });
 
-    it("does not carry one month's request into the month switched to", async () => {
+    it("does not carry one window's request into the window switched to", async () => {
       const fetchMock = vi.fn<typeof fetch>(
         async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
       );
@@ -1056,9 +1056,9 @@ describe("ChannelWorkspace", () => {
       fireEvent.click(screen.getByRole("button", { name: /Generate AI recommendation/i }));
       await screen.findByRole("button", { name: /Advice requested/i });
 
-      // The month picker pushes history rather than remounting, so the next
-      // month arrives as new props on the same component. February must not
-      // inherit January's answer.
+      // A refresh re-renders rather than remounting, so the next window
+      // arrives as new props on the same component. The new run must not
+      // inherit the old run's answer.
       rerender(
         workspaceElement({
           runs: [

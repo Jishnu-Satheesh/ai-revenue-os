@@ -19,7 +19,8 @@ import {
   CancellationImpact,
   RetentionVisual,
 } from "@/components/analysis/operations-visuals";
-import { MonthYearPicker } from "@/components/analysis/month-year-picker";
+import { AnalysisProgress } from "@/components/analysis/analysis-progress";
+import { WindowRangePicker } from "@/components/analysis/window-range-picker";
 import { RecommendationControls } from "@/components/analysis/recommendation-controls";
 import {
   figureToneClass,
@@ -42,8 +43,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { enumerateAnalysisMonths, formatAnalysisMonth } from "@/domain/analysis/calendar";
 import type { AnalysisGrain } from "@/domain/analysis/types";
+import type {
+  AnalysisWindowSelection,
+  CoverageSegment,
+  CoverageWindow,
+} from "@/domain/analysis/window-selection";
 import type {
   ChannelWorkspaceView,
   WorkspaceChapterView,
@@ -450,28 +455,24 @@ function ChapterVisual({
 function VerdictBand({
   view,
   coverageChip,
-  monthHorizon,
-  selectedMonth,
-  onSelectMonth,
+  segments,
+  coverageWindows,
+  selectedWindow,
+  today,
   timeZone,
   canRunAnalysis,
-  pending,
-  onRunAnalysis,
+  onApplyWindow,
 }: {
   view: ChannelWorkspaceView;
   coverageChip: string | null;
-  monthHorizon: { firstMonth: string; lastMonth: string } | null;
-  selectedMonth: string | null;
-  onSelectMonth: (month: string) => void;
+  segments: readonly CoverageSegment[];
+  coverageWindows: readonly CoverageWindow[];
+  selectedWindow: AnalysisWindowSelection | null;
+  today: string;
   timeZone: string | null;
   canRunAnalysis: boolean;
-  pending: boolean;
-  onRunAnalysis: () => void;
+  onApplyWindow: (selection: AnalysisWindowSelection) => void;
 }) {
-  const months = useMemo(
-    () => (monthHorizon ? enumerateAnalysisMonths(monthHorizon) : []),
-    [monthHorizon],
-  );
   return (
     <section
       aria-label="Marketplace audit verdict"
@@ -532,36 +533,28 @@ function VerdictBand({
           <PotentialLostEarnedScale figures={view.verdict.verdictFigures} />
 
           <div className="mt-auto flex flex-col gap-2">
-            {months.length > 0 && selectedMonth ? (
+            {selectedWindow ? (
               <>
-                <MonthYearPicker
-                  months={months}
-                  selectedMonth={selectedMonth}
-                  onSelectMonth={onSelectMonth}
+                <WindowRangePicker
+                  segments={segments}
+                  windows={coverageWindows}
+                  selected={selectedWindow}
+                  today={today}
+                  onApply={onApplyWindow}
+                  disabled={!canRunAnalysis}
                 />
                 <p className="text-[11px] leading-snug text-muted-foreground">
-                  {formatAnalysisMonth(selectedMonth)}
-                  {timeZone ? `, in ${timeZone}` : null}. An approved report declared this month.
-                  Days the provider left blank are counted as absent, not as zero. A month with no
+                  {formatWindow(selectedWindow.from, selectedWindow.to)}
+                  {timeZone ? `, in ${timeZone}` : null}. Approved reports declare these dates. Days
+                  the provider left blank are counted as absent, not as zero. A range with no
                   governed evidence analyses as exactly that, not as zero.
                 </p>
-                {canRunAnalysis ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="self-start"
-                    disabled={pending}
-                    onClick={onRunAnalysis}
-                  >
-                    {pending ? "Starting…" : "Run analysis"}
-                  </Button>
-                ) : null}
               </>
             ) : (
               // Not a disabled button. An operator staring at one cannot tell
               // whether the platform is busy, broken, or waiting on them.
               <p className="text-[11px] leading-snug text-muted-foreground">
-                There is no reported month to analyse yet. An approved report has to declare a
+                There is no reported range to analyse yet. An approved report has to declare a
                 period for this channel before an analysis has anything to run over.
               </p>
             )}
@@ -1130,8 +1123,9 @@ export function ChannelWorkspace({
   organizationId,
   channel,
   view,
-  monthHorizon,
-  selectedMonth,
+  segments,
+  coverageWindows,
+  selectedWindow,
   timeZone,
   canRunAnalysis,
   channelsHref,
@@ -1141,14 +1135,16 @@ export function ChannelWorkspace({
   channel: WorkspaceChannel;
   view: ChannelWorkspaceView;
   /**
-   * The contiguous month horizon this channel's declared packages cover.
-   * Offered instead of spans counted back from today, because evidence
-   * arrives as uploaded reports covering periods already past: "the last
-   * thirty days" reaches an imported January only by coincidence.
+   * The unbroken stretches of dates this channel's projected packages
+   * declare. Offered instead of spans counted back from today, because
+   * evidence arrives as uploaded reports covering periods already past: "the
+   * last thirty days" reaches an imported January only by coincidence.
    */
-  monthHorizon: { firstMonth: string; lastMonth: string } | null;
-  /** The canonical month the page URL selected. */
-  selectedMonth: string | null;
+  segments: readonly CoverageSegment[];
+  /** The declared package windows behind those stretches, for the grain warning. */
+  coverageWindows: readonly CoverageWindow[];
+  /** The range the page URL selected, or null when nothing is declared at all. */
+  selectedWindow: AnalysisWindowSelection | null;
   /** The organization's zone, for the caption under the picker. */
   timeZone: string | null;
   canRunAnalysis: boolean;
@@ -1157,16 +1153,21 @@ export function ChannelWorkspace({
 }) {
   const router = useRouter();
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  /**
+   * The range whose run is in flight, once the server has accepted it. The
+   * loader polls that range's status until it is ready; clearing this is
+   * what takes the loader back down.
+   */
+  const [appliedWindow, setAppliedWindow] = useState<AnalysisWindowSelection | null>(null);
 
-  // Month navigation is a history change, never a relabel: the evidence
-  // periods under every figure stay exactly what the run recorded.
-  const selectMonth = useCallback(
-    (month: string) => {
-      router.push(`?month=${month}`);
-    },
-    [router],
+  // Today in the organization's own calendar, for the picker's presets. Read
+  // on the client in the organization's zone rather than handed down, so the
+  // control never disagrees with the calendar beside it about what "last
+  // seven days" means.
+  const today = useMemo(
+    () => new Intl.DateTimeFormat("en-CA", timeZone ? { timeZone } : {}).format(new Date()),
+    [timeZone],
   );
 
   /**
@@ -1174,10 +1175,10 @@ export function ChannelWorkspace({
    *
    * Held here, not in each chapter's slot, for two reasons. One press narrates
    * the whole run, so every gap must show the same answer rather than five
-   * buttons that still look unpressed. And the month picker is a soft history
-   * change -- this component is not remounted -- so the run the ask was made
-   * for is stored beside it. Switching months therefore shows an idle button
-   * again instead of February inheriting March's "Advice requested".
+   * buttons that still look unpressed. And a refresh is not a remount -- this
+   * component keeps its state -- so the run the ask was made for is stored
+   * beside it. Switching windows therefore shows an idle button again instead
+   * of the new window inheriting the old one's "Advice requested".
    */
   const runId = view.run?.id ?? null;
   const [narrationRequest, setNarrationRequest] = useState<{
@@ -1299,47 +1300,59 @@ export function ChannelWorkspace({
     ? `${coverageRatio.numerator} of ${coverageRatio.denominator} ${coverageUnit} carry evidence`
     : view.verdict.badges[2];
 
-  async function runAnalysis() {
-    if (!selectedMonth) return;
-    setPending(true);
-    setMessage(null);
-    try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/channels/${channel.id}/analysis`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          // The month alone. The server resolves the window, the zone, and
-          // the grain from the channel's declared packages, so no caller
-          // date, grain, or branch can bypass the resolver.
-          body: JSON.stringify({ month: selectedMonth }),
-        },
-      );
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as {
-          error?: { message?: string };
-        } | null;
-        setMessage({
-          tone: "error",
-          text: payload?.error?.message ?? "The analysis could not be started.",
-        });
-        return;
-      }
-      setMessage({
-        tone: "info",
-        // Honest about the shape of the work: the run is queued, not finished.
-        text: `Analysis started for ${formatAnalysisMonth(selectedMonth)}. It runs in the background; refresh in a moment to see the result.`,
-      });
-      router.refresh();
-    } catch {
-      setMessage({
-        tone: "error",
-        text: "The analysis could not be started. Check your connection.",
-      });
-    } finally {
-      setPending(false);
-    }
-  }
+  /**
+   * Asking for an analysis of the picked range.
+   *
+   * The range alone. The server resolves the window, the zone, and the grain
+   * from the channel's declared packages, so no caller date, grain, or branch
+   * can bypass the resolver. On a successful `202` the loader below takes
+   * over: it polls the range's status and refreshes the page when the run --
+   * findings first, narration after -- is ready to read.
+   */
+  const applyWindow = useCallback(
+    (selection: AnalysisWindowSelection) => {
+      setMessage(null);
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/organizations/${organizationId}/channels/${channel.id}/analysis`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ from: selection.from, to: selection.to }),
+            },
+          );
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => null)) as {
+              error?: { message?: string };
+            } | null;
+            // A 429 carries the server's own allowance message, which says
+            // what happened in plain words; anything else falls back to the
+            // generic failure the operator can act on by retrying.
+            setMessage({
+              tone: "error",
+              text: payload?.error?.message ?? "The analysis could not be started.",
+            });
+            return;
+          }
+          setAppliedWindow(selection);
+        } catch {
+          setMessage({
+            tone: "error",
+            text: "The analysis could not be started. Check your connection.",
+          });
+        }
+      })();
+    },
+    [channel.id, organizationId],
+  );
+
+  // The loader is done when the range is ready: re-read the page, which now
+  // has a completed run for the applied window, and take the loader down.
+  const handleLoaderReady = useCallback(() => {
+    setAppliedWindow(null);
+    router.refresh();
+  }, [router]);
 
   return (
     // Sized to its content, not to the viewport: the shell's `main` scrolls,
@@ -1364,13 +1377,13 @@ export function ChannelWorkspace({
       <VerdictBand
         view={view}
         coverageChip={coverageChip}
-        monthHorizon={monthHorizon}
-        selectedMonth={selectedMonth}
-        onSelectMonth={selectMonth}
+        segments={segments}
+        coverageWindows={coverageWindows}
+        selectedWindow={selectedWindow}
+        today={today}
         timeZone={timeZone}
         canRunAnalysis={canRunAnalysis}
-        pending={pending}
-        onRunAnalysis={runAnalysis}
+        onApplyWindow={applyWindow}
       />
 
       {message ? (
@@ -1380,7 +1393,20 @@ export function ChannelWorkspace({
         </Alert>
       ) : null}
 
-      {/* What is on screen, stated exactly. The month names the question;
+      {/* The run just asked for, watched until it is ready to read. Rendered
+          over the workspace region rather than tucked beside the picker, so
+          the operator watches the work instead of being told to refresh. */}
+      {appliedWindow ? (
+        <AnalysisProgress
+          key={`${appliedWindow.from}:${appliedWindow.to}`}
+          organizationId={organizationId}
+          channelId={channel.id}
+          window={appliedWindow}
+          onReady={handleLoaderReady}
+        />
+      ) : null}
+
+      {/* What is on screen, stated exactly. The window names the question;
           the run below names the evidence window it actually analysed. */}
       <div
         aria-label="Run status"
