@@ -16,6 +16,7 @@ import type {
   ChannelFindingRecord,
   ChannelRecommendationDecisionRecord,
   ChannelRecommendationRecord,
+  RecommendationViewerState,
 } from "@/modules/analysis/application/ports";
 
 /**
@@ -36,8 +37,13 @@ const MAX_FINDINGS = 500;
 const MAX_EVIDENCE = 5_000;
 /** UUID filters above this size exceed common gateway request-line limits. */
 const EVIDENCE_METRIC_BATCH_SIZE = 200;
-/** A picker an operator can read, not every package they ever uploaded. */
-const MAX_EVIDENCE_WINDOWS = 24;
+/**
+ * A picker an operator can read, not every package they ever uploaded.
+ *
+ * Exported rather than repeated at the call site that caps its own read, so
+ * the page and the resolver cannot drift apart.
+ */
+export const MAX_EVIDENCE_WINDOWS = 24;
 const MAX_LINEAGE = 10_000;
 /**
  * The narrator files at most six recommendations per submission, but a run may
@@ -201,7 +207,7 @@ function toFindingRecord(row: ChannelFindingRow): ChannelFindingRecord {
 /** The columns a run record is built from, named once so the list a single
  *  run is read with cannot drift from the list the page's list is read with. */
 const CHANNEL_RUN_COLUMNS =
-  "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at";
+  "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, result_digest, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at";
 
 type ChannelAnalysisRunRow = Pick<
   Database["public"]["Tables"]["channel_analysis_runs"]["Row"],
@@ -214,6 +220,7 @@ type ChannelAnalysisRunRow = Pick<
   | "window_timezone"
   | "registry_version"
   | "detector_versions"
+  | "result_digest"
   | "status"
   | "finding_count"
   | "observation_count"
@@ -222,6 +229,74 @@ type ChannelAnalysisRunRow = Pick<
   | "started_at"
   | "completed_at"
 >;
+
+/**
+ * The per-viewer layer over a run's narration, read as one unit.
+ *
+ * Decisions and feedback travel together because they share a fate: neither
+ * may enter the run cache, and both are merged back onto a cached payload by
+ * the page. Reading them here, once, keeps the two callers that need them --
+ * the full read below and the standalone viewer-state port -- from drifting
+ * apart about what "a viewer's state" contains.
+ */
+async function readViewerState(
+  supabase: AnalysisClient,
+  input: {
+    organizationId: string;
+    recommendationIds: readonly string[];
+    viewerId: string;
+  },
+): Promise<{
+  decisionsById: Map<string, ChannelRecommendationDecisionRecord[]>;
+  feedbackById: Map<string, boolean>;
+}> {
+  // Every triage answer ever recorded; which one stands is decided by the
+  // view builder from `created_at`, not silently here. The actor's name
+  // arrives in the row itself, snapshotted definer-side when the answer
+  // was written, so no profiles read happens here -- a session cannot see
+  // another member's profile row, and must not borrow authority to try.
+  const { data: decisions, error: decisionError } = await supabase
+    .from("channel_recommendation_decisions")
+    .select(
+      "id, recommendation_id, decision, dismissal_reason, snoozed_until, actor_id, actor_display_name, created_at",
+    )
+    .eq("organization_id", input.organizationId)
+    .in("recommendation_id", [...input.recommendationIds])
+    .order("created_at", { ascending: false })
+    .limit(MAX_RECOMMENDATION_DECISIONS);
+  if (decisionError) throw new ChannelAnalysisReadError(decisionError.code ?? "unknown");
+
+  // One vote per actor per recommendation, and the only vote a page can
+  // honestly show the reader is their own.
+  const { data: feedback, error: feedbackError } = await supabase
+    .from("channel_recommendation_feedback")
+    .select("recommendation_id, helpful")
+    .eq("organization_id", input.organizationId)
+    .eq("actor_id", input.viewerId)
+    .in("recommendation_id", [...input.recommendationIds]);
+  if (feedbackError) throw new ChannelAnalysisReadError(feedbackError.code ?? "unknown");
+
+  const decisionsById = new Map<string, ChannelRecommendationDecisionRecord[]>();
+  for (const entry of decisions ?? []) {
+    const own = decisionsById.get(entry.recommendation_id) ?? [];
+    own.push({
+      recommendationId: entry.recommendation_id,
+      decision: entry.decision,
+      reason: entry.dismissal_reason,
+      snoozedUntil:
+        entry.snoozed_until === null || entry.snoozed_until === undefined
+          ? null
+          : String(entry.snoozed_until),
+      actorId: entry.actor_id,
+      actorName: entry.actor_display_name,
+      createdAt: entry.created_at,
+    });
+    decisionsById.set(entry.recommendation_id, own);
+  }
+  const feedbackById = new Map((feedback ?? []).map((row) => [row.recommendation_id, row.helpful]));
+
+  return { decisionsById, feedbackById };
+}
 
 function toRunRecord(row: ChannelAnalysisRunRow): ChannelAnalysisRunRecord {
   return {
@@ -234,6 +309,7 @@ function toRunRecord(row: ChannelAnalysisRunRow): ChannelAnalysisRunRecord {
     windowTimezone: row.window_timezone,
     registryVersion: row.registry_version,
     detectorVersions: toDetectorVersions(row.detector_versions),
+    resultDigest: row.result_digest,
     status: row.status,
     findingCount: row.finding_count,
     observationCount: row.observation_count,
@@ -676,33 +752,17 @@ export function createAuthenticatedChannelAnalysisRepository(
         .limit(MAX_CITATIONS);
       if (citationError) throw new ChannelAnalysisReadError(citationError.code ?? "unknown");
 
-      // Every triage answer ever recorded; which one stands is decided by the
-      // view builder from `created_at`, not silently here. The actor's name
-      // arrives in the row itself, snapshotted definer-side when the answer
-      // was written, so no profiles read happens here -- a session cannot see
-      // another member's profile row, and must not borrow authority to try.
-      const { data: decisions, error: decisionError } = await supabase
-        .from("channel_recommendation_decisions")
-        .select(
-          "id, recommendation_id, decision, dismissal_reason, snoozed_until, actor_id, actor_display_name, created_at",
-        )
-        .eq("organization_id", organizationId)
-        .in("recommendation_id", [...recommendationIds])
-        .order("created_at", { ascending: false })
-        .limit(MAX_RECOMMENDATION_DECISIONS);
-      if (decisionError) throw new ChannelAnalysisReadError(decisionError.code ?? "unknown");
-
-      const decisionRows = decisions ?? [];
-
-      // One vote per actor per recommendation, and the only vote this page can
-      // honestly show the reader is their own.
-      const { data: feedback, error: feedbackError } = await supabase
-        .from("channel_recommendation_feedback")
-        .select("recommendation_id, helpful")
-        .eq("organization_id", organizationId)
-        .eq("actor_id", viewerId)
-        .in("recommendation_id", [...recommendationIds]);
-      if (feedbackError) throw new ChannelAnalysisReadError(feedbackError.code ?? "unknown");
+      // A null viewer asks for the shareable text alone: the run cache holds
+      // this payload under the run id, where any viewer's decisions would
+      // leak to every other operator who opens the same range. The page reads
+      // the viewer's own layer separately and merges it back before display.
+      const { decisionsById, feedbackById } =
+        viewerId === null
+          ? {
+              decisionsById: new Map<string, ChannelRecommendationDecisionRecord[]>(),
+              feedbackById: new Map<string, boolean>(),
+            }
+          : await readViewerState(supabase, { organizationId, recommendationIds, viewerId });
 
       const citationsByRecommendation = new Map<string, string[]>();
       for (const row of citations ?? []) {
@@ -710,9 +770,6 @@ export function createAuthenticatedChannelAnalysisRepository(
         own.push(row.finding_id);
         citationsByRecommendation.set(row.recommendation_id, own);
       }
-      const feedbackByRecommendation = new Map(
-        (feedback ?? []).map((row) => [row.recommendation_id, row.helpful]),
-      );
 
       // A run can be narrated more than once: a re-submission writes new rows
       // rather than overwriting, and two tellings of one run on one page would
@@ -745,28 +802,41 @@ export function createAuthenticatedChannelAnalysisRepository(
             limitations: toStringArray(row.limitations),
             resultDigest: row.result_digest,
             citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
-            decisions: decisionRows.flatMap((entry): ChannelRecommendationDecisionRecord[] =>
-              entry.recommendation_id === row.id
-                ? [
-                    {
-                      recommendationId: entry.recommendation_id,
-                      decision: entry.decision,
-                      reason: entry.dismissal_reason,
-                      snoozedUntil:
-                        entry.snoozed_until === null || entry.snoozed_until === undefined
-                          ? null
-                          : String(entry.snoozed_until),
-                      actorId: entry.actor_id,
-                      actorName: entry.actor_display_name,
-                      createdAt: entry.created_at,
-                    },
-                  ]
-                : [],
-            ),
-            myFeedback: feedbackByRecommendation.get(row.id) ?? null,
+            decisions: decisionsById.get(row.id) ?? [],
+            myFeedback: feedbackById.get(row.id) ?? null,
             createdAt: row.created_at,
           }),
         );
+    },
+
+    async loadRecommendationViewerState({ organizationId, analysisRunId, viewerId }) {
+      // The ids first, because the decisions table names no run: without them
+      // this read cannot tell one run's answers from another's, and answering
+      // with another run's triage state would be the same defect as showing
+      // another window's figures.
+      const { data: rows, error } = await supabase
+        .from("channel_recommendations")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("analysis_run_id", analysisRunId)
+        .limit(MAX_RECOMMENDATIONS);
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      const recommendationIds = (rows ?? []).map((row) => row.id);
+      if (recommendationIds.length === 0) return [];
+
+      const { decisionsById, feedbackById } = await readViewerState(supabase, {
+        organizationId,
+        recommendationIds,
+        viewerId,
+      });
+      return recommendationIds.map(
+        (recommendationId): RecommendationViewerState => ({
+          recommendationId,
+          decisions: decisionsById.get(recommendationId) ?? [],
+          myFeedback: feedbackById.get(recommendationId) ?? null,
+        }),
+      );
     },
 
     async resolveWindowInput({ organizationId, channelId, from, to }) {

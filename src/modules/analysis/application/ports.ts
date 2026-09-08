@@ -21,6 +21,14 @@ export type ChannelAnalysisRunRecord = {
   windowTimezone: string;
   registryVersion: number;
   detectorVersions: readonly { key: string; calculationVersion: number }[];
+  /**
+   * Binds a completed run to the exact result the run cache holds. Null
+   * exactly when the run is still `running`, which the table's own
+   * `status = 'running'` check already guarantees -- so a null digest means
+   * "not finished", and callers treat the run as uncacheable rather than as
+   * an error.
+   */
+  resultDigest: string | null;
   status: "running" | "completed" | "failed";
   findingCount: number;
   observationCount: number;
@@ -149,6 +157,19 @@ export type ChannelRecommendationRecord = {
 };
 
 /**
+ * Everything about one recommendation that belongs to a person rather than to
+ * the run: every triage answer ever recorded for it, and the viewing
+ * operator's own helpfulness vote.
+ */
+export type RecommendationViewerState = {
+  recommendationId: string;
+  /** Newest first, so the latest answer is also the first stored one. */
+  decisions: readonly ChannelRecommendationDecisionRecord[];
+  /** The viewer's own vote; null when they have not voted. */
+  myFeedback: boolean | null;
+};
+
+/**
  * A window an operator can actually ask about.
  *
  * The window is the one a governed package *declared*, not the span its
@@ -247,9 +268,30 @@ export type ChannelAnalysisReadPort = {
   loadRecommendationsForRun(input: {
     organizationId: string;
     analysisRunId: string;
-    /** The signed-in reader, whose own feedback vote is the only one read. */
-    viewerId: string;
+    /**
+     * The signed-in reader, whose own feedback vote is the only one read.
+     * Null asks for the recommendations without any viewer's decisions
+     * attached -- the shareable layer that is safe to hold in the run cache,
+     * because caching decisions under a run id would show one operator
+     * another's choices.
+     */
+    viewerId: string | null;
   }): Promise<ChannelRecommendationRecord[]>;
+
+  /**
+   * The per-viewer layer over one run's narration: every triage answer and
+   * the viewer's own feedback vote, keyed by recommendation.
+   *
+   * Read separately from the shareable text so the run cache never holds it:
+   * callers merge these onto a cached payload before building the view, which
+   * is what keeps one operator's accept and dismiss decisions out of another
+   * operator's page.
+   */
+  loadRecommendationViewerState(input: {
+    organizationId: string;
+    analysisRunId: string;
+    viewerId: string;
+  }): Promise<RecommendationViewerState[]>;
 
   /**
    * Every window this organization has governed evidence for, newest first.

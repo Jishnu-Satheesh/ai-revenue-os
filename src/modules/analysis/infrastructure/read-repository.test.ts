@@ -222,6 +222,102 @@ describe("loadRecommendationsForRun", () => {
 
     expect(loaded).toEqual([]);
   });
+
+  it("reads no decisions and no feedback when the viewer is null", async () => {
+    // The null-viewer payload is what the run cache holds under the run id,
+    // so either read reaching for viewer state here would store one
+    // operator's answers where every later operator is served from.
+    const { supabase } = stubClient(
+      {
+        channel_recommendations: { data: [recommendationRow()], error: null },
+        channel_recommendation_citations: {
+          data: [{ recommendation_id: "rec-1", finding_id: "finding-1" }],
+          error: null,
+        },
+      },
+      {
+        forbiddenTables: ["channel_recommendation_decisions", "channel_recommendation_feedback"],
+      },
+    );
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: null,
+    });
+
+    expect(loaded[0].decisions).toEqual([]);
+    expect(loaded[0].myFeedback).toBeNull();
+    expect(loaded[0].citationFindingIds).toEqual(["finding-1"]);
+  });
+});
+
+describe("loadRecommendationViewerState", () => {
+  it("returns every answer and the viewer's own vote keyed by recommendation", async () => {
+    const { supabase } = stubClient({
+      channel_recommendations: { data: [recommendationRow()], error: null },
+      channel_recommendation_decisions: {
+        data: [
+          decisionRow(),
+          decisionRow({
+            id: "decision-0",
+            decision: "acknowledged",
+            dismissal_reason: null,
+            actor_id: "actor-1",
+            actor_display_name: "Dana",
+            created_at: "2026-02-02T09:00:00Z",
+          }),
+        ],
+        error: null,
+      },
+      channel_recommendation_feedback: {
+        data: [{ recommendation_id: "rec-1", helpful: true }],
+        error: null,
+      },
+    });
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationViewerState({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: "viewer-1",
+    });
+
+    expect(loaded).toEqual([
+      {
+        recommendationId: "rec-1",
+        decisions: [
+          expect.objectContaining({ decision: "dismissed", actorName: "Omar" }),
+          expect.objectContaining({ decision: "acknowledged", actorName: "Dana" }),
+        ],
+        myFeedback: true,
+      },
+    ]);
+  });
+
+  it("reads nothing viewer-shaped when the run was never narrated", async () => {
+    const { supabase } = stubClient(
+      {
+        channel_recommendations: { data: [], error: null },
+      },
+      {
+        forbiddenTables: ["channel_recommendation_decisions", "channel_recommendation_feedback"],
+      },
+    );
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationViewerState({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: "viewer-1",
+    });
+
+    expect(loaded).toEqual([]);
+  });
 });
 
 describe("loadEvidence", () => {

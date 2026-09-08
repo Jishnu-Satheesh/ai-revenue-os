@@ -28,6 +28,7 @@ function run(overrides: Partial<ChannelAnalysisRunRecord> = {}): ChannelAnalysis
     windowTimezone: "Asia/Dubai",
     registryVersion: 1,
     detectorVersions: [{ key: "evidence.period_coverage", calculationVersion: 1 }],
+    resultDigest: "d".repeat(64),
     status: "completed",
     findingCount: 0,
     observationCount: 1,
