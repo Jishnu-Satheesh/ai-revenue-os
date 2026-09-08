@@ -145,6 +145,26 @@ function checkedUrl(value: string): URL {
   return url;
 }
 
+/**
+ * Normalizes a provider citation URL without fetching it (snippet-only
+ * retrieval never crawls citations). Rejects credentials, non-HTTP(S)
+ * schemes, unusual ports, IP and non-registrable hosts with the same safe
+ * codes as the fetching path. Returns the canonical citation form: lowercase
+ * host, default port dropped, fragment stripped.
+ */
+export function normalizePublicCitationUrl(value: string): string {
+  const url = checkedUrl(value.trim());
+  url.hostname = url.hostname.toLowerCase();
+  if (
+    (url.protocol === "http:" && url.port === "80") ||
+    (url.protocol === "https:" && url.port === "443")
+  ) {
+    url.port = "";
+  }
+  url.hash = "";
+  return url.toString();
+}
+
 async function resolvePublic(
   url: URL,
   resolver: PublicAddressResolver,

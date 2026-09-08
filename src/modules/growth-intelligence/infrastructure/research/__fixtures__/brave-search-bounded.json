@@ -1,0 +1,413 @@
+{
+  "description": "Synthetic maximum-input Brave fixture: 20 topics + 5 competitor leads with an absent business website. All names, URLs (RFC 2606 .example), and snippets are invented public examples. No business reports, customer data, credentials, or live provider content.",
+  "endpoint": "https://api.search.brave.com/res/v1/web/search",
+  "scope": {
+    "publicBusinessName": "Harbor Lane Kitchen",
+    "approvedDomains": [],
+    "niches": [
+      "Seafood grill"
+    ],
+    "city": "Dubai",
+    "countryCode": "AE",
+    "topics": [
+      "weekend brunch",
+      "seafood grill specials",
+      "family dining offers",
+      "iftar catering",
+      "national day feasts",
+      "food delivery trends",
+      "outdoor seating demand",
+      "lunch combos",
+      "dessert parlors",
+      "karak tea culture",
+      "shawarma late night",
+      "vegan menus",
+      "restaurant hygiene ratings",
+      "valet parking dining",
+      "heritage Emirati cuisine",
+      "food truck festivals",
+      "corporate catering",
+      "birthday party venues",
+      "waterfront dining",
+      "ramadan tents"
+    ],
+    "competitors": [
+      {
+        "name": "Azure Dhow Restaurant",
+        "publicUrl": "https://azure-dhow.example.org",
+        "locationHint": "Deira waterfront"
+      },
+      {
+        "name": "Saffron Courtyard",
+        "publicUrl": "https://saffron-courtyard.example.org",
+        "locationHint": "Bur Dubai"
+      },
+      {
+        "name": "The Copper Lantern",
+        "locationHint": "Jumeirah"
+      },
+      {
+        "name": "Palm and Cardamom",
+        "publicUrl": "https://palm-cardamom.example.net"
+      },
+      {
+        "name": "Marina Spice Route",
+        "publicUrl": "https://marina-spice-route.example.com",
+        "locationHint": "Dubai Marina"
+      }
+    ]
+  },
+  "notes": [
+    "Responses are in plan order: index 0 is local_market, 1-20 are the topics in scope order, 21-25 are the competitors in scope order.",
+    "Index 0 and index 2 share https://directory.example/harbor-lane-kitchen to prove duplicate citation collapsing.",
+    "Index 8 carries only unsafe citation URLs (credentials, non-HTTP scheme, IP literal) and must yield searched_no_usable_evidence, never support.",
+    "Index 12 returns zero results and must yield searched_no_usable_evidence.",
+    "Index 23 is a name-only lead: its snippet carries no website, proving context-only handling."
+  ],
+  "searchResponses": [
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://directory.example/harbor-lane-kitchen",
+          "title": "Harbor Lane Kitchen — City Eats directory",
+          "description": "Harbor Lane Kitchen is listed as a Deira seafood grill with outdoor seating and weekend brunch in the 2026 City Eats directory."
+        },
+        {
+          "url": "https://guide.example/deira-seafood-grills",
+          "title": "Deira seafood grills guide",
+          "description": "A neighborhood guide rounds up Deira seafood grills, noting Harbor Lane Kitchen for its harbor-view terrace."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://events.example/weekend-brunch-roundup",
+          "title": "Weekend brunch roundup",
+          "description": "The weekend brunch roundup mentions harbor-side venues adding Friday seatings for the winter season."
+        },
+        {
+          "url": "https://guide.example/brunch-deira",
+          "title": "Brunch in Deira",
+          "description": "Deira brunch spots compete on karakFrench toast fusions and creek views this season."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://directory.example/harbor-lane-kitchen",
+          "title": "Harbor Lane Kitchen — City Eats directory",
+          "description": "Harbor Lane Kitchen is listed as a Deira seafood grill with outdoor seating and weekend brunch in the 2026 City Eats directory."
+        },
+        {
+          "url": "https://guide.example/grill-specials-winter",
+          "title": "Winter grill specials",
+          "description": "Winter grill specials across the creek include fixed-price hammour platters on Thursdays."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/family-dining-deals",
+          "title": "Family dining deals",
+          "description": "Family dining offers this month bundle kids-eat-free Tuesdays with creek-view tables."
+        },
+        {
+          "url": "https://events.example/family-food-weekend",
+          "title": "Family food weekend",
+          "description": "The family food weekend lists harbor restaurants with play areas and early seatings."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/iftar-catering-licenses",
+          "title": "Iftar catering notes",
+          "description": "Licensed iftar caterers publish tent menus and group-booking windows ahead of Ramadan."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://events.example/national-day-feasts",
+          "title": "National day feasts",
+          "description": "National day feast menus pair Emirati dishes with fireworks-view terraces along the creek."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/delivery-trends-2026",
+          "title": "Delivery trends 2026",
+          "description": "Delivery platforms report grilled seafood holding its share against burger orders this quarter."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/outdoor-seating-permits",
+          "title": "Outdoor seating permits",
+          "description": "Municipality guidance reminds venues to renew winter outdoor seating permits before October."
+        },
+        {
+          "url": "https://events.example/terrace-season-opening",
+          "title": "Terrace season opening",
+          "description": "Creek terraces reopen with misting fans and sunset seatings as temperatures ease."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://cook:secret@guide.example/lunch-combos",
+          "title": "Credentialed lunch page",
+          "description": "This citation carries credentials and must be dropped as unsafe."
+        },
+        {
+          "url": "ftp://files.example/lunch-combos",
+          "title": "Non-HTTP lunch file",
+          "description": "This citation uses a non-HTTP scheme and must be dropped as unsafe."
+        },
+        {
+          "url": "http://203.0.113.7/lunch",
+          "title": "IP literal lunch page",
+          "description": "This citation is an IP literal and must be dropped as unsafe."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/dessert-parlors-deira",
+          "title": "Dessert parlors in Deira",
+          "description": "Deira dessert parlors add saffron milk-cake and date-syrup soft serve for winter."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/karak-culture",
+          "title": "Karak tea culture",
+          "description": "Karak tea stalls anchor late-night food streets, with cafeterias competing on foam and price."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/late-night-shawarma",
+          "title": "Late-night shawarma",
+          "description": "Late-night shawarma counters near the abra stations stay open past 2am on weekends."
+        },
+        {
+          "url": "https://directory.example/night-eats-creek",
+          "title": "Night eats by the creek",
+          "description": "Night eats roundups list marinara-free zones and family sections after midnight."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": []
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/hygiene-ratings-explained",
+          "title": "Hygiene ratings explained",
+          "description": "The municipality explains its restaurant hygiene rating stickers and re-inspection cycle."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/valet-dining-deira",
+          "title": "Valet dining in Deira",
+          "description": "Deira restaurants bundle valet parking with Friday brunch to ease creek-side congestion."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/emirati-cuisine-guide",
+          "title": "Heritage Emirati cuisine guide",
+          "description": "Heritage Emirati cuisine guides document harees, machboos, and lugaimat makers across old Dubai."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://events.example/food-truck-season",
+          "title": "Food truck season",
+          "description": "Food truck season opens at the harbor promenade with twelve rotating vendors."
+        },
+        {
+          "url": "https://guide.example/truck-licenses",
+          "title": "Truck licenses",
+          "description": "New food truck licenses require commissary contracts and fire-suppression certificates."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://directory.example/corporate-catering-creek",
+          "title": "Corporate catering by the creek",
+          "description": "Corporate caterers quote majlis-style linens and live grill stations for harbor offices."
+        },
+        {
+          "url": "https://guide.example/office-iftar-packages",
+          "title": "Office iftar packages",
+          "description": "Office iftar packages bundle delivery, servers, and prayer-room signage for towers."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://events.example/party-venues-harbor",
+          "title": "Birthday party venues",
+          "description": "Harbor party venues offer dhow add-ons and magician slots for birthday packages."
+        },
+        {
+          "url": "https://guide.example/private-majlis-dining",
+          "title": "Private majlis dining",
+          "description": "Private majlis dining rooms seat twenty with dedicated oud players on request."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/waterfront-dining-2026",
+          "title": "Waterfront dining 2026",
+          "description": "Waterfront dining guides rank creek dhow decks above marina rooftops for breeze this year."
+        },
+        {
+          "url": "https://events.example/dhow-dinner-reviews",
+          "title": "Dhow dinner reviews",
+          "description": "Reviewers compare dhow dinner cruises on boarding-time honesty and grill freshness."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://events.example/ramadan-tent-guide",
+          "title": "Ramadan tent guide",
+          "description": "Ramadan tent guides compare suhoor closing times and valet queues across the creek."
+        },
+        {
+          "url": "https://guide.example/suhoor-delivery",
+          "title": "Suhoor delivery",
+          "description": "Suhoor delivery windows stretch to 3am for grills near the harbor this Ramadan."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/azure-dhow-review",
+          "title": "Azure Dhow Restaurant review",
+          "description": "A review of Azure Dhow Restaurant praises its Deira waterfront upper deck and Friday hammour."
+        },
+        {
+          "url": "https://events.example/dhow-rivals",
+          "title": "Dhow dining rivals",
+          "description": "Dhow dining rivals add sunset seatings; Azure Dhow keeps its Deira waterfront berth."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/saffron-courtyard-nights",
+          "title": "Saffron Courtyard nights",
+          "description": "Saffron Courtyard in Bur Dubai runs courtyard qawwali nights with a fixed grill menu."
+        },
+        {
+          "url": "https://directory.example/bur-dubai-grills",
+          "title": "Bur Dubai grills",
+          "description": "Bur Dubai grill listings place Saffron Courtyard beside two older kebab houses."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/copper-lantern-jumeirah",
+          "title": "The Copper Lantern in Jumeirah",
+          "description": "A neighborhood note describes The Copper Lantern in Jumeirah; the name-only lead carries no website of its own."
+        },
+        {
+          "url": "https://events.example/lantern-lit-suppers",
+          "title": "Lantern-lit suppers",
+          "description": "Lantern-lit supper series book out Jumeirah villas converted to supper clubs."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/palm-cardamom-brunch",
+          "title": "Palm and Cardamom brunch",
+          "description": "Palm and Cardamom serves a cardamom French-toast brunch with creek views on Saturdays."
+        },
+        {
+          "url": "https://directory.example/cafe-creek-north",
+          "title": "Cafes on the north creek",
+          "description": "North-creek cafe listings include Palm and Cardamom for its date-syrup latte."
+        }
+      ]
+    },
+    {
+      "status": 200,
+      "results": [
+        {
+          "url": "https://guide.example/marina-spice-route-deck",
+          "title": "Marina Spice Route deck",
+          "description": "Marina Spice Route plates coastal curries on its Dubai Marina deck with Friday brunch."
+        },
+        {
+          "url": "https://events.example/marina-food-walk",
+          "title": "Marina food walk",
+          "description": "The marina food walk stops at Marina Spice Route for its pepper-crab starter."
+        }
+      ]
+    }
+  ]
+}

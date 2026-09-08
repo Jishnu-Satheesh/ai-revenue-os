@@ -26,6 +26,21 @@ const publicDomainSchema = z
   )
   .refine(isRegistrablePublicDomain, "An approved domain must be publicly registrable.");
 
+/**
+ * A competitor lead from the approved scope. A website is identity context,
+ * never proof; a name-only lead is unverified and alone can never support a
+ * claim. Strict: business reports and customer data cannot parse here.
+ */
+export const researchCompetitorLeadSchema = z
+  .object({
+    name: boundedText(160),
+    publicUrl: z.string().trim().min(1).max(2_048).optional(),
+    locationHint: boundedText(240).optional(),
+  })
+  .strict();
+
+export type ResearchCompetitorLead = z.infer<typeof researchCompetitorLeadSchema>;
+
 export const approvedResearchScopeSchema = z
   .object({
     publicBusinessName: boundedText(160),
@@ -38,6 +53,7 @@ export const approvedResearchScopeSchema = z
       .toUpperCase()
       .regex(/^[A-Z]{2}$/),
     topics: z.array(boundedText(160)).min(1).max(20),
+    competitors: z.array(researchCompetitorLeadSchema).max(5).optional().default([]),
   })
   .strict()
   .superRefine((scope, context) => {
@@ -53,6 +69,14 @@ export const approvedResearchScopeSchema = z
           message: `${field} must not contain duplicates.`,
         });
       }
+    }
+    const competitorNames = scope.competitors.map((competitor) => competitor.name.toLowerCase());
+    if (new Set(competitorNames).size !== competitorNames.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["competitors"],
+        message: "competitors must not contain duplicates.",
+      });
     }
   });
 

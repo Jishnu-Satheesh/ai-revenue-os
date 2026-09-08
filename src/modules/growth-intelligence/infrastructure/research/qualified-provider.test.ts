@@ -8,6 +8,10 @@ import {
   resolveResearchAdapterAvailability,
   UNQUALIFIED_RESEARCH_AVAILABILITY,
 } from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
+import type {
+  ResearchAdapter,
+  ResearchRetrievalResult,
+} from "@/modules/growth-intelligence/infrastructure/research/ports";
 
 const VALID_INPUT = {
   scope: {
@@ -17,6 +21,7 @@ const VALID_INPUT = {
     city: "Dubai",
     countryCode: "AE",
     topics: ["weekend dining"],
+    competitors: [],
   },
   maxQueries: 1,
   maxResultsPerQuery: 1,
@@ -100,5 +105,35 @@ describe("the market research provider qualification", () => {
         }).available,
       ).toBe(false);
     }
+  });
+
+  it("delegates to the Brave adapter only while qualified on Brave", async () => {
+    const sentinel = { delegated: true } as unknown as ResearchRetrievalResult;
+    const brave: ResearchAdapter = {
+      availability: { available: true, provider: "brave" },
+      searchAndFetch: async () => sentinel,
+    };
+
+    const qualified = getQualifiedMarketResearchAdapter(
+      { available: true, provider: "brave" },
+      brave,
+    );
+    await expect(qualified.searchAndFetch({ ...VALID_INPUT })).resolves.toBe(sentinel);
+
+    const unqualified = getQualifiedMarketResearchAdapter(
+      { available: false, provider: "brave" },
+      brave,
+    );
+    await expect(unqualified.searchAndFetch({ ...VALID_INPUT })).rejects.toMatchObject({
+      code: "FEATURE_NOT_AVAILABLE",
+    });
+
+    const wrongProvider = getQualifiedMarketResearchAdapter(
+      { available: true, provider: "other" },
+      brave,
+    );
+    await expect(wrongProvider.searchAndFetch({ ...VALID_INPUT })).rejects.toMatchObject({
+      code: "FEATURE_NOT_AVAILABLE",
+    });
   });
 });

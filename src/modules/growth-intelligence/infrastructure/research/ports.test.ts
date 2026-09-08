@@ -54,6 +54,7 @@ function validRequest(): ResearchRequest {
       city: "Dubai",
       countryCode: "AE",
       topics: ["weekend dining"],
+      competitors: [],
     },
     maxQueries: 1,
     maxResultsPerQuery: 1,
@@ -202,5 +203,55 @@ describe("approved research scope", () => {
         topics: ["weekend dining"],
       }),
     ).toThrow(/duplicate/i);
+  });
+
+  it("defaults competitors to empty and rejects duplicate or oversized leads", () => {
+    const parsed = approvedResearchScopeSchema.parse({
+      publicBusinessName: "Cochin Kitchen",
+      approvedDomains: [],
+      niches: ["Kerala cuisine"],
+      city: "Dubai",
+      countryCode: "AE",
+      topics: ["weekend dining"],
+    });
+    expect(parsed.competitors).toEqual([]);
+
+    expect(() =>
+      approvedResearchScopeSchema.parse({
+        publicBusinessName: "Cochin Kitchen",
+        approvedDomains: [],
+        niches: ["Kerala cuisine"],
+        city: "Dubai",
+        countryCode: "AE",
+        topics: ["weekend dining"],
+        competitors: [{ name: "Azure Dhow" }, { name: "azure dhow" }],
+      }),
+    ).toThrow(/duplicate/i);
+
+    expect(() =>
+      approvedResearchScopeSchema.parse({
+        publicBusinessName: "Cochin Kitchen",
+        approvedDomains: [],
+        niches: ["Kerala cuisine"],
+        city: "Dubai",
+        countryCode: "AE",
+        topics: ["weekend dining"],
+        competitors: Array.from({ length: 6 }, (_, index) => ({ name: `Rival ${index}` })),
+      }),
+    ).toThrow();
+  });
+
+  it("keeps business reports and customer data out of competitor leads", () => {
+    expect(() =>
+      approvedResearchScopeSchema.parse({
+        publicBusinessName: "Cochin Kitchen",
+        approvedDomains: [],
+        niches: ["Kerala cuisine"],
+        city: "Dubai",
+        countryCode: "AE",
+        topics: ["weekend dining"],
+        competitors: [{ name: "Azure Dhow", internalReport: "Q3 revenue" }],
+      }),
+    ).toThrow();
   });
 });

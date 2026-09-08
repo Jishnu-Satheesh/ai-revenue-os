@@ -47,7 +47,11 @@ export function resolveResearchAdapterAvailability(
 
 export function getQualifiedMarketResearchAdapter(
   availability: ResearchAdapterAvailability = UNQUALIFIED_RESEARCH_AVAILABILITY,
+  brave?: ResearchAdapter,
 ): ResearchAdapter {
+  if (brave && availability.available && availability.provider === QUALIFIED_RESEARCH_PROVIDER) {
+    return brave;
+  }
   return {
     availability,
     async searchAndFetch(input) {
