@@ -28,18 +28,20 @@ function cleanCompletion(
     windowStart: "2026-03-01",
     windowEnd: "2026-03-31",
     periodGrain: "day",
+    periodTimezone: "Asia/Dubai",
     ...overrides,
   };
 }
 
 describe("selectAutoAnalysisInput", () => {
-  it("selects the package's own window, channel, branch, and grain on a clean projection", () => {
+  it("selects the package's own window, channel, branch, grain, and timezone on a clean projection", () => {
     expect(selectAutoAnalysisInput(cleanCompletion())).toEqual({
       channelId: CHANNEL_ID,
       branchId: BRANCH_ID,
       windowStart: "2026-03-01",
       windowEnd: "2026-03-31",
       periodGrain: "day",
+      windowTimezone: "Asia/Dubai",
     });
   });
 
@@ -52,22 +54,40 @@ describe("selectAutoAnalysisInput", () => {
   it("dispatches nothing for a partially projected run", () => {
     expect(
       selectAutoAnalysisInput(
-        cleanCompletion({ projectionOutcome: "partially_projected", packageStatus: "partially_projected" }),
+        cleanCompletion({
+          projectionOutcome: "partially_projected",
+          packageStatus: "partially_projected",
+        }),
       ),
     ).toBeNull();
   });
 
   it("dispatches nothing for a failed or replayed run", () => {
     expect(selectAutoAnalysisInput(cleanCompletion({ projectionOutcome: "failed" }))).toBeNull();
-    expect(
-      selectAutoAnalysisInput(cleanCompletion({ projectionOutcome: "completed" })),
-    ).toBeNull();
+    expect(selectAutoAnalysisInput(cleanCompletion({ projectionOutcome: "completed" }))).toBeNull();
   });
 
   it("fails closed when the completion row is missing pieces", () => {
     expect(selectAutoAnalysisInput(cleanCompletion({ channelId: null }))).toBeNull();
     expect(selectAutoAnalysisInput(cleanCompletion({ windowEnd: undefined }))).toBeNull();
     expect(selectAutoAnalysisInput(cleanCompletion({ periodGrain: null }))).toBeNull();
+  });
+
+  it("dispatches nothing when the package declares no timezone", () => {
+    // Fail closed. A run without a zone cannot be cached and cannot be
+    // reproduced, so it is better not started.
+    expect(
+      selectAutoAnalysisInput({
+        projectionOutcome: "projected",
+        packageStatus: "projected",
+        channelId: CHANNEL_ID,
+        branchId: BRANCH_ID,
+        windowStart: "2026-01-01",
+        windowEnd: "2026-02-28",
+        periodGrain: "day",
+        periodTimezone: null,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -76,7 +96,11 @@ describe("dispatchAnalysisForCleanProjection", () => {
     const requestAnalysis = vi.fn().mockResolvedValue(true);
 
     const outcome = await dispatchAnalysisForCleanProjection(
-      { organizationId: ORGANIZATION_ID, correlationId: CORRELATION_ID, completion: cleanCompletion() },
+      {
+        organizationId: ORGANIZATION_ID,
+        correlationId: CORRELATION_ID,
+        completion: cleanCompletion(),
+      },
       { requestAnalysis },
     );
 
@@ -89,12 +113,44 @@ describe("dispatchAnalysisForCleanProjection", () => {
         windowStart: "2026-03-01",
         windowEnd: "2026-03-31",
         periodGrain: "day",
+        windowTimezone: "Asia/Dubai",
         correlationId: CORRELATION_ID,
       }),
     );
     const analysisRunId = requestAnalysis.mock.calls[0][0].analysisRunId as string;
-    expect(analysisRunId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    expect(analysisRunId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  it("carries the package's timezone so the run joins the cached path", async () => {
+    // Before this, an auto-dispatched run carried no timezone and therefore no
+    // cache key, so an operator picking exactly the range it had already
+    // analysed paid for the whole thing twice.
+    const requestAnalysis = vi.fn().mockResolvedValue(true);
+
+    await dispatchAnalysisForCleanProjection(
+      {
+        organizationId: ORGANIZATION_ID,
+        correlationId: CORRELATION_ID,
+        completion: {
+          projectionOutcome: "projected",
+          packageStatus: "projected",
+          channelId: CHANNEL_ID,
+          branchId: BRANCH_ID,
+          windowStart: "2026-01-01",
+          windowEnd: "2026-02-28",
+          periodGrain: "day",
+          periodTimezone: "Asia/Dubai",
+        },
+      },
+      { requestAnalysis },
+    );
+
+    expect(requestAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowStart: "2026-01-01",
+        windowEnd: "2026-02-28",
+        windowTimezone: "Asia/Dubai",
+      }),
     );
   });
 
@@ -118,7 +174,11 @@ describe("dispatchAnalysisForCleanProjection", () => {
     const requestAnalysis = vi.fn().mockResolvedValue(false);
 
     const outcome = await dispatchAnalysisForCleanProjection(
-      { organizationId: ORGANIZATION_ID, correlationId: CORRELATION_ID, completion: cleanCompletion() },
+      {
+        organizationId: ORGANIZATION_ID,
+        correlationId: CORRELATION_ID,
+        completion: cleanCompletion(),
+      },
       { requestAnalysis },
     );
 
@@ -136,7 +196,11 @@ describe("dispatchAnalysisForCleanProjection", () => {
 
     await expect(
       dispatchAnalysisForCleanProjection(
-        { organizationId: ORGANIZATION_ID, correlationId: CORRELATION_ID, completion: cleanCompletion() },
+        {
+          organizationId: ORGANIZATION_ID,
+          correlationId: CORRELATION_ID,
+          completion: cleanCompletion(),
+        },
         { requestAnalysis },
       ),
     ).resolves.toBe("not_dispatched");

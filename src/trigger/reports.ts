@@ -673,6 +673,10 @@ export const reportPackageProjectionTask = schemaTask({
       windowStart: projectionCompletion.completedPackage?.declared_period_start,
       windowEnd: projectionCompletion.completedPackage?.declared_period_end,
       periodGrain: projectionCompletion.projectionGrain,
+      // The zone the package's own figures were declared in, not the
+      // server's and not an organization default -- so the auto-run resolves
+      // the same local dates a person picking this window by hand would get.
+      periodTimezone: projectionCompletion.completedPackage?.period_timezone,
     };
     await dispatchAnalysisForCleanProjection(
       {
