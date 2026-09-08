@@ -115,7 +115,10 @@ export const researchRetrievedSourceSchema = z
     sourceClass: z
       .enum(["official", "first_party", "industry_research", "public_signal"])
       .optional(),
-    excerptText: z.string().max(RESEARCH_BUDGET_LIMITS.maxExcerptCharacters),
+    excerptText: z
+      .string()
+      .min(1, "A retained source must carry excerpt text.")
+      .max(RESEARCH_BUDGET_LIMITS.maxExcerptCharacters),
     excerptDigest: z.string().regex(/^[a-f0-9]{64}$/),
     retrievedAt: z.string().datetime({ offset: true }),
   })

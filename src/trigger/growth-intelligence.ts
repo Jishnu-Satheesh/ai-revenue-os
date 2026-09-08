@@ -552,7 +552,11 @@ export const runMarketResearchTask = schemaTask({
   run: async (payload, { signal }) => {
     const parsed = marketResearchPayloadSchema.parse(payload);
     const dependencies = createResearchDependencies(signal);
-    const result = await runMarketResearch(parsed, dependencies);
+    const result = await runMarketResearch(
+      parsed,
+      // Task 6/8 must remove: the infra ResearchAdapter now returns ResearchRetrievalResult while the workflow MarketResearchAdapter still expects AdapterSourceAttempt[].
+      dependencies as unknown as Parameters<typeof runMarketResearch>[1],
+    );
 
     logger.info("growth_intelligence.research_finished", {
       organizationId: parsed.organizationId,

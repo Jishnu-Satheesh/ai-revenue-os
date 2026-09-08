@@ -409,6 +409,16 @@ describe("marketProfileDocumentV2Schema", () => {
     expect(() => marketProfileDocumentV2Schema.parse(twoTradeAreas)).toThrow(/trade area/i);
   });
 
+  it("rejects a fourth geography entry because layers are limited to the required three", () => {
+    const secondCity = validV2Profile();
+    secondCity.geographies = [
+      ...secondCity.geographies,
+      { ...secondCity.geographies[1]!, locationRef: "ae:sh", name: "Sharjah" },
+    ];
+
+    expect(() => marketProfileDocumentV2Schema.parse(secondCity)).toThrow(/exactly one city/i);
+  });
+
   it("preserves source policy and cadence validation from version one", () => {
     const input = validV2Profile();
     input.sourcePolicy.allowBoundedQuotes = false;

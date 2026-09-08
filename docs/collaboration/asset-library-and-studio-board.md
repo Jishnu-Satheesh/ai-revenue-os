@@ -5316,3 +5316,10 @@ through the real routes, not only in tests.
   channel errors plus one anticipated trigger-adapter coupling documented in the task report for
   Tasks 6/8. One self-caused board incident (prettier reflow + checkout) repaired by verbatim
   reconstruction; board diff is additive-only.
+- **Fix round 1/5:** the other session's uncommitted `itemFeedbackBodySchema` lines in
+  `api-schemas.ts` / `api-schemas.test.ts` were committed inside Task 2 commit `d0b4db9`
+  with content preserved byte-for-byte; ownership of that feedback feature stays with the
+  other session. Narrow type-only accommodation added at
+  `src/trigger/growth-intelligence.ts:555` (Tasks 6/8 must remove it); v2 geography proven
+  to reject a fourth entry; retrieval excerpts now require non-empty text; union keeps
+  `z.union` with the frozen-type reason documented.

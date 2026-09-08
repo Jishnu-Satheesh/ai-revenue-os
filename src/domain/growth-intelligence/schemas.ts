@@ -468,6 +468,12 @@ export const marketProfileDocumentV2Schema: z.ZodType<MarketProfileDocumentV2> =
 /**
  * Reads both profile versions. The schemaVersion literal routes each document to
  * its frozen validator, so version-one bytes keep their exact digest.
+ *
+ * This is a plain union rather than a discriminated union on purpose: the v1
+ * schema is annotated as `ZodType`, which hides the object shape the
+ * discriminated-union constructor needs, and retyping it would break the v1
+ * freeze. If that annotation is ever lifted, migrate this to
+ * `z.discriminatedUnion("schemaVersion", ...)` for sharper version errors.
  */
 export const marketProfileDocumentSchema: z.ZodType<MarketProfileDocument> = z.union([
   marketProfileDocumentV1Schema,

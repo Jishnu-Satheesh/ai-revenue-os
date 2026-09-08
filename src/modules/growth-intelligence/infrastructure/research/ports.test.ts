@@ -87,6 +87,15 @@ describe("research retrieval result", () => {
     ).toThrow(/40/i);
   });
 
+  it("rejects a retained source without excerpt text", () => {
+    expect(() =>
+      researchRetrievalResultSchema.parse({
+        ...validResult(),
+        sources: [validSource("")],
+      }),
+    ).toThrow(/excerpt text/i);
+  });
+
   it("rejects an excerpt longer than 2,000 characters", () => {
     expect(() =>
       researchRetrievalResultSchema.parse({
