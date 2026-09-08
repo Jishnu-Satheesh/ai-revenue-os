@@ -1,27 +1,53 @@
 import { DomainError } from "@/lib/errors";
+import {
+  isResearchProviderQualified,
+  RESEARCH_PROVIDER_REQUIRED_USES,
+  type ResearchProviderQualification,
+} from "@/domain/growth-intelligence/research-budget";
 import type {
   ResearchAdapter,
   ResearchAdapterAvailability,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 import { researchRequestSchema } from "@/modules/growth-intelligence/infrastructure/research/ports";
 
-export const EXA_ENTERPRISE_MARKET_RESEARCH_QUALIFICATION = {
-  provider: "exa",
-  status: "blocked",
-  reviewedAt: "2026-09-01",
-  blockers: [
-    "commercial_approval_missing",
-    "enterprise_terms_unexecuted",
-    "zero_retention_unverified",
-    "derived_claim_storage_rights_unverified",
-    "credential_missing",
-    "controlled_canary_missing",
-  ],
-} as const;
+/**
+ * Paid research runs on Brave Web Search only under an account agreement
+ * that explicitly permits snippet storage, commercial inference through
+ * Gemini, organization display, derived claims, synthesis reuse and agreed
+ * retention. An ordinary subscription is not assumed to grant these rights.
+ * Google Search grounding and the unavailable Exa adapter are excluded.
+ */
+export const QUALIFIED_RESEARCH_PROVIDER = "brave" as const;
 
-const availability: ResearchAdapterAvailability = { available: false, provider: "exa" };
+export { RESEARCH_PROVIDER_REQUIRED_USES };
 
-export function getQualifiedMarketResearchAdapter(): ResearchAdapter {
+/**
+ * Static baseline: this process stages no qualification, holds no
+ * credential, and runs no canary (fixtures only, gates stay off), so the
+ * adapter reports blocked until a staged qualification says otherwise.
+ */
+export const UNQUALIFIED_RESEARCH_AVAILABILITY: ResearchAdapterAvailability = {
+  available: false,
+  provider: QUALIFIED_RESEARCH_PROVIDER,
+};
+
+/**
+ * Maps a checked qualification onto adapter availability. Only the safe
+ * blocker codes travel; credentials and contract text never reach this
+ * layer.
+ */
+export function resolveResearchAdapterAvailability(
+  qualification: ResearchProviderQualification,
+): ResearchAdapterAvailability {
+  return {
+    available: isResearchProviderQualified(qualification),
+    provider: QUALIFIED_RESEARCH_PROVIDER,
+  };
+}
+
+export function getQualifiedMarketResearchAdapter(
+  availability: ResearchAdapterAvailability = UNQUALIFIED_RESEARCH_AVAILABILITY,
+): ResearchAdapter {
   return {
     availability,
     async searchAndFetch(input) {

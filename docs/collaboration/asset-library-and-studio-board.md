@@ -5392,3 +5392,58 @@ through the real routes, not only in tests.
   and `src/app/api/organizations/[organizationId]/growth-intelligence/route.ts`.
   Also adding branch-scope cases to the already-claimed market-profile `route.test.ts`.
   No other file enters scope; other sessions' lines in those files are preserved.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 5 spend reservations + qualified retention (12-task plan)
+
+- **Claimed files (Task 5 only):** new migration
+  `supabase/migrations/*_growth_intelligence_research_budget_retention.sql`, new pgTAP
+  suites `supabase/tests/database/growth_intelligence_research_budget_test.sql` and
+  `growth_intelligence_research_retention_test.sql`, new
+  `src/modules/growth-intelligence/infrastructure/research/budget-repository.ts`,
+  `qualification.ts`, `retention-repository.ts` and matching tests, modified
+  `research/qualified-provider.ts` and test, `infrastructure/evidence-repository.ts`
+  and test, domain evidence/qualification schema additions, `.env.example` (server-only
+  config names only), narrow `src/lib/supabase/database.types.ts` +
+  `database.types.test.ts` (PRIVATE_RPC_ONLY_TABLES) touches, report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-5-report.md`,
+  and this board. One consistent discriminated pipeline-or-request work scope across
+  all new boundaries. No provider signup/purchase/contact, no paid calls, no live
+  canary, no enablement — fixtures only, gates stay OFF. Path-limited staging only;
+  no whole-file staging of dirty out-of-brief files; no stash/push/repo-wide-format.
+- **Status:** in-progress — pgTAP red first, then private ledgers + qualification +
+  retention/erasure schema, quote/attempt reservation RPCs, fail-closed qualification,
+  audited erasure, focused tests + hosted pgTAP + per-function staging execution,
+  path-limited commit.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 5 resumed (same claim, verification + completion)
+
+- **BASE:** `b570f8f` (peer analysis commit on top of Task 4 `0cf947c`). Prior session
+  of this claim already drafted + pushed migration `20260908140000` (paired
+  Local|Remote) and both pgTAP suites (untracked). Resuming: verify draft against
+  live schema, run suites red-first, repair what is red, implement the TS boundary
+  (budget/qualification/retention repositories, qualified-provider, evidence
+  admission provenance, domain types, `.env.example`, narrow DB types), then
+  pgTAP + per-RPC staging execution + path-limited commit. No paid calls, no
+  enablement, gates stay OFF. Leaving `zz_scratch_debug_test.sql` untouched
+  (not mine to remove; never run unfiltered).
+
+### 2026-09-08 · muse-spark · Market monitoring Task 5 continued (same claim, own BASE)
+
+- **BASE:** `3a2b699` (peer analysis commits on top of Task 4 `0cf947c`). No stash/push/repo-wide-format; prettier only Task 5 files, never this board.
+- Prior session left untracked drafts: migrations `20260908140000` (paired Local|Remote, live) + `20260908150000` (local-only, pending push) and both pgTAP suites. Plan: verify-then-repair test drafts, push ONLY `20260908150000`, then TS boundary + focused tests + per-RPC staging execution, path-limited commit.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 5 verification pass (same claim, BASE 3a2b699)
+
+- Verified staging: BOTH `20260908140000` and `20260908150000` are paired
+  Local|Remote and dry-run reports up to date, so no push is needed or planned.
+  The "push ONLY 20260908150000" line above is stale.
+- RED baseline recorded: `database.types.test.ts` 4 failed / 91 passed (new columns
+  + 4 private tables unaccounted); budget pgTAP aborts on direct private-ledger
+  reads under `authenticated`; retention pgTAP aborts on a direct
+  `private.create_market_profile_digest` call under `authenticated`.
+- Plan: repair both suites without touching assertion counts, hand-edit
+  `database.types.ts` narrowly (+ `PRIVATE_RPC_ONLY_TABLES`), then the TS boundary
+  (budget/qualification/retention repositories, qualified-provider gate,
+  evidence admission provenance, domain work-scope/quote/retention schemas,
+  `.env.example` names only), focused vitest + hosted pgTAP + per-RPC staging
+  probes, path-limited commit. No paid calls, no enablement, gates stay OFF.

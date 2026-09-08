@@ -286,4 +286,86 @@ describe("Market Evidence repository", () => {
       }),
     );
   });
+
+  it("admits a bounded excerpt with its qualification and retain-until policy", async () => {
+    const db = persistence();
+    const provenancedPayload: MarketEvidencePayload = {
+      ...payload,
+      sources: [
+        {
+          ...payload.sources[0]!,
+          excerptText: "A public notice about weekend demand near the marina.",
+          excerptDigest: "b".repeat(64),
+          qualificationVersion: "BRAVE-ORDER-2026-09-08",
+          retainUntil: "2027-09-01T00:00:00Z",
+        },
+      ],
+    };
+
+    const result = await createMarketEvidenceRepository(db.client).record({
+      organizationId,
+      requestId,
+      claimToken,
+      runId,
+      payload: provenancedPayload,
+    });
+
+    expect(result).toEqual({ runId, claimCount: 1, replayed: false });
+    expect(db.rpc).toHaveBeenCalledWith(
+      "record_market_evidence_claims",
+      expect.objectContaining({ p_payload: provenancedPayload }),
+    );
+  });
+
+  it("refuses an excerpt without its digest, and an over-long excerpt", async () => {
+    const db = persistence();
+    const digestlessPayload = {
+      ...payload,
+      sources: [{ ...payload.sources[0], excerptText: "A notice without a digest." }],
+    } as unknown as MarketEvidencePayload;
+
+    await expect(
+      createMarketEvidenceRepository(db.client).record({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        payload: digestlessPayload,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "DOMAIN_ERROR",
+        message: "Market Evidence must contain compact citations and claims only.",
+      }),
+    );
+
+    const oversizedPayload = {
+      ...payload,
+      sources: [
+        {
+          ...payload.sources[0],
+          excerptText: "x".repeat(2_001),
+          excerptDigest: "b".repeat(64),
+          qualificationVersion: "BRAVE-ORDER-2026-09-08",
+          retainUntil: "2027-09-01T00:00:00Z",
+        },
+      ],
+    } as unknown as MarketEvidencePayload;
+
+    await expect(
+      createMarketEvidenceRepository(db.client).record({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        payload: oversizedPayload,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "DOMAIN_ERROR",
+        message: "Market Evidence must contain compact citations and claims only.",
+      }),
+    );
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
 });

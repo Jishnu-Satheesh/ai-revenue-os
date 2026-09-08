@@ -157,6 +157,13 @@ const PRIVATE_RPC_ONLY_TABLES = new Set([
   "channel_recommendation_operations",
   "decision_cycle_operations",
   "growth_intelligence_write_operations",
+  // Task 5 spend boundary: the organization-day allowance, the staged provider
+  // qualification, the pipeline-or-request reservations and the per-attempt
+  // debits. No session role holds a grant; every write passes a fenced RPC.
+  "growth_intelligence_research_day_allowances",
+  "growth_intelligence_provider_qualifications",
+  "growth_intelligence_research_budget_reservations",
+  "growth_intelligence_research_attempt_ledger",
   "integration_credentials",
   "integration_report_profile_operations",
   "integration_report_validation_operations",

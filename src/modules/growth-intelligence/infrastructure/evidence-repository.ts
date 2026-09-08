@@ -32,6 +32,10 @@ const sourceSchema = z
     retrievedAt: timestampSchema,
     publishedAt: timestampSchema.nullable(),
     observedAt: timestampSchema.nullable(),
+    excerptText: z.string().min(1).max(2_000).nullable().optional(),
+    excerptDigest: digestSchema.nullable().optional(),
+    qualificationVersion: z.string().min(1).max(80).nullable().optional(),
+    retainUntil: timestampSchema.nullable().optional(),
   })
   .strict()
   .superRefine((source, context) => {
@@ -55,6 +59,22 @@ const sourceSchema = z
       context.addIssue({
         code: "custom",
         message: "Source availability must match its digest and safe failure code.",
+      });
+    }
+    const excerptText = source.excerptText ?? null;
+    const excerptDigest = source.excerptDigest ?? null;
+    const qualificationVersion = source.qualificationVersion ?? null;
+    const retainUntil = source.retainUntil ?? null;
+    if ((excerptText === null) !== (excerptDigest === null)) {
+      context.addIssue({
+        code: "custom",
+        message: "A retained excerpt needs both its text and its digest.",
+      });
+    }
+    if (excerptText !== null && (qualificationVersion === null || retainUntil === null)) {
+      context.addIssue({
+        code: "custom",
+        message: "A retained excerpt must record its qualification and retain-until policy.",
       });
     }
   });

@@ -256,6 +256,12 @@ export type Database = {
           source_content_digest: string | null;
           safe_failure_code: string | null;
           quotation_characters: number;
+          excerpt_text: string | null;
+          excerpt_digest: string | null;
+          qualification_version: string | null;
+          retain_until: string | null;
+          erased_at: string | null;
+          erasure_reason_code: string | null;
           retrieved_at: string;
           published_at: string | null;
           observed_at: string | null;
@@ -283,7 +289,7 @@ export type Database = {
             | "topic";
           subject_ref: string;
           claim_kind: string;
-          paraphrase: string;
+          paraphrase: string | null;
           quotation: string | null;
           geographic_layer: "trade_area" | "city" | "country";
           geography_ref: string;
@@ -304,6 +310,7 @@ export type Database = {
           stale_at: string;
           expires_at: string;
           limitations: string[];
+          text_withdrawn: boolean;
           created_at: string;
         };
         Insert: never;
@@ -321,7 +328,8 @@ export type Database = {
             | "withdrawn"
             | "excluded"
             | "corrected"
-            | "superseded";
+            | "superseded"
+            | "erased";
           event_digest: string;
           reason: string | null;
           occurred_at: string;
@@ -339,6 +347,9 @@ export type Database = {
           market_evidence_source_id: string | null;
           related_market_evidence_claim_id: string | null;
           relation: "supports" | "corroborates" | "contradicts";
+          support_verdict: "supported" | "unsupported" | "uncertain" | null;
+          reviewed_at: string | null;
+          reviewer_ref: string | null;
           created_at: string;
         };
         Insert: never;

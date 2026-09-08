@@ -410,7 +410,8 @@ function createSynthesisDependencies(signal: AbortSignal) {
             (event) =>
               event.event_type === "expired" ||
               event.event_type === "withdrawn" ||
-              event.event_type === "excluded",
+              event.event_type === "excluded" ||
+              event.event_type === "erased",
           )
           .map((event) => event.market_evidence_claim_id),
       );
@@ -424,6 +425,7 @@ function createSynthesisDependencies(signal: AbortSignal) {
       const eligible: SynthesisMarketClaim[] = [];
       for (const row of rows) {
         if (terminal.has(row.id)) continue;
+        if (row.paraphrase === null) continue;
         if (Number.isNaN(Date.parse(row.expires_at)) || Date.parse(row.expires_at) <= at) {
           continue;
         }

@@ -27,6 +27,41 @@ export type {
   ResearchCoverageSlotKind,
   ResearchPipelineStage,
 } from "@/domain/growth-intelligence/research-pipeline";
+export {
+  RESEARCH_PROVIDER_BLOCKER_CODES,
+  RESEARCH_PROVIDER_REQUIRED_USES,
+  isResearchProviderQualified,
+  isResearchSourceEligibleForSynthesis,
+  renderResearchSourceState,
+  researchAttemptReservationSchema,
+  researchErasureReasonSchema,
+  researchExcerptProvenanceSchema,
+  researchProviderQualificationSchema,
+  researchQuoteSchema,
+  researchSupportReviewSchema,
+  researchSupportVerdictSchema,
+  researchWorkScopeSchema,
+  settleResearchAttemptSchema,
+  toResearchWorkScopeKey,
+  validateResearchQuote,
+} from "@/domain/growth-intelligence/research-budget";
+export type {
+  ResearchAttemptPhase,
+  ResearchAttemptReservation,
+  ResearchErasureReason,
+  ResearchExcerptProvenance,
+  ResearchProviderBlockerCode,
+  ResearchProviderQualification,
+  ResearchProviderRequiredUse,
+  ResearchQuote,
+  ResearchSourceAvailability,
+  ResearchSourceEligibilityInput,
+  ResearchSupportReview,
+  ResearchSupportVerdict,
+  ResearchWorkScope,
+  ResearchWorkScopeKey,
+  SettleResearchAttempt,
+} from "@/domain/growth-intelligence/research-budget";
 export { createMarketProfileDigest } from "@/domain/growth-intelligence/profile-digest";
 export { createGrowthIntelligenceRequestFingerprint } from "@/domain/growth-intelligence/request-fingerprint";
 export {
