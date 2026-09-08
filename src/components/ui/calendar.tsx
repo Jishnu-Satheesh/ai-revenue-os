@@ -98,11 +98,24 @@ function CalendarCaptionLabel({ role: _role, ...props }: CaptionLabelProps) {
   return <span {...props} />;
 }
 
+/**
+ * `YYYY-MM-DD`, matching the local-date form every date on this control is
+ * keyed by -- never `toLocaleDateString()`, whose output shifts with the
+ * viewer's locale and would be the one stray date format in a control built
+ * specifically so no locale can move a boundary.
+ */
+function isoDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function CalendarDayButton({ className, day, modifiers, ...props }: DayButtonProps) {
   return (
     <button
       type="button"
-      data-day={day.date.toLocaleDateString()}
+      data-day={isoDate(day.date)}
       data-selected={modifiers.selected || modifiers.range_start || modifiers.range_end}
       data-range-start={modifiers.range_start}
       data-range-end={modifiers.range_end}

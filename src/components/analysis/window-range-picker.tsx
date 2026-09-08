@@ -175,7 +175,7 @@ export function WindowRangePicker(props: {
             onSelect={handleCalendarSelect}
             disabled={(date) => {
               const value = formatLocalDate(date);
-              return !segments.some((segment) => segment.start <= value && value <= segment.end);
+              return !isWindowCovered(value, value, segments);
             }}
           />
 
