@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { resolveAnalysisMonth } from "@/domain/analysis/calendar";
+import { isWindowCovered, mergeCoverageSegments } from "@/domain/analysis/window-selection";
 import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
 import { toCalendarDate } from "@/domain/metrics/periods";
 import type { Database } from "@/lib/supabase/database.types";
@@ -543,38 +543,27 @@ export function createAuthenticatedChannelAnalysisRepository(
       return keys;
     },
 
-    async loadAnalysisMonthTimeline({ organizationId, channelId }) {
-      // The horizon comes from declared package dates, not from surviving
-      // evidence rows: a package whose rows were all superseded still declares
-      // the month, and a gap month must stay selectable. Two bounded rows.
-      const earliestBase = supabase
+    async loadCoverageSegments({ organizationId, channelId }) {
+      const base = supabase
         .from("integration_report_packages")
-        .select("declared_period_start")
+        .select("declared_period_start, declared_period_end")
         .eq("organization_id", organizationId)
         .eq("status", "projected")
-        .not("declared_period_start", "is", null);
-      const latestBase = supabase
-        .from("integration_report_packages")
-        .select("declared_period_end")
-        .eq("organization_id", organizationId)
-        .eq("status", "projected")
+        .not("declared_period_start", "is", null)
         .not("declared_period_end", "is", null);
-      const earliestScoped =
-        channelId === null ? earliestBase : earliestBase.eq("channel_id", channelId);
-      const latestScoped = channelId === null ? latestBase : latestBase.eq("channel_id", channelId);
-      const { data: earliestRows, error: earliestError } = await earliestScoped
+      const { data, error } = await (channelId === null ? base : base.eq("channel_id", channelId))
         .order("declared_period_start", { ascending: true })
-        .limit(1);
-      if (earliestError) throw new ChannelAnalysisReadError(earliestError.code ?? "unknown");
-      const { data: latestRows, error: latestError } = await latestScoped
-        .order("declared_period_end", { ascending: false })
-        .limit(1);
-      if (latestError) throw new ChannelAnalysisReadError(latestError.code ?? "unknown");
+        .limit(MAX_EVIDENCE_WINDOWS);
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
 
-      const earliest = (earliestRows ?? [])[0]?.declared_period_start;
-      const latest = (latestRows ?? [])[0]?.declared_period_end;
-      if (typeof earliest !== "string" || typeof latest !== "string") return null;
-      return { firstMonth: earliest.slice(0, 7), lastMonth: latest.slice(0, 7) };
+      return mergeCoverageSegments(
+        (data ?? []).flatMap((row) =>
+          typeof row.declared_period_start === "string" &&
+          typeof row.declared_period_end === "string"
+            ? [{ windowStart: row.declared_period_start, windowEnd: row.declared_period_end }]
+            : [],
+        ),
+      );
     },
 
     async loadEvidence({ organizationId, findingIds }) {
@@ -780,20 +769,13 @@ export function createAuthenticatedChannelAnalysisRepository(
         );
     },
 
-    async resolveMonthInput({ organizationId, channelId, month }) {
-      const timeline = await repository.loadAnalysisMonthTimeline({
-        organizationId,
-        channelId,
-      });
-      if (timeline === null) return null;
-      let bounds: { windowStart: string; windowEnd: string };
-      try {
-        bounds = resolveAnalysisMonth(month, timeline);
-      } catch {
-        // Outside the known timeline: a normal empty state for the caller,
-        // not a row the database failed to return.
-        return null;
-      }
+    async resolveWindowInput({ organizationId, channelId, from, to }) {
+      const segments = await repository.loadCoverageSegments({ organizationId, channelId });
+      // The first of the two independent checks. The worker repeats it under
+      // its lease, so a range that became uncovered between this read and the
+      // claim is still refused.
+      if (!isWindowCovered(from, to, segments)) return null;
+      const bounds = { windowStart: from, windowEnd: to };
 
       const { data: orgRows, error: orgError } = await supabase
         .from("organizations")
@@ -804,11 +786,9 @@ export function createAuthenticatedChannelAnalysisRepository(
       const timeZone = (orgRows ?? [])[0]?.default_timezone;
       if (typeof timeZone !== "string" || timeZone.length === 0) return null;
 
-      // The grain the month's own packages wrote, by current-row majority
-      // with ties breaking finer. Packages outside the month still vote when
-      // nothing declares it: an empty month inherits the channel's known
-      // primary grain, and a channel with no packages at all resolves day
-      // grain so the coverage detector can state that no evidence exists.
+      // Unchanged from the monthly resolver: the grain the range's own packages
+      // wrote, by current-row majority with ties breaking finer. Packages
+      // outside the range still vote when nothing declares it.
       const windows = await repository.loadEvidenceWindows({
         organizationId,
         channelId,

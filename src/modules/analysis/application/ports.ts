@@ -1,3 +1,4 @@
+import type { CoverageSegment } from "@/domain/analysis/window-selection";
 import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
 
 /**
@@ -193,17 +194,6 @@ export type AnalysedWindowKey = {
   grain: AnalysisGrain;
 };
 
-/**
- * The contiguous month horizon a channel's declared packages cover, as
- * canonical `YYYY-MM` bounds. A package with no current rows still
- * contributes its declared dates: otherwise a gap disappears from the picker
- * precisely when it is useful to inspect.
- */
-export type AnalysisMonthTimeline = {
-  firstMonth: string;
-  lastMonth: string;
-};
-
 export type ChannelAnalysisReadPort = {
   /** Most recent first. Includes running and failed runs, so the page can say so. */
   loadRuns(input: {
@@ -302,20 +292,29 @@ export type ChannelAnalysisReadPort = {
   loadAnalysedWindowKeys(input: { organizationId: string }): Promise<AnalysedWindowKey[]>;
 
   /**
-   * The month horizon for one channel's picker, or null when the channel has
-   * no projected package. Two bounded rows, never a full package listing.
+   * The unbroken stretches of dates this channel's projected packages declare.
+   *
+   * Declared periods rather than surviving evidence, for the reason the month
+   * timeline used before it: a package whose rows were all superseded still
+   * declared the period, and a gap inside a declaration must stay selectable
+   * so the coverage detector can report it.
    */
-  loadAnalysisMonthTimeline(input: {
+  loadCoverageSegments(input: {
     organizationId: string;
     channelId: string | null;
-  }): Promise<AnalysisMonthTimeline | null>;
+  }): Promise<CoverageSegment[]>;
 
   /**
-   * The server-resolved monthly input: the month's own window, the
-   * organization's zone, and the finest grain the month's packages wrote. Null
-   * when the month is outside the known timeline or nothing declares it.
+   * The server-resolved window: the picked range, the organization's zone, and
+   * the grain the range's own packages wrote. Null when any day of the range is
+   * outside the declared coverage, or when nothing is declared at all.
    */
-  resolveMonthInput(input: { organizationId: string; channelId: string; month: string }): Promise<{
+  resolveWindowInput(input: {
+    organizationId: string;
+    channelId: string;
+    from: string;
+    to: string;
+  }): Promise<{
     windowStart: string;
     windowEnd: string;
     timeZone: string;

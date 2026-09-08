@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { CoverageWindow } from "@/domain/analysis/window-selection";
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -29,6 +30,7 @@ function stubClient(
       select: () => builder,
       eq: () => builder,
       in: () => builder,
+      not: () => builder,
       order: () => builder,
       limit: () => builder,
       then: (
@@ -829,171 +831,111 @@ describe("loadEvidenceWindows", () => {
   });
 });
 
-describe("loadAnalysisMonthTimeline", () => {
-  function timelineClient(rows: { start: string | null; end: string | null }[]) {
-    const queries: { table: string; filters: [string, unknown][]; order: string[] }[] = [];
-    let call = 0;
-    const supabase = {
-      from(table: string) {
-        const filters: [string, unknown][] = [];
-        const order: string[] = [];
-        queries.push({ table, filters, order });
-        const builder = {
-          select: () => builder,
-          eq: (column: string, value: unknown) => {
-            filters.push([column, value]);
-            return builder;
-          },
-          not: () => builder,
-          order: (column: string) => {
-            order.push(column);
-            return builder;
-          },
-          limit: () => builder,
-          then: (
-            onFulfilled: (value: QueryResult) => unknown,
-            onRejected?: (reason: unknown) => unknown,
-          ) => {
-            // First read takes the earliest declared start, the second the
-            // latest declared end: the horizon is two bounded rows, never a
-            // full package listing.
-            const row = rows[Math.min(call, rows.length - 1)];
-            call += 1;
-            const data =
-              row && row.start !== null && row.end !== null
-                ? [{ declared_period_start: row.start, declared_period_end: row.end }]
-                : [];
-            return Promise.resolve({ data, error: null } as QueryResult).then(
-              onFulfilled,
-              onRejected,
-            );
-          },
-        };
-        return builder;
-      },
-    } as unknown as SupabaseClient<Database>;
-    return { supabase, queries };
-  }
+const ORGANIZATION_ID = "org-1";
+const CHANNEL_ID = "channel-1";
 
-  it("derives the horizon from declared package dates, not from evidence rows", async () => {
-    const { supabase } = timelineClient([
-      { start: "2026-01-05", end: "2026-01-31" },
-      { start: "2026-01-05", end: "2026-03-20" },
+/** A repository whose `loadCoverageSegments` reads exactly these declared packages. */
+function createRepositoryWithPackages(
+  packages: { declared_period_start: string; declared_period_end: string }[],
+) {
+  const { supabase } = stubClient({
+    integration_report_packages: { data: packages, error: null },
+  });
+  return createAuthenticatedChannelAnalysisRepository(supabase);
+}
+
+/**
+ * A repository wired for `resolveWindowInput`: declared packages back
+ * `loadCoverageSegments` through its real query, and the organization's zone
+ * comes from a stubbed `organizations` row. `loadEvidenceWindows` is replaced
+ * outright with the windows the test wants to vote over -- its own real path is
+ * five tables deep and is already exercised on its own in
+ * `describe("loadEvidenceWindows")` above, so reproducing that chain here would
+ * pin nothing this suite doesn't already pin.
+ */
+function createRepositoryWithCoverage(input: {
+  packages: { declared_period_start: string; declared_period_end: string }[];
+  timeZone: string;
+  windows: readonly CoverageWindow[];
+}) {
+  const { supabase } = stubClient({
+    integration_report_packages: { data: input.packages, error: null },
+    organizations: { data: [{ default_timezone: input.timeZone }], error: null },
+  });
+  const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+  repository.loadEvidenceWindows = vi.fn().mockResolvedValue(input.windows);
+  return repository;
+}
+
+describe("loadCoverageSegments", () => {
+  it("merges the channel's declared package periods into stretches", async () => {
+    const repository = createRepositoryWithPackages([
+      { declared_period_start: "2026-01-01", declared_period_end: "2026-01-31" },
+      { declared_period_start: "2026-02-01", declared_period_end: "2026-02-28" },
+      { declared_period_start: "2026-05-01", declared_period_end: "2026-08-31" },
     ]);
 
-    const timeline = await createAuthenticatedChannelAnalysisRepository(
-      supabase,
-    ).loadAnalysisMonthTimeline({ organizationId: "org-1", channelId: "channel-1" });
-
-    expect(timeline).toEqual({ firstMonth: "2026-01", lastMonth: "2026-03" });
+    await expect(
+      repository.loadCoverageSegments({ organizationId: ORGANIZATION_ID, channelId: CHANNEL_ID }),
+    ).resolves.toEqual([
+      { start: "2026-01-01", end: "2026-02-28" },
+      { start: "2026-05-01", end: "2026-08-31" },
+    ]);
   });
 
-  it("reports no timeline when the channel has no projected package", async () => {
-    const { supabase } = timelineClient([{ start: null, end: null }]);
+  it("returns nothing for a channel with no projected packages", async () => {
+    const repository = createRepositoryWithPackages([]);
 
-    const timeline = await createAuthenticatedChannelAnalysisRepository(
-      supabase,
-    ).loadAnalysisMonthTimeline({ organizationId: "org-1", channelId: "channel-1" });
-
-    expect(timeline).toBeNull();
+    await expect(
+      repository.loadCoverageSegments({ organizationId: ORGANIZATION_ID, channelId: CHANNEL_ID }),
+    ).resolves.toEqual([]);
   });
+});
 
-  it("resolves a month to the window, zone, and finest written grain", async () => {
-    const calls: string[] = [];
-    const supabase = {
-      from(table: string) {
-        calls.push(table);
-        const step = calls.filter((entry) => entry === table).length;
-        const builder = {
-          select: () => builder,
-          eq: () => builder,
-          is: () => builder,
-          not: () => builder,
-          in: () => builder,
-          order: () => builder,
-          limit: () => builder,
-          then: (
-            onFulfilled: (value: QueryResult) => unknown,
-            onRejected?: (reason: unknown) => unknown,
-          ) => {
-            let data: unknown[] = [];
-            if (table === "integration_report_packages" && step === 1) {
-              data = [{ declared_period_start: "2026-01-05" }];
-            } else if (table === "integration_report_packages" && step === 2) {
-              data = [{ declared_period_end: "2026-03-20" }];
-            } else if (table === "organizations") {
-              data = [{ default_timezone: "Asia/Dubai" }];
-            } else if (table === "integration_report_packages" && step === 3) {
-              data = [
-                {
-                  id: "package-1",
-                  channel_id: "channel-1",
-                  branch_id: null,
-                  declared_period_start: "2026-02-01",
-                  declared_period_end: "2026-02-28",
-                  period_timezone: "Asia/Dubai",
-                  original_filename: "February.xlsx",
-                  uploaded_at: "2026-03-01T00:00:00Z",
-                },
-              ];
-            } else if (table === "integration_report_projection_runs") {
-              data = [{ id: "run-1", report_package_id: "package-1" }];
-            } else if (table === "report_projection_lineage") {
-              data = [{ normalized_metric_id: "metric-1", projection_run_id: "run-1" }];
-            } else if (table === "normalized_metrics") {
-              data = [{ id: "metric-1", period_grain: "day" }];
-            }
-            return Promise.resolve({ data, error: null } as QueryResult).then(
-              onFulfilled,
-              onRejected,
-            );
-          },
-        };
-        return builder;
-      },
-    } as unknown as SupabaseClient<Database>;
-
-    const resolved = await createAuthenticatedChannelAnalysisRepository(supabase).resolveMonthInput(
-      { organizationId: "org-1", channelId: "channel-1", month: "2026-02" },
-    );
-
-    expect(resolved).toEqual({
-      windowStart: "2026-02-01",
-      windowEnd: "2026-02-28",
+describe("resolveWindowInput", () => {
+  it("refuses a range that leaves the declared coverage", async () => {
+    const repository = createRepositoryWithCoverage({
+      packages: [{ declared_period_start: "2026-01-01", declared_period_end: "2026-02-28" }],
       timeZone: "Asia/Dubai",
+      windows: [
+        { windowStart: "2026-01-01", windowEnd: "2026-02-28", grain: "day", governedRowCount: 100 },
+      ],
+    });
+
+    await expect(
+      repository.resolveWindowInput({
+        organizationId: ORGANIZATION_ID,
+        channelId: CHANNEL_ID,
+        from: "2026-02-25",
+        to: "2026-03-05",
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("resolves a covered range to its window, zone and evidence-voted grain", async () => {
+    const repository = createRepositoryWithCoverage({
+      packages: [{ declared_period_start: "2026-01-01", declared_period_end: "2026-02-28" }],
+      timeZone: "Asia/Dubai",
+      windows: [
+        { windowStart: "2026-01-01", windowEnd: "2026-02-28", grain: "day", governedRowCount: 554 },
+        { windowStart: "2026-01-01", windowEnd: "2026-02-28", grain: "span", governedRowCount: 2 },
+      ],
+    });
+
+    await expect(
+      repository.resolveWindowInput({
+        organizationId: ORGANIZATION_ID,
+        channelId: CHANNEL_ID,
+        from: "2026-01-01",
+        to: "2026-01-04",
+      }),
+    ).resolves.toEqual({
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-04",
+      timeZone: "Asia/Dubai",
+      // The daily package carries 554 governed rows against the span's 2, so
+      // the grain is day. The operator never chooses this.
       grain: "day",
     });
-  });
-
-  it("resolves nothing when the month falls outside the known timeline", async () => {
-    const { supabase } = timelineClient([
-      { start: "2026-01-05", end: "2026-01-31" },
-      { start: "2026-01-05", end: "2026-01-31" },
-    ]);
-
-    const resolved = await createAuthenticatedChannelAnalysisRepository(supabase).resolveMonthInput(
-      { organizationId: "org-1", channelId: "channel-1", month: "2026-04" },
-    );
-
-    expect(resolved).toBeNull();
-  });
-
-  it("scopes the horizon to the named channel", async () => {
-    const { supabase, queries } = timelineClient([
-      { start: "2026-02-01", end: "2026-02-28" },
-      { start: "2026-02-01", end: "2026-02-28" },
-    ]);
-
-    await createAuthenticatedChannelAnalysisRepository(supabase).loadAnalysisMonthTimeline({
-      organizationId: "org-1",
-      channelId: "channel-9",
-    });
-
-    const packageQueries = queries.filter((query) => query.table === "integration_report_packages");
-    expect(packageQueries.length).toBe(2);
-    for (const query of packageQueries) {
-      expect(query.filters).toContainEqual(["organization_id", "org-1"]);
-      expect(query.filters).toContainEqual(["channel_id", "channel-9"]);
-    }
   });
 });
