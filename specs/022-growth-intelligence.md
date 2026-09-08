@@ -186,14 +186,35 @@ Every claim declares exactly one geographic layer:
 Broader evidence may support a narrower business only when the synthesis states that inference as a
 limitation. A country-level pattern is never presented as proof of branch-level demand.
 
-### 6.4 Source policy
+### 6.4 Operator-started branch research
+
+- The Growth Intelligence **Market monitoring** dialog is an explicit review surface for one
+  branch, research topics, and competitor leads.
+- One operator-started run binds exactly one active organization branch. Selecting a branch changes
+  research scope only; it never edits the canonical branch record.
+- Topics are editable, unique tags capped at 20 per run.
+- Competitors are editable rows capped at five per run. Name is required; public website and a
+  bounded location hint are optional.
+- A competitor without cited relevance evidence is an unverified operator lead. It may guide
+  research but cannot itself support a claim, recommendation, or execution decision.
+- A missing business website does not block research. The approved name, selected branch scope, and
+  topics remain sufficient; a saved branch without a usable locality keeps Start disabled and links
+  to the organization profile for repair.
+- Starting research proposes and confirms one immutable Market Profile version through the existing
+  governed boundaries. The durable request and its fingerprint carry the selected branch.
+- An unchanged scope already pending or claimed cannot enqueue duplicate work. A confirmed changed
+  scope supersedes the prior version and cancels unfinished work under the existing transaction.
+
+### 6.5 Source policy
 
 - Only public, attributable sources and approved APIs are eligible.
 - Research respects authentication, paywalls, CAPTCHAs, robots controls, redirects, and provider
   terms. A blocked source is recorded as unavailable, never bypassed.
 - Operators may exclude a publisher/domain or an approved competitor.
 - The first production adapter must pass commercial, privacy, retention, citation, crawl-failure,
-  and SSRF review before any organization is enabled. This specification remains vendor-neutral.
+  and SSRF review before any organization is enabled.
+- ADR 0047 specifies Gemini Grounding with Google Search as the first implementation. Provider
+  identity remains behind the adapter boundary and does not change the profile or evidence model.
 
 ## 7. Market Evidence quality
 
@@ -405,6 +426,25 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
 - A later run creates untriaged narration when its content/evidence fingerprint materially changes;
   prior human decisions are not silently copied to new words.
 - Stable fingerprints suppress byte-for-byte or evidence-identical duplicates.
+
+### 9.7 Market monitoring and research outcomes
+
+- The page header and Market Watch use the same **Market monitoring** dialog. The large inline
+  profile-review block is not part of the four-tab workspace.
+- Dialog pre-fill order is latest undecided proposal, active profile, then confirmed
+  branch/onboarding context. A pending AI proposal may be edited or rejected.
+- Starting research is one user action. The application preserves the existing append-only proposal
+  and confirmation records; an interrupted confirmation leaves a recoverable pending proposal.
+- The client observes request state automatically only while research is active. Terminal state
+  causes one composed-page refresh; performance metrics keep their separate manual-refresh rule.
+- The **Insights & market** tab shows current status, branch, scope, finish time, coverage, cited
+  findings, competitor findings, limitations, source inspection, and research history.
+- Recommendations derived from Market Research remain in **Recommendations**, link to their cited
+  findings, and may enter Overview's deterministic Top Recommendations preview.
+- **Your actions** names the research start and terminal outcome without invented progress.
+- A completed or partial run with eligible claims enqueues one durable `market_evidence_changed`
+  request with trigger reason `market_research_completed`. The synthesis worker consumes that
+  request; empty or uncited retrieval does not enqueue synthesis.
 
 ## 10. Campaign Opportunity contract
 
@@ -755,6 +795,19 @@ precedes Campaign handoff.
 
 ## 19. Acceptance criteria
 
+- The header action matches the approved **Market monitoring** label and icon and opens an
+  accessible review dialog from both the header and Market Watch.
+- The dialog selects one same-organization active branch, edits up to 20 topics and five competitor
+  leads, and never mutates canonical branch data.
+- Operator-entered name-only competitors remain visibly unverified until public citations support
+  a Market Evidence Claim.
+- One Start action creates the immutable scope, activates it, and enqueues exactly one
+  branch-scoped research request; an identical active scope cannot duplicate work.
+- Active research updates automatically, then refreshes the composed workspace once at a terminal
+  state while preserving the last successful result on failure.
+- Completed or partial research with eligible cited claims produces exactly one immediate synthesis
+  handoff and makes resulting Insights, Recommendations, and Data Gaps reachable in their approved
+  tabs.
 - An operator confirms the exact inferred niche, public identity, geographic layers, competitors,
   topics, and source exclusions before recurring research begins.
 - AI-proposed profile changes do not affect research until confirmed.
@@ -795,6 +848,8 @@ precedes Campaign handoff.
 
 ### 20.1 Domain and property tests
 
+- Market monitoring form normalization, branch binding, 20-topic and five-competitor caps,
+  unverified leads, and optional competitor website/location fields.
 - Market Profile schema, digest, version activation, competitor/geography normalization, and source
   exclusion.
 - Research/request fingerprint stability and invalidation for every bound version/evidence change.
