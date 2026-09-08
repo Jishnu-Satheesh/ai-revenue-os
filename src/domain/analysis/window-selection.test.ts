@@ -4,6 +4,8 @@ import {
   isWindowCovered,
   mergeCoverageSegments,
   MAX_ANALYSIS_WINDOW_DAYS,
+  defaultAnalysisWindow,
+  describeGrainMismatch,
 } from "@/domain/analysis/window-selection";
 
 const w = (windowStart: string, windowEnd: string) => ({ windowStart, windowEnd });
@@ -92,8 +94,6 @@ describe("isWindowCovered", () => {
     expect(isWindowCovered("2026-01-01", "2026-01-04", [])).toBe(false);
   });
 });
-
-import { defaultAnalysisWindow } from "@/domain/analysis/window-selection";
 
 const daily = (windowStart: string, windowEnd: string) => ({
   windowStart,
@@ -260,6 +260,51 @@ describe("describeGrainMismatch", () => {
       declaredEnd: "2026-02-28",
       suggested: { from: "2026-01-01", to: "2026-02-28" },
     });
+  });
+
+  it("blames the declaration carrying the most governed rows", () => {
+    // Two declarations, both too coarse to answer, different sizes. The
+    // warning names the one the operator is most likely to recognise, which
+    // is the one that produced the most rows -- not whichever sorted first.
+    const mismatch = describeGrainMismatch({
+      from: "2026-08-01",
+      to: "2026-08-04",
+      windows: [
+        {
+          windowStart: "2026-01-01",
+          windowEnd: "2026-12-31",
+          grain: "month",
+          governedRowCount: 12,
+        },
+        {
+          windowStart: "2026-07-01",
+          windowEnd: "2026-09-30",
+          grain: "month",
+          governedRowCount: 900,
+        },
+      ],
+    });
+
+    expect(mismatch?.declaredStart).toBe("2026-07-01");
+    expect(mismatch?.declaredEnd).toBe("2026-09-30");
+  });
+
+  it("breaks a tie on row count by blaming the finer declaration", () => {
+    const mismatch = describeGrainMismatch({
+      from: "2026-08-01",
+      to: "2026-08-04",
+      windows: [
+        { windowStart: "2026-01-01", windowEnd: "2026-12-31", grain: "span", governedRowCount: 40 },
+        {
+          windowStart: "2026-07-01",
+          windowEnd: "2026-09-30",
+          grain: "month",
+          governedRowCount: 40,
+        },
+      ],
+    });
+
+    expect(mismatch?.grain).toBe("month");
   });
 
   it("says nothing when the whole span is asked for", () => {
