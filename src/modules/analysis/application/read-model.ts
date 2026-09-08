@@ -494,9 +494,24 @@ export function buildChannelWorkspaceView(input: {
   findings: readonly ChannelFindingRecord[];
   evidence: readonly ChannelFindingEvidenceRecord[];
   recommendations: readonly ChannelRecommendationRecord[];
+  /**
+   * The run the page picked for its exact window, by id -- or null when the
+   * window has no completed run. While present, `view.run` is that run
+   * alone: a covered-but-unanalysed window reads as not-analysed instead of
+   * borrowing another window's run. The full `runs` list still feeds the
+   * in-progress and last-failed indicators. Omitted only by callers with no
+   * window, which keep the newest-completed pick.
+   */
+  displayedRunId?: string | null;
 }): ChannelWorkspaceView {
   const runViews = input.runs.map(toRunView);
-  const completed = runViews.find((run) => run.status === "completed") ?? null;
+  const displayedRunId = input.displayedRunId;
+  const completed =
+    displayedRunId === undefined
+      ? (runViews.find((run) => run.status === "completed") ?? null)
+      : displayedRunId === null
+        ? null
+        : (runViews.find((run) => run.id === displayedRunId && run.status === "completed") ?? null);
   const findingViews = input.findings.map((finding) => toFindingView(finding, input.evidence));
 
   const placed = new Set<string>();

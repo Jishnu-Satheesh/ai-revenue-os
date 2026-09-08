@@ -222,6 +222,11 @@ export default async function ChannelDetailPage({
       findings: cached?.findings ?? [],
       evidence: cached?.evidence ?? [],
       recommendations,
+      // The findings above were read for the exact-window displayed run, so
+      // the view must show that run alone. Passing null when the window has
+      // none keeps a covered-but-unanalysed window in its not-analysed state
+      // instead of borrowing another window's run.
+      displayedRunId: displayedRun?.id ?? null,
     });
 
     workspace = (

@@ -196,6 +196,40 @@ describe("buildChannelWorkspaceView", () => {
     expect(neverRan.chapters.find((chapter) => chapter.id === "funnel")?.state).toBe("not_run");
   });
 
+  it("shows no run for a window with none, even beside another window's run", () => {
+    // A covered-but-unanalysed URL beside another window's completed run: the
+    // page passes displayedRunId: null, so the view must stay not-analysed
+    // rather than borrowing that run.
+    const view = buildChannelWorkspaceView({
+      runs: [run({ id: "run-other", windowStart: "2026-02-01", windowEnd: "2026-02-28" })],
+      findings: [],
+      evidence: [],
+      recommendations: [],
+      displayedRunId: null,
+    });
+
+    expect(view.run).toBeNull();
+    expect(view.chapters.find((chapter) => chapter.id === "funnel")?.state).toBe("not_run");
+    // The full list still feeds the indicators, which is why it is not narrowed.
+    expect(view.runs).toHaveLength(1);
+  });
+
+  it("shows the page's exact-window run rather than the newest completed one", () => {
+    const view = buildChannelWorkspaceView({
+      runs: [
+        run({ id: "run-new", windowStart: "2026-02-01", windowEnd: "2026-02-28" }),
+        run({ id: "run-window", windowStart: "2026-01-01", windowEnd: "2026-01-31" }),
+      ],
+      findings: [],
+      evidence: [],
+      recommendations: [],
+      displayedRunId: "run-window",
+    });
+
+    expect(view.run?.id).toBe("run-window");
+    expect(view.runs).toHaveLength(2);
+  });
+
   it("renders a needs_data outcome as a sentence and never as a number", () => {
     const view = buildChannelWorkspaceView({
       runs: [run()],
