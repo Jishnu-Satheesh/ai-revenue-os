@@ -105,4 +105,18 @@ describe("the window range picker", () => {
 
     expect(onApply).not.toHaveBeenCalled();
   });
+
+  // Not in the brief's seven -- added because none of them exercise the
+  // calendar grid itself. Every test above disables a *preset button*; this
+  // is the only one that opens the actual day grid and checks a day outside
+  // coverage is a genuinely disabled control, not merely a greyed-out one. A
+  // styled-but-clickable day would pass every other test in this file.
+  it("disables a calendar day that no report covers", async () => {
+    // March sits in the gap between the Jan-Feb and May-Aug segments, so
+    // every day the grid shows for this month is out of coverage.
+    const { user } = setup({ selected: { from: "2026-03-10", to: "2026-03-10" } });
+    await user.click(screen.getByRole("button", { name: /2026-03-10/ }));
+
+    expect(screen.getByRole("button", { name: /March 15/ })).toBeDisabled();
+  });
 });
