@@ -5447,6 +5447,40 @@ through the real routes, not only in tests.
   evidence admission provenance, domain work-scope/quote/retention schemas,
   `.env.example` names only), focused vitest + hosted pgTAP + per-RPC staging
   probes, path-limited commit. No paid calls, no enablement, gates stay OFF.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 6 bounded Brave retrieval (12-task plan)
+
+- **BASE:** `1209945` (peer commits on top of Task 5). Peer sessions active.
+- **Claimed files (Task 6 only):** modified
+  `src/modules/growth-intelligence/infrastructure/research/query-plan.ts`,
+  `ports.ts`, `qualified-provider.ts`, `safe-public-http.ts` and their tests;
+  created `research/brave-search-adapter.ts` and test,
+  `research/__fixtures__/brave-search-bounded.json`; report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-6-report.md`,
+  and this board. Full input coverage (every topic + competitor gets a slot).
+  No live Brave calls — synthetic fixture transport only, gates stay OFF. No new
+  provider SDK. Path-limited staging only; no stash/push/repo-wide-format;
+  prettier only Task 6 files, never this board.
+- **Status:** in-progress — maximum-input fixture, fixed-endpoint adapter,
+  reservation-before-call + durable attempts, bounded retry/timeout/restart
+  tests, focused vitest, path-limited commit.
+
+### 2026-09-08 · muse-spark · Market monitoring Task 6 done (same claim, BASE 1209945)
+
+- Full-coverage slots (`local_market` + every topic + every competitor, 26 max),
+  scope competitor leads (default `[]`), citation normalizer, new
+  `brave-search-adapter.ts` (fixed endpoint, reservation-before-call, durable
+  restart state, 429/5xx-only retries within 2, kill switch, 28-attempt ceiling,
+  truncation never implies support) + maximum-input fixture (20 topics, 5 leads,
+  no business website, duplicate + unsafe-only + empty anomalies).
+- Synthetic fixtures only, no live transport/SDK/retries; trigger Task 6/8 marker
+  and v1-parse untouched. Reserve re-assert rides the fenced RPC per-call (no
+  migration); release-with-spend deferred to Task 8 by design.
+- Research vitest 8 files / 86 passed; GI blast radius 39 files / 442 passed;
+  typecheck 0 errors. Report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-6-report.md`.
+  Path-limited commit, no stash/push/repo-wide-format.
+
 ### 2026-09-08 · muse-spark · Free-range window Task 15: ADR filed, month helpers retired
 
 - **Claimed files (Task 15 only):** created
