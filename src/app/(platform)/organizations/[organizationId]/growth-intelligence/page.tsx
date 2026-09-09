@@ -1,7 +1,10 @@
 import { GrowthIntelligenceWorkspace } from "@/components/growth-intelligence/growth-intelligence-workspace";
-import { MarketProfileReview } from "@/components/growth-intelligence/market-profile-review";
+import type { MonitoringBranchOption } from "@/components/growth-intelligence/market-monitoring-dialog";
 import { MarketWatch } from "@/components/growth-intelligence/market-watch";
-import { parseWorkspaceMonth } from "@/components/growth-intelligence/query-options";
+import {
+  parseWorkspaceMonth,
+  summarizeServiceArea,
+} from "@/components/growth-intelligence/query-options";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import type { MarketGeographicLayer } from "@/domain/growth-intelligence/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
@@ -131,6 +134,27 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
     />
   );
 
+  // Branches feed the Review market monitoring dialog's Location selector.
+  // A failed list degrades to no branches rather than failing the page.
+  let branches: MonitoringBranchOption[] = [];
+  try {
+    const { data: branchRows } = await context.supabase
+      .from("branches")
+      .select("id,name,service_area,is_active")
+      .eq("organization_id", context.organizationId)
+      .order("name");
+    branches = (branchRows ?? []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      serviceArea: summarizeServiceArea(row.service_area),
+      isActive: row.is_active,
+    }));
+  } catch {
+    logger.warn("growth_intelligence.branch_list_degraded", {
+      organizationId: context.organizationId,
+    });
+  }
+
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-8">
       <div>
@@ -140,17 +164,14 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
           starts research.
         </p>
       </div>
-      <MarketProfileReview
-        organizationId={context.organizationId}
-        profile={profile}
-        canManage={canManage}
-      />
       <GrowthIntelligenceWorkspace
         view={view}
         organizationId={context.organizationId}
         canManage={canManage}
         marketWatch={marketWatch}
         isCurrentMonth={activityMonth === null}
+        branches={branches}
+        selectedBranchId={branchId}
       />
     </div>
   );

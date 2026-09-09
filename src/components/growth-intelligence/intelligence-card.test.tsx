@@ -175,3 +175,47 @@ describe("IntelligenceCard", () => {
     expect(screen.queryByText(/[0-9]+\/100|[0-9]+%/)).toBeNull();
   });
 });
+
+describe("IntelligenceCard research provenance", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("labels market-research recommendations and links their exact outcomes", () => {
+    const statusPath =
+      "/api/organizations/10000000-0000-4000-8000-000000000001/market-profile/research/40000000-0000-4000-8000-000000000004";
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          researchProvenance: {
+            pipelineId: "40000000-0000-4000-8000-000000000004",
+            branchId: "20000000-0000-4000-8000-00000000000a",
+            stage: "ready",
+            statusPath,
+            supportingClaimIds: ["claim-1"],
+          },
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    expect(screen.getByText("From market research")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /view supporting outcomes/i }).getAttribute("href"),
+    ).toBe(statusPath);
+  });
+
+  it("leaves channel recommendations without provenance unmarked", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    expect(screen.queryByText("From market research")).toBeNull();
+    expect(screen.queryByRole("link", { name: /view supporting outcomes/i })).toBeNull();
+  });
+});

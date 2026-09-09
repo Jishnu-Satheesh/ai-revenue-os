@@ -61,3 +61,16 @@ describe("SourceEvidenceDrawer", () => {
     expect(screen.getByText("Dubai Tourism Mirror")).toBeTruthy();
   });
 });
+
+describe("SourceEvidenceDrawer erased sources", () => {
+  it("names an unavailable source without linking stored content", () => {
+    render(
+      <SourceEvidenceDrawer
+        sources={[{ ...sources[0]!, availability: "source-unavailable" as const }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /view sources \(1\)/i }));
+    expect(screen.getByText(/source evidence no longer available/i)).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+});

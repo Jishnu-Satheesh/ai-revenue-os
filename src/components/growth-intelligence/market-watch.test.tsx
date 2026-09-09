@@ -163,3 +163,20 @@ describe("MarketWatch", () => {
     expect(refresh).toHaveBeenCalled();
   });
 });
+
+describe("MarketWatch review entry", () => {
+  it("opens the Review market monitoring dialog from Market Watch", () => {
+    const opened: string[] = [];
+    const listener = (event: Event) => {
+      opened.push(event.type);
+    };
+    window.addEventListener("growth-intelligence:open-market-monitoring", listener);
+    try {
+      render(<MarketWatch organizationId="org-1" watch={watch()} canRetry={false} />);
+      fireEvent.click(screen.getByRole("button", { name: /review market monitoring/i }));
+      expect(opened).toEqual(["growth-intelligence:open-market-monitoring"]);
+    } finally {
+      window.removeEventListener("growth-intelligence:open-market-monitoring", listener);
+    }
+  });
+});

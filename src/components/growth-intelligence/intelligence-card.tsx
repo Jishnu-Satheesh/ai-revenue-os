@@ -179,6 +179,9 @@ export function IntelligenceCard({
           <CardTitle className="text-base">{card.title}</CardTitle>
           <div className="flex shrink-0 flex-wrap gap-1.5">
             <Badge variant="secondary">{sourceLabel}</Badge>
+            {"researchProvenance" in card && card.researchProvenance ? (
+              <Badge variant="outline">From market research</Badge>
+            ) : null}
             {"evidenceTier" in card ? (
               <Badge variant="outline">
                 {EVIDENCE_LABELS[card.evidenceTier as keyof typeof EVIDENCE_LABELS] ??
@@ -221,6 +224,14 @@ export function IntelligenceCard({
         )}
       </CardContent>
       <CardFooter className="flex flex-wrap items-center gap-2">
+        {"researchProvenance" in card && card.researchProvenance ? (
+          <Link
+            className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+            href={card.researchProvenance.statusPath}
+          >
+            View supporting outcomes
+          </Link>
+        ) : null}
         {"missingInput" in card ? (
           <DataGapRepair card={card} organizationId={organizationId} />
         ) : "channelId" in card && card.channelId ? (

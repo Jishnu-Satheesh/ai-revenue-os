@@ -2,7 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Ban, CheckCircle2, Clock3, EyeOff, RotateCcw, Scale } from "lucide-react";
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  Clock3,
+  EyeOff,
+  RotateCcw,
+  Scale,
+  Settings2,
+} from "lucide-react";
+
+import { requestMarketMonitoringDialog } from "@/components/growth-intelligence/query-options";
 
 import { SourceEvidenceDrawer } from "@/components/growth-intelligence/source-evidence-drawer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -126,7 +137,13 @@ export function MarketWatch({
   const delayedReason = watch.profileStatus.delayedReason;
   return (
     <section aria-label="Market Watch" className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Market Watch</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">Market Watch</h2>
+        <Button variant="outline" size="sm" onClick={requestMarketMonitoringDialog}>
+          <Settings2 aria-hidden="true" />
+          Review market monitoring
+        </Button>
+      </div>
       {delayedReason ? (
         <Alert>
           <Clock3 aria-hidden="true" />

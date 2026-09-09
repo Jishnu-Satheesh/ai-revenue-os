@@ -35,12 +35,22 @@ function sourceLabel(source: TimelineEvent["source"]): string {
  * Month navigation changes this history only; it never relabels evidence.
  */
 export function IntelligenceTimeline({
-  events,
+  events: incoming,
   timeZone,
 }: {
   events: readonly TimelineEvent[];
   timeZone: string;
 }) {
+  // Your actions names one start and one terminal event per transition, so
+  // the view deduplicates identical rows instead of showing the same moment
+  // twice when workspace and research reads overlap.
+  const seen = new Set<string>();
+  const events = incoming.filter((event) => {
+    const key = `${event.type}::${event.source.kind}::${event.source.id}::${event.occurredAt}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   return (
     <section aria-label="Activity timeline" className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Activity</h2>

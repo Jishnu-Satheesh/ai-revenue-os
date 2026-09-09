@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GrowthIntelligenceWorkspace } from "@/components/growth-intelligence/growth-intelligence-workspace";
 import type { GrowthIntelligenceView } from "@/modules/growth-intelligence/application/read-model";
@@ -79,5 +79,91 @@ describe("GrowthIntelligenceWorkspace", () => {
       />,
     );
     expect(screen.queryByRole("link", { name: "Back to current month" })).toBeNull();
+  });
+});
+
+describe("GrowthIntelligenceWorkspace market monitoring", () => {
+  afterEach(() => {
+    cleanup();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("opens the Review dialog from the Market monitoring header entry", async () => {
+    render(
+      <GrowthIntelligenceWorkspace
+        view={view()}
+        organizationId={ORGANIZATION}
+        canManage
+        isCurrentMonth
+        marketWatch={<section aria-label="Market Watch" />}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^market monitoring$/i }));
+    expect(
+      await screen.findByRole("dialog", { name: "Review market monitoring" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/no active branch/i)).toBeTruthy();
+  });
+
+  it("opens the same dialog from the Market Watch entry point", async () => {
+    render(
+      <GrowthIntelligenceWorkspace
+        view={view()}
+        organizationId={ORGANIZATION}
+        canManage
+        isCurrentMonth
+        marketWatch={<section aria-label="Market Watch" />}
+      />,
+    );
+    window.dispatchEvent(new CustomEvent("growth-intelligence:open-market-monitoring"));
+    expect(
+      await screen.findByRole("dialog", { name: "Review market monitoring" }),
+    ).toBeTruthy();
+  });
+
+  it("invites a branch choice in Insights & market while branchless", () => {
+    render(
+      <GrowthIntelligenceWorkspace
+        view={view()}
+        organizationId={ORGANIZATION}
+        canManage
+        isCurrentMonth
+        marketWatch={<section aria-label="Market Watch" />}
+      />,
+    );
+    expect(screen.getByText(/follows one branch at a time/i)).toBeTruthy();
+  });
+
+  it("observes the selected branch pipeline without branchless copy", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string) => new Response(JSON.stringify({ research: null }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <GrowthIntelligenceWorkspace
+          view={view()}
+          organizationId={ORGANIZATION}
+          canManage
+          isCurrentMonth
+          marketWatch={<section aria-label="Market Watch" />}
+          branches={[
+            {
+              id: "20000000-0000-4000-8000-00000000000a",
+              name: "Downtown",
+              serviceArea: null,
+              isActive: true,
+            },
+          ]}
+          selectedBranchId="20000000-0000-4000-8000-00000000000a"
+        />,
+      );
+      expect(screen.queryByText(/follows one branch at a time/i)).toBeNull();
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const url = String(fetchMock.mock.calls[0]?.[0] ?? "");
+      expect(url).toContain("branchId=20000000-0000-4000-8000-00000000000a");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
