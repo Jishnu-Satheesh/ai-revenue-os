@@ -106,7 +106,7 @@ function windowExcludes(
  * - Run lineage: only findings from completed runs whose run scope agrees
  *   with the finding scope (run branch matches the finding branch; a set
  *   run channel must match the finding channel).
- * - Currency: only current (`open`) governed findings; superseded rows stay
+ * - Status: only current (`open`) governed findings; superseded rows stay
  *   historical and never synthesize.
  * - Requested window: findings fully outside the window are excluded and
  *   counted; rows without periods are retained (their window is unknown).

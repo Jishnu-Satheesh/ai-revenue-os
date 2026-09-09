@@ -126,6 +126,8 @@ function dependencies(overrides: Record<string, unknown> = {}) {
     fail: vi.fn(async () => ({ runId, status: "failed" })),
     decide: vi.fn(),
     setPreference: vi.fn(),
+    // Peer item-feedback repository member: the service never calls it, but
+    // the mock stays structurally complete against the shared repository type.
     recordFeedback: vi.fn(),
   };
   const events = {
@@ -296,6 +298,7 @@ describe("createSynthesisService", () => {
         fail: vi.fn(),
         decide: vi.fn(),
         setPreference: vi.fn(),
+        // Peer item-feedback repository member (see note above).
         recordFeedback: vi.fn(),
       },
     });
@@ -333,6 +336,7 @@ describe("createSynthesisService", () => {
         fail: vi.fn(async () => ({ runId, status: "failed" })),
         decide: vi.fn(),
         setPreference: vi.fn(),
+        // Peer item-feedback repository member (see note above).
         recordFeedback: vi.fn(),
       },
     });
@@ -621,6 +625,92 @@ describe("branch-fenced business synthesis", () => {
               limitations: ["MIXED_MEASURE_EVIDENCE"],
             }),
           ],
+        },
+      ]),
+    });
+    const result = await createSynthesisService(deps).synthesize(branchInput);
+    expect(result.outcome).toBe("completed");
+  });
+
+  it("fails closed when cited findings mix units without a declared limitation", async () => {
+    const deps = dependencies({
+      findings: {
+        load: vi.fn(async () => ({
+          findings: [
+            branchFinding({ id: findingA, currency: null, valueKind: "count" as const }),
+            branchFinding({
+              id: findingB,
+              digest: "e".repeat(64),
+              currency: null,
+              valueKind: "ratio" as const,
+            }),
+          ],
+          fresh: true,
+          coverage: { scoped: 2, broaderContext: 0, excludedOutOfWindow: 0 },
+        })),
+      },
+      claims: { load: vi.fn(async () => [branchClaim()]) },
+      provider: providerReturning([
+        { candidates: [candidate({ businessFindingIds: [findingA, findingB] })] },
+        { candidates: [candidate({ businessFindingIds: [findingA, findingB] })] },
+      ]),
+    });
+    const result = await createSynthesisService(deps).synthesize(branchInput);
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "failed") expect(result.code).toBe("SYNTHESIS_CANDIDATE_INVALID");
+    expect(deps.synthesis.complete).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when cited findings mix same-currency kinds without a declared limitation", async () => {
+    const deps = dependencies({
+      findings: {
+        load: vi.fn(async () => ({
+          findings: [
+            branchFinding({ id: findingA, currency: "AED", valueKind: "money" as const }),
+            branchFinding({
+              id: findingB,
+              digest: "e".repeat(64),
+              currency: "AED",
+              valueKind: "count" as const,
+            }),
+          ],
+          fresh: true,
+          coverage: { scoped: 2, broaderContext: 0, excludedOutOfWindow: 0 },
+        })),
+      },
+      claims: { load: vi.fn(async () => [branchClaim()]) },
+      provider: providerReturning([
+        { candidates: [candidate({ businessFindingIds: [findingA, findingB] })] },
+        { candidates: [candidate({ businessFindingIds: [findingA, findingB] })] },
+      ]),
+    });
+    const result = await createSynthesisService(deps).synthesize(branchInput);
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "failed") expect(result.code).toBe("SYNTHESIS_CANDIDATE_INVALID");
+    expect(deps.synthesis.complete).not.toHaveBeenCalled();
+  });
+
+  it("passes identical units without a mixed-measure limitation", async () => {
+    const deps = dependencies({
+      findings: {
+        load: vi.fn(async () => ({
+          findings: [
+            branchFinding({ id: findingA, currency: null, valueKind: "count" as const }),
+            branchFinding({
+              id: findingB,
+              digest: "e".repeat(64),
+              currency: null,
+              valueKind: "count" as const,
+            }),
+          ],
+          fresh: true,
+          coverage: { scoped: 2, broaderContext: 0, excludedOutOfWindow: 0 },
+        })),
+      },
+      claims: { load: vi.fn(async () => [branchClaim()]) },
+      provider: providerReturning([
+        {
+          candidates: [candidate({ businessFindingIds: [findingA, findingB] })],
         },
       ]),
     });

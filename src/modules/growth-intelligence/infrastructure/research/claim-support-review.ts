@@ -282,6 +282,10 @@ export async function reviewResearchClaimSupport(input: {
     }
   }
 
+  // Batching follows the production model budget default
+  // (RESEARCH_MODEL_MAX_SOURCES_PER_BATCH = 10 in
+  // src/domain/growth-intelligence/research-budget.ts:225): groupings only
+  // change if that budget value changes, which the budget schema test pins.
   const batchSize = budget.maxSourcesPerBatch;
   for (let offset = 0; offset < pending.length; offset += batchSize) {
     if (input.signal?.aborted) {

@@ -289,8 +289,10 @@ function findingWindowsOverlap(
  * demands an explicit declared limitation rather than silent use:
  * - broader_context rows are organization-wide context, never branch
  *   measurements (BROADER_MARKET_INFERENCE, shared with the claims rule);
- * - mixed currencies or money/non-money units cannot be totalled
- *   (MIXED_MEASURE_EVIDENCE);
+ * - mixed currencies, units, or money/non-money measures cannot be
+ *   totalled (MIXED_MEASURE_EVIDENCE); a missing unit counts as unknown, so
+ *   a known unit cited beside an unknown one still demands the limitation
+ *   rather than a guess about compatibility;
  * - a partial-quality finding is stale on its own (STALE_BUSINESS_EVIDENCE);
  * - findings from different analysis runs with overlapping periods would
  *   double-count the overlap (OVERLAPPING_EVIDENCE_WINDOWS).
@@ -312,8 +314,12 @@ function checkCitedFindings(
       .filter((currency): currency is string => currency !== null),
   );
   const moneyness = new Set(cited.map(findingMoneyness));
+  // Unit identity is compared exactly: count-vs-ratio and same-currency
+  // kind mismatches (both collapse to one moneyness bucket) still demand
+  // the limitation, since values in different units cannot be totalled.
+  const kinds = new Set(cited.map((finding) => finding.valueKind ?? "unknown"));
   if (
-    (currencies.size > 1 || moneyness.size > 1) &&
+    (currencies.size > 1 || moneyness.size > 1 || kinds.size > 1) &&
     !candidate.limitations.includes("MIXED_MEASURE_EVIDENCE")
   ) {
     issues.push("MIXED_MEASURE_UNDECLARED");

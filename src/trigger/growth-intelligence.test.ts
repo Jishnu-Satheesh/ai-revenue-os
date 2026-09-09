@@ -142,6 +142,25 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain("selectBranchFindings");
   });
 
+  it("orders the synthesis loader reads so the row cap keeps a deterministic window", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source.match(/\.order\("id", \{ ascending: true \}\)/g)).toHaveLength(2);
+  });
+
+  it("validates the synthesis branch before interpolating it into the findings filter", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("UUID_PATTERN");
+    expect(source).toContain("branch_id.eq.${");
+  });
+
   it("threads exact branch/profile/research lineage into the synthesis claims loader", async () => {
     const source = await readFile(
       resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),

@@ -457,6 +457,13 @@ function createResearchDependencies(signal: AbortSignal) {
 }
 
 /**
+ * Synthesis branch filter guard: branch ids arrive from the request row, but
+ * the findings read interpolates one into an `or` filter string, so a
+ * malformed value must fail closed before any query is built.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Synthesis current-state readers. Every table and column read here is
  * verified in `src/lib/supabase/database.types.ts` (organization_market_
  * profiles, organization_market_profile_versions, growth_intelligence_
@@ -555,7 +562,12 @@ function createSynthesisDependencies(signal: AbortSignal) {
       // Exact branch scope at the database: the request branch plus
       // organization-wide rows (the selector labels those broader context).
       // Other named branches never load — a missing branch yields a gap,
-      // never cross-branch fallback.
+      // never cross-branch fallback. The branch id is UUID-shaped by
+      // construction (request row column), and re-checked here so a
+      // malformed value fails closed instead of breaking the filter string.
+      if (input.branchId !== null && !UUID_PATTERN.test(input.branchId)) {
+        throw new Error("Current business findings could not be loaded.");
+      }
       let query = supabase
         .from("channel_findings")
         .select(
@@ -564,6 +576,9 @@ function createSynthesisDependencies(signal: AbortSignal) {
         .eq("organization_id", input.organizationId)
         .eq("status", "open")
         .eq("kind", "finding")
+        // Deterministic window: id-ordered at the database so the 200-row
+        // cap keeps the same rows the in-memory id-sort would select first.
+        .order("id", { ascending: true })
         .limit(SYNTHESIS_FINDING_LOADER_LIMIT);
       query =
         input.branchId === null
@@ -620,6 +635,8 @@ function createSynthesisDependencies(signal: AbortSignal) {
         )
         .eq("organization_id", input.organizationId)
         .eq("market_profile_version_id", input.profileVersionId)
+        // Deterministic window, same reason as the findings read above.
+        .order("id", { ascending: true })
         .limit(SYNTHESIS_FINDING_LOADER_LIMIT);
       if (error) throw new Error("Current market claims could not be loaded.");
       const rows = data ?? [];
