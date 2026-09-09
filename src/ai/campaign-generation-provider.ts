@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { PlanPromptPurpose } from "@/ai/model-router";
 
 /**
@@ -48,6 +50,46 @@ export type CampaignImageReference = {
   mimeType: "image/png" | "image/jpeg" | "image/webp";
   bytes: Uint8Array;
 };
+
+const imageReferencePartsSchema = z.strictObject({
+  ordinal: z.number().int().nonnegative(),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+  bytes: z.instanceof(Uint8Array),
+});
+
+/** Corrected-path grounding has no legacy avoid role. */
+export const groundingReferenceSchema = imageReferencePartsSchema.extend({
+  role: z.enum(["subject", "brand_mark", "setting", "style_exemplar", "palette", "typography"]),
+});
+export const approvedCreativeReferenceSchema = imageReferencePartsSchema.extend({
+  role: z.literal("approved_creative"),
+});
+export const rejectedCreativeReferenceSchema = imageReferencePartsSchema.extend({
+  role: z.literal("rejected_creative"),
+  reasonCodes: z.array(z.string().min(1)).min(1).max(15),
+});
+
+/** Blueprint may inspect both independently pinned Creative History evidence sets. */
+export const blueprintEvidenceReferenceSchema = z.discriminatedUnion("role", [
+  groundingReferenceSchema,
+  approvedCreativeReferenceSchema,
+  rejectedCreativeReferenceSchema,
+]);
+
+/**
+ * The corrected final-image contract deliberately has no `avoid` or
+ * `rejected_creative` variant. Task 7 moves the runtime adapter to this port.
+ */
+export const finalImageReferenceSchema = z.discriminatedUnion("role", [
+  groundingReferenceSchema,
+  approvedCreativeReferenceSchema,
+]);
+
+export type GroundingReference = z.infer<typeof groundingReferenceSchema>;
+export type ApprovedCreativeReference = z.infer<typeof approvedCreativeReferenceSchema>;
+export type RejectedCreativeReference = z.infer<typeof rejectedCreativeReferenceSchema>;
+export type BlueprintEvidenceReference = z.infer<typeof blueprintEvidenceReferenceSchema>;
+export type FinalImageReference = z.infer<typeof finalImageReferenceSchema>;
 
 export type CampaignImageGenerationInput = {
   context: CampaignGenerationCallContext;
