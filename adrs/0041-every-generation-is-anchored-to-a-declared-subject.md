@@ -2,11 +2,12 @@
 
 ## Status
 
-Accepted. Implements `specs/019-organization-asset-library.md`. Extends ADR 0020's bounded creative
-family with a rule about what the creative may depict, and is the prerequisite for the Campaign
-Creative Studio.
+Accepted in part. Implements the declared-subject portion of
+`specs/019-organization-asset-library.md`. Extends ADR 0020's bounded creative family with a rule
+about what the creative may depict, and is a prerequisite for the Campaign Creative Studio.
 
-Supersedes nothing. It closes a gap nobody had written a rule about.
+ADR 0049 supersedes this ADR's former rejected-image routing only. It retains this ADR's
+declared-subject, deterministic-resolution, truth-class and no-generated-text decisions.
 
 ## Context
 
@@ -66,39 +67,31 @@ by a human, and reused by every later campaign about that dish. An unconfirmed d
 a generation, because an unreviewed description of a dish the restaurant may not sell is the same
 failure with an extra step.
 
-### A rejection travels as an image *and* its reason, in a bounded negative slot
+### Rejected creative is Blueprint-only evidence, with a structural final-provider fence
 
-An earlier draft of this ADR ruled that rejected images must never reach a provider, on the
-reasoning that showing a model a bad poster and asking it to avoid that poster reproduces the
-poster. That reasoning was drawn from naive diffusion prompting and was overruled on 2026-08-24 by
-the only evidence that counts here: the user has shipped a design studio to real clients that sends
-both approved and rejected work as references, and reports materially better output for it.
+This section's former decision permitted rejected image bytes in a final-generation `avoid` slot.
+That route is superseded by ADR 0049. The correction retains the useful finding: a human reason is
+more intelligible when the Blueprint can inspect the rejected design that caused it. It changes
+where that inspection ends.
 
-The revised rule keeps the useful half of the original caution and drops the part that was
-theoretical:
+- Approved Creative History bytes may reach Blueprint and final image generation.
+- Rejected Creative History bytes may reach Blueprint only, with their human reason codes.
+- Blueprint emits validated, cited negative rules. The final image prompt receives those rules and
+  human reasons as text, never rejected design bytes.
+- The final provider has no rejected-design input variant. Type validation and adapter tests make
+  the prohibited route impossible rather than merely discouraged.
 
-- A rejected asset may be supplied to the model in a dedicated `avoid` slot and **never** in a
-  `subject`, `style_exemplar`, `setting` or `brand_mark` slot. It is never a thing to draw from; it
-  is a thing to draw away from, and the slot is what says so.
-- Negatives are hard-capped, well below the positive budget. Reproduction risk grows with the share
-  of negative material in the context, and a handful of clear negatives carries nearly all of the
-  signal a large pile would.
-- **The reason codes travel with the image.** This is the point the original draft was right about.
-  "This was rejected" teaches far less than "this was rejected because the plating is not ours",
-  and the pairing is stronger than either alone.
-- Because the risk is real but bounded rather than absent, it is **tested rather than asserted**:
-  the acceptance criteria require checking that output does not resemble the negative it was shown.
-
-Mandatory reason codes on rejection therefore remain load-bearing. They are no longer the *only*
-channel through which human judgement reaches the next generation, but they are still the channel
-that makes the other one intelligible.
+Mandatory human reason codes remain load-bearing. They explain every rejection to the Blueprint and
+support each rule that travels forward, but a model cannot choose a verdict or turn an uncited reason
+into final image instruction.
 
 ### A reasoning model writes the art direction before the image model draws
 
-A generation runs in two stages. A reasoning model receives the system prompt, the operator's
-direction, the brand and subject context, and the resolved references — positive and negative — and
-produces a **structured blueprint**: composition, lighting, camera treatment, palette, focal point
-and an explicit avoid list. The image model then draws from the blueprint alongside the same inputs.
+A generation runs in two stages. A reasoning model receives the system prompt, operator direction,
+brand and subject context, Approved Creative History evidence and Rejected Creative History
+Blueprint evidence. It produces a **structured blueprint**: composition, lighting, camera treatment,
+palette, focal point and cited negative rules. The image model then draws from the blueprint with
+declared-subject/brand grounding and Approved Creative History evidence only.
 
 This is adopted on the same basis as the rule above: it is what the user's production studio does,
 and it outperformed every flatter architecture they tried. The platform's own requirements are met
@@ -127,9 +120,10 @@ A generator asserting that its own output is authentic was never a check.
 
 ### Selection is deterministic and no model participates
 
-Which of a client's photographs represents their business, in what order, under what caps, with
-which negative rules, and whether to refuse — all deterministic code, versioned like a detector. A
-changed method is a new resolver version, never a silent reinterpretation of sets already pinned.
+Which of a client's photographs represents their business, which Creative History designs are
+eligible and in what order, under what caps, and whether to refuse — all deterministic code,
+versioned like a detector. Blueprint may interpret selected rejection evidence into a validated
+rule, but cannot select identifiers or silently reinterpret sets already pinned.
 
 ### No script is rendered inside a generated image
 
@@ -151,8 +145,9 @@ Generated creative depicts the client's actual business, and the platform says p
 three ways each image was made. The reference plumbing that already runs the length of the pipeline
 gets its last connection fitted rather than being rebuilt.
 
-Human review compounds. A rejection today constrains every generation tomorrow, in words, which is
-auditable in a way that a fine-tuned preference would not be.
+Human review compounds. A rejection today informs future Blueprints through attributable human
+reasons and validated rules, without exposing its image bytes to final generation. That is auditable
+in a way a fine-tuned preference would not be.
 
 The cost is a new obligation on the client: somebody must say what the restaurant sells. Four dishes
 are named in Business Memory and a menu has dozens. The platform mitigates this by drafting

@@ -2,17 +2,25 @@
 
 ## Status
 
-**Approved 2026-08-24.** Tier 3. Implementation is under way against
-`docs/superpowers/plans/2026-08-24-organization-asset-library-implementation.md`, which was approved
-the same day. This document remains the source of truth for the acceptance criteria in §14.
+**Approved 2026-08-24; corrected in part 2026-09-09.** Tier 3. The declared-subject,
+truth-class and grounding rules remain binding. The Asset Library product model, its
+Creative History schema, and the rejected-evidence route are corrected by ADR 0049 and
+`docs/superpowers/specs/2026-08-26-creative-history-asset-library-correction-design.md`.
+The approved implementation plan is
+`docs/superpowers/plans/2026-09-09-creative-history-asset-library-correction.md`.
+
+Where this document formerly treats a finished design as a generic generation ingredient,
+the correction is binding: Creative History, Products & Subjects, and Brand Kit are separate
+records on one Asset Library page. In particular, no rejected creative bytes may enter a final
+image-provider request. The corrected acceptance criteria in §14 govern that boundary.
 
 Revised 2026-08-24 after the three open questions were answered: the image model stays flash-tier
 for Release 1, a missing photograph is drawn rather than refused, and tags are free-text Unicode
 with pack suggestions. §18 records those decisions and what they replaced.
 
-Prerequisite for the Campaign Creative Studio (poster composition, output verification, masked
-editing), which is specified separately and cannot be built first: a studio with nothing to
-condition on produces the same output we have today.
+Integrates with the Campaign Creative Studio (poster composition, output verification and masked
+editing), specified separately. A completed Studio poster can become an **unreviewed** Creative
+History item; raw plates do not become historical designs merely because they exist.
 
 Depends on ADR 0015 (campaign bundle as system of record), ADR 0017 (campaign runtime and
 approval), ADR 0020 (bounded creative family approval), ADR 0022 (account as tenant root),
@@ -21,7 +29,8 @@ ADR 0023 (permission as data), and ADR 0006 (industry packs). Introduces ADR 004
 ## 1. Business outcome
 
 Make generated campaign creative depict the client's actual business — using their photographs
-where they have them, and drawing the named dish faithfully where they do not.
+where they have them, and drawing the named dish faithfully where they do not — while preserving
+an organization’s reviewed finished designs as a separate visual history.
 
 Release 1 succeeds when every generation is anchored to a **declared subject**: either a photograph
 the client uploaded of that dish, or a written description of a dish they actually sell. What is
@@ -29,8 +38,8 @@ never permitted again is the third case that produced everything on file today �
 the subject for itself.
 
 The measurable outcome is the proportion of generated assets an operator approves rather than
-discards. Today that figure is zero across every asset ever generated, which is the reason this
-document exists.
+discards. Creative History makes that human signal inspectable and reusable without allowing a
+rejected design to reach the final image provider.
 
 ## 2. Problem statement
 
@@ -91,10 +100,10 @@ there was no offer to place on a poster in the first place.
   biryani shows my biryani.
 - As a restaurant owner, I upload photographs of my dining room, my family section and my terrace,
   so a campaign about a weekend family offer looks like my restaurant and not a stock library.
-- As an agency operator, I reject a generated asset and say why in one click, and the next
-  generation for that client already knows.
-- As an agency operator, I keep a small set of posters I admire as style references, and the
-  platform takes their layout and mood without copying their food or their words.
+- As an agency operator, I reject a finished design and say why in one click, so a Blueprint can
+  learn the reason without that rejected design reaching final image generation.
+- As an agency operator, I keep finished posters, flyers and social designs in real folders, then
+  reuse only reviewed Approved work as historical visual evidence without copying its food or words.
 - As an agency operator, I brief a campaign and see exactly which of the client's photographs will
   be used, and I can swap any of them before anything is generated.
 - As a restaurant owner, I do not have a good photograph of every dish, so when I describe my meen
@@ -112,19 +121,19 @@ there was no offer to place on a poster in the first place.
 
 ## 4. Governing principles
 
-- A reference is selected deterministically. No model chooses which of a client's photographs
-  represents their business.
-- **A rejection travels as an image and its reason, in a bounded `avoid` slot.** Revised 2026-08-24;
-  an earlier draft banned rejected bytes outright on theoretical grounds and was overruled by
-  production evidence from the user's own design studio. A rejected asset is never something to draw
-  from, so it never occupies a positive slot; negatives are hard-capped; and the reason codes travel
-  alongside the image, because "rejected because the plating is not ours" teaches far more than
-  either half alone. See ADR 0041.
+- A reference is selected deterministically. No model chooses which of a client's photographs or
+  finished designs represents their business.
+- **Creative History separates historical visual evidence from grounding.** Approved finished-design
+  bytes may reach Blueprint and final image generation; rejected finished-design bytes may reach
+  Blueprint only. The final image prompt receives validated Blueprint rules with the human reasons,
+  never rejected bytes. ADR 0049 makes that final-provider fence structural rather than a prompt
+  convention.
 - **A reasoning model writes the art direction before the image model draws.** The blueprint is a
   validated structured object with no field for the subject and no field for text, so a stage that
   could drift cannot express the drift.
-- A rejection without a reason teaches nothing. A reason code is mandatory, and is the entire
-  learning substrate of this feature.
+- A rejection without a reason teaches nothing. A reason code is mandatory. It travels with the
+  rejected design to Blueprint and supports validated rules for final generation; it is not the
+  only historical-learning record.
 - More references is worse, not better. Slot caps are enforced in domain code.
 - **A photograph outranks a depiction, and a depiction outranks an invention.** Where the client has
   a photograph of the dish, it is used. Where they do not, the model draws that dish from a written
@@ -144,17 +153,20 @@ there was no offer to place on a poster in the first place.
 
 ### 5.1 In scope
 
-- Conditioning roles, tags and archival on `organization_brand_assets`.
-- An append-only human verdict record over both uploaded references and generated campaign assets,
-  carrying mandatory reason codes on rejection.
+- A single Asset Library page with Creative History, Products & Subjects, and Brand Kit tabs.
+- Creative History folders (one optional nested level), immutable design versions, design-level
+  reviews, confirmed metadata, rights and qualified performance evidence.
+- An append-only human verdict record over Creative History versions, carrying mandatory reason
+  codes on rejection. Products & Subjects and Brand Kit retain their own records and permissions.
 - A pack-extensible reason-code registry.
-- A deterministic, versioned reference resolver returning one of three outcomes — draw from a
-  photograph, draw from a description, or refuse for want of a declared subject — together with a
-  bounded set of negative references and the derived negative rules.
+- A deterministic, versioned declared-subject resolver returning one of three outcomes — draw from
+  a photograph, draw from a description, or refuse for want of a declared subject — plus a separate,
+  deterministic Creative History selector that pins Approved final evidence and Rejected Blueprint
+  evidence before spending.
 - Two reference modes, `inspiration` and `exact_match`, the latter gated on the organization owning
   the reference.
-- Ad-hoc references attached per generation, stored into the library automatically and usable in the
-  same request.
+- Permission-checked manual Creative History overrides, pinned and audited; a new historical upload
+  cannot affect a run until its metadata and review make it eligible.
 - The two-stage generation: a reasoning model produces a validated structured blueprint, the image
   model draws from it.
 - Subject profiles: the dishes an organization sells, model-drafted and human-confirmed, with names
@@ -164,9 +176,11 @@ there was no offer to place on a poster in the first place.
   run's realized reference set, negative rules, resolution outcome and blueprint onto that
   generation run, and populating `derivedFromBrandAssetVersionIds` from the run receipt.
 - Deriving `truth_class` from the resolution outcome, and removing it from what the model declares.
-- Widening the provider seam so reference bytes reach the image model with per-role instructions.
-- An asset workspace: browse, upload, tag, review, archive; and a subject workspace.
-- A reference picker in the campaign brief, defaulting to what the resolver would choose.
+- Widening the Blueprint seam for approved and rejected historical evidence, while narrowing the
+  final provider seam so it cannot accept a rejected-design variant.
+- An Asset Library workspace: browse, upload, folder, tag, review, archive and inspect receipts;
+  plus a separate Products & Subjects workspace.
+- A Creative History evidence picker in the campaign brief, defaulting to the deterministic selector.
 - Replacing the misleading `brand_constraints` refusal code, which currently sends an operator to
   look at their brand constraints when the real gap is elsewhere, with `no_declared_subject`.
 - Re-scoping `syntheticAssetsAllowed` to mean a synthetic *setting* only.
@@ -194,39 +208,36 @@ Deferred elsewhere or not planned:
   subject kind is registered with zero rows against it; `specs/009-restaurant-menu-intelligence.md`
   is unimplemented. Subject profiles (§8.4) are the interim stand-in and are deliberately not a
   menu: no price, no availability, no modifiers, no economics.
-- Model-proposed tags. Release 1 tags are human. The seam is designed in §8.1 and the work is not
-  done.
-- Arbitrary operator-created folders and collections.
+- Model-proposed tags as authoritative metadata. A model may propose metadata, but a human confirms
+  it before selection.
 - Video, audio and document assets.
 - Cross-organization or agency-template libraries.
 - Changing `CAMPAIGN_IMAGE_MODEL`. Release 1 is built and measured on `gemini-3.1-flash-image`;
   §18 records the trigger that would move it to a pro-tier model.
 
-### 5.3 How this maps to the requested folder model
+### 5.3 One page, three purpose-based tabs
 
-The request was for folders. People navigate by folder, so the workspace renders folders. The data
-underneath is roles, verdicts and tags, because a folder holds an asset in exactly one place and
-retrieval needs it in several.
+The requested library is a visual memory, not a renamed list of references. It has exactly three
+tabs backed by separate records. A real Creative History folder can contain mixed Approved, Rejected
+and Unreviewed designs; verdict remains design-level so history is not distorted into verdict folders.
 
-| Requested | Delivered as |
-|---|---|
-| **Campaign** folder, sub-folder per campaign | A read-only view over `campaign_assets`, grouped by campaign then bundle version. This is already the storage path layout. |
-| **Reference** folder | `organization_brand_assets`, grouped in the workspace by conditioning role. |
-| **approved** / **rejected** sub-folders | Verdict filters over `creative_asset_reviews`. Rendered as folders; stored as a verdict with reasons, because the reasons are what the model learns from. |
+| Tab | Contains | Does not become |
+|---|---|---|
+| **Creative History** | Historical uploads and completed Studio posters: finished posters, flyers, social designs, stories and banners | A source of subject truth or a substitute Brand Kit |
+| **Products & Subjects** | Product/dish photos, confirmed descriptions and factual visual constraints | A historical-style verdict collection |
+| **Brand Kit** | Logos, marks, palette, typography and reusable identity material | A set of reviewed finished designs |
 
 ## 6. UX flow
 
-1. **Open the library.** Two sections: *References* — what the client gave us — and *Campaign
-   output* — what the platform made. Counts, and an empty state that names the one thing to do
-   first: add photographs of the dishes you sell.
-2. **Add references.** Multi-file upload. Each file needs a label, a subject role, at least one
-   conditioning role, and tags. Bulk tagging for a batch of dish photographs. The existing
-   reserve → upload → read-back flow runs per file; a file that fails intake is listed with its
-   rejection reason and does not block the rest.
-3. **Review anything.** Approve, or reject with at least one reason and optional free text. The
+1. **Open the library.** Three tabs: *Creative History*, *Products & Subjects*, and *Brand Kit*.
+   Creative History shows a folder tree, filterable finished-design grid and evidence panel.
+2. **Add finished creative.** Multi-file historical upload goes to a private Creative History path;
+   folder defaults supply metadata, and an item may override it. The reserve → upload → read-back
+   flow runs per file; an unreadable file is refused without blocking the rest.
+3. **Review a finished design.** Approve, or reject with at least one reason and optional free text. The
    reject form cannot be submitted without a reason. Reason chips carry plain-language labels, not
    codes.
-4. **Describe what you sell.** A subjects list beside the library. The operator names a dish; the
+4. **Describe what you sell.** The Products & Subjects tab carries the subjects list. The operator names a dish; the
    model drafts a description from Business Memory and their own words; the operator edits and
    confirms it. Names in other scripts are entered here. A confirmed subject is reusable forever
    and is what makes a photograph optional rather than mandatory.
@@ -235,8 +246,8 @@ retrieval needs it in several.
    has told us what this campaign is about*. In the first two the operator may swap or clear any
    slot. In the third the submit action is disabled with one recovery — pick or write a subject.
 6. **Read a generated asset's lineage.** Every generated asset shows its truth class in plain
-   words, the references it was drawn from or the description it was drawn from, the negative rules
-   in force, and the resolver version — reachable from the campaign studio and from the library.
+   words, the declared subject, pinned Approved final evidence, Rejected Blueprint evidence, the
+   validated negative rules and their human reasons, and selector/resolver versions.
 
 Every blocked, missing or refused state renders its stable code, a plain-language explanation and
 the action that clears it. Nothing blocked is styled as ready.
@@ -259,7 +270,6 @@ it is eligible for; the resolver assigns exactly one per generation and records 
 | `style_exemplar` | Take layout, spacing, colour relationships and mood. Take nothing literal — no object, no text, no mark. |
 | `palette` | Constrain colour only. |
 | `typography` | Constrain type feel only, for the scripts this asset declares. |
-| `avoid` | This was rejected, for the reasons attached. Do not produce anything resembling it. Never a source of anything. |
 
 **Two reference modes.** A `subject`, `setting` or `style_exemplar` slot carries a mode:
 
@@ -272,7 +282,8 @@ it is eligible for; the resolver assigns exactly one per generation and records 
 
 `exact_match` constrains the **plate only**. Where a reference carries text, that text is excluded
 from what is matched — reproducing it would put the wrong words, in the wrong script, on the client's
-poster, which is the failure `specs/020-campaign-creative-studio.md` exists to end.
+poster, which is the failure `specs/020-campaign-creative-studio.md` exists to end. Finished designs
+are instead Creative History evidence under ADR 0049; they are never recast as a conditioning role.
 
 A `brand_mark` is supplied to the model for placement context only. Until the Creative Studio
 composites it deterministically, a generated logo is treated as unusable and the verification of
@@ -289,20 +300,22 @@ that fact belongs to that spec.
   `brand_mark_distorted`, `people_shown`, `prohibited_content`, `low_quality`, `off_palette`,
   `not_localised`, `other`.
 - Restaurant Pack codes: `wrong_cuisine`, `alcohol_visible`, `unappetising`, `not_our_plating`.
-- A rejected asset is excluded from every positive reference slot unless a later review approves it.
-  While rejected, it may enter only the separate `avoid` set, capped at two assets, with the reason
-  codes for that asset attached.
-- A rejected asset's bytes may be sent to the image provider only as a bounded `avoid` reference.
-  They may never be presented as inspiration, an exact match, or any other positive reference.
+- A rejected Creative History version is excluded from every positive role unless a later review
+  approves it. It may be selected only as Blueprint evidence, capped at five designs, with the
+  human reason codes for that version attached.
+- Rejected Creative History bytes are never a final image-provider input. Blueprint may turn their
+  evidence into validated, cited negative rules; only those rules and their human reasons may reach
+  the final image prompt. See ADR 0049.
 
 ### 7.3 Resolution
 
 Pure, versioned domain function. `RESOLVER_VERSION` starts at 1. A changed method is a new version,
 never a silent reinterpretation of sets already pinned.
 
-Candidates are usable versions of unarchived assets. Approved and unreviewed candidates may fill
-positive slots. Rejected candidates may fill only the separate `avoid` set and never count against
-the positive budget.
+Declared-subject candidates are usable versions of unarchived Products & Subjects and Brand Kit
+records. Creative History is selected separately: only reviewed, confirmed-metadata designs are
+eligible; Approved designs form the positive historical set and Rejected designs form the Blueprint
+negative-evidence set. Unreviewed designs reach neither.
 
 The request is a pure function of stated intent and stored data:
 
@@ -327,32 +340,27 @@ Slot caps, enforced in domain code:
 | `style_exemplar` | 0 | 2 |
 | `palette` | 0 | 1 |
 | `typography` | 0 | 1 per requested script, maximum 3 |
-| `avoid` | 0 | **2** |
 
 Positive references per generation may not exceed 7. The schema's existing bound of 40 is a safety
 limit; 7 is the quality limit, and the lower of the two governs.
 
-The `avoid` cap is deliberately the tightest in the table. Reproduction risk grows with the share of
-negative material in the context, and two clear negatives carry nearly all the signal that ten
-would. Negatives are counted separately from the positive budget so that adding a rejection can
-never silently evict a photograph of the dish.
+Creative History is outside those grounding-role caps and is pinned by its own selector: no more
+than three Approved designs reach final image generation, and no more than five Rejected designs
+reach Blueprint. Relevance dominates performance; the selector records a weak match as an exclusion
+rather than filling either cap.
 
-**Where references come from when the operator supplies none.** The studio may attach a reference
-per generation, and that is used when present. When it is absent — the ordinary case for a campaign
-generated from an opportunity — the resolver draws from the library: approved and unreviewed assets
-into the positive slots, and the most recently rejected assets into the `avoid` slots. Nothing has
-to be curated for a generation to be well grounded.
-
-An ad-hoc reference attached in the studio is stored in the library automatically as an unreviewed
-asset. It is usable in the same request that uploaded it, so nothing waits on curation, and it is
-not lost afterwards.
+**Where evidence comes from when the operator supplies none.** The declared-subject resolver reads
+Products & Subjects and Brand Kit for grounding. The Creative History selector separately reads
+reviewed designs using scenario relevance, with stable tie-breaking and explicit exclusions. A new
+historical upload remains ineligible until its metadata is human-confirmed and it receives a human
+review; this prevents an unreviewed upload from silently influencing the campaign that received it.
 
 Ordering is total and deterministic, so two runs over identical data produce an identical set:
 
-1. current verdict `approved` before no verdict;
-2. descending count of tag overlap with the request;
-3. descending version number;
-4. ascending asset id.
+1. declared-subject suitability and confirmed Creative History scenario relevance;
+2. Approved or Rejected verdict as appropriate to the independent evidence set;
+3. comparable verified performance only after relevance;
+4. descending immutable version number, then ascending stable identifier.
 
 Nothing is ever resolved by arrival order or by chance.
 
@@ -449,23 +457,16 @@ good campaign asset; it is only a problem if someone believes it is a photograph
 
 ### 7.6 Negative rules
 
-Derived deterministically at resolution time — no stored rollup, no model:
+Rejected Creative History designs are selected independently for Blueprint analysis. The Blueprint
+receives each selected design with its human reason codes and can produce a maximum of twelve
+structured negative rules. A rule is valid only when it names its supporting rejected version and
+the registered human reason that made it relevant; uncited, malformed, conditional-without-condition
+or over-cap rules are refused at schema validation.
 
-- collect the distinct reason codes on this organization's currently-rejected assets;
-- map each through the registry's description;
-- deduplicate, sort by code, cap at 12;
-- record the exact resulting list on the generation run that used it.
-
-So the rules are always reproducible from the reviews that produced them, and a reviewer's rejection
-is visibly in force on the next generation.
-
-**The rules and the `avoid` images are one mechanism, not two.** Each negative reference is supplied
-with its own reason codes attached, so the model sees *this picture* alongside *why it was refused*.
-The twelve-rule text block remains, because an organization accumulates far more rejections than the
-two images the `avoid` slots can carry, and the surplus judgement has to reach the model somehow.
-
-The learning loop therefore compounds in both: two images the client rejected most recently, and
-every distinct reason they have ever given.
+The final image prompt receives the validated rules and their human reasons as text. It does not
+receive rejected design bytes, storage identities or a role that can load either. A rule can therefore
+carry the useful human judgment — for example, "avoid restaurant plating that is unlike ours" —
+without making the rejected poster an ingredient of the final image request.
 
 ### 7.7 The art-direction blueprint
 
@@ -474,11 +475,12 @@ where it outperformed every flatter architecture tried.
 
 **Stage one.** The `plan` model — the slot already present in `createModelRouter` beside `text`,
 `patch`, `repair` and `image`, configured by `CAMPAIGN_PLAN_MODEL` — receives the system prompt, the
-operator's creative direction, the brand and subject context, and every resolved reference including
-the negatives. It returns a **blueprint**.
+operator's creative direction, brand and subject context, Approved Creative History evidence and
+Rejected Creative History evidence with human reasons. It returns a **blueprint**.
 
-**Stage two.** The image model receives the blueprint *and* the same references and context, and
-draws.
+**Stage two.** The image model receives the blueprint, declared-subject and Brand Kit grounding,
+Approved Creative History evidence, and the validated Blueprint rules with human reasons. It never
+receives Rejected Creative History bytes. The final-image input type makes that route impossible.
 
 The blueprint is a strict Zod object, never prose. It carries composition, framing, lighting, camera
 treatment, palette guidance, focal point, surface and prop notes, and an explicit avoid list.
@@ -490,9 +492,9 @@ than an instruction the stage might ignore.
 
 Other rules:
 
-- The blueprint is pinned to the generation run alongside its realized reference set, so an operator
-  can read why an image looks the way it does, and so each regeneration remains independently
-  explainable after the fact.
+- The blueprint is pinned to the generation run alongside its separate Approved-final and
+  Rejected-Blueprint evidence sets, so an operator can read why an image looks the way it does and
+  each regeneration remains independently explainable after the fact.
 - A blueprint that fails to parse gets one bounded repair pass through the existing `repair` slot,
   then the generation fails safely. It never degrades to sending the raw text through.
 - The fixed constraints of §7.4 are appended *after* the blueprint, so nothing the planner writes can
@@ -555,6 +557,26 @@ All new and changed objects are tenant-owned with forced RLS, composite tenant f
 explicit grants, and `authenticated` holding select only. Writes go through security-definer
 functions with `search_path = ''` and an explicit organization check. Every new function that reads
 a table it did not create is called once against staging before its task is complete.
+
+### 8.0 Creative History — the corrected visual-memory model
+
+Creative History adds separate, additive records: `creative_folders`, `creative_items`, immutable
+`creative_item_versions`, append-only `creative_item_reviews`, qualified
+`creative_item_performance_evidence`, and run-scoped selection receipts. A folder has an optional
+single parent; an item has a stable identity, source kind and rights; a version has a private object
+or tenant-checked completed Studio render link, dimensions and content hash; a review is the sole
+source of the current Approved, Rejected or Unreviewed verdict.
+
+Folder defaults and item overrides produce effective metadata for subject, occasion, channel,
+format, market, language, objective and tags. Proposed model metadata is stored separately from
+human-confirmed metadata. Only confirmed metadata and a human-reviewed version are eligible for
+selection. Completed Studio renders may be linked without copying bytes and enter as Unreviewed;
+raw plates and unqualified legacy assets are not backfilled.
+
+New historical uploads use a private `creative-assets` path and the existing reserve, upload,
+read-back, re-encode and hash discipline. Every selection receipt snapshots effective metadata,
+selector version, candidates, exclusions, the Approved final-image set, the Rejected Blueprint set,
+and the resulting validated rules. It is never recomputed from mutable current rows.
 
 ### 8.1 Changed — `organization_brand_assets`
 
@@ -628,9 +650,8 @@ reasoning in §7.8.
 - `negative_rules jsonb not null default '[]'` — the rules in force.
 - `resolver_version integer null` — null on rows written before this feature.
 - `resolution_outcome text null`, `avoid_reference_version_ids uuid[]`, `blueprint jsonb`,
-  `plan_model_id text` — retained as **what the brief proposed**, where an operator picked references
-  in the brief picker. They are a request, not a receipt, and are never the provenance of a
-  generated image.
+  `plan_model_id text` — legacy proposal fields. They remain readable for historical snapshots but
+  are not written by the corrected Creative History path and are never a generation receipt.
 - `subject_profile_id uuid null` — the confirmed profile the operator chose.
 - `subject_description text null` — the exact confirmed text as it stood at creation, copied rather
   than referenced, so editing a profile later cannot rewrite the record of what was asked for.
@@ -642,9 +663,13 @@ Additive, and the correction recorded in §7.8. A campaign has many generation r
 `revise`, `variants` — resolved at different times against a library that changes between them. One
 campaign on staging already has more than one run out of three in total, so this is not hypothetical.
 
-- `reference_slots jsonb not null default '[]'` — the slot assignment this run sent.
-- `avoid_reference_version_ids uuid[] not null default '{}'` — the negatives this run sent.
-- `negative_rules jsonb not null default '[]'` — the rules in force for this run.
+- `reference_slots jsonb not null default '[]'` — legacy grounding slot assignment retained for
+  prior runs; corrected runs use the separate Creative History receipt.
+- `avoid_reference_version_ids uuid[] not null default '{}'` — deprecated historical field. It is
+  readable for old runs and never written by corrected runs.
+- `negative_rules jsonb not null default '[]'` — legacy summary retained for old runs. Corrected
+  receipts preserve each validated rule, its supporting Rejected Creative History version and human
+  reason.
 - `resolver_version integer null`, `resolution_outcome text null`.
 - `blueprint jsonb null`, `plan_model_id text null` — stage one's parsed art direction and the model
   that wrote it.
@@ -656,8 +681,10 @@ still records what it was about to spend on; the blueprint is added **after** st
 
 ### 8.7 Storage
 
-The `brand-assets` bucket and its `{organizationId}/{brandAssetId}/{versionId}/source` layout are
-unchanged. No new bucket.
+The `brand-assets` bucket and its `{organizationId}/{brandAssetId}/{versionId}/source` layout remain
+for Products & Subjects and Brand Kit. Creative History uses a separate private `creative-assets`
+path. A linked completed Studio render keeps its existing private storage object; the Creative
+History version stores a tenant-checked link rather than a copied blob.
 
 ### 8.8 Types
 
@@ -702,10 +729,13 @@ Events, past tense, identifier-only payloads: `asset.version_added`, `asset.upda
 
 ## 10. AI behavior
 
-- **No model participates in resolution.** Selection, ordering, caps, negative-rule derivation and
-  refusal are all deterministic code.
-- A model receives reference bytes with a per-role instruction line, in a deterministic part order
-  — by slot then by ordinal — so a rerun is reproducible.
+- **No model participates in selection.** Candidate eligibility, ordering, caps, exclusions and
+  refusal are deterministic, versioned code. A model may interpret selected Rejected Creative
+  History evidence into a Blueprint rule, but cannot choose asset identifiers, confirm metadata or
+  set a verdict.
+- Blueprint receives approved and rejected historical bytes in deterministic, separately typed
+  evidence sets. Final generation receives declared-subject/Brand Kit grounding and approved
+  historical bytes only; rejected bytes have no final-input type, validation path or adapter role.
 - A model writes no verdict, no reason code and no tag in Release 1.
 - **A model no longer declares `truth_class`.** It is derived from the resolution outcome, and the
   manifest schema stops asking for it. A generator asserting its own output is authentic was never
@@ -724,9 +754,9 @@ Events, past tense, identifier-only payloads: `asset.version_added`, `asset.upda
   ownership in code.
 - The operator's creative direction steers treatment only. It cannot name a subject, an offer, a
   price or any text, and it is carried as data in a delimited block.
-- The negative-rule block is assembled from registry descriptions, which are platform-authored
-  strings, not operator free text. The optional `note` on a review is stored for humans and is not
-  sent to any provider.
+- A validated Blueprint rule carries its registered human reason and supporting rejected-version
+  identifier. Review notes remain for humans and are not sent to a provider unless a future governed
+  policy explicitly admits them.
 
 ## 11. Security and tenancy
 
@@ -755,10 +785,10 @@ Structured logs and spans carry `organizationId`, `campaignId`, `runId`, `worker
 `correlationId` and, where applicable, `resolverVersion`.
 
 Tracked: resolution outcome by code, the split between drawing from a photograph and drawing from a
-description, unfilled-slot counts by slot, references per generation, tag overlap distribution,
-negative-rule count in force, intake rejection rate by reason, review throughput and rejection rate
-by reason code, subject profiles confirmed per organization, and the proportion of generated assets
-subsequently approved — the outcome measure named in §1.
+description, unfilled-slot counts by slot, Creative History selection exclusions, approved-final and
+rejected-Blueprint evidence counts, negative-rule count in force, intake rejection rate by reason,
+review throughput and rejection rate by reason code, subject profiles confirmed per organization,
+and the proportion of generated assets subsequently approved — the outcome measure named in §1.
 
 **The approval rate is reported separately for the two paths.** If drawings from descriptions are
 approved at a materially lower rate than drawings from photographs, that is the signal that the
@@ -812,22 +842,25 @@ and is a defect if observed.
 - No generated image in Release 1 contains rendered text in any script.
 - A Malayalam tag, an Arabic tag and a Malayalam dish name round-trip through upload, storage,
   search and display unchanged.
-- A rejection with reasons changes the negative rules pinned on the next generation for that
-  organization, and supplies that image in an `avoid` slot with its reasons attached.
-- **A rejected image never occupies a positive slot**, and no more than two negatives reach any one
-  generation.
-- **The output does not resemble the negative it was shown.** Judged by a reviewer against the
-  specific reason the reference was rejected — if it was refused for wrong plating, the new output
-  does not carry that plating. This is the empirical check on the decision recorded in ADR 0041, and
-  a failure here reopens that decision rather than being worked around.
+- A rejected Creative History review with reasons can change the next Blueprint's validated negative
+  rules, but its image bytes stop at Blueprint. The final image prompt sees only the validated rule
+  and human reason, never the rejected file.
+- **A rejected design never occupies a positive slot or a final image-provider input.** No more than
+  five relevant Rejected designs reach Blueprint; no more than three relevant Approved designs reach
+  final image generation.
+- **The output does not reproduce the human concern that the Blueprint carried forward.** A reviewer
+  judges the result against the cited reason — for example, wrong plating — without treating the
+  rejected design as final-generation material.
 - `exact_match` is refused for an asset whose ownership is `third_party`.
 - Every generation pins a parsed blueprint, and a blueprint that fails to parse twice fails the run
   rather than reaching the image model as text.
-- An ad-hoc reference attached in the studio is usable in that same request and is present in the
-  library afterwards.
+- A completed Studio poster may be linked into Creative History as Unreviewed and is ineligible for
+  later selection until a human confirms metadata and reviews it. A raw plate remains outside
+  Creative History.
 - A rejection cannot be recorded without at least one reason code.
-- Slot caps hold: no generation receives more than 7 references, more than 1 brand mark, or more
-  than 3 subjects.
+- Grounding-slot caps hold: no generation receives more than 7 grounding references, more than 1
+  brand mark, or more than 3 subjects. Creative History caps hold independently: three Approved
+  designs to final generation, five Rejected designs to Blueprint, and twelve validated rules.
 - Two resolutions over identical candidate data return byte-identical sets in identical order.
 - `syntheticAssetsAllowed` affects only the setting slot and cannot cause a subject to be invented.
 - An archived asset is excluded from new resolutions and remains readable in the provenance of
@@ -839,23 +872,26 @@ and is a defect if observed.
 
 ## 15. Test plan
 
-- **Domain unit** — slot caps at boundary values; total ordering including every tiebreak; the
-  three-way outcome across every combination of photograph present/absent and description
-  confirmed/draft/absent; negative-rule derivation including deduplication, sorting and the cap of
-  12; truth-class derivation per outcome; the re-scoped `syntheticAssetsAllowed`; typography
-  matching per script including a request for a script no asset declares; resolver version stamping.
+- **Domain unit** — grounding-slot caps at boundary values; deterministic declared-subject and
+  Creative History selection with every tiebreak; the three-way outcome across every combination of
+  photograph present/absent and description confirmed/draft/absent; relevance dominance, explicit
+  weak-match exclusions, three-Approved/five-Rejected caps and twelve-rule cap; truth-class
+  derivation; the re-scoped `syntheticAssetsAllowed`; typography matching and selector/resolver
+  version stamping.
 - **Application unit** — review validation refuses an empty reason list on rejection and a
-  non-empty one on approval; archive excludes from resolution; a rejected asset re-approved becomes
-  a candidate again; a draft profile is refused for generation; confirming requires the permission.
+  non-empty one on approval; archive excludes from selection; a rejected design re-approved becomes
+  an eligible Approved candidate; an Unreviewed design and unconfirmed metadata are ineligible; a
+  draft subject profile is refused for generation; confirming requires the permission.
 - **Unicode** — NFC normalization on write; case-folded matching that is a no-op for Malayalam and
   Arabic; `char_length` bounds so a 24-character Malayalam tag is not rejected as too long; a tag
   containing a combining mark round-trips byte-identically.
 - **Prompt builder** — the fixed constraints of §7.4 appear in every synthesis prompt; a component
   absent from the description is absent from the prompt; no prompt requests rendered text.
-- **Provider seam** — reference parts are ordered deterministically; each carries its role
-  instruction; a rejected asset appears only in an `avoid` part, never a positive one, and always
-  with its reason codes; the negative cap holds; an unreadable reference fails the run rather than
-  degrading it.
+- **Provider seam** — Blueprint and final reference parts are ordered deterministically and have
+  distinct structural types; Rejected Creative History bytes can reach only Blueprint with their
+  human reasons; final generation admits only Approved historical bytes plus grounding and validated
+  rules; compile-time, runtime and adapter integration tests prove a rejected byte cannot arrive at
+  the final provider; an unreadable pinned reference fails the run rather than degrading it.
 - **Blueprint stage** — a valid blueprint parses and is pinned; an invalid one takes exactly one
   repair pass then fails; the schema rejects any attempt to carry a subject or text; the subject is
   injected after parsing and cannot be overwritten by blueprint content; the fixed constraints
@@ -876,9 +912,9 @@ and is a defect if observed.
      compare the two outputs side by side. If no photograph is available the step is recorded as
      not performed, and the reference path is proved against the fixture organization instead — the
      weaker evidence is stated, never quietly substituted.
-  3. Reject one output with a reason; confirm the next generation's pinned negative rules contain
-     it, the rejected asset appears only in the capped `avoid` set with its own reason codes, and
-     its bytes are never presented to the provider as a positive reference.
+  3. Reject one finished design with a reason; confirm the next Blueprint receipt contains the
+     rejected evidence and a cited validated rule, while the captured final-provider request has no
+     rejected bytes or identifiers.
   4. Remove the subject and confirm the run refuses with `no_declared_subject`.
   5. Confirm every generated image contains no rendered text.
 
@@ -893,11 +929,11 @@ and is a defect if observed.
 
 ## 16. Migration and rollback
 
-The forward-only migration set is additive: five columns on `organization_brand_assets`, ten on
-`campaign_source_snapshots`, seven on `campaign_generation_runs`, three new tables, the reason and
-permission seeds, the governed functions, and the rejected-candidate reader correction. No column
-is dropped, no existing CHECK is narrowed, and the generation-run columns default safely for prior
-runs, so there is no provenance backfill or retrospective claim.
+The forward-only migration set is additive: the existing grounding tables remain; Creative History
+adds folders, items, immutable versions, append-only reviews, performance evidence and pinned
+selection receipts, plus private storage and governed functions. No column is dropped, no existing
+CHECK is narrowed, and legacy `avoid_reference_version_ids` remain readable but are never written by
+the corrected path. There is no retrospective provenance claim.
 
 The one non-additive change is in code, not schema: `truth_class` moves from model-declared to
 derived, and the manifest schema stops asking for it. Existing rows keep the value the model wrote.
@@ -908,16 +944,17 @@ exactly the kind of claim this specification exists to prevent. The three existi
 Pushed migrations are live for staging immediately; there is no local rehearsal, so the existing
 schema is read before the file is written.
 
-Rollback is asymmetric and stated plainly. The provider seam, the resolver call, the prompt builder
-and the truth-class derivation are all a code revert. The tables can be left in place unused. The
-re-scoping of `syntheticAssetsAllowed` is the one behavioural change affecting an existing campaign:
+Rollback is asymmetric and stated plainly. The new selector, provider seam and prompt builder are a
+code/configuration revert; additive tables and receipts remain readable. No rollback may make a
+corrected run claim a rejected design was sent to final generation. The re-scoping of
+`syntheticAssetsAllowed` remains the separate behavioural change affecting an existing campaign:
 reverting it restores the previous permissive outcome, and the duck breast with it.
 
 ## 17. Documentation updates
 
-- ADR 0041 — every generation is anchored to a declared subject; references are resolved
-  deterministically; rejected examples may enter only the capped `avoid` image set with their own
-  reasons attached; and truth class is derived rather than declared.
+- ADR 0041 — every generation is anchored to a declared subject, with deterministic grounding and
+  derived truth class; ADR 0049 — Creative History's Blueprint-only rejected evidence and final
+  provider fence.
 - `context/05-module-map.md` — the asset library, subject profiles, and the resolver.
 - `context/04-domain-model.md` — conditioning roles, subject profiles, verdicts, reason codes,
   truth class.

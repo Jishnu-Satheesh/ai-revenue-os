@@ -1,6 +1,6 @@
 # Creative History Asset Library — Product-Model Correction
 
-**Status:** Approved in chat on 2026-08-26; awaiting written-spec review  
+**Status:** Approved in chat on 2026-08-26; forward-only cutover reaffirmed for Campaign Progress CP1 on 2026-09-09; written-spec and ADR reconciliation completed in CP1 Task 1 on 2026-09-09
 **Corrects:** `specs/019-organization-asset-library.md`  
 **Integrates with:** `specs/020-campaign-creative-studio.md`, ADR 0041, ADR 0042
 

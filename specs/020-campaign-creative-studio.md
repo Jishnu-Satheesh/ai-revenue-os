@@ -5,6 +5,12 @@
 **Approved 2026-08-24.** Tier 3. Implemented against
 `docs/superpowers/plans/2026-08-24-campaign-creative-studio-implementation.md`.
 
+**Creative History boundary corrected 2026-09-09.** ADR 0049 and corrected Spec 019 govern
+historical evidence: Approved Creative History bytes may reach Blueprint and final image generation;
+Rejected Creative History bytes reach Blueprint only; final generation receives validated Blueprint
+rules with their human reasons, never rejected bytes. Studio consumes the resulting plate and owns
+finished-poster lineage; it does not reopen that provider boundary.
+
 Revised before approval to adopt four practices from a design studio the user has already shipped to
 real clients: multi-region annotated editing, named text slots in the operator's language, a
 creative-direction field with a prompt optimizer, and aspect presets. §7.6 and §7.3 carry those
@@ -158,6 +164,12 @@ specification does not weaken it.
 | Produces | the **plate** — a photograph or a drawing of the declared dish, with no text | the **poster** — plate plus composited layers |
 | Model's role | draws the dish | draws nothing new except inside a mask |
 | Refuses when | nobody declared the subject | a glyph is uncovered or text will not fit |
+
+Creative History is not a fourth Studio layer. When Studio completes a poster, that finished result
+may be linked to one Creative History item as **Unreviewed**, with its render identity and private
+output preserved. It affects no later campaign until a human confirms metadata and gives it a review.
+Raw plates, intermediate variants and masked-edit source plates never enter Creative History merely
+because they exist.
 
 ## 6. UX flow
 
@@ -398,6 +410,10 @@ so an identical re-render is idempotent rather than duplicated.
   `variants` run succeeds with a null `result_version_id` by constraint, so for a plate produced that
   way, asset → bundle version → "the run whose `result_version_id` matches" resolves to nothing.
   Nullable, because a client's own photograph and an edited plate legitimately have no run.
+- **A completed poster can be linked into Creative History without changing its render identity.**
+  The link is optional, tenant-checked and starts `unreviewed`; it points to this completed poster
+  rather than copying the private object. A raw plate remains a Studio/campaign intermediate, not a
+  finished historical design.
 
 ### 8.3 New — `campaign_plate_edits`
 
@@ -492,7 +508,8 @@ Events: `campaign.poster_rendered`, `campaign.plate_edited`, `campaign.render_re
   validate them server-side. A mask is an image and is untrusted like any other.
 - Mask storage paths are validated against the tenant prefix before any byte is fetched.
 - A render request naming a plate from another organization is refused before any work is queued.
-- Rendered posters inherit the existing campaign-asset access rules. No new public surface.
+- Rendered posters inherit the existing campaign-asset access rules. A Creative History link is
+  resolved through its own tenant-checked private read path; neither route creates a public surface.
 - Font files are read from the repository, never from user input, never from a URL.
 - No secret, token or customer PII is logged. Operator instructions are tenant content.
 
@@ -613,8 +630,9 @@ prohibition, and *"Explore Our Mezza"* with it.
 - `context/04-domain-model.md` — plate, layer, poster, render, template, mask.
 - `context/05-module-map.md` — the compositor and the two new workers.
 - `specs/016-campaign-feedback-loop.md` — a note that an approved version now carries a poster plan.
-- `specs/019-organization-asset-library.md` — a note that the plate is this specification's input,
-  and a pointer to §7.7 on the naming trap.
+- `specs/019-organization-asset-library.md` and ADR 0049 — the plate remains this specification's
+  input; a completed poster may enter Creative History as Unreviewed, while raw plates do not; and
+  rejected creative bytes are excluded structurally from final image generation.
 
 ## 18. The gate, and what remains open
 
