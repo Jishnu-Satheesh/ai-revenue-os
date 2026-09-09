@@ -13,6 +13,11 @@ const EVENT_META = {
   retry: { label: "Retried", Icon: Clock3 },
   "draft-created": { label: "Draft created", Icon: Check },
   "draft-failed": { label: "Draft failed", Icon: X },
+  // Research lifecycle rows arrive from the read contract; the Task 11
+  // progress/outcome surfaces own their presentation.
+  "research-started": { label: "Research started", Icon: FilePlus2 },
+  "research-finished": { label: "Research finished", Icon: Check },
+  "research-retried": { label: "Analysis retried", Icon: Clock3 },
 } as const;
 
 function sourceLabel(source: TimelineEvent["source"]): string {
@@ -20,7 +25,9 @@ function sourceLabel(source: TimelineEvent["source"]): string {
     ? "Opportunity"
     : source.kind === "channel_recommendation"
       ? "Recommendation"
-      : "Intelligence item";
+      : source.kind === "research_pipeline"
+        ? "Market research"
+        : "Intelligence item";
 }
 
 /**

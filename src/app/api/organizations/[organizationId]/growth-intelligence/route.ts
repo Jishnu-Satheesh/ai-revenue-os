@@ -20,6 +20,7 @@ import {
 } from "@/modules/growth-intelligence/application/read-service";
 import type { GrowthIntelligenceSection } from "@/modules/growth-intelligence/application/read-model";
 import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/growth-intelligence/infrastructure/read-repository";
+import { createAuthenticatedResearchReadRepository } from "@/modules/growth-intelligence/infrastructure/research-read-repository";
 import { createAuthenticatedMarketProfileRepository } from "@/modules/growth-intelligence/infrastructure/profile-repository";
 import type { DecisionPersistence } from "@/modules/decisions/infrastructure/repository";
 import { createDecisionRepository } from "@/modules/decisions/infrastructure/repository";
@@ -43,6 +44,9 @@ const querySchema = z
       .regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/, "The activity month must be canonical YYYY-MM.")
       .nullable()
       .optional(),
+    branchId: z.string().uuid().nullable().optional(),
+    historyLimit: z.coerce.number().int().min(1).max(50).default(10),
+    historyCursor: z.string().min(1).max(500).nullable().optional(),
     sections: z
       .string()
       .min(1)
@@ -104,6 +108,9 @@ export async function GET(
       cursor: url.searchParams.get("cursor"),
       geography: url.searchParams.get("geography"),
       month: url.searchParams.get("month"),
+      branchId: url.searchParams.get("branchId"),
+      historyLimit: url.searchParams.get("historyLimit") ?? undefined,
+      historyCursor: url.searchParams.get("historyCursor"),
       sections: url.searchParams.get("sections"),
     });
 
@@ -156,6 +163,9 @@ export async function GET(
     // The composed workspace reads through the owning modules only and
     // starts no work. A failure here must not take down Market Watch: the
     // page still renders and the workspace simply arrives as null.
+    // Research provenance rides the same workspace read; an annotation
+    // failure degrades to unattributed cards and is logged, never hidden.
+    const researchReads = createAuthenticatedResearchReadRepository(context.supabase);
     let workspace = null;
     try {
       const workspaceService = createGrowthIntelligenceReadService({
@@ -163,12 +173,21 @@ export async function GET(
         opportunities: createDecisionRepository(
           context.supabase as unknown as DecisionPersistence,
         ),
+        research: researchReads,
+        onResearchError: (researchError) => {
+          logger.warn("growth_intelligence.research_provenance_degraded", {
+            organizationId,
+            correlationId,
+            errorCode: toPublicError(researchError).code,
+          });
+        },
       });
       workspace = await workspaceService.getWorkspace({
         organizationId,
         actorId: context.user.id,
         activityMonth: query.month,
         sections: query.sections,
+        branchId: query.branchId ?? null,
       });
     } catch (workspaceError) {
       logger.warn("growth_intelligence.workspace_degraded", {
@@ -178,10 +197,44 @@ export async function GET(
       });
     }
 
+    // Branch-scoped research composition for the observer: the live
+    // pipeline, cursor-paginated retained history (10 per page, 50 max)
+    // and the same-branch last success. Legacy scope has no pipelines, so
+    // without a branch the section stays null. A failure here degrades to
+    // null like the workspace; the status route stays authoritative.
+    let research = null;
+    if (query.branchId) {
+      try {
+        const branchProfile = await service.read({ organizationId, branchId: query.branchId });
+        const [active, history, lastSuccess] = await Promise.all([
+          researchReads.readCurrentPipeline({ organizationId, branchId: query.branchId }),
+          researchReads.listPipelineHistory({
+            organizationId,
+            branchId: query.branchId,
+            limit: query.historyLimit,
+            cursor: query.historyCursor,
+          }),
+          researchReads.readLastSuccessfulPipeline({
+            organizationId,
+            branchId: query.branchId,
+            currentVersionId: branchProfile.profile?.currentVersionId ?? null,
+          }),
+        ]);
+        research = { branchId: query.branchId, active, history, lastSuccess };
+      } catch (researchError) {
+        logger.warn("growth_intelligence.research_history_degraded", {
+          organizationId,
+          correlationId,
+          errorCode: toPublicError(researchError).code,
+        });
+      }
+    }
+
     const response = NextResponse.json({
       marketWatch: { ...marketWatch, nextCursor: claims.nextCursor },
       profile,
       workspace,
+      research,
     });
     response.headers.set("x-correlation-id", correlationId);
     response.headers.set("Cache-Control", "no-store");

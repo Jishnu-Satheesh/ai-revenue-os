@@ -7,19 +7,27 @@ import type { MarketGeographicLayer } from "@/domain/growth-intelligence/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { createEventPublisher } from "@/domain/events/publisher";
 import { getOrganizationContext } from "@/lib/api/organization-context";
-import { DomainError } from "@/lib/errors";
+import { DomainError, toPublicError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
 import { buildMarketWatch } from "@/modules/growth-intelligence/application/market-watch";
 import { createMarketProfileService } from "@/modules/growth-intelligence/application/profile-service";
 import { createGrowthIntelligenceReadService } from "@/modules/growth-intelligence/application/read-service";
 import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/growth-intelligence/infrastructure/read-repository";
+import { createAuthenticatedResearchReadRepository } from "@/modules/growth-intelligence/infrastructure/research-read-repository";
 import { createAuthenticatedMarketProfileRepository } from "@/modules/growth-intelligence/infrastructure/profile-repository";
 import { createDecisionRepository } from "@/modules/decisions/infrastructure/repository";
 import type { DecisionPersistence } from "@/modules/decisions/infrastructure/repository";
 
 type PageProps = {
   params: Promise<{ organizationId: string }>;
-  searchParams?: Promise<{ limit?: string; cursor?: string; geography?: string; month?: string }>;
+  searchParams?: Promise<{
+    limit?: string;
+    cursor?: string;
+    geography?: string;
+    month?: string;
+    branch?: string;
+  }>;
 };
 
 function parseLimit(value: string | undefined): number {
@@ -93,11 +101,26 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
   const readService = createGrowthIntelligenceReadService({
     workspace: reads,
     opportunities: createDecisionRepository(context.supabase as unknown as DecisionPersistence),
+    research: createAuthenticatedResearchReadRepository(context.supabase),
+    onResearchError: (researchError) => {
+      logger.warn("growth_intelligence.research_provenance_degraded", {
+        organizationId: context.organizationId,
+        errorCode: toPublicError(researchError).code,
+      });
+    },
   });
+  // A selected branch scopes research provenance and activity; any other
+  // value keeps the legacy organization-wide read.
+  const branchId =
+    typeof search.branch === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(search.branch)
+      ? search.branch
+      : null;
   const view = await readService.getWorkspace({
     organizationId: context.organizationId,
     actorId: context.user.id,
     activityMonth: activityMonth ?? undefined,
+    branchId,
   });
 
   const marketWatch = (

@@ -131,6 +131,7 @@ describe("getGrowthIntelligence workspace", () => {
       narrative: "Delivery orders spike on rainy Thursdays.",
       fingerprint:
         "aa00000000000000000000000000000000000000000000000000000000000001",
+      synthesisRunId: "71000000-0000-4000-8000-000000000071",
       supportGrade: "corroborated",
       freshness: "current",
       urgency: "medium",
@@ -229,5 +230,144 @@ describe("getGrowthIntelligence workspace", () => {
     expect(view.priorityActions.opportunities[0]!.draftRequest).toMatchObject({
       status: "processing",
     });
+  });
+});
+
+describe("research composition", () => {
+  const branchId = "30000000-0000-4000-8000-000000000003";
+  const pipelineId = "31000000-0000-4000-8000-000000000031";
+  const runId = "71000000-0000-4000-8000-000000000071";
+  const itemId = "70000000-0000-4000-8000-000000000007";
+
+  function researchReader() {
+    return {
+      listItemProvenance: vi.fn().mockResolvedValue({
+        [runId]: {
+          pipelineId,
+          branchId,
+          stage: "ready",
+          statusPath: `/api/organizations/${organizationId}/market-profile/research/${pipelineId}`,
+          supportingClaimIds: [],
+        },
+      }),
+      listResearchActivity: vi.fn().mockResolvedValue([
+        {
+          kind: "started",
+          pipelineId,
+          branchId,
+          scopeLabel: "Marina",
+          title: "Market research started — Marina",
+          occurredAt: "2026-09-01T08:00:00.000Z",
+          stage: null,
+        },
+      ]),
+    };
+  }
+
+  function recommendationItemRow() {
+    return {
+      id: itemId,
+      kind: "recommendation" as const,
+      narrative: "Research advice.",
+      fingerprint: "aa00000000000000000000000000000000000000000000000000000000000001",
+      synthesisRunId: runId,
+      supportGrade: "corroborated",
+      freshness: "current",
+      urgency: "medium",
+      goalAlignment: "direct",
+      activityMonth: "2026-09",
+      generatedAt: "2026-09-02T08:00:00.000Z",
+      evidenceWindowStart: null,
+      evidenceWindowEnd: null,
+      marketObservedAt: null,
+      missingInput: null,
+      decision: null,
+      decidedAt: null,
+      snoozedUntil: null,
+      pinned: false,
+    };
+  }
+
+  it("attaches provenance and activity without changing lane order", async () => {
+    const research = researchReader();
+    const read = service({
+      workspace: workspace({
+        listWorkspaceItems: vi.fn().mockResolvedValue([recommendationItemRow()]),
+      }),
+      research,
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId, branchId });
+    const plain = await service({
+      workspace: workspace({
+        listWorkspaceItems: vi.fn().mockResolvedValue([recommendationItemRow()]),
+      }),
+    }).getWorkspace({ organizationId, actorId });
+
+    expect(research.listItemProvenance).toHaveBeenCalledWith({
+      organizationId,
+      items: [{ itemId, runId }],
+    });
+    expect(research.listResearchActivity).toHaveBeenCalledWith({
+      organizationId,
+      branchId,
+      limit: undefined,
+    });
+    const attributed = view.priorityActions.recommendations.find((card) => card.id === itemId);
+    expect(attributed?.researchProvenance?.pipelineId).toBe(pipelineId);
+    // Ordering, filters and triage are untouched: the same cards in the same order.
+    expect(view.priorityActions.recommendations.map((card) => card.id)).toEqual(
+      plain.priorityActions.recommendations.map((card) => card.id),
+    );
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      1,
+    );
+  });
+
+  it("reads organization-wide activity when no branch is selected", async () => {
+    const research = researchReader();
+    const read = service({ research });
+
+    await read.getWorkspace({ organizationId, actorId });
+
+    expect(research.listResearchActivity).toHaveBeenCalledWith({
+      organizationId,
+      branchId: null,
+      limit: undefined,
+    });
+  });
+
+  it("leaves cards without provenance when no research reader is wired", async () => {
+    const read = service({
+      workspace: workspace({
+        listWorkspaceItems: vi.fn().mockResolvedValue([recommendationItemRow()]),
+      }),
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(view.priorityActions.recommendations[0]!.researchProvenance).toBeNull();
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe("research degradation", () => {
+  it("composes the workspace without provenance when the research read fails", async () => {
+    const onResearchError = vi.fn();
+    const research = {
+      listItemProvenance: vi.fn().mockRejectedValue(new Error("denied")),
+      listResearchActivity: vi.fn().mockResolvedValue([]),
+    };
+    const read = service({ research, onResearchError });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(view.activityMonth).toBe("2026-09");
+    expect(onResearchError).toHaveBeenCalledTimes(1);
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      0,
+    );
   });
 });

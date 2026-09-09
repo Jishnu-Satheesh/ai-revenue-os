@@ -8,6 +8,10 @@ import {
   type GrowthIntelligenceView,
   type SynthesizedItemRow,
 } from "@/modules/growth-intelligence/application/read-model";
+import type {
+  ResearchActivityEvent,
+  ResearchItemProvenance,
+} from "@/modules/growth-intelligence/application/research-read-model";
 
 /**
  * Source reads behind the composed workspace. Every method takes the
@@ -35,7 +39,32 @@ export type GrowthIntelligenceWorkspaceRepository = {
 export type GrowthIntelligenceReadDependencies = {
   workspace: GrowthIntelligenceWorkspaceRepository;
   opportunities: DecisionReadPort;
+  /**
+   * Research provenance and activity behind Recommendations and Your
+   * actions. Optional: when absent the composed view is exactly the
+   * pre-research read (cards without provenance, no research timeline).
+   * A failing research read never fails the workspace: the failure is
+   * reported through onResearchError and the view composes without it.
+   */
+  research?: GrowthIntelligenceResearchReader;
+  onResearchError?: (error: unknown) => void;
   now?: () => Date;
+};
+
+/**
+ * Pipeline lineage for visible items plus named research lifecycle events.
+ * Implemented by the research read repository over signed-in RLS reads.
+ */
+export type GrowthIntelligenceResearchReader = {
+  listItemProvenance(input: {
+    organizationId: string;
+    items: readonly { itemId: string; runId: string }[];
+  }): Promise<Record<string, ResearchItemProvenance>>;
+  listResearchActivity(input: {
+    organizationId: string;
+    branchId: string | null;
+    limit?: number;
+  }): Promise<readonly ResearchActivityEvent[]>;
 };
 
 export type GetWorkspaceInput = {
@@ -44,6 +73,8 @@ export type GetWorkspaceInput = {
   /** Canonical YYYY-MM; null/undefined resolves the organization's current local month. */
   activityMonth?: string | null;
   sections?: readonly GrowthIntelligenceSection[];
+  /** Selected branch for research provenance and activity; null/undefined reads organization-wide. */
+  branchId?: string | null;
 };
 
 const CANONICAL_MONTH = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
@@ -78,16 +109,17 @@ export function currentLocalMonth(timeZone: string, now: Date): string {
  * assembles the workspace from the owning modules' records and starts no
  * work. Mutations stay with the owning module's routes.
  */
-export function createGrowthIntelligenceReadService(dependencies: GrowthIntelligenceReadDependencies) {
-  const { workspace, opportunities } = dependencies;
+export function createGrowthIntelligenceReadService(
+  dependencies: GrowthIntelligenceReadDependencies,
+) {
+  const { workspace, opportunities, research } = dependencies;
   const clock = dependencies.now ?? (() => new Date());
 
   return {
     async getWorkspace(input: GetWorkspaceInput): Promise<GrowthIntelligenceView> {
       const now = clock();
       const timeZone = await workspace.readOrganizationTimeZone(input.organizationId);
-      const activityMonth =
-        input.activityMonth ?? currentLocalMonth(timeZone, now);
+      const activityMonth = input.activityMonth ?? currentLocalMonth(timeZone, now);
       if (!CANONICAL_MONTH.test(activityMonth)) {
         throw new DomainError(
           "VALIDATION_ERROR",
@@ -109,6 +141,33 @@ export function createGrowthIntelligenceReadService(dependencies: GrowthIntellig
         }),
         workspace.listDraftRequestStates({ organizationId: input.organizationId }),
       ]);
+      // Provenance never reorders, refilters or retriages: it only annotates
+      // the rows the deterministic builders already selected. A failing
+      // annotation read degrades to unattributed cards rather than an
+      // empty workspace; the failure is reported, never hidden.
+      let researchProvenance: Record<string, ResearchItemProvenance> | undefined;
+      let researchActivity: readonly ResearchActivityEvent[] | undefined;
+      if (research) {
+        try {
+          const lineageItems = items
+            .filter((item) => item.kind === "recommendation" && item.synthesisRunId)
+            .map((item) => ({ itemId: item.id, runId: item.synthesisRunId }));
+          [researchProvenance, researchActivity] = await Promise.all([
+            research.listItemProvenance({
+              organizationId: input.organizationId,
+              items: lineageItems,
+            }),
+            research.listResearchActivity({
+              organizationId: input.organizationId,
+              branchId: input.branchId ?? null,
+            }),
+          ]);
+        } catch (error) {
+          dependencies.onResearchError?.(error);
+          researchProvenance = undefined;
+          researchActivity = undefined;
+        }
+      }
       return buildGrowthIntelligenceView({
         organizationId: input.organizationId,
         actorId: input.actorId,
@@ -120,6 +179,8 @@ export function createGrowthIntelligenceReadService(dependencies: GrowthIntellig
         items,
         draftRequests,
         sections: input.sections,
+        researchProvenance,
+        researchActivity,
       });
     },
   };

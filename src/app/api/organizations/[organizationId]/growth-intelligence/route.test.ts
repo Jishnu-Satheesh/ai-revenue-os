@@ -18,6 +18,11 @@ const mocks = vi.hoisted(() => ({
   listChannelRecommendationRecords: vi.fn(),
   listDraftRequestStates: vi.fn(),
   listOpportunities: vi.fn(),
+  readCurrentPipeline: vi.fn(),
+  listPipelineHistory: vi.fn(),
+  readLastSuccessfulPipeline: vi.fn(),
+  listItemProvenance: vi.fn(),
+  listResearchActivity: vi.fn(),
   warn: vi.fn(),
 }));
 
@@ -47,6 +52,15 @@ vi.mock("@/modules/growth-intelligence/infrastructure/read-repository", () => ({
     listWorkspaceItems: mocks.listWorkspaceItems,
     listChannelRecommendationRecords: mocks.listChannelRecommendationRecords,
     listDraftRequestStates: mocks.listDraftRequestStates,
+  }),
+}));
+vi.mock("@/modules/growth-intelligence/infrastructure/research-read-repository", () => ({
+  createAuthenticatedResearchReadRepository: () => ({
+    readCurrentPipeline: mocks.readCurrentPipeline,
+    listPipelineHistory: mocks.listPipelineHistory,
+    readLastSuccessfulPipeline: mocks.readLastSuccessfulPipeline,
+    listItemProvenance: mocks.listItemProvenance,
+    listResearchActivity: mocks.listResearchActivity,
   }),
 }));
 vi.mock("@/modules/decisions/infrastructure/repository", () => ({
@@ -97,6 +111,11 @@ beforeEach(() => {
   mocks.listChannelRecommendationRecords.mockResolvedValue([]);
   mocks.listDraftRequestStates.mockResolvedValue([]);
   mocks.listOpportunities.mockResolvedValue([]);
+  mocks.readCurrentPipeline.mockResolvedValue(null);
+  mocks.listPipelineHistory.mockResolvedValue({ pipelines: [], nextCursor: null });
+  mocks.readLastSuccessfulPipeline.mockResolvedValue(null);
+  mocks.listItemProvenance.mockResolvedValue({});
+  mocks.listResearchActivity.mockResolvedValue([]);
 });
 
 function get(url: string) {
@@ -176,6 +195,7 @@ describe("GET Growth Intelligence", () => {
         kind: "insight",
         narrative: "Delivery orders spike on rainy Thursdays.",
         fingerprint: "a".repeat(64),
+        synthesisRunId: "71000000-0000-4000-8000-000000000071",
         supportGrade: "corroborated",
         freshness: "current",
         urgency: "medium",
@@ -263,5 +283,66 @@ describe("GET Growth Intelligence", () => {
     expect(mocks.listRequests).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: otherOrganizationId }),
     );
+  });
+});
+
+describe("GET Growth Intelligence research composition", () => {
+  const branchId = "20000000-0000-4000-8000-000000000002";
+
+  it("returns a null research section for the legacy scope without branch reads", async () => {
+    const response = await get(`https://example.test/api/x`);
+    const body = (await response.json()) as { research: unknown };
+
+    expect(response.status).toBe(200);
+    expect(body.research).toBeNull();
+    expect(mocks.readCurrentPipeline).not.toHaveBeenCalled();
+    expect(mocks.listPipelineHistory).not.toHaveBeenCalled();
+  });
+
+  it("composes live pipeline, history and last success for a selected branch", async () => {
+    const active = { pipelineId: "active-pipeline", stage: "researching" };
+    const history = { pipelines: [{ pipelineId: "old-pipeline" }], nextCursor: "cursor-1" };
+    const lastSuccess = { pipelineId: "old-pipeline", settingsMatchCurrent: false };
+    mocks.readCurrentPipeline.mockResolvedValue(active);
+    mocks.listPipelineHistory.mockResolvedValue(history);
+    mocks.readLastSuccessfulPipeline.mockResolvedValue(lastSuccess);
+
+    const response = await get(`https://example.test/api/x?branchId=${branchId}`);
+    const body = (await response.json()) as {
+      research: { branchId: string; active: unknown; history: unknown; lastSuccess: unknown };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.research).toEqual({ branchId, active, history, lastSuccess });
+    expect(mocks.readCurrentPipeline).toHaveBeenCalledWith({ organizationId, branchId });
+    expect(mocks.listPipelineHistory).toHaveBeenCalledWith({
+      organizationId,
+      branchId,
+      limit: 10,
+      cursor: null,
+    });
+    expect(mocks.readLastSuccessfulPipeline).toHaveBeenCalledWith({
+      organizationId,
+      branchId,
+      currentVersionId: profileVersionId,
+    });
+  });
+
+  it("degrades the research section without losing the workspace", async () => {
+    mocks.readCurrentPipeline.mockRejectedValue(new Error("denied"));
+
+    const response = await get(`https://example.test/api/x?branchId=${branchId}`);
+    const body = (await response.json()) as { research: unknown; workspace: unknown };
+
+    expect(response.status).toBe(200);
+    expect(body.research).toBeNull();
+    expect(body.workspace).not.toBeNull();
+  });
+
+  it("rejects an invalid branch id without tenant reads", async () => {
+    const response = await get(`https://example.test/api/x?branchId=not-a-uuid`);
+
+    expect(response.status).toBe(400);
+    expect(mocks.readProfile).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,10 @@ import {
   type OrganizationRecommendationLaneRecord,
   type OrganizationRecommendationRecord,
 } from "@/modules/analysis/application/read-model";
+import type {
+  ResearchActivityEvent,
+  ResearchItemProvenance,
+} from "@/modules/growth-intelligence/application/research-read-model";
 
 /**
  * Composed organization intelligence view (spec 022 section 9).
@@ -44,6 +48,8 @@ export type SynthesizedItemRow = {
   kind: "insight" | "recommendation" | "data_gap";
   narrative: string;
   fingerprint: string;
+  /** Exact synthesis run that produced the item; links research provenance. */
+  synthesisRunId: string;
   supportGrade: string;
   freshness: string;
   urgency: string;
@@ -65,7 +71,8 @@ export type SynthesizedItemRow = {
 export type CardSource =
   | { kind: "opportunity"; id: string }
   | { kind: "channel_recommendation"; id: string }
-  | { kind: "synthesized_item"; id: string };
+  | { kind: "synthesized_item"; id: string }
+  | { kind: "research_pipeline"; id: string };
 
 export type EvidenceWindow = { start: string; end: string };
 
@@ -124,6 +131,13 @@ export type RecommendationCard = CardBase & {
   /** Null for synthesized cross-market recommendations with no single channel. */
   channelId: string | null;
   branchId: string | null;
+  /**
+   * Market-research provenance for items produced by a research pipeline.
+   * The builders always set this (null when there is no pipeline lineage);
+   * the field stays optional so existing card fixtures keep compiling.
+   * The card keeps its deterministic position either way.
+   */
+  researchProvenance?: ResearchItemProvenance | null;
 };
 
 export type InsightCard = CardBase & {
@@ -151,11 +165,17 @@ export type TimelineEventType =
   | "draft-requested"
   | "retry"
   | "draft-created"
-  | "draft-failed";
+  | "draft-failed"
+  | "research-started"
+  | "research-finished"
+  | "research-retried";
 
 export type TimelineEvent = {
   type: TimelineEventType;
   source: CardSource;
+  // Titles arrive with the Your-actions research events; every
+  // other event kind gains its title with the timeline-titles work.
+  title?: string;
   occurredAt: string;
   reason: string | null;
 };
@@ -172,6 +192,13 @@ export type GrowthIntelligenceViewInput = {
   items: readonly SynthesizedItemRow[];
   draftRequests?: readonly DraftRequestState[];
   sections?: readonly GrowthIntelligenceSection[];
+  /**
+   * Research provenance keyed by synthesis run id. Omitted lookups leave
+   * cards without provenance; ordering, filters and triage never depend on it.
+   */
+  researchProvenance?: Readonly<Record<string, ResearchItemProvenance>>;
+  /** Named research lifecycle events merged into the timeline. */
+  researchActivity?: readonly ResearchActivityEvent[];
 };
 
 export type GrowthIntelligenceView = {
@@ -301,7 +328,12 @@ function toRecommendationCardFromChannel(
   row: OrganizationRecommendationLaneRecord,
 ): RecommendationCard {
   if (row.label !== "recommendation") throw new Error("Recommendation misrouted.");
-  return { ...channelBase(row), channelId: row.channelId, branchId: row.branchId };
+  return {
+    ...channelBase(row),
+    channelId: row.channelId,
+    branchId: row.branchId,
+    researchProvenance: null,
+  };
 }
 
 function toInsightCardFromChannel(row: OrganizationRecommendationLaneRecord): InsightCard {
@@ -350,9 +382,15 @@ function itemBase(row: SynthesizedItemRow, activityMonth: string) {
 function toRecommendationCardFromItem(
   row: SynthesizedItemRow,
   activityMonth: string,
+  provenance: Readonly<Record<string, ResearchItemProvenance>> = {},
 ): RecommendationCard {
   if (row.kind !== "recommendation") throw new Error("Item misrouted.");
-  return { ...itemBase(row, activityMonth), channelId: null, branchId: null };
+  return {
+    ...itemBase(row, activityMonth),
+    channelId: null,
+    branchId: null,
+    researchProvenance: provenance[row.synthesisRunId] ?? null,
+  };
 }
 
 function toInsightCardFromItem(row: SynthesizedItemRow, activityMonth: string): InsightCard {
@@ -527,8 +565,9 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
   const visibleItems = uniqueItems.filter((row) => isVisibleItem(row, input.now));
 
   if (sections.has("recommendations")) {
+    const provenance = input.researchProvenance ?? {};
     for (const row of visibleItems.filter((item) => item.kind === "recommendation")) {
-      recommendations.push(toRecommendationCardFromItem(row, input.activityMonth));
+      recommendations.push(toRecommendationCardFromItem(row, input.activityMonth, provenance));
     }
   }
 
@@ -577,8 +616,35 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
         row.decidedAt,
       );
     }
+    for (const event of input.researchActivity ?? []) {
+      timeline.push({
+        type:
+          event.kind === "started"
+            ? "research-started"
+            : event.kind === "finished"
+              ? "research-finished"
+              : "research-retried",
+        source: { kind: "research_pipeline", id: event.pipelineId },
+        title: event.title,
+        occurredAt: event.occurredAt,
+        reason: null,
+      });
+    }
     timeline.sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
   }
+
+  // Identical lifecycle deliveries collapse to one named event: a retried
+  // pipeline emits one start and one terminal event per transition, never a
+  // duplicated row for the same instant.
+  const seenTimelineKeys = new Set<string>();
+  const timelineEvents = wantTimeline
+    ? timeline.filter((event) => {
+        const key = `${event.type}|${event.source.kind}|${event.source.id}|${event.occurredAt}`;
+        if (seenTimelineKeys.has(key)) return false;
+        seenTimelineKeys.add(key);
+        return true;
+      })
+    : [];
 
   return {
     activityMonth: input.activityMonth,
@@ -589,7 +655,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
     },
     insights,
     dataGaps,
-    timeline: wantTimeline ? timeline.slice(0, 50) : [],
+    timeline: wantTimeline ? timelineEvents.slice(0, 50) : [],
     counts: {
       opportunities: sections.has("opportunities") ? opportunities.length : 0,
       recommendations: recommendations.length,

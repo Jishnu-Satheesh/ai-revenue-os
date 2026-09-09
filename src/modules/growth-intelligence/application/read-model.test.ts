@@ -62,6 +62,7 @@ function item(overrides: Partial<SynthesizedItemRow> = {}): SynthesizedItemRow {
     narrative: "Delivery orders spike on rainy Thursdays.",
     fingerprint:
       "aa00000000000000000000000000000000000000000000000000000000000001",
+    synthesisRunId: "71000000-0000-4000-8000-000000000071",
     supportGrade: "corroborated",
     freshness: "current",
     urgency: "medium",
@@ -331,5 +332,140 @@ describe("buildGrowthIntelligenceView", () => {
     expect(view.priorityActions.opportunities).toHaveLength(0);
     expect(view.priorityActions.recommendations).toHaveLength(0);
     expect(view.dataGaps).toHaveLength(0);
+  });
+});
+
+describe("research provenance", () => {
+  const branchId = "20000000-0000-4000-8000-000000000002";
+  const pipelineId = "30000000-0000-4000-8000-000000000003";
+  const runId = "71000000-0000-4000-8000-000000000071";
+  const otherRunId = "71000000-0000-4000-8000-000000000072";
+  const claimId = "80000000-0000-4000-8000-000000000008";
+  const provenance = {
+    [runId]: {
+      pipelineId,
+      branchId,
+      stage: "ready" as const,
+      statusPath: `/api/organizations/${organizationId}/market-profile/research/${pipelineId}`,
+      supportingClaimIds: [claimId],
+    },
+  };
+
+  function recommendationItem(id: string, run: string) {
+    return item({
+      id,
+      kind: "recommendation",
+      synthesisRunId: run,
+      fingerprint: `bb${id.replace(/-/g, "").slice(0, 62)}`,
+      narrative: `Research advice ${id.slice(-4)}`,
+      generatedAt: "2026-09-02T08:00:00.000Z",
+    });
+  }
+
+  it("attaches pipeline provenance to market-research recommendations without moving them", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        items: [recommendationItem("70000000-0000-4000-8000-000000000007", runId)],
+        researchProvenance: provenance,
+      }),
+    );
+
+    const cards = view.priorityActions.recommendations;
+    // Deterministic order is preserved: the channel lane still leads, the
+    // research card follows exactly where an unattributed card would sit.
+    expect(cards.map((card) => card.id)).toEqual([
+      "60000000-0000-4000-8000-000000000006",
+      "70000000-0000-4000-8000-000000000007",
+    ]);
+    expect(cards[0]!.researchProvenance).toBeNull();
+    expect(cards[1]!.researchProvenance).toEqual(provenance[runId]);
+  });
+
+  it("leaves unattributed recommendations without provenance rather than guessing", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        items: [recommendationItem("70000000-0000-4000-8000-000000000007", otherRunId)],
+        researchProvenance: provenance,
+      }),
+    );
+
+    expect(view.priorityActions.recommendations[1]!.researchProvenance).toBeNull();
+  });
+
+  it("keeps the overview preview order identical with and without provenance", () => {
+    const items = [
+      recommendationItem("70000000-0000-4000-8000-000000000007", runId),
+      recommendationItem("70000000-0000-4000-8000-000000000009", otherRunId),
+    ];
+    const plain = buildGrowthIntelligenceView(input({ items }));
+    const attributed = buildGrowthIntelligenceView(
+      input({ items, researchProvenance: provenance }),
+    );
+
+    expect(attributed.priorityActions.recommendations.map((card) => card.id)).toEqual(
+      plain.priorityActions.recommendations.map((card) => card.id),
+    );
+    expect(attributed.priorityActions.recommendations.slice(0, 3)).toHaveLength(3);
+  });
+
+  it("merges named research start, terminal and retry events without duplicates", () => {
+    const activity = [
+      {
+        kind: "started" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market research started — Marina",
+        occurredAt: "2026-09-01T08:00:00.000Z",
+        stage: null,
+      },
+      {
+        kind: "finished" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market research Ready — Marina",
+        occurredAt: "2026-09-02T09:00:00.000Z",
+        stage: "ready" as const,
+      },
+      {
+        kind: "retried" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market analysis retried — Marina",
+        occurredAt: "2026-09-03T09:00:00.000Z",
+        stage: "preparing_insights" as const,
+      },
+      // A redelivered start for the same instant collapses to one event.
+      {
+        kind: "started" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market research started — Marina",
+        occurredAt: "2026-09-01T08:00:00.000Z",
+        stage: null,
+      },
+    ];
+    const view = buildGrowthIntelligenceView(input({ researchActivity: activity }));
+
+    const researchEvents = view.timeline.filter(
+      (event) => event.source.kind === "research_pipeline",
+    );
+    expect(researchEvents.map((event) => event.type)).toEqual([
+      "research-retried",
+      "research-finished",
+      "research-started",
+    ]);
+    expect(researchEvents[0]!.title).toMatch(/retr/i);
+  });
+
+  it("renders no research timeline rows when no activity arrives", () => {
+    const view = buildGrowthIntelligenceView(input({}));
+
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      0,
+    );
   });
 });

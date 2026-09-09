@@ -374,7 +374,7 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
         "growth_intelligence_items",
       )
         .select(
-          "id,kind,narrative,item_fingerprint,evidence_fingerprint,support_grade,freshness,urgency,goal_alignment,activity_month,missing_input,created_at",
+          "id,kind,narrative,item_fingerprint,growth_intelligence_synthesis_run_id,evidence_fingerprint,support_grade,freshness,urgency,goal_alignment,activity_month,missing_input,created_at",
         )
         .eq("organization_id", input.organizationId)
         .eq("status", "current")
@@ -528,11 +528,15 @@ function mapWorkspaceItem(
   if (kind !== "insight" && kind !== "recommendation" && kind !== "data_gap") readFailure();
   const decisionValue = decision ? String(decision.decision) : null;
   if (decisionValue !== null && !WORKSPACE_ITEM_DECISIONS.has(decisionValue)) readFailure();
+  // The synthesis run links research provenance; a row without one cannot
+  // be attributed, so it fails closed instead of silently unattributed.
+  if (typeof row.growth_intelligence_synthesis_run_id !== "string") readFailure();
   return {
     id: String(row.id),
     kind: kind as SynthesizedItemRow["kind"],
     narrative: String(row.narrative),
     fingerprint: String(row.item_fingerprint),
+    synthesisRunId: row.growth_intelligence_synthesis_run_id,
     supportGrade: String(row.support_grade),
     freshness: String(row.freshness),
     urgency: String(row.urgency),

@@ -231,16 +231,29 @@ describe("authenticated Growth Intelligence read repository", () => {
 
 function workspacePersistence(results: Record<string, QueryResult[]> = {}) {
   const queues = new Map(Object.entries(results).map(([table, rows]) => [table, [...rows]]));
-  const calls: Array<{ table: string; filters: Array<[string, unknown]>; limit?: number }> = [];
+  const calls: Array<{
+    table: string;
+    filters: Array<[string, unknown]>;
+    limit?: number;
+    select?: string;
+  }> = [];
   const from = vi.fn((table: string) => {
     const result = queues.get(table)?.shift() ?? { data: [], error: null };
-    const call: { table: string; filters: Array<[string, unknown]>; limit?: number } = {
+    const call: {
+      table: string;
+      filters: Array<[string, unknown]>;
+      limit?: number;
+      select?: string;
+    } = {
       table,
       filters: [],
     };
     calls.push(call);
     const builder = {
-      select: vi.fn(() => builder),
+      select: vi.fn((columns: string) => {
+        call.select = columns;
+        return builder;
+      }),
       eq: vi.fn((key: string, value: unknown) => {
         call.filters.push([key, value]);
         return builder;
@@ -274,6 +287,7 @@ function workspaceItemRow(overrides = {}) {
     kind: "insight",
     narrative: "Delivery orders spike on rainy Thursdays.",
     item_fingerprint: "a".repeat(64),
+    growth_intelligence_synthesis_run_id: "71000000-0000-4000-8000-000000000071",
     evidence_fingerprint: "b".repeat(64),
     support_grade: "corroborated",
     freshness: "current",
@@ -568,5 +582,25 @@ describe("workspace reads", () => {
       "channel_recommendations",
       "growth_intelligence_items",
     ]);
+  });
+
+  it("selects the synthesis run lineage and maps it onto workspace items", async () => {
+    const db = workspacePersistence({
+      growth_intelligence_items: [{ data: [workspaceItemRow()], error: null }],
+      growth_intelligence_item_decisions: [{ data: [], error: null }],
+      growth_intelligence_item_preferences: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const items = await repository.listWorkspaceItems({
+      organizationId,
+      actorId,
+      throughMonth: "2026-09",
+      limit: 100,
+    });
+
+    expect(items[0]!.synthesisRunId).toBe("71000000-0000-4000-8000-000000000071");
+    const call = db.calls.find((entry) => entry.table === "growth_intelligence_items")!;
+    expect(call.select).toContain("growth_intelligence_synthesis_run_id");
   });
 });
