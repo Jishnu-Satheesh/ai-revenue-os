@@ -5695,3 +5695,39 @@ through the real routes, not only in tests.
   `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-11-report.md`.
   Merge note: staged workspace/page/test hunks target the HEAD structure (no router callbacks);
   the worktree keeps the peer-adapted variants (fully green) — take the worktree variants at merge.
+
+### 2026-09-09 · muse-spark · Market monitoring Task 12 verify, document and enable cautiously (12-task plan)
+
+- **BASE:** `1433327` at claim time. Peer sessions active; peer rows (CP1–CP6) present — this board
+  stays UNSTAGED at commit (controller preserves it). No feature code, no migration, no provider
+  enablement, no paid canary. No stash/checkout/reset/push; no repo-wide format. Narrow commit of
+  docs/spec/e2e files only; user performs git push. No subagents dispatched.
+- **Claimed files (Task 12 only):** `e2e/growth-intelligence.spec.ts` (research route-protection
+  boundary tests + authenticated research-flow acceptance that skips without seed/qualification),
+  `README.md` + `.env.example` (E2E_GROWTH_ORGANIZATION_ID + qualification prerequisite, setup only),
+  Spec 022 status line, ADR 0047 verification appendix (hunk-surgery around worktree diffs),
+  verification record + this board (worktree-only), report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-12-report.md` (ignored).
+- **Status:** done-with-blockers — full gates ran with baseline-vs-slice separation (typecheck 0
+  errors; build clean; vitest 4822 passed / 2 failed, both non-slice; lint 11 errors, 9 in
+  committed slice files Tasks 7/8/11 never ran lint; pgTAP 11/12 slice suites green, item-decisions
+  test 25 fails on the Task 5 retention error-string rename). Playwright 8 passed / 12 skipped
+  (seed + qualification absent; first cold run failed on webServer boot race, green on retry
+  against a warm server). All slice migrations paired; every new PL/pgSQL path executed on staging
+  (rolled back, zero residue). Provider qualification BLOCKED (no Brave key, no Gemini
+  rate/model qualification — env verified); paid canary BLOCKED; seeded-browser research flow
+  BLOCKED. Gates stay OFF, new starts stay disabled, no production readiness claimed. Two open
+  slice findings for the owner: lint errors + item-decisions test-25 expectation (both need a
+  code/test owner; Task 12 may not touch them).
+
+### 2026-09-09 · muse-spark · Channel audit recommendations pilot (Cancellations + Availability)
+
+- Scope: user-approved pilot only — Cancellations Financial Impact plus Operating
+  Availability Heatmap. Stored org/channel record as context, curated Talabat playbooks now,
+  live web-evidence slot prepared fail-closed (no live Brave transport ships yet).
+- Claimed files: src/domain/analysis/recommendations.ts,
+  src/workflows/analysis/recommendation-prompt.ts,
+  src/workflows/analysis/channel-playbooks.ts (new),
+  src/workflows/analysis/run-channel-recommendations.ts,
+  src/trigger/recommendations.ts, related tests, specs/018 11.4 amendment, new ADR.
+- Status: in-progress — no migration, no new env keys, no model tool calls.
