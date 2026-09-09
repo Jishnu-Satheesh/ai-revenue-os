@@ -5,6 +5,7 @@ import {
   type NarratedItem,
   type NarrationSubmission,
 } from "@/domain/analysis/recommendations";
+import { logger } from "@/lib/logger";
 import {
   buildNarrationPrompt,
   sha256Hex,
@@ -253,6 +254,10 @@ export async function runChannelRecommendations(
           findings,
         });
       } catch {
+        logger.warn("channel_recommendations.pilot_context_unavailable", {
+          organizationId: payload.organizationId,
+          runId: payload.analysisRunId,
+        });
         pilot = { channelContext: null, playbookGuidance: [], webEvidence: [] };
       }
     }

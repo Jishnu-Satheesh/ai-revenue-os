@@ -183,7 +183,9 @@ const ADVICE_RULES = [
  * alone becomes 5). The set itself lives in `channel-playbooks.ts`; this
  * alias keeps the gate and the prompt tests reading from the same source.
  */
-export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = PILOT_PLAYBOOK_DETECTOR_KEYS;
+export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = new Set(
+  PILOT_PLAYBOOK_DETECTOR_KEYS,
+);
 
 /** Fenced web evidence is bounded: at most 5 items, each snippet 500 chars. */
 export const MAX_WEB_EVIDENCE_ITEMS = 5;

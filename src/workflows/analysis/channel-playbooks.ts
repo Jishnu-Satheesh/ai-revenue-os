@@ -43,7 +43,7 @@ function isTalabatChannel(input: { channelKey: string; templateKey: string | nul
 }
 
 function hasClosedReason(reasonLabels: readonly string[]): boolean {
-  return reasonLabels.some((label) => label.toUpperCase() === "CLOSED");
+  return reasonLabels.some((label) => label.trim().toUpperCase() === "CLOSED");
 }
 
 function talabatCancellationClosedSteps(): readonly string[] {
