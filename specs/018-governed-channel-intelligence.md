@@ -1228,18 +1228,19 @@ This section narrowly extends `specs/012` and `specs/015`: models still never co
 financial/metric value. Narration is permitted only after a deterministic detector has created a
 cited finding.
 
-Pilot amendment (2026-09-09, channel recommendations pilot): for runs whose findings include a
-pilot detector — `orders.cancellation_loss`, `orders.cancellation_attribution`, or
+Pilot amendment (2026-09-09, channel recommendations pilot, Amendment A): for runs whose findings
+include a pilot detector — `orders.cancellation_loss`, `orders.cancellation_attribution`, or
 `operations.closed_share` — the worker widens the fenced prompt folder with stored channel
 context (organization and channel display names, keys, template key, category, industry, country,
-timezone, and currency under a PII allowlist; never service-area blobs or contact details), plus
-curated versioned playbook guidance (`CHANNEL_PLAYBOOK_VERSION = 1`) and a prepared web-evidence
-slot that ships empty and fail-closed (`webEvidence = []`: nothing fetched, nothing invented)
-under narration prompt version 5. Portal steps are framed as checks the operator runs in their own
-portal, never as claims about a portal's menu structure; URLs and domains may only be copied from
-fenced evidence, never invented. A pilot-loader failure falls back to the pre-pilot v4 prompt
-shape and the run still completes; the judge is untouched. Qualifying live search (Brave transport
-runs on fixtures only today) is the explicit follow-up.
+timezone, and currency under a PII allowlist; never service-area blobs or contact details), and
+the narrator grounds itself with Google Search at generation time (user-consented; the channel's
+own docs, forums, and merchant discussions first) under narration prompt version 6. Curated
+playbooks are removed and there is no pre-fetched web slot. The model emits no URLs, findings
+remain the only cited evidence, portal how-to steps are allowed as grounded advice phrased as
+actions the operator performs (never menu-path claims), and every action stays human-supervised.
+A grounding failure falls back to the pre-pilot v4 prompt shape and the run still completes; the
+judge (version 2) still flags invented values. The version-5 playbook design stands as history in
+ADR 0050; the binding rule is section 14 — see ADR 0051.
 
 ## 12. Public API contracts
 
@@ -1374,8 +1375,9 @@ provider payloads, credentials, or customer PII.
   `orders.cancellation_attribution`, or `operations.closed_share` — preferring the channel's own
   docs, forums, and merchant discussions first. The model still emits no URLs (the output shape has
   no URL field), findings remain the only cited evidence, every action stays human-supervised, and
-  output still passes the same schema-validation and citation re-check fence. This supersedes the
-  section 11.4 pilot paragraph's playbook and empty-web-slot sentences; see ADR 0051. ADR 0050
+  output still passes the same schema-validation and citation re-check fence. This superseded the
+  original section 11.4 pilot paragraph's playbook and empty-web-slot sentences — that paragraph now
+  describes Amendment A; see ADR 0051. ADR 0050
   stands as history.
 - Redact or remove customer names, phone numbers, email addresses, delivery addresses, free-text
   order notes, and unrestricted review text unless a declared detector needs minimized content and
