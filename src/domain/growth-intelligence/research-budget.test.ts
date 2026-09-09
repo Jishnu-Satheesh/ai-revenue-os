@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  estimateResearchPromptTokens,
   isResearchProviderQualified,
   isResearchSourceEligibleForSynthesis,
   renderResearchSourceState,
   RESEARCH_BUDGET_LIMITS,
+  RESEARCH_MODEL_CALL_LIMITS,
+  RESEARCH_MODEL_MAX_SOURCES_PER_BATCH,
+  RESEARCH_MODEL_PHASES,
   RESEARCH_PROVIDER_REQUIRED_USES,
   researchAttemptReservationSchema,
   researchExcerptProvenanceSchema,
+  researchModelBudgetSchema,
   researchProviderQualificationSchema,
   researchQuoteSchema,
   researchSupportReviewSchema,
@@ -237,6 +242,67 @@ describe("retention provenance and eligibility", () => {
     expect(
       isResearchSourceEligibleForSynthesis({ availability: "unavailable", erasedAt: null }),
     ).toBe(false);
+  });
+
+  it("bounds each model phase to four calls inside the token ceilings", () => {
+    for (const phase of RESEARCH_MODEL_PHASES) {
+      const ceiling = RESEARCH_MODEL_CALL_LIMITS[phase];
+      expect(ceiling.maxCalls).toBe(4);
+      expect(ceiling.maxInputTokens).toBe(12_000);
+      expect(ceiling.maxOutputTokens).toBe(4_000);
+      expect(
+        researchModelBudgetSchema.parse({
+          phase,
+          maxCalls: 4,
+          maxInputTokens: 12_000,
+          maxOutputTokens: 4_000,
+          maxSourcesPerBatch: RESEARCH_MODEL_MAX_SOURCES_PER_BATCH,
+        }).phase,
+      ).toBe(phase);
+    }
+    expect(() =>
+      researchModelBudgetSchema.parse({
+        phase: "extraction",
+        maxCalls: 5,
+        maxInputTokens: 12_000,
+        maxOutputTokens: 4_000,
+        maxSourcesPerBatch: 10,
+      }),
+    ).toThrow();
+    expect(() =>
+      researchModelBudgetSchema.parse({
+        phase: "support_review",
+        maxCalls: 4,
+        maxInputTokens: 12_001,
+        maxOutputTokens: 4_000,
+        maxSourcesPerBatch: 10,
+      }),
+    ).toThrow();
+    expect(() =>
+      researchModelBudgetSchema.parse({
+        phase: "extraction",
+        maxCalls: 4,
+        maxInputTokens: 12_000,
+        maxOutputTokens: 4_001,
+        maxSourcesPerBatch: 10,
+      }),
+    ).toThrow();
+    expect(() =>
+      researchModelBudgetSchema.parse({
+        phase: "extraction",
+        maxCalls: 4,
+        maxInputTokens: 12_000,
+        maxOutputTokens: 4_000,
+        maxSourcesPerBatch: 11,
+      }),
+    ).toThrow();
+  });
+
+  it("estimates prompt tokens conservatively at four characters per token", () => {
+    expect(estimateResearchPromptTokens("")).toBe(1);
+    expect(estimateResearchPromptTokens("abcd")).toBe(1);
+    expect(estimateResearchPromptTokens("abcde")).toBe(2);
+    expect(estimateResearchPromptTokens("x".repeat(48_000))).toBe(12_000);
   });
 
   it("renders erased payloads as source-unavailable history", () => {

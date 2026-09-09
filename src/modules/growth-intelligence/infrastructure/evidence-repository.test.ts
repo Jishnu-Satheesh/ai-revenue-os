@@ -317,6 +317,79 @@ describe("Market Evidence repository", () => {
     );
   });
 
+  it("surfaces a lost lease distinctly so the worker stops mutating evidence", async () => {
+    const lost = { message: "market_research_claim_lost" };
+    const recordRpc = vi.fn().mockResolvedValue({ data: null, error: lost });
+    const repository = createMarketEvidenceRepository({ rpc: recordRpc });
+
+    await expect(
+      repository.record({ organizationId, requestId, claimToken, runId, payload }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+    expect(recordRpc).toHaveBeenCalledOnce();
+
+    const throwingRpc = vi.fn().mockRejectedValue(new Error("market_research_claim_lost"));
+    await expect(
+      createMarketEvidenceRepository({ rpc: throwingRpc }).record({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        payload,
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+
+    const completeRpc = vi.fn().mockResolvedValue({ data: null, error: lost });
+    await expect(
+      createMarketEvidenceRepository({ rpc: completeRpc }).complete({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        result: {
+          outcome: "partial",
+          resultDigest: "d".repeat(64),
+          sourceAttemptCount: 1,
+          sourceSuccessCount: 1,
+          adapterCostMicrosUsd: 42_000,
+          adapterLatencyMs: 721,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+  });
+
+  it("refuses claims that cite unavailable or excluded sources before any RPC", async () => {
+    const db = persistence();
+    for (const availability of ["unavailable", "excluded"] as const) {
+      const inadmissible = {
+        ...payload,
+        sources: [
+          {
+            ...payload.sources[0]!,
+            availability,
+            contentDigest: null,
+            safeFailureCode: "SOURCE_ACCESS_REFUSED",
+          },
+        ],
+      } as unknown as MarketEvidencePayload;
+
+      await expect(
+        createMarketEvidenceRepository(db.client).record({
+          organizationId,
+          requestId,
+          claimToken,
+          runId,
+          payload: inadmissible,
+        }),
+      ).rejects.toEqual(
+        expect.objectContaining({
+          code: "DOMAIN_ERROR",
+          message: "Market Evidence must contain compact citations and claims only.",
+        }),
+      );
+    }
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
   it("refuses an excerpt without its digest, and an over-long excerpt", async () => {
     const db = persistence();
     const digestlessPayload = {

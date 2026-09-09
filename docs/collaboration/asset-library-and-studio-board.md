@@ -5510,6 +5510,35 @@ through the real routes, not only in tests.
   and the browser proof (Keeta 22–28 Feb default, 1–4 Jan run + cache hit,
   Offline Store grain warning, Noon whole-span default, March unselectable,
   auto-run visibility) — excluded from this task by controller ruling.
+### 2026-09-08 · muse-spark · Market monitoring Task 7 extract and admit cited claims (12-task plan)
+
+- **BASE:** `aa5be1b` (peer commits on top of Task 6). Peer sessions active.
+- **Claimed files (Task 7 only):** created
+  `src/modules/growth-intelligence/infrastructure/research/claim-extraction.ts`
+  and test, `research/claim-support-review.ts` and test;
+  `supabase/migrations/*_growth_intelligence_research_claim_support.sql` (if the
+  Task 5 provenance schema requires it) + `market_evidence_test.sql` extension;
+  modified `research-budget.ts` (+ model-budget test), `errors.ts`,
+  `infrastructure/evidence-repository.ts` + test,
+  `src/workflows/growth-intelligence/run-market-research.ts` + test; report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-7-report.md`,
+  and this board. Bounded no-tool Gemini SHAPE only (fixtures/mocks, gates stay
+  OFF); replaces claims=[]/links=[] placeholder + Math.min clamping incl.
+  failure/replay paths; trigger Task 6/8 marker + old completion RPCs stay for
+  Task 8. No live model calls, no stash/push/repo-wide-format; prettier only
+  Task 7 files, never this board.
+- **Status:** in-progress — adversarial RED cases first, then extraction +
+  support-review modules, fenced persistence with provenance, worker rewiring,
+  focused vitest + hosted market-evidence pgTAP + staging RPC execution,
+  path-limited commit.
+- **Status 2026-09-09 (resume):** done — prior draft verified, test-53
+  expectation repaired (23503→22023, Task 5 trigger fires first; isolation
+  holds), prettier on Task 7 TS files only; vitest 493/493, typecheck 0
+  errors, pgTAP market-evidence 61/61, staging RPC probe clean (42501 fence,
+  zero residue); migration 20260908173651 already paired, nothing pushed;
+  report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-7-report.md`.
+
 - **Status:** done — calendar + month-year-picker focused suites green,
   typecheck clean, lint with no new errors; report at
   `.superpowers/sdd/2026-09-07-channel-audit-free-range-window/task-15-report.md`.

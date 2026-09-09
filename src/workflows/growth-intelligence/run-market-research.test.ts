@@ -1,21 +1,35 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { DomainError } from "@/lib/errors";
 import type { MarketEvidenceRepository } from "@/modules/growth-intelligence/infrastructure/evidence-repository";
+import type {
+  ResearchModelSpender,
+  ResearchModelTransport,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
 import { buildResearchQueryPlan } from "@/modules/growth-intelligence/infrastructure/research/query-plan";
 import {
   researchRequestSchema,
   type ResearchRequest,
+  type ResearchRetrievedSource,
+  type ResearchRetrievalResult,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 import {
+  createMarketResearchSpendLedger,
   marketResearchPayloadSchema,
+  recordMarketResearchLatency,
+  recordMarketResearchUsage,
   runMarketResearch,
-  selectMaterialAttempts,
-  type AdapterSourceAttempt,
+  selectMaterialSources,
   type ApprovedMarketProfileView,
   type GrowthIntelligenceRequestView,
   type MarketResearchClaim,
+  type MarketResearchExcerptProvenance,
+  type MarketResearchModelPhase,
 } from "@/workflows/growth-intelligence/run-market-research";
 
 const organizationId = "10000000-0000-4000-8000-000000000001";
@@ -26,7 +40,6 @@ const correlationId = "60000000-0000-4000-8000-000000000006";
 const profileVersionId = "70000000-0000-4000-8000-000000000007";
 const sourcePolicyDigest = "c".repeat(64);
 const digestA = "a".repeat(64);
-const digestB = "b".repeat(64);
 
 const document: MarketProfileDocumentV1 = {
   schemaVersion: 1,
@@ -84,21 +97,152 @@ const profileView: ApprovedMarketProfileView = {
   enabled: true,
 };
 
-function attempt(overrides: Partial<AdapterSourceAttempt> = {}): AdapterSourceAttempt {
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+const EXCERPT_A = "Harbor Eats saw record weekend footfall near the marina promenade.";
+const EXCERPT_B = "The city calendar lists a waterfront festival next weekend.";
+
+function retrievedSource(
+  overrides: Partial<ResearchRetrievedSource> = {},
+): ResearchRetrievedSource {
+  const excerptText = EXCERPT_A;
   return {
-    queryKind: "market_context",
     sourceUrl: "https://tourism.example/dubai-notice",
-    sourceDomain: "tourism.example",
+    domain: "tourism.example",
     publisher: "Dubai Tourism",
-    sourceClass: "official",
-    availability: "available",
-    contentDigest: digestA,
-    safeFailureCode: null,
+    excerptText,
+    excerptDigest: sha256(excerptText),
     retrievedAt: "2026-09-02T06:00:00Z",
+    ...overrides,
+  };
+}
+
+function retrievalResult(
+  overrides: Partial<ResearchRetrievalResult> = {},
+): ResearchRetrievalResult {
+  const attemptId = "10000000-0000-4000-8000-000000000010";
+  return {
+    sources: [retrievedSource()],
+    coverage: [
+      {
+        slotKey: "local_market",
+        kind: "local_market",
+        outcome: "supported",
+        attemptIds: [attemptId],
+        acceptedClaimIds: [],
+      },
+    ],
+    attempts: [
+      { attemptId, slotKey: "local_market", usage: { kind: "reported", microsUsd: 1_000 } },
+    ],
+    ...overrides,
+  };
+}
+
+function scriptedExtractionTransport(
+  candidates: (input: { sourceKey: string; excerptText: string }) => unknown[],
+) {
+  const transport: ResearchModelTransport = {
+    complete: vi.fn(async (input) => {
+      const prompt = JSON.parse(input.prompt) as {
+        sources: Array<{ sourceKey: string; sourceUrl: string; excerptText: string }>;
+      };
+      const shaped = prompt.sources.flatMap((item) =>
+        candidates({ sourceKey: item.sourceKey, excerptText: item.excerptText }),
+      );
+      return {
+        text: JSON.stringify(shaped),
+        usage: { kind: "reported" as const, microsUsd: 140 },
+        latencyMs: 210,
+      };
+    }),
+  };
+  return transport;
+}
+
+function spanCandidate(
+  sourceKey: string,
+  excerptText: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    candidateKey: `candidate-${sourceKey.slice(4, 12)}`,
+    subjectKind: "market",
+    subjectRef: "dubai marina footfall",
+    claimKind: "demand_signal",
+    paraphrase: "Weekend footfall near the marina reached a record level.",
+    quotation: null,
+    claimCategory: "demand_trend",
+    geographicLayer: "city",
+    geographyRef: "ae:du",
+    citations: [{ sourceKey, spanStart: 0, spanEnd: excerptText.length, quotedText: excerptText }],
     publishedAt: null,
-    observedAt: "2026-09-02T05:00:00Z",
-    adapterCostMicrosUsd: 1_000,
-    adapterLatencyMs: 500,
+    observedAt: "2026-09-01T09:00:00Z",
+    limitations: [],
+    ...overrides,
+  };
+}
+
+function scriptedReviewTransport(
+  verdict: "supported" | "unsupported" | "uncertain" = "supported",
+  microsUsd = 90,
+) {
+  const transport: ResearchModelTransport = {
+    complete: vi.fn(async (input) => {
+      const prompt = JSON.parse(input.prompt) as {
+        candidates: Array<{ candidateKey: string }>;
+      };
+      return {
+        text: JSON.stringify(
+          prompt.candidates.map((item) => ({
+            candidateKey: item.candidateKey,
+            verdict,
+            limitations: [],
+          })),
+        ),
+        usage: { kind: "reported" as const, microsUsd },
+        latencyMs: 95,
+      };
+    }),
+  };
+  return transport;
+}
+
+function fakeSpender(): ResearchModelSpender {
+  let count = 0;
+  return {
+    reserve: vi.fn(async () => {
+      count += 1;
+      return { attemptId: `20000000-0000-4000-8000-${String(count).padStart(12, "0")}` };
+    }),
+    settle: vi.fn(async () => {}),
+  };
+}
+
+function modelPhase(overrides: Partial<MarketResearchModelPhase> = {}): MarketResearchModelPhase {
+  return {
+    transport: scriptedExtractionTransport(() => []),
+    spender: fakeSpender(),
+    budget: {
+      phase: "extraction",
+      maxCalls: 4,
+      maxInputTokens: 12_000,
+      maxOutputTokens: 4_000,
+      maxSourcesPerBatch: 10,
+    },
+    modelId: "gemini-fixture-extraction",
+    ...overrides,
+  };
+}
+
+function provenance(
+  overrides: Partial<MarketResearchExcerptProvenance> = {},
+): MarketResearchExcerptProvenance {
+  return {
+    qualificationVersion: "BRAVE-ORDER-FIXTURE",
+    retainUntilFor: () => "2027-09-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -129,7 +273,7 @@ function dependencies(overrides = {}) {
   const currentSources = { load: vi.fn(async () => [] as string[]) };
   const adapter = {
     availability: { available: true, provider: "test-adapter" },
-    searchAndFetch: vi.fn(async () => [attempt()] as AdapterSourceAttempt[]),
+    searchAndFetch: vi.fn(async () => retrievalResult()),
   };
   const planQueries = vi.fn((request: ResearchRequest) =>
     buildResearchQueryPlan({
@@ -169,6 +313,19 @@ function dependencies(overrides = {}) {
     evidence,
     currentSources,
     adapter,
+    extraction: modelPhase(),
+    supportReview: modelPhase({
+      transport: scriptedReviewTransport(),
+      budget: {
+        phase: "support_review" as const,
+        maxCalls: 4,
+        maxInputTokens: 12_000,
+        maxOutputTokens: 4_000,
+        maxSourcesPerBatch: 10,
+      },
+      modelId: "gemini-fixture-review",
+    }),
+    excerptProvenance: provenance(),
     planQueries,
     buildScope,
     events,
@@ -218,6 +375,40 @@ describe("runMarketResearch claim fencing", () => {
     expect(result).toEqual({ outcome: "claim_lost" });
   });
 
+  it("returns claim_lost without further mutations when recording loses the lease", async () => {
+    const deps = dependencies();
+    deps.evidence.record.mockRejectedValueOnce(
+      new GrowthIntelligenceError(
+        "RESEARCH_CLAIM_LOST",
+        "The research lease is no longer current.",
+      ),
+    );
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "claim_lost" });
+    expect(deps.evidence.complete).not.toHaveBeenCalled();
+    expect(deps.evidence.fail).not.toHaveBeenCalled();
+    expect(deps.requests.complete).not.toHaveBeenCalled();
+    expect(deps.requests.fail).not.toHaveBeenCalled();
+    expect(deps.events.publish).not.toHaveBeenCalled();
+  });
+
+  it("returns claim_lost without further mutations when completion loses the lease", async () => {
+    const deps = dependencies();
+    deps.evidence.complete.mockRejectedValueOnce(
+      new GrowthIntelligenceError(
+        "RESEARCH_CLAIM_LOST",
+        "The research lease is no longer current.",
+      ),
+    );
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "claim_lost" });
+    expect(deps.requests.complete).not.toHaveBeenCalled();
+  });
+
   it("returns cancelled before claiming when the run signal is already aborted", async () => {
     const deps = dependencies();
     const controller = new AbortController();
@@ -261,6 +452,16 @@ describe("runMarketResearch profile and request reloading", () => {
       code: "REQUEST_KIND_UNSUPPORTED",
       runId: null,
     });
+    expect(deps.adapter.searchAndFetch).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before any run begins when the model phases are not wired", async () => {
+    const deps = dependencies({ extraction: undefined });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "failed", code: "EXTRACTION_UNAVAILABLE", runId: null });
+    expect(deps.evidence.begin).not.toHaveBeenCalled();
     expect(deps.adapter.searchAndFetch).not.toHaveBeenCalled();
   });
 
@@ -316,12 +517,175 @@ describe("runMarketResearch fail-closed adapter", () => {
       }),
     );
   });
+
+  it("reports honest zero spend on a pre-retrieval failure because nothing was spent", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: false, provider: "exa" },
+        searchAndFetch: vi.fn(async () => {
+          throw new Error("Market research is not enabled for this organization.");
+        }),
+      },
+    });
+
+    await runMarketResearch(payload, deps);
+
+    expect(deps.evidence.fail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failure: {
+          safeFailureCode: "ADAPTER_UNAVAILABLE",
+          adapterCostMicrosUsd: 0,
+          adapterLatencyMs: 0,
+        },
+      }),
+    );
+  });
 });
 
-describe("runMarketResearch grading and completion", () => {
+describe("runMarketResearch extraction and admission", () => {
+  it("records validated claims with excerpt provenance instead of the empty placeholder", async () => {
+    const deps = dependencies({
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText),
+        ]),
+      }),
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({ outcome: "completed", claimCount: 1, supportedCount: 1 });
+    expect(deps.evidence.record).toHaveBeenCalledOnce();
+    const recorded = deps.evidence.record.mock.calls[0]![0];
+    expect(recorded.payload.claims).toHaveLength(1);
+    const claim = recorded.payload.claims[0];
+    expect(claim.key).toMatch(/^clm-[a-f0-9]{12}$/);
+    expect(claim.claimDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(claim.sourceKeys).toHaveLength(1);
+    expect(claim.staleAt).toBe("2026-09-15T09:00:00.000Z");
+    expect(claim.expiresAt).toBe("2026-10-01T09:00:00.000Z");
+    expect(claim.limitations).toEqual(
+      expect.arrayContaining(["SNIPPET_EVIDENCE_ONLY", "ONE_SOURCE"]),
+    );
+    expect(claim.quotation).toBeNull();
+    const source = recorded.payload.sources[0];
+    expect(source.excerptText).toBe(EXCERPT_A);
+    expect(source.excerptDigest).toBe(sha256(EXCERPT_A));
+    expect(source.contentDigest).toBe(sha256(EXCERPT_A));
+    expect(source.qualificationVersion).toBe("BRAVE-ORDER-FIXTURE");
+    expect(source.retainUntil).toBe("2027-09-01T00:00:00Z");
+    expect(recorded.payload.links).toEqual([]);
+  });
+
+  it("completes with recorded counts and unclamped actual spend", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            attempts: [
+              {
+                attemptId: "10000000-0000-4000-8000-000000000010",
+                slotKey: "local_market",
+                usage: { kind: "reported", microsUsd: 6_000_000 },
+              },
+            ],
+          }),
+        ),
+      },
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText),
+        ]),
+      }),
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({
+      outcome: "completed",
+      sourceAttemptCount: 1,
+      sourceSuccessCount: 1,
+    });
+    expect(deps.evidence.complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          sourceAttemptCount: 1,
+          sourceSuccessCount: 1,
+          adapterCostMicrosUsd: 6_000_000 + 140 + 90,
+          adapterLatencyMs: 210 + 95,
+        }),
+      }),
+    );
+  });
+
+  it("carries unknown usage as a count in events instead of converting it to zero", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            attempts: [
+              {
+                attemptId: "10000000-0000-4000-8000-000000000010",
+                slotKey: "local_market",
+                usage: { kind: "unknown" },
+              },
+            ],
+          }),
+        ),
+      },
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({ outcome: "completed", unknownUsageCount: 1 });
+    expect(deps.evidence.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ result: expect.objectContaining({ adapterCostMicrosUsd: 140 }) }),
+    );
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.completed",
+        payload: expect.objectContaining({ unknownUsageCount: 1 }),
+      }),
+    );
+  });
+
+  it("records sources alone with zero claims when extraction finds nothing supportable", async () => {
+    const deps = dependencies({
+      supportReview: modelPhase({
+        transport: scriptedReviewTransport("unsupported"),
+        budget: {
+          phase: "support_review" as const,
+          maxCalls: 4,
+          maxInputTokens: 12_000,
+          maxOutputTokens: 4_000,
+          maxSourcesPerBatch: 10,
+        },
+        modelId: "gemini-fixture-review",
+      }),
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText),
+        ]),
+      }),
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({ outcome: "completed", claimCount: 0, unsupportedCount: 1 });
+    expect(deps.evidence.record).toHaveBeenCalledOnce();
+    expect(deps.evidence.record.mock.calls[0]![0].payload.claims).toEqual([]);
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ claimCount: 0, unsupportedCount: 1 }),
+      }),
+    );
+  });
+
   it("skips record when every digest is already current but still completes run lineage", async () => {
     const deps = dependencies();
-    deps.currentSources.load.mockResolvedValueOnce([digestA]);
+    deps.currentSources.load.mockResolvedValueOnce([sha256(EXCERPT_A)]);
 
     const result = await runMarketResearch(payload, deps);
 
@@ -330,66 +694,200 @@ describe("runMarketResearch grading and completion", () => {
     expect(result).toMatchObject({ outcome: "completed", claimCount: 0 });
   });
 
-  it("records compact sources with no claim content when digests are new", async () => {
-    const deps = dependencies();
+  it("drops policy-excluded sources before recording and completes partial", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            sources: [
+              retrievedSource(),
+              retrievedSource({
+                sourceUrl: "https://blocked.example/closed",
+                domain: "blocked.example",
+                publisher: "Blocked Publisher",
+                excerptText: EXCERPT_B,
+                excerptDigest: sha256(EXCERPT_B),
+              }),
+            ],
+          }),
+        ),
+      },
+    });
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(deps.evidence.record).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ outcome: "partial", sourceAttemptCount: 1 });
     const recorded = deps.evidence.record.mock.calls[0]![0];
-    expect(recorded.payload.claims).toEqual([]);
-    expect(recorded.payload.links).toEqual([]);
     expect(recorded.payload.sources).toHaveLength(1);
-    expect(result).toMatchObject({ outcome: "completed", sourceAttemptCount: 1 });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.partially_completed",
+        payload: expect.objectContaining({ excludedSourceCount: 1 }),
+      }),
+    );
   });
 
-  it("completes partial and emits partially_completed when a source fetch fails safely", async () => {
-    const deps = dependencies();
-    deps.adapter.searchAndFetch.mockResolvedValueOnce([
-      attempt(),
-      attempt({
-        sourceUrl: "https://paywalled.example/closed",
-        sourceDomain: "paywalled.example",
-        publisher: null,
-        sourceClass: "public_signal",
-        availability: "unavailable",
-        contentDigest: null,
-        safeFailureCode: "SOURCE_ACCESS_REFUSED",
+  it("links corroborating claims from independent publishers and nothing else", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            sources: [
+              retrievedSource(),
+              retrievedSource({
+                sourceUrl: "https://calendar.example/dubai-events",
+                domain: "calendar.example",
+                publisher: "Dubai Calendar",
+                excerptText: EXCERPT_B,
+                excerptDigest: sha256(EXCERPT_B),
+              }),
+            ],
+          }),
+        ),
+      },
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText),
+        ]),
       }),
-    ]);
+    });
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toMatchObject({ outcome: "partial", sourceAttemptCount: 2 });
+    expect(result).toMatchObject({ outcome: "completed", claimCount: 2 });
+    const recorded = deps.evidence.record.mock.calls[0]![0];
+    expect(recorded.payload.links).toHaveLength(1);
+    expect(recorded.payload.links[0]).toMatchObject({ relation: "corroborates" });
+    const [first, second] = recorded.payload.claims as Array<{ key: string }>;
+    expect(
+      [recorded.payload.links[0].fromClaimKey, recorded.payload.links[0].toClaimKey].sort(),
+    ).toEqual([first!.key, second!.key].sort());
+  });
+
+  it("strips quotations when the confirmed policy forbids bounded quotes", async () => {
+    const deps = dependencies({
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText, { quotation: excerptText }),
+        ]),
+      }),
+    });
+
+    await runMarketResearch(payload, deps);
+
+    const recorded = deps.evidence.record.mock.calls[0]![0];
+    expect(recorded.payload.claims[0].quotation).toBeNull();
+  });
+
+  it("keeps quotations inside the aggregate cap when the confirmed policy allows them", async () => {
+    const quotedDocument: MarketProfileDocumentV1 = {
+      ...document,
+      sourcePolicy: {
+        ...document.sourcePolicy,
+        allowBoundedQuotes: true,
+        maxQuotationCharacters: 240,
+      },
+    };
+    const deps = dependencies({
+      profiles: { readCurrent: vi.fn(async () => ({ ...profileView, document: quotedDocument })) },
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText, {
+            quotation: excerptText.slice(0, 60),
+            citations: [
+              { sourceKey, spanStart: 0, spanEnd: 60, quotedText: excerptText.slice(0, 60) },
+            ],
+          }),
+        ]),
+      }),
+    });
+
+    await runMarketResearch(payload, deps);
+
+    const recorded = deps.evidence.record.mock.calls[0]![0];
+    expect(recorded.payload.claims[0].quotation).toBe(EXCERPT_A.slice(0, 60));
+  });
+
+  it("completes partial and emits partially_completed when a slot has no usable evidence", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            sources: [],
+            coverage: [
+              {
+                slotKey: "local_market",
+                kind: "local_market",
+                outcome: "searched_no_usable_evidence",
+                attemptIds: ["10000000-0000-4000-8000-000000000010"],
+                acceptedClaimIds: [],
+              },
+            ],
+            attempts: [
+              {
+                attemptId: "10000000-0000-4000-8000-000000000010",
+                slotKey: "local_market",
+                usage: { kind: "reported", microsUsd: 1_000 },
+              },
+            ],
+          }),
+        ),
+      },
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({ outcome: "partial", sourceAttemptCount: 0 });
+    expect(deps.evidence.record).not.toHaveBeenCalled();
     expect(deps.events.publish).toHaveBeenCalledWith(
       expect.objectContaining({ eventName: "market_research.partially_completed" }),
     );
   });
 
-  it("refuses unbounded adapter results instead of truncating them silently", async () => {
+  it("refuses unbounded retrieval results instead of truncating them silently", async () => {
     const deps = dependencies();
     deps.adapter.searchAndFetch.mockResolvedValueOnce(
-      Array.from({ length: 201 }, (_, index) =>
-        attempt({ sourceUrl: `https://tourism.example/notice-${index}` }),
-      ),
+      retrievalResult({
+        sources: Array.from({ length: 41 }, (_, index) =>
+          retrievedSource({
+            sourceUrl: `https://tourism.example/notice-${index}`,
+            excerptText: `${EXCERPT_A} ${index}`,
+            excerptDigest: sha256(`${EXCERPT_A} ${index}`),
+          }),
+        ),
+      }),
     );
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_RESULT_UNBOUNDED", runId });
+    expect(result).toEqual({ outcome: "failed", code: "EVIDENCE_RECORD_INVALID", runId });
     expect(deps.evidence.record).not.toHaveBeenCalled();
   });
 });
 
 describe("runMarketResearch reassessment", () => {
   it("enqueues evidence reassessment for observed domains outside the approved policy", async () => {
-    const deps = dependencies();
-    deps.adapter.searchAndFetch.mockResolvedValueOnce([
-      attempt({
-        sourceUrl: "https://new-competitor.example/launch",
-        sourceDomain: "new-competitor.example",
-      }),
-    ]);
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            sources: [
+              retrievedSource({
+                sourceUrl: "https://new-competitor.example/launch",
+                domain: "new-competitor.example",
+                publisher: "New Competitor",
+                excerptText: EXCERPT_B,
+                excerptDigest: sha256(EXCERPT_B),
+              }),
+            ],
+          }),
+        ),
+      },
+    });
 
     const result = await runMarketResearch(payload, deps);
 
@@ -420,13 +918,24 @@ describe("runMarketResearch reassessment", () => {
   });
 
   it("writes no profile proposal from inferred domains; the approved profile stays untouched", async () => {
-    const deps = dependencies();
-    deps.adapter.searchAndFetch.mockResolvedValueOnce([
-      attempt({
-        sourceUrl: "https://new-competitor.example/launch",
-        sourceDomain: "new-competitor.example",
-      }),
-    ]);
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            sources: [
+              retrievedSource({
+                sourceUrl: "https://new-competitor.example/launch",
+                domain: "new-competitor.example",
+                publisher: "New Competitor",
+                excerptText: EXCERPT_B,
+                excerptDigest: sha256(EXCERPT_B),
+              }),
+            ],
+          }),
+        ),
+      },
+    });
 
     await runMarketResearch(payload, deps);
 
@@ -447,32 +956,59 @@ describe("runMarketResearch reassessment", () => {
     expect(deps.profiles.readCurrent).toHaveBeenCalled();
   });
 
-  it("never lets raw source content reach events, logs, or RPC payloads", async () => {
-    const deps = dependencies();
+  it("never lets raw source content reach events", async () => {
+    const deps = dependencies({
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText),
+        ]),
+      }),
+    });
 
     await runMarketResearch(payload, deps);
 
     const serialized = JSON.stringify([
       deps.events.publish.mock.calls,
       deps.requests.enqueue.mock.calls,
-      deps.evidence.record.mock.calls,
-      deps.evidence.complete.mock.calls,
     ]);
-    expect(serialized).not.toContain("paraphrase");
-    expect(serialized).not.toContain("quotation");
+    expect(serialized).not.toContain(EXCERPT_A);
+    expect(serialized).not.toContain("Weekend footfall near the marina reached a record level.");
   });
 });
 
-describe("selectMaterialAttempts", () => {
-  it("keeps only available attempts with digests outside the current set", () => {
-    const available = attempt();
-    const unavailable = attempt({
-      availability: "unavailable",
-      contentDigest: null,
-      safeFailureCode: "SOURCE_ACCESS_REFUSED",
+describe("selectMaterialSources", () => {
+  it("keeps only sources whose excerpt digest is outside the current set", () => {
+    const current = retrievedSource();
+    const novel = retrievedSource({
+      sourceUrl: "https://calendar.example/dubai-events",
+      domain: "calendar.example",
+      excerptText: EXCERPT_B,
+      excerptDigest: sha256(EXCERPT_B),
     });
-    const stale = attempt({ contentDigest: digestB });
 
-    expect(selectMaterialAttempts([available, unavailable, stale], [digestB])).toEqual([available]);
+    expect(selectMaterialSources([current, novel], [current.excerptDigest])).toEqual([novel]);
+  });
+});
+
+describe("market research spend ledger", () => {
+  it("sums known usage without clamping and counts unknowns separately", () => {
+    const ledger = createMarketResearchSpendLedger();
+    recordMarketResearchUsage(ledger, { kind: "reported", microsUsd: 6_000_000 });
+    recordMarketResearchUsage(ledger, { kind: "estimated", microsUsd: 250 });
+    recordMarketResearchUsage(ledger, { kind: "unknown" });
+    recordMarketResearchLatency(ledger, 210);
+    recordMarketResearchLatency(ledger, -5);
+
+    expect(ledger).toEqual({ knownMicrosUsd: 6_000_250, unknownCount: 1, latencyMs: 210 });
+  });
+
+  it("treats malformed model usage as unknown liability rather than trusting it", () => {
+    const ledger = createMarketResearchSpendLedger();
+    recordMarketResearchUsage(ledger, { kind: "reported", microsUsd: -40 } as unknown as {
+      kind: "reported";
+      microsUsd: number;
+    });
+
+    expect(ledger).toEqual({ knownMicrosUsd: 0, unknownCount: 1, latencyMs: 0 });
   });
 });

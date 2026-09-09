@@ -205,6 +205,64 @@ export const researchSupportReviewSchema = z
 
 export type ResearchSupportReview = z.infer<typeof researchSupportReviewSchema>;
 
+/**
+ * Bounded no-tool model budgets for the extraction and support-review
+ * phases. Each phase may issue at most four calls (one bounded repair
+ * included); every call stays within its input/output token bound and every
+ * batch holds at most ten sources. Billable reasoning tokens ride inside the
+ * same per-call output bound; hidden SDK retries stay disabled.
+ */
+export const RESEARCH_MODEL_PHASES = ["extraction", "support_review"] as const;
+
+export type ResearchModelPhase = (typeof RESEARCH_MODEL_PHASES)[number];
+
+export const RESEARCH_MODEL_CALL_LIMITS = {
+  extraction: { maxCalls: 4, maxInputTokens: 12_000, maxOutputTokens: 4_000 },
+  support_review: { maxCalls: 4, maxInputTokens: 12_000, maxOutputTokens: 4_000 },
+} as const;
+
+/** At most ten sources travel in one model batch (four batches cover forty). */
+export const RESEARCH_MODEL_MAX_SOURCES_PER_BATCH = 10;
+
+export const researchModelBudgetSchema = z
+  .object({
+    phase: z.enum(RESEARCH_MODEL_PHASES),
+    maxCalls: z.number().int().min(1).max(4),
+    maxInputTokens: z.number().int().min(1).max(12_000),
+    maxOutputTokens: z.number().int().min(1).max(4_000),
+    maxSourcesPerBatch: z.number().int().min(1).max(RESEARCH_MODEL_MAX_SOURCES_PER_BATCH),
+  })
+  .strict()
+  .superRefine((budget, context) => {
+    const ceiling = RESEARCH_MODEL_CALL_LIMITS[budget.phase];
+    if (budget.maxCalls > ceiling.maxCalls) {
+      context.addIssue({ code: "custom", message: "A model phase cannot exceed four calls." });
+    }
+    if (budget.maxInputTokens > ceiling.maxInputTokens) {
+      context.addIssue({
+        code: "custom",
+        message: "A model call cannot exceed 12,000 input tokens.",
+      });
+    }
+    if (budget.maxOutputTokens > ceiling.maxOutputTokens) {
+      context.addIssue({
+        code: "custom",
+        message: "A model call cannot exceed 4,000 output tokens.",
+      });
+    }
+  });
+
+export type ResearchModelBudget = z.infer<typeof researchModelBudgetSchema>;
+
+/**
+ * Conservative token estimate for prompt bounding: four characters per
+ * token. Real billable bounds are enforced by the staged model agreement;
+ * this estimate only keeps prompts inside the call ceiling before issuing.
+ */
+export function estimateResearchPromptTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
 export const researchErasureReasonSchema = z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/);
 
 export type ResearchErasureReason = z.infer<typeof researchErasureReasonSchema>;

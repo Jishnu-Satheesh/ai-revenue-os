@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { DomainError } from "@/lib/errors";
 
 const identifierSchema = z.string().uuid();
@@ -316,6 +317,20 @@ function persistenceError(
   return new DomainError("DOMAIN_ERROR", messages[operation]);
 }
 
+function errorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return "";
+}
+
+function claimLostError(): GrowthIntelligenceError {
+  return new GrowthIntelligenceError(
+    "RESEARCH_CLAIM_LOST",
+    "The research lease is no longer current; no evidence was changed.",
+  );
+}
+
 async function invoke(
   persistence: MarketEvidencePersistence,
   name: string,
@@ -326,10 +341,17 @@ async function invoke(
   let result: { data: unknown; error: unknown };
   try {
     result = await persistence.rpc(name, args);
-  } catch {
+  } catch (error: unknown) {
+    // A lost lease (expiry or same-branch supersession, which cancels the
+    // claimed request) must surface distinctly so the worker stops mutating
+    // instead of retrying evidence writes under a dead claim token.
+    if (errorMessage(error).includes("market_research_claim_lost")) throw claimLostError();
     throw persistenceError(operation);
   }
-  if (result.error) throw persistenceError(operation);
+  if (result.error) {
+    if (errorMessage(result.error).includes("market_research_claim_lost")) throw claimLostError();
+    throw persistenceError(operation);
+  }
   const parsed = outputSchema.safeParse(result.data);
   if (!parsed.success) throw persistenceError(operation);
   return parsed.data;
@@ -363,6 +385,20 @@ export function createMarketEvidenceRepository(
 
     async record(input) {
       const payload = parseOrThrow(marketEvidencePayloadSchema, input.payload);
+      // Deterministic admission at the boundary: a claim may only cite
+      // available sources. Unavailable, excluded or erased sources are kept
+      // as retrieval lineage, but the link trigger would refuse them as
+      // support — fail here with safe copy before any RPC crosses.
+      const availabilityByKey = new Map(
+        payload.sources.map((source) => [source.key, source.availability] as const),
+      );
+      for (const claim of payload.claims) {
+        if (
+          !claim.sourceKeys.every((sourceKey) => availabilityByKey.get(sourceKey) === "available")
+        ) {
+          throw boundaryError();
+        }
+      }
       return (await invoke(
         persistence,
         "record_market_evidence_claims",
