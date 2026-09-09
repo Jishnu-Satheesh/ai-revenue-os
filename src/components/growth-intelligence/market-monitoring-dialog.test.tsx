@@ -159,6 +159,7 @@ function dialog(overrides: Record<string, unknown> = {}) {
     open: true,
     onOpenChange,
     loadProfile: vi.fn(async () => profileView()),
+    loadLegacyProfile: vi.fn(async () => ({ profile: null, versions: [], decisions: [] })),
     loadResearch: vi.fn(async () => ({ active: null, lastSuccess: null })),
     rejectProposal: vi.fn(async () => {}),
     startResearch: vi.fn(async () => ({
@@ -503,6 +504,182 @@ describe("MarketMonitoringDialog", () => {
     });
     expect(await screen.findByText(/no active branch/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /start market research/i })).toBeNull();
+  });
+
+  it("shows why Start stays disabled instead of a dead button", async () => {
+    dialog({
+      loadProfile: vi.fn(async () => ({ profile: null, versions: [], decisions: [] })),
+      loadLegacyProfile: vi.fn(async () => ({ profile: null, versions: [], decisions: [] })),
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "No proposal exists for this branch yet.",
+    );
+    expect(screen.getByRole("button", { name: /start market research/i })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+});
+
+describe("MarketMonitoringDialog legacy draft fallback", () => {
+  const EMPTY_VIEW = { profile: null, versions: [], decisions: [] };
+
+  function legacyView() {
+    return {
+      profile: {
+        id: "legacy-profile",
+        currentVersionId: "legacy-v1",
+        enabled: true,
+        nextDailyResearchDueAt: null,
+        nextWeeklySynthesisDueAt: null,
+      },
+      versions: [
+        {
+          id: "legacy-v1",
+          profileId: "legacy-profile",
+          version: 1,
+          document: {
+            schemaVersion: 1,
+            publicIdentity: {
+              approvedName: "Example Kitchen",
+              domains: ["example.com"],
+              publicUrls: ["https://example.com/"],
+            },
+            nicheDescriptors: ["neighborhood restaurant"],
+            geographies: [
+              { layer: "city", locationRef: "city:dubai", name: "Dubai", countryCode: "AE" },
+              {
+                layer: "country",
+                locationRef: "country:ae",
+                name: "United Arab Emirates",
+                countryCode: "AE",
+              },
+            ],
+            competitors: [
+              {
+                key: "seed.competitor",
+                name: "Seed Competitor",
+                geographyRefs: ["city:dubai"],
+                relevanceEvidenceUrls: ["https://example.com/dubai-dining-guide"],
+              },
+            ],
+            topics: [{ key: "seed.topic", label: "Seed topic", provenance: "operator" }],
+            sourcePolicy: {
+              excludedDomains: [],
+              excludedPublishers: [],
+              excludedCompetitorKeys: [],
+              allowBoundedQuotes: true,
+              maxQuotationCharacters: 200,
+            },
+            cadence: {
+              timeZone: "Asia/Dubai",
+              dailyLocalTime: "07:00",
+              weeklyDay: "monday",
+              weeklyLocalTime: "08:00",
+            },
+          },
+          digest: "e".repeat(64),
+          proposalSource: "operator",
+          createdAt: "2026-09-06T15:23:47Z",
+        },
+      ],
+      decisions: [],
+    } as unknown as MarketProfileView;
+  }
+
+  it("prefills the legacy draft without transferring its city to the branch", async () => {
+    dialog({
+      loadProfile: vi.fn(async () => EMPTY_VIEW),
+      loadLegacyProfile: vi.fn(async () => legacyView()),
+    });
+    await screen.findByText("Seed topic");
+    expect(screen.getByText(/draft suggestion/i)).toBeTruthy();
+    expect(screen.getByText("Seed Competitor")).toBeTruthy();
+    // The legacy city never becomes the branch's research area: the operator
+    // still completes service area, city and country for this branch.
+    expect(screen.getByText(/confirm research area/i)).toBeTruthy();
+    expect(screen.getByLabelText(/^city/i)).toHaveProperty("value", "");
+    expect(screen.getByLabelText(/^country/i)).toHaveProperty("value", "");
+    // The branch's own saved service area is shown beside its name, not the legacy city.
+    expect(screen.getByLabelText(/service area/i)).toHaveProperty("value", "Downtown Dubai");
+  });
+
+  it("starts branch research from the legacy draft once the area is entered", async () => {
+    const { props } = dialog({
+      loadProfile: vi.fn(async () => EMPTY_VIEW),
+      loadLegacyProfile: vi.fn(async () => legacyView()),
+    });
+    await screen.findByText("Seed topic");
+    fireEvent.change(screen.getByLabelText(/^city/i), { target: { value: "Dubai" } });
+    fireEvent.change(screen.getByLabelText(/^country/i), { target: { value: "AE" } });
+    const start = await waitFor(() => {
+      const button = screen.getByRole("button", { name: /start market research/i });
+      expect(button).toHaveProperty("disabled", false);
+      return button;
+    });
+    fireEvent.click(start);
+    await waitFor(() =>
+      expect(props.startResearch as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1),
+    );
+    const input = (props.startResearch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      branchId: string;
+      document: {
+        schemaVersion: number;
+        branchId: string;
+        geographies: Array<{ layer: string; name: string; countryCode?: string }>;
+        topics: Array<{ label: string }>;
+        competitors: Array<{ name: string; provenance: string }>;
+      };
+      expectedCurrentVersionId: null;
+    };
+    expect(input.branchId).toBe(BRANCH_A);
+    expect(input.expectedCurrentVersionId).toBeNull();
+    expect(input.document.schemaVersion).toBe(2);
+    expect(input.document.branchId).toBe(BRANCH_A);
+    expect(input.document.topics.map((topic) => topic.label)).toContain("Seed topic");
+    expect(input.document.competitors[0]).toMatchObject({
+      name: "Seed Competitor",
+      provenance: "operator_lead",
+    });
+    const tradeArea = input.document.geographies.find((entry) => entry.layer === "trade_area");
+    expect(tradeArea?.name).toBe("Downtown Dubai");
+    const city = input.document.geographies.find((entry) => entry.layer === "city");
+    expect(city).toMatchObject({ name: "Dubai", countryCode: "AE" });
+  });
+
+  it("keeps typed edits when the legacy draft lands late", async () => {
+    let resolveLegacy!: (view: MarketProfileView) => void;
+    dialog({
+      loadProfile: vi.fn(async () => EMPTY_VIEW),
+      loadLegacyProfile: vi.fn(
+        () =>
+          new Promise<MarketProfileView>((resolve) => {
+            resolveLegacy = resolve;
+          }),
+      ),
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /start market research/i })).toHaveProperty(
+        "disabled",
+        true,
+      ),
+    );
+    fireEvent.change(screen.getByLabelText(/add a topic/i), { target: { value: "Late night" } });
+    fireEvent.click(screen.getByRole("button", { name: /add topic/i }));
+    expect(screen.getByText("Late night")).toBeTruthy();
+    resolveLegacy(legacyView());
+    await screen.findByText(/draft suggestion/i);
+    // The late draft adopts the source but never overwrites typed rows.
+    expect(screen.getByText("Late night")).toBeTruthy();
+    expect(screen.queryByText("Seed topic")).toBeNull();
+  });
+
+  it("never fetches the legacy scope when the branch has its own proposal", async () => {
+    const loadLegacyProfile = vi.fn(async () => legacyView());
+    dialog({ loadLegacyProfile });
+    await screen.findByText("Local dining demand");
+    expect(loadLegacyProfile).not.toHaveBeenCalled();
+    expect(screen.queryByText(/draft suggestion/i)).toBeNull();
   });
 });
 

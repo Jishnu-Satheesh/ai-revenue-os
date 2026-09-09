@@ -83,7 +83,9 @@ function pipelineRow(overrides: Record<string, unknown> = {}) {
 function versionRow() {
   return {
     id: versionId,
-    document: {
+    // Column name must match the migration: organization_market_profile_versions
+    // stores the document in profile_document, not document.
+    profile_document: {
       schemaVersion: 2,
       branchId,
       topics: [{ key: "vegan", label: "Vegan options", provenance: "operator" }],
@@ -127,6 +129,8 @@ describe("readPipeline", () => {
     for (const call of calls) {
       expect(call.filters).toContainEqual(["organization_id", organizationId]);
     }
+    const versionCall = calls.find((call) => call.table === "organization_market_profile_versions");
+    expect(versionCall?.select).toBe("id,profile_document");
   });
 
   it("returns null when RLS hides the row from a foreign tenant", async () => {

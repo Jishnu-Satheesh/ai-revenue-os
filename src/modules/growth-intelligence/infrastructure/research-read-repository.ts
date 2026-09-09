@@ -190,13 +190,13 @@ export function createAuthenticatedResearchReadRepository(
       persistence,
       "organization_market_profile_versions",
     )
-      .select("id,document")
+      .select("id,profile_document")
       .eq("organization_id", input.organizationId)
       .in("id", unique);
     if (versions.error) readFailure();
     const documents = new Map<string, unknown>();
     for (const row of versions.data ?? []) {
-      documents.set(String(row.id), row.document ?? null);
+      documents.set(String(row.id), row.profile_document ?? null);
     }
     return documents;
   }

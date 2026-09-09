@@ -65,6 +65,13 @@ export type MarketMonitoringDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   loadProfile?: (branchId: string) => Promise<MarketProfileView>;
+  /**
+   * Reads the legacy organization scope used only as a labelled draft
+   * suggestion when the selected branch has no proposal of its own.
+   * Geography is never transferred: the draft carries topics, competitors
+   * and identity, while the research area stays branch-entered.
+   */
+  loadLegacyProfile?: () => Promise<MarketProfileView>;
   loadResearch?: (branchId: string) => Promise<MonitoringResearchState>;
   rejectProposal?: (input: { versionId: string; digest: string }) => Promise<void>;
   startResearch?: (input: StartResearchInput) => Promise<StartBranchResearchResult>;
@@ -257,6 +264,15 @@ async function defaultLoadProfile(
   return body.marketProfile;
 }
 
+async function defaultLoadLegacyProfile(organizationId: string): Promise<MarketProfileView> {
+  const response = await fetch(`/api/organizations/${organizationId}/market-profile`, {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("PROFILE_LOAD_FAILED");
+  const body = (await response.json()) as { marketProfile: MarketProfileView };
+  return body.marketProfile;
+}
+
 async function defaultLoadResearch(
   organizationId: string,
   branchId: string,
@@ -337,6 +353,7 @@ export function MarketMonitoringDialog({
   open,
   onOpenChange,
   loadProfile,
+  loadLegacyProfile,
   loadResearch,
   rejectProposal,
   startResearch,
@@ -360,6 +377,10 @@ export function MarketMonitoringDialog({
   const [profile, setProfile] = useState<MarketProfileView | null>(null);
   const [settledKey, setSettledKey] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  // Legacy organization scope, used only as a labelled draft suggestion when
+  // the selected branch has no proposal of its own. Organization-wide, so it
+  // never goes stale across branch switches — only across dialog sessions.
+  const [legacyProfile, setLegacyProfile] = useState<MarketProfileView | null>(null);
   const [research, setResearch] = useState<MonitoringResearchState>({
     active: null,
     lastSuccess: null,
@@ -382,6 +403,12 @@ export function MarketMonitoringDialog({
     "idle",
   );
   const requestId = useRef(0);
+  // Mirrors `dirty` for async callbacks, which otherwise read a stale
+  // closure. A late legacy draft must never overwrite typed edits.
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
 
   const branchName = branches.find((branch) => branch.id === branchId)?.name ?? "";
   const branchServiceArea = branches.find((branch) => branch.id === branchId)?.serviceArea ?? null;
@@ -396,16 +423,33 @@ export function MarketMonitoringDialog({
   if (!open && settledKey !== null) {
     setSettledKey(null);
   }
+  if (!open && legacyProfile !== null) {
+    setLegacyProfile(null);
+  }
   const settled = loadKey !== null && settledKey === loadKey;
   const visibleProfile = settled && !loadFailed ? profile : null;
   const profileState: "idle" | "loading" | "failed" =
     loadKey === null ? "idle" : !settled ? "loading" : loadFailed ? "failed" : "idle";
+
+  function applyPrefillToForm(next: Prefill) {
+    setTopics(next.topics);
+    setCompetitors(next.competitors);
+    setServiceArea(next.serviceArea);
+    setCity(next.city);
+    setCountry(next.countryCode);
+    setTopicDraft("");
+    setCompetitorName("");
+    setCompetitorWebsite("");
+    setCompetitorHint("");
+    setFormError(null);
+  }
 
   useEffect(() => {
     if (loadKey === null || branchId === null) return;
     const key = loadKey;
     const seen = (requestId.current += 1);
     const loader = loadProfile ?? ((id: string) => defaultLoadProfile(organizationId, id));
+    const legacyLoader = loadLegacyProfile ?? (() => defaultLoadLegacyProfile(organizationId));
     loader(branchId).then(
       (view) => {
         // A background refresh must never overwrite typed edits: only the
@@ -419,17 +463,36 @@ export function MarketMonitoringDialog({
         setSubmitState("idle");
         setSubmitError(null);
         setRejectState("idle");
-        const prefill = derivePrefill(view, branchId, branchName, branchServiceArea);
-        setTopics(prefill.topics);
-        setCompetitors(prefill.competitors);
-        setServiceArea(prefill.serviceArea);
-        setCity(prefill.city);
-        setCountry(prefill.countryCode);
-        setTopicDraft("");
-        setCompetitorName("");
-        setCompetitorWebsite("");
-        setCompetitorHint("");
-        setFormError(null);
+        const branchPrefill = derivePrefill(view, branchId, branchName, branchServiceArea);
+        applyPrefillToForm(branchPrefill);
+        if (branchPrefill.source !== null) return;
+        // No branch proposal of its own: fall back to the legacy
+        // organization scope as a labelled draft suggestion. Geography is
+        // never transferred (derivePrefill scopes it to the same branch),
+        // so the research area stays branch-entered. Field edits made while
+        // the draft loads are kept: only the source is adopted, never the
+        // operator's typed rows.
+        legacyLoader().then(
+          (legacyView) => {
+            if (requestId.current !== seen) return;
+            setLegacyProfile(legacyView);
+            if (dirtyRef.current) return;
+            const legacyPrefill = derivePrefill(
+              legacyView,
+              branchId,
+              branchName,
+              branchServiceArea,
+            );
+            if (legacyPrefill.source === null) return;
+            applyPrefillToForm(legacyPrefill);
+          },
+          () => {
+            // A failed legacy read leaves the branch-empty form as-is; the
+            // visible blocked reason explains why Start stays disabled.
+            if (requestId.current !== seen) return;
+            setLegacyProfile(null);
+          },
+        );
       },
       () => {
         if (requestId.current !== seen) return;
@@ -451,12 +514,29 @@ export function MarketMonitoringDialog({
       },
     );
     return () => controller.abort();
-  }, [loadKey, branchId, organizationId, loadProfile, loadResearch, branchName, branchServiceArea]);
+  }, [
+    loadKey,
+    branchId,
+    organizationId,
+    loadProfile,
+    loadLegacyProfile,
+    loadResearch,
+    branchName,
+    branchServiceArea,
+  ]);
 
-  const prefill = useMemo(
-    () => derivePrefill(visibleProfile, branchId ?? "", branchName, branchServiceArea),
-    [visibleProfile, branchId, branchName, branchServiceArea],
-  );
+  const prefill = useMemo(() => {
+    const branchPrefill = derivePrefill(
+      visibleProfile,
+      branchId ?? "",
+      branchName,
+      branchServiceArea,
+    );
+    if (branchPrefill.source !== null) return branchPrefill;
+    // Branch has no proposal of its own: the legacy organization draft (if
+    // one loaded) is the source, labelled as a draft suggestion by the view.
+    return derivePrefill(legacyProfile, branchId ?? "", branchName, branchServiceArea);
+  }, [visibleProfile, legacyProfile, branchId, branchName, branchServiceArea]);
 
   const inProgress = research.active !== null && !dirty;
   const lastSuccess = research.lastSuccess;
@@ -1074,6 +1154,17 @@ export function MarketMonitoringDialog({
         <DialogFooter className="flex-col gap-2 sm:flex-row">
           {canManage && activeBranches.length > 0 ? (
             <>
+              {blockedReason !== null &&
+              submitState !== "working" &&
+              profileState === "idle" &&
+              branchId !== null &&
+              // The in-progress state already explains itself beside the
+              // button label; announcing it twice would only add noise.
+              blockedReason !== "Research in progress for the reviewed scope." ? (
+                <p role="status" className="w-full text-sm text-muted-foreground">
+                  {blockedReason}
+                </p>
+              ) : null}
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
