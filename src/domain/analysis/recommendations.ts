@@ -36,8 +36,13 @@ import { z } from "zod";
  * docs, forums, and merchant discussions. It emits no URLs, findings remain
  * the only cited evidence, portal how-to steps are allowed as grounded
  * advice, and every action stays human-supervised.
+ *
+ * 7: global rollout plus plain English (Amendment B). Stored channel context
+ * and grounding apply to every run with findings, not just the three pilot
+ * detectors, and a global plain-language block requires short common words,
+ * one idea per sentence, and no idioms. All v6 rules keep their intent.
  */
-export const RECOMMENDATION_PROMPT_VERSION = 6;
+export const RECOMMENDATION_PROMPT_VERSION = 7;
 
 /**
  * Bumped only when the judge prompt's instructions change.
@@ -45,8 +50,13 @@ export const RECOMMENDATION_PROMPT_VERSION = 6;
  * 2: portal how-to steps are grounding-backed operational advice and allowed;
  * invented numbers, causes, savings, benchmarks, attribution, and confidence
  * are still flagged.
+ *
+ * 3: the narrator must write plain English (prompt v7), so the judge names
+ * heavy jargon, unexplained technical terms, and longwinded prose in issues
+ * and reflects them in score. The verdict shape is unchanged: issues and
+ * score already carry it, so no schema or migration was needed.
  */
-export const JUDGE_PROMPT_VERSION = 2;
+export const JUDGE_PROMPT_VERSION = 3;
 
 /**
  * The completion RPC re-checks citations against the findings of the same run,

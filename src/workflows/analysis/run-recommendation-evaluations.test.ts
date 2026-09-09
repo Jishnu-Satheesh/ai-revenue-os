@@ -148,4 +148,19 @@ describe("runChannelRecommendationEvaluations", () => {
     expect(system).toContain("grounding-backed operational advice, not invention");
     expect(system).toMatch(/invented number, cause, saving, benchmark, attribution/);
   });
+
+  it("flags heavy jargon and longwinded prose as a plain-language issue", async () => {
+    // Amendment B (prompt v7, judge v3): the narrator must write plain
+    // English, so the judge names jargon and longwinded prose in issues and
+    // reflects them in score. The verdict shape is unchanged — issues and
+    // score already carry it.
+    const d = deps();
+
+    await runChannelRecommendationEvaluations(meta, d);
+
+    const system = vi.mocked(d.judge).mock.calls[0]![0];
+    expect(system).toContain("basic English");
+    expect(system).toMatch(/heavy jargon/);
+    expect(system).toMatch(/longwinded prose/);
+  });
 });

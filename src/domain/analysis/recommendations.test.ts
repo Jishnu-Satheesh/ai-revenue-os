@@ -85,8 +85,12 @@ describe("the recommendation narration contracts", () => {
     // confidence (Amendment A: playbooks removed, grounding primary).
     // v6: narration prompt grounds with Google Search instead of curated
     // playbooks; no URLs emitted; findings remain the only cited evidence.
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(6);
-    expect(JUDGE_PROMPT_VERSION).toBe(2);
+    // v7: narration prompt rolls grounding plus stored channel context out to
+    // every run with findings and requires plain English globally
+    // (Amendment B). v3: judge names heavy jargon and longwinded prose in
+    // issues and reflects them in score; the verdict shape is unchanged.
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(7);
+    expect(JUDGE_PROMPT_VERSION).toBe(3);
     expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(6);
     expect(MAX_EVALUATION_BATCH).toBe(200);
   });

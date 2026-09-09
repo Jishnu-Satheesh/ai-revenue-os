@@ -8,7 +8,6 @@ import {
 import { logger } from "@/lib/logger";
 import {
   buildNarrationPrompt,
-  PILOT_NARRATION_DETECTOR_KEYS,
   sha256Hex,
   type NarrationChannelContext,
   type NarrationPromptFinding,
@@ -270,13 +269,13 @@ export async function runChannelRecommendations(
       channelContext: pilot.channelContext,
     });
 
-    // Grounding follows the run's detectors, not the loader's luck: a pilot
-    // run whose context failed to load still searches, and a non-pilot run
-    // never sees the tool. A grounding failure surfaces as a provider error
-    // and takes the existing fail paths below.
-    const useGrounding = findings.some((finding) =>
-      PILOT_NARRATION_DETECTOR_KEYS.has(finding.detectorKey),
-    );
+    // Grounding follows the run having findings, not the loader's luck and
+    // not any detector allowlist (Amendment B retired the 3-key pilot gate):
+    // findings-empty fails above, so reaching here means findings exist and
+    // the tool is always on. A run whose context failed to load still
+    // searches. A grounding failure surfaces as a provider error and takes
+    // the existing fail paths below.
+    const useGrounding = findings.length > 0;
 
     let reply = await generateOnce(dependencies.generator, prompt, { useGrounding });
     let submission = parseSubmission(reply);

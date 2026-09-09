@@ -84,6 +84,7 @@ No other keys. No prose outside the JSON.`;
     "labelAppropriate: observation states a fact, recommendation suggests a bounded action, needs_data names what missing report would answer it. A needs_data finding dressed up as a recommendation is inappropriate.",
     "inventedValueDetected: true when any value appears that no cited finding contains.",
     "uncertaintyHonest: true when thin evidence is stated as thin (for example, twenty of fifty-nine days), false when confidence outruns coverage.",
+    "The operator reads basic English: name heavy jargon, unexplained technical terms, or longwinded prose in issues as well, and reflect them in score.",
     "score: overall advisory usefulness from 1 (harmful or empty) to 5 (accurate and actionable).",
     "issues: each concrete defect, named briefly. Empty when none.",
     "notes: one or two sentences of context for a human reviewer.",

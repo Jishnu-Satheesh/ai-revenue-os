@@ -188,6 +188,29 @@ const PILOT_FINDING_AVAILABILITY: NarrationPromptFinding = {
   limitations: [],
 };
 
+/** Previously non-pilot detectors: funnel stages and commission share. */
+const FUNNEL_FINDING: NarrationPromptFinding = {
+  id: "00000000-0000-4000-8000-00000000000e",
+  detectorKey: "funnel.stage_conversion",
+  kind: "finding",
+  code: "FUNNEL_STAGE_DROP_HIGH",
+  headline: "Menu views rarely turn into carts.",
+  detail: "Most views end before a cart is started.",
+  valueSummary: "6.2% view-to-cart",
+  limitations: [],
+};
+
+const COMMISSION_FINDING: NarrationPromptFinding = {
+  id: "00000000-0000-4000-8000-00000000000f",
+  detectorKey: "economics.commission_share",
+  kind: "finding",
+  code: "COMMISSION_SHARE_HIGH",
+  headline: "Commission took a large share of gross.",
+  detail: null,
+  valueSummary: "22.0% of gross",
+  limitations: [],
+};
+
 const CHANNEL_CONTEXT: NarrationChannelContext = {
   organizationName: "Al Noor Restaurant",
   industry: "restaurant",
@@ -222,14 +245,28 @@ function pilotInput(overrides: Partial<NarrationPromptInput> = {}): NarrationPro
   };
 }
 
-describe("prompt version 6", () => {
-  it("stamps version 6 for pilot and non-pilot prompts alike", () => {
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(6);
-    expect(buildNarrationPrompt(input).promptVersion).toBe(6);
-    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(6);
+function nonPilotInput(overrides: Partial<NarrationPromptInput> = {}): NarrationPromptInput {
+  return {
+    windowStart: "2026-01-01",
+    windowEnd: "2026-01-05",
+    periodGrain: "day",
+    findings: [FUNNEL_FINDING, COMMISSION_FINDING],
+    channelContext: CHANNEL_CONTEXT,
+    ...overrides,
+  };
+}
+
+describe("prompt version 7", () => {
+  it("stamps version 7 for context and context-free prompts alike", () => {
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(7);
+    expect(buildNarrationPrompt(input).promptVersion).toBe(7);
+    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(7);
+    expect(buildNarrationPrompt(nonPilotInput()).promptVersion).toBe(7);
   });
 
-  it("covers exactly the pilot detector set", () => {
+  it("keeps the retired pilot detector set as documentation", () => {
+    // Amendment B dropped the gate; the set records where the rollout
+    // started. Nothing in the prompt builder reads it anymore.
     expect([...PILOT_NARRATION_DETECTOR_KEYS].sort()).toEqual([
       "operations.closed_share",
       "orders.cancellation_attribution",
@@ -237,7 +274,7 @@ describe("prompt version 6", () => {
     ]);
   });
 
-  it("keeps the v4 shape for non-pilot runs: no channel block, no pilot rules", () => {
+  it("keeps the v4 shape when context is absent: no channel block, no grounding rules", () => {
     const { system, user } = buildNarrationPrompt(input);
 
     expect(user).not.toContain("<channel_context>");
@@ -245,9 +282,16 @@ describe("prompt version 6", () => {
     expect(system).not.toContain("merchant discussions");
     expect(system).not.toContain("Never emit a URL");
   });
+
+  it("still carries the plain-language rules when context is absent", () => {
+    const { system } = buildNarrationPrompt(input);
+
+    expect(system).toContain("basic English");
+    expect(system).toContain("No idioms");
+  });
 });
 
-describe("pilot gating", () => {
+describe("global channel context (Amendment B)", () => {
   it("renders the channel block for pilot findings with stored context", () => {
     const { user } = buildNarrationPrompt(pilotInput());
 
@@ -255,21 +299,25 @@ describe("pilot gating", () => {
     expect(user).toContain("Talabat");
   });
 
-  it("renders the v4 shape for non-pilot findings even when context is supplied", () => {
-    const { system, user } = buildNarrationPrompt({
-      ...input,
-      channelContext: CHANNEL_CONTEXT,
-    });
+  it("renders the channel block for previously non-pilot detectors with stored context", () => {
+    // The 3-key gate is gone: funnel, commission, and every other detector
+    // get stored context and grounding rules once context survived the loader.
+    const { system, user } = buildNarrationPrompt(nonPilotInput());
 
-    expect(user).not.toContain("<channel_context>");
-    expect(system).not.toContain("3 to 5 concrete steps");
+    expect(user).toContain("<channel_context>");
+    expect(user).toContain("Talabat");
+    expect(system).toContain("3 to 5 concrete steps in supportedActions");
+    expect(system).toContain("merchant discussions");
+    expect(system).toContain("Never emit a URL");
   });
 
-  it("renders the v4 shape for pilot findings when context is absent or failed open", () => {
+  it("renders the v4 shape when context is absent or failed open, for any detector", () => {
     for (const emptied of [
       pilotInput({ channelContext: null }),
       pilotInput({ channelContext: undefined }),
       pilotInput({ channelContext: {} }),
+      nonPilotInput({ channelContext: null }),
+      nonPilotInput({ channelContext: undefined }),
     ]) {
       const { system, user } = buildNarrationPrompt(emptied);
 
@@ -278,17 +326,52 @@ describe("pilot gating", () => {
     }
   });
 
-  it("carries the 3-to-5-step and grounding rules for pilot runs only", () => {
-    const pilot = buildNarrationPrompt(pilotInput());
-    const nonPilot = buildNarrationPrompt(input);
+  it("carries the step-count and grounding rules whenever the channel block renders", () => {
+    for (const shaped of [pilotInput(), nonPilotInput()]) {
+      const { system } = buildNarrationPrompt(shaped);
 
-    expect(pilot.system).toContain("3 to 5 concrete steps in supportedActions");
-    expect(pilot.system).toContain("one problem per item");
-    expect(pilot.system).toContain("Never claim a menu path, button name, or portal structure");
-    expect(pilot.system).toContain("merchant discussions");
-    expect(nonPilot.system).not.toContain("3 to 5 concrete steps");
-    expect(nonPilot.system).not.toContain("Never claim a menu path");
-    expect(nonPilot.system).not.toContain("merchant discussions");
+      expect(system).toContain("3 to 5 concrete steps in supportedActions");
+      expect(system).toContain("one problem per item");
+      expect(system).toContain("Never claim a menu path, button name, or portal structure");
+      expect(system).toContain("merchant discussions");
+    }
+    const { system } = buildNarrationPrompt(input);
+    expect(system).not.toContain("3 to 5 concrete steps");
+    expect(system).not.toContain("Never claim a menu path");
+    expect(system).not.toContain("merchant discussions");
+  });
+});
+
+describe("plain language rules", () => {
+  it("carries the plain rules globally: context, pilot, and bare shapes alike", () => {
+    for (const shaped of [input, pilotInput(), nonPilotInput()]) {
+      const { system } = buildNarrationPrompt(shaped);
+
+      expect(system).toContain("basic English");
+      expect(system).toContain("One idea per sentence");
+      expect(system).toContain("under about 15 words");
+      expect(system).toContain("No idioms or figures of speech");
+      expect(system).toContain("never spelled out in words");
+    }
+  });
+
+  it("extends the no-jargon rule with a tiny good/bad wording example", () => {
+    const { system } = buildNarrationPrompt(input);
+
+    expect(system).toContain("money lost to cancelled orders");
+    expect(system).toContain("cancellation-loss attribution detracted from gross");
+  });
+
+  it("keeps every v6 rule intact beside the new plain block", () => {
+    // Channel-first lever, no URLs, findings-only citations, 3–5 steps,
+    // human-supervised: the brief keeps them byte-equivalent in intent.
+    const { system } = buildNarrationPrompt(nonPilotInput());
+
+    expect(system).toContain("Let it choose the lever");
+    expect(system).toContain("Never emit a URL");
+    expect(system).toContain("the fenced findings remain the only cited evidence");
+    expect(system).toContain("3 to 5 concrete steps in supportedActions");
+    expect(system).toContain("as an action a human supervises");
   });
 });
 

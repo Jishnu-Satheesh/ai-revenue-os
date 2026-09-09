@@ -246,7 +246,7 @@ describe("runChannelRecommendations", () => {
   });
 });
 
-describe("runChannelRecommendations pilot context threading", () => {
+describe("runChannelRecommendations channel context threading", () => {
   const pilotContext = {
     channelContext: {
       organizationName: "ACME Restaurants",
@@ -301,11 +301,17 @@ describe("runChannelRecommendations pilot context threading", () => {
 });
 
 describe("runChannelRecommendations grounding switch", () => {
-  it("grounds pilot-detector runs: the generator receives useGrounding true", async () => {
+  it("grounds every run with findings: the generator receives useGrounding true", async () => {
+    // Amendment B retired the 3-key pilot gate. Previously non-pilot
+    // detectors — funnel, retention, commission, revenue — ground exactly
+    // like the pilot chapters once did.
     for (const detectorKey of [
       "orders.cancellation_loss",
       "orders.cancellation_attribution",
       "operations.closed_share",
+      "funnel.stage_conversion",
+      "revenue.period_movement",
+      "economics.commission_share",
     ]) {
       const deps = dependencies({
         loadFindings: vi.fn(async () => [findingSummary({ detectorKey })]),
@@ -320,16 +326,21 @@ describe("runChannelRecommendations grounding switch", () => {
     }
   });
 
-  it("leaves non-pilot runs ungrounded: the generator receives useGrounding false", async () => {
+  it("keeps the tool on even when the context loader fails open", async () => {
+    // Grounding follows the run having findings, not the loader's luck: a
+    // context miss renders the v4 shape but still searches.
     const deps = dependencies({
       loadFindings: vi.fn(async () => [findingSummary({ detectorKey: "revenue.period_movement" })]),
+      loadPilotContext: vi.fn(async () => {
+        throw new Error("database unreachable");
+      }),
     });
 
     const result = await runChannelRecommendations(payload, deps);
 
     expect(result.outcome).toBe("completed");
     const [, user, options] = vi.mocked(deps.generator.generate).mock.calls[0];
-    expect(options).toEqual({ useGrounding: false });
+    expect(options).toEqual({ useGrounding: true });
     expect(user).not.toContain("<channel_context>");
   });
 });

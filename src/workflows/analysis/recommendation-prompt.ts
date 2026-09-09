@@ -39,7 +39,7 @@ export type NarrationPromptInput = {
   windowEnd: string;
   periodGrain: string;
   findings: readonly NarrationPromptFinding[];
-  /** Stored channel identity; absent (or non-pilot findings) renders the v4 shape. */
+  /** Stored channel identity; absent renders the v4 shape (plus the global plain-language rules). */
   channelContext?: NarrationChannelContext | null;
 };
 
@@ -155,12 +155,27 @@ const ADVICE_RULES = [
 ].join("\n");
 
 /**
- * The pilot chapters: cancellations and availability. Only runs whose
- * findings include one of these keys may render the channel block below;
- * every other run renders the v4 shape (the version stamp alone becomes 6).
- * Curated playbooks used to live beside this set; Amendment A removed them,
- * so the set is declared here now that nothing else owns it. Grounding needs
- * no pre-fetched evidence slot — the model searches at generation time.
+ * How the advice should sound. A busy shop owner with basic English reads
+ * this, so every item uses short common words, one idea per sentence, and no
+ * idioms or figures of speech. Global: these lines render on every run, with
+ * or without stored channel context, pilot detectors or not.
+ */
+const PLAIN_RULES = [
+  "Write every field in plain, everyday English a busy shop owner with basic English reads fast.",
+  "Use short, common words. One idea per sentence. Keep most sentences under about 15 words.",
+  "No idioms or figures of speech. Say what to do in direct words.",
+  'No jargon: write "money lost to cancelled orders", not "cancellation-loss attribution detracted from gross".',
+  "Write numbers as figures (6%, AED 300), never spelled out in words.",
+].join("\n");
+
+/**
+ * The pilot chapters: cancellations and availability.
+ *
+ * Retired as a gate by Amendment B, which rolled stored channel context and
+ * grounding out to every audit section. Kept as documentation of where the
+ * rollout started, and still exported so older callers compile. Nothing in
+ * this module reads it anymore: the channel block renders whenever stored
+ * context survived the loader, for any detector key.
  */
 export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = new Set([
   "orders.cancellation_loss",
@@ -169,20 +184,22 @@ export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Pilot-only rules, added to the system prompt when the fenced channel block
- * renders. Non-pilot runs never see them, which is what keeps those runs
- * byte-identical to the v4 shape. Grounding (Amendment A) replaced the
- * curated playbooks: the model searches the live web itself, so these rules
- * say where to look first, what grounding may never become, and what the
- * operator is allowed to read.
+ * Channel-grounding rules, added to the system prompt when the fenced channel
+ * block renders. Runs without stored context never see them, which is what
+ * keeps the loader-failure fallback byte-identical to the v4 shape.
+ * Grounding (Amendment A) replaced the curated playbooks: the model searches
+ * the live web itself, so these rules say where to look first, what
+ * grounding may never become, and what the operator is allowed to read.
+ * Amendment B widened them from the three pilot detectors to every run with
+ * context; the wording is unchanged apart from that scope.
  */
-const PILOT_RULES = [
+const CHANNEL_GROUNDING_RULES = [
   "The fenced channel context names the channel, category, and operating window. Let it choose the lever: advise about this channel in this window, not about any business.",
   "You may draw on grounded web knowledge to shape supportedActions. Prefer the channel's own docs, forums, and merchant discussions first, then other sources.",
   "Grounding never creates evidence: the fenced findings remain the only cited evidence. Cite at least one finding id in every item, and never cite a web source.",
   "Never emit a URL, link, domain, or anything shaped like one, in any field. The output shape has no URL field.",
   "Portal and device how-to steps are allowed when grounding supports them. Phrase them as actions the operator performs in their own portal or on their own tablet. Never claim a menu path, button name, or portal structure.",
-  "For pilot items about cancellations or availability, file one problem per item and put 3 to 5 concrete steps in supportedActions.",
+  "File one problem per item and put 3 to 5 concrete steps in supportedActions.",
   "Phrase every step as an action a human supervises. Never propose an automatic price, budget, or availability change.",
   "Write headline and detail from cited findings only. Grounded knowledge may shape supportedActions, never the headline or the detail.",
 ].join("\n");
@@ -275,18 +292,17 @@ function renderChannelContext(context: NarrationChannelContext): string | null {
  */
 export function buildNarrationPrompt(input: NarrationPromptInput): NarrationPrompt {
   const sortedFindings = [...input.findings].sort(byId);
-  const hasPilotFinding = sortedFindings.some((finding) =>
-    PILOT_NARRATION_DETECTOR_KEYS.has(finding.detectorKey),
-  );
 
-  // The pilot block renders only for pilot findings with stored context
-  // present. Anything else — non-pilot findings, or pilot findings whose
-  // loader failed and fell back to null — renders the v4 shape below.
-  // Grounding is decided worker-side from the same detector set, not from
-  // this block, so a context miss never silently disables it.
-  const channelBlock =
-    hasPilotFinding && input.channelContext ? renderChannelContext(input.channelContext) : null;
-  const isPilot = channelBlock !== null;
+  // The channel block renders for any detector key whenever stored context
+  // survived the loader. Anything else — context absent, empty, or a loader
+  // miss that failed open to null — renders the v4 shape below (plus the
+  // global plain-language rules). Grounding is decided worker-side from the
+  // run having findings at all, not from this block, so a context miss never
+  // silently disables it.
+  const channelBlock = input.channelContext
+    ? renderChannelContext(input.channelContext)
+    : null;
+  const hasChannel = channelBlock !== null;
 
   const system = [
     "You narrate the findings of one channel-analysis run for a business operator.",
@@ -299,7 +315,9 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     ADVICE_MANDATE,
     "",
     ADVICE_RULES,
-    ...(isPilot ? ["", PILOT_RULES] : []),
+    "",
+    PLAIN_RULES,
+    ...(hasChannel ? ["", CHANNEL_GROUNDING_RULES] : []),
     "",
     ADVICE_EXAMPLE,
     "",
