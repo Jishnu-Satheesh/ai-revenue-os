@@ -23,8 +23,14 @@ import { z } from "zod";
  * their own prohibitions as a ban on advising anything, and filed observations
  * that repeated each figure back at the operator. ADR 0039 puts the fence on
  * claims about cause and realized result, never on the advice itself.
+ *
+ * 5: pilot channel context plus curated playbook and web-evidence slots for
+ * the cancellations and availability chapters. The model still has no tools;
+ * the worker widens the fenced folder with stored channel context and
+ * curated guidance, and portal steps are framed as checks rather than claims
+ * about a portal's structure. See the pilot ADR.
  */
-export const RECOMMENDATION_PROMPT_VERSION = 4;
+export const RECOMMENDATION_PROMPT_VERSION = 5;
 
 /** Bumped only when the judge prompt's instructions change. */
 export const JUDGE_PROMPT_VERSION = 1;
