@@ -5730,4 +5730,57 @@ through the real routes, not only in tests.
   src/workflows/analysis/channel-playbooks.ts (new),
   src/workflows/analysis/run-channel-recommendations.ts,
   src/trigger/recommendations.ts, related tests, specs/018 11.4 amendment, new ADR.
-- Status: in-progress — no migration, no new env keys, no model tool calls.
+- Status: done — no migration, no new env keys, no model tool calls.
+- Shipped: 3711f3e (prompt v5 + curated playbooks), 324fa21 (worker threading of stored
+  pilot context), 48aa2dd (test version pin 4 → 5).
+- Gate evidence (Task 3): 406/406 tests pass across 35 files; `pnpm typecheck` clean; eslint
+  clean on touched files; tenant isolation 5/5 including foreign-tenant channel id → null
+  context (v4 shape).
+- Docs (Task 4): specs/018 §11.4 pilot amendment + ADR 0050. Explicit follow-up: live-search
+  (Brave transport) qualification to fill the prepared web-evidence slot.
+
+### 2026-09-09 · muse-spark · Channel recommendations pilot Amendment A (grounding primary, playbooks removed) — docs (Task 6)
+
+- Amendment A (user-consented 2026-09-09): narration grounding exception for the pilot — Google
+  Search grounding on pilot-detector runs, channel docs/forums/merchant-discussions first, no URLs
+  shown, medium bar (recommendations only, every action human-supervised). Curated playbooks
+  removed, not kept as fallback; grounding failure falls back to the v4-shape prompt.
+- Status: done (docs only, zero code changes) — specs/018 §14 narrow amendment, ADR 0037 amendment
+  note, qualified-provider.ts exclusion scoped to the market-research pipeline (comment only),
+  new ADR 0051 (ADR 0050 stands as history).
+- Commits: 3d07304 (grounding code) + b639159 (this docs commit; spec+ADRs only — board and
+  provider-comment edits left uncommitted per policy).
+- Gate evidence (Task 5): 327 tests pass across 33 files; `pnpm typecheck` clean; eslint clean on
+  all 13 touched files; tenant isolation intact (foreign-tenant channel id → null context).
+
+### 2026-09-09 · muse-spark · Browser verification of the market-monitoring slice (Chrome DevTools, staging canary org)
+
+- **Verified live against staging** (Al Noor Kitchen seeded org, Deira branch): header Market
+  monitoring entry, Review dialog, branch dropdown (3 branches, no silent first-pick), topic
+  add/remove, competitor context copy, research-only area group, atomic Start (201, Deira v2
+  profile + pipeline + request committed), status read, Your actions entry, Market Watch
+  delayed notice, in-progress Start disable. Overview tabs/metrics/triage untouched.
+- **Anomaly 1 (fixed, 2c44917):** `blockedReason` disabled Start with no visible explanation.
+  The reason now renders as `role=status` (suppressed only for branch-less state, which the
+  field already explains, and for in-progress, which labels itself).
+- **Anomaly 2 (fixed, 2c44917):** dialog dead-ended for orgs with only a legacy profile —
+  branch reads return null and no legacy draft was ever fetched, so Start could never enable
+  and the Draft-suggestion UI was unreachable. The dialog now falls back to an explicit
+  legacy-null read as a labelled draft (topics/competitors prefilled, city never transferred,
+  late drafts adopt the source without overwriting typed rows). 5 new tests, 25/25 dialog.
+- **Anomaly 3 (fixed, 2c44917):** status route 422 on the real pipeline — the read repository
+  selected a non-existent `document` column (real name `profile_document`). Unit mocks
+  mirrored the bug; only a live read exposed it. Column pinned by a new select assertion.
+- **Brave key (user-supplied 2026-09-09):** 4 single-query live calls, zero persistence.
+  Proved the key authenticates (200) but exposed a second live-only defect: the real API
+  nests hits under `web.results` beside sibling sections, while fixtures used a top-level
+  `results` array — every fixture-green retrieval path would have failed live (fixed,
+  2ebb8f2, with a real-envelope regression test; live re-probe then returned `supported`).
+  Real count=1 responses run ~329 KB, inside the 512 KiB cap but far above fixture sizes.
+- **Also added (2ebb8f2, unwired):** single-shot live transport (fixed endpoint, token
+  header only, manual redirects, caller-owned timeout/signal). NOT wired into the runner:
+  a working key does not prove storage/reuse rights, staged qualification is still empty,
+  gates stay OFF, no spend enabled, no canary claimed.
+- **Left running:** `pnpm dev` on :3000 for operator click-through. Staging side effects
+  limited to one Deira v2 profile + queued pipeline + request on the canary org (no worker
+  attached locally, no spend, no paid calls beyond the 4 probe queries).
