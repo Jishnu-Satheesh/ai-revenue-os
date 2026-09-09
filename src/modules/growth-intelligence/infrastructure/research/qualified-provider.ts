@@ -15,7 +15,10 @@ import { researchRequestSchema } from "@/modules/growth-intelligence/infrastruct
  * that explicitly permits snippet storage, commercial inference through
  * Gemini, organization display, derived claims, synthesis reuse and agreed
  * retention. An ordinary subscription is not assumed to grant these rights.
- * Google Search grounding and the unavailable Exa adapter are excluded.
+ * Google Search grounding and the unavailable Exa adapter are excluded from
+ * this market-research pipeline. (Amendment A, 2026-09-09, permits Google
+ * Search grounding on the channel-recommendations narration path only; that
+ * exception lives outside this adapter and changes nothing here.)
  */
 export const QUALIFIED_RESEARCH_PROVIDER = "brave" as const;
 
