@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { DomainError } from "@/lib/errors";
 import type { MarketEvidenceRepository } from "@/modules/growth-intelligence/infrastructure/evidence-repository";
@@ -87,6 +90,8 @@ const requestView: GrowthIntelligenceRequestView = {
   researchRuleVersion: "market-research@1",
   localTimeBucket: "daily:2026-09-02",
   correlationId,
+  pipelineId: null,
+  phase: null,
 };
 
 const profileView: ApprovedMarketProfileView = {
@@ -268,6 +273,25 @@ function dependencies(overrides = {}) {
     })),
     complete: vi.fn(async () => ({ runId, status: "completed" as const, replayed: false })),
     fail: vi.fn(async () => ({ runId, status: "failed" as const, replayed: false })),
+    completePipeline: vi.fn(async () => ({
+      runId,
+      pipelineStage: "preparing_insights" as const,
+      synthesisRequestId: "80000000-0000-4000-8000-000000000008",
+      eligibleClaimCount: 1,
+      replayed: false,
+    })),
+    completeSynthesisPipeline: vi.fn(async () => ({
+      runId,
+      itemCount: 0,
+      supersededItemIds: [],
+      pipelineStage: "ready" as const,
+      replayed: false,
+    })),
+    failSynthesisPipeline: vi.fn(async () => ({
+      runId,
+      pipelineStage: "synthesis_failed" as const,
+      replayed: false,
+    })),
     appendEvent: vi.fn(),
   };
   const currentSources = { load: vi.fn(async () => [] as string[]) };
@@ -282,30 +306,35 @@ function dependencies(overrides = {}) {
       maxResultsPerQuery: request.maxResultsPerQuery,
     }),
   );
-  const buildScope = vi.fn((doc: MarketProfileDocumentV1): ResearchRequest => {
-    const city = doc.geographies.find((geography) => geography.layer === "city");
-    const country = doc.geographies.find((geography) => geography.layer === "country");
-    const location = city ?? country;
-    if (!location || !("countryCode" in location)) {
-      throw new DomainError("DOMAIN_ERROR", "The approved profile has no usable city or country.");
-    }
-    return researchRequestSchema.parse({
-      scope: {
-        publicBusinessName: doc.publicIdentity.approvedName,
-        approvedDomains: doc.publicIdentity.domains,
-        niches: doc.nicheDescriptors,
-        city: location.name,
-        countryCode: location.countryCode,
-        topics: doc.topics.map((topic) => topic.label),
-      },
-      maxQueries: 3,
-      maxResultsPerQuery: 10,
-      maxResponseBytes: 512 * 1_024,
-      maxRedirects: 3,
-      timeoutMs: 20_000,
-      maxCostMicrosUsd: 5_000_000,
-    });
-  });
+  const buildScope = vi.fn(
+    (doc: MarketProfileDocumentV1 | MarketProfileDocumentV2): ResearchRequest => {
+      const city = doc.geographies.find((geography) => geography.layer === "city");
+      const country = doc.geographies.find((geography) => geography.layer === "country");
+      const location = city ?? country;
+      if (!location || !("countryCode" in location)) {
+        throw new DomainError(
+          "DOMAIN_ERROR",
+          "The approved profile has no usable city or country.",
+        );
+      }
+      return researchRequestSchema.parse({
+        scope: {
+          publicBusinessName: doc.publicIdentity.approvedName,
+          approvedDomains: doc.publicIdentity.domains,
+          niches: doc.nicheDescriptors,
+          city: location.name,
+          countryCode: location.countryCode,
+          topics: doc.topics.map((topic) => topic.label),
+        },
+        maxQueries: 3,
+        maxResultsPerQuery: 10,
+        maxResponseBytes: 512 * 1_024,
+        maxRedirects: 3,
+        timeoutMs: 20_000,
+        maxCostMicrosUsd: 5_000_000,
+      });
+    },
+  );
   const events = { publish: vi.fn(async () => {}) };
   return {
     requests,
@@ -465,7 +494,7 @@ describe("runMarketResearch profile and request reloading", () => {
     expect(deps.adapter.searchAndFetch).not.toHaveBeenCalled();
   });
 
-  it("treats business evidence changes as research until synthesis owns them", async () => {
+  it("refuses business evidence changes because synthesis owns them now", async () => {
     const deps = dependencies();
     deps.requests.load.mockResolvedValueOnce({
       ...requestView,
@@ -474,8 +503,13 @@ describe("runMarketResearch profile and request reloading", () => {
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toMatchObject({ outcome: "completed" });
-    expect(deps.adapter.searchAndFetch).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "REQUEST_KIND_UNSUPPORTED",
+      runId: null,
+    });
+    expect(deps.adapter.searchAndFetch).not.toHaveBeenCalled();
+    expect(deps.evidence.begin).not.toHaveBeenCalled();
   });
 });
 
@@ -973,6 +1007,115 @@ describe("runMarketResearch reassessment", () => {
     ]);
     expect(serialized).not.toContain(EXCERPT_A);
     expect(serialized).not.toContain("Weekend footfall near the marina reached a record level.");
+  });
+});
+
+describe("runMarketResearch pipeline handoff", () => {
+  const pipelineId = "50000000-0000-4000-8000-000000000005";
+  const pipelineRequestView = {
+    ...requestView,
+    branchId: "30000000-0000-4000-8000-000000000030",
+    pipelineId,
+    phase: "research",
+  };
+
+  function pipelineDependencies(overrides = {}) {
+    const deps = dependencies(overrides);
+    deps.requests.load.mockResolvedValue(pipelineRequestView);
+    deps.evidence.completePipeline = vi.fn(async () => ({
+      runId,
+      pipelineStage: "preparing_insights",
+      synthesisRequestId: "80000000-0000-4000-8000-000000000008",
+      eligibleClaimCount: 1,
+      replayed: false,
+    }));
+    return deps;
+  }
+
+  it("completes pipeline-bound runs through the fenced pipeline RPC, not the legacy path", async () => {
+    const deps = pipelineDependencies({
+      extraction: modelPhase({
+        transport: scriptedExtractionTransport(({ sourceKey, excerptText }) => [
+          spanCandidate(sourceKey, excerptText),
+        ]),
+      }),
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({ outcome: "completed" });
+    expect(deps.evidence.completePipeline).toHaveBeenCalledOnce();
+    expect(deps.evidence.completePipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken: expect.any(String),
+        runId,
+        result: expect.objectContaining({ outcome: "completed" }),
+        coverage: expect.arrayContaining([
+          expect.objectContaining({ slotKey: "local_market", outcome: "supported" }),
+        ]),
+      }),
+    );
+    expect(deps.evidence.complete).not.toHaveBeenCalled();
+    expect(deps.requests.complete).not.toHaveBeenCalled();
+  });
+
+  it("threads the request branch into the approved-profile read", async () => {
+    const deps = pipelineDependencies();
+
+    await runMarketResearch(payload, deps);
+
+    expect(deps.profiles.readCurrent).toHaveBeenCalledWith({
+      organizationId,
+      branchId: pipelineRequestView.branchId,
+    });
+  });
+
+  it("treats an idempotent legacy completion as success instead of claim_lost", async () => {
+    const deps = dependencies();
+    deps.requests.complete.mockResolvedValueOnce({ outcome: "already_finished" });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({ outcome: "completed" });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ eventName: "market_research.completed" }),
+    );
+  });
+
+  it("returns claim_lost when the run failure loses the lease instead of throwing", async () => {
+    const deps = dependencies();
+    deps.evidence.fail.mockRejectedValueOnce(
+      new GrowthIntelligenceError("RESEARCH_CLAIM_LOST", "The research lease is gone."),
+    );
+
+    const result = await runMarketResearch(payload, {
+      ...deps,
+      adapter: {
+        availability: { available: false, provider: "test-adapter" },
+        searchAndFetch: vi.fn(),
+      },
+    });
+
+    expect(result).toEqual({ outcome: "claim_lost" });
+    expect(deps.requests.fail).not.toHaveBeenCalled();
+    expect(deps.events.publish).not.toHaveBeenCalled();
+  });
+
+  it("refuses business_evidence_changed: synthesis owns that kind now", async () => {
+    const deps = dependencies();
+    deps.requests.load.mockResolvedValueOnce({ ...requestView, kind: "business_evidence_changed" });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "REQUEST_KIND_UNSUPPORTED",
+      runId: null,
+    });
+    expect(deps.evidence.begin).not.toHaveBeenCalled();
   });
 });
 

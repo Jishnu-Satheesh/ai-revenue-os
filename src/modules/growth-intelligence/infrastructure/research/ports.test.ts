@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   approvedResearchScopeSchema,
+  researchRequestSchema,
   researchRetrievalResultSchema,
   type ResearchAdapter,
   type ResearchRequest,
@@ -175,6 +176,16 @@ describe("research retrieval result", () => {
 
     expect(result.sources).toHaveLength(1);
     expect(result.coverage[0]?.outcome).toBe("supported");
+  });
+
+  it("lets maxQueries span the full 26-slot plan instead of the legacy 1–3 ceiling", () => {
+    const parsed = researchRequestSchema.parse({ ...validRequest(), maxQueries: 26 });
+
+    expect(parsed.maxQueries).toBe(26);
+  });
+
+  it("rejects a 27th query beyond the planned slot ceiling", () => {
+    expect(() => researchRequestSchema.parse({ ...validRequest(), maxQueries: 27 })).toThrow();
   });
 });
 

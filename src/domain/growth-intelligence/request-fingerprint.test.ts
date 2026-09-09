@@ -29,6 +29,19 @@ function input(): GrowthIntelligenceRequestFingerprintInput {
 }
 
 describe("createGrowthIntelligenceRequestFingerprint", () => {
+  it("fingerprints the handoff child kind and reason distinctly", () => {
+    const child = createGrowthIntelligenceRequestFingerprint({
+      ...input(),
+      kind: "market_evidence_changed",
+      triggerReason: "market_research_completed",
+      businessEvidenceDigest: null,
+      localTimeBucket: "immediate",
+    });
+
+    expect(child).toMatch(/^[a-f0-9]{64}$/);
+    expect(child).not.toBe(createGrowthIntelligenceRequestFingerprint(input()));
+  });
+
   it("returns a stable SHA-256 fingerprint", () => {
     expect(createGrowthIntelligenceRequestFingerprint(input())).toMatch(/^[a-f0-9]{64}$/);
     expect(createGrowthIntelligenceRequestFingerprint(input())).toBe(

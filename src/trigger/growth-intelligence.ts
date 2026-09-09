@@ -2,20 +2,35 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger, queue, schemaTask, tasks } from "@trigger.dev/sdk";
 
 import { createEventPublisher } from "@/domain/events/publisher";
-import { marketProfileDocumentV1Schema } from "@/domain/growth-intelligence/schemas";
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
+import { RESEARCH_BUDGET_LIMITS } from "@/domain/growth-intelligence/research-pipeline";
+import {
+  RESEARCH_MODEL_CALL_LIMITS,
+  RESEARCH_MODEL_MAX_SOURCES_PER_BATCH,
+} from "@/domain/growth-intelligence/research-budget";
+import { marketProfileDocumentSchema } from "@/domain/growth-intelligence/schemas";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import { DomainError } from "@/lib/errors";
 import type { Database } from "@/lib/supabase/database.types";
 import { createGrowthIntelligenceWorkerServiceClient } from "@/lib/supabase/service";
 import {
   buildResearchQueryPlan,
+  buildResearchQuerySlots,
   type ResearchQuery,
 } from "@/modules/growth-intelligence/infrastructure/research/query-plan";
 import {
   researchRequestSchema,
+  type ResearchAdapter,
   type ResearchRequest,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 import { getQualifiedMarketResearchAdapter } from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
+import type {
+  ResearchModelSpender,
+  ResearchModelTransport,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
 import {
   createMarketEvidenceRepository,
   type MarketEvidencePersistence,
@@ -120,7 +135,7 @@ function createRequestOperations(supabase: WorkerClient): MarketResearchClaim {
       const { data, error } = await supabase
         .from("growth_intelligence_requests")
         .select(
-          "id, organization_id, branch_id, channel_id, kind, trigger_reason, business_evidence_digest, market_profile_version_id, source_policy_digest, research_rule_version, local_time_bucket, correlation_id",
+          "id, organization_id, branch_id, channel_id, kind, trigger_reason, business_evidence_digest, market_profile_version_id, source_policy_digest, research_rule_version, local_time_bucket, correlation_id, pipeline_id, phase",
         )
         .eq("organization_id", input.organizationId)
         .eq("id", input.requestId)
@@ -140,6 +155,8 @@ function createRequestOperations(supabase: WorkerClient): MarketResearchClaim {
         researchRuleVersion: data.research_rule_version,
         localTimeBucket: data.local_time_bucket,
         correlationId: data.correlation_id,
+        pipelineId: data.pipeline_id,
+        phase: data.phase,
       };
     },
     async enqueue(input) {
@@ -164,9 +181,8 @@ async function readApprovedProfile(
 ): Promise<ApprovedMarketProfileView | null> {
   // Exact scope only: a set branch reads its own profile, null reads the
   // legacy organization profile. Never read by organization alone — the first
-  // branch row in an organization would make maybeSingle() throw. Branch
-  // pipeline work threads its request branch through here in Tasks 8/9; until
-  // then the legacy null scope preserves existing worker behavior exactly.
+  // branch row in an organization would make maybeSingle() throw. Both
+  // workers thread their request branch through here.
   let profileQuery = supabase
     .from("organization_market_profiles")
     .select("id, current_version_id, enabled")
@@ -187,7 +203,10 @@ async function readApprovedProfile(
   return {
     versionId: version.id,
     digest: version.profile_digest,
-    document: marketProfileDocumentV1Schema.parse(version.profile_document),
+    // Union parser: branch rows persist v2 documents, legacy rows v1. The
+    // research scope builder below accepts both; synthesis reads only the
+    // shared identity/geography/topic blocks, so it never assumes v1.
+    document: marketProfileDocumentSchema.parse(version.profile_document),
     sourcePolicyDigest: version.source_policy_digest,
     enabled: profile.enabled,
   };
@@ -211,28 +230,45 @@ const TERMINAL_CLAIM_EVENT_TYPES = new Set([
 // `src/workflows/growth-intelligence/run-market-research.ts`: the scope carries
 // the timeout and budget caps the adapter must enforce.
 const RESEARCH_ADAPTER_TIMEOUT_MS = 20_000;
-const RESEARCH_RUN_BUDGET_MICROS_USD = 5_000_000;
+const RESEARCH_RUN_BUDGET_MICROS_USD = RESEARCH_BUDGET_LIMITS.maxPipelineReservationMicrosUsd;
 
-function buildResearchScope(document: MarketProfileDocumentV1): ResearchRequest {
+function buildResearchScope(
+  document: MarketProfileDocumentV1 | MarketProfileDocumentV2,
+): ResearchRequest {
   const city = document.geographies.find((geography) => geography.layer === "city");
   const country = document.geographies.find((geography) => geography.layer === "country");
   const location = city ?? country;
   if (!location || !("countryCode" in location)) {
     throw new DomainError("DOMAIN_ERROR", "The approved profile has no usable city or country.");
   }
+  const scope = {
+    publicBusinessName: document.publicIdentity.approvedName,
+    approvedDomains: document.publicIdentity.domains,
+    niches: document.nicheDescriptors,
+    city: location.name,
+    countryCode: location.countryCode,
+    topics: document.topics.map((topic) => topic.label),
+    competitors: document.competitors.map((competitor) => ({
+      name: competitor.name,
+      ...(competitor.publicUrl ? { publicUrl: competitor.publicUrl } : {}),
+      ...("locationHint" in competitor && competitor.locationHint
+        ? { locationHint: competitor.locationHint }
+        : {}),
+    })),
+  };
+  // The full-coverage slot plan is authoritative: the request carries one
+  // query per slot so the legacy bounded wrapper below cannot truncate
+  // topics or competitors back to a first-N subset.
+  const slotCount = buildResearchQuerySlots({
+    scope,
+    maxResultsPerQuery: RESEARCH_BUDGET_LIMITS.maxResultsPerQuery,
+  }).length;
   return researchRequestSchema.parse({
-    scope: {
-      publicBusinessName: document.publicIdentity.approvedName,
-      approvedDomains: document.publicIdentity.domains,
-      niches: document.nicheDescriptors,
-      city: location.name,
-      countryCode: location.countryCode,
-      topics: document.topics.map((topic) => topic.label),
-    },
-    maxQueries: 3,
-    maxResultsPerQuery: 10,
-    maxResponseBytes: 512 * 1_024,
-    maxRedirects: 3,
+    scope,
+    maxQueries: slotCount,
+    maxResultsPerQuery: RESEARCH_BUDGET_LIMITS.maxResultsPerQuery,
+    maxResponseBytes: RESEARCH_BUDGET_LIMITS.maxResponseBytes,
+    maxRedirects: 0,
     timeoutMs: RESEARCH_ADAPTER_TIMEOUT_MS,
     maxCostMicrosUsd: RESEARCH_RUN_BUDGET_MICROS_USD,
   });
@@ -246,8 +282,79 @@ function planResearchQueries(request: ResearchRequest): ResearchQuery[] {
   });
 }
 
+/**
+ * Fail-closed model transport: no model calls leave the worker until a
+ * qualified extraction/review transport is configured. Refusals surface as
+ * failed batches with honest unknown-cost accounting inside extraction and
+ * support review — never as worker throws, so Trigger cannot redeliver a
+ * run that simply has no model wired yet.
+ */
+function unconfiguredResearchModelTransport(phase: string): ResearchModelTransport {
+  return {
+    async complete() {
+      throw new DomainError(
+        "INTEGRATION_ERROR",
+        `Market research ${phase} is not configured for this organization.`,
+      );
+    },
+  };
+}
+
+/**
+ * Fail-closed model spender: without a per-run budget scope no reservation
+ * can be admitted, so every batch fails before any paid call. Extraction
+ * and support review catch reserve refusals and fail their batch.
+ */
+function unconfiguredResearchModelSpender(): ResearchModelSpender {
+  return {
+    async reserve() {
+      throw new GrowthIntelligenceError(
+        "RESEARCH_PROVIDER_NOT_QUALIFIED",
+        "Market research model spend is not qualified for this organization.",
+      );
+    },
+    async settle() {},
+  };
+}
+
+function researchModelBudget(phase: "extraction" | "support_review") {
+  return {
+    phase,
+    maxCalls: RESEARCH_MODEL_CALL_LIMITS[phase].maxCalls,
+    maxInputTokens: RESEARCH_MODEL_CALL_LIMITS[phase].maxInputTokens,
+    maxOutputTokens: RESEARCH_MODEL_CALL_LIMITS[phase].maxOutputTokens,
+    maxSourcesPerBatch: RESEARCH_MODEL_MAX_SOURCES_PER_BATCH,
+  } as const;
+}
+
+function researchModelId(envName: string, fallback: string): string {
+  const configured = process.env[envName]?.trim();
+  return configured && configured.length > 0 ? configured : fallback;
+}
+
+/**
+ * Operator-configured excerpt provenance. An empty qualification version
+ * keeps the worker's EXTRACTION_UNAVAILABLE gate closed; the retain-until
+ * horizon only matters once the gate passes, and the documented agreement
+ * value must replace the conservative default.
+ */
+function triggerExcerptProvenance(): {
+  qualificationVersion: string;
+  retainUntilFor: (retrievedAt: string) => string;
+} {
+  const qualificationVersion = process.env.RESEARCH_EXCERPT_QUALIFICATION_VERSION?.trim() ?? "";
+  const retentionDays = Number.parseInt(process.env.RESEARCH_EXCERPT_RETENTION_DAYS ?? "", 10);
+  const horizonDays = Number.isInteger(retentionDays) && retentionDays > 0 ? retentionDays : 90;
+  return {
+    qualificationVersion,
+    retainUntilFor: (retrievedAt: string) =>
+      new Date(new Date(retrievedAt).getTime() + horizonDays * 24 * 3_600_000).toISOString(),
+  };
+}
+
 function createResearchDependencies(signal: AbortSignal) {
   const supabase = createGrowthIntelligenceWorkerServiceClient();
+  const adapter: ResearchAdapter = getQualifiedMarketResearchAdapter();
   return {
     requests: createRequestOperations(supabase),
     profiles: {
@@ -255,7 +362,20 @@ function createResearchDependencies(signal: AbortSignal) {
         readApprovedProfile(supabase, input.organizationId, input.branchId ?? null),
     },
     evidence: createMarketEvidenceRepository(supabase as unknown as MarketEvidencePersistence),
-    adapter: getQualifiedMarketResearchAdapter(),
+    adapter,
+    extraction: {
+      transport: unconfiguredResearchModelTransport("extraction"),
+      spender: unconfiguredResearchModelSpender(),
+      budget: researchModelBudget("extraction"),
+      modelId: researchModelId("RESEARCH_EXTRACTION_MODEL", "unconfigured-extraction-model"),
+    },
+    supportReview: {
+      transport: unconfiguredResearchModelTransport("support_review"),
+      spender: unconfiguredResearchModelSpender(),
+      budget: researchModelBudget("support_review"),
+      modelId: researchModelId("RESEARCH_SUPPORT_REVIEW_MODEL", "unconfigured-review-model"),
+    },
+    excerptProvenance: triggerExcerptProvenance(),
     planQueries: planResearchQueries,
     buildScope: buildResearchScope,
     currentSources: {
@@ -345,7 +465,71 @@ const SYNTHESIS_LOADER_LIMIT = 200;
 function createSynthesisDependencies(signal: AbortSignal) {
   const supabase = createGrowthIntelligenceWorkerServiceClient();
   const now = () => new Date();
-  const synthesis = createSynthesisRepository(supabase as unknown as SynthesisPersistence);
+  const baseSynthesis = createSynthesisRepository(supabase as unknown as SynthesisPersistence);
+  const evidence = createMarketEvidenceRepository(supabase as unknown as MarketEvidencePersistence);
+
+  // Pipeline lineage decides which fence persists synthesis. Handoff
+  // children (phase synthesis on a pipeline) finalize items, request and
+  // pipeline in one transaction; legacy rows keep the separate completion.
+  async function pipelineLineage(input: {
+    organizationId: string;
+    requestId: string;
+  }): Promise<{ pipelineId: string; phase: string | null } | null> {
+    const { data, error } = await supabase
+      .from("growth_intelligence_requests")
+      .select("pipeline_id, phase")
+      .eq("organization_id", input.organizationId)
+      .eq("id", input.requestId)
+      .maybeSingle();
+    if (error) throw new Error("Synthesis request lineage could not be loaded.");
+    if (!data || !data.pipeline_id) return null;
+    return { pipelineId: data.pipeline_id, phase: data.phase };
+  }
+
+  const synthesis = {
+    ...baseSynthesis,
+    async complete(
+      input: Parameters<typeof baseSynthesis.complete>[0],
+    ): Promise<Awaited<ReturnType<typeof baseSynthesis.complete>>> {
+      const lineage = await pipelineLineage(input);
+      if (lineage && lineage.phase === "synthesis") {
+        const finalized = await evidence.completeSynthesisPipeline({
+          organizationId: input.organizationId,
+          requestId: input.requestId,
+          claimToken: input.claimToken,
+          runId: input.runId,
+          result: {
+            outcome: "completed",
+            resultDigest: input.result.resultDigest,
+            items: input.result.items,
+          },
+        });
+        return {
+          runId: finalized.runId,
+          status: "completed",
+          itemCount: finalized.itemCount,
+          supersededItemIds: finalized.supersededItemIds,
+        };
+      }
+      return baseSynthesis.complete(input);
+    },
+    async fail(
+      input: Parameters<typeof baseSynthesis.fail>[0],
+    ): Promise<Awaited<ReturnType<typeof baseSynthesis.fail>>> {
+      const lineage = await pipelineLineage(input);
+      if (lineage && lineage.phase === "synthesis") {
+        const failed = await evidence.failSynthesisPipeline({
+          organizationId: input.organizationId,
+          requestId: input.requestId,
+          claimToken: input.claimToken,
+          runId: input.runId,
+          failureCode: input.failure.safeFailureCode,
+        });
+        return { runId: failed.runId, status: "failed" };
+      }
+      return baseSynthesis.fail(input);
+    },
+  };
 
   const findings = {
     load: async (input: {
@@ -562,11 +746,7 @@ export const runMarketResearchTask = schemaTask({
   run: async (payload, { signal }) => {
     const parsed = marketResearchPayloadSchema.parse(payload);
     const dependencies = createResearchDependencies(signal);
-    const result = await runMarketResearch(
-      parsed,
-      // Task 6/8 must remove: the infra ResearchAdapter now returns ResearchRetrievalResult while the workflow MarketResearchAdapter still expects AdapterSourceAttempt[].
-      dependencies as unknown as Parameters<typeof runMarketResearch>[1],
-    );
+    const result = await runMarketResearch(parsed, dependencies);
 
     logger.info("growth_intelligence.research_finished", {
       organizationId: parsed.organizationId,

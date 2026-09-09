@@ -106,6 +106,7 @@ export type MarketProfileDocument = MarketProfileDocumentV1 | MarketProfileDocum
 export type GrowthIntelligenceRequestKind =
   | "profile_discovery"
   | "market_research"
+  | "market_evidence_changed"
   | "weekly_synthesis"
   | "business_evidence_changed"
   | "evidence_reassessment";
@@ -116,6 +117,7 @@ export type GrowthIntelligenceTriggerReason =
   | "daily_due"
   | "weekly_due"
   | "business_evidence_current"
+  | "market_research_completed"
   | "source_policy_changed"
   | "evidence_expired"
   | "source_changed"

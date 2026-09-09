@@ -3,6 +3,10 @@ import "server-only";
 import { z } from "zod";
 
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
+import {
+  RESEARCH_PIPELINE_STAGES,
+  researchCoverageEntrySchema,
+} from "@/domain/growth-intelligence/research-pipeline";
 import { DomainError } from "@/lib/errors";
 
 const identifierSchema = z.string().uuid();
@@ -256,6 +260,54 @@ const appendOutcomeSchema = z
   })
   .strict();
 
+/**
+ * The atomic handoff input: the worker's bounded result digest plus the
+ * retrieval coverage manifest. Eligibility is decided server-side from
+ * persisted claims, never from these worker counts.
+ */
+const pipelineCoverageSchema = z
+  .array(researchCoverageEntrySchema)
+  .min(1)
+  .max(26, "Coverage cannot exceed the planned query slots.");
+
+const pipelineHandoffSchema = z
+  .object({
+    runId: identifierSchema,
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    synthesisRequestId: identifierSchema.nullable(),
+    eligibleClaimCount: z.number().int().min(0).max(200),
+    replayed: z.boolean(),
+  })
+  .strict();
+
+const synthesisFinalizeResultSchema = z
+  .object({
+    outcome: z.literal("completed"),
+    resultDigest: digestSchema,
+    // Items ride through to the fenced persistence RPC, which validates
+    // every item strictly. The boundary only bounds the envelope.
+    items: z.array(z.unknown()).max(200),
+  })
+  .strict();
+
+const synthesisFinalizeOutcomeSchema = z
+  .object({
+    runId: identifierSchema,
+    itemCount: z.number().int().min(0).max(200),
+    supersededItemIds: z.array(identifierSchema).max(200).optional().default([]),
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    replayed: z.boolean(),
+  })
+  .strict();
+
+const synthesisFailOutcomeSchema = z
+  .object({
+    runId: identifierSchema,
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    replayed: z.boolean(),
+  })
+  .strict();
+
 export type MarketEvidencePersistence = {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
 };
@@ -295,6 +347,29 @@ export type MarketEvidenceRepository = {
     eventType: "expired" | "withdrawn" | "excluded" | "corrected" | "superseded";
     event: z.infer<typeof appendEventSchema>;
   }): Promise<z.infer<typeof appendOutcomeSchema>>;
+  completePipeline(input: {
+    organizationId: string;
+    pipelineId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    result: z.infer<typeof resultSchema>;
+    coverage: z.input<typeof pipelineCoverageSchema>;
+  }): Promise<z.infer<typeof pipelineHandoffSchema>>;
+  completeSynthesisPipeline(input: {
+    organizationId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    result: z.infer<typeof synthesisFinalizeResultSchema>;
+  }): Promise<z.infer<typeof synthesisFinalizeOutcomeSchema>>;
+  failSynthesisPipeline(input: {
+    organizationId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    failureCode: string;
+  }): Promise<z.infer<typeof synthesisFailOutcomeSchema>>;
 };
 
 function boundaryError(): DomainError {
@@ -305,7 +380,15 @@ function boundaryError(): DomainError {
 }
 
 function persistenceError(
-  operation: "begin" | "record" | "complete" | "fail" | "append",
+  operation:
+    | "begin"
+    | "record"
+    | "complete"
+    | "fail"
+    | "append"
+    | "completePipeline"
+    | "completeSynthesis"
+    | "failSynthesis",
 ): DomainError {
   const messages = {
     begin: "Market research could not be started.",
@@ -313,6 +396,9 @@ function persistenceError(
     complete: "Market research could not be completed.",
     fail: "Market research could not be marked as failed.",
     append: "Market Evidence state could not be updated.",
+    completePipeline: "Market research handoff could not be completed.",
+    completeSynthesis: "Market synthesis could not be finalized.",
+    failSynthesis: "Market synthesis could not be marked as failed.",
   } as const;
   return new DomainError("DOMAIN_ERROR", messages[operation]);
 }
@@ -336,7 +422,15 @@ async function invoke(
   name: string,
   args: Record<string, unknown>,
   outputSchema: z.ZodType,
-  operation: "begin" | "record" | "complete" | "fail" | "append",
+  operation:
+    | "begin"
+    | "record"
+    | "complete"
+    | "fail"
+    | "append"
+    | "completePipeline"
+    | "completeSynthesis"
+    | "failSynthesis",
 ): Promise<unknown> {
   let result: { data: unknown; error: unknown };
   try {
@@ -463,6 +557,60 @@ export function createMarketEvidenceRepository(
         appendOutcomeSchema,
         "append",
       )) as z.infer<typeof appendOutcomeSchema>;
+    },
+
+    async completePipeline(input) {
+      const result = parseOrThrow(resultSchema, input.result);
+      const coverage = parseOrThrow(pipelineCoverageSchema, input.coverage);
+      return (await invoke(
+        persistence,
+        "complete_market_research_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_pipeline_id: parseOrThrow(identifierSchema, input.pipelineId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_market_research_run_id: parseOrThrow(identifierSchema, input.runId),
+          p_result: result,
+          p_coverage: coverage,
+        },
+        pipelineHandoffSchema,
+        "completePipeline",
+      )) as z.infer<typeof pipelineHandoffSchema>;
+    },
+
+    async completeSynthesisPipeline(input) {
+      const result = parseOrThrow(synthesisFinalizeResultSchema, input.result);
+      return (await invoke(
+        persistence,
+        "complete_market_synthesis_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_synthesis_run_id: parseOrThrow(identifierSchema, input.runId),
+          p_result: result,
+        },
+        synthesisFinalizeOutcomeSchema,
+        "completeSynthesis",
+      )) as z.infer<typeof synthesisFinalizeOutcomeSchema>;
+    },
+
+    async failSynthesisPipeline(input) {
+      const failureCode = parseOrThrow(safeCodeSchema, input.failureCode);
+      return (await invoke(
+        persistence,
+        "fail_market_synthesis_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_synthesis_run_id: parseOrThrow(identifierSchema, input.runId),
+          p_safe_failure_code: failureCode,
+        },
+        synthesisFailOutcomeSchema,
+        "failSynthesis",
+      )) as z.infer<typeof synthesisFailOutcomeSchema>;
     },
   };
 }

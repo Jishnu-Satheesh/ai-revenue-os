@@ -166,3 +166,84 @@ export type StartBranchResearchResult = {
   pipelineId: string;
   researchRequestId: string;
 };
+
+/**
+ * The atomic research-to-synthesis handoff. The worker computes evidence
+ * outside any transaction; these fenced operations own the crash window
+ * between saved research, analysis scheduling and terminal output.
+ */
+export type ResearchPipelineCompletionResult = {
+  outcome: string;
+  resultDigest: string;
+  sourceAttemptCount: number;
+  sourceSuccessCount: number;
+  adapterCostMicrosUsd: number;
+  adapterLatencyMs: number;
+};
+
+export type ResearchPipelineCoverageEntry = {
+  slotKey: string;
+  kind: "local_market" | "topic" | "competitor";
+  outcome:
+    | "not_started"
+    | "searched_no_usable_evidence"
+    | "supported"
+    | "failed"
+    | "skipped_budget"
+    | "skipped_policy";
+  attemptIds?: string[];
+  acceptedClaimIds?: string[];
+};
+
+export type ResearchPipelineHandoff = {
+  runId: string;
+  pipelineStage: string;
+  synthesisRequestId: string | null;
+  eligibleClaimCount: number;
+  replayed: boolean;
+};
+
+export type SynthesisPipelineFinalization = {
+  runId: string;
+  itemCount: number;
+  supersededItemIds: string[];
+  pipelineStage: string;
+  replayed: boolean;
+};
+
+export type ResearchPipelineRepository = {
+  completeResearch(input: {
+    organizationId: string;
+    pipelineId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    result: ResearchPipelineCompletionResult;
+    coverage: readonly ResearchPipelineCoverageEntry[];
+  }): Promise<ResearchPipelineHandoff>;
+  finalizeSynthesis(input: {
+    organizationId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    result: {
+      outcome: "completed";
+      resultDigest: string;
+      items: readonly unknown[];
+    };
+  }): Promise<SynthesisPipelineFinalization>;
+  failSynthesis(input: {
+    organizationId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    failureCode: string;
+  }): Promise<{ runId: string; pipelineStage: string; replayed: boolean }>;
+  retrySynthesis(input: {
+    organizationId: string;
+    pipelineId: string;
+    actorId: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<{ requestId: string; status: string; replayed: boolean }>;
+};

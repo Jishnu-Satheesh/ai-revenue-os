@@ -126,4 +126,41 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain("quality_state, status, channel_id, limitations");
     expect(source).toContain("limitations: safeLimitationCodes(");
   });
+
+  it("wires real extraction and support-review phases instead of the Task 6/8 marker", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).not.toContain("Task 6/8 must remove");
+    expect(source).not.toContain("as unknown as Parameters<typeof runMarketResearch>");
+    expect(source).toContain("supportReview:");
+    expect(source).toContain("excerptProvenance:");
+    expect(source).toContain("EXTRACTION_UNAVAILABLE");
+  });
+
+  it("parses branch profiles through the v1/v2 union instead of v1 only", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("marketProfileDocumentSchema");
+    expect(source).not.toMatch(
+      /document: marketProfileDocumentV1Schema\.parse\(version\.profile_document\)/,
+    );
+  });
+
+  it("bounds the research plan by the full slot count within plan ceilings", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("buildResearchQuerySlots");
+    expect(source).toContain("maxResultsPerQuery: RESEARCH_BUDGET_LIMITS.maxResultsPerQuery");
+    expect(source).toContain("maxRedirects: 0");
+    expect(source).toContain("maxPipelineReservationMicrosUsd");
+  });
 });

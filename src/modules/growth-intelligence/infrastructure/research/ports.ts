@@ -105,7 +105,11 @@ export type ApprovedResearchScope = z.infer<typeof approvedResearchScopeSchema>;
 export const researchRequestSchema = z
   .object({
     scope: approvedResearchScopeSchema,
-    maxQueries: z.number().int().min(1).max(3),
+    // The full-coverage slot plan is authoritative: one business/local-market
+    // slot, one per topic, one per competitor, at most 26 primaries. maxQueries
+    // survives as that plan-length bound (the trigger sets it to the slot
+    // count), not the legacy 1–3 ceiling it once was.
+    maxQueries: z.number().int().min(1).max(RESEARCH_BUDGET_LIMITS.maxPrimarySearches),
     maxResultsPerQuery: z.number().int().min(1).max(10),
     maxResponseBytes: z
       .number()

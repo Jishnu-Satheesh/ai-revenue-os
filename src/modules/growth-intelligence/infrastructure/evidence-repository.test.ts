@@ -442,3 +442,180 @@ describe("Market Evidence repository", () => {
     expect(db.rpc).not.toHaveBeenCalled();
   });
 });
+
+describe("Market Evidence repository pipeline handoff", () => {
+  const pipelineId = "60000000-0000-4000-8000-000000000006";
+  const synthesisRunId = "70000000-0000-4000-8000-000000000007";
+
+  const completionResult = {
+    outcome: "completed" as const,
+    resultDigest: "d".repeat(64),
+    sourceAttemptCount: 1,
+    sourceSuccessCount: 1,
+    adapterCostMicrosUsd: 42_000,
+    adapterLatencyMs: 721,
+  };
+
+  const coverage = [
+    {
+      slotKey: "local_market",
+      kind: "local_market" as const,
+      outcome: "supported" as const,
+      attemptIds: ["11111111-1111-4111-8111-111111111111"],
+      acceptedClaimIds: [] as string[],
+    },
+  ];
+
+  it("completes research and schedules synthesis through one fenced call", async () => {
+    const rpc = vi.fn(async () => ({
+      data: {
+        runId,
+        pipelineStage: "preparing_insights",
+        synthesisRequestId: "80000000-0000-4000-8000-000000000008",
+        eligibleClaimCount: 1,
+        replayed: false,
+      },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const result = await repository.completePipeline({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken,
+      runId,
+      result: completionResult,
+      coverage,
+    });
+
+    expect(result).toEqual({
+      runId,
+      pipelineStage: "preparing_insights",
+      synthesisRequestId: "80000000-0000-4000-8000-000000000008",
+      eligibleClaimCount: 1,
+      replayed: false,
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_market_research_pipeline",
+      expect.objectContaining({
+        p_organization_id: organizationId,
+        p_pipeline_id: pipelineId,
+        p_request_id: requestId,
+        p_claim_token: claimToken,
+        p_market_research_run_id: runId,
+      }),
+    );
+  });
+
+  it("rejects unbounded coverage before any pipeline RPC", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    await expect(
+      repository.completePipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        result: completionResult,
+        coverage: Array.from({ length: 27 }, (_, index) => ({
+          slotKey: `topic-${index}`,
+          kind: "topic" as const,
+          outcome: "supported" as const,
+        })),
+      }),
+    ).rejects.toEqual(expect.objectContaining({ code: "DOMAIN_ERROR" }));
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a lost pipeline lease distinctly", async () => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { message: "market_research_claim_lost" },
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    await expect(
+      repository.completePipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        result: completionResult,
+        coverage,
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+  });
+
+  it("finalizes synthesis items, request and pipeline through one fenced call", async () => {
+    const rpc = vi.fn(async () => ({
+      data: {
+        runId: synthesisRunId,
+        itemCount: 2,
+        supersededItemIds: [],
+        pipelineStage: "ready",
+        replayed: false,
+      },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const result = await repository.completeSynthesisPipeline({
+      organizationId,
+      requestId,
+      claimToken,
+      runId: synthesisRunId,
+      result: {
+        outcome: "completed",
+        resultDigest: "e".repeat(64),
+        items: [],
+      },
+    });
+
+    expect(result).toEqual({
+      runId: synthesisRunId,
+      itemCount: 2,
+      supersededItemIds: [],
+      pipelineStage: "ready",
+      replayed: false,
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_market_synthesis_pipeline",
+      expect.objectContaining({
+        p_organization_id: organizationId,
+        p_request_id: requestId,
+        p_claim_token: claimToken,
+        p_synthesis_run_id: synthesisRunId,
+      }),
+    );
+  });
+
+  it("fails synthesis runs through the fenced pipeline fail path", async () => {
+    const rpc = vi.fn(async () => ({
+      data: { runId: synthesisRunId, pipelineStage: "synthesis_failed", replayed: false },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const result = await repository.failSynthesisPipeline({
+      organizationId,
+      requestId,
+      claimToken,
+      runId: synthesisRunId,
+      failureCode: "SYNTHESIS_NO_VALID_CANDIDATE",
+    });
+
+    expect(result).toEqual({
+      runId: synthesisRunId,
+      pipelineStage: "synthesis_failed",
+      replayed: false,
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "fail_market_synthesis_pipeline",
+      expect.objectContaining({ p_safe_failure_code: "SYNTHESIS_NO_VALID_CANDIDATE" }),
+    );
+  });
+});

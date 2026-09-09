@@ -2399,6 +2399,28 @@ export type Database = {
         };
         Returns: Record<string, unknown>;
       };
+      complete_market_research_pipeline: {
+        Args: {
+          p_organization_id: string;
+          p_pipeline_id: string;
+          p_market_research_run_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_result: unknown;
+          p_coverage: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      retry_market_research_synthesis: {
+        Args: {
+          p_organization_id: string;
+          p_pipeline_id: string;
+          p_actor_id: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
       fail_market_research_run: {
         Args: {
           p_organization_id: string;
@@ -2439,6 +2461,26 @@ export type Database = {
         Returns: Record<string, unknown>;
       };
       fail_growth_intelligence_synthesis: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_synthesis_run_id: string;
+          p_safe_failure_code: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_market_synthesis_pipeline: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_synthesis_run_id: string;
+          p_result: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_market_synthesis_pipeline: {
         Args: {
           p_organization_id: string;
           p_request_id: string;

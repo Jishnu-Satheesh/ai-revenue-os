@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { EventPublisher } from "@/domain/events/types";
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { createGrowthIntelligenceRequestFingerprint } from "@/domain/growth-intelligence/request-fingerprint";
 import { DomainError } from "@/lib/errors";
@@ -80,12 +83,14 @@ export type GrowthIntelligenceRequestView = {
   researchRuleVersion: string;
   localTimeBucket: string;
   correlationId: string;
+  pipelineId?: string | null;
+  phase?: string | null;
 };
 
 export type ApprovedMarketProfileView = {
   versionId: string;
   digest: string;
-  document: MarketProfileDocumentV1;
+  document: MarketProfileDocumentV1 | MarketProfileDocumentV2;
   sourcePolicyDigest: string;
   enabled: boolean;
 };
@@ -136,7 +141,10 @@ export type MarketResearchClaim = {
 };
 
 export type MarketResearchProfiles = {
-  readCurrent(input: { organizationId: string }): Promise<ApprovedMarketProfileView | null>;
+  readCurrent(input: {
+    organizationId: string;
+    branchId?: string | null;
+  }): Promise<ApprovedMarketProfileView | null>;
 };
 
 export type MarketResearchCurrentSources = {
@@ -153,7 +161,7 @@ export type MarketResearchDependencies = {
   supportReview: MarketResearchModelPhase;
   excerptProvenance: MarketResearchExcerptProvenance;
   planQueries: (request: ResearchRequest) => ResearchQuery[];
-  buildScope: (document: MarketProfileDocumentV1) => ResearchRequest;
+  buildScope: (document: MarketProfileDocumentV1 | MarketProfileDocumentV2) => ResearchRequest;
   events: EventPublisher;
   now?: () => Date;
   newClaimToken?: () => string;
@@ -183,13 +191,10 @@ const RESEARCH_RULE_VERSION = "market-research@1";
 const RESEARCH_MODEL_PROVIDER = "gemini";
 const MAX_RECORDED_SOURCES = 50;
 
-// business_evidence_changed has no synthesis consumer until Increment 2, so a
-// fresh market read is the honest handling; Task 14 may narrow this set.
-const RESEARCH_KINDS = new Set([
-  "market_research",
-  "evidence_reassessment",
-  "business_evidence_changed",
-]);
+// business_evidence_changed belongs to the synthesis worker: fresh business
+// evidence is analysis input, not a reason to refetch public research.
+// market_evidence_changed children likewise never re-enter research.
+const RESEARCH_KINDS = new Set(["market_research", "evidence_reassessment"]);
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -347,15 +352,19 @@ export async function runMarketResearch(
     return { outcome: "failed", code, runId: null };
   };
 
-  const [request, profile] = await Promise.all([
-    dependencies.requests.load({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-    }),
-    dependencies.profiles.readCurrent({ organizationId: payload.organizationId }),
-  ]);
-
+  // The request loads first so the profile read pins its exact branch
+  // scope: a set branch reads its own profile, null reads the legacy
+  // organization profile. Never read by organization alone.
+  const request = await dependencies.requests.load({
+    organizationId: payload.organizationId,
+    requestId: payload.requestId,
+  });
   if (!request) return failRequest("REQUEST_CONTEXT_UNAVAILABLE");
+  const profile = await dependencies.profiles.readCurrent({
+    organizationId: payload.organizationId,
+    branchId: request.branchId,
+  });
+
   if (!profile || !profile.enabled) {
     return failRequest(!profile ? "PROFILE_UNAVAILABLE" : "PROFILE_DISABLED");
   }
@@ -428,17 +437,24 @@ export async function runMarketResearch(
   });
 
   const failRun = async (code: string): Promise<MarketResearchResult> => {
-    await dependencies.evidence.fail({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-      claimToken,
-      runId: begun.runId,
-      failure: {
-        safeFailureCode: code,
-        adapterCostMicrosUsd: ledger.knownMicrosUsd,
-        adapterLatencyMs: ledger.latencyMs,
-      },
-    });
+    try {
+      await dependencies.evidence.fail({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        claimToken,
+        runId: begun.runId,
+        failure: {
+          safeFailureCode: code,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        },
+      });
+    } catch (error) {
+      // Lease loss ends the run without further mutations: no request
+      // write, no reassessment, no failure event under a dead claim.
+      if (isClaimLost(error)) return { outcome: "claim_lost" };
+      throw error;
+    }
     // The run failure already fences the request through the same claim token,
     // so this second call replays that outcome rather than duplicating it.
     await dependencies.requests.fail({
@@ -737,21 +753,78 @@ export async function runMarketResearch(
     }),
   );
 
+  const eventName =
+    runOutcome === "partial" ? "market_research.partially_completed" : "market_research.completed";
+  const completedPayload = {
+    requestId: payload.requestId,
+    runId: begun.runId,
+    claimCount: claims.length,
+    sourceAttemptCount,
+    sourceSuccessCount,
+    supportedCount: review.supportedCount,
+    unsupportedCount: review.unsupportedCount,
+    uncertainCount: review.uncertainCount,
+    unprocessedSourceCount: extraction.unprocessedSourceCount,
+    excludedSourceCount,
+    unknownUsageCount: ledger.unknownCount,
+    extractionModel: dependencies.extraction.modelId,
+    reviewModel: dependencies.supportReview.modelId,
+  };
+
+  // Legacy requests carry no pipeline lineage (null, or absent on older
+  // readers); only a bound pipeline takes the fenced handoff path.
+  const pipelineId = request.pipelineId ?? null;
+
   try {
-    await dependencies.evidence.complete({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-      claimToken,
-      runId: begun.runId,
-      result: {
-        outcome: runOutcome,
-        resultDigest,
-        sourceAttemptCount,
-        sourceSuccessCount,
-        adapterCostMicrosUsd: ledger.knownMicrosUsd,
-        adapterLatencyMs: ledger.latencyMs,
-      },
-    });
+    if (pipelineId !== null) {
+      // Pipeline-bound runs hand off through one fenced transaction: run
+      // completion, request success, the unique synthesis child and the
+      // pipeline transition commit together, so no crash can strand saved
+      // research without analysis scheduling.
+      const handoff = await dependencies.evidence.completePipeline({
+        organizationId: payload.organizationId,
+        pipelineId,
+        requestId: payload.requestId,
+        claimToken,
+        runId: begun.runId,
+        result: {
+          outcome: runOutcome,
+          resultDigest,
+          sourceAttemptCount,
+          sourceSuccessCount,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        },
+        coverage,
+      });
+      await publishEvent(dependencies.events, {
+        organizationId: payload.organizationId,
+        eventName,
+        correlationId: payload.correlationId,
+        occurredAt: now().toISOString(),
+        payload: {
+          ...completedPayload,
+          pipelineId,
+          pipelineStage: handoff.pipelineStage,
+          synthesisRequestId: handoff.synthesisRequestId,
+        },
+      });
+    } else {
+      await dependencies.evidence.complete({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        claimToken,
+        runId: begun.runId,
+        result: {
+          outcome: runOutcome,
+          resultDigest,
+          sourceAttemptCount,
+          sourceSuccessCount,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        },
+      });
+    }
   } catch (error) {
     if (isClaimLost(error)) return { outcome: "claim_lost" };
     if (error instanceof DomainError || error instanceof GrowthIntelligenceError) {
@@ -767,36 +840,26 @@ export async function runMarketResearch(
     throw error;
   }
 
-  const completion = await dependencies.requests.complete({
-    organizationId: payload.organizationId,
-    requestId: payload.requestId,
-    claimToken,
-  });
-  if (completion.outcome !== "completed") return { outcome: "claim_lost" };
-
-  const eventName =
-    runOutcome === "partial" ? "market_research.partially_completed" : "market_research.completed";
-  await publishEvent(dependencies.events, {
-    organizationId: payload.organizationId,
-    eventName,
-    correlationId: payload.correlationId,
-    occurredAt: now().toISOString(),
-    payload: {
+  if (pipelineId === null) {
+    const completion = await dependencies.requests.complete({
+      organizationId: payload.organizationId,
       requestId: payload.requestId,
-      runId: begun.runId,
-      claimCount: claims.length,
-      sourceAttemptCount,
-      sourceSuccessCount,
-      supportedCount: review.supportedCount,
-      unsupportedCount: review.unsupportedCount,
-      uncertainCount: review.uncertainCount,
-      unprocessedSourceCount: extraction.unprocessedSourceCount,
-      excludedSourceCount,
-      unknownUsageCount: ledger.unknownCount,
-      extractionModel: dependencies.extraction.modelId,
-      reviewModel: dependencies.supportReview.modelId,
-    },
-  });
+      claimToken,
+    });
+    // The run completion above already succeeded this request, so a replayed
+    // delivery reports already_finished: still success, never claim_lost.
+    if (completion.outcome !== "completed" && completion.outcome !== "already_finished") {
+      return { outcome: "claim_lost" };
+    }
+
+    await publishEvent(dependencies.events, {
+      organizationId: payload.organizationId,
+      eventName,
+      correlationId: payload.correlationId,
+      occurredAt: now().toISOString(),
+      payload: completedPayload,
+    });
+  }
 
   // Newly inferred source-rule changes become a reassessment request only.
   // The worker never alters active research; an operator-confirmed profile

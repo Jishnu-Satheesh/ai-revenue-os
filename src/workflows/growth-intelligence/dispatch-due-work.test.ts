@@ -45,25 +45,33 @@ describe("dispatchDuePayloadSchema", () => {
 });
 
 describe("dispatchDueWork", () => {
-  it("dispatches identifier-only runs routed by request kind", async () => {
+  it("routes research kinds to research and synthesis kinds to synthesis", async () => {
     const deps = dependencies();
     deps.claimDue.mockResolvedValueOnce([
       dueRequest(),
       dueRequest({
         organizationId: otherOrganizationId,
         requestId: "21000000-0000-4000-8000-000000000021",
-        kind: "weekly_synthesis",
+        kind: "market_evidence_changed",
       }),
       dueRequest({
         requestId: "22000000-0000-4000-8000-000000000022",
         kind: "evidence_reassessment",
       }),
+      dueRequest({
+        requestId: "23000000-0000-4000-8000-000000000023",
+        kind: "business_evidence_changed",
+      }),
+      dueRequest({
+        requestId: "24000000-0000-4000-8000-000000000024",
+        kind: "weekly_synthesis",
+      }),
     ]);
 
     const result = await dispatchDueWork({ correlationId }, deps);
 
-    expect(result).toMatchObject({ outcome: "dispatched", dispatched: 3, skipped: 0 });
-    expect(deps.trigger).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ outcome: "dispatched", dispatched: 5, skipped: 0 });
+    expect(deps.trigger).toHaveBeenCalledTimes(5);
     expect(deps.trigger).toHaveBeenNthCalledWith(1, {
       taskId: "growth-intelligence.run-market-research",
       organizationId,
@@ -71,9 +79,27 @@ describe("dispatchDueWork", () => {
       correlationId,
     });
     expect(deps.trigger).toHaveBeenNthCalledWith(2, {
-      taskId: "growth-intelligence.consolidate-market-evidence",
+      taskId: "growth-intelligence.run-synthesis",
       organizationId: otherOrganizationId,
       requestId: "21000000-0000-4000-8000-000000000021",
+      correlationId,
+    });
+    expect(deps.trigger).toHaveBeenNthCalledWith(3, {
+      taskId: "growth-intelligence.run-market-research",
+      organizationId,
+      requestId: "22000000-0000-4000-8000-000000000022",
+      correlationId,
+    });
+    expect(deps.trigger).toHaveBeenNthCalledWith(4, {
+      taskId: "growth-intelligence.run-synthesis",
+      organizationId,
+      requestId: "23000000-0000-4000-8000-000000000023",
+      correlationId,
+    });
+    expect(deps.trigger).toHaveBeenNthCalledWith(5, {
+      taskId: "growth-intelligence.run-synthesis",
+      organizationId,
+      requestId: "24000000-0000-4000-8000-000000000024",
       correlationId,
     });
   });

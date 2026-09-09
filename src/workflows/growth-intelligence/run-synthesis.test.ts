@@ -64,6 +64,8 @@ const requestView: SynthesisRequestView = {
   researchRuleVersion: "market-research@1",
   localTimeBucket: "2026-09",
   correlationId,
+  pipelineId: null,
+  phase: null,
 };
 
 const profileView: ApprovedSynthesisProfileView = {
@@ -250,5 +252,57 @@ describe("runSynthesis", () => {
     // only fail its own request, never erase deterministic business state.
     expect(deps.requests.fail).toHaveBeenCalledTimes(1);
     expect(deps.requests.complete).not.toHaveBeenCalled();
+  });
+
+  it("accepts market_evidence_changed children from the atomic handoff", async () => {
+    const deps = dependencies({
+      requests: {
+        claim: vi.fn(async () => ({ outcome: "acquired", replayed: false })),
+        complete: vi.fn(async () => ({ outcome: "completed" })),
+        fail: vi.fn(async () => ({ outcome: "failed" })),
+        load: vi.fn(async () => ({
+          ...requestView,
+          kind: "market_evidence_changed",
+          triggerReason: "market_research_completed",
+          pipelineId: "50000000-0000-4000-8000-000000000005",
+          phase: "synthesis",
+        })),
+      },
+    });
+    const result = await runSynthesis(payload, deps);
+    expect(result).toEqual({ outcome: "synthesized", runId, itemCount: 1 });
+  });
+
+  it("treats an idempotent completion as success: the atomic finalize already finished the request", async () => {
+    const deps = dependencies({
+      requests: {
+        claim: vi.fn(async () => ({ outcome: "acquired", replayed: false })),
+        complete: vi.fn(async () => ({ outcome: "already_finished" })),
+        fail: vi.fn(async () => ({ outcome: "failed" })),
+        load: vi.fn(async () => ({
+          ...requestView,
+          kind: "market_evidence_changed",
+          triggerReason: "market_research_completed",
+          pipelineId: "50000000-0000-4000-8000-000000000005",
+          phase: "synthesis",
+        })),
+      },
+    });
+    const result = await runSynthesis(payload, deps);
+    expect(result).toEqual({ outcome: "synthesized", runId, itemCount: 1 });
+  });
+
+  it("threads the request branch into the approved-profile read", async () => {
+    const branchId = "30000000-0000-4000-8000-000000000030";
+    const deps = dependencies({
+      requests: {
+        claim: vi.fn(async () => ({ outcome: "acquired", replayed: false })),
+        complete: vi.fn(async () => ({ outcome: "completed" })),
+        fail: vi.fn(async () => ({ outcome: "failed" })),
+        load: vi.fn(async () => ({ ...requestView, branchId })),
+      },
+    });
+    await runSynthesis(payload, deps);
+    expect(deps.profiles.readCurrent).toHaveBeenCalledWith({ organizationId, branchId });
   });
 });

@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import { DomainError } from "@/lib/errors";
 import type {
   SynthesisProfileContext,
@@ -46,12 +49,14 @@ export type SynthesisRequestView = {
   researchRuleVersion: string;
   localTimeBucket: string;
   correlationId: string;
+  pipelineId?: string | null;
+  phase?: string | null;
 };
 
 export type ApprovedSynthesisProfileView = {
   versionId: string;
   digest: string;
-  document: MarketProfileDocumentV1;
+  document: MarketProfileDocumentV1 | MarketProfileDocumentV2;
   sourcePolicyDigest: string;
   enabled: boolean;
 };
@@ -78,7 +83,10 @@ export type SynthesisRequestOperations = {
 };
 
 export type SynthesisProfileReader = {
-  readCurrent(input: { organizationId: string }): Promise<ApprovedSynthesisProfileView | null>;
+  readCurrent(input: {
+    organizationId: string;
+    branchId?: string | null;
+  }): Promise<ApprovedSynthesisProfileView | null>;
 };
 
 export type SynthesisRunner = (input: SynthesizeInput) => Promise<SynthesisServiceResult>;
@@ -101,13 +109,19 @@ export type SynthesisResult =
 
 export const SYNTHESIS_LEASE_SECONDS = 600;
 
-// business_evidence_changed carries new monthly business evidence;
-// weekly_synthesis carries the weekly consolidation. Research and
-// reassessment kinds belong to the market research worker, and profile
-// discovery belongs to the Market Profile proposal flow.
-const SYNTHESIS_KINDS = new Set(["business_evidence_changed", "weekly_synthesis"]);
+// market_evidence_changed children arrive from the atomic research handoff
+// with market_research_completed trigger reasons. Research and reassessment
+// kinds belong to the market research worker, and profile discovery belongs
+// to the Market Profile proposal flow.
+const SYNTHESIS_KINDS = new Set([
+  "market_evidence_changed",
+  "business_evidence_changed",
+  "weekly_synthesis",
+]);
 
-function profileContext(document: MarketProfileDocumentV1): SynthesisProfileContext {
+function profileContext(
+  document: MarketProfileDocumentV1 | MarketProfileDocumentV2,
+): SynthesisProfileContext {
   const city = document.geographies.find((geography) => geography.layer === "city");
   const country = document.geographies.find((geography) => geography.layer === "country");
   const location = city ?? country;
@@ -156,15 +170,19 @@ export async function runSynthesis(
     return { outcome: "failed", code, runId: null };
   };
 
-  const [request, profile] = await Promise.all([
-    dependencies.requests.load({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-    }),
-    dependencies.profiles.readCurrent({ organizationId: payload.organizationId }),
-  ]);
-
+  // The request loads first so the profile read pins its exact branch
+  // scope: a set branch reads its own profile, null reads the legacy
+  // organization profile. Never read by organization alone.
+  const request = await dependencies.requests.load({
+    organizationId: payload.organizationId,
+    requestId: payload.requestId,
+  });
   if (!request) return failRequest("REQUEST_CONTEXT_UNAVAILABLE");
+  const profile = await dependencies.profiles.readCurrent({
+    organizationId: payload.organizationId,
+    branchId: request.branchId,
+  });
+
   if (!profile || !profile.enabled) {
     return failRequest(!profile ? "PROFILE_UNAVAILABLE" : "PROFILE_DISABLED");
   }
@@ -212,12 +230,18 @@ export async function runSynthesis(
     return { outcome: "failed", code: serviceResult.code, runId: serviceResult.runId };
   }
 
+  // For pipeline-bound children the Trigger composition routes persistence
+  // through the atomic finalize RPC (items, request and pipeline in one
+  // transaction), which already completes the request: an already_finished
+  // answer is the same success, never a lost lease.
   const completion = await dependencies.requests.complete({
     organizationId: payload.organizationId,
     requestId: payload.requestId,
     claimToken,
   });
-  if (completion.outcome !== "completed") return { outcome: "claim_lost" };
+  if (completion.outcome !== "completed" && completion.outcome !== "already_finished") {
+    return { outcome: "claim_lost" };
+  }
 
   if (serviceResult.outcome === "replayed") {
     return { outcome: "replayed", runId: serviceResult.runId };
