@@ -1228,6 +1228,19 @@ This section narrowly extends `specs/012` and `specs/015`: models still never co
 financial/metric value. Narration is permitted only after a deterministic detector has created a
 cited finding.
 
+Pilot amendment (2026-09-09, channel recommendations pilot): for runs whose findings include a
+pilot detector — `orders.cancellation_loss`, `orders.cancellation_attribution`, or
+`operations.closed_share` — the worker widens the fenced prompt folder with stored channel
+context (organization and channel display names, keys, template key, category, industry, country,
+timezone, and currency under a PII allowlist; never service-area blobs or contact details), plus
+curated versioned playbook guidance (`CHANNEL_PLAYBOOK_VERSION = 1`) and a prepared web-evidence
+slot that ships empty and fail-closed (`webEvidence = []`: nothing fetched, nothing invented)
+under narration prompt version 5. Portal steps are framed as checks the operator runs in their own
+portal, never as claims about a portal's menu structure; URLs and domains may only be copied from
+fenced evidence, never invented. A pilot-loader failure falls back to the pre-pilot v4 prompt
+shape and the run still completes; the judge is untouched. Qualifying live search (Brave transport
+runs on fixtures only today) is the explicit follow-up.
+
 ## 12. Public API contracts
 
 All routes are organization-scoped, Zod-validated, permission-checked, correlation-aware, and use
