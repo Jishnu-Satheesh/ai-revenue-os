@@ -245,3 +245,69 @@ describe("runChannelRecommendations", () => {
     expect(vi.mocked(empty.fail).mock.calls[0][0].code).toBe("NARRATION_PROCESSING_FAILED");
   });
 });
+
+describe("runChannelRecommendations pilot context threading", () => {
+  const pilotContext = {
+    channelContext: {
+      organizationName: "ACME Restaurants",
+      industry: "restaurant",
+      countryCode: "AE",
+      baseCurrency: "AED",
+      organizationTimezone: "Asia/Dubai",
+      channelKey: "talabat",
+      channelDisplayName: "Talabat",
+      channelCategory: "marketplace",
+      templateKey: "talabat_v1",
+      branchName: "Marina",
+      branchTimezone: "Asia/Dubai",
+    },
+    playbookGuidance: [
+      {
+        detectorKey: "orders.cancellation_loss",
+        title: "Talabat cancellation checks",
+        steps: ["Complete the tablet check-in at opening."],
+        sourceLabel: "Curated Talabat operations checklist",
+      },
+    ],
+    webEvidence: [],
+  };
+
+  it("threads pilot context into the prompt and digests exactly what was sent", async () => {
+    const deps = dependencies({ loadPilotContext: vi.fn(async () => pilotContext) });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    expect(deps.loadPilotContext).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      analysisRunId: RUN,
+      findings: [findingSummary()],
+    });
+    const [system, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).toContain("<channel_context>");
+    expect(user).toContain("Talabat");
+    expect(user).toContain("Talabat cancellation checks");
+    // The digest covers the new inputs because it digests the rendered
+    // system+user strings rather than the pre-pilot fields.
+    const call = vi.mocked(deps.complete).mock.calls[0][0];
+    expect(call.promptDigest).toBe(sha256Hex(JSON.stringify({ system, user })));
+  });
+
+  it("fails open to the v4 shape when the pilot loader throws, and still completes", async () => {
+    const deps = dependencies({
+      loadPilotContext: vi.fn(async () => {
+        throw new Error("database unreachable");
+      }),
+    });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).not.toContain("<channel_context>");
+    expect(user).not.toContain("<playbook_guidance>");
+    expect(user).not.toContain("<web_evidence>");
+    expect(deps.complete).toHaveBeenCalledTimes(1);
+    expect(deps.fail).not.toHaveBeenCalled();
+  });
+});

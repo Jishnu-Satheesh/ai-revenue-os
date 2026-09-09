@@ -97,8 +97,11 @@ describe("channel recommendations Trigger registration", () => {
     expect(source).toContain('id: "channel-recommendations.evaluate"');
     expect(source).toMatch(/schedules\.task\(\{[\s\S]*?cron: "0 3 \*\/2 \* \*"/);
     // A string cron runs in UTC by Trigger.dev contract; no timezone override
-    // may drift the judge off the plan's Global Constraints.
-    expect(source).not.toContain("timezone:");
+    // may drift the judge off the plan's Global Constraints. Scoped to the
+    // evaluate registration: the pilot-context loader's zod row schemas
+    // legitimately name `default_timezone`/`timezone` columns elsewhere.
+    const evaluateBody = source.slice(source.indexOf('id: "channel-recommendations.evaluate"'));
+    expect(evaluateBody).not.toMatch(/timezone\s*:/);
   });
 
   it("lets Postgres anti-join the bounded judge cursor and logs refused ids", async () => {

@@ -8,7 +8,10 @@ import {
 import {
   buildNarrationPrompt,
   sha256Hex,
+  type NarrationChannelContext,
   type NarrationPromptFinding,
+  type PlaybookGuidanceItem,
+  type WebEvidenceItem,
 } from "@/workflows/analysis/recommendation-prompt";
 
 /**
@@ -90,6 +93,17 @@ export type ChannelRecommendationsDependencies = {
     organizationId: string;
     analysisRunId: string;
   }): Promise<readonly NarrationPromptFinding[]>;
+  /**
+   * Pilot channel context for the prompt, loaded server-side by the caller
+   * (the Trigger task reads the stored org/channel/branch rows and selects
+   * curated playbook guidance). Optional so existing callers compile; absent
+   * — or throwing, which fails open below — renders the v4-shape prompt.
+   */
+  loadPilotContext?(input: {
+    organizationId: string;
+    analysisRunId: string;
+    findings: readonly NarrationPromptFinding[];
+  }): Promise<ChannelPilotContext>;
   generator: NarrationGenerator;
   complete(input: {
     organizationId: string;
@@ -110,6 +124,17 @@ export type ChannelRecommendationsDependencies = {
     code: ChannelRecommendationFailureCode;
     resultDigest: string;
   }): Promise<void>;
+};
+
+/**
+ * The pilot inputs the prompt builder renders as fenced blocks. The trigger
+ * task's loader assembles this from stored rows; the workflow only threads it
+ * through, so a context the database cannot supply never blocks a narration.
+ */
+export type ChannelPilotContext = {
+  channelContext: NarrationChannelContext | null;
+  playbookGuidance: readonly PlaybookGuidanceItem[];
+  webEvidence: readonly WebEvidenceItem[];
 };
 
 function failureDigest(code: ChannelRecommendationFailureCode): string {
@@ -211,11 +236,35 @@ export async function runChannelRecommendations(
       throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
     }
 
+    // Pilot context is advisory, never load-bearing: any throw from the
+    // loader — a database error, a drifted row — falls back to null context
+    // with empty guidance, which the prompt builder renders as the v4 shape.
+    // The run still completes; only findings-empty above fails the run.
+    let pilot: ChannelPilotContext = {
+      channelContext: null,
+      playbookGuidance: [],
+      webEvidence: [],
+    };
+    if (dependencies.loadPilotContext) {
+      try {
+        pilot = await dependencies.loadPilotContext({
+          organizationId: payload.organizationId,
+          analysisRunId: payload.analysisRunId,
+          findings,
+        });
+      } catch {
+        pilot = { channelContext: null, playbookGuidance: [], webEvidence: [] };
+      }
+    }
+
     const prompt = buildNarrationPrompt({
       windowStart: claim.window.windowStart,
       windowEnd: claim.window.windowEnd,
       periodGrain: claim.window.periodGrain,
       findings,
+      channelContext: pilot.channelContext,
+      playbookGuidance: pilot.playbookGuidance,
+      webEvidence: pilot.webEvidence,
     });
 
     let reply = await generateOnce(dependencies.generator, prompt);

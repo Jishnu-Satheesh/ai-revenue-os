@@ -19,6 +19,7 @@ import {
   runChannelRecommendationEvaluations,
   type UnjudgedRecommendation,
 } from "@/workflows/analysis/run-recommendation-evaluations";
+import { loadRecommendationPilotContext } from "./recommendation-pilot-context";
 
 /**
  * The narrator's Trigger wiring.
@@ -255,6 +256,9 @@ export const channelRecommendationsTask = schemaTask({
           .eq("analysis_run_id", input.analysisRunId);
         if (error) throw new Error(`Channel findings load failed: ${error.code}`);
         return (data ?? []).map(toNarrationFinding);
+      },
+      async loadPilotContext(input) {
+        return loadRecommendationPilotContext(supabase, input);
       },
       generator: recommendationGenerator(),
       async complete(input) {
