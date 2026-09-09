@@ -80,7 +80,7 @@ describe("the recommendation narration contracts", () => {
     // v2: narration prompt gained the plain-language, highest-leverage advice
     // rules so a recommendation reads as advice a non-technical owner can act
     // on, never as a restatement of the arithmetic.
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(4);
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(5);
     expect(JUDGE_PROMPT_VERSION).toBe(1);
     expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(6);
     expect(MAX_EVALUATION_BATCH).toBe(200);
