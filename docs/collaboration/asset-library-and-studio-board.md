@@ -5612,3 +5612,56 @@ through the real routes, not only in tests.
   tests first (RED), then loader contracts, branchId threading, SQL
   persistence re-validation, deterministic policies, workflow/service/provider/
   repository/loader tests + hosted suites, path-limited commit.
+
+### 2026-09-09 · muse-spark · Market monitoring Task 10 pipeline status, history, retry and outcome links (12-task plan)
+
+- **BASE:** `161c2a5c780ffc5ae94013202f64f56be8dc0d72` (board records Tasks 8+9
+  done). Peer sessions active; peer rows present — leave this board UNSTAGED
+  at commit (controller preserves it). NOTE mid-session: HEAD advanced to
+  `3f05fa4` (docs-only: 5 spec/design files, none in this claim); the staged
+  slice is unaffected (verified: index diff touches no moved file).
+- **Claimed files (Task 10 only):** created
+  `application/research-read-model.ts` + test (ResearchPipelineView builder,
+  history pagination at 10/max 50, retry eligibility, provenance attachment),
+  `infrastructure/research-read-repository.ts` + test (signed-in RLS pipeline,
+  history, last-success, counts, retrySynthesis RPC wire),
+  `src/app/api/organizations/[organizationId]/market-profile/research/[pipelineId]/route.ts`
+  + test (status), its `retry/route.ts` + test (eligible-only retry);
+  modified `application/read-model.ts` + test (research provenance on
+  recommendation cards, research timeline events), `read-service.ts` + test,
+  `infrastructure/read-repository.ts` + test (synthesisRunId lineage),
+  GI page + `growth-intelligence/route.ts` + test (branch-scoped research
+  composition), report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-10-report.md`,
+  and this board. No UI components (Task 11), no migration expected, no live
+  calls, gates stay OFF. No stash/checkout/reset/push; prettier only Task 10
+  files, never this board.
+- **Status:** in-progress — viewer/operator/foreign-tenant read + retry +
+  history tests first (RED), then read-model/repository, status + retry
+  routes, GI composition + provenance, route/model/repository tests +
+  typecheck, path-limited commit.
+
+### 2026-09-09 · codex · Campaign Progress CP1 Task 1 governing documents
+
+- **Completed:** reconciled Specs 019/020, ADR 0041 and new ADR 0049 to establish the three-tab
+  Asset Library; approved historical bytes may reach Blueprint and final generation, while rejected
+  historical bytes stop at Blueprint and only validated rules with human reasons reach the final
+  prompt. Completed Studio posters may link to Creative History as Unreviewed; raw plates do not.
+- **Evidence:** `3f05fa4` (`docs: correct creative history evidence boundary`); targeted legacy-route
+  scan, `git diff --check HEAD^ HEAD`, and `git show --check` passed. Board intentionally remains
+  unstaged because it records concurrent work.
+- **Next:** CP1 Task 2 — test-first strict Creative History records, deterministic selector and
+  separated Blueprint/final provider evidence contracts. No migration or provider adapter change yet.
+
+### 2026-09-09 · codex · Campaign Progress CP1 Task 2 strict domain contracts
+
+- **Completed:** added immutable Creative History items, versions, reviews and eligibility; a
+  deterministic selector with relevance-first ordering, weak-match exclusions, three Approved final
+  evidence cap, five Rejected Blueprint evidence cap and human-reason coverage; and the corrected
+  provider schemas whose final-image union excludes `avoid` and `rejected_creative`.
+- **Evidence:** `d5b035d` (`feat: define creative history evidence contracts`). New tests were
+  observed failing before production code, then 50 focused/adjacent Vitest tests, `pnpm typecheck`,
+  Prettier on only CP1 code files, and `git diff --check` passed. Expected provider-refusal test logs
+  remain redacted and tests passed.
+- **Next:** CP1 Task 3 drafts the additive hosted-staging migration and pgTAP suite. It is explicitly
+  blocked from `db:migrations:push` until independent review of the SQL/security/query shape.
