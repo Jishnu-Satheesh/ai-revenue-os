@@ -73,3 +73,15 @@ was poking at; the pilot flag keeps this to known organizations. The page can
 show findings briefly before their narration arrives; that is the accepted
 shape of independence, not a defect. Two workers now exist to operate, and
 the silent-queue trap applies to both.
+
+## Amendment A (2026-09-09, user-consented)
+
+The "no tools and no retrieval" sentence above no longer describes the narration worker on pilot
+runs. Under Amendment A the narrator may use Google Search grounding on runs whose findings include
+a pilot detector (`orders.cancellation_loss`, `orders.cancellation_attribution`,
+`operations.closed_share`), preferring the channel's own docs, forums, and merchant discussions
+first, and emitting no URLs. Everything else in this ADR stands: narration is still its own worker
+chained after analysis, output is still schema-validated, the completion RPC still re-checks
+citations against the same run's findings, six per run still holds, and triage still does not carry
+forward. The scheduled judge keeps the no-tools constraint. Rationale and consent record:
+ADR 0051.

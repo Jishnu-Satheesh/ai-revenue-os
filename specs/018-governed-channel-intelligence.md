@@ -1367,8 +1367,16 @@ provider payloads, credentials, or customer PII.
 - Treat file names, sheet names, headers, descriptions, formulas, URLs, reviews, and cell text as
   attacker-controlled. They never determine tool calls or prompt instructions.
 - The contract-proposal model has no tools and no retrieval outside the bounded package context.
-  The recommendation-narration model and the scheduled judge have the same constraint, bounded to
-  one run's findings and their citations.
+  The scheduled judge has the same constraint, bounded to one run's findings and their citations.
+  The recommendation-narration model keeps that constraint on all non-pilot runs; under Amendment A
+  (2026-09-09, user-consented, recommendations pilot only) the narrator may use Google Search
+  grounding on pilot runs — runs whose findings include `orders.cancellation_loss`,
+  `orders.cancellation_attribution`, or `operations.closed_share` — preferring the channel's own
+  docs, forums, and merchant discussions first. The model still emits no URLs (the output shape has
+  no URL field), findings remain the only cited evidence, every action stays human-supervised, and
+  output still passes the same schema-validation and citation re-check fence. This supersedes the
+  section 11.4 pilot paragraph's playbook and empty-web-slot sentences; see ADR 0051. ADR 0050
+  stands as history.
 - Redact or remove customer names, phone numbers, email addresses, delivery addresses, free-text
   order notes, and unrestricted review text unless a declared detector needs minimized content and
   policy permits it.
@@ -1384,7 +1392,8 @@ provider payloads, credentials, or customer PII.
 
 OWASP documents indirect prompt injection through attacker-controlled files, and NIST reports agent
 hijacking from external data as a practical security risk. This architecture reduces impact through
-least privilege, a no-tool model worker, typed output, deterministic projection, and exact human
+least privilege, a no-tool model worker (apart from the Amendment A pilot-narration grounding
+exception above), typed output, deterministic projection, and exact human
 approval rather than claiming prompt injection can be eliminated.
 
 ## 15. Observability and operations
