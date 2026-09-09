@@ -5542,3 +5542,73 @@ through the real routes, not only in tests.
 - **Status:** done — calendar + month-year-picker focused suites green,
   typecheck clean, lint with no new errors; report at
   `.superpowers/sdd/2026-09-07-channel-audit-free-range-window/task-15-report.md`.
+
+### 2026-09-09 · muse-spark · Market monitoring Task 8 atomic research-to-synthesis handoff (12-task plan)
+
+- **BASE:** `4ff4119` (Task 7 commit). Peer sessions active; peer rows present —
+  leave this board UNSTAGED at commit (controller preserves it).
+- **Claimed files (Task 8 only):** created
+  `supabase/migrations/*_growth_intelligence_research_completion.sql` +
+  `supabase/tests/database/growth_intelligence_research_pipeline_test.sql`;
+  modified `infrastructure/evidence-repository.ts` + test
+  (`completePipeline`/`completeSynthesis`/`failSynthesisPipeline` boundary),
+  `application/ports.ts` (pipeline handoff ports),
+  `src/workflows/growth-intelligence/run-market-research.ts` + test (fenced
+  pipeline completion, legacy already_finished fix),
+  `run-synthesis.ts` + test (market_evidence_changed kind, atomic finalize),
+  `dispatch-due-work.ts` + test (synthesis reroute),
+  `src/trigger/growth-intelligence.ts` + loader/worker tests (marker removal
+  with fail-closed extraction/review wiring, union profile parser, slot-count
+  maxQueries, synthesis allowlists),
+  `research/ports.ts` + test (maxQueries 1–26),
+  `domain/growth-intelligence/types.ts` + request-fingerprint helper
+  (market_evidence_changed kind, market_research_completed reason),
+  report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-8-report.md`,
+  and this board. No live calls, no enablement, gates stay OFF. Forward
+  migration only; push ONLY the Task 8 slice; no stash/checkout/reset/push;
+  prettier only Task 8 files, never this board.
+- **Status:** in-progress — red transaction/replay/sweeper tests first, then
+  fenced complete/retry RPCs, old-completion rejection, dispatch reroute +
+  allowlists, synthesis atomic finalization, trigger/workflow rewiring,
+  carried minors, workflow tests + hosted pgTAP + staging execution,
+  path-limited commit.
+- **Status 2026-09-09 (done):** fenced `complete_market_research_pipeline` +
+  `retry_market_research_synthesis` + `complete/fail_market_synthesis_pipeline`
+  live (base `20260909090000` + 5 narrow repairs, all paired); legacy
+  completions refuse pipeline runs; sweeper skips 23505/55000; dispatch +
+  both workers rerouted; trigger marker/cast gone (union parser, slot-count
+  maxQueries, fail-closed extraction/review wiring, pipeline-aware synthesis
+  persistence); maxQueries 1–26. Vitest 643/643, typecheck 0 errors, pgTAP
+  68/68 + 7 neighboring suites green, 13/13 staging probes. Two Task 7
+  minors deferred with reason (outside brief files, no behavior drift).
+  Report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-8-report.md`.
+  Path-limited commit; this board left UNSTAGED (peer rows present).
+
+### 2026-09-09 · muse-spark · Market monitoring Task 9 branch-fenced business synthesis (12-task plan)
+
+- **BASE:** `da674e1b52772d5c22108f436e47564ea428d123` (Task 8 commit). Peer sessions active; peer rows present —
+  leave this board UNSTAGED at commit (controller preserves it).
+- **Claimed files (Task 9 only):** created
+  `supabase/migrations/*_growth_intelligence_branch_synthesis.sql` +
+  `supabase/tests/database/growth_intelligence_branch_synthesis_test.sql`;
+  modified `application/synthesis-service.ts` (branch-fenced loader contracts,
+  cited-set compatibility rules, branchId threading),
+  `infrastructure/synthesis-repository.ts` (item branchId),
+  `infrastructure/synthesis-provider.ts` (lineage in compact input/prompt),
+  `infrastructure/research/claim-extraction.ts` (strict candidate schema export) +
+  `claim-support-review.ts` (strict review boundary, budget batchSize),
+  `src/workflows/growth-intelligence/run-synthesis.ts` + test (branchId threading),
+  `src/trigger/growth-intelligence.ts` + `synthesis-loaders.ts` + loader tests
+  (branch/run/window-fenced findings, lineage claims, chunked ID reads),
+  `src/lib/supabase/database.types.ts` (items branch_id, narrow),
+  report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-9-report.md`,
+  and this board. No live calls, fixtures/mocks only, gates stay OFF. Forward
+  migration only; push ONLY the Task 9 slice; no stash/checkout/reset/push;
+  prettier only Task 9 files, never this board.
+- **Status:** in-progress — A/B/org fixture + scope/currency/window/staleness
+  tests first (RED), then loader contracts, branchId threading, SQL
+  persistence re-validation, deterministic policies, workflow/service/provider/
+  repository/loader tests + hosted suites, path-limited commit.
