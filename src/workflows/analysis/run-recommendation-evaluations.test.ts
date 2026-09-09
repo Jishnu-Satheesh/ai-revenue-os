@@ -135,4 +135,17 @@ describe("runChannelRecommendationEvaluations", () => {
     expect(outcome.refusedCount).toBe(1);
     expect(d.admit).not.toHaveBeenCalled();
   });
+
+  it("allows grounded portal how-to while still flagging invented values", async () => {
+    // Amendment A: portal how-to steps are grounding-backed operational
+    // advice, not invention — but an uncited number, cause, saving,
+    // benchmark, attribution, or confidence level still fails the item.
+    const d = deps();
+
+    await runChannelRecommendationEvaluations(meta, d);
+
+    const system = vi.mocked(d.judge).mock.calls[0]![0];
+    expect(system).toContain("grounding-backed operational advice, not invention");
+    expect(system).toMatch(/invented number, cause, saving, benchmark, attribution/);
+  });
 });

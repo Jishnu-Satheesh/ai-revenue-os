@@ -3,17 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_RECOMMENDATIONS_PER_RUN,
   RECOMMENDATION_PROMPT_VERSION,
+  narratedItemSchema,
 } from "@/domain/analysis/recommendations";
 import {
-  MAX_WEB_EVIDENCE_ITEMS,
-  MAX_WEB_SNIPPET_CHARS,
+  PILOT_NARRATION_DETECTOR_KEYS,
   buildNarrationPrompt,
   sha256Hex,
   type NarrationChannelContext,
   type NarrationPromptFinding,
   type NarrationPromptInput,
-  type PlaybookGuidanceItem,
-  type WebEvidenceItem,
 } from "@/workflows/analysis/recommendation-prompt";
 
 const FINDING_A: NarrationPromptFinding = {
@@ -213,40 +211,6 @@ const HOSTILE_CONTEXT = {
   phone: "+971501234567",
 } as unknown as NarrationChannelContext;
 
-const PLAYBOOK_CANCELLATION: PlaybookGuidanceItem = {
-  detectorKey: "orders.cancellation_loss",
-  title: "Talabat closed-cancellation checks",
-  steps: [
-    "Compare the portal hours with the tablet status for the flagged days.",
-    "Complete the tablet check-in at opening.",
-  ],
-  sourceLabel: "Curated Talabat operations checklist",
-};
-
-const PLAYBOOK_AVAILABILITY: PlaybookGuidanceItem = {
-  detectorKey: "operations.closed_share",
-  title: "Talabat availability checks",
-  steps: [
-    "Compare the portal hours with the tablet status for the days flagged closed.",
-    "Keep the store network connection stable during trading hours.",
-  ],
-  sourceLabel: "Curated Talabat operations checklist",
-};
-
-const PLAYBOOK_NON_PILOT: PlaybookGuidanceItem = {
-  detectorKey: "revenue.period_movement",
-  title: "Revenue movement checks",
-  steps: ["Review the comparable periods."],
-  sourceLabel: "Curated checklist",
-};
-
-const WEB_ALLOWED: WebEvidenceItem = {
-  title: "Managing availability in the merchant portal",
-  snippet: "Keep the store reachable during scheduled hours.",
-  domain: "docs.talabat.com",
-  url: "https://docs.talabat.com/help/availability",
-};
-
 function pilotInput(overrides: Partial<NarrationPromptInput> = {}): NarrationPromptInput {
   return {
     windowStart: "2026-01-01",
@@ -254,81 +218,126 @@ function pilotInput(overrides: Partial<NarrationPromptInput> = {}): NarrationPro
     periodGrain: "day",
     findings: [PILOT_FINDING_CANCELLATION, PILOT_FINDING_AVAILABILITY],
     channelContext: CHANNEL_CONTEXT,
-    playbookGuidance: [PLAYBOOK_CANCELLATION, PLAYBOOK_AVAILABILITY],
-    webEvidence: [WEB_ALLOWED],
     ...overrides,
   };
 }
 
-describe("prompt version 5", () => {
-  it("stamps version 5 for pilot and non-pilot prompts alike", () => {
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(5);
-    expect(buildNarrationPrompt(input).promptVersion).toBe(5);
-    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(5);
+describe("prompt version 6", () => {
+  it("stamps version 6 for pilot and non-pilot prompts alike", () => {
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(6);
+    expect(buildNarrationPrompt(input).promptVersion).toBe(6);
+    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(6);
   });
 
-  it("keeps the v4 shape for non-pilot runs: no new blocks, no pilot rules", () => {
+  it("covers exactly the pilot detector set", () => {
+    expect([...PILOT_NARRATION_DETECTOR_KEYS].sort()).toEqual([
+      "operations.closed_share",
+      "orders.cancellation_attribution",
+      "orders.cancellation_loss",
+    ]);
+  });
+
+  it("keeps the v4 shape for non-pilot runs: no channel block, no pilot rules", () => {
     const { system, user } = buildNarrationPrompt(input);
 
     expect(user).not.toContain("<channel_context>");
-    expect(user).not.toContain("<playbook_guidance>");
-    expect(user).not.toContain("<web_evidence>");
     expect(system).not.toContain("3 to 5 concrete steps");
-    expect(system).not.toContain("Copy URLs and domains only from the fenced web evidence");
+    expect(system).not.toContain("merchant discussions");
+    expect(system).not.toContain("Never emit a URL");
   });
 });
 
 describe("pilot gating", () => {
-  it("renders channel, playbook, and web blocks for pilot findings with pilot inputs", () => {
+  it("renders the channel block for pilot findings with stored context", () => {
     const { user } = buildNarrationPrompt(pilotInput());
 
     expect(user).toContain("<channel_context>");
     expect(user).toContain("Talabat");
-    expect(user).toContain("<playbook_guidance>");
-    expect(user).toContain("Talabat closed-cancellation checks");
-    expect(user).toContain("<web_evidence>");
-    expect(user).toContain("docs.talabat.com");
   });
 
-  it("renders the v4 shape for non-pilot findings even when pilot inputs are supplied", () => {
+  it("renders the v4 shape for non-pilot findings even when context is supplied", () => {
     const { system, user } = buildNarrationPrompt({
       ...input,
       channelContext: CHANNEL_CONTEXT,
-      playbookGuidance: [PLAYBOOK_CANCELLATION],
-      webEvidence: [WEB_ALLOWED],
     });
 
     expect(user).not.toContain("<channel_context>");
-    expect(user).not.toContain("<playbook_guidance>");
-    expect(user).not.toContain("<web_evidence>");
     expect(system).not.toContain("3 to 5 concrete steps");
   });
 
-  it("renders the v4 shape for pilot findings when pilot inputs are absent or failed open", () => {
+  it("renders the v4 shape for pilot findings when context is absent or failed open", () => {
     for (const emptied of [
-      pilotInput({ channelContext: null, playbookGuidance: null, webEvidence: null }),
-      pilotInput({ channelContext: undefined, playbookGuidance: [], webEvidence: [] }),
-      pilotInput({ channelContext: {}, playbookGuidance: [], webEvidence: [] }),
+      pilotInput({ channelContext: null }),
+      pilotInput({ channelContext: undefined }),
+      pilotInput({ channelContext: {} }),
     ]) {
       const { system, user } = buildNarrationPrompt(emptied);
 
       expect(user).not.toContain("<channel_context>");
-      expect(user).not.toContain("<playbook_guidance>");
-      expect(user).not.toContain("<web_evidence>");
       expect(system).not.toContain("3 to 5 concrete steps");
     }
   });
 
-  it("carries the 3-to-5-step and portal-checks rules for pilot runs only", () => {
+  it("carries the 3-to-5-step and grounding rules for pilot runs only", () => {
     const pilot = buildNarrationPrompt(pilotInput());
     const nonPilot = buildNarrationPrompt(input);
 
     expect(pilot.system).toContain("3 to 5 concrete steps in supportedActions");
     expect(pilot.system).toContain("one problem per item");
     expect(pilot.system).toContain("Never claim a menu path, button name, or portal structure");
-    expect(pilot.system).toContain("Copy URLs and domains only from the fenced web evidence");
+    expect(pilot.system).toContain("merchant discussions");
     expect(nonPilot.system).not.toContain("3 to 5 concrete steps");
     expect(nonPilot.system).not.toContain("Never claim a menu path");
+    expect(nonPilot.system).not.toContain("merchant discussions");
+  });
+});
+
+describe("grounding rules", () => {
+  it("prefers the channel's own docs, forums, and merchant discussions", () => {
+    const { system } = buildNarrationPrompt(pilotInput());
+
+    expect(system).toContain(
+      "Prefer the channel's own docs, forums, and merchant discussions first",
+    );
+  });
+
+  it("forbids emitting URLs in any field", () => {
+    const { system } = buildNarrationPrompt(pilotInput());
+
+    expect(system).toContain("Never emit a URL");
+  });
+
+  it("keeps the findings the only cited evidence: grounding never cites a web source", () => {
+    const { system } = buildNarrationPrompt(pilotInput());
+
+    expect(system).toContain("the fenced findings remain the only cited evidence");
+    expect(system).toContain("never cite a web source");
+  });
+
+  it("allows grounded portal how-to while keeping every step human-supervised", () => {
+    const { system } = buildNarrationPrompt(pilotInput());
+
+    expect(system).toContain("Portal and device how-to steps are allowed when grounding supports");
+    expect(system).toContain("as an action a human supervises");
+  });
+
+  it("keeps URLs out of the output shape: the schema has no URL field", () => {
+    // The prompt rule above is the instruction; the strict schema is the
+    // fence. A model reply carrying a URL-shaped field fails here, so no URL
+    // can ride along into storage even if grounding returned one.
+    const withUrl = {
+      label: "recommendation",
+      headline: "Confirm open status in the first and last trading hour",
+      detail: "Closed readings drove the loss the detectors measured.",
+      supportedActions: ["Compare the portal hours with the tablet status"],
+      limitations: [],
+      citations: [PILOT_FINDING_CANCELLATION.id],
+      url: "https://docs.example.com/help",
+    };
+
+    expect(narratedItemSchema.safeParse(withUrl).success).toBe(false);
+    const { system } = buildNarrationPrompt(pilotInput());
+    expect(system).not.toMatch(/"url"/);
   });
 });
 
@@ -360,111 +369,6 @@ describe("channel context allowlist", () => {
     expect(user).not.toContain("+971501234567");
     expect(user).not.toContain("ops@example.com");
     expect(user).not.toContain("POLYGON");
-  });
-});
-
-describe("playbook block", () => {
-  it("is byte-identical regardless of guidance input order, sorted by detector key", () => {
-    const first = buildNarrationPrompt(
-      pilotInput({ playbookGuidance: [PLAYBOOK_CANCELLATION, PLAYBOOK_AVAILABILITY] }),
-    );
-    const second = buildNarrationPrompt(
-      pilotInput({ playbookGuidance: [PLAYBOOK_AVAILABILITY, PLAYBOOK_CANCELLATION] }),
-    );
-
-    expect(second.user).toBe(first.user);
-    expect(first.user.indexOf('detector="operations.closed_share"')).toBeLessThan(
-      first.user.indexOf('detector="orders.cancellation_loss"'),
-    );
-  });
-
-  it("drops guidance for detectors outside the pilot set", () => {
-    const { user } = buildNarrationPrompt(pilotInput({ playbookGuidance: [PLAYBOOK_NON_PILOT] }));
-
-    expect(user).not.toContain("<playbook_guidance>");
-    expect(user).not.toContain("Revenue movement checks");
-  });
-});
-
-describe("web evidence block", () => {
-  const CREDENTIALED: WebEvidenceItem = {
-    title: "Credentialed doc",
-    snippet: "credentialed snippet marker",
-    domain: "evil.example",
-    url: "https://user:secret@evil.example/x",
-  };
-  const FTP: WebEvidenceItem = {
-    title: "FTP dump",
-    snippet: "ftp snippet marker",
-    domain: "files.example",
-    url: "ftp://files.example/x",
-  };
-  const SCRIPT: WebEvidenceItem = {
-    title: "Script link",
-    snippet: "script snippet marker",
-    domain: "x.example",
-    url: "javascript:alert(1)",
-  };
-  const BARE: WebEvidenceItem = {
-    title: "Bare domain",
-    snippet: "bare snippet marker",
-    domain: "www.example.com",
-    url: "www.example.com/no-scheme",
-  };
-
-  it("keeps allowlisted https URLs and drops credentialed or non-http(s) URLs but keeps their items", () => {
-    const { user } = buildNarrationPrompt(
-      pilotInput({ webEvidence: [WEB_ALLOWED, CREDENTIALED, FTP, SCRIPT, BARE] }),
-    );
-
-    expect(user).toContain("url: https://docs.talabat.com/help/availability");
-    expect(user).not.toContain("user:secret@");
-    expect(user).not.toContain("ftp://");
-    expect(user).not.toContain("javascript:");
-    expect(user).not.toContain("www.example.com/no-scheme");
-    // The items survive without their URL lines.
-    expect(user).toContain("credentialed snippet marker");
-    expect(user).toContain("ftp snippet marker");
-    expect(user).toContain("bare snippet marker");
-  });
-
-  it("caps items and snippet length", () => {
-    const many: WebEvidenceItem[] = Array.from({ length: 7 }, (_, index) => ({
-      title: `Doc ${index}`,
-      snippet: "s".repeat(MAX_WEB_SNIPPET_CHARS + 100),
-      domain: `doc${index}.example`,
-      url: `https://doc${index}.example/help`,
-    }));
-    const { user } = buildNarrationPrompt(pilotInput({ webEvidence: many }));
-
-    expect(user.match(/<evidence>/g)).toHaveLength(MAX_WEB_EVIDENCE_ITEMS);
-    for (const line of user.match(/^snippet: .*$/gm) ?? []) {
-      expect(line.length).toBeLessThanOrEqual("snippet: ".length + MAX_WEB_SNIPPET_CHARS);
-    }
-  });
-
-  it("is byte-identical regardless of evidence input order, sorted by domain", () => {
-    const first = buildNarrationPrompt(
-      pilotInput({
-        webEvidence: [
-          { title: "B doc", snippet: "b", domain: "b.example" },
-          { title: "A doc", snippet: "a", domain: "a.example" },
-        ],
-      }),
-    );
-    const second = buildNarrationPrompt(
-      pilotInput({
-        webEvidence: [
-          { title: "A doc", snippet: "a", domain: "a.example" },
-          { title: "B doc", snippet: "b", domain: "b.example" },
-        ],
-      }),
-    );
-
-    expect(second.user).toBe(first.user);
-    expect(first.user.indexOf("domain: a.example")).toBeLessThan(
-      first.user.indexOf("domain: b.example"),
-    );
   });
 });
 

@@ -8,11 +8,10 @@ import {
 import { logger } from "@/lib/logger";
 import {
   buildNarrationPrompt,
+  PILOT_NARRATION_DETECTOR_KEYS,
   sha256Hex,
   type NarrationChannelContext,
   type NarrationPromptFinding,
-  type PlaybookGuidanceItem,
-  type WebEvidenceItem,
 } from "@/workflows/analysis/recommendation-prompt";
 
 /**
@@ -80,7 +79,11 @@ export class ChannelRecommendationsFailure extends Error {
 export type NarrationGenerator = {
   providerName: string;
   modelId: string;
-  generate(system: string, user: string): Promise<unknown>;
+  generate(
+    system: string,
+    user: string,
+    options?: { useGrounding?: boolean },
+  ): Promise<unknown>;
 };
 
 export type ChannelRecommendationsDependencies = {
@@ -95,10 +98,10 @@ export type ChannelRecommendationsDependencies = {
     analysisRunId: string;
   }): Promise<readonly NarrationPromptFinding[]>;
   /**
-   * Pilot channel context for the prompt, loaded server-side by the caller
-   * (the Trigger task reads the stored org/channel/branch rows and selects
-   * curated playbook guidance). Optional so existing callers compile; absent
-   * — or throwing, which fails open below — renders the v4-shape prompt.
+   * Stored pilot channel context for the prompt, loaded server-side by the
+   * caller (the Trigger task reads the stored org/channel/branch rows).
+   * Optional so existing callers compile; absent — or throwing, which fails
+   * open below — renders the v4-shape prompt.
    */
   loadPilotContext?(input: {
     organizationId: string;
@@ -128,14 +131,14 @@ export type ChannelRecommendationsDependencies = {
 };
 
 /**
- * The pilot inputs the prompt builder renders as fenced blocks. The trigger
- * task's loader assembles this from stored rows; the workflow only threads it
- * through, so a context the database cannot supply never blocks a narration.
+ * The stored channel context the prompt builder renders as a fenced block.
+ * The trigger task's loader assembles this from stored rows; the workflow
+ * only threads it through, so a context the database cannot supply never
+ * blocks a narration. Grounding needs no pre-fetched slot — the model
+ * searches at generation time — so context is all that travels here.
  */
 export type ChannelPilotContext = {
   channelContext: NarrationChannelContext | null;
-  playbookGuidance: readonly PlaybookGuidanceItem[];
-  webEvidence: readonly WebEvidenceItem[];
 };
 
 function failureDigest(code: ChannelRecommendationFailureCode): string {
@@ -183,9 +186,10 @@ function canonicalJson(value: unknown): string {
 async function generateOnce(
   generator: NarrationGenerator,
   prompt: { system: string; user: string },
+  options: { useGrounding: boolean },
 ): Promise<unknown> {
   try {
-    return await generator.generate(prompt.system, prompt.user);
+    return await generator.generate(prompt.system, prompt.user, options);
   } catch {
     // The provider's own errors stay in its structured log; nothing about the
     // reply or the business context escapes through this module.
@@ -238,14 +242,10 @@ export async function runChannelRecommendations(
     }
 
     // Pilot context is advisory, never load-bearing: any throw from the
-    // loader — a database error, a drifted row — falls back to null context
-    // with empty guidance, which the prompt builder renders as the v4 shape.
-    // The run still completes; only findings-empty above fails the run.
-    let pilot: ChannelPilotContext = {
-      channelContext: null,
-      playbookGuidance: [],
-      webEvidence: [],
-    };
+    // loader — a database error, a drifted row — falls back to null context,
+    // which the prompt builder renders as the v4 shape. The run still
+    // completes; only findings-empty above fails the run.
+    let pilot: ChannelPilotContext = { channelContext: null };
     if (dependencies.loadPilotContext) {
       try {
         pilot = await dependencies.loadPilotContext({
@@ -258,7 +258,7 @@ export async function runChannelRecommendations(
           organizationId: payload.organizationId,
           runId: payload.analysisRunId,
         });
-        pilot = { channelContext: null, playbookGuidance: [], webEvidence: [] };
+        pilot = { channelContext: null };
       }
     }
 
@@ -268,16 +268,22 @@ export async function runChannelRecommendations(
       periodGrain: claim.window.periodGrain,
       findings,
       channelContext: pilot.channelContext,
-      playbookGuidance: pilot.playbookGuidance,
-      webEvidence: pilot.webEvidence,
     });
 
-    let reply = await generateOnce(dependencies.generator, prompt);
+    // Grounding follows the run's detectors, not the loader's luck: a pilot
+    // run whose context failed to load still searches, and a non-pilot run
+    // never sees the tool. A grounding failure surfaces as a provider error
+    // and takes the existing fail paths below.
+    const useGrounding = findings.some((finding) =>
+      PILOT_NARRATION_DETECTOR_KEYS.has(finding.detectorKey),
+    );
+
+    let reply = await generateOnce(dependencies.generator, prompt, { useGrounding });
     let submission = parseSubmission(reply);
     if (submission === null) {
       // Exactly one retry: models correct a format miss far more often than
       // two consecutive misses mean a third would help.
-      reply = await generateOnce(dependencies.generator, prompt);
+      reply = await generateOnce(dependencies.generator, prompt, { useGrounding });
       submission = parseSubmission(reply);
     }
     if (submission === null) {

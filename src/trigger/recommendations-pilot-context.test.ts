@@ -115,7 +115,7 @@ function cancellationFinding(overrides: Partial<NarrationPromptFinding> = {}): N
 const BANNED_COLUMNS = ["service_area", "operating_hours", "contact_details", "capacity_metadata"];
 
 describe("loadRecommendationPilotContext", () => {
-  it("loads stored context, selects the Talabat closed playbook, and leaves web evidence empty", async () => {
+  it("loads stored channel context and nothing else", async () => {
     const fake = fakeClient({ rows: storedRows() });
 
     const result = await loadRecommendationPilotContext(asSupabase(fake), {
@@ -129,22 +129,21 @@ describe("loadRecommendationPilotContext", () => {
       ],
     });
 
-    expect(result.channelContext).toEqual({
-      organizationName: "ACME Restaurants",
-      industry: "restaurant",
-      countryCode: "AE",
-      baseCurrency: "AED",
-      organizationTimezone: "Asia/Dubai",
-      channelKey: "talabat",
-      channelDisplayName: "Talabat",
-      channelCategory: "marketplace",
-      templateKey: "talabat_v1",
-      branchName: "Marina",
-      branchTimezone: "Asia/Dubai",
+    expect(result).toEqual({
+      channelContext: {
+        organizationName: "ACME Restaurants",
+        industry: "restaurant",
+        countryCode: "AE",
+        baseCurrency: "AED",
+        organizationTimezone: "Asia/Dubai",
+        channelKey: "talabat",
+        channelDisplayName: "Talabat",
+        channelCategory: "marketplace",
+        templateKey: "talabat_v1",
+        branchName: "Marina",
+        branchTimezone: "Asia/Dubai",
+      },
     });
-    expect(result.playbookGuidance).toHaveLength(1);
-    expect(result.playbookGuidance[0]?.title).toBe("Talabat closed-cancellation checks");
-    expect(result.webEvidence).toEqual([]);
     // PII never reaches the context object even though the branch row carries it.
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain("+971");
@@ -174,7 +173,7 @@ describe("loadRecommendationPilotContext", () => {
       findings: [cancellationFinding()],
     });
 
-    expect(result).toEqual({ channelContext: null, playbookGuidance: [], webEvidence: [] });
+    expect(result).toEqual({ channelContext: null });
   });
 
   it("returns null context without touching the channel table when the run has no channel", async () => {
@@ -188,30 +187,24 @@ describe("loadRecommendationPilotContext", () => {
       findings: [cancellationFinding()],
     });
 
-    expect(result).toEqual({ channelContext: null, playbookGuidance: [], webEvidence: [] });
+    expect(result).toEqual({ channelContext: null });
     expect(fake.queries.map((query) => query.table)).not.toContain("organization_channels");
   });
 
-  it("derives the CLOSED reason label from limitations text and skips the branch read without one", async () => {
+  it("leaves branch fields null and skips the branch read when the run has no branch", async () => {
     const rows = storedRows();
     rows.channel_analysis_runs = [{ id: RUN, organization_id: ORGANIZATION, channel_id: CHANNEL, branch_id: null }];
     const fake = fakeClient({ rows });
 
-    const closed = await loadRecommendationPilotContext(asSupabase(fake), {
-      organizationId: ORGANIZATION,
-      analysisRunId: RUN,
-      findings: [cancellationFinding({ limitations: ["Store showed closed on Friday"] })],
-    });
-    expect(closed.playbookGuidance[0]?.title).toBe("Talabat closed-cancellation checks");
-    expect(closed.channelContext?.branchName).toBeNull();
-    expect(fake.queries.map((query) => query.table)).not.toContain("branches");
-
-    const general = await loadRecommendationPilotContext(asSupabase(fake), {
+    const result = await loadRecommendationPilotContext(asSupabase(fake), {
       organizationId: ORGANIZATION,
       analysisRunId: RUN,
       findings: [cancellationFinding()],
     });
-    expect(general.playbookGuidance[0]?.title).toBe("Talabat cancellation checks");
+
+    expect(result.channelContext?.branchName).toBeNull();
+    expect(result.channelContext?.branchTimezone).toBeNull();
+    expect(fake.queries.map((query) => query.table)).not.toContain("branches");
   });
 
   it("propagates a run-row database error so the workflow can fail open", async () => {

@@ -75,10 +75,23 @@ export function extractJsonText(raw: string): unknown {
   }
 }
 
+export type RecommendationGenerationOptions = {
+  /**
+   * Pilot runs ground on live web knowledge; anything else omits tools
+   * entirely, keeping today's call shape. The worker decides from the run's
+   * detector keys, so this provider never learns what a pilot is.
+   */
+  useGrounding?: boolean;
+};
+
 export type RecommendationGenerationProvider = {
   providerName: "google";
   modelId: string;
-  generate(system: string, user: string): Promise<unknown>;
+  generate(
+    system: string,
+    user: string,
+    options?: RecommendationGenerationOptions,
+  ): Promise<unknown>;
 };
 
 export function createRecommendationGenerationProvider(config: {
@@ -95,13 +108,22 @@ export function createRecommendationGenerationProvider(config: {
     providerName: "google",
     modelId: config.modelId,
 
-    async generate(system: string, user: string): Promise<unknown> {
+    async generate(
+      system: string,
+      user: string,
+      options?: RecommendationGenerationOptions,
+    ): Promise<unknown> {
       try {
         const result = await generateText({
           model: google(config.modelId),
           system,
           prompt: user,
           abortSignal: AbortSignal.timeout(RECOMMENDATION_GENERATION_TIMEOUT_MS),
+          // Grounding is a tool the model may use, never a second prompt: the
+          // system rules still bind what it may claim and cite, and a grounded
+          // answer still parses through the same output contract. Absent for
+          // non-pilot runs, so those calls keep exactly today's shape.
+          ...(options?.useGrounding ? { tools: { google_search: google.tools.googleSearch({}) } } : {}),
         });
         try {
           return extractJsonText(result.text);

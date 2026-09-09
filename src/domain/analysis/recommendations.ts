@@ -29,11 +29,24 @@ import { z } from "zod";
  * the worker widens the fenced folder with stored channel context and
  * curated guidance, and portal steps are framed as checks rather than claims
  * about a portal's structure. See the pilot ADR.
+ *
+ * 6: curated playbooks and the pre-fetched web slot are gone (Amendment A).
+ * The worker threads stored channel context only; the narrator grounds
+ * itself with Google Search at generation time, preferring the channel's own
+ * docs, forums, and merchant discussions. It emits no URLs, findings remain
+ * the only cited evidence, portal how-to steps are allowed as grounded
+ * advice, and every action stays human-supervised.
  */
-export const RECOMMENDATION_PROMPT_VERSION = 5;
+export const RECOMMENDATION_PROMPT_VERSION = 6;
 
-/** Bumped only when the judge prompt's instructions change. */
-export const JUDGE_PROMPT_VERSION = 1;
+/**
+ * Bumped only when the judge prompt's instructions change.
+ *
+ * 2: portal how-to steps are grounding-backed operational advice and allowed;
+ * invented numbers, causes, savings, benchmarks, attribution, and confidence
+ * are still flagged.
+ */
+export const JUDGE_PROMPT_VERSION = 2;
 
 /**
  * The completion RPC re-checks citations against the findings of the same run,

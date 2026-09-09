@@ -261,18 +261,9 @@ describe("runChannelRecommendations pilot context threading", () => {
       branchName: "Marina",
       branchTimezone: "Asia/Dubai",
     },
-    playbookGuidance: [
-      {
-        detectorKey: "orders.cancellation_loss",
-        title: "Talabat cancellation checks",
-        steps: ["Complete the tablet check-in at opening."],
-        sourceLabel: "Curated Talabat operations checklist",
-      },
-    ],
-    webEvidence: [],
   };
 
-  it("threads pilot context into the prompt and digests exactly what was sent", async () => {
+  it("threads stored context into the prompt and digests exactly what was sent", async () => {
     const deps = dependencies({ loadPilotContext: vi.fn(async () => pilotContext) });
 
     const result = await runChannelRecommendations(payload, deps);
@@ -286,7 +277,6 @@ describe("runChannelRecommendations pilot context threading", () => {
     const [system, user] = vi.mocked(deps.generator.generate).mock.calls[0];
     expect(user).toContain("<channel_context>");
     expect(user).toContain("Talabat");
-    expect(user).toContain("Talabat cancellation checks");
     // The digest covers the new inputs because it digests the rendered
     // system+user strings rather than the pre-pilot fields.
     const call = vi.mocked(deps.complete).mock.calls[0][0];
@@ -305,9 +295,41 @@ describe("runChannelRecommendations pilot context threading", () => {
     expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
     const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
     expect(user).not.toContain("<channel_context>");
-    expect(user).not.toContain("<playbook_guidance>");
-    expect(user).not.toContain("<web_evidence>");
     expect(deps.complete).toHaveBeenCalledTimes(1);
     expect(deps.fail).not.toHaveBeenCalled();
+  });
+});
+
+describe("runChannelRecommendations grounding switch", () => {
+  it("grounds pilot-detector runs: the generator receives useGrounding true", async () => {
+    for (const detectorKey of [
+      "orders.cancellation_loss",
+      "orders.cancellation_attribution",
+      "operations.closed_share",
+    ]) {
+      const deps = dependencies({
+        loadFindings: vi.fn(async () => [findingSummary({ detectorKey })]),
+      });
+
+      const result = await runChannelRecommendations(payload, deps);
+
+      expect(result.outcome).toBe("completed");
+      expect(vi.mocked(deps.generator.generate).mock.calls[0][2]).toEqual({
+        useGrounding: true,
+      });
+    }
+  });
+
+  it("leaves non-pilot runs ungrounded: the generator receives useGrounding false", async () => {
+    const deps = dependencies({
+      loadFindings: vi.fn(async () => [findingSummary({ detectorKey: "revenue.period_movement" })]),
+    });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.outcome).toBe("completed");
+    const [, user, options] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(options).toEqual({ useGrounding: false });
+    expect(user).not.toContain("<channel_context>");
   });
 });

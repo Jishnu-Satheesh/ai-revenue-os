@@ -4,12 +4,6 @@ import {
   MAX_RECOMMENDATIONS_PER_RUN,
   RECOMMENDATION_PROMPT_VERSION,
 } from "@/domain/analysis/recommendations";
-import {
-  PILOT_PLAYBOOK_DETECTOR_KEYS,
-  type PlaybookGuidanceItem,
-} from "@/workflows/analysis/channel-playbooks";
-
-export type { PlaybookGuidanceItem };
 
 /**
  * Builds the narration prompt: one bounded folder and the hard rules.
@@ -47,10 +41,6 @@ export type NarrationPromptInput = {
   findings: readonly NarrationPromptFinding[];
   /** Stored channel identity; absent (or non-pilot findings) renders the v4 shape. */
   channelContext?: NarrationChannelContext | null;
-  /** Curated playbook steps; absent (or non-pilot findings) renders the v4 shape. */
-  playbookGuidance?: readonly PlaybookGuidanceItem[] | null;
-  /** Fenced web/document excerpts; absent (or non-pilot findings) renders the v4 shape. */
-  webEvidence?: readonly WebEvidenceItem[] | null;
 };
 
 /**
@@ -75,18 +65,6 @@ export type NarrationChannelContext = {
   templateKey?: string | null;
   branchName?: string | null;
   branchTimezone?: string | null;
-};
-
-/**
- * One curated web or document excerpt, fenced as data. The model may copy a
- * URL or domain from here and nowhere else.
- */
-export type WebEvidenceItem = {
-  title: string;
-  snippet: string;
-  domain: string;
-  /** Rendered only when it passes the http(s) allowlist below. */
-  url?: string | null;
 };
 
 export type NarrationPrompt = {
@@ -178,39 +156,35 @@ const ADVICE_RULES = [
 
 /**
  * The pilot chapters: cancellations and availability. Only runs whose
- * findings include one of these keys may render the channel, playbook, or
- * web blocks below; every other run renders the v4 shape (the version stamp
- * alone becomes 5). The set itself lives in `channel-playbooks.ts`; this
- * alias keeps the gate and the prompt tests reading from the same source.
+ * findings include one of these keys may render the channel block below;
+ * every other run renders the v4 shape (the version stamp alone becomes 6).
+ * Curated playbooks used to live beside this set; Amendment A removed them,
+ * so the set is declared here now that nothing else owns it. Grounding needs
+ * no pre-fetched evidence slot — the model searches at generation time.
  */
-export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = new Set(
-  PILOT_PLAYBOOK_DETECTOR_KEYS,
-);
-
-/** Fenced web evidence is bounded: at most 5 items, each snippet 500 chars. */
-export const MAX_WEB_EVIDENCE_ITEMS = 5;
-export const MAX_WEB_SNIPPET_CHARS = 500;
+export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = new Set([
+  "orders.cancellation_loss",
+  "orders.cancellation_attribution",
+  "operations.closed_share",
+]);
 
 /**
- * Playbook rendering bounds. The selector emits at most one item per pilot
- * detector, so 6 is headroom, not a target; steps cap at 5 to match the
- * `supportedActions` contract the pilot instruction points at.
- */
-export const MAX_PLAYBOOK_ITEMS = 6;
-export const MAX_PLAYBOOK_STEPS = 5;
-
-/**
- * Pilot-only rules, added to the system prompt when at least one fenced
- * pilot block renders. Non-pilot runs never see them, which is what keeps
- * those runs byte-identical to the v4 shape.
+ * Pilot-only rules, added to the system prompt when the fenced channel block
+ * renders. Non-pilot runs never see them, which is what keeps those runs
+ * byte-identical to the v4 shape. Grounding (Amendment A) replaced the
+ * curated playbooks: the model searches the live web itself, so these rules
+ * say where to look first, what grounding may never become, and what the
+ * operator is allowed to read.
  */
 const PILOT_RULES = [
   "The fenced channel context names the channel, category, and operating window. Let it choose the lever: advise about this channel in this window, not about any business.",
-  "The fenced playbook steps are suggestions, not orders. Use a step only where it fits a cited finding; leave out every step that does not fit rather than forcing it in.",
+  "You may draw on grounded web knowledge to shape supportedActions. Prefer the channel's own docs, forums, and merchant discussions first, then other sources.",
+  "Grounding never creates evidence: the fenced findings remain the only cited evidence. Cite at least one finding id in every item, and never cite a web source.",
+  "Never emit a URL, link, domain, or anything shaped like one, in any field. The output shape has no URL field.",
+  "Portal and device how-to steps are allowed when grounding supports them. Phrase them as actions the operator performs in their own portal or on their own tablet. Never claim a menu path, button name, or portal structure.",
   "For pilot items about cancellations or availability, file one problem per item and put 3 to 5 concrete steps in supportedActions.",
-  "Frame portal and device steps as checks the operator performs in their own portal or on their own tablet. Never claim a menu path, button name, or portal structure.",
-  "Copy URLs and domains only from the fenced web evidence. Never invent, complete, or guess a URL or domain.",
-  "Write headline and detail from cited findings only. Playbook and web evidence may shape supportedActions, never the headline or the detail.",
+  "Phrase every step as an action a human supervises. Never propose an automatic price, budget, or availability change.",
+  "Write headline and detail from cited findings only. Grounded knowledge may shape supportedActions, never the headline or the detail.",
 ].join("\n");
 
 /**
@@ -258,12 +232,7 @@ function renderFinding(finding: NarrationPromptFinding): string {
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? "").trim();
-}
-
-/** Codepoint order, matching `byId`: no locale table may move these blocks. */
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
+};
 
 /**
  * Renders only the whitelisted identity fields, in a fixed order. Extra keys
@@ -296,84 +265,6 @@ function renderChannelContext(context: NarrationChannelContext): string | null {
   return ["<channel_context>", ...lines, "</channel_context>"].join("\n");
 }
 
-function renderPlaybookGuidance(items: readonly PlaybookGuidanceItem[]): string | null {
-  const kept = items
-    .filter((item) => PILOT_NARRATION_DETECTOR_KEYS.has(item.detectorKey))
-    .map((item) => ({
-      detectorKey: item.detectorKey,
-      title: cleanText(item.title),
-      steps: item.steps
-        .map((step) => step.trim())
-        .filter((step) => step.length > 0)
-        .slice(0, MAX_PLAYBOOK_STEPS),
-      sourceLabel: cleanText(item.sourceLabel),
-    }))
-    .filter((item) => item.title.length > 0 && item.steps.length > 0)
-    .sort(
-      (left, right) =>
-        compareText(left.detectorKey, right.detectorKey) || compareText(left.title, right.title),
-    )
-    .slice(0, MAX_PLAYBOOK_ITEMS);
-  if (kept.length === 0) return null;
-  const blocks = kept.map((item) => {
-    const stepLines = item.steps.map((step, index) => `${index + 1}. ${step}`);
-    const sourceLine = item.sourceLabel ? [`source: ${item.sourceLabel}`] : [];
-    return [
-      `<playbook detector="${item.detectorKey}">`,
-      `title: ${item.title}`,
-      ...stepLines,
-      ...sourceLine,
-      "</playbook>",
-    ].join("\n");
-  });
-  return ["<playbook_guidance>", ...blocks, "</playbook_guidance>"].join("\n");
-}
-
-/**
- * Allowlisted URL or null: http(s) only, never credentialed
- * (`user:pass@host`), never containing whitespace. A rejected URL drops the
- * URL line, not the item — the title, snippet, and domain stay usable.
- */
-function allowedWebUrl(value: string | null | undefined): string | null {
-  const url = cleanText(value);
-  if (!/^https?:\/\//i.test(url)) return null;
-  if (/\s/.test(url)) return null;
-  const authority = url.replace(/^https?:\/\//i, "").split("/")[0] ?? "";
-  if (authority.includes("@")) return null;
-  return url;
-}
-
-function renderWebEvidence(items: readonly WebEvidenceItem[]): string | null {
-  const kept = items
-    .map((item) => ({
-      title: cleanText(item.title),
-      snippet: cleanText(item.snippet).slice(0, MAX_WEB_SNIPPET_CHARS),
-      domain: cleanText(item.domain),
-      url: allowedWebUrl(item.url),
-    }))
-    .filter((item) => item.title !== "" || item.snippet !== "" || item.domain !== "")
-    .sort(
-      (left, right) =>
-        compareText(left.domain, right.domain) ||
-        compareText(left.title, right.title) ||
-        compareText(left.url ?? "", right.url ?? ""),
-    )
-    .slice(0, MAX_WEB_EVIDENCE_ITEMS);
-  if (kept.length === 0) return null;
-  const blocks = kept.map((item) => {
-    const urlLine = item.url ? [`url: ${item.url}`] : [];
-    return [
-      "<evidence>",
-      `title: ${item.title || "(untitled)"}`,
-      `domain: ${item.domain || "(unknown)"}`,
-      ...urlLine,
-      `snippet: ${item.snippet || "(none)"}`,
-      "</evidence>",
-    ].join("\n");
-  });
-  return ["<web_evidence>", ...blocks, "</web_evidence>"].join("\n");
-}
-
 /**
  * Builds the narrator's system and user prompts for one analysis run.
  *
@@ -388,18 +279,14 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     PILOT_NARRATION_DETECTOR_KEYS.has(finding.detectorKey),
   );
 
-  // Pilot blocks render only for pilot findings with pilot inputs present.
-  // Anything else — non-pilot findings, or pilot findings whose loader failed
-  // and fell back to null/empty — renders the v4 shape below.
+  // The pilot block renders only for pilot findings with stored context
+  // present. Anything else — non-pilot findings, or pilot findings whose
+  // loader failed and fell back to null — renders the v4 shape below.
+  // Grounding is decided worker-side from the same detector set, not from
+  // this block, so a context miss never silently disables it.
   const channelBlock =
     hasPilotFinding && input.channelContext ? renderChannelContext(input.channelContext) : null;
-  const playbookBlock =
-    hasPilotFinding && input.playbookGuidance
-      ? renderPlaybookGuidance(input.playbookGuidance)
-      : null;
-  const webBlock =
-    hasPilotFinding && input.webEvidence ? renderWebEvidence(input.webEvidence) : null;
-  const isPilot = channelBlock !== null || playbookBlock !== null || webBlock !== null;
+  const isPilot = channelBlock !== null;
 
   const system = [
     "You narrate the findings of one channel-analysis run for a business operator.",
@@ -436,8 +323,6 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     ...sortedFindings.map(renderFinding),
     "</findings>",
     ...(channelBlock ? ["", channelBlock] : []),
-    ...(playbookBlock ? ["", playbookBlock] : []),
-    ...(webBlock ? ["", webBlock] : []),
     "",
     "Cite only finding ids listed above. Nothing outside this list exists.",
     "Respond under the output contract given in your instructions.",

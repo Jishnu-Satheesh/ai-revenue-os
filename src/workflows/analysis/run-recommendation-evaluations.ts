@@ -80,6 +80,7 @@ No other keys. No prose outside the JSON.`;
     "",
     "For each recommendation you receive exactly one recommendation and the findings it cites.",
     "citationFaithful: every factual claim in the recommendation traces to a stored value in the cited findings. An uncited number, cause, saving, benchmark, or attribution makes this false.",
+    "Portal and device how-to steps — actions the operator performs in their own portal or on their own tablet — are grounding-backed operational advice, not invention on their own. Still flag any invented number, cause, saving, benchmark, attribution, or confidence level as unfaithful.",
     "labelAppropriate: observation states a fact, recommendation suggests a bounded action, needs_data names what missing report would answer it. A needs_data finding dressed up as a recommendation is inappropriate.",
     "inventedValueDetected: true when any value appears that no cited finding contains.",
     "uncertaintyHonest: true when thin evidence is stated as thin (for example, twenty of fifty-nine days), false when confidence outruns coverage.",

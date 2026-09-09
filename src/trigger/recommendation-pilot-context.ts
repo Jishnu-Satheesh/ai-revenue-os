@@ -2,12 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import type { Database } from "@/lib/supabase/database.types";
-import { selectPlaybookGuidance } from "@/workflows/analysis/channel-playbooks";
 import type {
   NarrationChannelContext,
   NarrationPromptFinding,
-  PlaybookGuidanceItem,
-  WebEvidenceItem,
 } from "@/workflows/analysis/recommendation-prompt";
 import type { ChannelPilotContext } from "@/workflows/analysis/run-channel-recommendations";
 
@@ -54,27 +51,7 @@ const pilotBranchRowShape = z.object({
 });
 
 function emptyPilotContext(): ChannelPilotContext {
-  return { channelContext: null, playbookGuidance: [], webEvidence: [] };
-}
-
-/**
- * Reason labels are a documented heuristic, not stored dimensions.
- *
- * The narration finding shape carries no dimension values — `valueSummary`
- * is null by construction, because raw metric rows are never loaded into the
- * prompt — so there is no reason column to read. Instead a finding whose
- * code, headline, or limitations text names CLOSED (as a whole word,
- * case-insensitive) contributes the `CLOSED` label, which is what steers the
- * Talabat selector toward its closed-cancellation checklist. A finding that
- * never names it contributes nothing.
- */
-function derivePilotReasonLabels(findings: readonly NarrationPromptFinding[]): string[] {
-  const labels = new Set<string>();
-  for (const finding of findings) {
-    const haystack = [finding.code, finding.headline, ...finding.limitations].join("\n");
-    if (/\bCLOSED\b/i.test(haystack)) labels.add("CLOSED");
-  }
-  return [...labels].sort();
+  return { channelContext: null };
 }
 
 /**
@@ -95,10 +72,10 @@ function derivePilotReasonLabels(findings: readonly NarrationPromptFinding[]): s
  *
  * Any throw — a database error, a row that no longer matches its schema —
  * propagates to the workflow, which fails open to the v4-shape prompt. A
- * null channel (a cross-channel comparison run) or a channel row outside
- * this tenant is not an error: it returns null context with empty guidance,
- * which renders the same v4 shape.
- */
+  * null channel (a cross-channel comparison run) or a channel row outside
+  * this tenant is not an error: it returns null context, which renders the
+  * same v4 shape.
+  */
 export async function loadRecommendationPilotContext(
   supabase: SupabaseClient<Database>,
   input: {
@@ -162,18 +139,9 @@ export async function loadRecommendationPilotContext(
     branchTimezone: branch?.timezone ?? null,
   };
 
-  const playbookGuidance: readonly PlaybookGuidanceItem[] = selectPlaybookGuidance({
-    channelKey: channel.key,
-    templateKey: channel.template_key,
-    channelDisplayName: channel.display_name,
-    detectorKeys: input.findings.map((finding) => finding.detectorKey),
-    reasonLabels: derivePilotReasonLabels(input.findings),
-  });
-
-  // Live Brave transport is unqualified — the research pipeline runs on
-  // fixtures only — so this slot ships prepared and empty: never fetched,
-  // never invented. Qualifying live search is the explicit follow-up.
-  const webEvidence: readonly WebEvidenceItem[] = [];
-
-  return { channelContext, playbookGuidance, webEvidence };
+  // No pre-fetched web slot ships here: the narrator grounds itself with
+  // Google Search at generation time (Amendment A), preferring the channel's
+  // own docs, forums, and merchant discussions. This loader assembles stored
+  // channel identity only, so grounding needs nothing from the database.
+  return { channelContext };
 }
