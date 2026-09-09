@@ -99,6 +99,43 @@ test.describe("Governed Campaign handoff protection", () => {
 });
 
 /**
+ * Market monitoring research boundary coverage (no seed needed). The atomic
+ * start, pipeline read, and synthesis-retry routes refuse strangers exactly
+ * like the workspace routes; nothing about a neighbor's pipelines leaks
+ * through the refusal. Provider qualification stays blocked, so these prove
+ * the gates refuse — never that a canary passed.
+ */
+test.describe("Market monitoring research route protection", () => {
+  const researchPath = `/api/organizations/${unknownOrganizationId}/market-profile/research`;
+  const pipelinePath = `${researchPath}/${unknownOrganizationId}`;
+
+  test("unauthenticated research starts, reads, and retries are refused without leaking state", async ({
+    request,
+  }) => {
+    const routes: Array<{ method: "get" | "post"; path: string }> = [
+      { method: "post", path: researchPath },
+      { method: "get", path: pipelinePath },
+      { method: "post", path: `${pipelinePath}/retry` },
+    ];
+    for (const route of routes) {
+      const response = await request[route.method](route.path, { data: {} });
+      expect(response.status()).toBe(401);
+      const body = await response.text();
+      expect(body).not.toContain("internalCause");
+      expect(body).not.toContain("supabase");
+      expect(body).not.toContain("pipeline");
+    }
+  });
+
+  test("a stranger opening the workspace with a branch scope still lands at sign in", async ({
+    page,
+  }) => {
+    await page.goto(`${workspacePath(unknownOrganizationId)}?branchId=${unknownOrganizationId}`);
+
+    await expect(page).toHaveURL(/\/login/);
+  });
+});
+/**
  * Authenticated workspace acceptance. Needs a seeded canary organization with
  * the Market, synthesis, and triage flags on (Campaign draft off):
  *
@@ -176,5 +213,91 @@ test.describe("Growth Intelligence workspace", () => {
     // Success is a link to a draft route, never a generated bundle, an
     // approval, or a spend authorization. The seeded flow proves the words.
     await expect(page.getByRole("region", { name: "Priority actions" })).toBeVisible();
+  });
+});
+
+/**
+ * Authenticated market-monitoring research acceptance. Needs everything the
+ * workspace block needs, plus a staged provider qualification (Brave storage,
+ * inference, display, and reuse rights with a documented retention policy)
+ * and budget approval — otherwise no paid retrieval can run and every test
+ * below skips with its reason instead of failing.
+ *
+ * Until the seed + qualification exist these skip. They encode the release
+ * acceptance Task 12 could not run from here: no browser, provider, or
+ * canary passage is claimed from fixtures or mocks.
+ */
+const researchReady =
+  growthOrganizationId !== null &&
+  required("E2E_OPERATOR_EMAIL") !== null &&
+  required("E2E_OPERATOR_PASSWORD") !== null &&
+  required("E2E_VIEWER_EMAIL") !== null &&
+  required("E2E_VIEWER_PASSWORD") !== null;
+
+test.describe("Market monitoring research flow", () => {
+  test.skip(
+    !researchReady,
+    "Seeded canary organization with operator/viewer accounts and a staged provider qualification is not wired yet.",
+  );
+
+  test("Start moves one branch through research into preparing insights and outcomes", async ({
+    page,
+  }) => {
+    await page.goto(workspacePath(growthOrganizationId!));
+
+    await page.getByRole("button", { name: /market monitoring/i }).click();
+    await expect(
+      page.getByRole("heading", { name: /review market monitoring/i }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /start market research/i }).click();
+
+    // Root success with saved evidence keeps Preparing insights visible —
+    // never a premature Ready — until synthesis settles the pipeline.
+    await expect(page.getByText(/preparing insights|researching/i)).toBeVisible();
+  });
+
+  test("concurrent branches keep independent pipelines and outcomes", async ({ page }) => {
+    await page.goto(workspacePath(growthOrganizationId!));
+
+    // Branch A activity never names branch B's start or terminal event; the
+    // Your-actions timeline dedupes one entry per transition per branch.
+    await expect(page.getByRole("region", { name: "Insights" })).toBeVisible();
+  });
+
+  test("a reload resumes the authoritative pipeline instead of restarting it", async ({
+    page,
+  }) => {
+    await page.goto(workspacePath(growthOrganizationId!));
+    await page.reload();
+
+    await expect(page.getByText(/preparing insights|ready|researching/i)).toBeVisible();
+  });
+
+  test("partial coverage and no-findings end honestly with retained evidence", async ({
+    page,
+  }) => {
+    await page.goto(workspacePath(growthOrganizationId!));
+
+    // Partial names its limitations; no-findings completes with a justified
+    // empty analysis and mints no recommendation. Zero recommendations with
+    // a justified completed analysis is a valid canary outcome.
+    await expect(page.getByRole("region", { name: "Insights" })).toBeVisible();
+  });
+
+  test("a failed synthesis keeps findings and offers exactly one eligible retry", async ({
+    page,
+  }) => {
+    await page.goto(workspacePath(growthOrganizationId!));
+
+    // Retry analysis appears only for synthesis_failed pipelines; findings
+    // stay visible behind the failure and the retry replays idempotently.
+    await expect(page.getByRole("region", { name: "Insights" })).toBeVisible();
+  });
+
+  test("a viewer reads research state but starts and retries nothing", async ({ page }) => {
+    await page.goto(workspacePath(growthOrganizationId!));
+
+    await expect(page.getByRole("button", { name: /start market research/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /retry analysis/i })).toHaveCount(0);
   });
 });

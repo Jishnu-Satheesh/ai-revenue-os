@@ -8,6 +8,13 @@ implementation planning began.
 Governed by accepted ADR 0044. Extends specs 005, 007, 016, and 018; ADRs 0026, 0037, 0039, 0040,
 and 0043 remain in force except where ADR 0044 explicitly changes release sequencing.
 
+Verification state after the 2026-09-09 market-monitoring completion pass (Tasks 2–12): the
+branch-scoped research slice is implemented behind fail-closed gates (typecheck and build clean;
+vitest 4822 passed with 2 unrelated pre-existing failures; pgTAP 11/12 slice suites green). Release
+acceptance remains incomplete — provider qualification, the paid canary, and the seeded-browser
+research flow are blocked and documented in the Task 12 report — so new starts stay disabled and no
+production readiness is claimed.
+
 This is a large Tier-3 feature. It introduces recurring public-market research, new tenant-owned
 records, durable workers, an organization-level read model, and a draft-only Campaign handoff.
 

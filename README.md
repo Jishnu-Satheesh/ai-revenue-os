@@ -132,6 +132,13 @@ Set `E2E_INTEGRATION_ORGANIZATION_ID`, `E2E_OTHER_ORGANIZATION_ID`, and the `E2E
 `E2E_VIEWER_*` credentials from `.env.example`; without them those scenarios skip and only the
 unauthenticated boundary scenarios run.
 
+The market-monitoring scenarios in `e2e/growth-intelligence.spec.ts` follow the same rule with
+`E2E_GROWTH_ORGANIZATION_ID` for the canary organization. Its research-flow scenarios (Start to
+outcomes, concurrent branches, reload, partial/no-findings, retry, viewer denial) additionally
+require a staged provider qualification and budget approval; until then they skip with their
+reason, the research routes stay fail-closed, and no browser, provider, or canary acceptance is
+claimed.
+
 ## Public landing page
 
 `/` serves a public landing page (`src/components/marketing/`) to signed-out visitors; signed-in

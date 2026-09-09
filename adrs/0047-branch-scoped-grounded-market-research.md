@@ -62,3 +62,16 @@ approved one-branch-per-run flow does not need.
 
 This reduces calls but makes the evidence contract depend on a preview tool combination. Separate
 retrieval and validation gives the platform an explicit citation fence.
+
+## Verification (2026-09-09, market-monitoring Task 12)
+
+The decision above is implemented (Tasks 2–11) and verified to the extent fixtures allow:
+migrations paired on staging, every new PL/pgSQL path executed via pgTAP (11/12 slice suites
+green), e2e boundary tests proving the routes refuse strangers (8 passed, 12 seeded scenarios
+skip). Status stays Proposed: provider qualification is blocked (no Brave key, no Gemini
+rate/model qualification), no paid canary ran, and the seeded-browser research flow never
+executed — so new starts stay gated and no production readiness is claimed. Two slice-attributed
+findings remain open: `pnpm lint` reports 9 errors in slice files (workflow restricted-import and
+react-hooks rules Tasks 7/8/11 never ran), and pgTAP `growth_intelligence_item_decisions` test 25
+fails because the Task 5 retention rewrite renamed the DELETE refusal string. See the Task 12
+report for commands, outputs, and the remaining release acceptance.
