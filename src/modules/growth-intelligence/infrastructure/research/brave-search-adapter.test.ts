@@ -101,7 +101,7 @@ function createProgrammedTransport(
 }
 
 function jsonResponse(results: unknown[], status = 200): { status: number; body: Uint8Array } {
-  return { status, body: encodeJson({ results }) };
+  return { status, body: encodeJson({ web: { results } }) };
 }
 
 function validResult(url: string, description = "A bounded synthetic snippet.") {
@@ -179,7 +179,10 @@ describe("maximum-input fixture run", () => {
     const transport = createProgrammedTransport((call) => {
       const programmed = fixture.searchResponses[call];
       expect(programmed).toBeDefined();
-      return { status: programmed.status, body: encodeJson({ results: programmed.results }) };
+      return {
+        status: programmed.status,
+        body: encodeJson({ web: { results: programmed.results } }),
+      };
     });
 
     const output = await runBraveSearchResearch({
@@ -232,6 +235,54 @@ describe("maximum-input fixture run", () => {
 });
 
 describe("retry, timeout, and malformed responses", () => {
+  it("parses the real Brave envelope with sibling sections beside web results", async () => {
+    // Live-contract regression: Brave nests hits under web.results beside
+    // type/query/discussions/faq/locations/mixed/videos. A top-level
+    // results array is NOT the Brave shape and must fail closed.
+    const { spender } = createFakeSpender();
+    const envelope = {
+      type: "search",
+      query: { original: "synthetic query topic:envelope" },
+      discussions: { type: "discussions", results: [] },
+      faq: { type: "faq", results: [] },
+      locations: { type: "locations", results: [] },
+      mixed: { type: "mixed", main: [] },
+      videos: { type: "videos", results: [] },
+      web: { type: "search", results: [validResult("https://guide.example/real-envelope")] },
+    };
+    const transport = createProgrammedTransport(() => ({
+      status: 200,
+      body: encodeJson(envelope),
+    }));
+
+    const output = await runBraveSearchResearch({
+      request: baseRequest(),
+      plan: [slot("topic:envelope")],
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+    });
+
+    expect(output.result.coverage[0]?.outcome).toBe("supported");
+    expect(output.result.sources).toHaveLength(1);
+
+    const legacy = createProgrammedTransport(() => ({
+      status: 200,
+      body: encodeJson({ results: [validResult("https://guide.example/legacy-top-level")] }),
+    }));
+    const legacyOutput = await runBraveSearchResearch({
+      request: baseRequest(),
+      plan: [slot("topic:legacy")],
+      transport: legacy,
+      spender: createFakeSpender().spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+    });
+    expect(legacyOutput.result.coverage[0]?.outcome).toBe("failed");
+    expect(legacyOutput.result.sources).toHaveLength(0);
+  });
+
   it("retries 429 within the two-call allowance, then supports the slot", async () => {
     const { events, spender } = createFakeSpender();
     const transport = createProgrammedTransport((call) =>

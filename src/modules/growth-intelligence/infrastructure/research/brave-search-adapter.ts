@@ -55,7 +55,7 @@ const braveSearchResultSchema = z
   .passthrough();
 
 const braveSearchResponseSchema = z
-  .object({ results: z.array(braveSearchResultSchema) })
+  .object({ web: z.object({ results: z.array(braveSearchResultSchema) }).passthrough() })
   .passthrough();
 
 /**
@@ -577,7 +577,7 @@ export async function runBraveSearchResearch(
       }
       record.usage = { kind: "reported", microsUsd: 0 };
 
-      const candidates = parsed.results.slice(
+      const candidates = parsed.web.results.slice(
         0,
         Math.min(slot.maxResults, RESEARCH_BUDGET_LIMITS.maxResultsPerQuery),
       );
