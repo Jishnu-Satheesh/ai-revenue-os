@@ -39,6 +39,28 @@ const compactFindingSchema = z
     severity: z.enum(["critical", "high", "medium", "low"]),
     headline: z.string().trim().min(1).max(200),
     limitations: z.array(safeCodeSchema).max(20),
+    // Branch business-evidence lineage. The loader scopes rows to the exact
+    // request branch (other named branches are excluded, organization rows
+    // arrive only as broader context); the analysis run, periods, currency
+    // and units travel alongside so advice can label scope honestly and
+    // never total across currencies, units, or overlapping windows.
+    analysisRunId: uuidSchema,
+    branchId: uuidSchema.nullable(),
+    periodStart: z
+      .string()
+      .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)
+      .nullable(),
+    periodEnd: z
+      .string()
+      .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)
+      .nullable(),
+    currency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .nullable(),
+    valueKind: z.enum(["money", "count", "ratio"]).nullable(),
+    scope: z.enum(["branch", "broader_context"]),
+    stale: z.boolean(),
   })
   .strict();
 
@@ -53,6 +75,10 @@ const compactClaimSchema = z
     supportGrade: z.enum(["primary", "corroborated", "single_source", "contextual"]),
     freshness: z.enum(["current", "stale"]),
     limitations: z.array(safeCodeSchema).max(20),
+    // Research lineage: the run that produced the claim and the branch that
+    // run researched. The loader admits exact branch/profile/run claims only.
+    researchRunId: uuidSchema,
+    branchId: uuidSchema.nullable(),
   })
   .strict();
 
@@ -83,6 +109,10 @@ const synthesisPreferencesSchema = z
 
 export const compactSynthesisInputSchema = z
   .object({
+    // Exact synthesis scope: the request branch (null is the legacy
+    // organization scope). Findings labelled broader_context are
+    // organization-wide context, never branch measurements.
+    branchId: uuidSchema.nullable(),
     findings: z.array(compactFindingSchema).max(200),
     claims: z.array(compactClaimSchema).max(200),
     goals: z.array(compactGoalSchema).max(50),
@@ -160,7 +190,9 @@ const outputContract = {
       businessFindingIds: ["current business finding ids, required for recommendation"],
       geographicLayer: "trade_area | city | country",
       geographyRef: "normalized geography reference",
-      limitations: ["BROADER_MARKET_INFERENCE and STALE_BUSINESS_EVIDENCE when they apply"],
+      limitations: [
+        "BROADER_MARKET_INFERENCE for broader findings or broader claims, STALE_BUSINESS_EVIDENCE for stale findings, MIXED_MEASURE_EVIDENCE when cited findings mix currencies or money with non-money units, OVERLAPPING_EVIDENCE_WINDOWS when cited findings overlap across analysis runs",
+      ],
       staleBusinessEvidence: false,
       missingInput: "required only for data_gap, otherwise null",
     },
@@ -178,7 +210,9 @@ export function buildSynthesisPrompt(input: CompactSynthesisInput): string {
     "Propose cited Growth Intelligence candidates from the compact evidence below.",
     "This is a candidate synthesis only: it cannot approve, publish, spend, rank, price, or claim outcomes.",
     "Cite only the supplied finding and claim identifiers. Declare broader-market inference and stale business evidence as limitations where they apply.",
+    "Findings scoped broader_context are organization-wide context, never branch measurements: cite them only with BROADER_MARKET_INFERENCE. Never total values across currencies, units, or overlapping periods: declare MIXED_MEASURE_EVIDENCE or OVERLAPPING_EVIDENCE_WINDOWS where they apply, or emit a data_gap naming the missing input.",
     "Output exactly one JSON object matching the output contract and no prose.",
+    `<synthesis_branch>${input.branchId ?? "organization"}</synthesis_branch>`,
     `<business_findings>${serializeUntrusted(
       input.findings.map((finding) => ({
         id: finding.id,
@@ -187,6 +221,14 @@ export function buildSynthesisPrompt(input: CompactSynthesisInput): string {
         severity: finding.severity,
         headline: finding.headline,
         limitations: finding.limitations,
+        analysisRunId: finding.analysisRunId,
+        branchId: finding.branchId,
+        periodStart: finding.periodStart,
+        periodEnd: finding.periodEnd,
+        currency: finding.currency,
+        valueKind: finding.valueKind,
+        scope: finding.scope,
+        stale: finding.stale,
       })),
     )}</business_findings>`,
     `<market_claims>${serializeUntrusted(
@@ -200,6 +242,8 @@ export function buildSynthesisPrompt(input: CompactSynthesisInput): string {
         supportGrade: claim.supportGrade,
         freshness: claim.freshness,
         limitations: claim.limitations,
+        researchRunId: claim.researchRunId,
+        branchId: claim.branchId,
       })),
     )}</market_claims>`,
     `<goals>${serializeUntrusted(input.goals)}</goals>`,

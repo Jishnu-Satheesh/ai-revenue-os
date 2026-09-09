@@ -50,6 +50,8 @@ import {
   type ExistingSynthesisItem,
   type SynthesisApprovedGoal,
   type SynthesisBusinessFinding,
+  type SynthesisEvidenceWindow,
+  type SynthesisFindingCoverage,
   type SynthesisMarketClaim,
 } from "@/modules/growth-intelligence/application/synthesis-service";
 import {
@@ -71,7 +73,13 @@ import {
   runSynthesis,
   synthesisPayloadSchema,
 } from "@/workflows/growth-intelligence/run-synthesis";
-import { safeLimitationCodes, toCompactBusinessFinding } from "@/trigger/synthesis-loaders";
+import {
+  chunkIdentifiers,
+  selectBranchFindings,
+  SYNTHESIS_CLAIM_ID_READ_BATCH_SIZE,
+  SYNTHESIS_FINDING_LOADER_LIMIT,
+  toEligibleMarketClaims,
+} from "@/trigger/synthesis-loaders";
 
 const retry = {
   maxAttempts: 3,
@@ -448,19 +456,21 @@ function createResearchDependencies(signal: AbortSignal) {
   };
 }
 
-const SYNTHESIS_LOADER_LIMIT = 200;
-
 /**
  * Synthesis current-state readers. Every table and column read here is
  * verified in `src/lib/supabase/database.types.ts` (organization_market_
  * profiles, organization_market_profile_versions, growth_intelligence_
- * requests, channel_findings, market_evidence_claims, market_evidence_claim_
- * events, market_evidence_links, growth_intelligence_items) or the Task 13
- * synthesis RPCs. Business findings enter the service through the injected
- * loader seam; this default implementation selects compact finding identity
- * plus limitation codes only — never raw measures, report payloads, file contents, private records,
- * or transfer links. There is no approved-goals table in scope, so the goals loader
- * returns empty until Task 11 binds monthly report lineage (see report).
+ * requests, channel_findings, channel_analysis_runs, market_research_runs,
+ * market_evidence_claims, market_evidence_claim_events, market_evidence_
+ * links, growth_intelligence_items) or the Task 13 synthesis RPCs. Business
+ * findings enter the service through the injected loader seam; the findings
+ * implementation selects compact finding identity plus analysis-run
+ * lineage, periods, currency, and units only — never raw measures, report
+ * payloads, file contents, private records, or transfer links (value_
+ * numerator/denominator and monetary impact are not selected). Claims enter
+ * with exact organization/profile/branch/research-run lineage. There is no
+ * approved-goals table in scope, so the goals loader returns empty until
+ * Task 11 binds monthly report lineage (see report).
  */
 function createSynthesisDependencies(signal: AbortSignal) {
   const supabase = createGrowthIntelligenceWorkerServiceClient();
@@ -534,25 +544,66 @@ function createSynthesisDependencies(signal: AbortSignal) {
   const findings = {
     load: async (input: {
       organizationId: string;
+      branchId: string | null;
       channelId: string | null;
-    }): Promise<{ findings: SynthesisBusinessFinding[]; fresh: boolean }> => {
+      evidenceWindow: SynthesisEvidenceWindow | null;
+    }): Promise<{
+      findings: SynthesisBusinessFinding[];
+      fresh: boolean;
+      coverage: SynthesisFindingCoverage;
+    }> => {
+      // Exact branch scope at the database: the request branch plus
+      // organization-wide rows (the selector labels those broader context).
+      // Other named branches never load — a missing branch yields a gap,
+      // never cross-branch fallback.
       let query = supabase
         .from("channel_findings")
         .select(
-          "id, detector_key, code, severity, calculation_digest, quality_state, status, channel_id, limitations",
+          "id, detector_key, code, severity, calculation_digest, quality_state, status, kind, channel_id, branch_id, analysis_run_id, period_start, period_end, currency, value_kind, limitations",
         )
         .eq("organization_id", input.organizationId)
         .eq("status", "open")
         .eq("kind", "finding")
-        .limit(SYNTHESIS_LOADER_LIMIT);
+        .limit(SYNTHESIS_FINDING_LOADER_LIMIT);
+      query =
+        input.branchId === null
+          ? query.is("branch_id", null)
+          : query.or(`branch_id.eq.${input.branchId},branch_id.is.null`);
       if (input.channelId) query = query.eq("channel_id", input.channelId);
       const { data, error } = await query;
       if (error) throw new Error("Current business findings could not be loaded.");
-      const compact = (data ?? []).map((row) => toCompactBusinessFinding(row));
-      return {
-        findings: compact,
-        fresh: compact.length > 0 && (data ?? []).every((row) => row.quality_state === "complete"),
-      };
+      const rows = data ?? [];
+      // Analysis-run lineage arrives in one batched read: only completed
+      // runs whose scope agrees with the finding scope admit findings.
+      const runIds = [...new Set(rows.map((row) => row.analysis_run_id))];
+      const runsById = new Map<
+        string,
+        { status: string; branch_id: string | null; channel_id: string | null }
+      >();
+      for (const batch of chunkIdentifiers(runIds, SYNTHESIS_CLAIM_ID_READ_BATCH_SIZE)) {
+        const { data: runs, error: runsError } = await supabase
+          .from("channel_analysis_runs")
+          .select("id, status, branch_id, channel_id")
+          .eq("organization_id", input.organizationId)
+          .in("id", batch);
+        if (runsError) throw new Error("Current analysis runs could not be loaded.");
+        for (const run of runs ?? []) runsById.set(run.id, run);
+      }
+      const scoped = rows.map((row) => {
+        const run = runsById.get(row.analysis_run_id);
+        return {
+          ...row,
+          run_status: run?.status ?? null,
+          run_branch_id: run ? run.branch_id : null,
+          run_channel_id: run ? run.channel_id : null,
+        };
+      });
+      return selectBranchFindings(scoped, {
+        organizationId: input.organizationId,
+        branchId: input.branchId,
+        channelId: input.channelId,
+        evidenceWindow: input.evidenceWindow,
+      });
     },
   };
 
@@ -560,83 +611,84 @@ function createSynthesisDependencies(signal: AbortSignal) {
     load: async (input: {
       organizationId: string;
       profileVersionId: string;
+      branchId: string | null;
     }): Promise<SynthesisMarketClaim[]> => {
       const { data, error } = await supabase
         .from("market_evidence_claims")
         .select(
-          "id, claim_digest, paraphrase, quotation, geographic_layer, geography_ref, stale_at, expires_at, limitations",
+          "id, claim_digest, paraphrase, quotation, geographic_layer, geography_ref, market_research_run_id, stale_at, expires_at, limitations",
         )
         .eq("organization_id", input.organizationId)
         .eq("market_profile_version_id", input.profileVersionId)
-        .limit(SYNTHESIS_LOADER_LIMIT);
+        .limit(SYNTHESIS_FINDING_LOADER_LIMIT);
       if (error) throw new Error("Current market claims could not be loaded.");
       const rows = data ?? [];
       if (rows.length === 0) return [];
-      const claimIds = rows.map((row) => row.id);
-      const [{ data: events, error: eventsError }, { data: links, error: linksError }] =
-        await Promise.all([
-          supabase
-            .from("market_evidence_claim_events")
-            .select("market_evidence_claim_id, event_type")
-            .eq("organization_id", input.organizationId)
-            .in("market_evidence_claim_id", claimIds),
-          supabase
-            .from("market_evidence_links")
-            .select("market_evidence_claim_id, relation")
-            .eq("organization_id", input.organizationId)
-            .in("market_evidence_claim_id", claimIds),
-        ]);
-      if (eventsError) throw new Error("Current claim events could not be loaded.");
-      if (linksError) throw new Error("Current claim links could not be loaded.");
-      const terminal = new Set(
-        (events ?? [])
-          .filter(
-            (event) =>
-              event.event_type === "expired" ||
-              event.event_type === "withdrawn" ||
-              event.event_type === "excluded" ||
-              event.event_type === "erased",
-          )
-          .map((event) => event.market_evidence_claim_id),
-      );
-      const relations = new Map<string, string[]>();
-      for (const link of links ?? []) {
-        const list = relations.get(link.market_evidence_claim_id) ?? [];
-        list.push(link.relation);
-        relations.set(link.market_evidence_claim_id, list);
-      }
-      const at = now().getTime();
-      const eligible: SynthesisMarketClaim[] = [];
-      for (const row of rows) {
-        if (terminal.has(row.id)) continue;
-        if (row.paraphrase === null) continue;
-        if (Number.isNaN(Date.parse(row.expires_at)) || Date.parse(row.expires_at) <= at) {
-          continue;
+      // Research lineage in batched reads: research run to request to exact
+      // branch. Claims whose run researched another branch are excluded by
+      // the selector below, never synthesized.
+      const runIds = [...new Set(rows.map((row) => row.market_research_run_id))];
+      const requestIdsByRun = new Map<string, string>();
+      for (const batch of chunkIdentifiers(runIds, SYNTHESIS_CLAIM_ID_READ_BATCH_SIZE)) {
+        const { data: runs, error: runsError } = await supabase
+          .from("market_research_runs")
+          .select("id, growth_intelligence_request_id")
+          .eq("organization_id", input.organizationId)
+          .in("id", batch);
+        if (runsError) throw new Error("Current research runs could not be loaded.");
+        for (const run of runs ?? []) {
+          requestIdsByRun.set(run.id, run.growth_intelligence_request_id);
         }
-        const claimRelations = relations.get(row.id) ?? [];
-        if (claimRelations.includes("contradicts")) continue;
-        const supports = claimRelations.filter((relation) => relation === "supports").length;
-        const corroborates = claimRelations.filter(
-          (relation) => relation === "corroborates",
-        ).length;
-        eligible.push({
-          id: row.id,
-          digest: row.claim_digest,
-          paraphrase: row.paraphrase,
-          quotation: row.quotation,
-          geographicLayer: row.geographic_layer,
-          geographyRef: row.geography_ref,
-          supportGrade:
-            corroborates > 0 || supports >= 2
-              ? "corroborated"
-              : supports === 1
-                ? "single_source"
-                : "contextual",
-          freshness: Date.parse(row.stale_at) <= at ? "stale" : "current",
-          limitations: safeLimitationCodes(row.limitations),
-        });
       }
-      return eligible;
+      const requestIds = [...new Set(requestIdsByRun.values())];
+      const branchByRequest = new Map<string, string | null>();
+      for (const batch of chunkIdentifiers(requestIds, SYNTHESIS_CLAIM_ID_READ_BATCH_SIZE)) {
+        const { data: requests, error: requestsError } = await supabase
+          .from("growth_intelligence_requests")
+          .select("id, branch_id")
+          .eq("organization_id", input.organizationId)
+          .in("id", batch);
+        if (requestsError) throw new Error("Current synthesis requests could not be loaded.");
+        for (const request of requests ?? []) branchByRequest.set(request.id, request.branch_id);
+      }
+      const claimIds = rows.map((row) => row.id);
+      const events: Array<{ market_evidence_claim_id: string; event_type: string }> = [];
+      for (const batch of chunkIdentifiers(claimIds, SYNTHESIS_CLAIM_ID_READ_BATCH_SIZE)) {
+        const { data: batchEvents, error: eventsError } = await supabase
+          .from("market_evidence_claim_events")
+          .select("market_evidence_claim_id, event_type")
+          .eq("organization_id", input.organizationId)
+          .in("market_evidence_claim_id", batch);
+        if (eventsError) throw new Error("Current claim events could not be loaded.");
+        events.push(...(batchEvents ?? []));
+      }
+      const links: Array<{ market_evidence_claim_id: string; relation: string }> = [];
+      for (const batch of chunkIdentifiers(claimIds, SYNTHESIS_CLAIM_ID_READ_BATCH_SIZE)) {
+        const { data: batchLinks, error: linksError } = await supabase
+          .from("market_evidence_links")
+          .select("market_evidence_claim_id, relation")
+          .eq("organization_id", input.organizationId)
+          .in("market_evidence_claim_id", batch);
+        if (linksError) throw new Error("Current claim links could not be loaded.");
+        links.push(...(batchLinks ?? []));
+      }
+      return toEligibleMarketClaims({
+        rows: rows.map((row) => {
+          const requestId = requestIdsByRun.get(row.market_research_run_id);
+          return {
+            ...row,
+            run_branch_id: requestId ? (branchByRequest.get(requestId) ?? null) : null,
+          };
+        }),
+        events,
+        links,
+        scope: {
+          organizationId: input.organizationId,
+          profileVersionId: input.profileVersionId,
+          branchId: input.branchId,
+        },
+        nowMs: now().getTime(),
+      });
     },
   };
 
@@ -653,7 +705,7 @@ function createSynthesisDependencies(signal: AbortSignal) {
         .select("id, kind, geographic_layer, geography_ref, item_fingerprint, evidence_fingerprint")
         .eq("organization_id", input.organizationId)
         .eq("status", "current")
-        .limit(SYNTHESIS_LOADER_LIMIT);
+        .limit(SYNTHESIS_FINDING_LOADER_LIMIT);
       if (error) throw new Error("Current synthesis items could not be loaded.");
       return (data ?? []).map((row) => ({
         id: row.id,

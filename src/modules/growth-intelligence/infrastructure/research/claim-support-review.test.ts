@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 vi.mock("server-only", () => ({}));
 
@@ -424,5 +425,57 @@ describe("buildCorroborationLinks", () => {
     });
 
     expect(links).toEqual([]);
+  });
+});
+
+describe("review boundary hardening", () => {
+  it("rejects malformed candidates with a validation error instead of crashing", async () => {
+    const { transport } = reviewTransport([]);
+    await expect(
+      reviewResearchClaimSupport({
+        candidates: [{ not: "a candidate" }],
+        sources,
+        scope,
+        eligibleSourceKeys: eligible,
+        budget,
+        transport,
+        spender: spender(),
+        modelId: "review-model",
+      }),
+    ).rejects.toThrow(z.ZodError);
+  });
+
+  it("sizes model batches from the budget instead of a hardcoded constant", async () => {
+    const secondCandidate = candidate({
+      candidateKey: "second-signal",
+      paraphrase: "A second recorded signal near the marina promenade.",
+      citations: [{ sourceKey: "src-0-aabbccddeeff", spanStart: 0, spanEnd: 20, quotedText: null }],
+    });
+    // One verdict per call: a batch of one earns exactly one answer, so two
+    // single-candidate batches cost two calls under maxSourcesPerBatch: 1.
+    const verdicts = [
+      { candidateKey: "marina-footfall", verdict: "supported", limitations: [] },
+      { candidateKey: "second-signal", verdict: "supported", limitations: [] },
+    ];
+    const transport: ResearchModelTransport = {
+      complete: vi.fn(async () => ({
+        text: JSON.stringify([verdicts.shift()]),
+        usage: { kind: "reported" as const, microsUsd: 90 },
+        latencyMs: 80,
+      })),
+    };
+    const complete = vi.mocked(transport.complete);
+    const result = await reviewResearchClaimSupport({
+      candidates: [candidate(), secondCandidate],
+      sources,
+      scope,
+      eligibleSourceKeys: eligible,
+      budget: { ...budget, maxSourcesPerBatch: 1 },
+      transport,
+      spender: spender(),
+      modelId: "review-model",
+    });
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(result.reviews).toHaveLength(2);
   });
 });

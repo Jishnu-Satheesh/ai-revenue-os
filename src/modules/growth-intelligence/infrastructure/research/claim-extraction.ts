@@ -115,6 +115,68 @@ export type ExtractedClaimCandidate = {
   limitations: string[];
 };
 
+/**
+ * Strict boundary schema for an already-validated candidate. Extraction
+ * builds this shape in `validateCandidate` (trimmed text, span-checked
+ * citations, parsed dates); downstream phases (support review, admission)
+ * parse unknown input against this schema instead of `z.custom`, so a
+ * malformed caller fails validation rather than crashing deterministic
+ * pre-checks on undefined fields.
+ */
+export const extractedClaimCandidateSchema = z
+  .object({
+    candidateKey: keySchema,
+    subjectKind: z.enum([
+      "market",
+      "competitor",
+      "event",
+      "regulation",
+      "seasonality",
+      "audience",
+      "topic",
+    ]),
+    subjectRef: z.string().min(1).max(160),
+    claimKind: z.string().regex(/^[a-z][a-z0-9_.-]{1,119}$/),
+    paraphrase: z.string().min(1).max(1_000),
+    quotation: z.string().min(1).max(500).nullable(),
+    claimCategory: z.enum([
+      "availability",
+      "offer",
+      "price",
+      "event",
+      "review_trend",
+      "demand_trend",
+      "regulation",
+      "seasonality",
+      "structural_context",
+    ]),
+    geographicLayer: z.enum(["trade_area", "city", "country"]),
+    geographyRef: z.string().min(2).max(160),
+    citations: z
+      .array(
+        z
+          .object({
+            sourceKey: z.string(),
+            spanStart: z.number().int().min(0),
+            spanEnd: z.number().int().min(1),
+            quotedText: z.string().max(500).nullable(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+    sourceKeys: z.array(z.string()).min(1),
+    publishedAt: z.string().nullable(),
+    observedAt: z.string().nullable(),
+    limitations: z.array(safeCodeSchema).max(20),
+  })
+  .strict();
+
+const _extractedCandidateShape: ExtractedClaimCandidate = {} as z.infer<
+  typeof extractedClaimCandidateSchema
+>;
+void _extractedCandidateShape;
+
 export type ResearchModelUsage =
   | { kind: "reported"; microsUsd: number }
   | { kind: "estimated"; microsUsd: number }

@@ -40,6 +40,7 @@ const digestB = "b".repeat(64);
 
 function compactInput(overrides: Record<string, unknown> = {}) {
   return {
+    branchId: null,
     findings: [
       {
         id: findingId,
@@ -48,6 +49,14 @@ function compactInput(overrides: Record<string, unknown> = {}) {
         severity: "high",
         headline: "Weekend demand softened across dine-in.",
         limitations: ["PARTIAL_EVIDENCE_WINDOW"],
+        analysisRunId: "41000000-0000-4000-8000-000000000040",
+        branchId: null,
+        periodStart: "2026-08-01",
+        periodEnd: "2026-08-31",
+        currency: "AED",
+        valueKind: "money",
+        scope: "branch",
+        stale: false,
       },
     ],
     claims: [
@@ -61,6 +70,8 @@ function compactInput(overrides: Record<string, unknown> = {}) {
         supportGrade: "single_source",
         freshness: "current",
         limitations: [],
+        researchRunId: "42000000-0000-4000-8000-000000000040",
+        branchId: null,
       },
     ],
     goals: [{ ref: "weekend-covers" }],
@@ -110,6 +121,14 @@ describe("toCompactSynthesisInput", () => {
           severity: "high",
           headline: "Weekend demand softened.",
           limitations: [],
+          analysisRunId: "41000000-0000-4000-8000-000000000040",
+          branchId: null,
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-31",
+          currency: "AED",
+          valueKind: "money",
+          scope: "branch",
+          stale: false,
           metricValue: 412.5,
           normalizedMetricId: "metric-1",
           reportRow: { revenue: 99_000 },
@@ -258,5 +277,107 @@ describe("google synthesis provider", () => {
       }),
     ).rejects.toMatchObject({ name: "DomainError", code: "INTEGRATION_ERROR" });
     expect(generateText).toHaveBeenCalledTimes(1);
+  });
+});
+
+const branchA = "30000000-0000-4000-8000-000000000030";
+const analysisRunA = "41000000-0000-4000-8000-000000000041";
+const researchRunA = "42000000-0000-4000-8000-000000000042";
+
+describe("branch lineage in the compact input", () => {
+  it("accepts exact branch/profile lineage on the input, findings, and claims", () => {
+    const parsed = toCompactSynthesisInput(
+      compactInput({
+        branchId: branchA,
+        findings: [
+          {
+            id: findingId,
+            digest: digestA,
+            code: "DEMAND_SOFTNESS",
+            severity: "high",
+            headline: "Weekend demand softened across dine-in.",
+            limitations: [],
+            analysisRunId: analysisRunA,
+            branchId: branchA,
+            periodStart: "2026-08-01",
+            periodEnd: "2026-08-31",
+            currency: "AED",
+            valueKind: "money",
+            scope: "branch",
+            stale: false,
+          },
+        ],
+        claims: [
+          {
+            id: claimId,
+            digest: digestB,
+            paraphrase: "A public notice lists a weekend food festival near the trade area.",
+            quotation: null,
+            geographicLayer: "city",
+            geographyRef: "ae:du:dubai",
+            supportGrade: "single_source",
+            freshness: "current",
+            limitations: [],
+            researchRunId: researchRunA,
+            branchId: branchA,
+          },
+        ],
+      }),
+    );
+    expect(parsed.branchId).toBe(branchA);
+    expect(parsed.findings[0]?.analysisRunId).toBe(analysisRunA);
+    expect(parsed.claims[0]?.researchRunId).toBe(researchRunA);
+  });
+
+  it("rejects findings that hide their lineage", () => {
+    expect(() =>
+      toCompactSynthesisInput(
+        compactInput({
+          branchId: branchA,
+          findings: [
+            {
+              id: findingId,
+              digest: digestA,
+              code: "DEMAND_SOFTNESS",
+              severity: "high",
+              headline: "Weekend demand softened across dine-in.",
+              limitations: [],
+            },
+          ],
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it("labels branch scope, periods, and currency in the prompt without raw values", () => {
+    const prompt = buildSynthesisPrompt(
+      toCompactSynthesisInput(
+        compactInput({
+          branchId: branchA,
+          findings: [
+            {
+              id: findingId,
+              digest: digestA,
+              code: "DEMAND_SOFTNESS",
+              severity: "high",
+              headline: "Weekend demand softened across dine-in.",
+              limitations: [],
+              analysisRunId: analysisRunA,
+              branchId: branchA,
+              periodStart: "2026-08-01",
+              periodEnd: "2026-08-31",
+              currency: "AED",
+              valueKind: "money",
+              scope: "branch",
+              stale: false,
+            },
+          ],
+        }),
+      ),
+    );
+    expect(prompt).toContain(branchA);
+    expect(prompt).toContain("AED");
+    expect(prompt).toContain("2026-08-01");
+    expect(prompt).not.toContain("value_numerator");
   });
 });

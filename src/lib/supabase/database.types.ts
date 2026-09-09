@@ -386,6 +386,8 @@ export type Database = {
           organization_id: string;
           growth_intelligence_synthesis_run_id: string;
           market_profile_version_id: string;
+          /** Exact synthesis branch; null is the legacy organization scope. */
+          branch_id: string | null;
           kind: "insight" | "recommendation" | "data_gap";
           narrative: string;
           item_fingerprint: string;

@@ -117,14 +117,40 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain("changedCount: 0");
   });
 
-  it("selects finding limitation codes for the synthesis loader", async () => {
+  it("selects finding lineage for the synthesis loader", async () => {
     const source = await readFile(
       resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
       "utf8",
     );
 
-    expect(source).toContain("quality_state, status, channel_id, limitations");
-    expect(source).toContain("limitations: safeLimitationCodes(");
+    expect(source).toContain("quality_state, status, kind, channel_id, branch_id");
+    expect(source).toContain("analysis_run_id, period_start, period_end, currency, value_kind");
+  });
+
+  it("fences the synthesis findings loader by branch, run lineage, window, and measure", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("branch_id");
+    expect(source).toContain("analysis_run_id");
+    expect(source).toContain("period_start");
+    expect(source).toContain("currency");
+    expect(source).toContain("value_kind");
+    expect(source).toContain("run_branch_id");
+    expect(source).toContain("selectBranchFindings");
+  });
+
+  it("threads exact branch/profile/research lineage into the synthesis claims loader", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("toEligibleMarketClaims");
+    expect(source).toContain("market_research_run_id");
+    expect(source).toContain("growth_intelligence_request_id");
   });
 
   it("wires real extraction and support-review phases instead of the Task 6/8 marker", async () => {

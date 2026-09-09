@@ -305,4 +305,28 @@ describe("runSynthesis", () => {
     await runSynthesis(payload, deps);
     expect(deps.profiles.readCurrent).toHaveBeenCalledWith({ organizationId, branchId });
   });
+
+  it("threads the request branch into the synthesis service input", async () => {
+    const branchId = "30000000-0000-4000-8000-000000000030";
+    const deps = dependencies({
+      requests: {
+        claim: vi.fn(async () => ({ outcome: "acquired", replayed: false })),
+        complete: vi.fn(async () => ({ outcome: "completed" })),
+        fail: vi.fn(async () => ({ outcome: "failed" })),
+        load: vi.fn(async () => ({ ...requestView, branchId })),
+      },
+    });
+    await runSynthesis(payload, deps);
+    expect(deps.synthesize).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId, requestId, branchId }),
+    );
+  });
+
+  it("threads a null branch for legacy organization-scope requests", async () => {
+    const deps = dependencies();
+    await runSynthesis(payload, deps);
+    expect(deps.synthesize).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId, requestId, branchId: null }),
+    );
+  });
 });

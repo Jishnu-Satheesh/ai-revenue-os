@@ -15,6 +15,7 @@ import {
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 import {
   extractableSourceSchema,
+  extractedClaimCandidateSchema,
   type ExtractableSource,
   type ExtractedClaimCandidate,
   type ResearchModelSpender,
@@ -242,7 +243,7 @@ export async function reviewResearchClaimSupport(input: {
   if (budget.phase !== CLAIM_SUPPORT_REVIEW_PHASE) {
     throw new Error("Support review requires a support_review budget.");
   }
-  const candidates = z.array(z.custom<ExtractedClaimCandidate>()).parse(input.candidates);
+  const candidates = z.array(extractedClaimCandidateSchema).parse(input.candidates);
   const sources = z.array(extractableSourceSchema).parse(input.sources);
   const eligibleSourceKeys = new Set(z.array(z.string()).parse(input.eligibleSourceKeys));
   const reviewerRef = z.string().trim().min(1).max(160).parse(input.modelId);
@@ -281,7 +282,7 @@ export async function reviewResearchClaimSupport(input: {
     }
   }
 
-  const batchSize = 10;
+  const batchSize = budget.maxSourcesPerBatch;
   for (let offset = 0; offset < pending.length; offset += batchSize) {
     if (input.signal?.aborted) {
       for (const candidate of pending.slice(offset)) {

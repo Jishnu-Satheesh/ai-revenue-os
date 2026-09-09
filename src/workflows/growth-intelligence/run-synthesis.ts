@@ -122,6 +122,10 @@ const SYNTHESIS_KINDS = new Set([
 function profileContext(
   document: MarketProfileDocumentV1 | MarketProfileDocumentV2,
 ): SynthesisProfileContext {
+  // Shared blocks only (identity, geographies, topics): v1 and v2 documents
+  // both synthesize through here. Exact branch/profile/version/research
+  // lineage travels beside the document — request.branchId, the profile
+  // version id, and the loader/persistence checks — never inside it.
   const city = document.geographies.find((geography) => geography.layer === "city");
   const country = document.geographies.find((geography) => geography.layer === "country");
   const location = city ?? country;
@@ -207,6 +211,10 @@ export async function runSynthesis(
       organizationId: payload.organizationId,
       requestId: payload.requestId,
       claimToken,
+      // Exact request scope, including null for legacy organization rows:
+      // the service, loaders, provider input, and persisted items all carry
+      // this same branch, and the fenced RPCs check it again.
+      branchId: request.branchId,
       channelId: request.channelId,
       profileVersionId: profile.versionId,
       profile: context,

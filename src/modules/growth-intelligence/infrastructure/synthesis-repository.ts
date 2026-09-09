@@ -36,6 +36,12 @@ const itemSchema = z
     narrative: z.string().trim().min(1).max(2_000),
     itemFingerprint: digestSchema,
     evidenceFingerprint: digestSchema,
+    // Exact item scope, threaded from the synthesis request branch (null is
+    // the legacy organization scope). The fenced complete RPCs check this
+    // against the request branch and re-validate every cited claim and
+    // finding for exact branch/profile/run support — privileged worker
+    // access never makes inconsistent support admissible.
+    branchId: uuidSchema.nullable(),
     geographicLayer: z.enum(["trade_area", "city", "country"]),
     geographyRef: z.string().trim().min(2).max(160),
     supportGrade: z.enum(["primary", "corroborated", "single_source", "contextual", "conflicted"]),
@@ -263,6 +269,7 @@ export function createSynthesisRepository(persistence: SynthesisPersistence): Sy
             narrative: item.narrative,
             itemFingerprint: item.itemFingerprint,
             evidenceFingerprint: item.evidenceFingerprint,
+            branchId: item.branchId,
             geographicLayer: item.geographicLayer,
             geographyRef: item.geographyRef,
             supportGrade: item.supportGrade,

@@ -27,6 +27,7 @@ const item = {
   narrative: "Recorded dinner demand clusters across Dubai this month.",
   itemFingerprint: "1".repeat(64),
   evidenceFingerprint: "2".repeat(64),
+  branchId: "30000000-0000-4000-8000-000000000030",
   geographicLayer: "city" as const,
   geographyRef: "ae:du",
   supportGrade: "corroborated" as const,
@@ -327,5 +328,51 @@ describe("Synthesis repository", () => {
         metadata,
       }),
     ).rejects.toThrow("Synthesis could not be started.");
+  });
+});
+
+const branchA = "30000000-0000-4000-8000-000000000030";
+
+describe("branch-fenced synthesis persistence", () => {
+  it("refuses items that hide their branch before any RPC", async () => {
+    const db = persistence();
+    const repository = createSynthesisRepository(db.persistence);
+    const { branchId, ...branchless } = item;
+    void branchId;
+
+    await expect(
+      repository.complete({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        result: {
+          outcome: "completed",
+          resultDigest: "b".repeat(64),
+          items: [branchless as never],
+        },
+      }),
+    ).rejects.toThrow();
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("forwards the exact item branch for SQL scope re-validation", async () => {
+    const db = persistence();
+
+    await createSynthesisRepository(db.persistence).complete({
+      organizationId,
+      requestId,
+      claimToken,
+      runId,
+      result: {
+        outcome: "completed",
+        resultDigest: "b".repeat(64),
+        items: [{ ...item, branchId: branchA }],
+      },
+    });
+
+    const sent = db.rpc.mock.calls[0]![1] as { p_result: { items: Array<{ branchId: string }> } };
+    expect(sent.p_result.items).toHaveLength(1);
+    expect(sent.p_result.items[0]!.branchId).toBe(branchA);
   });
 });
