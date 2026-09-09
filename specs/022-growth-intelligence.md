@@ -13,7 +13,11 @@ branch-scoped research slice is implemented behind fail-closed gates (typecheck 
 vitest 4822 passed with 2 unrelated pre-existing failures; pgTAP 11/12 slice suites green). Release
 acceptance remains incomplete — provider qualification, the paid canary, and the seeded-browser
 research flow are blocked and documented in the Task 12 report — so new starts stay disabled and no
-production readiness is claimed.
+production readiness is claimed. The Task 12 gate run also left 9 slice lint errors (direct
+infrastructure imports in the research workflow, prefer-const, React effect/ref patterns) and one
+pgTAP expectation on the renamed DELETE refusal string open; the follow-up fix wave resolved them
+by injecting the claim engines through Trigger, deriving component state during render, and
+correcting the expectation (see the Fix wave section of the Task 12 report).
 
 This is a large Tier-3 feature. It introduces recurring public-market research, new tenant-owned
 records, durable workers, an organization-level read model, and a draft-only Campaign handoff.
@@ -79,7 +83,8 @@ readiness contract in section 10 is satisfied.
 
 ### 4.1 In scope
 
-- An operator-confirmed, versioned Market Profile for each organization, with optional branch scopes.
+- Operator-confirmed, versioned Market Profiles with independent branch identities; existing null-
+  branch organization profiles remain legacy scope.
 - AI-assisted initial discovery of niche, public business identity, geography, likely competitors,
   and research topics.
 - Operator-confirmed proposed changes to the Market Profile; recurring research never changes its
@@ -205,12 +210,13 @@ limitation. A country-level pattern is never presented as proof of branch-level 
 - A competitor without cited relevance evidence is an unverified operator lead. It may guide
   research but cannot itself support a claim, recommendation, or execution decision.
 - A missing business website does not block research. The approved name, selected branch scope, and
-  topics remain sufficient; a saved branch without a usable locality keeps Start disabled and links
-  to the organization profile for repair.
-- Starting research proposes and confirms one immutable Market Profile version through the existing
-  governed boundaries. The durable request and its fingerprint carry the selected branch.
-- An unchanged scope already pending or claimed cannot enqueue duplicate work. A confirmed changed
-  scope supersedes the prior version and cancels unfinished work under the existing transaction.
+  topics remain sufficient. Missing locality is explicitly completed in a research-only area group
+  in the dialog; it never changes the official branch or infers a city from timezone.
+- One atomic reviewed start saves/reuses a v2 profile version, records confirmation and starts or
+  returns a durable pipeline. Existing v1 versions and digests remain unchanged.
+- Each branch owns its current profile and cadence. Replacement cancels unfinished work for that
+  branch only. Identical active scopes converge under a database lock; unchanged settings may start
+  a new run after completion without duplicating their immutable version.
 
 ### 6.5 Source policy
 
@@ -220,8 +226,12 @@ limitation. A country-level pattern is never presented as proof of branch-level 
 - Operators may exclude a publisher/domain or an approved competitor.
 - The first production adapter must pass commercial, privacy, retention, citation, crawl-failure,
   and SSRF review before any organization is enabled.
-- ADR 0047 specifies Gemini Grounding with Google Search as the first implementation. Provider
-  identity remains behind the adapter boundary and does not change the profile or evidence model.
+- ADR 0047 specifies Brave Web Search under explicit account-specific storage/reuse rights and
+  Gemini analysis without Google Search tools. Initial retrieval uses permitted snippets, not
+  returned-page crawling. Ordinary API access does not qualify evidence storage.
+- Record evidence rights and retention; narrowly audited payload erasure withdraws unavailable
+  support while preserving safe lifecycle history. This is an explicit exception to content
+  immutability where retention obligations require it.
 
 ## 7. Market Evidence quality
 
@@ -290,8 +300,8 @@ month receives an independent tenant-scoped request. One channel failure does no
 
 ### 8.2 Recurring cadence
 
-- A database-owned due time represents each organization's daily scan and weekly synthesis in its
-  configured timezone.
+- Database-owned due times represent each enabled branch profile's daily scan and weekly synthesis
+  in its configured timezone; legacy null-branch profiles retain their own cadence.
 - A scheduled dispatcher asks Postgres for due identifiers. It does not infer cadence from Trigger
   run history.
 - New current business evidence creates an immediate request.
@@ -310,7 +320,9 @@ The canonical request fingerprint covers:
 - Market Profile version;
 - source-policy and research-rule versions;
 - local daily or weekly time bucket; and
-- synthesis/playbook version tuple where applicable.
+- synthesis/playbook version tuple where applicable; and
+- pipeline identity and phase for reviewed research and its synthesis child, allowing deliberate
+  new runs of unchanged settings while replaying the same run safely.
 
 The same upload, scheduler overlap, retry, or dispatcher replay reuses the same request. Changed
 evidence, profile, source policy, or rule version creates new work.
@@ -319,8 +331,8 @@ evidence, profile, source policy, or rule version creates new work.
 
 - Postgres owns pending state, claims, leases, attempts, cancellation, terminal outcome, and replay.
 - Trigger.dev `schemaTask` workers carry identifiers and correlation metadata only.
-- A model may return a bounded, schema-validated query plan; a deterministic research executor makes
-  the approved search/content calls. The model receives no general browser or side-effect tool.
+- This adapter uses deterministic per-topic/per-competitor query slots; the research executor makes
+  only qualified bounded search calls. Models receive no browser or side-effect tool.
 - An immediate task trigger reduces latency; a scheduled sweeper recovers requests whose dispatch
   was lost or whose lease expired.
 - Workers claim rows atomically, process external calls outside database transactions, and complete
@@ -438,20 +450,27 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
 
 - The page header and Market Watch use the same **Market monitoring** dialog. The large inline
   profile-review block is not part of the four-tab workspace.
-- Dialog pre-fill order is latest undecided proposal, active profile, then confirmed
+- Dialog pre-fill order is the selected branch's latest undecided proposal, active profile, then confirmed
   branch/onboarding context. A pending AI proposal may be edited or rejected.
-- Starting research is one user action. The application preserves the existing append-only proposal
-  and confirmation records; an interrupted confirmation leaves a recoverable pending proposal.
-- The client observes request state automatically only while research is active. Terminal state
-  causes one composed-page refresh; performance metrics keep their separate manual-refresh rule.
+- Starting research is one atomic user action preserving version and confirmation audit records;
+  failure rolls back the start and retains typed input. Legacy proposal APIs remain compatible.
+- The client observes the durable pipeline through Queued, Researching and Preparing insights,
+  refreshing research views on evidence readiness and each terminal transition. Root research
+  success alone does not end observation. Performance metrics retain their manual-refresh rule.
 - The **Insights & market** tab shows current status, branch, scope, finish time, coverage, cited
   findings, competitor findings, limitations, source inspection, and research history.
 - Recommendations derived from Market Research remain in **Recommendations**, link to their cited
   findings, and may enter Overview's deterministic Top Recommendations preview.
 - **Your actions** names the research start and terminal outcome without invented progress.
-- A completed or partial run with eligible claims enqueues one durable `market_evidence_changed`
-  request with trigger reason `market_research_completed`. The synthesis worker consumes that
-  request; empty or uncited retrieval does not enqueue synthesis.
+- One fenced transaction completes research and inserts its unique `market_evidence_changed`
+  child with trigger reason `market_research_completed`. Existing sweeping recovers dispatch.
+  Empty/uncited retrieval ends as No usable findings. Synthesis failure retains findings and supports
+  analysis-only retry when scope, freshness and budget permit.
+- Synthesis loaders and persistence enforce exact branch/profile/research lineage and governed
+  business periods. Other branches are excluded; organization context is never branch measurement.
+- Use the full dated design for per-input coverage and atomic spend limits: 26 primary searches,
+  two additional retry attempts, five competitors, 20 topics, USD 1 per pipeline and USD 5 per
+  organization local day. Quotes must fit before calls; unknown costs remain unknown.
 
 ## 10. Campaign Opportunity contract
 
@@ -541,18 +560,22 @@ where stated.
 
 ### 11.1 New records
 
-- `organization_market_profiles` — stable profile identity, current approved version, enabled state,
-  research due times, and last successful research markers.
+- `organization_market_profiles` — stable organization/branch identity (null branch for legacy),
+  current approved version, enabled state, research due times and last successful research markers.
 - `organization_market_profile_versions` — immutable bounded profile document, digest, proposal
   provenance, model metadata where applicable, and creation time.
 - `organization_market_profile_decisions` — append-only confirmation, rejection, disable, and
   supersession decisions with actor and correlation ID.
 - `growth_intelligence_requests` — durable request fingerprint, trigger reason, bound versions and
   evidence digest, status, lease/fencing token, attempt state, due time, and safe failure code.
+- `growth_intelligence_research_pipelines` — branch/profile lifecycle envelope, root and child
+  request lineage, stage, coverage, timestamps and safe outcome; not a second settings authority.
+- Private research allowance/reservation/attempt ledgers — organization-day and work-scope spend
+  admission, unique call attempts, reported/estimated usage and explicit unknown reconciliation.
 - `market_research_runs` — request execution, adapter/model versions, query/result digests, cost,
   latency, status, and safe counts.
 - `market_evidence_sources` — normalized public source metadata, domain, source class, access state,
-  content digest, and retrieval metadata.
+  content digest, retrieval metadata, qualified rights/retention and bounded excerpt provenance.
 - `market_evidence_claims` — compact claims and the contract in section 7.2.
 - `market_evidence_claim_events` — append-only expiry, withdrawal, exclusion, correction, and
   supersession events. The read model derives current claim state without rewriting the claim.
@@ -810,8 +833,12 @@ precedes Campaign handoff.
   a Market Evidence Claim.
 - One Start action creates the immutable scope, activates it, and enqueues exactly one
   branch-scoped research request; an identical active scope cannot duplicate work.
-- Active research updates automatically, then refreshes the composed workspace once at a terminal
-  state while preserving the last successful result on failure.
+- Active research and synthesis update automatically through pipeline completion, preserving the
+  same branch's previous successful result on failure and labelling earlier settings.
+- Concurrent branch starts cannot replace one another; v1 history remains readable; expired worker
+  tokens cannot duplicate children, spend allowance or overwrite completed outcomes.
+- Every topic/competitor has visible coverage; spend is reserved before calls and reconciled
+  honestly. Qualified retention and source deletion paths pass before provider enablement.
 - Completed or partial research with eligible cited claims produces exactly one immediate synthesis
   handoff and makes resulting Insights, Recommendations, and Data Gaps reachable in their approved
   tabs.

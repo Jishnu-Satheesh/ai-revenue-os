@@ -233,6 +233,11 @@ const researchReady =
   required("E2E_OPERATOR_PASSWORD") !== null &&
   required("E2E_VIEWER_EMAIL") !== null &&
   required("E2E_VIEWER_PASSWORD") !== null;
+// Seed + credential gate only. Provider qualification (Brave storage,
+// inference, display, and reuse rights with a documented retention policy)
+// and budget approval are manual staged state: no environment variable can
+// attest them, so they cannot be env-checked here. An operator confirms them
+// before these scenarios unskip; until then they skip with their reason.
 
 test.describe("Market monitoring research flow", () => {
   test.skip(
@@ -294,6 +299,10 @@ test.describe("Market monitoring research flow", () => {
     await expect(page.getByRole("region", { name: "Insights" })).toBeVisible();
   });
 
+  // Scaffolding, not a viewer-denial proof: no viewer session is installed
+  // here (see signIn in e2e/support/authenticated.ts), so an unauthenticated
+  // redirect would satisfy the same assertions. True viewer denial needs a
+  // viewer-signed-in session asserting the same absences.
   test("a viewer reads research state but starts and retries nothing", async ({ page }) => {
     await page.goto(workspacePath(growthOrganizationId!));
 

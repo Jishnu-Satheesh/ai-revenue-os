@@ -344,8 +344,22 @@ export function MarketMonitoringDialog({
 }: MarketMonitoringDialogProps) {
   const activeBranches = useMemo(() => branches.filter((branch) => branch.isActive), [branches]);
   const [branchId, setBranchId] = useState<string | null>(initialBranchId);
+  // The selection follows the seed branch while the dialog opens, and falls
+  // back to the only active branch instead of choosing for the operator when
+  // several exist. Adjusted during render (never in an effect) so the branch
+  // state is settled before the loaders below read it.
+  const [selectionSeed, setSelectionSeed] = useState({ initialBranchId, open });
+  if (selectionSeed.initialBranchId !== initialBranchId || selectionSeed.open !== open) {
+    setSelectionSeed({ initialBranchId, open });
+    setBranchId(initialBranchId);
+  }
+  const singleActiveBranchId = activeBranches.length === 1 ? activeBranches[0]!.id : null;
+  if (branchId === null && singleActiveBranchId !== null) {
+    setBranchId(singleActiveBranchId);
+  }
   const [profile, setProfile] = useState<MarketProfileView | null>(null);
-  const [profileState, setProfileState] = useState<"idle" | "loading" | "failed">("idle");
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [research, setResearch] = useState<MonitoringResearchState>({
     active: null,
     lastSuccess: null,
@@ -369,24 +383,28 @@ export function MarketMonitoringDialog({
   );
   const requestId = useRef(0);
 
-  useEffect(() => {
-    setBranchId(initialBranchId);
-  }, [initialBranchId, open]);
-
-  useEffect(() => {
-    if (branchId !== null) return;
-    if (activeBranches.length === 1) setBranchId(activeBranches[0]!.id);
-  }, [activeBranches, branchId]);
-
   const branchName = branches.find((branch) => branch.id === branchId)?.name ?? "";
   const branchServiceArea = branches.find((branch) => branch.id === branchId)?.serviceArea ?? null;
   const branchActive = branches.find((branch) => branch.id === branchId)?.isActive ?? false;
 
+  // The loaders below settle exactly one branch scope at a time. Loading and
+  // failure are derived from which scope settled last, so the effect only
+  // ever writes settled results from async callbacks — never synchronously.
+  const loadKey = !open || branchId === null ? null : `${organizationId}:${branchId}`;
+  // Closing the dialog releases the settled scope, so reopening re-reads
+  // instead of flashing the previous scope as current.
+  if (!open && settledKey !== null) {
+    setSettledKey(null);
+  }
+  const settled = loadKey !== null && settledKey === loadKey;
+  const visibleProfile = settled && !loadFailed ? profile : null;
+  const profileState: "idle" | "loading" | "failed" =
+    loadKey === null ? "idle" : !settled ? "loading" : loadFailed ? "failed" : "idle";
+
   useEffect(() => {
-    if (!open || branchId === null) return;
+    if (loadKey === null || branchId === null) return;
+    const key = loadKey;
     const seen = (requestId.current += 1);
-    setProfileState("loading");
-    setProfile(null);
     const loader = loadProfile ?? ((id: string) => defaultLoadProfile(organizationId, id));
     loader(branchId).then(
       (view) => {
@@ -395,7 +413,8 @@ export function MarketMonitoringDialog({
         // never while the operator has unsaved changes.
         if (requestId.current !== seen) return;
         setProfile(view);
-        setProfileState("idle");
+        setLoadFailed(false);
+        setSettledKey(key);
         setDirty(false);
         setSubmitState("idle");
         setSubmitError(null);
@@ -414,7 +433,8 @@ export function MarketMonitoringDialog({
       },
       () => {
         if (requestId.current !== seen) return;
-        setProfileState("failed");
+        setLoadFailed(true);
+        setSettledKey(key);
       },
     );
     const controller = new AbortController();
@@ -431,11 +451,11 @@ export function MarketMonitoringDialog({
       },
     );
     return () => controller.abort();
-  }, [open, branchId, organizationId, loadProfile, loadResearch, branchName, branchServiceArea]);
+  }, [loadKey, branchId, organizationId, loadProfile, loadResearch, branchName, branchServiceArea]);
 
   const prefill = useMemo(
-    () => derivePrefill(profile, branchId ?? "", branchName, branchServiceArea),
-    [profile, branchId, branchName, branchServiceArea],
+    () => derivePrefill(visibleProfile, branchId ?? "", branchName, branchServiceArea),
+    [visibleProfile, branchId, branchName, branchServiceArea],
   );
 
   const inProgress = research.active !== null && !dirty;
@@ -547,6 +567,8 @@ export function MarketMonitoringDialog({
         const view = await loader(branchId);
         if (requestId.current !== seen) return;
         setProfile(view);
+        setLoadFailed(false);
+        if (loadKey !== null) setSettledKey(loadKey);
         setDirty(false);
         const next = derivePrefill(view, branchId, branchName, branchServiceArea);
         setTopics(next.topics);
@@ -631,7 +653,7 @@ export function MarketMonitoringDialog({
       const outcome = await starter({
         branchId,
         document,
-        expectedCurrentVersionId: profile?.profile?.currentVersionId ?? null,
+        expectedCurrentVersionId: visibleProfile?.profile?.currentVersionId ?? null,
         idempotencyKey: crypto.randomUUID(),
       });
       // Conflict and timeout paths throw above, so reaching here means the

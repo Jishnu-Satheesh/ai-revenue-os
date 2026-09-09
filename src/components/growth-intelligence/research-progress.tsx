@@ -42,32 +42,44 @@ export function useResearchPipeline({
   /** Called on preparing_insights and once per terminal transition. */
   onTransition?: (pipeline: ResearchPipelineView) => void;
 }): UseResearchPipelineResult {
-  const [active, setActive] = useState<ResearchPipelineView | null>(initialActive ?? null);
+  const [active, setActive] = useState<ResearchPipelineView | null>(
+    branchId === null ? null : (initialActive ?? null),
+  );
   const [history, setHistory] = useState<ResearchPipelineView[]>([]);
   const [lastSuccess, setLastSuccess] = useState<ResearchPipelineView | null>(null);
-  const [status, setStatus] = useState<ResearchPipelineStatus>(initialActive ? "ready" : "loading");
+  const [status, setStatus] = useState<ResearchPipelineStatus>(
+    branchId === null || initialActive ? "ready" : "loading",
+  );
   const seenStage = useRef<string | null>(initialActive?.stage ?? null);
   const notifiedTerminal = useRef<string | null>(null);
   const onTransitionRef = useRef(onTransition);
-  onTransitionRef.current = onTransition;
+
+  // The latest callback wins over a stale closure: updated during an effect
+  // so render never writes a ref.
+  useEffect(() => {
+    onTransitionRef.current = onTransition;
+  });
+
+  // Remount and branch switches resume from the authoritative read; the
+  // previous branch stays on screen only until its replacement arrives, and
+  // a late response for it is discarded by the effect cleanup below.
+  // Adjusted during render (never in an effect) so polling always starts
+  // from settled state.
+  const [pipelineSeed, setPipelineSeed] = useState({ organizationId, branchId });
+  if (pipelineSeed.organizationId !== organizationId || pipelineSeed.branchId !== branchId) {
+    setPipelineSeed({ organizationId, branchId });
+    setActive(branchId === null ? null : (initialActive ?? null));
+    setHistory([]);
+    setLastSuccess(null);
+    setStatus(branchId === null ? "ready" : "loading");
+  }
 
   useEffect(() => {
     notifiedTerminal.current = null;
     seenStage.current = null;
     if (branchId === null) {
-      setActive(null);
-      setHistory([]);
-      setLastSuccess(null);
-      setStatus("ready");
       return;
     }
-    // Remount and branch switches resume from the authoritative read; the
-    // previous branch stays on screen only until its replacement arrives,
-    // and a late response for it is discarded below.
-    setActive(initialActive ?? null);
-    setHistory([]);
-    setLastSuccess(null);
-    setStatus("loading");
     seenStage.current = initialActive?.stage ?? null;
 
     let disposed = false;

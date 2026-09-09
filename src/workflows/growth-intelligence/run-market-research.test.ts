@@ -14,9 +14,21 @@ import type {
   ResearchModelSpender,
   ResearchModelTransport,
 } from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
+import {
+  digestClaimCandidate,
+  extractResearchClaims,
+  resolveClaimFreshnessWindow,
+  resolveFreshnessClass,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
+import {
+  buildCorroborationLinks,
+  reviewResearchClaimSupport,
+  selectAdmissibleClaims,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-support-review";
 import { buildResearchQueryPlan } from "@/modules/growth-intelligence/infrastructure/research/query-plan";
 import {
   researchRequestSchema,
+  researchRetrievalResultSchema,
   type ResearchRequest,
   type ResearchRetrievedSource,
   type ResearchRetrievalResult,
@@ -355,6 +367,19 @@ function dependencies(overrides = {}) {
       modelId: "gemini-fixture-review",
     }),
     excerptProvenance: provenance(),
+    // Tests inject the real claim engines, exactly as Trigger does in
+    // production: behavior coverage stays end-to-end through the same pure
+    // functions the worker receives.
+    engines: {
+      parseRetrievalResult: (value: unknown) => researchRetrievalResultSchema.parse(value),
+      extractClaims: extractResearchClaims,
+      reviewClaimSupport: reviewResearchClaimSupport,
+      selectAdmissible: selectAdmissibleClaims,
+      buildLinks: buildCorroborationLinks,
+      digestCandidate: digestClaimCandidate,
+      freshnessWindow: resolveClaimFreshnessWindow,
+      freshnessClass: resolveFreshnessClass,
+    },
     planQueries,
     buildScope,
     events,

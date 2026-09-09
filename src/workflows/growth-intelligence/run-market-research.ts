@@ -11,22 +11,18 @@ import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { createGrowthIntelligenceRequestFingerprint } from "@/domain/growth-intelligence/request-fingerprint";
 import { DomainError } from "@/lib/errors";
 import type { MarketEvidenceRepository } from "@/modules/growth-intelligence/infrastructure/evidence-repository";
-import {
-  buildCorroborationLinks,
-  reviewResearchClaimSupport,
-  selectAdmissibleClaims,
-} from "@/modules/growth-intelligence/infrastructure/research/claim-support-review";
-import {
-  digestClaimCandidate,
-  extractResearchClaims,
-  resolveClaimFreshnessWindow,
-  resolveFreshnessClass,
-  type ExtractableSource,
-  type ExtractedClaimCandidate,
-  type ResearchModelSpender,
-  type ResearchModelTransport,
-  type ResearchModelUsage,
+import type {
+  ClaimExtractionResult,
+  ExtractableSource,
+  ExtractedClaimCandidate,
+  ResearchModelSpender,
+  ResearchModelTransport,
+  ResearchModelUsage,
 } from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
+import type {
+  ClaimSupportReviewResult,
+  ReviewedClaimSupport,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-support-review";
 import type {
   ResearchAttemptUsage,
   ResearchCoverageEntry,
@@ -36,11 +32,10 @@ import {
   type ResearchModelBudget,
 } from "@/domain/growth-intelligence/research-budget";
 import type { ResearchQuery } from "@/modules/growth-intelligence/infrastructure/research/query-plan";
-import {
-  researchRetrievalResultSchema,
-  type ResearchRequest,
-  type ResearchRetrievedSource,
-  type ResearchRetrievalResult,
+import type {
+  ResearchRequest,
+  ResearchRetrievedSource,
+  ResearchRetrievalResult,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 
 /**
@@ -112,6 +107,70 @@ export type MarketResearchExcerptProvenance = {
   retainUntilFor: (retrievedAt: string) => string;
 };
 
+/**
+ * Claim engines the worker receives instead of importing.
+ *
+ * The architecture boundary forbids workflow runners from importing
+ * infrastructure at runtime; only Trigger task registration may construct
+ * adapters. These are the pure claim functions (retrieval validation,
+ * extraction, support review, admission, links, digests, freshness) that the
+ * worker calls with its already-injected transports and budgets. Trigger
+ * wires the real implementations; tests inject the same or scripted ones.
+ */
+export type MarketResearchEngines = {
+  parseRetrievalResult: (value: unknown) => ResearchRetrievalResult;
+  extractClaims: (input: {
+    scope: unknown;
+    sources: unknown;
+    budget: unknown;
+    transport: ResearchModelTransport;
+    spender: ResearchModelSpender;
+    modelId: string;
+    now: () => Date;
+    signal?: AbortSignal;
+  }) => Promise<ClaimExtractionResult>;
+  reviewClaimSupport: (input: {
+    candidates: unknown;
+    sources: unknown;
+    scope: unknown;
+    eligibleSourceKeys: unknown;
+    budget: unknown;
+    transport: ResearchModelTransport;
+    spender: ResearchModelSpender;
+    modelId: string;
+    now: () => Date;
+    signal?: AbortSignal;
+  }) => Promise<ClaimSupportReviewResult>;
+  selectAdmissible: (input: {
+    candidates: readonly ExtractedClaimCandidate[];
+    reviews: readonly ReviewedClaimSupport[];
+    eligibleSourceKeys: readonly string[];
+  }) => { admitted: ExtractedClaimCandidate[]; rejectedCount: number; uncertainCount: number };
+  buildLinks: (input: {
+    admitted: readonly ExtractedClaimCandidate[];
+    keyOf: (candidate: ExtractedClaimCandidate) => string;
+    publishersOf: (candidate: ExtractedClaimCandidate) => readonly string[];
+  }) => Array<{ fromClaimKey: string; toClaimKey: string; relation: "corroborates" }>;
+  digestCandidate: (input: {
+    subjectKind: string;
+    subjectRef: string;
+    claimKind: string;
+    paraphrase: string;
+    quotation: string | null;
+    claimCategory: string;
+    geographicLayer: string;
+    geographyRef: string;
+    sourceKeys: readonly string[];
+  }) => string;
+  freshnessWindow: (input: {
+    claimCategory: ExtractedClaimCandidate["claimCategory"];
+    basisAt: string;
+  }) => { staleAt: string; expiresAt: string };
+  freshnessClass: (
+    claimCategory: ExtractedClaimCandidate["claimCategory"],
+  ) => "fast" | "standard" | "structural";
+};
+
 export type MarketResearchClaim = {
   claim(input: {
     organizationId: string;
@@ -160,6 +219,7 @@ export type MarketResearchDependencies = {
   extraction: MarketResearchModelPhase;
   supportReview: MarketResearchModelPhase;
   excerptProvenance: MarketResearchExcerptProvenance;
+  engines: MarketResearchEngines;
   planQueries: (request: ResearchRequest) => ResearchQuery[];
   buildScope: (document: MarketProfileDocumentV1 | MarketProfileDocumentV2) => ResearchRequest;
   events: EventPublisher;
@@ -485,7 +545,7 @@ export async function runMarketResearch(
   // long before this await, so a slow provider holds no database lock.
   let retrieval: ResearchRetrievalResult;
   try {
-    retrieval = researchRetrievalResultSchema.parse(await adapter.searchAndFetch(research));
+    retrieval = dependencies.engines.parseRetrievalResult(await adapter.searchAndFetch(research));
   } catch (error) {
     if (error instanceof DomainError && error.code === "FEATURE_NOT_AVAILABLE") {
       return failRun("ADAPTER_UNAVAILABLE");
@@ -534,7 +594,7 @@ export async function runMarketResearch(
       retrievedAt: item.retrievedAt,
     }));
 
-  const extraction = await extractResearchClaims({
+  const extraction = await dependencies.engines.extractClaims({
     scope: research.scope,
     sources: extractable,
     budget: extractionBudget.data,
@@ -548,7 +608,7 @@ export async function runMarketResearch(
   recordMarketResearchLatency(ledger, extraction.totalLatencyMs);
 
   const eligibleSourceKeys = extractable.map((item) => item.sourceKey);
-  const review = await reviewResearchClaimSupport({
+  const review = await dependencies.engines.reviewClaimSupport({
     candidates: extraction.candidates,
     sources: extractable,
     scope: research.scope,
@@ -563,7 +623,7 @@ export async function runMarketResearch(
   for (const usage of review.usages) recordMarketResearchUsage(ledger, usage);
   recordMarketResearchLatency(ledger, review.totalLatencyMs);
 
-  const admission = selectAdmissibleClaims({
+  const admission = dependencies.engines.selectAdmissible({
     candidates: extraction.candidates,
     reviews: review.reviews,
     eligibleSourceKeys,
@@ -596,7 +656,10 @@ export async function runMarketResearch(
       candidate.citations
         .map((citation) => sourceByKey.get(citation.sourceKey)!.retrievedAt)
         .sort()[0]!;
-    const window = resolveClaimFreshnessWindow({ claimCategory: candidate.claimCategory, basisAt });
+    const window = dependencies.engines.freshnessWindow({
+      claimCategory: candidate.claimCategory,
+      basisAt,
+    });
     const limitations = [...candidate.limitations, "SNIPPET_EVIDENCE_ONLY"];
     if (candidate.sourceKeys.length === 1) limitations.push("ONE_SOURCE");
     return {
@@ -620,7 +683,7 @@ export async function runMarketResearch(
   );
   const quoteTotals = new Map<string, number>();
   const keptQuotations: Array<string | null> = sortedFinalized.map((item) => {
-    let quotation = item.quotation;
+    const quotation = item.quotation;
     if (quotation === null || quoteLimit <= 0) return null;
     for (const sourceKey of item.candidate.sourceKeys) {
       if ((quoteTotals.get(sourceKey) ?? 0) + quotation.length > quoteLimit) return null;
@@ -633,7 +696,7 @@ export async function runMarketResearch(
 
   const claims = sortedFinalized.map((item, index) => {
     const quotation = keptQuotations[index] ?? null;
-    const digest = digestClaimCandidate({
+    const digest = dependencies.engines.digestCandidate({
       subjectKind: item.candidate.subjectKind,
       subjectRef: item.candidate.subjectRef,
       claimKind: item.candidate.claimKind,
@@ -655,7 +718,7 @@ export async function runMarketResearch(
       geographicLayer: item.candidate.geographicLayer,
       geographyRef: item.candidate.geographyRef,
       sourceKeys: item.candidate.sourceKeys,
-      freshnessClass: resolveFreshnessClass(item.candidate.claimCategory),
+      freshnessClass: dependencies.engines.freshnessClass(item.candidate.claimCategory),
       claimCategory: item.candidate.claimCategory,
       freshnessRegistryVersion: 1 as const,
       publishedAt: item.candidate.publishedAt,
@@ -675,7 +738,7 @@ export async function runMarketResearch(
     ),
   );
 
-  const links = buildCorroborationLinks({
+  const links = dependencies.engines.buildLinks({
     admitted: admission.admitted,
     keyOf: (candidate) => claimKeyByCandidate.get(candidate.candidateKey)!,
     publishersOf: (candidate) =>

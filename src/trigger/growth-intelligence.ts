@@ -23,14 +23,24 @@ import {
 } from "@/modules/growth-intelligence/infrastructure/research/query-plan";
 import {
   researchRequestSchema,
+  researchRetrievalResultSchema,
   type ResearchAdapter,
   type ResearchRequest,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 import { getQualifiedMarketResearchAdapter } from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
-import type {
-  ResearchModelSpender,
-  ResearchModelTransport,
+import {
+  digestClaimCandidate,
+  extractResearchClaims,
+  resolveClaimFreshnessWindow,
+  resolveFreshnessClass,
+  type ResearchModelSpender,
+  type ResearchModelTransport,
 } from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
+import {
+  buildCorroborationLinks,
+  reviewResearchClaimSupport,
+  selectAdmissibleClaims,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-support-review";
 import {
   createMarketEvidenceRepository,
   type MarketEvidencePersistence,
@@ -384,6 +394,19 @@ function createResearchDependencies(signal: AbortSignal) {
       modelId: researchModelId("RESEARCH_SUPPORT_REVIEW_MODEL", "unconfigured-review-model"),
     },
     excerptProvenance: triggerExcerptProvenance(),
+    // Only Trigger constructs infrastructure implementations: the workflow
+    // runner receives these pure claim engines as dependencies and never
+    // imports the infrastructure modules itself (architecture boundary).
+    engines: {
+      parseRetrievalResult: (value: unknown) => researchRetrievalResultSchema.parse(value),
+      extractClaims: extractResearchClaims,
+      reviewClaimSupport: reviewResearchClaimSupport,
+      selectAdmissible: selectAdmissibleClaims,
+      buildLinks: buildCorroborationLinks,
+      digestCandidate: digestClaimCandidate,
+      freshnessWindow: resolveClaimFreshnessWindow,
+      freshnessClass: resolveFreshnessClass,
+    },
     planQueries: planResearchQueries,
     buildScope: buildResearchScope,
     currentSources: {
