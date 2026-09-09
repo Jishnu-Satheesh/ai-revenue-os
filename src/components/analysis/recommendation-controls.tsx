@@ -57,7 +57,10 @@ export function RecommendationControls({
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeUntil, setSnoozeUntil] = useState("");
 
-  async function answer(body: Record<string, unknown>, path: "decisions" | "feedback"): Promise<boolean> {
+  async function answer(
+    body: Record<string, unknown>,
+    path: "decisions" | "feedback",
+  ): Promise<boolean> {
     setPending(true);
     setError(null);
     try {
@@ -177,9 +180,7 @@ export function RecommendationControls({
             day: "numeric",
           })}
           {recommendation.decision.reason ? (
-            <span className="block font-normal italic">
-              “{recommendation.decision.reason}”
-            </span>
+            <span className="block font-normal italic">“{recommendation.decision.reason}”</span>
           ) : null}
           {recommendation.decision.decision === "snoozed" &&
           recommendation.decision.snoozedUntil ? (
@@ -194,7 +195,11 @@ export function RecommendationControls({
           ) : null}
         </p>
       ) : (
-        <div className="flex items-center gap-2 pt-1">
+        // Wraps rather than overflowing: at a narrow main column the four
+        // decision controls plus the two feedback buttons are wider than the
+        // card, and an un-wrapped row pushed a horizontal scrollbar onto the
+        // whole workspace.
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
             type="button"
             variant="outline"
@@ -269,8 +274,8 @@ export function RecommendationControls({
           <DialogHeader>
             <DialogTitle>Snooze this recommendation</DialogTitle>
             <DialogDescription>
-              Hidden until the time below, then back in the queue. The horizon
-              travels with the answer so the record explains itself later.
+              Hidden until the time below, then back in the queue. The horizon travels with the
+              answer so the record explains itself later.
             </DialogDescription>
           </DialogHeader>
           <input
@@ -286,12 +291,7 @@ export function RecommendationControls({
             </p>
           ) : null}
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setSnoozeOpen(false)}
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSnoozeOpen(false)}>
               Cancel
             </Button>
             <Button
@@ -319,8 +319,8 @@ export function RecommendationControls({
           <DialogHeader>
             <DialogTitle>Dismiss this recommendation</DialogTitle>
             <DialogDescription>
-              Say why in a few words. The reason is kept with the answer so the
-              record explains itself later.
+              Say why in a few words. The reason is kept with the answer so the record explains
+              itself later.
             </DialogDescription>
           </DialogHeader>
           <textarea
@@ -336,12 +336,7 @@ export function RecommendationControls({
             </p>
           ) : null}
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setDismissOpen(false)}
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setDismissOpen(false)}>
               Cancel
             </Button>
             <Button
