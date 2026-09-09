@@ -5665,3 +5665,33 @@ through the real routes, not only in tests.
   remain redacted and tests passed.
 - **Next:** CP1 Task 3 drafts the additive hosted-staging migration and pgTAP suite. It is explicitly
   blocked from `db:migrations:push` until independent review of the SQL/security/query shape.
+
+### 2026-09-09 · muse-spark · Market monitoring Task 11 prototype dialog and pipeline-aware views (12-task plan)
+
+- **BASE:** `d05198bc` (board records Task 10 done). Peer sessions active; peer rows present — leave this board UNSTAGED
+  at commit (controller preserves it). No live calls, fixtures/mocks only, gates stay OFF. No backend changes expected:
+  the Task 10 read contract is the API. No stash/checkout/reset/push; prettier only Task 11
+  files, never this board.
+- **Claimed files (Task 11 only):** created
+  `src/components/growth-intelligence/market-monitoring-dialog.tsx` + test (Review dialog:
+  header/icon/title, entry points, prefill, selection-required, viewer read-only, proposal
+  rejection, bounds, lead labels, research-only locality, dirty-branch-switch),
+  `research-progress.tsx` + test (pipeline observation + Preparing-insights/terminal/Status-unavailable
+  transitions), `research-outcomes.tsx` + test (history, last-success, retry, exact links);
+  modified `growth-intelligence-workspace.tsx` + test (Market monitoring header entry, dialog mount,
+  hunk-staged around peer work), `market-watch.tsx` + test (Review entry point), `query-options.ts`
+  + test (branch parse, pipeline query keys, poll intervals), `source-evidence-drawer.tsx` + test
+  (erased-source label), `intelligence-card.tsx` + test (From-market-research provenance),
+  `intelligence-timeline.tsx` + test (dedupe), GI `page.tsx` (stop inline profile-review mount,
+  branch list through; hunk-staged), report at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-11-report.md`,
+  and this board. `market-profile-review.tsx` retained (existing callers/tests need it).
+- **Status:** done — dialog/progress/outcomes + observation hook + state-transition tests, all
+  RED-first and GREEN (worktree 83/83 GI components, 407/407 modules+routes, typecheck 0 errors;
+  staged slice verified standalone in a fresh HEAD worktree: tsc clean, 81/81 + 399/399).
+  Path-limited commit of 19 code/test files via whole-add (clean files) + blob surgery
+  (7 peer-interleaved files, peer hunks byte-identical in worktree, leakage-grep clean).
+  Report (untracked, ignored like prior reports) at
+  `.superpowers/sdd/2026-09-08-market-monitoring-research-completion/task-11-report.md`.
+  Merge note: staged workspace/page/test hunks target the HEAD structure (no router callbacks);
+  the worktree keeps the peer-adapted variants (fully green) — take the worktree variants at merge.
