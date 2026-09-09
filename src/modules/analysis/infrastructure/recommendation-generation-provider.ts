@@ -77,9 +77,10 @@ export function extractJsonText(raw: string): unknown {
 
 export type RecommendationGenerationOptions = {
   /**
-   * Pilot runs ground on live web knowledge; anything else omits tools
-   * entirely, keeping today's call shape. The worker decides from the run's
-   * detector keys, so this provider never learns what a pilot is.
+   * Runs with findings ground on live web knowledge; the worker sets the flag
+   * whenever findings exist, so every narration grounds. Absent the flag the
+   * call omits tools entirely, keeping today's call shape. The worker decides
+   * from the run having findings, so this provider never learns what a pilot was.
    */
   useGrounding?: boolean;
 };
@@ -121,8 +122,9 @@ export function createRecommendationGenerationProvider(config: {
           abortSignal: AbortSignal.timeout(RECOMMENDATION_GENERATION_TIMEOUT_MS),
           // Grounding is a tool the model may use, never a second prompt: the
           // system rules still bind what it may claim and cite, and a grounded
-          // answer still parses through the same output contract. Absent for
-          // non-pilot runs, so those calls keep exactly today's shape.
+          // answer still parses through the same output contract. Absent only
+          // when the worker passes no grounding flag, so those calls keep
+          // exactly today's shape.
           ...(options?.useGrounding ? { tools: { google_search: google.tools.googleSearch({}) } } : {}),
         });
         try {

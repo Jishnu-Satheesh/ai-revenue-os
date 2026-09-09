@@ -97,10 +97,11 @@ export type ChannelRecommendationsDependencies = {
     analysisRunId: string;
   }): Promise<readonly NarrationPromptFinding[]>;
   /**
-   * Stored pilot channel context for the prompt, loaded server-side by the
+   * Stored channel context for the prompt, loaded server-side by the
    * caller (the Trigger task reads the stored org/channel/branch rows).
    * Optional so existing callers compile; absent — or throwing, which fails
-   * open below — renders the v4-shape prompt.
+   * open below — renders the prompt without the channel block and grounding
+   * rules (the global plain-language rules still render).
    */
   loadPilotContext?(input: {
     organizationId: string;
@@ -240,9 +241,10 @@ export async function runChannelRecommendations(
       throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
     }
 
-    // Pilot context is advisory, never load-bearing: any throw from the
+    // Channel context is advisory, never load-bearing: any throw from the
     // loader — a database error, a drifted row — falls back to null context,
-    // which the prompt builder renders as the v4 shape. The run still
+    // which the prompt builder renders without the channel block and grounding
+    // rules (the global plain-language rules still render). The run still
     // completes; only findings-empty above fails the run.
     let pilot: ChannelPilotContext = { channelContext: null };
     if (dependencies.loadPilotContext) {

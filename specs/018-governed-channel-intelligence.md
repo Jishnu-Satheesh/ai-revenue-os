@@ -1228,19 +1228,25 @@ This section narrowly extends `specs/012` and `specs/015`: models still never co
 financial/metric value. Narration is permitted only after a deterministic detector has created a
 cited finding.
 
-Pilot amendment (2026-09-09, channel recommendations pilot, Amendment A): for runs whose findings
-include a pilot detector — `orders.cancellation_loss`, `orders.cancellation_attribution`, or
-`operations.closed_share` — the worker widens the fenced prompt folder with stored channel
-context (organization and channel display names, keys, template key, category, industry, country,
-timezone, and currency under a PII allowlist; never service-area blobs or contact details), and
-the narrator grounds itself with Google Search at generation time (user-consented; the channel's
-own docs, forums, and merchant discussions first) under narration prompt version 6. Curated
-playbooks are removed and there is no pre-fetched web slot. The model emits no URLs, findings
-remain the only cited evidence, portal how-to steps are allowed as grounded advice phrased as
-actions the operator performs (never menu-path claims), and every action stays human-supervised.
-A grounding failure falls back to the pre-pilot v4 prompt shape and the run still completes; the
-judge (version 2) still flags invented values. The version-5 playbook design stands as history in
-ADR 0050; the binding rule is section 14 — see ADR 0051.
+Global rollout (2026-09-09, channel recommendations, Amendment B): the Amendment A
+treatment — stored channel context plus Google Search grounding (user-consented; the
+channel's own docs, forums, and merchant discussions first), no URLs emitted, findings
+the only cited evidence, portal how-to steps allowed as grounded advice phrased as
+actions the operator performs (never menu-path claims), every action human-supervised —
+now applies to every audit section, not just the three pilot detectors
+(`orders.cancellation_loss`, `orders.cancellation_attribution`,
+`operations.closed_share`, kept as documentation of where the rollout started). The
+channel block and grounding rules render whenever stored context survives the loader,
+for any detector key. Narration prompt version 7 adds a global plain-English rule: short
+common words a busy shop owner with basic English reads fast, one idea per sentence,
+most sentences under about 15 words, no idioms or figures of speech, numbers as figures
+never spelled out. The plain-English rule renders on every run, including the
+loader-failure fallback, which is otherwise the pre-pilot v4 shape (no channel block, no
+grounding rules). A grounding failure still falls back the same way and the run still
+completes. The judge (version 3) still flags invented values and now also names heavy
+jargon, unexplained technical terms, or longwinded prose. The version-5 playbook design
+stands as history in ADR 0050, the Amendment A grounding decision in ADR 0051; the
+binding rule is section 14 — see ADR 0052.
 
 ## 12. Public API contracts
 
@@ -1369,16 +1375,19 @@ provider payloads, credentials, or customer PII.
   attacker-controlled. They never determine tool calls or prompt instructions.
 - The contract-proposal model has no tools and no retrieval outside the bounded package context.
   The scheduled judge has the same constraint, bounded to one run's findings and their citations.
-  The recommendation-narration model keeps that constraint on all non-pilot runs; under Amendment A
-  (2026-09-09, user-consented, recommendations pilot only) the narrator may use Google Search
-  grounding on pilot runs — runs whose findings include `orders.cancellation_loss`,
-  `orders.cancellation_attribution`, or `operations.closed_share` — preferring the channel's own
+  The recommendation-narration model grounds with Google Search on every run with findings
+  (2026-09-09, user-consented, global rollout under Amendment B; the Amendment A
+  pilot-detector gate is retired and its three keys are kept as documentation of where the
+  rollout started) — preferring the channel's own
   docs, forums, and merchant discussions first. The model still emits no URLs (the output shape has
   no URL field), findings remain the only cited evidence, every action stays human-supervised, and
-  output still passes the same schema-validation and citation re-check fence. This superseded the
-  original section 11.4 pilot paragraph's playbook and empty-web-slot sentences — that paragraph now
-  describes Amendment A; see ADR 0051. ADR 0050
-  stands as history.
+  output still passes the same schema-validation and citation re-check fence. Narration prompt
+  version 7 states the global plain-English rule (short common words, one idea per sentence,
+  no idioms, numbers as figures); the judge (version 3) checks it. This superseded the
+  original section 11.4 pilot paragraph's playbook and empty-web-slot sentences, and then the
+  Amendment A pilot-only wording — that paragraph now
+  describes the global rollout; see ADR 0052. ADRs 0050 and 0051
+  stand as history.
 - Redact or remove customer names, phone numbers, email addresses, delivery addresses, free-text
   order notes, and unrestricted review text unless a declared detector needs minimized content and
   policy permits it.
@@ -1394,7 +1403,7 @@ provider payloads, credentials, or customer PII.
 
 OWASP documents indirect prompt injection through attacker-controlled files, and NIST reports agent
 hijacking from external data as a practical security risk. This architecture reduces impact through
-least privilege, a no-tool model worker (apart from the Amendment A pilot-narration grounding
+least privilege, a no-tool model worker (apart from the user-consented narration grounding
 exception above), typed output, deterministic projection, and exact human
 approval rather than claiming prompt injection can be eliminated.
 

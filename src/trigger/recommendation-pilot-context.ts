@@ -9,17 +9,18 @@ import type {
 import type { ChannelPilotContext } from "@/workflows/analysis/run-channel-recommendations";
 
 /**
- * The narrator's pilot-context loader.
+ * The narrator's channel-context loader.
  *
  * Kept in its own module — rather than inside the Trigger task file — for the
  * same reason as `synthesis-loaders.ts`: the task file pulls server-only
  * transport (`@/lib/env`, the Trigger SDK), which unit tests cannot import,
  * while this loader is plain reads plus pure assembly and is tested directly.
- * The task file wires it as its `loadPilotContext` dependency.
+ * The task file wires it as its `loadPilotContext` dependency (pilot-era name
+ * kept; renaming would touch the trigger seam for zero behavior gain).
  */
 
 /**
- * Whitelisted pilot-context row shapes. Each schema names exactly the columns
+ * Whitelisted channel-context row shapes. Each schema names exactly the columns
  * the prompt may see, so a wider row — a future column, a `select("*")`
  * refactor — cannot smuggle PII past this point: anything undeclared is
  * stripped, and anything unparseable throws into the workflow's fail-open
@@ -55,7 +56,7 @@ function emptyPilotContext(): ChannelPilotContext {
 }
 
 /**
- * Loads the pilot's stored channel context for one narration run.
+ * Loads the stored channel context for one narration run, for any detector.
  *
  * The `channel_analysis_runs` row (by analysis run id, scoped by
  * organization id) is authoritative for channel and branch scope:
@@ -71,10 +72,11 @@ function emptyPilotContext(): ChannelPilotContext {
  * in the context type and are never named in a select.
  *
  * Any throw — a database error, a row that no longer matches its schema —
- * propagates to the workflow, which fails open to the v4-shape prompt. A
-  * null channel (a cross-channel comparison run) or a channel row outside
-  * this tenant is not an error: it returns null context, which renders the
-  * same v4 shape.
+ * propagates to the workflow, which fails open to the prompt without the
+ * channel block and grounding rules (the global plain-English rule still
+ * renders). A null channel (a cross-channel comparison run) or a channel row
+ * outside this tenant is not an error: it returns null context, which renders
+ * the same fallback (no channel block, no grounding rules, plain-English rule on).
   */
 export async function loadRecommendationPilotContext(
   supabase: SupabaseClient<Database>,

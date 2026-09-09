@@ -158,7 +158,7 @@ const ADVICE_RULES = [
  * How the advice should sound. A busy shop owner with basic English reads
  * this, so every item uses short common words, one idea per sentence, and no
  * idioms or figures of speech. Global: these lines render on every run, with
- * or without stored channel context, pilot detectors or not.
+ * or without stored channel context, for any detector.
  */
 const PLAIN_RULES = [
   "Write every field in plain, everyday English a busy shop owner with basic English reads fast.",
@@ -186,7 +186,9 @@ export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = new Set([
 /**
  * Channel-grounding rules, added to the system prompt when the fenced channel
  * block renders. Runs without stored context never see them, which is what
- * keeps the loader-failure fallback byte-identical to the v4 shape.
+ * the loader-failure fallback preserves: no channel block, no grounding
+ * rules. The global plain-language rules above still render, so the fallback
+ * is the v4 shape plus that block and nothing else.
  * Grounding (Amendment A) replaced the curated playbooks: the model searches
  * the live web itself, so these rules say where to look first, what
  * grounding may never become, and what the operator is allowed to read.
