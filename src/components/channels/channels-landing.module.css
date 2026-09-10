@@ -1,0 +1,160 @@
+/**
+ * Channels landing foundation (Task 1, visual contract V00).
+ *
+ * Scoped theme + geometry only. `.root` wraps landing content; `.theme`
+ * carries the same variables onto portalled Dialog/Select/Tooltip content,
+ * because CSS inheritance stops at a portal. Nothing here restyles shared
+ * primitives globally: every selector lives under `.root` / `.theme` or is a
+ * module-hashed class composed explicitly by landing components.
+ */
+
+.root,
+.theme {
+  --channel-ink: #222624;
+  --channel-subdued: #69716c;
+  --channel-line: #e5e8e5;
+  --channel-soft: #f7f8f7;
+  --channel-primary: #127451;
+  --channel-primary-hover: #0e6143;
+  --channel-sage: #edf5f0;
+  --channel-earned: #29956b;
+  --channel-loss: #c58148;
+  --channel-reported: #bac8c0;
+  --channel-warning: #925e2c;
+  --channel-measured: #226f50;
+  --channel-coverage-bg: #f8f9f6;
+  --channel-note-bg: #fcfdfb;
+  --channel-header-bg: #fafbf9;
+  --channel-radius: 12px;
+  --channel-title-size: 32px;
+
+  /* Scoped shadcn mapping: landing primitives read this palette while the
+     rest of the app keeps the shared tokens. Destructive keeps its meaning. */
+  --foreground: var(--channel-ink);
+  --primary: var(--channel-primary);
+  --primary-foreground: #ffffff;
+  --muted: var(--channel-soft);
+  --muted-foreground: var(--channel-subdued);
+  --border: var(--channel-line);
+  --input: var(--channel-line);
+  --card: #ffffff;
+  --card-foreground: var(--channel-ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--channel-ink);
+}
+
+.root {
+  color: var(--channel-ink);
+  font-size: 13px;
+}
+
+/* Page title: 32px desktop, 28px on narrow screens (V01). */
+.title {
+  margin: 0;
+  font-size: var(--channel-title-size);
+  font-weight: 700;
+  letter-spacing: -1.3px;
+  line-height: normal;
+}
+
+.subtitle {
+  margin: 7px 0 0;
+  color: var(--channel-subdued);
+  font-size: 12px;
+}
+
+/* Displayed figures are tabular proportional sans, never font-mono. */
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.6px;
+}
+
+.headlineNum {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+
+.currencyPrefix {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--channel-subdued);
+  margin-right: 4px;
+}
+
+/*
+ * 38px control geometry (V00). Composed onto shadcn Button/Trigger via
+ * className so primitives keep semantics, disabled handling and focus
+ * behavior; only the measurements come from here.
+ */
+.control {
+  min-height: 38px;
+  padding: 8px 13px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.root :focus-visible,
+.theme :focus-visible {
+  outline: 2px solid var(--channel-primary);
+  outline-offset: 4px;
+}
+
+.root button,
+.theme button,
+.root a,
+.theme a {
+  cursor: pointer;
+}
+
+/* Content breakpoints are explicit px values, never Tailwind's sm (V00/R).
+   Component geometry lands with Tasks 2-7; the shared tokens they consume
+   switch here. */
+@media (max-width: 1200px) {
+  .root,
+  .theme {
+    --channel-stat-pad-x: 16px;
+  }
+}
+
+@media (max-width: 980px) {
+  .root,
+  .theme {
+    --channel-stat-pad-x: 16px;
+  }
+}
+
+@media (max-width: 650px) {
+  .root,
+  .theme {
+    --channel-title-size: 28px;
+  }
+
+  .subtitle {
+    max-width: 210px;
+    line-height: 1.65;
+  }
+
+  .control {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root *,
+  .root *::before,
+  .root *::after,
+  .theme *,
+  .theme *::before,
+  .theme *::after {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
