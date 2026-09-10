@@ -334,6 +334,23 @@ export type ChannelAnalysisReadPort = {
   loadAnalysedWindowKeys(input: { organizationId: string }): Promise<AnalysedWindowKey[]>;
 
   /**
+   * The card findings of the latest completed run per channel for one declared
+   * window: the two money-band codes plus the count and share codes the
+   * business-performance card reads (order and menu-view totals, the
+   * cancellation share of orders, and cost-context presence).
+   *
+   * Separate from `loadChannelBandsForWindow` because that record's contract
+   * is the money band and nothing else; widening it would let a future reader
+   * believe the roll-up sums funnel figures too.
+   */
+  loadChannelCardFindingsForWindow(input: {
+    organizationId: string;
+    windowStart: string;
+    windowEnd: string;
+    grain: AnalysisGrain;
+  }): Promise<ChannelBandRecord[]>;
+
+  /**
    * The unbroken stretches of dates this channel's projected packages declare.
    *
    * Declared periods rather than surviving evidence, for the reason the month
