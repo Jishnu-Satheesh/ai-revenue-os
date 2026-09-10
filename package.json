@@ -32,7 +32,7 @@
     "deploy:trigger": "pnpm dlx trigger.dev@latest deploy"
   },
   "dependencies": {
-    "@ai-sdk/google": "2.0.0",
+    "@ai-sdk/google": "3.0.122",
     "@date-fns/tz": "^1.5.0",
     "@napi-rs/canvas": "1.0.8",
     "@supabase/ssr": "0.7.0",
@@ -42,7 +42,7 @@
     "@trigger.dev/sdk": "4.5.16",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.4",
-    "ai": "5.0.0",
+    "ai": "6.0.280",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "^1.1.1",
