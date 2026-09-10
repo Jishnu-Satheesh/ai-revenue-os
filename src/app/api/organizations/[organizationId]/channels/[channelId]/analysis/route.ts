@@ -101,9 +101,8 @@ export async function POST(
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     // Channel-wide: the picker names no branch, so the run analyses every
     // branch this channel trades through.
-    const resolved = await createAuthenticatedChannelAnalysisRepository(
-      context.supabase,
-    ).resolveWindowInput({
+    const repository = createAuthenticatedChannelAnalysisRepository(context.supabase);
+    const resolved = await repository.resolveWindowInput({
       organizationId: routeParams.organizationId,
       channelId: routeParams.channelId,
       from: body.from,
@@ -116,11 +115,27 @@ export async function POST(
       );
     }
 
+    // An already-analysed range opens instantly: the same ready rule the
+    // status route reports (`completed` with recommendations landed) returns
+    // the existing run without spending allowance or starting new work.
+    const existing = await repository.loadRunForWindow({
+      organizationId: routeParams.organizationId,
+      channelId: routeParams.channelId,
+      windowStart: resolved.windowStart,
+      windowEnd: resolved.windowEnd,
+    });
+    if (existing !== null && existing.status === "completed" && existing.recommendationCount > 0) {
+      return NextResponse.json(
+        { analysisRunId: existing.id, correlationId, cached: true },
+        { status: 200 },
+      );
+    }
+
     // After coverage, never before: a mistyped date must not cost the
     // organization part of its allowance. Starting a run costs a detector
     // pass and an AI narration; the permission check above already decided
-    // this caller may ask at all, and this caps how often. Reading an
-    // already-computed range never reaches here.
+    // this caller may ask at all, and this caps how often. An
+    // already-computed range returned above and never reaches here.
     if (!(await consumeAnalysisRunAllowance(routeParams.organizationId))) {
       throw new DomainError(
         "RATE_LIMITED",

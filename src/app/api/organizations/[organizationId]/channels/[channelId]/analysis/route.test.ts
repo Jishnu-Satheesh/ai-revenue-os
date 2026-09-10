@@ -29,11 +29,13 @@ vi.mock("@/modules/analysis/application/dispatch", () => ({
 
 const repositoryMocks = vi.hoisted(() => ({
   resolveWindowInput: vi.fn(),
+  loadRunForWindow: vi.fn(),
 }));
 
 vi.mock("@/modules/analysis/infrastructure/read-repository", () => ({
   createAuthenticatedChannelAnalysisRepository: vi.fn(() => ({
     resolveWindowInput: repositoryMocks.resolveWindowInput,
+    loadRunForWindow: repositoryMocks.loadRunForWindow,
   })),
 }));
 vi.mock("@/lib/logger", () => ({
@@ -50,6 +52,7 @@ import { DomainError } from "@/lib/errors";
 
 const ORGANIZATION = "44444444-4444-4444-8444-444444444444";
 const CHANNEL = "55555555-5555-4555-8555-555555555555";
+const EXISTING_RUN = "77777777-7777-4777-8777-777777777777";
 
 function request(body: unknown) {
   return new Request("https://example.test/analysis", {
@@ -80,6 +83,7 @@ describe("POST channel analysis, by window", () => {
       timeZone: "Asia/Dubai",
       grain: "day",
     });
+    repositoryMocks.loadRunForWindow.mockResolvedValue(null);
   });
 
   it("starts a run for a covered four-day range", async () => {
@@ -99,6 +103,102 @@ describe("POST channel analysis, by window", () => {
         windowTimezone: "Asia/Dubai",
       }),
     );
+  });
+
+  it("returns the existing run without spending allowance or dispatching when the window is ready", async () => {
+    repositoryMocks.loadRunForWindow.mockResolvedValue({
+      id: EXISTING_RUN,
+      status: "completed",
+      recommendationCount: 6,
+    });
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      analysisRunId: string;
+      correlationId: string;
+      cached: boolean;
+    };
+    expect(body).toEqual({
+      analysisRunId: EXISTING_RUN,
+      correlationId: expect.any(String),
+      cached: true,
+    });
+    expect(repositoryMocks.loadRunForWindow).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      channelId: CHANNEL,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-04",
+    });
+    expect(rateMocks.consume).not.toHaveBeenCalled();
+    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("returns a cached run even when the organization is over its run allowance", async () => {
+    rateMocks.consume.mockResolvedValue(false);
+    repositoryMocks.loadRunForWindow.mockResolvedValue({
+      id: EXISTING_RUN,
+      status: "completed",
+      recommendationCount: 2,
+    });
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("starts a new run while the existing run is still narrating", async () => {
+    // Completed with no recommendations means the narrator has not landed
+    // yet — the same rule the status route uses to report `narrating`.
+    repositoryMocks.loadRunForWindow.mockResolvedValue({
+      id: EXISTING_RUN,
+      status: "completed",
+      recommendationCount: 0,
+    });
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(rateMocks.consume).toHaveBeenCalled();
+    expect(mocks.requestChannelAnalysis).toHaveBeenCalled();
+  });
+
+  it("starts a new run when the existing run failed", async () => {
+    repositoryMocks.loadRunForWindow.mockResolvedValue({
+      id: EXISTING_RUN,
+      status: "failed",
+      recommendationCount: 0,
+    });
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(mocks.requestChannelAnalysis).toHaveBeenCalled();
+  });
+
+  it("starts a new run while the existing run is still running", async () => {
+    repositoryMocks.loadRunForWindow.mockResolvedValue({
+      id: EXISTING_RUN,
+      status: "running",
+      recommendationCount: 0,
+    });
+
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(mocks.requestChannelAnalysis).toHaveBeenCalled();
   });
 
   it("refuses an organization the slice is not enabled for", async () => {
