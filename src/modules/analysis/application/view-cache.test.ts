@@ -16,6 +16,7 @@ const key = {
   organizationId: "859cf039-1cd8-41b0-bd09-66c6c52e9c52",
   analysisRunId: "11111111-1111-4111-8111-111111111111",
   resultDigest: "a".repeat(64),
+  narrationCount: 5,
 };
 
 /** A minimal, schema-valid payload -- empty arrays are a valid completed run. */
@@ -96,6 +97,7 @@ describe("caching a completed run", () => {
     expect(analysisViewCacheKey(key)).toContain(key.organizationId);
     expect(analysisViewCacheKey(key)).toContain(key.analysisRunId);
     expect(analysisViewCacheKey(key)).toContain(key.resultDigest);
+    expect(analysisViewCacheKey(key)).toContain(String(key.narrationCount));
   });
 
   it("loads from the database on a miss and stores the result", async () => {
@@ -122,6 +124,15 @@ describe("caching a completed run", () => {
     // Two runs of the same id cannot exist, but a digest in the key means a
     // stored payload can never outlive the result it describes.
     expect(analysisViewCacheKey({ ...key, resultDigest: "b".repeat(64) })).not.toBe(
+      analysisViewCacheKey(key),
+    );
+  });
+
+  it("changes key when the filed count changes, so a gap-fill filing misses the pre-gap-fill payload", () => {
+    // A completed run's analysis never changes, but one gap-fill narration
+    // can file against it afterwards. Without the count in the key, the page
+    // serves the payload cached before the filing for the whole TTL.
+    expect(analysisViewCacheKey({ ...key, narrationCount: 8 })).not.toBe(
       analysisViewCacheKey(key),
     );
   });

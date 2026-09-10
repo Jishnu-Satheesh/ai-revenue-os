@@ -142,11 +142,21 @@ export default async function ChannelDetailPage({
               run.windowEnd === selectedWindow.to,
           ) ?? null);
 
-    // The findings, the evidence and the recommendation *text* for a
-    // completed run are immutable, so they go through `readCachedRunPayload`.
-    // The viewer's own accept and dismiss decisions do **not**: they are read
-    // outside the cache and merged on top, because caching them under a run
-    // id would show one operator another's choices.
+    // The findings and the evidence for a completed run are immutable; the
+    // recommendation text grows at most once afterwards, when a gap-fill
+    // narration files against the same run. The filed count enters the cache
+    // key below, so that growth misses the pre-gap-fill payload instead of
+    // serving it for the whole TTL. The viewer's own accept and dismiss
+    // decisions do **not** go through the cache: they are read outside it
+    // and merged on top, because caching them under a run id would show one
+    // operator another's choices.
+    const narrationCount =
+      displayedRun === null
+        ? 0
+        : await analysis.countRecommendationsForRun({
+            organizationId: context.organizationId,
+            analysisRunId: displayedRun.id,
+          });
     const cached =
       displayedRun === null || displayedRun.resultDigest === null
         ? null
@@ -154,6 +164,7 @@ export default async function ChannelDetailPage({
             organizationId: context.organizationId,
             analysisRunId: displayedRun.id,
             resultDigest: displayedRun.resultDigest,
+            narrationCount,
             load: async () => {
               const runFindings = await analysis.loadFindingsForRun({
                 organizationId: context.organizationId,

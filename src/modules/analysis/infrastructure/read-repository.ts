@@ -808,6 +808,19 @@ export function createAuthenticatedChannelAnalysisRepository(
       });
     },
 
+    async countRecommendationsForRun({ organizationId, analysisRunId }) {
+      // An exact head count: one indexed lookup, no row data. The fence caps
+      // a run's filings, so this stays a small number by construction.
+      const { count, error } = await supabase
+        .from("channel_recommendations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("analysis_run_id", analysisRunId);
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+      return count ?? 0;
+    },
+
     async loadRecommendationsForRun({ organizationId, analysisRunId, viewerId }) {
       // Only the displayed run's narration, for the same reason findings are
       // read per run: words narrated over another window must not sit above

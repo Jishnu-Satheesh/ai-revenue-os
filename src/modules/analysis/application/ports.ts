@@ -279,6 +279,20 @@ export type ChannelAnalysisReadPort = {
   }): Promise<ChannelRecommendationRecord[]>;
 
   /**
+   * How many items one run has filed. The view cache keys on it: a completed
+   * run's analysis never changes, but Amendment C lets one gap-fill narration
+   * land afterwards, and a key without the count serves the pre-gap-fill
+   * payload for the whole TTL. Filings are insert-only -- `complete` deletes
+   * only the lease row -- so the count is monotonic per run and a changed
+   * count always means a changed narration. If a delete path for filed items
+   * ever appears, this key must change with it.
+   */
+  countRecommendationsForRun(input: {
+    organizationId: string;
+    analysisRunId: string;
+  }): Promise<number>;
+
+  /**
    * The per-viewer layer over one run's narration: every triage answer and
    * the viewer's own feedback vote, keyed by recommendation.
    *

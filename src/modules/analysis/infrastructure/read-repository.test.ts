@@ -14,7 +14,7 @@ vi.mock("server-only", () => ({}));
  * narrated more than once, and where a triage answer's name comes from.
  */
 
-type QueryResult = { data: unknown; error: null };
+type QueryResult = { data: unknown; error: null; count?: number | null };
 
 function stubClient(
   results: Record<string, QueryResult>,
@@ -341,6 +341,48 @@ describe("loadRecommendationsForRun", () => {
     expect(loaded[0].decisions).toEqual([]);
     expect(loaded[0].myFeedback).toBeNull();
     expect(loaded[0].citationFindingIds).toEqual(["finding-1"]);
+  });
+});
+
+describe("countRecommendationsForRun", () => {
+  it("returns the exact filed count without reading row data", async () => {
+    // The view cache keys on this count so a gap-fill filing misses the
+    // pre-gap-fill payload. A head count is one indexed lookup; the fence
+    // caps a run's filings, so the number stays small by construction.
+    const { supabase, asked } = stubClient({
+      channel_recommendations: { data: null, error: null, count: 8 },
+    });
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).countRecommendationsForRun({ organizationId: "org-1", analysisRunId: "run-1" });
+
+    expect(count).toBe(8);
+    expect(asked).toEqual(["channel_recommendations"]);
+  });
+
+  it("reads zero when the run was never narrated", async () => {
+    const { supabase } = stubClient({
+      channel_recommendations: { data: null, error: null, count: 0 },
+    });
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).countRecommendationsForRun({ organizationId: "org-1", analysisRunId: "run-1" });
+
+    expect(count).toBe(0);
+  });
+
+  it("reads zero when the count comes back null", async () => {
+    const { supabase } = stubClient({
+      channel_recommendations: { data: null, error: null },
+    });
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).countRecommendationsForRun({ organizationId: "org-1", analysisRunId: "run-1" });
+
+    expect(count).toBe(0);
   });
 });
 

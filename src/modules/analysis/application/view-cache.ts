@@ -5,10 +5,13 @@ import { z } from "zod";
 import { cacheGet, cacheSet } from "@/lib/cache/redis";
 
 /**
- * A completed analysis run never changes, so its findings, its evidence and
- * its recommendation text can be held for as long as memory allows. The TTL
- * below is a memory bound, not a correctness device: there is no invalidation
- * to forget, because there is nothing that can go stale.
+ * A completed analysis run's findings and evidence never change, so they can
+ * be held for as long as memory allows. Its recommendation text grows at most
+ * once afterwards — the gap-fill narration files against the same run after
+ * the first payload cached (Amendment C, ADR 0053) — and the narration count
+ * in the key below is what keeps that growth from reading stale. The TTL is a
+ * memory bound, not a correctness device: a superseded key simply expires,
+ * and there is still no invalidation to forget.
  *
  * What is deliberately *not* in here: the viewer's own accept and dismiss
  * decisions, or their own feedback vote. `loadRecommendationsForRun` reads
@@ -136,18 +139,24 @@ export function analysisViewCacheKey(input: {
   organizationId: string;
   analysisRunId: string;
   resultDigest: string;
+  /** Items the run has filed. Filings are insert-only, so a changed count always means a changed narration. */
+  narrationCount: number;
 }): string {
   // Organization-leading, so no key is reachable across tenants. The digest
   // is included so a re-analysed run (a new resultDigest for the same
   // analysisRunId cannot happen today, but nothing here should assume it
-  // never will) can never serve its predecessor's answer.
-  return `analysis:view:v1:${input.organizationId}:${input.analysisRunId}:${input.resultDigest}`;
+  // never will) can never serve its predecessor's answer. The count is
+  // included because the narration can grow once after the analysis closed:
+  // without it a gap-fill filing lands behind a key cached earlier, and the
+  // page serves the pre-gap-fill payload for the whole TTL.
+  return `analysis:view:v2:${input.organizationId}:${input.analysisRunId}:${input.resultDigest}:${input.narrationCount}`;
 }
 
 export async function readCachedRunPayload(input: {
   organizationId: string;
   analysisRunId: string;
   resultDigest: string;
+  narrationCount: number;
   load: () => Promise<AnalysisViewPayload>;
 }): Promise<AnalysisViewPayload> {
   const key = analysisViewCacheKey(input);
