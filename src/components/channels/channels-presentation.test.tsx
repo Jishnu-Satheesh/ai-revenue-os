@@ -13,7 +13,9 @@ import { describe, expect, it } from "vitest";
 import { ChannelIcon } from "@/components/channels/channel-icons";
 import {
   buildChannelsPortfolioPresentation,
+  countChannelDirectoryFilters,
   formatChannelsWindowOption,
+  labelForChannelCategory,
   parseChannelsWindow,
   selectChannelDirectoryRows,
 } from "@/components/channels/channels-presentation";
@@ -567,6 +569,69 @@ describe("selectChannelDirectoryRows", () => {
       "Direct",
       "In-store",
     ]);
+  });
+});
+
+describe("countChannelDirectoryFilters", () => {
+  const rows = februaryRows();
+  const analysis = { state: "ready" as const, view: overviewView(rows) };
+  const channels = [
+    channelRecord("0001", "Delivery A"),
+    channelRecord("0002", "Delivery B"),
+    channelRecord("0003", "Direct", { category: "owned_digital" }),
+    channelRecord("0004", "In-store", { category: "physical" }),
+    channelRecord("0005", "Previous", { status: "archived" }),
+  ];
+
+  it("counts every state before search, with attention covering revenue-only and refused", () => {
+    expect(countChannelDirectoryFilters({ channels, analysis })).toEqual({
+      active: 4,
+      measured: 2,
+      attention: 2,
+      archived: 1,
+    });
+  });
+
+  it("counts zero evidence states without a ready view instead of failing every channel", () => {
+    expect(countChannelDirectoryFilters({ channels, analysis: { state: "disabled" } })).toEqual({
+      active: 4,
+      measured: 0,
+      attention: 0,
+      archived: 1,
+    });
+    expect(countChannelDirectoryFilters({ channels, analysis: { state: "unavailable" } })).toEqual({
+      active: 4,
+      measured: 0,
+      attention: 0,
+      archived: 1,
+    });
+  });
+});
+
+describe("labelForChannelCategory", () => {
+  it("returns the exact V09 display strings", () => {
+    expect(labelForChannelCategory("marketplace")).toBe("Marketplace");
+    expect(labelForChannelCategory("owned_digital")).toBe("Owned digital");
+    expect(labelForChannelCategory("physical")).toBe("Physical");
+    expect(labelForChannelCategory("reseller")).toBe("Reseller");
+    expect(labelForChannelCategory("other")).toBe("Other");
+  });
+
+  it("searches the displayed label with its space, not only the raw value", () => {
+    const rows = februaryRows();
+    const analysis = { state: "ready" as const, view: overviewView(rows) };
+    const channels = [
+      channelRecord("0001", "Delivery A"),
+      channelRecord("0003", "Direct", { category: "owned_digital" }),
+    ];
+    const selected = selectChannelDirectoryRows({
+      channels,
+      analysis,
+      query: "owned digital",
+      filter: "active",
+      sort: "descending",
+    });
+    expect(selected.map((channel) => channel.display_name)).toEqual(["Direct"]);
   });
 });
 

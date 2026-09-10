@@ -536,3 +536,540 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * V07–V10 directory (Task 5): compact five-column table on desktop, stacked
+ * cards at <=650px. Both render from the same rows; `display:none` keeps
+ * exactly one set in the focus/announcement tree, and no IDs are duplicated
+ * because neither rendering mints any. Breakpoints are explicit px values,
+ * never Tailwind's sm (R).
+ */
+.directory {
+  margin-top: 32px;
+}
+
+@media (min-width: 1601px) {
+  .directory {
+    margin-top: 38px;
+  }
+}
+
+@media (max-width: 650px) {
+  .directory {
+    margin-top: 27px;
+  }
+}
+
+/* V07 header: title + active-count badge + subtitle, About link at right. */
+.dirHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.dirTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dirCount {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--channel-subdued);
+  padding: 2px 7px;
+  border: 1px solid var(--channel-line);
+  border-radius: 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.dirSubtitle {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--channel-subdued);
+}
+
+.dirAbout {
+  font-size: 12px;
+  font-weight: 700;
+  gap: 7px;
+  height: auto;
+  padding: 0;
+}
+
+.dirAboutIcon {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 650px) {
+  .dirHeader {
+    align-items: flex-start;
+  }
+
+  .dirAbout {
+    font-size: 10px;
+  }
+}
+
+/* V08 tools: counted ToggleGroup + search; search goes full width <=650px. */
+.dirTools {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 17px;
+  margin-bottom: 13px;
+}
+
+.dirFilters {
+  gap: 3px;
+}
+
+.dirFilterItem {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+.dirFilterItem[data-state="on"] {
+  background: #eef1ee;
+  color: var(--channel-ink);
+  font-weight: 700;
+}
+
+.dirFilterCount {
+  font-size: 9px;
+  margin-left: 5px;
+  color: #899189;
+}
+
+/* Wrapper so a disabled evidence filter still surfaces its tooltip. */
+.dirFilterHint {
+  display: inline-flex;
+}
+
+.dirSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--channel-line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--channel-subdued);
+}
+
+.dirSearch > svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.dirSearchInput {
+  width: 142px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+}
+
+/* The explicit X button is the only clear affordance; never show the native
+   one beside it. */
+.dirSearchInput[type="search"]::-webkit-search-cancel-button {
+  display: none;
+}
+
+.dirClear {
+  width: 24px;
+  height: 24px;
+}
+
+.dirClear svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dirMixedNote {
+  margin: 0 0 13px;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+@media (max-width: 650px) {
+  .dirTools {
+    flex-wrap: wrap;
+  }
+
+  .dirSearch {
+    flex: 1 1 100%;
+  }
+
+  .dirSearchInput {
+    width: 100%;
+  }
+}
+
+/* V09 table card: one border shared by the table (or its empty state) and
+   the footer. Generated Table/Card ring/padding are zeroed here, in scope. */
+.dirCard {
+  border: 1px solid var(--channel-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.dirTableWrap {
+  display: block;
+}
+
+.dirTable thead tr {
+  background: var(--channel-header-bg);
+  border-bottom: 1px solid var(--channel-line);
+}
+
+.dirTable tbody tr:hover {
+  background: #fcfdfb;
+}
+
+.dirHead {
+  background: var(--channel-header-bg);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--channel-subdued);
+  padding: 12px 17px;
+}
+
+.dirHeadActions {
+  text-align: right;
+}
+
+.dirCell {
+  padding: 17px;
+  font-size: 11px;
+  white-space: normal;
+  vertical-align: middle;
+}
+
+.dirCellActions {
+  text-align: right;
+}
+
+@media (max-width: 1200px) {
+  .dirHead {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .dirCell {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  /* Locations stay in state (Manage/mobile); the column hides <=1200px. */
+  .dirLocationCell {
+    display: none;
+  }
+}
+
+/* Sort lives in the Reported revenue header: plain label + thin text arrow,
+   never a dropdown chevron. */
+.dirSort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.dirSort:disabled {
+  cursor: default;
+}
+
+.dirSortArrow {
+  font-size: 10px;
+}
+
+/* Channel cell: category tile + wrapping name + category string. */
+.dirIdentity {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.dirTile {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--channel-sage);
+  color: var(--channel-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.dirTilePhysical {
+  background: #f1f1ed;
+  color: #848676;
+}
+
+.dirName {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.dirCategory {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+/* Revenue cell: prefix + tabular value, then share or the honest reason. */
+.dirMoney {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dirMoneyPrefix {
+  font-size: 10px;
+  color: var(--channel-subdued);
+  margin-right: 4px;
+}
+
+.dirMoneyValue {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dirMoneyDash {
+  margin: 0;
+  font-size: 12px;
+  color: var(--channel-subdued);
+}
+
+.dirSub {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+/* Data cell: dot + text badge, color never the only encoding. */
+.dirBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 5px;
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dirDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.dirBadgeMeasured {
+  background: var(--channel-sage);
+  color: var(--channel-measured);
+}
+
+.dirBadgeRevenue {
+  background: #f0f2f0;
+  color: #626c65;
+}
+
+.dirBadgeReview {
+  background: #faf2e7;
+  color: var(--channel-warning);
+}
+
+.dirBadgeArchived {
+  background: #eef1ee;
+  color: #626c65;
+}
+
+.dirBadgeNeutral {
+  background: var(--channel-soft);
+  color: var(--channel-subdued);
+}
+
+.dirLocation {
+  margin: 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+.dirLocation + .dirLocation {
+  margin-top: 4px;
+}
+
+/* Trailing actions: real audit Link + ellipsis Manage/View details. */
+.dirActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.dirAuditLink {
+  font-size: 10px;
+  color: var(--channel-subdued);
+  padding: 5px;
+  gap: 4px;
+}
+
+.dirAuditLink:hover {
+  color: var(--channel-primary);
+}
+
+.dirAuditLink svg {
+  width: 13px;
+  height: 13px;
+}
+
+.dirEllipsis {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 5px;
+  color: var(--channel-subdued);
+}
+
+.dirEllipsis svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* V10 mobile cards: hidden on desktop; the table hides at <=650px. */
+.dirMobile {
+  display: none;
+}
+
+@media (max-width: 650px) {
+  .dirTableWrap {
+    display: none;
+  }
+
+  .dirMobile {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .dirMobileItem {
+    padding: 14px 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 7px;
+    row-gap: 14px;
+    border-bottom: 1px solid var(--channel-line);
+  }
+
+  .dirMobileItem:last-child {
+    border-bottom: none;
+  }
+
+  .dirMobileIdentity {
+    grid-column: 1 / -1;
+  }
+
+  .dirMobileCaption {
+    margin: 0 0 7px;
+    font-size: 10px;
+    color: var(--channel-subdued);
+  }
+
+  .dirMobileLocation {
+    margin-top: 8px;
+  }
+
+  .dirMobileActions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--channel-line);
+    padding-top: 8px;
+  }
+
+  .dirMobileActions .dirAuditLink {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+}
+
+/* V10 footer: count + period left, directory-only note right. */
+.dirFoot {
+  background: var(--channel-header-bg);
+  border-top: 1px solid var(--channel-line);
+  padding: 12px 16px;
+  font-size: 10px;
+  color: var(--channel-subdued);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 650px) {
+  .dirFoot {
+    flex-direction: column;
+    min-width: 0;
+    gap: 4px;
+  }
+}
+
+/* V11 empty states: full-width blocks inside the card, tools retained. */
+.dirEmpty {
+  padding: 44px 20px;
+  text-align: center;
+  display: grid;
+  justify-items: center;
+}
+
+.dirEmptyIcon {
+  width: 32px;
+  height: 32px;
+  color: var(--channel-subdued);
+}
+
+.dirEmptyTitle {
+  margin: 12px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dirEmptyCopy {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--channel-subdued);
+}
+
+.dirEmptyAction {
+  margin-top: 15px;
+}

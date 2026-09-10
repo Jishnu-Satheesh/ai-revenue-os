@@ -235,9 +235,12 @@ export function selectChannelDirectoryRows(
       }
     }
     if (query.length === 0) return true;
-    return (
-      channel.display_name.toLowerCase().includes(query) ||
-      channel.category.toLowerCase().includes(query)
+    // Search covers the channel name and the *displayed* category label
+    // (e.g. "Owned digital"), not just the raw snapshot value
+    // ("owned_digital"). The raw value stays in the haystack so an exact
+    // `owned_digital` query keeps matching.
+    return [channel.display_name, labelForChannelCategory(channel.category), channel.category].some(
+      (haystack) => haystack.toLowerCase().includes(query),
     );
   });
 
@@ -279,6 +282,59 @@ export function selectChannelDirectoryRows(
 
 const WINDOW_VALUE_SCHEMA = z.string().min(1);
 const WINDOW_GRAIN_SCHEMA = z.enum(["day", "week", "month", "span"]);
+
+/**
+ * Display labels for the directory category cell and search (Task 5,
+ * visual contract V09). The raw snapshot value stays on the record; these
+ * are the exact human-readable strings the directory shows and matches.
+ */
+const CHANNEL_CATEGORY_LABELS: Record<string, string> = {
+  marketplace: "Marketplace",
+  owned_digital: "Owned digital",
+  physical: "Physical",
+  reseller: "Reseller",
+  other: "Other",
+};
+
+export function labelForChannelCategory(category: string): string {
+  return CHANNEL_CATEGORY_LABELS[category] ?? "Other";
+}
+
+export type ChannelDirectoryCounts = {
+  active: number;
+  measured: number;
+  attention: number;
+  archived: number;
+};
+
+/**
+ * Pre-search counts for the directory ToggleGroup (Task 5, V08): every
+ * record in each state before the query applies. Evidence states need a
+ * ready view, so without one they count zero -- the UI disables them --
+ * rather than claiming every channel failed.
+ */
+export function countChannelDirectoryFilters(input: {
+  channels: readonly OrganizationChannelRow[];
+  analysis: ChannelsLandingAnalysis;
+}): ChannelDirectoryCounts {
+  const bandByChannel = new Map<string, ChannelsOverviewRow>();
+  if (input.analysis.state === "ready") {
+    for (const row of input.analysis.view.rows) bandByChannel.set(row.channelId, row);
+  }
+  const counts: ChannelDirectoryCounts = { active: 0, measured: 0, attention: 0, archived: 0 };
+  for (const channel of input.channels) {
+    if (channel.status === "archived") {
+      counts.archived += 1;
+      continue;
+    }
+    counts.active += 1;
+    if (input.analysis.state !== "ready") continue;
+    const state = bandByChannel.get(channel.id)?.band.state ?? "refused";
+    if (state === "complete") counts.measured += 1;
+    else counts.attention += 1;
+  }
+  return counts;
+}
 
 export type ParsedChannelsWindow = {
   windowStart: string;
