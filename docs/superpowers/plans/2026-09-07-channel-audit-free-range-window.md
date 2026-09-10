@@ -1501,7 +1501,12 @@ The one genuinely subtle cache. A completed run is immutable, so it can be held 
 - Test: `src/modules/analysis/application/view-cache.test.ts`
 
 **Interfaces:**
-- Consumes: `cacheGet`, `cacheSet` from Task 6.
+- Consumes: `cacheGet`, `cacheSet` from Task 6. **`cacheGet` takes a Zod schema as its
+  second argument** — `cacheGet<T>(key: string, schema: ZodType<T>)` — and returns null when
+  the stored value does not satisfy it. Define a `analysisViewPayloadSchema` for the cached
+  half (findings, evidence, recommendations without decisions) and pass it. A cache read is
+  an external boundary and this repository validates every one of those with Zod.
+  Do not cast; a wrong-shape payload from an older deploy must read as a miss.
 - Produces: `readCachedRunPayload<T>(input: { organizationId: string; analysisRunId: string; resultDigest: string; load: () => Promise<T> }): Promise<T>` and `analysisViewCacheKey(input: { organizationId: string; analysisRunId: string; resultDigest: string }): string`.
 
 - [ ] **Step 1: Write the failing test**

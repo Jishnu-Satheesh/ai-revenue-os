@@ -5,7 +5,7 @@
       "targetKind": "existing-ui",
       "projectId": "8393ba3e-6abf-458c-a693-bac68f26161b",
       "baselineDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
-    "activeDraftId": "8de86a1e-5f2b-477c-ab6e-5d2eddeae8dd",
+      "activeDraftId": "8de86a1e-5f2b-477c-ab6e-5d2eddeae8dd",
       "designSystemPath": ".superdesign/design-system.md",
       "contextFiles": [
         ".superdesign/design-system.md",
@@ -60,7 +60,7 @@
       ],
       "drafts": {
         "298e0aae-820f-40f9-8df9-bc894e78649e": {
-          "title": "Current Organization Overview — 2026-08-24",
+          "title": "Current Organization Overview \u2014 2026-08-24",
           "visualDirection": "faithful current-source baseline with the readiness strip absent and preview campaigns retained",
           "currentVersion": 1
         },
@@ -82,20 +82,20 @@
           "parentDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
           "currentVersion": 1
         },
-      "d174c71c-c747-4cea-aa4b-0728438aba00": {
-        "title": "Revenue Observatory",
-        "visualDirection": "premium dark analytical instrument with a restrained economics canvas, ranked signal rail, channel scan, and explicit evidence lineage",
-        "parentDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
-        "currentVersion": 1
+        "d174c71c-c747-4cea-aa4b-0728438aba00": {
+          "title": "Revenue Observatory",
+          "visualDirection": "premium dark analytical instrument with a restrained economics canvas, ranked signal rail, channel scan, and explicit evidence lineage",
+          "parentDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
+          "currentVersion": 1
+        },
+        "8de86a1e-5f2b-477c-ab6e-5d2eddeae8dd": {
+          "title": "Growth Intelligence \u2014 Hybrid",
+          "visualDirection": "locked hybrid light client-facing command center with a pale sage focal economics instrument, light ranked action rail, channel comparison, evidence lineage, and collapsed organization foundation",
+          "parentDraftId": "6f06e200-4f70-411e-9fdb-8306449673e1",
+          "currentVersion": 2
+        }
       },
-      "8de86a1e-5f2b-477c-ab6e-5d2eddeae8dd": {
-        "title": "Growth Intelligence — Hybrid",
-        "visualDirection": "locked hybrid light client-facing command center with a pale sage focal economics instrument, light ranked action rail, channel comparison, evidence lineage, and collapsed organization foundation",
-        "parentDraftId": "6f06e200-4f70-411e-9fdb-8306449673e1",
-        "currentVersion": 2
-      }
-    },
-    "updatedAt": "2026-08-24T05:37:44.000Z"
+      "updatedAt": "2026-08-24T05:37:44.000Z"
     },
     "/organizations/[organizationId]/economics": {
       "targetKind": "existing-ui",
@@ -356,6 +356,66 @@
         }
       },
       "updatedAt": "2026-08-22T12:08:51.920960Z"
+    },
+    "/organizations/[organizationId]/growth-intelligence": {
+      "targetKind": "existing-ui",
+      "projectId": "99074e63-8b31-43b3-b3bf-d29ae0583535",
+      "baselineDraftId": "5e38b367-f8e0-4707-ba46-5b5be3d65822",
+      "activeDraftId": "5e38b367-f8e0-4707-ba46-5b5be3d65822",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/growth-intelligence/brief.md",
+        "src/app/globals.css",
+        "src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx",
+        "src/components/layout/app-shell.tsx",
+        "src/components/layout/sidebar.tsx",
+        "src/components/growth-intelligence/campaign-draft-action.tsx",
+        "src/components/growth-intelligence/data-gaps.tsx",
+        "src/components/growth-intelligence/growth-intelligence-workspace.tsx",
+        "src/components/growth-intelligence/insights-list.tsx",
+        "src/components/growth-intelligence/intelligence-card.tsx",
+        "src/components/growth-intelligence/intelligence-timeline.tsx",
+        "src/components/growth-intelligence/market-profile-review.tsx",
+        "src/components/growth-intelligence/market-watch.tsx",
+        "src/components/growth-intelligence/priority-actions.tsx",
+        "src/components/growth-intelligence/source-evidence-drawer.tsx",
+        ".superdesign/growth-intelligence/primitives-context.md"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "6b82a4e5bdb263638930208e74577b5a70c818721e57618fc37e9a3d187361ef",
+        ".superdesign/growth-intelligence/brief.md": "055cc56f151079228819b64ce3255960caaf75f06c89b13dfdc852f13afc3763",
+        "src/app/globals.css": "9d84771e9dd3ffba9016d03395f9f7ee8c0a18104ef6f8ccff1f2063a21257cb",
+        "src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx": "bb5e02f61f852e374d11103e7600e1d7cd114fc5b71811676e6eb2b66ad3db50",
+        "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+        "src/components/layout/sidebar.tsx": "79e6b159c149d941f7d9472430c0cb3606cb4247a62d0e91c4187d7250dbcdc1",
+        "src/components/growth-intelligence/campaign-draft-action.tsx": "3659ce1ab8382925b831278853cd22d9a8ac92aa8778979c190717b8fa099652",
+        "src/components/growth-intelligence/data-gaps.tsx": "680f3446138327b9e4c6f091688208bd7970404a015e1e1f34658eb2de3f77cd",
+        "src/components/growth-intelligence/growth-intelligence-workspace.tsx": "d116d47239cd42581dd13334c8aa2d1210801c1581e15631d7dcf1fdd3c62396",
+        "src/components/growth-intelligence/insights-list.tsx": "914c324d195c8a3bb9ac6a3d14002fa1c39ea7455f124958f9a2ee2d38065115",
+        "src/components/growth-intelligence/intelligence-card.tsx": "e6906f2788dc40f88878b43e49a372ee367183c06044713addcfc0ac5b385346",
+        "src/components/growth-intelligence/intelligence-timeline.tsx": "593b3ff8609c1dbed210a4e7d11e172b426a0562a443c43996733068938ac19b",
+        "src/components/growth-intelligence/market-profile-review.tsx": "cc623cf2b4be58d4a483373e0a3a608f823a7ae5747589c78b8ddda7062c6bd2",
+        "src/components/growth-intelligence/market-watch.tsx": "e94fa515d59348c78b70211e7655acf31efc1228abd650e02d92ba01085d717b",
+        "src/components/growth-intelligence/priority-actions.tsx": "7d4f4dfc3f0d9f8c18b5bcbc6d1654282eab75daa452d1a07589e8dd4f4c1f8b",
+        "src/components/growth-intelligence/source-evidence-drawer.tsx": "73eea63f94e0c13983b0fb2d8ae389bf500b3fa3f2d87ad031821b34da52f225",
+        ".superdesign/growth-intelligence/primitives-context.md": "8507600ace8a803dde1abf8f15f1b1e5c746bbd9a7c41aabbdf6b792856892c5"
+      },
+      "components": [
+        {
+          "name": "GrowthWorkspaceSidebar",
+          "id": "31072f0b-a9ef-4029-a095-c28d8848fd0a",
+          "sourcePath": "src/components/layout/sidebar.tsx"
+        }
+      ],
+      "drafts": {
+        "5e38b367-f8e0-4707-ba46-5b5be3d65822": {
+          "title": "Growth Intelligence \u2014 source baseline",
+          "visualDirection": "Source-derived baseline, prior to approved four-tab redesign",
+          "currentVersion": 1
+        }
+      },
+      "updatedAt": "2026-09-07T04:42:43.106303+00:00"
     }
   }
 }
