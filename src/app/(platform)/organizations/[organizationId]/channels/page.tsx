@@ -1,33 +1,31 @@
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { ChannelsManagement } from "@/components/channels/channels-management";
-import { ChannelsRollup } from "@/components/channels/channels-rollup";
-import type { AnalysisGrain } from "@/domain/analysis/types";
+import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
+import { parseChannelsWindow } from "@/components/channels/channels-presentation";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
+import { logger } from "@/lib/logger";
 import {
   buildChannelsOverviewView,
   buildOverviewWindows,
   resolveDefaultWindow,
 } from "@/modules/analysis/application/channels-overview";
-import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
+import {
+  ChannelAnalysisReadError,
+  createAuthenticatedChannelAnalysisRepository,
+} from "@/modules/analysis/infrastructure/read-repository";
 import { createChannelService } from "@/modules/channels/application/service";
 import { createAuthenticatedChannelRepository } from "@/modules/channels/infrastructure/repository";
 import { isGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
 
-function isAnalysisGrain(value: string): value is AnalysisGrain {
-  return value === "day" || value === "week" || value === "month";
-}
-
-/** `start..end..grain`, the one shape the window control emits. */
-function parseWindow(
-  value: string | undefined,
-): { windowStart: string; windowEnd: string; grain: AnalysisGrain } | null {
-  if (!value) return null;
-  const [windowStart, windowEnd, grain] = value.split("..");
-  if (!windowStart || !windowEnd || !grain) return null;
-  if (!isAnalysisGrain(grain)) return null;
-  return { windowStart, windowEnd, grain };
+/**
+ * Keep the diagnostic log free of tenant text. Postgres codes (`42501`) and
+ * the repository's own bounded codes (`VALUE_NOT_EXACT`) pass through;
+ * anything else is cardinality, not information, so it becomes `unknown`.
+ */
+function toSafeReadCode(code: string): string {
+  return /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : "unknown";
 }
 
 export default async function ChannelsPage({
@@ -52,41 +50,60 @@ export default async function ChannelsPage({
   // the register and there is nothing to pay for or to leak.
   const workspaceEnabled = isGovernedChannelAnalysisEnabled(context.organizationId);
 
-  let overview = null;
+  let analysis: ChannelsLandingAnalysis = { state: "disabled" };
   if (workspaceEnabled) {
-    const analysis = createAuthenticatedChannelAnalysisRepository(context.supabase);
-    const [evidenceWindows, analysedKeys] = await Promise.all([
-      analysis.loadEvidenceWindows({
-        organizationId: context.organizationId,
-        channelId: null,
-        limit: 24,
-      }),
-      analysis.loadAnalysedWindowKeys({ organizationId: context.organizationId }),
-    ]);
-
-    // The page resolves which window to answer for before reading any band,
-    // because a band read is scoped to one window and the read model cannot
-    // infer which one it was given afterwards.
-    const requested = parseWindow((await searchParams).window);
-    const declared = buildOverviewWindows(evidenceWindows);
-    const selected =
-      requested ?? resolveDefaultWindow({ windows: declared, analysed: analysedKeys });
-
-    const bands = selected
-      ? await analysis.loadChannelBandsForWindow({
+    try {
+      const repository = createAuthenticatedChannelAnalysisRepository(context.supabase);
+      const [evidenceWindows, analysedKeys] = await Promise.all([
+        repository.loadEvidenceWindows({
           organizationId: context.organizationId,
-          windowStart: selected.windowStart,
-          windowEnd: selected.windowEnd,
-          grain: selected.grain,
-        })
-      : [];
+          channelId: null,
+          limit: 24,
+        }),
+        repository.loadAnalysedWindowKeys({ organizationId: context.organizationId }),
+      ]);
 
-    overview = buildChannelsOverviewView({
-      channels: snapshot.channels,
-      bands,
-      evidenceWindows,
-      selected,
-    });
+      // The page resolves which window to answer for before reading any band,
+      // because a band read is scoped to one window and the read model cannot
+      // infer which one it was given afterwards. The default resolver runs
+      // only when the URL does not parse; a URL that parses but names no
+      // declared window stays explicitly unresolved (`selectedWindow: null`)
+      // so the landing suppresses figures instead of showing fallback ones.
+      const requested = parseChannelsWindow((await searchParams).window);
+      const declared = buildOverviewWindows(evidenceWindows);
+      const selected =
+        requested ?? resolveDefaultWindow({ windows: declared, analysed: analysedKeys });
+
+      const bands = selected
+        ? await repository.loadChannelBandsForWindow({
+            organizationId: context.organizationId,
+            windowStart: selected.windowStart,
+            windowEnd: selected.windowEnd,
+            grain: selected.grain,
+          })
+        : [];
+
+      analysis = {
+        state: "ready",
+        view: buildChannelsOverviewView({
+          channels: snapshot.channels,
+          bands,
+          evidenceWindows,
+          selected,
+        }),
+      };
+    } catch (error) {
+      // Only a known analysis-read failure degrades to `unavailable` with the
+      // directory intact. Authentication, tenant and unexpected failures throw
+      // on to the error boundary; turning them into an empty success would
+      // hide an outage behind a working-looking page.
+      if (!(error instanceof ChannelAnalysisReadError)) throw error;
+      logger.warn("channels_overview.read_failed", {
+        organizationId: context.organizationId,
+        errorCode: toSafeReadCode(error.code),
+      });
+      analysis = { state: "unavailable" };
+    }
   }
 
   return (
@@ -101,13 +118,7 @@ export default async function ChannelsPage({
         aliases={snapshot.aliases}
         canManage={hasOrganizationPermission(context.membership.role, "channel.manage")}
         canMapBranches={hasOrganizationPermission(context.membership.role, "channel.map_branch")}
-        workspaceEnabled={workspaceEnabled}
-        analysisRows={overview?.rows}
-        portfolio={
-          overview ? (
-            <ChannelsRollup view={overview} organizationId={context.organizationId} />
-          ) : null
-        }
+        analysis={analysis}
       />
     </div>
   );

@@ -4,16 +4,25 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelsRollup } from "@/components/channels/channels-rollup";
-import type { ChannelsOverviewView } from "@/modules/analysis/application/channels-overview";
+import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
+import type {
+  ChannelsOverviewRow,
+  ChannelsOverviewView,
+  ChannelsOverviewWindow,
+} from "@/modules/analysis/application/channels-overview";
 
-const mockPush = vi.hoisted(() => vi.fn());
+const nav = vi.hoisted(() => ({
+  push: vi.fn(),
+  refresh: vi.fn(),
+  params: new URLSearchParams(),
+}));
 
-// The component reads and updates the `window` query param through the app
-// router. Mocked the same way the sibling economics client test does it: a
-// real `URLSearchParams` so `.toString()` behaves, and a spyable `push`.
+// The toolbar reads and updates the `window` query param through the app
+// router. A real `URLSearchParams` so `.toString()` behaves, and spyable
+// `push`/`refresh`.
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: nav.push, refresh: nav.refresh }),
+  useSearchParams: () => nav.params,
 }));
 
 vi.mock("recharts", () => ({
@@ -30,287 +39,249 @@ vi.mock("recharts", () => ({
   YAxis: () => null,
 }));
 
-const WINDOW = {
+const WINDOW_FEB: ChannelsOverviewWindow = {
+  windowStart: "2026-02-01",
+  windowEnd: "2026-02-28",
+  grain: "month",
+  label: "2026-02-01 to 2026-02-28",
+  value: "2026-02-01..2026-02-28..month",
+};
+
+const WINDOW_JAN_FEB_SPAN: ChannelsOverviewWindow = {
   windowStart: "2026-01-01",
   windowEnd: "2026-02-28",
-  grain: "day" as const,
+  grain: "span",
   label: "2026-01-01 to 2026-02-28",
-  value: "2026-01-01..2026-02-28..day",
+  value: "2026-01-01..2026-02-28..span",
 };
 
-const WINDOW_MARCH = {
+const WINDOW_MARCH_MONTH: ChannelsOverviewWindow = {
   windowStart: "2026-03-01",
   windowEnd: "2026-03-31",
-  grain: "day" as const,
+  grain: "month",
   label: "2026-03-01 to 2026-03-31",
-  value: "2026-03-01..2026-03-31..day",
+  value: "2026-03-01..2026-03-31..month",
 };
 
-// A second window that starts in the same month as `WINDOW_MARCH`. Windows are
-// declared as start, end and grain, so this is ordinary -- a weekly package
-// beside a monthly one -- and it must stay pickable.
-const WINDOW_MARCH_WEEK = {
-  windowStart: "2026-03-02",
-  windowEnd: "2026-03-08",
-  grain: "week" as const,
-  label: "2026-03-02 to 2026-03-08",
-  value: "2026-03-02..2026-03-08..week",
+// Same March dates at another grain: the label must carry the grain so both
+// options stay reachable instead of collapsing into one choice.
+const WINDOW_MARCH_SPAN: ChannelsOverviewWindow = {
+  windowStart: "2026-03-01",
+  windowEnd: "2026-03-31",
+  grain: "span",
+  label: "2026-03-01 to 2026-03-31",
+  value: "2026-03-01..2026-03-31..span",
 };
+
+function row(
+  channelId: string,
+  displayName: string,
+  band: ChannelsOverviewRow["band"],
+): ChannelsOverviewRow {
+  return { channelId, displayName, status: "active", assessed: band.state === "complete", band };
+}
+
+/** February §7 reference rows: A + B complete, Direct revenue-only, In-store refused. */
+function februaryRows(): ChannelsOverviewRow[] {
+  return [
+    row("a", "Delivery A", {
+      state: "complete",
+      potential: { minorUnits: 8_000_000, currency: "AED" },
+      lost: { minorUnits: 400_000, currency: "AED" },
+      earned: { minorUnits: 7_600_000, currency: "AED" },
+    }),
+    row("b", "Delivery B", {
+      state: "complete",
+      potential: { minorUnits: 4_000_000, currency: "AED" },
+      lost: { minorUnits: 200_000, currency: "AED" },
+      earned: { minorUnits: 3_800_000, currency: "AED" },
+    }),
+    row("direct", "Direct", {
+      state: "revenue_only",
+      potential: { minorUnits: 1_800_000, currency: "AED" },
+      lost: null,
+      earned: null,
+    }),
+    row("instore", "In-store", { state: "refused", potential: null, lost: null, earned: null }),
+  ];
+}
 
 function view(overrides: Partial<ChannelsOverviewView> = {}): ChannelsOverviewView {
   return {
-    windows: [WINDOW],
-    selectedWindow: WINDOW,
+    windows: [WINDOW_MARCH_MONTH, WINDOW_MARCH_SPAN, WINDOW_FEB, WINDOW_JAN_FEB_SPAN],
+    selectedWindow: WINDOW_FEB,
     total: {
-      potential: { minorUnits: 55300, currency: "AED" },
-      lost: { minorUnits: 35700, currency: "AED" },
-      earned: { minorUnits: 19600, currency: "AED" },
+      potential: { minorUnits: 12_000_000, currency: "AED" },
+      lost: { minorUnits: 600_000, currency: "AED" },
+      earned: { minorUnits: 11_400_000, currency: "AED" },
     },
     coverage: {
-      assessedCount: 1,
+      assessedCount: 2,
       channelCount: 4,
-      revenueOnlyNames: [],
-      unassessedNames: ["noon", "deliveroo"],
+      revenueOnlyNames: ["Direct"],
+      unassessedNames: ["In-store"],
     },
     refusalReason: null,
-    rows: [
-      {
-        channelId: "talabat",
-        displayName: "Talabat",
-        status: "active",
-        assessed: true,
-        band: {
-          state: "complete",
-          potential: { minorUnits: 55300, currency: "AED" },
-          lost: { minorUnits: 35700, currency: "AED" },
-          earned: { minorUnits: 19600, currency: "AED" },
-        },
-      },
-      {
-        channelId: "keeta",
-        displayName: "Keeta",
-        status: "active",
-        assessed: false,
-        band: {
-          state: "revenue_only",
-          potential: { minorUnits: 41000, currency: "AED" },
-          lost: null,
-          earned: null,
-        },
-      },
-      {
-        channelId: "noon",
-        displayName: "Noon",
-        status: "active",
-        assessed: false,
-        band: { state: "refused", potential: null, lost: null, earned: null },
-      },
-    ],
+    rows: februaryRows(),
     ...overrides,
   };
+}
+
+function ready(overrides: Partial<ChannelsOverviewView> = {}): ChannelsLandingAnalysis {
+  return { state: "ready", view: view(overrides) };
 }
 
 afterEach(cleanup);
 
 beforeEach(() => {
-  mockPush.mockClear();
+  nav.push.mockClear();
+  nav.refresh.mockClear();
+  nav.params = new URLSearchParams();
 });
 
 describe("ChannelsRollup", () => {
-  it("presents the selected window as one report canvas", () => {
-    render(<ChannelsRollup view={view()} organizationId="org-1" />);
-
-    expect(screen.getByRole("heading", { name: "Channel performance" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Revenue outcome" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Reported revenue mix" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Channel performance chart" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Where revenue was lost" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Evidence coverage" })).toBeInTheDocument();
-    expect(screen.queryByText("Capture gap by channel")).not.toBeInTheDocument();
-  });
-
-  it("states the earned figure and the window it answers for", () => {
-    render(<ChannelsRollup view={view()} organizationId="org-1" />);
-
-    expect(screen.getByText("AED 196.00")).toBeTruthy();
-    expect(screen.getAllByText(/2026-01-01 to 2026-02-28/).length).toBeGreaterThan(0);
-  });
-
-  it("names how many channels it covered and which it did not", () => {
-    render(<ChannelsRollup view={view()} organizationId="org-1" />);
-
-    const coverage = screen.getByText(/Across 1 of 4 channels/);
-    expect(coverage.textContent).toContain("noon");
-    expect(coverage.textContent).toContain("deliveroo");
-  });
-
-  it("separates a channel that reported revenue from the ones nobody has read", () => {
-    // The two gaps need different next actions: Keeta needs a report that
-    // records cancellations, while noon needs any report at all. One sentence
-    // covering both would send the operator looking for the wrong file.
-    render(
-      <ChannelsRollup
-        view={view({
-          coverage: {
-            assessedCount: 1,
-            channelCount: 4,
-            revenueOnlyNames: ["Keeta"],
-            unassessedNames: ["noon"],
-          },
-        })}
-        organizationId="org-1"
-      />,
+  it("renders nothing when analysis is disabled for the organization", () => {
+    const { container } = render(
+      <ChannelsRollup organizationId="org-1" analysis={{ state: "disabled" }} />,
     );
 
-    const coverage = screen.getByText(/Across 1 of 4 channels/);
-    expect(coverage.textContent).toContain("Keeta reported revenue but no recorded loss");
-    expect(coverage.textContent).toContain("noon has no analysis for this window");
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("says nothing about revenue-only channels when there are none", () => {
-    render(<ChannelsRollup view={view()} organizationId="org-1" />);
+  it("offers retry without hiding anything else when the read fails", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={{ state: "unavailable" }} />);
 
-    expect(screen.queryByText(/reported revenue but no recorded loss/)).toBeNull();
+    expect(screen.getByText("Channel performance is unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText("Your channels are still available. Try loading performance again."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(nav.refresh).toHaveBeenCalledTimes(1);
+    // Retry refreshes this page; it never starts an analysis run.
+    expect(nav.push).not.toHaveBeenCalled();
   });
 
-  it("still names a revenue-only channel when the total itself refuses", () => {
-    // Keeta on staging: revenue measured for 28 of 31 January days, no
-    // cancellation data, and nothing else analysed in that window. The refusal
-    // replaced the coverage line wholesale, so the one channel that did report
-    // a figure vanished from the page that exists to show it.
-    render(
-      <ChannelsRollup
-        view={view({
-          total: { potential: null, lost: null, earned: null },
-          coverage: {
-            assessedCount: 0,
-            channelCount: 4,
-            revenueOnlyNames: ["Keeta"],
-            unassessedNames: ["noon", "deliveroo", "talabat"],
-          },
-          refusalReason:
-            "No channel has both a revenue figure and a recorded loss for this window, so no earned total can be stated.",
-        })}
-        organizationId="org-1"
-      />,
-    );
+  it("shows one reporting-period selector with every declared window value", async () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
 
-    expect(screen.getByText(/no earned total can be stated/)).toBeTruthy();
-    expect(screen.getByText(/Keeta reported revenue but no recorded loss/)).toBeTruthy();
+    const trigger = screen.getByRole("combobox", { name: "Reporting period" });
+    expect(trigger).toHaveTextContent("February 2026");
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    const options = within(await screen.findByRole("listbox")).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "March 2026 · month",
+      "March 2026 · span",
+      "February 2026",
+      "1 Jan 2026 – 28 Feb 2026",
+    ]);
+    // The value is always the exact encoded window, never the display label:
+    // picking one navigates with the encoded value (see below).
   });
 
-  it("shows the refusal reason instead of a zero when nothing was measured", () => {
-    render(
-      <ChannelsRollup
-        view={view({
-          total: { potential: null, lost: null, earned: null },
-          coverage: {
-            assessedCount: 0,
-            channelCount: 4,
-            revenueOnlyNames: [],
-            unassessedNames: [],
-          },
-          refusalReason:
-            "No channel has a completed analysis for this window, so nothing has been measured.",
-        })}
-        organizationId="org-1"
-      />,
-    );
+  it("names the scope and the reported window beside the selector", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
 
-    expect(screen.getByText(/nothing has been measured/)).toBeTruthy();
-    // A zero would read as "you earned nothing", which is a different claim.
-    expect(screen.queryByText("AED 0.00")).toBeNull();
+    expect(screen.getByText("Reported scope · AED")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Reporting window: 1 February 2026 to 28 February 2026",
+      }),
+    ).toHaveTextContent("1–28 Feb · reported window");
   });
 
-  it("picks the window through Year and Month selects like the audit page", () => {
-    render(<ChannelsRollup view={view()} organizationId="org-1" />);
-
-    // One window in the month, so the month names it outright.
-    expect(screen.queryByLabelText("Window to report on")).toBeNull();
-    expect(screen.getByLabelText("Year to analyse")).toBeTruthy();
-    expect(screen.getByLabelText("Month to analyse")).toBeTruthy();
-  });
-
-  it("selecting a month navigates with that month's window value", async () => {
-    render(
-      <ChannelsRollup
-        view={view({ windows: [WINDOW_MARCH, WINDOW], selectedWindow: WINDOW })}
-        organizationId="org-1"
-      />,
-    );
-
-    fireEvent.pointerDown(screen.getByLabelText("Month to analyse"), {
-      button: 0,
-      ctrlKey: false,
-      pointerType: "mouse",
+  it("admits a currency mismatch in the scope caption instead of converting", () => {
+    const mixed = februaryRows();
+    mixed[1] = row("b", "Delivery B", {
+      state: "complete",
+      potential: { minorUnits: 4_000_000, currency: "USD" },
+      lost: { minorUnits: 200_000, currency: "USD" },
+      earned: { minorUnits: 3_800_000, currency: "USD" },
     });
+
+    render(<ChannelsRollup organizationId="org-1" analysis={ready({ rows: mixed })} />);
+
+    expect(screen.getByText("Reported scope · Multiple currencies")).toBeInTheDocument();
+  });
+
+  it("opens a read-only reporting-window dialog with exact range, grain and scope limits", async () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reporting window: 1 February 2026 to 28 February 2026",
+      }),
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Reporting window" });
+    expect(within(dialog).getByText("1 February 2026 – 28 February 2026")).toBeInTheDocument();
+    expect(within(dialog).getByText("Reported scope · AED")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "The comparison and directory use this same exact reporting window. Each channel shows whether its revenue and loss data are available.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Monthly (month)")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/Location coverage follows each source analysis/),
+    ).toBeInTheDocument();
+    // Read-only: a close control and nothing that writes, refreshes or analyses.
+    expect(within(dialog).getByRole("button", { name: "Close dialog" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /save|refresh|start/i })).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Reporting window" })).toBeNull(),
+    );
+  });
+
+  it("navigates with only the window param changed, preserving the rest", async () => {
+    nav.params = new URLSearchParams("tab=setup");
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
+
+    const trigger = screen.getByRole("combobox", { name: "Reporting period" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
     const march = within(await screen.findByRole("listbox")).getByRole("option", {
-      name: "March",
+      name: "March 2026 · month",
     });
     fireEvent.click(march);
 
-    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
-    expect(mockPush.mock.calls[0]?.[0]).toContain("window=2026-03-01..2026-03-31..day");
+    await waitFor(() => expect(nav.push).toHaveBeenCalledTimes(1));
+    const target = String(nav.push.mock.calls[0]?.[0]);
+    expect(target).toContain("window=2026-03-01..2026-03-31..month");
+    expect(target).toContain("tab=setup");
   });
 
-  it("keeps every window of a shared month pickable, not just the newest", async () => {
+  it("leaves figures out when the requested window names nothing declared", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready({ selectedWindow: null })} />);
+
+    // The selector stays usable so the reader can pick a real window; no
+    // figure from another window is shown above the unresolved request.
+    expect(screen.getByText("Choose a reporting window.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Reporting period" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Revenue outcome" })).toBeNull();
+    expect(screen.getByText("Reported scope")).toBeInTheDocument();
+    expect(screen.queryByText(/Reported scope ·/)).toBeNull();
+  });
+
+  it("says plainly when no reporting window exists yet", () => {
     render(
       <ChannelsRollup
-        view={view({
-          windows: [WINDOW_MARCH, WINDOW_MARCH_WEEK, WINDOW],
-          selectedWindow: WINDOW_MARCH,
-        })}
         organizationId="org-1"
+        analysis={ready({ windows: [], selectedWindow: null, rows: [] })}
       />,
     );
 
-    // Two windows start in March, so the month alone cannot say which is meant
-    // and the exact ranges are offered beside it.
-    const windowPicker = screen.getByLabelText("Window to report on");
-    fireEvent.pointerDown(windowPicker, { button: 0, ctrlKey: false, pointerType: "mouse" });
-    const options = within(await screen.findByRole("listbox")).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "2026-03-01 to 2026-03-31",
-      "2026-03-02 to 2026-03-08",
-    ]);
-
-    fireEvent.click(options[1] as HTMLElement);
-    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
-    expect(mockPush.mock.calls[0]?.[0]).toContain("window=2026-03-02..2026-03-08..week");
+    expect(screen.getByText("No reporting windows yet.")).toBeInTheDocument();
+    expect(screen.getByText("Open a channel to review its reports and setup.")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Reporting period" })).toBeNull();
   });
 
-  it("captions the single window of a month instead of asking a question with one answer", () => {
-    render(
-      <ChannelsRollup
-        view={view({ windows: [WINDOW_MARCH, WINDOW], selectedWindow: WINDOW_MARCH })}
-        organizationId="org-1"
-      />,
-    );
+  it("keeps the current figures on screen behind the toolbar", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
 
-    expect(screen.queryByLabelText("Window to report on")).toBeNull();
-    expect(screen.getByText("2026-03-01 to 2026-03-31")).toBeTruthy();
-  });
-
-  it("renders nothing measurable when the organization has imported no windows", () => {
-    render(
-      <ChannelsRollup
-        view={view({
-          windows: [],
-          selectedWindow: null,
-          total: { potential: null, lost: null, earned: null },
-          coverage: {
-            assessedCount: 0,
-            channelCount: 4,
-            revenueOnlyNames: [],
-            unassessedNames: [],
-          },
-          refusalReason:
-            "No channel has a completed analysis for this window, so nothing has been measured.",
-        })}
-        organizationId="org-1"
-      />,
-    );
-
-    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByRole("region", { name: "Channel portfolio analysis" })).toBeInTheDocument();
+    expect(screen.queryByText("Loading reporting window…")).toBeNull();
   });
 });

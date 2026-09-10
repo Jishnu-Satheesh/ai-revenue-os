@@ -1,16 +1,40 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const nav = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: nav.refresh, push: nav.push }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("recharts", () => ({
+  Bar: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  BarChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  CartesianGrid: () => null,
+  Cell: () => null,
+  Legend: () => null,
+  Pie: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  PieChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ResponsiveContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  Tooltip: () => null,
+  XAxis: () => null,
+  YAxis: () => null,
+}));
 
 import { ChannelsManagement } from "@/components/channels/channels-management";
+import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
 import type {
   OrganizationBranchRow,
   OrganizationChannelBranchRow,
   OrganizationChannelRow,
 } from "@/modules/channels/application/ports";
-import type { ChannelsOverviewRow } from "@/modules/analysis/application/channels-overview";
+import type {
+  ChannelsOverviewRow,
+  ChannelsOverviewView,
+} from "@/modules/analysis/application/channels-overview";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const channel: OrganizationChannelRow = {
@@ -71,6 +95,40 @@ const measuredRow: ChannelsOverviewRow = {
   },
 };
 
+const februaryWindow = {
+  windowStart: "2026-02-01",
+  windowEnd: "2026-02-28",
+  grain: "month" as const,
+  label: "2026-02-01 to 2026-02-28",
+  value: "2026-02-01..2026-02-28..month",
+};
+
+function readyView(rows: readonly ChannelsOverviewRow[]): ChannelsOverviewView {
+  return {
+    windows: [februaryWindow],
+    selectedWindow: februaryWindow,
+    total: {
+      potential: { minorUnits: 55300, currency: "AED" },
+      lost: { minorUnits: 35700, currency: "AED" },
+      earned: { minorUnits: 19600, currency: "AED" },
+    },
+    coverage: {
+      assessedCount: 1,
+      channelCount: 1,
+      revenueOnlyNames: [],
+      unassessedNames: [],
+    },
+    refusalReason: null,
+    rows,
+  };
+}
+
+function ready(rows: readonly ChannelsOverviewRow[]): ChannelsLandingAnalysis {
+  return { state: "ready", view: readyView(rows) };
+}
+
+const disabled: ChannelsLandingAnalysis = { state: "disabled" };
+
 describe("ChannelsManagement", () => {
   afterEach(() => cleanup());
 
@@ -80,8 +138,7 @@ describe("ChannelsManagement", () => {
         organizationId={organizationId}
         organizationName="Nostaza"
         channels={[channel]}
-        analysisRows={[measuredRow]}
-        workspaceEnabled
+        analysis={ready([measuredRow])}
         canManage={false}
       />,
     );
@@ -104,8 +161,7 @@ describe("ChannelsManagement", () => {
         organizationId={organizationId}
         organizationName="Nostaza"
         channels={[channel, unassessedChannel]}
-        analysisRows={[measuredRow]}
-        workspaceEnabled
+        analysis={ready([measuredRow])}
         canManage={false}
       />,
     );
@@ -119,13 +175,86 @@ describe("ChannelsManagement", () => {
     expect(screen.getByRole("heading", { name: "Noon" })).toBeInTheDocument();
   });
 
+  it("renders the V01 title without the old eyebrow, tile or technical subtitle", () => {
+    const onAdd = vi.fn();
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel]}
+        analysis={disabled}
+        canManage
+        onAdd={onAdd}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Channels" })).toBeInTheDocument();
+    expect(screen.getByText("See what each channel brings to your business.")).toBeInTheDocument();
+    expect(screen.queryByText("Channel portfolio")).toBeNull();
+    expect(screen.queryByText(/business identities that keep marketplace reporting/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add channel" }));
+    expect(onAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no fake Add action to a viewer", () => {
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel]}
+        analysis={disabled}
+        canManage={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /Add channel/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Channels" })).toBeInTheDocument();
+  });
+
+  it("hides toolbar and portfolio when analysis is disabled but keeps the directory", () => {
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel]}
+        analysis={disabled}
+        canManage={false}
+      />,
+    );
+
+    expect(screen.queryByRole("combobox", { name: "Reporting period" })).toBeNull();
+    expect(screen.queryByText("Channel performance is unavailable")).toBeNull();
+    expect(screen.getByText("Analysis is not enabled for this organization.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Keeta" })).toBeInTheDocument();
+  });
+
+  it("keeps the directory usable when the performance read fails", () => {
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel]}
+        analysis={{ state: "unavailable" }}
+        canManage={false}
+      />,
+    );
+
+    expect(screen.getByText("Channel performance is unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Keeta" })).toBeInTheDocument();
+  });
+
   it("explains the capability boundary and gives an authorized manager an empty-state action", () => {
+    const onAdd = vi.fn();
     render(
       <ChannelsManagement
         organizationId={organizationId}
         organizationName="Nostaza"
         channels={[]}
+        analysis={disabled}
         canManage
+        onAdd={onAdd}
       />,
     );
 
@@ -134,6 +263,9 @@ describe("ChannelsManagement", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Add channel/ })).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "Channel directory" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Add channel/ })[1] as HTMLElement);
+    expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
   it("does not render mutation controls for a read-only member", () => {
@@ -142,6 +274,7 @@ describe("ChannelsManagement", () => {
         organizationId={organizationId}
         organizationName="Nostaza"
         channels={[]}
+        analysis={disabled}
         canManage={false}
       />,
     );
@@ -159,6 +292,7 @@ describe("ChannelsManagement", () => {
         organizationId={organizationId}
         organizationName="Nostaza"
         channels={[channel]}
+        analysis={disabled}
         canManage={false}
         canMapBranches
       />,
@@ -184,6 +318,7 @@ describe("ChannelsManagement", () => {
         organizationId={organizationId}
         organizationName="Nostaza"
         channels={[channel, archivedChannel]}
+        analysis={disabled}
         canManage={false}
       />,
     );
@@ -208,6 +343,7 @@ describe("ChannelsManagement", () => {
         channels={[channel]}
         branches={[branch]}
         branchMappings={[inactiveMapping]}
+        analysis={disabled}
         canManage={false}
         canMapBranches
       />,

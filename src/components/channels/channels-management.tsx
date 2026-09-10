@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import {
   ArchiveIcon,
   CirclePlusIcon,
@@ -11,6 +11,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+import { ChannelIcon } from "@/components/channels/channel-icons";
+import { ChannelsRollup } from "@/components/channels/channels-rollup";
+import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
+import styles from "@/components/channels/channels-landing.module.css";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -776,16 +781,16 @@ export function ChannelSetupPanel({
 
 export function ChannelsManagement({
   organizationId,
-  organizationName,
   channels,
   branchMappings,
   aliases,
   canManage,
-  workspaceEnabled,
-  analysisRows,
-  portfolio,
+  analysis,
+  onAdd,
 }: {
   organizationId: string;
+  // Retained for the directory and management dialogs; the V01 title no
+  // longer names the organization in its subtitle.
   organizationName: string;
   channels: readonly OrganizationChannelRow[];
   // Mapping setup now lives on the channel's own page (`ChannelSetupPanel`),
@@ -795,19 +800,21 @@ export function ChannelsManagement({
   aliases?: readonly ChannelSourceAliasRow[];
   canManage: boolean;
   canMapBranches?: boolean;
-  /** Whether governed channel analysis is on for this organization. */
-  workspaceEnabled?: boolean;
-  /** A row for each channel in the selected governed reporting window. */
-  analysisRows?: readonly ChannelsOverviewRow[];
-  /** Server-rendered portfolio outcome and comparison visualisation. */
-  portfolio?: ReactNode;
+  /** One coherent analysis state from the page: disabled, unavailable, or ready. */
+  analysis: ChannelsLandingAnalysis;
+  /**
+   * Task 6 hook point for the create dialog (D04). Add emits here and builds
+   * no dialog itself, so this slice never ships a half-wired create form.
+   */
+  onAdd?: () => void;
 }) {
   const router = useRouter();
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>("all");
   const availableMappings = branchMappings ?? [];
   const availableAliases = aliases ?? [];
-  const analysisEnabled = workspaceEnabled ?? false;
-  const analysisByChannel = new Map((analysisRows ?? []).map((row) => [row.channelId, row]));
+  const analysisEnabled = analysis.state !== "disabled";
+  const readyRows = analysis.state === "ready" ? analysis.view.rows : undefined;
+  const analysisByChannel = new Map((readyRows ?? []).map((row) => [row.channelId, row]));
   const mappingCounts = countMappingsByChannel(availableMappings);
   const aliasCounts = countAliasesByChannel(availableAliases);
   const visibleChannels = channels.filter((channel) =>
@@ -820,27 +827,27 @@ export function ChannelsManagement({
   );
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col gap-6">
-      <div className="flex flex-col justify-between gap-4 border-b pb-5 md:flex-row md:items-start">
-        <div className="flex items-start gap-3">
-          <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-xs">
-            <WaypointsIcon />
-          </span>
-          <div className="flex flex-col gap-1">
-            <p className="text-sm font-medium text-primary">Channel portfolio</p>
-            <h1 className="text-3xl font-semibold tracking-tight">Channels</h1>
-            <p className="text-sm text-muted-foreground">
-              {organizationName} · business identities that keep marketplace reporting, economics,
-              and evidence comparable.
-            </p>
-          </div>
+    <div className={`${styles.root} flex min-h-0 w-full flex-1 flex-col gap-6`}>
+      <div className="flex items-center justify-between gap-4 max-[650px]:items-start">
+        <div>
+          <h1 className={styles.title}>Channels</h1>
+          <p className={styles.subtitle}>See what each channel brings to your business.</p>
         </div>
         {canManage ? (
-          <ChannelDialog organizationId={organizationId} onComplete={() => router.refresh()} />
+          <Button onClick={() => onAdd?.()} className={styles.control}>
+            <ChannelIcon name="plus" />
+            Add channel
+          </Button>
         ) : null}
       </div>
 
-      {portfolio ? <div className="flex flex-col gap-6">{portfolio}</div> : null}
+      <ChannelsRollup organizationId={organizationId} analysis={analysis} />
+
+      {analysis.state === "disabled" ? (
+        <p className="text-sm text-muted-foreground">
+          Analysis is not enabled for this organization.
+        </p>
+      ) : null}
 
       <Alert>
         <ShieldCheckIcon />
@@ -895,10 +902,10 @@ export function ChannelsManagement({
             </EmptyHeader>
             {canManage ? (
               <EmptyContent>
-                <ChannelDialog
-                  organizationId={organizationId}
-                  onComplete={() => router.refresh()}
-                />
+                <Button onClick={() => onAdd?.()} className={styles.control}>
+                  <ChannelIcon name="plus" />
+                  Add channel
+                </Button>
               </EmptyContent>
             ) : null}
           </Empty>
