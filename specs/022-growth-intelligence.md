@@ -490,24 +490,45 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
 
 ### 9.9 Business performance card
 
-- The Overview performance section is one business-performance card over a single
-  calendar month. Its picker offers whole covered months only, newest first; a
-  `from`/`to` range inside one covered month snaps to that month, and anything
-  else falls back to the newest month with a completed analysis.
+- The Overview performance section is one business-performance card over the operator's
+  picked covered range, using the same Channel Audit calendar as §9.8. The month-only
+  restriction is retired following the ADR 0048 pattern: the picker offers any range the
+  organization's approved reports cover, with the newest coverage first; dates outside
+  coverage stay unpickable rather than falling back silently.
 - The card header carries a rule-composed headline from measured movement (never
-  a live model call during page rendering), the measured range, the comparison
-  month, and the channel/location scope. Four tiles -- reported sales, orders
-  placed, menu views, cancelled orders -- show previous-month deltas over the
-  channels analysed in both months; anything unmeasured stays absent with its
-  reason, never zero.
-- The trend plots whole weeks of the month from nested analysed week windows
+  a live model call during page rendering), the measured range, the comparison range
+  (the previous equal-length covered period), and the channel/location scope. Four
+  tiles -- reported sales, orders placed, menu views, cancelled orders -- show deltas
+  against the previous equal-length period over the channels analysed in both periods;
+  anything unmeasured stays absent with its reason, never zero.
+- The trend plots whole weeks inside the picked range from nested analysed week windows
   and states its week and channel coverage. With fewer than two analysable
   weeks, the axes keep their shape with the plain reason in the middle rather
   than hiding. Channel shares refuse mixed currencies with a reason.
+- The assembled card is cached per organization, range, channel, and location,
+  following ADR 0048: the cache holds answers, never verdicts about whether an answer
+  is current. A completed analysis for that scope rebuilds the cached card; the
+  "already analysed?" lookup is never cached and fails through to the database, and
+  every key is namespaced by organization id.
+- A picked range with no finished analysis starts the governed build: the page
+  triggers the same admissibility-checked channel-analysis runs the Channel Audit
+  uses (the property is unchanged -- no analysis over dates the approved reports do
+  not declare), shows the page-content loader (§9.10) while polling build status, and
+  reveals the card when the build lands. Authorization answers who may start a build;
+  a per-organization sliding-window rate limit caps how often builds can be spent.
 - "View data sources" opens the reporting period, scope, per-metric source
   notes, and cost context behind the figures. The footer states channel and
   location coverage, and "Order & fulfillment details" opens order and
   cancellation totals with the explicit delivery-completion gap.
+
+### 9.10 Page-content loader
+
+- A shared loader covers the page-content viewport only: a blurry overlay
+  background with the docs-exact Spinner centered. The side-menu dock and the top
+  navbar are never covered, and any platform page can reuse the component.
+- It renders only while a polled backend build is outstanding. It never stands in
+  for an honest empty state: no coverage, no permission, and failed builds each keep
+  their own plain message beside the loader's absence.
 
 ## 10. Campaign Opportunity contract
 
