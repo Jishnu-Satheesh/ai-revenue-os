@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildBusinessPerformanceCard,
   buildChannelsOverviewView,
   buildOverviewWindows,
+  enumerateCoveredMonths,
+  monthName,
+  previousCalendarMonth,
   resolveDefaultWindow,
+  resolveOverviewWindow,
+  snapToCoveredMonth,
+  wholeWeeksOfMonth,
 } from "@/modules/analysis/application/channels-overview";
 import type {
   ChannelBandRecord,
   ChannelEvidenceWindow,
+  ChannelFindingRecord,
 } from "@/modules/analysis/application/ports";
 
 const CHANNELS = [
@@ -409,5 +417,516 @@ describe("buildOverviewWindows", () => {
 
   it("states nothing when there are no evidence windows", () => {
     expect(buildOverviewWindows([])).toEqual([]);
+  });
+});
+
+describe("resolveOverviewWindow", () => {
+  const analysed = [
+    { windowStart: "2026-01-01", windowEnd: "2026-01-31", grain: "month" as const },
+  ];
+
+  it("resolves a range matching exactly one declared window", () => {
+    expect(
+      resolveOverviewWindow({
+        from: "2026-01-01",
+        to: "2026-02-28",
+        evidenceWindows: [window_({ grain: "day" })],
+        analysed: [],
+      }),
+    ).toEqual({
+      kind: "resolved",
+      windowStart: "2026-01-01",
+      windowEnd: "2026-02-28",
+      grain: "day",
+    });
+  });
+
+  it("stays unresolved when no declared window matches the range", () => {
+    expect(
+      resolveOverviewWindow({
+        from: "2026-02-10",
+        to: "2026-02-20",
+        evidenceWindows: [window_({ grain: "day" })],
+        analysed: [],
+      }),
+    ).toEqual({ kind: "unresolved" });
+  });
+
+  it("prefers the grain with a completed analysis on shared dates", () => {
+    expect(
+      resolveOverviewWindow({
+        from: "2026-01-01",
+        to: "2026-01-31",
+        evidenceWindows: [
+          window_({ packageId: "pkg-1", windowEnd: "2026-01-31", grain: "day" }),
+          window_({ packageId: "pkg-2", windowEnd: "2026-01-31", grain: "month" }),
+        ],
+        analysed,
+      }),
+    ).toEqual({
+      kind: "resolved",
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-31",
+      grain: "month",
+    });
+  });
+
+  it("breaks an unanalysed tie toward the coarser grain", () => {
+    expect(
+      resolveOverviewWindow({
+        from: "2026-01-01",
+        to: "2026-01-31",
+        evidenceWindows: [
+          window_({ packageId: "pkg-1", windowEnd: "2026-01-31", grain: "day" }),
+          window_({ packageId: "pkg-2", windowEnd: "2026-01-31", grain: "week" }),
+        ],
+        analysed: [],
+      }),
+    ).toEqual({
+      kind: "resolved",
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-31",
+      grain: "week",
+    });
+  });
+});
+
+describe("covered months", () => {
+  const segments = [{ start: "2026-01-15", end: "2026-03-10" }];
+
+  it("offers only whole months fully inside coverage, newest first", () => {
+    expect(enumerateCoveredMonths(segments)).toEqual([{ from: "2026-02-01", to: "2026-02-28" }]);
+    expect(enumerateCoveredMonths([{ start: "2026-01-01", end: "2026-03-31" }])).toEqual([
+      { from: "2026-03-01", to: "2026-03-31" },
+      { from: "2026-02-01", to: "2026-02-28" },
+      { from: "2026-01-01", to: "2026-01-31" },
+    ]);
+  });
+
+  it("snaps a legacy range to its month and refuses straddlers", () => {
+    expect(snapToCoveredMonth("2026-02-05", "2026-02-20", segments)).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
+    expect(snapToCoveredMonth("2026-01-28", "2026-02-05", segments)).toBeNull();
+    expect(snapToCoveredMonth("2026-04-01", "2026-04-30", segments)).toBeNull();
+  });
+
+  it("steps back exactly one calendar month", () => {
+    expect(previousCalendarMonth("2026-02-01")).toEqual({
+      from: "2026-01-01",
+      to: "2026-01-31",
+    });
+    expect(previousCalendarMonth("2026-03-01")).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
+  });
+
+  it("plots whole Monday weeks, leaving edge stubs out", () => {
+    expect(wholeWeeksOfMonth({ from: "2026-02-01", to: "2026-02-28" })).toEqual([
+      { from: "2026-02-02", to: "2026-02-08" },
+      { from: "2026-02-09", to: "2026-02-15" },
+      { from: "2026-02-16", to: "2026-02-22" },
+    ]);
+    expect(monthName("2026-02-01")).toBe("February");
+  });
+});
+
+function cardFinding(input: {
+  channelId: string;
+  code: string;
+  metricKey?: string;
+  valueKind: "money" | "count" | "ratio";
+  numerator: number | null;
+  denominator?: number | null;
+  currency?: string;
+}): ChannelFindingRecord {
+  return {
+    id: `f-${input.channelId}-${input.code}-${input.metricKey ?? "none"}`,
+    analysisRunId: `run-${input.channelId}`,
+    channelId: input.channelId,
+    branchId: null,
+    detectorKey: "test.detector",
+    detectorVersion: 1,
+    kind: "observation",
+    code: input.code,
+    severity: null,
+    priority: null,
+    metricKey: input.metricKey ?? null,
+    periodStart: "2026-02-01",
+    periodEnd: "2026-02-28",
+    valueKind: input.valueKind,
+    valueNumerator: input.numerator,
+    valueDenominator: input.denominator ?? null,
+    currency: input.currency ?? (input.valueKind === "money" ? "AED" : null),
+    monetaryImpactMinorUnits: null,
+    expectedPeriodCount: 1,
+    observedPeriodCount: 1,
+    absentPeriodCount: 0,
+    qualityState: "complete",
+    needsDataReason: null,
+    limitations: [],
+    calculationDigest: "b".repeat(64),
+    createdAt: "2026-02-28T00:00:00Z",
+  };
+}
+
+const GROSS = "WINDOW_GROSS_REVENUE";
+const LOSS = "ORDER_CANCELLATION_LOSS";
+const FUNNEL = "FUNNEL_STAGE_CONVERSION";
+const SHARE = "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS";
+const PLACED = "listing.placed_orders";
+const VIEWS = "listing.menu_views";
+
+function monthRecords(
+  entries: { channelId: string; findings: readonly ChannelFindingRecord[] }[],
+): Map<string, readonly ChannelFindingRecord[]> {
+  return new Map<string, readonly ChannelFindingRecord[]>(
+    entries.map((entry) => [entry.channelId, entry.findings]),
+  );
+}
+
+function fullMonth(input: { gross: number; orders: number; cancelled: number; shareDen: number }) {
+  return [
+    cardFinding({
+      channelId: "ch-a",
+      code: GROSS,
+      valueKind: "money",
+      numerator: input.gross,
+    }),
+    cardFinding({
+      channelId: "ch-a",
+      code: FUNNEL,
+      metricKey: PLACED,
+      valueKind: "ratio",
+      numerator: input.orders,
+      denominator: 100,
+    }),
+    cardFinding({
+      channelId: "ch-a",
+      code: LOSS,
+      valueKind: "count",
+      numerator: input.cancelled,
+    }),
+    cardFinding({
+      channelId: "ch-a",
+      code: SHARE,
+      valueKind: "ratio",
+      numerator: input.cancelled,
+      denominator: input.shareDen,
+    }),
+  ];
+}
+
+function cardInput(overrides: Partial<Parameters<typeof buildBusinessPerformanceCard>[0]> = {}) {
+  return {
+    month: { from: "2026-02-01", to: "2026-02-28" },
+    channels: [
+      { id: "ch-a", displayName: "Delivery A" },
+      { id: "ch-b", displayName: "Delivery B" },
+    ],
+    current: monthRecords([
+      {
+        channelId: "ch-a",
+        findings: fullMonth({ gross: 6_000_000, orders: 1200, cancelled: 60, shareDen: 1200 }),
+      },
+      {
+        channelId: "ch-b",
+        findings: [
+          cardFinding({ channelId: "ch-b", code: GROSS, valueKind: "money", numerator: 6_000_000 }),
+          cardFinding({
+            channelId: "ch-b",
+            code: FUNNEL,
+            metricKey: PLACED,
+            valueKind: "ratio",
+            numerator: 1200,
+            denominator: 50,
+          }),
+          cardFinding({ channelId: "ch-b", code: LOSS, valueKind: "count", numerator: 60 }),
+          cardFinding({
+            channelId: "ch-b",
+            code: SHARE,
+            valueKind: "ratio",
+            numerator: 60,
+            denominator: 1200,
+          }),
+        ],
+      },
+    ]),
+    previous: monthRecords([
+      {
+        channelId: "ch-a",
+        findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 50, shareDen: 1000 }),
+      },
+      {
+        channelId: "ch-b",
+        findings: [
+          cardFinding({ channelId: "ch-b", code: GROSS, valueKind: "money", numerator: 5_000_000 }),
+          cardFinding({
+            channelId: "ch-b",
+            code: FUNNEL,
+            metricKey: PLACED,
+            valueKind: "ratio",
+            numerator: 1000,
+            denominator: 50,
+          }),
+          cardFinding({ channelId: "ch-b", code: LOSS, valueKind: "count", numerator: 50 }),
+          cardFinding({
+            channelId: "ch-b",
+            code: SHARE,
+            valueKind: "ratio",
+            numerator: 50,
+            denominator: 1000,
+          }),
+        ],
+      },
+    ]),
+    trendWeeks: [
+      {
+        window: { from: "2026-02-02", to: "2026-02-08" },
+        records: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: [
+              cardFinding({
+                channelId: "ch-a",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 2_400_000,
+              }),
+            ],
+          },
+          {
+            channelId: "ch-b",
+            findings: [
+              cardFinding({
+                channelId: "ch-b",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 2_400_000,
+              }),
+            ],
+          },
+        ]),
+      },
+      {
+        window: { from: "2026-02-09", to: "2026-02-15" },
+        records: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: [
+              cardFinding({
+                channelId: "ch-a",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 3_600_000,
+              }),
+            ],
+          },
+          {
+            channelId: "ch-b",
+            findings: [
+              cardFinding({
+                channelId: "ch-b",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 3_600_000,
+              }),
+            ],
+          },
+        ]),
+      },
+    ],
+    locationCount: 2,
+    channelScopeName: null,
+    locationScopeName: null,
+    reportFiles: ["DeliveryA-Feb.xlsx"],
+    ...overrides,
+  };
+}
+
+describe("buildBusinessPerformanceCard", () => {
+  it("totals the tiles with previous-month deltas and the prototype headline", () => {
+    const card = buildBusinessPerformanceCard(cardInput());
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 12_000_000, currency: "AED" },
+    });
+    expect(card.tiles.sales.deltaPercent).toBe(20);
+    expect(card.tiles.sales.deltaLabel).toBe("vs January");
+    expect(card.tiles.orders.value).toEqual({ kind: "count", value: 2400 });
+    expect(card.tiles.orders.deltaPercent).toBe(20);
+    expect(card.tiles.orders.footnote).toBe("2 channels");
+    expect(card.tiles.cancelled.value).toEqual({ kind: "count", value: 120 });
+    expect(card.headline).toBe("Sales are up. Cancellations still need attention.");
+    expect(card.cancelledShare).toEqual({ percent: 5, pointChange: 0 });
+    expect(card.footer).toBe(
+      "Sales and orders: 2 channels · 2 locations. Menu views were not reported.",
+    );
+  });
+
+  it("reads menu views from the reporting channel only", () => {
+    const input = cardInput();
+    const chA = input.current.get("ch-a") ?? [];
+    input.current = monthRecords([
+      {
+        channelId: "ch-a",
+        findings: [
+          ...chA,
+          cardFinding({
+            channelId: "ch-a",
+            code: FUNNEL,
+            metricKey: VIEWS,
+            valueKind: "ratio",
+            numerator: 12000,
+            denominator: 100,
+          }),
+        ],
+      },
+      { channelId: "ch-b", findings: input.current.get("ch-b") ?? [] },
+    ]);
+    const card = buildBusinessPerformanceCard(input);
+    expect(card.tiles.views.value).toEqual({ kind: "count", value: 12000 });
+    expect(card.tiles.views.footnote).toBe("Delivery A only");
+    expect(card.footer).toContain("Menu views: Delivery A only.");
+  });
+
+  it("compares only channels analysed in both months", () => {
+    const input = cardInput();
+    input.previous = monthRecords([
+      {
+        channelId: "ch-a",
+        findings: fullMonth({ gross: 6_000_000, orders: 1200, cancelled: 60, shareDen: 1200 }),
+      },
+    ]);
+    const card = buildBusinessPerformanceCard(input);
+    // ch-a is flat across the two months; ch-b is new and stays out of the delta.
+    expect(card.tiles.sales.deltaPercent).toBe(0);
+  });
+
+  it("states no comparison rather than a delta when last month is missing", () => {
+    const card = buildBusinessPerformanceCard(cardInput({ previous: new Map() }));
+    expect(card.tiles.sales.value).not.toBeNull();
+    expect(card.tiles.sales.deltaPercent).toBeNull();
+    expect(card.tiles.sales.deltaAbsentReason).toBe("No earlier comparable period was analysed.");
+    expect(card.headline).toBe(
+      "Performance for February 2026. Cancellations still need attention.",
+    );
+  });
+
+  it("writes the down and steady headlines by rule", () => {
+    const down = buildBusinessPerformanceCard(
+      cardInput({
+        current: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: fullMonth({ gross: 4_000_000, orders: 800, cancelled: 60, shareDen: 800 }),
+          },
+        ]),
+        previous: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 50, shareDen: 1000 }),
+          },
+        ]),
+        channels: [{ id: "ch-a", displayName: "Delivery A" }],
+        trendWeeks: [],
+      }),
+    );
+    expect(down.headline).toBe("Sales are down. Cancellations still need attention.");
+
+    const flat = buildBusinessPerformanceCard(
+      cardInput({
+        current: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 0, shareDen: 1000 }),
+          },
+        ]),
+        previous: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 0, shareDen: 1000 }),
+          },
+        ]),
+        channels: [{ id: "ch-a", displayName: "Delivery A" }],
+        trendWeeks: [],
+      }),
+    );
+    expect(flat.headline).toBe("Sales held steady. No cancellations recorded.");
+  });
+
+  it("keeps every tile absent with its reason when nothing was analysed", () => {
+    const card = buildBusinessPerformanceCard(
+      cardInput({ current: new Map(), previous: new Map(), trendWeeks: [] }),
+    );
+    expect(card.tiles.sales.value).toBeNull();
+    expect(card.tiles.sales.unavailableReason).toBe(
+      "No approved report carried a sales figure for this month.",
+    );
+    expect(card.tiles.orders.value).toBeNull();
+    expect(card.headline).toBe("Performance for February 2026.");
+    expect(card.trend).toEqual({
+      state: "empty",
+      reason: "Fewer than two weeks of this month have a completed analysis.",
+      weeks: ["2–8 Feb", "9–15 Feb", "16–22 Feb"],
+    });
+    expect(card.shares).toBeNull();
+  });
+
+  it("refuses combined figures across currencies rather than converting them", () => {
+    const input = cardInput();
+    input.current = monthRecords([
+      {
+        channelId: "ch-a",
+        findings: [
+          cardFinding({
+            channelId: "ch-a",
+            code: GROSS,
+            valueKind: "money",
+            numerator: 6_000_000,
+            currency: "USD",
+          }),
+        ],
+      },
+      { channelId: "ch-b", findings: input.current.get("ch-b") ?? [] },
+    ]);
+    const card = buildBusinessPerformanceCard(input);
+    expect(card.tiles.sales.value).toBeNull();
+    expect(card.tiles.sales.unavailableReason).toContain("more than one currency");
+    expect(card.shares).toBeNull();
+    expect(card.sharesAbsentReason).toContain("more than one currency");
+  });
+
+  it("plots analysed weeks and shares the channels behind them", () => {
+    const card = buildBusinessPerformanceCard(cardInput());
+    expect(card.trend).toEqual({
+      state: "ready",
+      buckets: [
+        { label: "2–8 Feb", minorUnits: 4_800_000 },
+        { label: "9–15 Feb", minorUnits: 7_200_000 },
+      ],
+      currency: "AED",
+      coverageNote: "2 of 3 February weeks · 2 of 2 channels",
+    });
+    expect(card.shares?.rows.map((row) => row.sharePercent)).toEqual([50, 50]);
+  });
+
+  it("carries the modal payloads without inventing cost context", () => {
+    const card = buildBusinessPerformanceCard(cardInput());
+    expect(card.sources.reportingPeriod).toBe("1–28 Feb 2026");
+    expect(card.sources.scope).toBe("all channels · all locations");
+    expect(card.sources.salesOrdersNote).toContain("DeliveryA-Feb.xlsx");
+    expect(card.sources.menuViewsNote).toBe(
+      "No approved report carried menu views for this month.",
+    );
+    expect(card.sources.costNote).toContain("Cost reports are missing");
+    expect(card.fulfillment).toEqual({
+      ordersPlaced: 2400,
+      ordersAbsentReason: null,
+      cancelled: 120,
+      cancelledAbsentReason: null,
+    });
   });
 });
