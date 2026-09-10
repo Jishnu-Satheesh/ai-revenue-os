@@ -1928,3 +1928,6 @@ select extensions.is(
 );
 
 reset role;
+
+select extensions.finish();
+rollback;

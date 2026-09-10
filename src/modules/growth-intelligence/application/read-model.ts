@@ -66,6 +66,7 @@ export type SynthesizedItemRow = {
   decidedAt: string | null;
   snoozedUntil: string | null;
   pinned: boolean;
+  myFeedback: boolean | null;
 };
 
 export type CardSource =
@@ -93,6 +94,8 @@ type CardBase = {
   carriedOver: boolean;
   /** Present only when carriedOver; e.g. "2 months old". */
   ageLabel: string | null;
+  /** Required only by synthesized-item decision writes. */
+  itemFingerprint: string | null;
 };
 
 export type OpportunityCard = CardBase & {
@@ -131,6 +134,7 @@ export type RecommendationCard = CardBase & {
   /** Null for synthesized cross-market recommendations with no single channel. */
   channelId: string | null;
   branchId: string | null;
+  myFeedback: boolean | null;
   /**
    * Market-research provenance for items produced by a research pipeline.
    * The builders always set this (null when there is no pipeline lineage);
@@ -147,6 +151,7 @@ export type InsightCard = CardBase & {
   /** Owning channel for provenance links; null for synthesized cross-market insights. */
   channelId: string | null;
   branchId: string | null;
+  myFeedback: boolean | null;
 };
 
 export type DataGapCard = CardBase & {
@@ -173,9 +178,7 @@ export type TimelineEventType =
 export type TimelineEvent = {
   type: TimelineEventType;
   source: CardSource;
-  // Titles arrive with the Your-actions research events; every
-  // other event kind gains its title with the timeline-titles work.
-  title?: string;
+  title: string;
   occurredAt: string;
   reason: string | null;
 };
@@ -245,8 +248,7 @@ function compareOpportunities(left: OpportunityFeedItem, right: OpportunityFeedI
   // ADR 0014 ordering: evidence tier, expected contribution within that tier,
   // then time to impact. No blending across tiers; the sort never mixes
   // currencies into one number.
-  const tierDelta =
-    TIER_ORDER.indexOf(left.evidenceTier) - TIER_ORDER.indexOf(right.evidenceTier);
+  const tierDelta = TIER_ORDER.indexOf(left.evidenceTier) - TIER_ORDER.indexOf(right.evidenceTier);
   if (tierDelta !== 0) return tierDelta;
   if (left.expectedContributionMinor !== right.expectedContributionMinor) {
     return right.expectedContributionMinor - left.expectedContributionMinor;
@@ -287,6 +289,7 @@ function toOpportunityCard(
     timeToImpactDays: item.timeToImpactDays,
     version: item.version,
     draftRequest,
+    itemFingerprint: null,
   };
 }
 
@@ -321,6 +324,7 @@ function channelBase(row: OrganizationRecommendationLaneRecord) {
     pinned: row.pinned,
     carriedOver: row.carriedOver,
     ageLabel: row.ageLabel,
+    itemFingerprint: null,
   };
 }
 
@@ -332,6 +336,7 @@ function toRecommendationCardFromChannel(
     ...channelBase(row),
     channelId: row.channelId,
     branchId: row.branchId,
+    myFeedback: row.myFeedback ?? null,
     researchProvenance: null,
   };
 }
@@ -345,6 +350,7 @@ function toInsightCardFromChannel(row: OrganizationRecommendationLaneRecord): In
     urgency: "low",
     channelId: row.channelId,
     branchId: row.branchId,
+    myFeedback: row.myFeedback ?? null,
   };
 }
 
@@ -376,6 +382,7 @@ function itemBase(row: SynthesizedItemRow, activityMonth: string) {
     snoozedUntil: row.snoozedUntil,
     pinned: row.pinned,
     ...itemCarryOver(row, activityMonth),
+    itemFingerprint: row.fingerprint,
   };
 }
 
@@ -389,6 +396,7 @@ function toRecommendationCardFromItem(
     ...itemBase(row, activityMonth),
     channelId: null,
     branchId: null,
+    myFeedback: row.myFeedback,
     researchProvenance: provenance[row.synthesisRunId] ?? null,
   };
 }
@@ -402,12 +410,17 @@ function toInsightCardFromItem(row: SynthesizedItemRow, activityMonth: string): 
     urgency: row.urgency,
     channelId: null,
     branchId: null,
+    myFeedback: row.myFeedback,
   };
 }
 
 function toDataGapCardFromItem(row: SynthesizedItemRow, activityMonth: string): DataGapCard {
   if (row.kind !== "data_gap") throw new Error("Data gap misrouted.");
-  return { ...itemBase(row, activityMonth), missingInput: row.missingInput ?? "unknown", channelId: null };
+  return {
+    ...itemBase(row, activityMonth),
+    missingInput: row.missingInput ?? "unknown",
+    channelId: null,
+  };
 }
 
 function isVisibleItem(row: SynthesizedItemRow, now: Date): boolean {
@@ -439,15 +452,17 @@ function suppressDuplicates<T extends { fingerprint?: string; id: string; genera
 function pushTimeline(
   events: TimelineEvent[],
   source: CardSource,
+  title: string,
   generatedAt: string,
   decision: string | null,
   decidedAt: string | null,
 ): void {
-  events.push({ type: "generated", source, occurredAt: generatedAt, reason: null });
+  events.push({ type: "generated", source, title, occurredAt: generatedAt, reason: null });
   if (decision && decidedAt && decision !== "pinned" && decision !== "unpinned") {
     events.push({
       type: decision as TimelineEventType,
       source,
+      title,
       occurredAt: decidedAt,
       reason: null,
     });
@@ -468,7 +483,9 @@ const ALL_SECTIONS: readonly GrowthIntelligenceSection[] = [
  * Reads only: every row arrives tenant-scoped from its owning repository.
  * The month is canonical `YYYY-MM`; the view never relabels evidence.
  */
-export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput): GrowthIntelligenceView {
+export function buildGrowthIntelligenceView(
+  input: GrowthIntelligenceViewInput,
+): GrowthIntelligenceView {
   if (!CANONICAL_MONTH.test(input.activityMonth)) {
     throw new Error(`Activity month must be canonical YYYY-MM, got ${input.activityMonth}.`);
   }
@@ -503,6 +520,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
       timeline.push({
         type: "generated",
         source,
+        title: item.title,
         occurredAt: item.createdAt,
         reason: null,
       });
@@ -511,6 +529,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
         timeline.push({
           type: "draft-requested",
           source,
+          title: item.title,
           occurredAt: draft.requestedAt,
           reason: null,
         });
@@ -518,6 +537,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
           timeline.push({
             type: "draft-created",
             source,
+            title: item.title,
             occurredAt: draft.updatedAt,
             reason: null,
           });
@@ -525,6 +545,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
           timeline.push({
             type: "retry",
             source,
+            title: item.title,
             occurredAt: draft.updatedAt,
             reason: null,
           });
@@ -532,6 +553,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
           timeline.push({
             type: "draft-failed",
             source,
+            title: item.title,
             occurredAt: draft.updatedAt,
             reason: null,
           });
@@ -573,9 +595,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
 
   const insights: InsightCard[] = sections.has("insights")
     ? [
-        ...channelLanes.insights
-          .filter((row) => row.actionable)
-          .map(toInsightCardFromChannel),
+        ...channelLanes.insights.filter((row) => row.actionable).map(toInsightCardFromChannel),
         ...visibleItems
           .filter((row) => row.kind === "insight")
           .map((row) => toInsightCardFromItem(row, input.activityMonth)),
@@ -584,9 +604,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
 
   const dataGaps: DataGapCard[] = sections.has("data_gaps")
     ? [
-        ...channelLanes.dataGaps
-          .filter((row) => row.actionable)
-          .map(toDataGapCardFromChannel),
+        ...channelLanes.dataGaps.filter((row) => row.actionable).map(toDataGapCardFromChannel),
         ...visibleItems
           .filter((row) => row.kind === "data_gap")
           .map((row) => toDataGapCardFromItem(row, input.activityMonth)),
@@ -602,6 +620,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
       pushTimeline(
         timeline,
         { kind: "channel_recommendation", id: row.id },
+        row.headline,
         row.generatedAt,
         row.decision?.decision ?? null,
         row.decision?.createdAt ?? null,
@@ -611,6 +630,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
       pushTimeline(
         timeline,
         { kind: "synthesized_item", id: row.id },
+        row.narrative,
         row.generatedAt,
         row.decision,
         row.decidedAt,

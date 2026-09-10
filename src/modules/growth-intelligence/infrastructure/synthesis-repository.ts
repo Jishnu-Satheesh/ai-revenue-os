@@ -116,6 +116,15 @@ const preferenceInputSchema = preferenceSchema
   })
   .strict();
 
+const feedbackInputSchema = z
+  .object({
+    organizationId: uuidSchema,
+    actorId: uuidSchema,
+    itemId: uuidSchema,
+    helpful: z.boolean(),
+  })
+  .strict();
+
 export type SynthesisRunMetadata = z.infer<typeof metadataSchema>;
 export type SynthesisItemPayload = z.infer<typeof itemSchema>;
 export type SynthesisRunResult = z.infer<typeof resultSchema>;
@@ -156,6 +165,10 @@ export type SynthesisRepository = {
       actorId: string;
     } & SynthesisPreference,
   ): Promise<{ sourceKind: string; pinned: boolean }>;
+  recordFeedback(input: z.infer<typeof feedbackInputSchema>): Promise<{
+    itemId: string;
+    helpful: boolean;
+  }>;
 };
 
 function boundaryError(): DomainError {
@@ -163,7 +176,7 @@ function boundaryError(): DomainError {
 }
 
 function persistenceError(
-  operation: "begin" | "complete" | "fail" | "decide" | "preference",
+  operation: "begin" | "complete" | "fail" | "decide" | "preference" | "feedback",
 ): DomainError {
   const messages = {
     begin: "Synthesis could not be started.",
@@ -171,6 +184,7 @@ function persistenceError(
     fail: "Synthesis could not be marked as failed.",
     decide: "The item decision could not be recorded.",
     preference: "The preference could not be saved.",
+    feedback: "The feedback could not be saved.",
   } as const;
   return new DomainError("DOMAIN_ERROR", messages[operation]);
 }
@@ -182,7 +196,7 @@ function persistenceError(
  * Anything else keeps the safe generic message.
  */
 function memberRpcError(
-  operation: "decide" | "preference",
+  operation: "decide" | "preference" | "feedback",
   error: { code?: string | null; message?: string | null },
 ): DomainError {
   if (error?.code === "42501") {
@@ -204,12 +218,9 @@ function memberRpcError(
         "This record was not found. It may have been removed.",
       );
     }
-    return new DomainError(
-      "VALIDATION_ERROR",
-      "That answer is not one the platform can record.",
-    );
+    return new DomainError("VALIDATION_ERROR", "That answer is not one the platform can record.");
   }
-  if (error?.code === "23503") {
+  if (error?.code === "23503" || error?.code === "P0002") {
     return new DomainError(
       "TENANT_SCOPE_ERROR",
       "The named record was not found in this organization.",
@@ -229,7 +240,7 @@ function runOutcome(data: unknown): { runId: string; status: string; replayed: b
 
 export function createSynthesisRepository(persistence: SynthesisPersistence): SynthesisRepository {
   async function invoke(
-    operation: "begin" | "complete" | "fail" | "decide" | "preference",
+    operation: "begin" | "complete" | "fail" | "decide" | "preference" | "feedback",
     name: string,
     args: Record<string, unknown>,
     mapError?: (error: { code?: string | null; message?: string | null }) => DomainError,
@@ -362,6 +373,22 @@ export function createSynthesisRepository(persistence: SynthesisPersistence): Sy
         .safeParse(data);
       if (!parsed.success) throw boundaryError();
       return parsed.data;
+    },
+
+    async recordFeedback(input) {
+      const feedback = feedbackInputSchema.parse(input);
+      await invoke(
+        "feedback",
+        "record_growth_intelligence_item_feedback",
+        {
+          p_organization_id: feedback.organizationId,
+          p_item_id: feedback.itemId,
+          p_helpful: feedback.helpful,
+          p_actor_id: feedback.actorId,
+        },
+        (error) => memberRpcError("feedback", error),
+      );
+      return { itemId: feedback.itemId, helpful: feedback.helpful };
     },
   };
 }

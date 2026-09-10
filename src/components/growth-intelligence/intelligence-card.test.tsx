@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const refresh = vi.fn();
+const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 import { IntelligenceCard } from "@/components/growth-intelligence/intelligence-card";
 import type {
@@ -29,6 +31,7 @@ function opportunityCard(overrides: Partial<OpportunityCard> = {}): OpportunityC
     pinned: false,
     carriedOver: false,
     ageLabel: null,
+    itemFingerprint: null,
     draftRequest: null,
     actionKey: "campaign.governed_draft_v1",
     status: "proposed",
@@ -62,12 +65,20 @@ function recommendationCard(overrides: Partial<RecommendationCard> = {}): Recomm
     ageLabel: null,
     channelId: "61000000-0000-4000-8000-000000000061",
     branchId: null,
+    myFeedback: null,
+    itemFingerprint: null,
     ...overrides,
   };
 }
 
 describe("IntelligenceCard", () => {
-  afterEach(() => cleanup());
+  beforeEach(() => vi.stubGlobal("fetch", fetchMock));
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    fetchMock.mockClear();
+    refresh.mockClear();
+  });
 
   it("shows an opportunity range as a pair with its tier, never one number", () => {
     render(
@@ -123,7 +134,7 @@ describe("IntelligenceCard", () => {
     ).toBeTruthy();
   });
 
-  it("sends a viewer to the owning surface with words, never a control", () => {
+  it("lets a viewer grade usefulness while keeping decision controls unavailable", () => {
     const { container } = render(
       <IntelligenceCard
         card={recommendationCard()}
@@ -132,7 +143,9 @@ describe("IntelligenceCard", () => {
         canManage={false}
       />,
     );
-    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("button")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Helpful" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
     expect(screen.getByRole("link", { name: /channel workspace/i })).toBeTruthy();
   });
 
@@ -162,6 +175,7 @@ describe("IntelligenceCard", () => {
       supportGrade: "corroborated",
       freshness: "current",
       urgency: "high",
+      itemFingerprint: "a".repeat(64),
     };
     render(
       <IntelligenceCard
@@ -173,6 +187,40 @@ describe("IntelligenceCard", () => {
     );
     expect(screen.getByText(/corroborated/i)).toBeTruthy();
     expect(screen.queryByText(/[0-9]+\/100|[0-9]+%/)).toBeNull();
+  });
+
+  it("records synthesized-item feedback through its own route", async () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          source: { kind: "synthesized_item", id: "70000000-0000-4000-8000-000000000007" },
+          channelId: null,
+          itemFingerprint: "a".repeat(64),
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Not helpful" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      `/api/organizations/${ORGANIZATION}/growth-intelligence/items/70000000-0000-4000-8000-000000000007/feedback`,
+    );
+  });
+
+  it("keeps the Channel Audit decision vocabulary visible on open recommendations", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    for (const name of ["Acknowledge", "Planned", "Snooze", "Helpful", "Not helpful"]) {
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    }
   });
 });
 

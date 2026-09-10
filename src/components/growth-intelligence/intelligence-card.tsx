@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignDraftAction } from "@/components/growth-intelligence/campaign-draft-action";
+import { IntelligenceActions } from "@/components/growth-intelligence/intelligence-actions";
 import type {
   DataGapCard,
   InsightCard,
@@ -236,6 +237,9 @@ export function IntelligenceCard({
           <DataGapRepair card={card} organizationId={organizationId} />
         ) : "channelId" in card && card.channelId ? (
           <ChannelFooter card={card} organizationId={organizationId} canManage={canManage} />
+        ) : null}
+        {"myFeedback" in card ? (
+          <IntelligenceActions card={card} organizationId={organizationId} canManage={canManage} />
         ) : null}
       </CardFooter>
     </Card>

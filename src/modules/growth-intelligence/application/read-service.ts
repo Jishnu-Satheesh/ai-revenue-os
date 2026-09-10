@@ -31,9 +31,7 @@ export type GrowthIntelligenceWorkspaceRepository = {
     actorId: string;
     limit: number;
   }): Promise<readonly ChannelRecommendationRow[]>;
-  listDraftRequestStates(input: {
-    organizationId: string;
-  }): Promise<readonly DraftRequestState[]>;
+  listDraftRequestStates(input: { organizationId: string }): Promise<readonly DraftRequestState[]>;
 };
 
 export type GrowthIntelligenceReadDependencies = {
@@ -96,10 +94,7 @@ export function currentLocalMonth(timeZone: string, now: Date): string {
       day: "2-digit",
     }).format(now);
   } catch {
-    throw new DomainError(
-      "VALIDATION_ERROR",
-      "The organization's timezone could not be resolved.",
-    );
+    throw new DomainError("VALIDATION_ERROR", "The organization's timezone could not be resolved.");
   }
   return rendered.slice(0, 7);
 }

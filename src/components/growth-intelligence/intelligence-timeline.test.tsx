@@ -15,6 +15,7 @@ function event(overrides: Partial<TimelineEvent> = {}): TimelineEvent {
     occurredAt: "2026-09-02T08:00:00.000Z",
     reason: null,
     ...overrides,
+    title: overrides.title ?? "Extend Friday hours",
   };
 }
 
@@ -57,7 +58,7 @@ describe("IntelligenceTimeline research rows", () => {
     });
     render(<IntelligenceTimeline events={[started, { ...started }]} timeZone="Asia/Dubai" />);
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
-    expect(screen.getByText("Research started · Market research")).toBeTruthy();
+    expect(screen.getByText("Market research started — Downtown")).toBeTruthy();
   });
 
   it("labels a retried analysis without inventing progress", () => {
@@ -73,6 +74,7 @@ describe("IntelligenceTimeline research rows", () => {
         timeZone="Asia/Dubai"
       />,
     );
+    expect(screen.getByText("Market analysis retried — Downtown")).toBeTruthy();
     expect(screen.getByText("Analysis retried · Market research")).toBeTruthy();
   });
 });

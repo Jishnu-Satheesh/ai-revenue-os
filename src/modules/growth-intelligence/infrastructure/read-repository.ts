@@ -167,9 +167,7 @@ export type GrowthIntelligenceReadRepository = {
     actorId: string;
     limit: number;
   }): Promise<ChannelRecommendationRow[]>;
-  listDraftRequestStates(input: {
-    organizationId: string;
-  }): Promise<DraftRequestState[]>;
+  listDraftRequestStates(input: { organizationId: string }): Promise<DraftRequestState[]>;
 };
 
 function query<T>(persistence: MarketWatchPersistence, table: string): QueryBuilder<T> {
@@ -350,20 +348,14 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
     },
 
     async readOrganizationTimeZone(organizationId) {
-      const result = await query<Record<string, unknown>[]>(
-        persistence,
-        "organizations",
-      )
+      const result = await query<Record<string, unknown>[]>(persistence, "organizations")
         .select("default_timezone")
         .eq("id", organizationId)
         .limit(1);
       if (result.error) readFailure();
       const timeZone = (result.data ?? [])[0]?.default_timezone;
       if (typeof timeZone !== "string" || timeZone.length === 0) {
-        throw new DomainError(
-          "DOMAIN_ERROR",
-          "The organization's timezone is not available.",
-        );
+        throw new DomainError("DOMAIN_ERROR", "The organization's timezone is not available.");
       }
       return timeZone;
     },
@@ -386,7 +378,7 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const rows = result.data ?? [];
       if (rows.length === 0) return [];
       const itemIds = rows.map((row) => String(row.id));
-      const [decisions, preferences] = await Promise.all([
+      const [decisions, preferences, feedback] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_decisions")
           .select(
             "growth_intelligence_item_id,decision,reason,snoozed_until,item_fingerprint,created_at",
@@ -399,11 +391,17 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .eq("organization_id", input.organizationId)
           .eq("user_id", input.actorId)
           .in("growth_intelligence_item_id", itemIds),
+        query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_feedback")
+          .select("growth_intelligence_item_id,helpful")
+          .eq("organization_id", input.organizationId)
+          .eq("actor_id", input.actorId)
+          .in("growth_intelligence_item_id", itemIds),
       ]);
       if (decisions.error) readFailure();
       if (preferences.error) readFailure();
+      if (feedback.error) readFailure();
       const latestDecision = new Map<string, Record<string, unknown>>();
-      for (const decision of (decisions.data ?? [])) {
+      for (const decision of decisions.data ?? []) {
         const key = String(decision.growth_intelligence_item_id);
         if (!latestDecision.has(key)) latestDecision.set(key, decision);
       }
@@ -412,19 +410,25 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .filter((preference) => preference.pinned === true)
           .map((preference) => String(preference.growth_intelligence_item_id)),
       );
+      const myFeedback = new Map(
+        (feedback.data ?? []).map((row) => [
+          String(row.growth_intelligence_item_id),
+          row.helpful === true,
+        ]),
+      );
       return rows.map((row) =>
-        mapWorkspaceItem(row, latestDecision.get(String(row.id)) ?? null, pinned.has(String(row.id))),
+        mapWorkspaceItem(
+          row,
+          latestDecision.get(String(row.id)) ?? null,
+          pinned.has(String(row.id)),
+          myFeedback.get(String(row.id)) ?? null,
+        ),
       );
     },
 
     async listChannelRecommendationRecords(input) {
-      const result = await query<Record<string, unknown>[]>(
-        persistence,
-        "channel_recommendations",
-      )
-        .select(
-          "id,channel_id,branch_id,label,headline,detail,window_start,window_end,created_at",
-        )
+      const result = await query<Record<string, unknown>[]>(persistence, "channel_recommendations")
+        .select("id,channel_id,branch_id,label,headline,detail,window_start,window_end,created_at")
         .eq("organization_id", input.organizationId)
         .order("created_at", { ascending: false })
         .limit(clampLimit(input.limit));
@@ -432,7 +436,7 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const rows = result.data ?? [];
       if (rows.length === 0) return [];
       const recommendationIds = rows.map((row) => String(row.id));
-      const [decisions, preferences] = await Promise.all([
+      const [decisions, preferences, feedback] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "channel_recommendation_decisions")
           .select("recommendation_id,decision,snoozed_until,created_at")
           .eq("organization_id", input.organizationId)
@@ -443,11 +447,17 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .eq("organization_id", input.organizationId)
           .eq("user_id", input.actorId)
           .in("channel_recommendation_id", recommendationIds),
+        query<Record<string, unknown>[]>(persistence, "channel_recommendation_feedback")
+          .select("recommendation_id,helpful")
+          .eq("organization_id", input.organizationId)
+          .eq("actor_id", input.actorId)
+          .in("recommendation_id", recommendationIds),
       ]);
       if (decisions.error) readFailure();
       if (preferences.error) readFailure();
+      if (feedback.error) readFailure();
       const latestDecision = new Map<string, Record<string, unknown>>();
-      for (const decision of (decisions.data ?? [])) {
+      for (const decision of decisions.data ?? []) {
         const key = String(decision.recommendation_id);
         if (!latestDecision.has(key)) latestDecision.set(key, decision);
       }
@@ -457,27 +467,28 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .map((preference) => String(preference.channel_recommendation_id)),
       );
       const preferenceSnoozedUntil = new Map<string, string>();
-      for (const preference of (preferences.data ?? [])) {
+      for (const preference of preferences.data ?? []) {
         const key = String(preference.channel_recommendation_id);
         if (preferenceSnoozedUntil.has(key)) continue;
         if (preference.snoozed_until === null || preference.snoozed_until === undefined) continue;
         preferenceSnoozedUntil.set(key, String(preference.snoozed_until));
       }
+      const myFeedback = new Map(
+        (feedback.data ?? []).map((row) => [String(row.recommendation_id), row.helpful === true]),
+      );
       return rows.map((row) =>
         mapChannelRecommendationRecord(
           row,
           latestDecision.get(String(row.id)) ?? null,
           pinned.has(String(row.id)),
           preferenceSnoozedUntil.get(String(row.id)) ?? null,
+          myFeedback.get(String(row.id)) ?? null,
         ),
       );
     },
 
     async listDraftRequestStates(input) {
-      const result = await query<Record<string, unknown>[]>(
-        persistence,
-        "campaign_draft_requests",
-      )
+      const result = await query<Record<string, unknown>[]>(persistence, "campaign_draft_requests")
         .select("opportunity_id,status,campaign_id,created_at,updated_at")
         .eq("organization_id", input.organizationId)
         .order("created_at", { ascending: false })
@@ -523,6 +534,7 @@ function mapWorkspaceItem(
   row: Record<string, unknown>,
   decision: Record<string, unknown> | null,
   pinned: boolean,
+  myFeedback: boolean | null,
 ): SynthesizedItemRow {
   const kind = String(row.kind);
   if (kind !== "insight" && kind !== "recommendation" && kind !== "data_gap") readFailure();
@@ -554,6 +566,7 @@ function mapWorkspaceItem(
         ? String(decision.snoozed_until)
         : null,
     pinned,
+    myFeedback,
   };
 }
 
@@ -564,6 +577,7 @@ function mapChannelRecommendationRecord(
   decision: Record<string, unknown> | null,
   pinned: boolean,
   preferenceSnoozedUntil: string | null,
+  myFeedback: boolean | null,
 ): ChannelRecommendationRow {
   const label = String(row.label);
   if (label !== "observation" && label !== "recommendation" && label !== "needs_data") {
@@ -594,6 +608,7 @@ function mapChannelRecommendationRecord(
           },
     pinned,
     preferenceSnoozedUntil,
+    myFeedback,
   };
 }
 

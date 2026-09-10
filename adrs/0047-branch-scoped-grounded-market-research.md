@@ -1,67 +1,76 @@
-# ADR 0047: Branch-scoped grounded Market Research completes into synthesis
+# ADR 0047: Branch-scoped Market Research with durable synthesis
 
-- Status: Proposed
+- Status: Proposed — revised after design review; implementation approval pending
 - Date: 2026-09-08
 - Related: Spec 022, ADR 0039, ADR 0044
+- Design: [Market monitoring](../docs/superpowers/specs/2026-09-08-market-monitoring-research-completion-design.md)
 
 ## Context
 
-The Growth Intelligence prototype asks an operator to review market monitoring for a chosen
-location, topics, and competitors. The current implementation confirms an organization-wide Market
-Profile, enqueues a request with no branch, ignores competitors in its query scope, and uses an
-unavailable adapter that persists no Market Evidence Claims. A completed source retrieval also has
-no immediate path into synthesis.
+The approved dialog lets an operator research one branch, topics and up to five competitor leads.
+Current profiles have one organization-wide current version; confirming another scope cancels prior
+work. The adapter is unavailable, claims are not extracted, and research completion does not durably
+hand off to branch-fenced synthesis. A modal alone would promise an outcome the system cannot deliver.
 
-Showing **Start market research** over those boundaries would make the interface promise a result
-the system does not produce.
+Review also found that the earlier Google Search grounding proposal conflicts with the durable,
+organization-shared evidence use described here under the standard published terms.
 
 ## Decision
 
-One operator-started Market Research run binds one active organization branch and one immutable
-Market Profile version. Topics and up to five operator-entered competitor leads are part of that
-profile. A competitor name is sufficient to form an unverified lead; website and location hint are
-optional. User-entered details guide research but never become evidence by assertion.
+Extend the existing Market Profile identity to organization + branch, retaining an explicit legacy
+null-branch identity. Each branch has independent immutable versions and cadence. New branch starts
+use a v2 document; old v1 digests and validation remain unchanged. One atomic start operation saves
+the reviewed scope, records confirmation and starts or returns an identical active pipeline.
 
-The qualified adapter uses Gemini Grounding with Google Search and optional URL Context. Grounded
-retrieval and strict claim extraction remain separate bounded stages so production correctness does
-not depend on the preview combination of built-in tools and structured outputs. Deterministic code
-validates citations, source policy, geography, dates, content bounds, support, and persistence.
+Use Brave Web Search only under account-specific storage, commercial inference, display and reuse
+rights. Gemini analyzes bounded permitted snippets with search tools disabled. Publicly advertised
+storage plans establish a qualification path, not permission for our account. No returned-page
+crawling is included. Provider qualification and audited content-retention handling are release
+requirements. See the design's dated official sources and exact required agreement scope.
 
-A completed or partial research run that stores eligible claims enqueues one durable
-`market_evidence_changed` request. That request runs the existing governed synthesis path and may
-produce cited Insights, Recommendations, and Data Gaps. It never publishes, spends, approves a
-Campaign, or treats an operator-entered competitor as verified.
+Add a research-pipeline lifecycle envelope over existing leased requests. Research success is not
+pipeline success: queued → researching → preparing_insights → ready, with distinct partial, empty,
+research-failed, synthesis-failed and cancelled outcomes. Completing research and creating its unique
+market_evidence_changed synthesis child occur in one fenced database transaction. Existing request
+sweeping recovers lost dispatch. Synthesis persistence and pipeline completion also settle atomically.
 
-The existing four Growth Intelligence tabs remain. Research outcomes live under **Insights &
-market**; derived actions live under **Recommendations** and may appear in Overview's Top
-Recommendations.
+Carry branch, exact profile/version, research lineage and business-evidence periods through reads,
+support validation and writes. Other named branches never enter branch analysis. Organization-wide
+context is explicitly labelled and never becomes a branch measurement.
 
-## Consequences
+Deterministic query slots cover every topic and competitor. Persist searched and supported coverage
+separately. Reserve spend against per-pipeline and organization-day budgets before external calls,
+including retries. Record unknown, estimated and reported cost distinctly; never clamp actual cost.
 
-- Research scope, evidence, and synthesis share exact branch/profile lineage.
-- The interface can show meaningful active, partial, completed, empty, and failed states.
-- Operator location edits remain research-only and cannot mutate canonical branch data.
-- The request vocabulary, dispatcher, worker adapter, profile validation, and UI read model expand.
-- A live provider remains disabled until billing, retention, legal/commercial, citation, cost, and
-  canary gates pass.
-- Existing Market Profile versions remain readable through backward-compatible schema validation;
-  database changes are additive and forward-only.
+Keep the four tabs. Research outcomes live in Insights & market, derived actions in Recommendations
+and the existing Overview preview. The UI observes pipeline state through synthesis completion.
+The platform never publishes, spends business budgets, approves Campaigns or treats an operator
+competitor lead as verified through this research flow.
+
+## Consequences and tradeoffs
+
+- Independent branch monitoring requires auditing every singleton-profile reader and scheduler.
+- A lifecycle envelope and private spend ledgers add state, but do not duplicate settings authority.
+- v1 history stays intact; v2 handles operator-lead provenance and branch-specific geography.
+- Snippet-only retrieval can yield less evidence than full-page retrieval; show that limitation.
+- Source spans enable review, but citation validation cannot prove factual truth. A bounded support
+  review and deterministic admission enforce the evidence contract.
+- Retention requires narrowly authorized payload erasure, extending append-only evidence rules only
+  where rights require deletion. Safe audit records survive.
+- Actual provider agreement, pricing/model configuration and a live canary remain external release
+  prerequisites. Flags-off rollback must remain compatible with multiple branch profiles.
 
 ## Rejected alternatives
 
-### Per-request settings outside the Market Profile
-
-This duplicates research scope and weakens the explanation of which settings produced a result.
-
-### A separate branch-monitoring configuration subsystem
-
-This supports several simultaneous saved scopes but adds a new authority and lifecycle that the
-approved one-branch-per-run flow does not need.
-
-### Grounded search with preview structured output as one production step
-
-This reduces calls but makes the evidence contract depend on a preview tool combination. Separate
-retrieval and validation gives the platform an explicit citation fence.
+- One organization profile plus branch_id on requests: another branch still replaces its settings.
+- An unrelated branch-settings subsystem: duplicates existing profile authority; extend it instead.
+- Google Search Grounding as a reusable evidence database: standard storage/reuse/display terms do
+  not fit this design. Do not bypass the conflict by discarding Search Suggestions.
+- Separate research-complete and enqueue calls: a process crash can lose synthesis permanently.
+- Poll only the research request: the user sees completion before insights arrive.
+- Model-controlled search counts and cost defaults: cannot enforce coverage or application spend.
+- Two browser mutations to propose then confirm: recoverable, but unnecessary for this new entry
+  point; retain legacy APIs and use one atomic reviewed start for the dialog.
 
 ## Verification (2026-09-09, market-monitoring Task 12)
 

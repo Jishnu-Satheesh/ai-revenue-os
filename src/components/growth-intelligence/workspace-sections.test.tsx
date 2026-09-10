@@ -28,6 +28,7 @@ const base = {
   pinned: false,
   carriedOver: false,
   ageLabel: null,
+  itemFingerprint: null,
 } as const;
 
 function opportunityCard(): OpportunityCard {
@@ -59,6 +60,7 @@ function recommendationCard(): RecommendationCard {
     title: "Extend Friday hours",
     channelId: CHANNEL,
     branchId: null,
+    myFeedback: null,
   };
 }
 

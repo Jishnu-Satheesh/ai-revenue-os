@@ -64,6 +64,9 @@ function persistence(overrides: Partial<Record<string, unknown>> = {}) {
     if (name === "set_growth_intelligence_preference") {
       return { data: { sourceKind: "synthesis_item", pinned: true }, error: null };
     }
+    if (name === "record_growth_intelligence_item_feedback") {
+      return { data: null, error: null };
+    }
     return { data: null, error: new Error(`unexpected call ${name}`) };
   });
   return { persistence: { rpc } as unknown as SynthesisPersistence, rpc, ...overrides };
@@ -214,6 +217,35 @@ describe("Synthesis repository", () => {
     });
 
     expect(result).toEqual({ sourceKind: "synthesis_item", pinned: true });
+  });
+
+  it("records actor-scoped helpfulness through the fenced member RPC", async () => {
+    const db = persistence();
+
+    const result = await createSynthesisRepository(db.persistence).recordFeedback({
+      organizationId,
+      actorId,
+      itemId,
+      helpful: false,
+    });
+
+    expect(result).toEqual({ itemId, helpful: false });
+    expect(db.rpc).toHaveBeenCalledWith("record_growth_intelligence_item_feedback", {
+      p_organization_id: organizationId,
+      p_item_id: itemId,
+      p_helpful: false,
+      p_actor_id: actorId,
+    });
+  });
+
+  it("keeps a missing feedback item indistinguishable from another tenant's item", async () => {
+    const repository = createSynthesisRepository({
+      rpc: vi.fn(async () => ({ data: null, error: { code: "P0002", message: "not found" } })),
+    });
+
+    await expect(
+      repository.recordFeedback({ organizationId, actorId, itemId, helpful: true }),
+    ).rejects.toMatchObject({ code: "TENANT_SCOPE_ERROR" });
   });
 
   it.each([

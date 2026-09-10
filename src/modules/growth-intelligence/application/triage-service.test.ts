@@ -15,13 +15,38 @@ function store(
   overrides: Partial<GrowthIntelligenceTriageStore> = {},
 ): GrowthIntelligenceTriageStore {
   return {
-    decide: vi
-      .fn()
-      .mockResolvedValue({ decisionId: "80000000-0000-4000-8000-000000000008", decision: "planned" }),
+    decide: vi.fn().mockResolvedValue({
+      decisionId: "80000000-0000-4000-8000-000000000008",
+      decision: "planned",
+    }),
     setPreference: vi.fn().mockResolvedValue({ sourceKind: "synthesis_item", pinned: true }),
+    recordFeedback: vi.fn(async (input) => ({ itemId: input.itemId, helpful: input.helpful })),
     ...overrides,
   };
 }
+
+describe("recordFeedback", () => {
+  it("saves the member's vote without emitting an organization policy event", async () => {
+    const { service: triage, triage: store, events } = service();
+    const publish = vi.spyOn(events, "publish");
+
+    const outcome = await triage.recordFeedback({
+      organizationId,
+      actorId,
+      itemId,
+      helpful: false,
+    });
+
+    expect(outcome).toEqual({ itemId, helpful: false });
+    expect(store.recordFeedback).toHaveBeenCalledWith({
+      organizationId,
+      actorId,
+      itemId,
+      helpful: false,
+    });
+    expect(publish).not.toHaveBeenCalled();
+  });
+});
 
 function service(
   triage: GrowthIntelligenceTriageStore = store(),

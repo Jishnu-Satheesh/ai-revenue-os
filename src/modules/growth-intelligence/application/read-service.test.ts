@@ -27,9 +27,7 @@ function workspace(
   };
 }
 
-function service(
-  deps: Partial<Parameters<typeof createGrowthIntelligenceReadService>[0]> = {},
-) {
+function service(deps: Partial<Parameters<typeof createGrowthIntelligenceReadService>[0]> = {}) {
   return createGrowthIntelligenceReadService({
     workspace: workspace(),
     opportunities: { listOpportunities: vi.fn().mockResolvedValue([]) },
@@ -129,8 +127,7 @@ describe("getGrowthIntelligence workspace", () => {
       id: "70000000-0000-4000-8000-000000000007",
       kind: "insight",
       narrative: "Delivery orders spike on rainy Thursdays.",
-      fingerprint:
-        "aa00000000000000000000000000000000000000000000000000000000000001",
+      fingerprint: "aa00000000000000000000000000000000000000000000000000000000000001",
       synthesisRunId: "71000000-0000-4000-8000-000000000071",
       supportGrade: "corroborated",
       freshness: "current",
@@ -146,6 +143,7 @@ describe("getGrowthIntelligence workspace", () => {
       decidedAt: null,
       snoozedUntil: null,
       pinned: false,
+      myFeedback: null,
     };
     const read = service({
       workspace: workspace({
@@ -163,9 +161,7 @@ describe("getGrowthIntelligence workspace", () => {
       insights: 1,
       dataGaps: 0,
     });
-    expect(view.priorityActions.opportunities[0]!.actionKey).toBe(
-      "campaign.meta_bundle_v1",
-    );
+    expect(view.priorityActions.opportunities[0]!.actionKey).toBe("campaign.meta_bundle_v1");
   });
 
   it("passes the actor and section filter to the repositories", async () => {
@@ -285,6 +281,7 @@ describe("research composition", () => {
       decidedAt: null,
       snoozedUntil: null,
       pinned: false,
+      myFeedback: null,
     };
   }
 

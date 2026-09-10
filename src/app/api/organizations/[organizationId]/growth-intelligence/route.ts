@@ -170,9 +170,7 @@ export async function GET(
     try {
       const workspaceService = createGrowthIntelligenceReadService({
         workspace: reads as unknown as GrowthIntelligenceWorkspaceRepository,
-        opportunities: createDecisionRepository(
-          context.supabase as unknown as DecisionPersistence,
-        ),
+        opportunities: createDecisionRepository(context.supabase as unknown as DecisionPersistence),
         research: researchReads,
         onResearchError: (researchError) => {
           logger.warn("growth_intelligence.research_provenance_degraded", {

@@ -50,6 +50,7 @@ function recommendation(
     generatedAt: "2026-09-01T08:00:00.000Z",
     decision: null,
     pinned: false,
+    myFeedback: null,
     preferenceSnoozedUntil: null,
     ...overrides,
   };
@@ -60,8 +61,7 @@ function item(overrides: Partial<SynthesizedItemRow> = {}): SynthesizedItemRow {
     id: "70000000-0000-4000-8000-000000000007",
     kind: "insight",
     narrative: "Delivery orders spike on rainy Thursdays.",
-    fingerprint:
-      "aa00000000000000000000000000000000000000000000000000000000000001",
+    fingerprint: "aa00000000000000000000000000000000000000000000000000000000000001",
     synthesisRunId: "71000000-0000-4000-8000-000000000071",
     supportGrade: "corroborated",
     freshness: "current",
@@ -78,6 +78,7 @@ function item(overrides: Partial<SynthesizedItemRow> = {}): SynthesizedItemRow {
     snoozedUntil: null,
     pinned: false,
     ...overrides,
+    myFeedback: overrides.myFeedback ?? null,
   };
 }
 
@@ -107,6 +108,25 @@ describe("buildGrowthIntelligenceView", () => {
     expect(view.priorityActions.recommendations[0]!.source).toEqual({
       kind: "channel_recommendation",
       id: "60000000-0000-4000-8000-000000000006",
+    });
+  });
+
+  it("names timeline rows so previous actions explain what the member acted on", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            decision: {
+              decision: "planned",
+              snoozedUntil: null,
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+      }),
+    );
+    expect(view.timeline.find((event) => event.type === "planned")).toMatchObject({
+      title: "Extend Friday hours",
     });
   });
 
@@ -254,8 +274,7 @@ describe("buildGrowthIntelligenceView", () => {
             id: "70000000-0000-4000-8000-000000000008",
             kind: "data_gap",
             narrative: "No delivery data for August.",
-            fingerprint:
-              "bb00000000000000000000000000000000000000000000000000000000000002",
+            fingerprint: "bb00000000000000000000000000000000000000000000000000000000000002",
             missingInput: "delivery_orders",
           }),
         ],
@@ -287,9 +306,7 @@ describe("buildGrowthIntelligenceView", () => {
     expect(view.priorityActions.recommendations).toHaveLength(0);
     expect(view.timeline.map((event) => event.type)).toContain("planned");
     expect(
-      view.insights.some(
-        (card) => card.source.id === "60000000-0000-4000-8000-000000000006",
-      ),
+      view.insights.some((card) => card.source.id === "60000000-0000-4000-8000-000000000006"),
     ).toBe(false);
   });
 

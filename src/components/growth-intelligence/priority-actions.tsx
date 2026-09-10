@@ -21,15 +21,17 @@ export function PriorityActions({
   organizationId,
   timeZone,
   canManage,
+  hideHeading = false,
 }: SharedProps & {
   opportunities: readonly OpportunityCard[];
   recommendations: readonly RecommendationCard[];
+  hideHeading?: boolean;
 }) {
   return (
     <section aria-label="Priority actions" className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Priority actions</h2>
+      {hideHeading ? null : <h2 className="text-lg font-semibold">Priority actions</h2>}
       <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold">Platform opportunities</h3>
+        {hideHeading ? null : <h3 className="text-sm font-semibold">Platform opportunities</h3>}
         {opportunities.length === 0 ? (
           <p className="text-sm text-muted-foreground">No open platform opportunities.</p>
         ) : null}
@@ -44,7 +46,7 @@ export function PriorityActions({
         ))}
       </div>
       <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold">Operator recommendations</h3>
+        {hideHeading ? null : <h3 className="text-sm font-semibold">Operator recommendations</h3>}
         {recommendations.length === 0 ? (
           <p className="text-sm text-muted-foreground">No operator recommendations awaiting you.</p>
         ) : null}

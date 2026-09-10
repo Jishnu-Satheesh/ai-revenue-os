@@ -92,10 +92,9 @@ beforeEach(() => {
 
 describe("POST item decisions", () => {
   it("records the operator's answer and returns its id", async () => {
-    const response = await POST(
-      request({ decision: "planned", itemFingerprint: FINGERPRINT }),
-      { params },
-    );
+    const response = await POST(request({ decision: "planned", itemFingerprint: FINGERPRINT }), {
+      params,
+    });
     const body = (await response.json()) as Record<string, unknown>;
 
     expect(response.status).toBe(200);
@@ -169,7 +168,11 @@ describe("POST item decisions", () => {
 
   it("logs ids and the decision kind only, never the reason text", async () => {
     await POST(
-      request({ decision: "dismissed", reason: "Already handled offline.", itemFingerprint: FINGERPRINT }),
+      request({
+        decision: "dismissed",
+        reason: "Already handled offline.",
+        itemFingerprint: FINGERPRINT,
+      }),
       { params },
     );
 

@@ -37,9 +37,11 @@ function sourceLabel(source: TimelineEvent["source"]): string {
 export function IntelligenceTimeline({
   events: incoming,
   timeZone,
+  compact = false,
 }: {
   events: readonly TimelineEvent[];
   timeZone: string;
+  compact?: boolean;
 }) {
   // Your actions names one start and one terminal event per transition, so
   // the view deduplicates identical rows instead of showing the same moment
@@ -53,7 +55,7 @@ export function IntelligenceTimeline({
   });
   return (
     <section aria-label="Activity timeline" className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Activity</h2>
+      {compact ? null : <h2 className="text-lg font-semibold">Activity</h2>}
       {events.length === 0 ? (
         <p className="text-sm text-muted-foreground">No activity this month.</p>
       ) : (
@@ -75,6 +77,7 @@ export function IntelligenceTimeline({
                   <span className="font-medium">
                     {label} · {sourceLabel(event.source)}
                   </span>
+                  <span className="truncate text-sm">{event.title}</span>
                   <span className="text-xs text-muted-foreground">
                     {new Date(event.occurredAt).toLocaleDateString("en-AE", {
                       timeZone,
