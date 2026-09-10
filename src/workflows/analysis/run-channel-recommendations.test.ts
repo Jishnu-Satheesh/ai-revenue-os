@@ -331,6 +331,99 @@ describe("runChannelRecommendations gap-fill narration", () => {
   });
 });
 
+describe("runChannelRecommendations gap-fill headroom", () => {
+  // Prod run run_06g8l0bf99rpqlavml9alnpj01: five filed, four chapters
+  // uncovered, cap eight. The model filed one item per chapter and the fence
+  // refused 5+4>8 on every attempt, because nothing told the prompt about the
+  // budget the fence enforces.
+  const FUNNEL_UNCITED = "00000000-0000-4000-8000-000000000103";
+  const RETENTION_UNCITED = "00000000-0000-4000-8000-000000000104";
+
+  function headroomDependencies(
+    overrides: Partial<ChannelRecommendationsDependencies> = {},
+  ): ChannelRecommendationsDependencies {
+    return gapFillDependencies({
+      loadFindings: vi.fn(async () => [
+        findingSummary({ id: FUNNEL_UNCITED, detectorKey: "funnel.stage_conversion" }),
+        findingSummary({ id: RETENTION_UNCITED, detectorKey: "customer.new_share" }),
+      ]),
+      loadCitedFindingIds: vi.fn(async () => []),
+      loadFiledRecommendationCount: vi.fn(async () => 7),
+      generator: {
+        providerName: "google",
+        modelId: "test-model",
+        generate: vi.fn(async () => ({
+          items: [
+            {
+              citations: [FUNNEL_UNCITED, RETENTION_UNCITED],
+              limitations: [],
+              supportedActions: ["Review the funnel and mix together on Monday"],
+              detail: "The funnel and the customer mix leave one shared action.",
+              headline: "Recover the funnel and the lapsed mix in one move",
+              label: "recommendation",
+            },
+          ],
+        })),
+      },
+      ...overrides,
+    });
+  }
+
+  it("binds the gap-fill prompt to the free slots when chapters outnumber them", async () => {
+    const deps = headroomDependencies();
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    const [system, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(system).toContain("file at most 1 more");
+    expect(system).toContain("more than one key");
+    expect(user).toContain(`<finding id="${FUNNEL_UNCITED}">`);
+    expect(user).toContain(`<finding id="${RETENTION_UNCITED}">`);
+    expect(vi.mocked(deps.loadFiledRecommendationCount)).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      analysisRunId: RUN,
+    });
+  });
+
+  it("carries no budget line when the filed count loader is absent", async () => {
+    const deps = gapFillDependencies();
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.outcome).toBe("completed");
+    const [system] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(system).not.toContain("gap-fill");
+  });
+
+  it("fails fast without generating when no slot is free", async () => {
+    const deps = headroomDependencies({
+      loadFiledRecommendationCount: vi.fn(async () => 8),
+    });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.outcome).toBe("failed");
+    expect(deps.generator.generate).not.toHaveBeenCalled();
+    expect(deps.complete).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.fail).mock.calls[0][0].code).toBe("NARRATION_PROCESSING_FAILED");
+  });
+
+  it("fails processing when the filed count cannot be read", async () => {
+    const deps = headroomDependencies({
+      loadFiledRecommendationCount: vi.fn(async () => {
+        throw new Error("connection reset");
+      }),
+    });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.outcome).toBe("failed");
+    expect(deps.generator.generate).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.fail).mock.calls[0][0].code).toBe("NARRATION_PROCESSING_FAILED");
+  });
+});
+
 describe("runChannelRecommendations channel context threading", () => {
   const pilotContext = {
     channelContext: {

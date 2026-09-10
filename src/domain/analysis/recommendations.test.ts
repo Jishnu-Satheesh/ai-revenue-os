@@ -92,7 +92,7 @@ describe("the recommendation narration contracts", () => {
     // v8: narration prompt requires at least one citing item per chapter
     // holding observation findings, and the per-run cap rises to 8
     // (Amendment C).
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(8);
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(9);
     expect(JUDGE_PROMPT_VERSION).toBe(3);
     expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(8);
     expect(MAX_EVALUATION_BATCH).toBe(200);

@@ -224,6 +224,7 @@ export const channelRecommendationsTask = schemaTask({
     // Built after the strict payload parse, never at module scope: the service
     // credential must not exist for a request nobody validated.
     const supabase = createAnalysisWorkerServiceClient();
+
     const rpc = async <
       Name extends
         | "claim_channel_recommendations"
@@ -237,6 +238,27 @@ export const channelRecommendationsTask = schemaTask({
       if (error) throw new Error(`Channel recommendation state transition failed: ${error.code}`);
       return data;
     };
+
+    // The run's filed items, read once and shared: gap-fill scoping needs
+    // the cited set, and the headroom budget needs the count, and both read
+    // the same rows. One query, memoized for the run, so the two can never
+    // disagree about what this run holds.
+    let filedRecommendationIds: readonly string[] | null = null;
+    async function loadFiledRecommendationIds(
+      organizationId: string,
+      analysisRunId: string,
+    ): Promise<readonly string[]> {
+      if (filedRecommendationIds === null) {
+        const { data: items, error: itemsError } = await supabase
+          .from("channel_recommendations")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .eq("analysis_run_id", analysisRunId);
+        if (itemsError) throw new Error(`Channel cited findings load failed: ${itemsError.code}`);
+        filedRecommendationIds = (items ?? []).map((item) => item.id);
+      }
+      return filedRecommendationIds;
+    }
 
     const result = await runChannelRecommendations(payload, {
       async claim(input) {
@@ -262,13 +284,10 @@ export const channelRecommendationsTask = schemaTask({
         // through the worker client because citations are worker-owned rows;
         // scoped to this run's items so another window's narration can never
         // shrink this run's gap-fill folder.
-        const { data: items, error: itemsError } = await supabase
-          .from("channel_recommendations")
-          .select("id")
-          .eq("organization_id", input.organizationId)
-          .eq("analysis_run_id", input.analysisRunId);
-        if (itemsError) throw new Error(`Channel cited findings load failed: ${itemsError.code}`);
-        const recommendationIds = (items ?? []).map((item) => item.id);
+        const recommendationIds = await loadFiledRecommendationIds(
+          input.organizationId,
+          input.analysisRunId,
+        );
         if (recommendationIds.length === 0) return [];
         const { data: citations, error: citationsError } = await supabase
           .from("channel_recommendation_citations")
@@ -279,6 +298,14 @@ export const channelRecommendationsTask = schemaTask({
           throw new Error(`Channel cited findings load failed: ${citationsError.code}`);
         }
         return [...new Set((citations ?? []).map((citation) => citation.finding_id))];
+      },
+      async loadFiledRecommendationCount(input) {
+        // The headroom budget for the gap-fill prompt: how many items this
+        // run already filed. Same rows the cited set reads above, so the
+        // budget and the scoping can never disagree.
+        return (
+          await loadFiledRecommendationIds(input.organizationId, input.analysisRunId)
+        ).length;
       },
       async loadPilotContext(input) {
         return loadRecommendationPilotContext(supabase, input);

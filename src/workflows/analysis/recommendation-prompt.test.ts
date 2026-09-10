@@ -256,12 +256,12 @@ function nonPilotInput(overrides: Partial<NarrationPromptInput> = {}): Narration
   };
 }
 
-describe("prompt version 8", () => {
-  it("stamps version 8 for context and context-free prompts alike", () => {
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(8);
-    expect(buildNarrationPrompt(input).promptVersion).toBe(8);
-    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(8);
-    expect(buildNarrationPrompt(nonPilotInput()).promptVersion).toBe(8);
+describe("prompt version 9", () => {
+  it("stamps version 9 for context and context-free prompts alike", () => {
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(9);
+    expect(buildNarrationPrompt(input).promptVersion).toBe(9);
+    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(9);
+    expect(buildNarrationPrompt(nonPilotInput()).promptVersion).toBe(9);
   });
 
   it("requires at least one citing item per chapter holding observation findings", () => {
@@ -313,6 +313,47 @@ describe("prompt version 8", () => {
 
     expect(system).toContain("basic English");
     expect(system).toContain("No idioms");
+  });
+});
+
+describe("gap-fill headroom (prompt version 9)", () => {
+  // Prod run run_06g8l0bf99rpqlavml9alnpj01: five filed, four chapters
+  // uncovered, cap eight. The model filed one item per chapter and the fence
+  // refused 5+4>8 on every attempt. A gap-fill whose chapters outnumber its
+  // free slots now gets the exact budget as a binding line.
+  it("binds the exact item budget and requires multi-key items when groups outnumber slots", () => {
+    // nonPilotInput spans funnel and money: two detector keys, one free slot
+    // at seven filed. Keys are the unit, not chapters: keys with no chapter
+    // still cost a slot each when the model covers them.
+    const { system, user } = buildNarrationPrompt({
+      ...nonPilotInput(),
+      gapFill: { filedCount: 7 },
+    });
+
+    expect(system).toContain("file at most 1 more");
+    expect(system).toContain("more than one key");
+    expect(user).toContain("funnel.stage_conversion");
+  });
+
+  it("leaves the prompt byte-identical when the uncovered groups already fit", () => {
+    // Two chapters, two free slots at six filed: the standing coverage rules
+    // suffice, so no budget line may drift the prompt.
+    const base = nonPilotInput();
+    const budgeted = buildNarrationPrompt({ ...base, gapFill: { filedCount: 6 } });
+    const plain = buildNarrationPrompt(base);
+
+    expect(budgeted.system).toBe(plain.system);
+    expect(budgeted.user).toBe(plain.user);
+  });
+
+  it("never mentions gap-fill budgets on full narrations", () => {
+    for (const built of [
+      buildNarrationPrompt(input),
+      buildNarrationPrompt(pilotInput()),
+      buildNarrationPrompt(nonPilotInput()),
+    ]) {
+      expect(built.system).not.toContain("gap-fill");
+    }
   });
 });
 

@@ -46,8 +46,16 @@ import { z } from "zod";
  * observation findings gets at least one citing item, and the per-run cap
  * rises to 8 so coverage never competes with honest needs_data notes.
  * See ADR 0053.
+ *
+ * 9: gap-fill headroom. A March run filed five items with four finding
+ * groups still uncovered, the model filed one item per group, and the fence
+ * refused 5+4>8 on every attempt (prod run run_06g8l0bf99rpqlavml9alnpj01).
+ * Gap-fill rounds now carry the filed count, and when the uncovered groups
+ * outnumber the free slots the prompt binds the exact item budget and
+ * requires multi-group items instead of letting coverage and the cap
+ * disagree.
  */
-export const RECOMMENDATION_PROMPT_VERSION = 8;
+export const RECOMMENDATION_PROMPT_VERSION = 9;
 
 /**
  * Bumped only when the judge prompt's instructions change.

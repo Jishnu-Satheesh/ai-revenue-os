@@ -42,6 +42,15 @@ export type NarrationPromptInput = {
   findings: readonly NarrationPromptFinding[];
   /** Stored channel identity; absent renders the v4 shape (plus the global plain-language rules). */
   channelContext?: NarrationChannelContext | null;
+  /**
+   * Gap-fill rounds only: how many items this run already filed. Absent, the
+   * prompt stays byte-identical to a full narration, so full rounds never see
+   * gap-fill rules. Present, the uncovered chapters are counted against the
+   * free slots, and a round whose chapters outnumber its slots gets one
+   * binding line with the exact item budget instead of the standing
+   * per-chapter coverage rule the fence's run-total cap would then refuse.
+   */
+  gapFill?: { filedCount: number } | null;
 };
 
 /**
@@ -248,6 +257,42 @@ const OUTPUT_CONTRACT = [
 const OUTPUT_CONTRACT_BLOCK = ["<output_contract>", OUTPUT_CONTRACT, "</output_contract>"];
 
 /**
+ * Coverage units the folder still asks to cover: distinct detector keys in
+ * hand. Keys, not chapters: the model files one item per key left to itself
+ * (four samples, four one-key items), while chapters undercount — keys like
+ * revenue.window_gross belong to no chapter yet still cost a slot each when
+ * the model covers them. Counting keys binds the budget against what the
+ * model will actually file.
+ */
+function uncoveredDetectorKeys(findings: readonly NarrationPromptFinding[]): string[] {
+  return [...new Set(findings.map((finding) => finding.detectorKey))].sort();
+}
+
+/**
+ * The binding budget for a gap-fill round whose finding groups outnumber its
+ * slots.
+ *
+ * A standing "one item per chapter" habit plus a run-total cap is how a filed
+ * five with four keys uncovered refused 5+4>8 on every attempt: the model
+ * complied with coverage and the fence complied with the cap. Null whenever
+ * no budget binds — no gap-fill input, a non-positive slot count the workflow
+ * fails before generating, or groups that already fit — so those prompts
+ * stay byte-identical to what earlier versions built.
+ */
+function gapFillHeadroomLine(input: NarrationPromptInput): string | null {
+  const filed = input.gapFill?.filedCount;
+  if (filed === undefined || filed === null) return null;
+  const headroom = MAX_RECOMMENDATIONS_PER_RUN - filed;
+  if (headroom < 1) return null;
+  const keys = uncoveredDetectorKeys(input.findings);
+  if (keys.length <= headroom) return null;
+  return [
+    `This is a gap-fill: ${filed} items are already filed, so you may file at most ${headroom} more.`,
+    `Cover all ${keys.length} detector_keys below within those ${headroom} items: where one problem touches findings from more than one key, put them in a single item instead of one item per key.`,
+  ].join("\n");
+}
+
+/**
  * Codepoint order, not locale order. A locale table update between two
  * environments would otherwise silently change the folder the model reads.
  */
@@ -326,6 +371,7 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     ? renderChannelContext(input.channelContext)
     : null;
   const hasChannel = channelBlock !== null;
+  const headroomLine = gapFillHeadroomLine(input);
 
   const system = [
     "You narrate the findings of one channel-analysis run for a business operator.",
@@ -338,6 +384,7 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     ADVICE_MANDATE,
     "",
     COVERAGE_RULES,
+    ...(headroomLine ? ["", headroomLine] : []),
     "",
     ADVICE_RULES,
     "",

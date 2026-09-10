@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  MAX_RECOMMENDATIONS_PER_RUN,
   narrationSubmissionSchema,
   type NarratedItem,
   type NarrationSubmission,
@@ -108,6 +109,17 @@ export type ChannelRecommendationsDependencies = {
     organizationId: string;
     analysisRunId: string;
   }): Promise<readonly string[]>;
+  /**
+   * Items this run already filed. Gap-fill only: the prompt binds its item
+   * budget to the free slots, so coverage and the run-total cap cannot ask
+   * for different things. Optional so existing callers compile; absent, the
+   * prompt carries no budget line and the fence stays the only cap, exactly
+   * as before this dependency existed.
+   */
+  loadFiledRecommendationCount?(input: {
+    organizationId: string;
+    analysisRunId: string;
+  }): Promise<number>;
   /**
    * Stored channel context for the prompt, loaded server-side by the
    * caller (the Trigger task reads the stored org/channel/branch rows).
@@ -239,6 +251,9 @@ export async function runChannelRecommendations(
 
   try {
     let findings: readonly NarrationPromptFinding[];
+    // Items this run already filed; gap-fill only, and only when the loader
+    // below is provided. Carried out of the branch so the prompt binds it.
+    let filedCount: number | null = null;
     try {
       findings = await dependencies.loadFindings({
         organizationId: payload.organizationId,
@@ -283,6 +298,24 @@ export async function runChannelRecommendations(
       if (findings.length === 0) {
         throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
       }
+
+      // The budget the prompt will bind: a gap-fill whose filed items leave
+      // no free slot cannot file anything the fence would accept, so it fails
+      // here, before a single provider call burns. Absent loader keeps the
+      // old behavior — no budget line, fence as the only cap.
+      if (dependencies.loadFiledRecommendationCount) {
+        try {
+          filedCount = await dependencies.loadFiledRecommendationCount({
+            organizationId: payload.organizationId,
+            analysisRunId: payload.analysisRunId,
+          });
+        } catch {
+          throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
+        }
+        if (MAX_RECOMMENDATIONS_PER_RUN - filedCount < 1) {
+          throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
+        }
+      }
     }
 
     // Channel context is advisory, never load-bearing: any throw from the
@@ -313,6 +346,9 @@ export async function runChannelRecommendations(
       periodGrain: claim.window.periodGrain,
       findings,
       channelContext: pilot.channelContext,
+      // Full narrations pass nothing: their prompt stays byte-identical, and
+      // a gap-fill without a filed count keeps the old behavior too.
+      ...(gapFill && filedCount !== null ? { gapFill: { filedCount } } : {}),
     });
 
     // Grounding follows the run having findings, not the loader's luck and
