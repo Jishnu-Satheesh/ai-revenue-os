@@ -25,9 +25,10 @@ export const reportContractVersionRouteParamsSchema = organizationReportRoutePar
 export const reportProjectionVersionRouteParamsSchema = organizationReportRouteParamsSchema.extend({
   projectionVersionId: z.string().uuid(),
 });
-export const reportProjectionReconciliationRouteParamsSchema = organizationReportRouteParamsSchema.extend({
-  reconciliationId: z.string().uuid(),
-});
+export const reportProjectionReconciliationRouteParamsSchema =
+  organizationReportRouteParamsSchema.extend({
+    reconciliationId: z.string().uuid(),
+  });
 
 export async function reportRequest<TSchema extends z.ZodType>(
   request: Request,
@@ -38,7 +39,8 @@ export async function reportRequest<TSchema extends z.ZodType>(
   try {
     return schema.parse(transform(await request.json()));
   } catch (error) {
-    if (error instanceof z.ZodError) throw new DomainError("VALIDATION_ERROR", validationMessage, error);
+    if (error instanceof z.ZodError)
+      throw new DomainError("VALIDATION_ERROR", validationMessage, error);
     throw new DomainError("VALIDATION_ERROR", validationMessage, error);
   }
 }

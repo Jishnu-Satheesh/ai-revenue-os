@@ -166,7 +166,12 @@ type GrantAdmissionRpcResult = {
 
 export function createAdmissionService(client: AuthenticatedClient): AdmissionService {
   return {
-    async findActiveAdmission({ organizationId, channelId, structureFingerprint, declaredCurrency }) {
+    async findActiveAdmission({
+      organizationId,
+      channelId,
+      structureFingerprint,
+      declaredCurrency,
+    }) {
       const { data, error } = await client
         .from("report_structure_admissions")
         .select("*")
@@ -224,7 +229,10 @@ export function createAdmissionService(client: AuthenticatedClient): AdmissionSe
         p_idempotency_key: idempotencyKey,
         p_correlation_id: correlationId,
       });
-      if (error?.code === "23514" && error.message === "report package has no recorded structure fingerprint") {
+      if (
+        error?.code === "23514" &&
+        error.message === "report package has no recorded structure fingerprint"
+      ) {
         throw new UnprofiledReportPackageError(error);
       }
       if (error || !data) persistenceFailure(grantFailureMessage(error), error);

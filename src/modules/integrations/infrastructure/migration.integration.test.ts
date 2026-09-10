@@ -798,7 +798,9 @@ describe("Integration Hub migration contract", () => {
     expect(policy).toContain("(storage.foldername(objects.name))[2]");
     expect(policy).toContain("(storage.foldername(objects.name))[3]");
     expect(policy).toContain("objects.name = p.storage_path");
-    expect(policy).toContain("private.has_organization_permission(p.organization_id, 'report.upload')");
+    expect(policy).toContain(
+      "private.has_organization_permission(p.organization_id, 'report.upload')",
+    );
     expect(policy).not.toMatch(/storage\.foldername\(\s*name\s*\)/);
   });
 

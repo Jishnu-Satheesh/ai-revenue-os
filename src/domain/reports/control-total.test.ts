@@ -26,7 +26,12 @@ const contract: ReportContractDocument = {
       allowFormula: false,
       allowMergedCells: false,
       fields: [
-        { canonicalField: "period_date", sourceHeader: "date", parser: "local_date", required: true },
+        {
+          canonicalField: "period_date",
+          sourceHeader: "date",
+          parser: "local_date",
+          required: true,
+        },
         {
           canonicalField: "gross_sales",
           sourceHeader: "gross_sales",
@@ -221,10 +226,7 @@ describe("checking an import against the total the provider states", () => {
   });
 
   it("leaves an import with no stated total exactly as it was", () => {
-    const result = projectRange(
-      [["2026-01-01", 70, 2]],
-      exactRange({ controlTotals: undefined }),
-    );
+    const result = projectRange([["2026-01-01", 70, 2]], exactRange({ controlTotals: undefined }));
 
     expect(result.controlTotals).toEqual([]);
     expect(result.outputs[0]?.valueNumerator).toBe("7000");
@@ -254,11 +256,15 @@ describe("what a stated total may not say", () => {
   });
 
   it("refuses a total that is not whole minor units", () => {
-    expect(() => exactRange({ controlTotals: [statedTotal({ statedTotalMinorUnits: "89.00" })] })).toThrow();
+    expect(() =>
+      exactRange({ controlTotals: [statedTotal({ statedTotalMinorUnits: "89.00" })] }),
+    ).toThrow();
   });
 
   it("refuses a negative tolerance", () => {
-    expect(() => exactRange({ controlTotals: [statedTotal({ toleranceMinorUnits: -1 })] })).toThrow();
+    expect(() =>
+      exactRange({ controlTotals: [statedTotal({ toleranceMinorUnits: -1 })] }),
+    ).toThrow();
   });
 
   it("refuses a total with no named source, because an unattributed figure is not evidence", () => {

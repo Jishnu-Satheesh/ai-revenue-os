@@ -25,7 +25,12 @@ const contract: ReportContractDocument = {
       allowFormula: false,
       allowMergedCells: false,
       fields: [
-        { canonicalField: "period_date", sourceHeader: "date", parser: "local_date", required: true },
+        {
+          canonicalField: "period_date",
+          sourceHeader: "date",
+          parser: "local_date",
+          required: true,
+        },
         {
           canonicalField: "gross_sales",
           sourceHeader: "gross_sales",
@@ -121,10 +126,7 @@ describe("projecting a file that carries one row per day", () => {
       ["2026-01-03", null, null],
     ]);
 
-    expect(result.observations.map((row) => row.periodStart)).toEqual([
-      "2026-01-02",
-      "2026-01-02",
-    ]);
+    expect(result.observations.map((row) => row.periodStart)).toEqual(["2026-01-02", "2026-01-02"]);
     expect(result.absentRowCount).toBe(2);
   });
 
@@ -136,7 +138,10 @@ describe("projecting a file that carries one row per day", () => {
   });
 
   it("ignores a wholly empty trailing row", () => {
-    const result = project([["2026-01-01", 70, 2], [null, null, null]]);
+    const result = project([
+      ["2026-01-01", 70, 2],
+      [null, null, null],
+    ]);
 
     expect(result.observations).toHaveLength(2);
     expect(result.absentRowCount).toBe(0);
@@ -224,7 +229,12 @@ describe("a provider that leaves days blank", () => {
       contract: optional,
       document: declaration() as Extract<ReportProjectionDocument, { outputKind: "period_grain" }>,
       declaredCurrency: "AED",
-      sheets: [{ normalizedSheetName: "sheet1", rows: [HEADER, ["2026-01-01", 70, 2], ["2026-01-02", null, 1]] }],
+      sheets: [
+        {
+          normalizedSheetName: "sheet1",
+          rows: [HEADER, ["2026-01-01", 70, 2], ["2026-01-02", null, 1]],
+        },
+      ],
     });
 
     expect(result.observations.filter((row) => row.key === "gross_revenue")).toHaveLength(1);

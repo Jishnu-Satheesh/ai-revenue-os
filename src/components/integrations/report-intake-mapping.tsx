@@ -324,7 +324,10 @@ export function ReportIntakeMapping({
             </p>
           )}
           {(selectedSheet?.headerRows.length ?? 0) > 1 ? (
-            <Select value={String(selectedHeaderRow?.rowPosition ?? "")} onValueChange={setHeaderRow}>
+            <Select
+              value={String(selectedHeaderRow?.rowPosition ?? "")}
+              onValueChange={setHeaderRow}
+            >
               <SelectTrigger aria-label="Row the headings are on" className="max-w-[14rem]">
                 <SelectValue />
               </SelectTrigger>
@@ -369,7 +372,12 @@ export function ReportIntakeMapping({
             "guided-sales",
             "Which column is your sales?",
             "The money the customer paid, before anything is taken.",
-            columnSelect("guided-sales", salesColumn, setSalesColumn, "— this file doesn't have it —"),
+            columnSelect(
+              "guided-sales",
+              salesColumn,
+              setSalesColumn,
+              "— this file doesn't have it —",
+            ),
             salesColumn === NONE ? undefined : "Recorded",
           )}
           {question(
@@ -388,12 +396,7 @@ export function ReportIntakeMapping({
             "guided-totals",
             "Does it have a totals row?",
             "If we counted it as data, every figure would double.",
-            columnSelect(
-              "guided-totals",
-              totalsColumn,
-              setTotalsColumn,
-              "— no totals row —",
-            ),
+            columnSelect("guided-totals", totalsColumn, setTotalsColumn, "— no totals row —"),
           )}
           {totalsColumn === NONE
             ? null

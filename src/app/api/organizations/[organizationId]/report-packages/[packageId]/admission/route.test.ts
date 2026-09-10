@@ -19,7 +19,10 @@ vi.mock("@/modules/reports/application/dispatch", () => ({
 }));
 
 import { POST } from "@/app/api/organizations/[organizationId]/report-packages/[packageId]/admission/route";
-import { admissionIdempotencyKeys, UnprofiledReportPackageError } from "@/modules/reports/application/admissions";
+import {
+  admissionIdempotencyKeys,
+  UnprofiledReportPackageError,
+} from "@/modules/reports/application/admissions";
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const PACKAGE_ID = "22222222-2222-4222-8222-222222222222";
@@ -36,9 +39,13 @@ const requestBody = {
 
 function service(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}) {
   return {
-    proposeContract: vi.fn().mockResolvedValue({ id: CONTRACT_VERSION_ID, provider_definition_key: null }),
+    proposeContract: vi
+      .fn()
+      .mockResolvedValue({ id: CONTRACT_VERSION_ID, provider_definition_key: null }),
     decideContract: vi.fn().mockResolvedValue({}),
-    proposeProjection: vi.fn().mockResolvedValue({ id: PROJECTION_VERSION_ID, provider_definition_key: null }),
+    proposeProjection: vi
+      .fn()
+      .mockResolvedValue({ id: PROJECTION_VERSION_ID, provider_definition_key: null }),
     decideProjection: vi.fn().mockResolvedValue({}),
     ...overrides,
   };
@@ -104,7 +111,9 @@ describe("POST report structure admission", () => {
 
     await expect(handler(context)).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
     expect((context.service as ReturnType<typeof service>).proposeContract).not.toHaveBeenCalled();
-    expect((context.admissionService as ReturnType<typeof admissionService>).grantAdmission).not.toHaveBeenCalled();
+    expect(
+      (context.admissionService as ReturnType<typeof admissionService>).grantAdmission,
+    ).not.toHaveBeenCalled();
   });
 
   it("lets an admin grant, orchestrating all five calls with keys derived from the package id, and names the admission in the response", async () => {
@@ -176,18 +185,24 @@ describe("POST report structure admission", () => {
       service: service({
         proposeContract: vi
           .fn()
-          .mockResolvedValue({ id: CONTRACT_VERSION_ID, provider_definition_key: "talabat.performance.v1" }),
+          .mockResolvedValue({
+            id: CONTRACT_VERSION_ID,
+            provider_definition_key: "talabat.performance.v1",
+          }),
         proposeProjection: vi
           .fn()
-          .mockResolvedValue({ id: PROJECTION_VERSION_ID, provider_definition_key: "talabat.performance.v1" }),
+          .mockResolvedValue({
+            id: PROJECTION_VERSION_ID,
+            provider_definition_key: "talabat.performance.v1",
+          }),
       }),
     });
 
     await handler(context);
 
-    expect((context.admissionService as ReturnType<typeof admissionService>).grantAdmission).toHaveBeenCalledWith(
-      expect.objectContaining({ reportFamilyKey: "talabat.performance.v1" }),
-    );
+    expect(
+      (context.admissionService as ReturnType<typeof admissionService>).grantAdmission,
+    ).toHaveBeenCalledWith(expect.objectContaining({ reportFamilyKey: "talabat.performance.v1" }));
   });
 
   it("answers 409 with a profiling message when the package has no recorded structure fingerprint", async () => {
@@ -201,7 +216,9 @@ describe("POST report structure admission", () => {
     const result = await handler(context);
 
     expect(result.status).toBe(409);
-    expect((result.body as { error: { message: string } }).error.message).toMatch(/has not been profiled yet/);
+    expect((result.body as { error: { message: string } }).error.message).toMatch(
+      /has not been profiled yet/,
+    );
   });
 
   /**
@@ -265,6 +282,8 @@ describe("POST report structure admission", () => {
     });
 
     await expect(handler(context)).rejects.toBe(failure);
-    expect((context.admissionService as ReturnType<typeof admissionService>).grantAdmission).not.toHaveBeenCalled();
+    expect(
+      (context.admissionService as ReturnType<typeof admissionService>).grantAdmission,
+    ).not.toHaveBeenCalled();
   });
 });

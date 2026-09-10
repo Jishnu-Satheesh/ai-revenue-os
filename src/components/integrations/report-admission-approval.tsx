@@ -60,9 +60,9 @@ export function ReportAdmissionApproval({
         },
       );
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as
-          | { error?: { message?: string } }
-          | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
         throw new Error(payload?.error?.message ?? "This report could not be admitted. Try again.");
       }
       return response.json();
@@ -92,8 +92,8 @@ export function ReportAdmissionApproval({
           <ShieldCheck className="mt-0.5 size-4 shrink-0" />
           <span>
             Approving does not approve just this file. It grants a standing permission for this
-            channel: every future upload of this report is read the same way automatically,
-            without asking again, until an owner or admin revokes it.
+            channel: every future upload of this report is read the same way automatically, without
+            asking again, until an owner or admin revokes it.
           </span>
         </p>
       </div>

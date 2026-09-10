@@ -27,15 +27,23 @@ import { requestReportPackageValidation } from "@/modules/reports/application/di
 const contractContentSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("human"), mappingDocument: reportContractDocumentSchema }).strict(),
   z
-    .object({ source: z.literal("library"), providerDefinitionKey: z.string().trim().min(2).max(80) })
+    .object({
+      source: z.literal("library"),
+      providerDefinitionKey: z.string().trim().min(2).max(80),
+    })
     .strict(),
   z.object({ source: z.literal("guided"), guided: guidedReportMappingSchema }).strict(),
 ]);
 
 const projectionContentSchema = z.discriminatedUnion("source", [
-  z.object({ source: z.literal("human"), projectionDocument: reportProjectionDocumentSchema }).strict(),
   z
-    .object({ source: z.literal("library"), providerDefinitionKey: z.string().trim().min(2).max(80) })
+    .object({ source: z.literal("human"), projectionDocument: reportProjectionDocumentSchema })
+    .strict(),
+  z
+    .object({
+      source: z.literal("library"),
+      providerDefinitionKey: z.string().trim().min(2).max(80),
+    })
     .strict(),
   z.object({ source: z.literal("guided") }).strict(),
 ]);

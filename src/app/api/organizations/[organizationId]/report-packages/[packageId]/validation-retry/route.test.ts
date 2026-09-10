@@ -50,9 +50,7 @@ function admittedPackageSnapshot() {
   return {
     validationRuns: [],
     contractVersions: [{ id: ADMITTED_VERSION_ID, report_package_id: EARLIER_PACKAGE_ID }],
-    contractDecisions: [
-      { report_contract_version_id: ADMITTED_VERSION_ID, decision: "approved" },
-    ],
+    contractDecisions: [{ report_contract_version_id: ADMITTED_VERSION_ID, decision: "approved" }],
   };
 }
 
@@ -113,10 +111,12 @@ describe("validation retry route", () => {
     const result = await invokeRoute();
 
     expect(mocks.requestReportPackageValidation).not.toHaveBeenCalled();
-    expect(result.body).toEqual(expect.objectContaining({
-      validationQueued: false,
-      reason: "feature_disabled",
-    }));
+    expect(result.body).toEqual(
+      expect.objectContaining({
+        validationQueued: false,
+        reason: "feature_disabled",
+      }),
+    );
   });
 
   it("distinguishes an upload with no approved structure from a disabled feature", async () => {
@@ -130,10 +130,12 @@ describe("validation retry route", () => {
     const result = await invokeRoute();
 
     expect(mocks.requestReportPackageValidation).not.toHaveBeenCalled();
-    expect(result.body).toEqual(expect.objectContaining({
-      validationQueued: false,
-      reason: "contract_unresolved",
-    }));
+    expect(result.body).toEqual(
+      expect.objectContaining({
+        validationQueued: false,
+        reason: "contract_unresolved",
+      }),
+    );
   });
 
   it("reports a transport failure as a transport failure", async () => {
@@ -141,9 +143,11 @@ describe("validation retry route", () => {
 
     const result = await invokeRoute();
 
-    expect(result.body).toEqual(expect.objectContaining({
-      validationQueued: false,
-      reason: "dispatch_failed",
-    }));
+    expect(result.body).toEqual(
+      expect.objectContaining({
+        validationQueued: false,
+        reason: "dispatch_failed",
+      }),
+    );
   });
 });

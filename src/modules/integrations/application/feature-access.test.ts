@@ -67,9 +67,12 @@ describe("governed economics readiness rollout", () => {
   it("is off for everyone when the variable is unset", () => {
     // The default the rollback plan depends on. An unset variable parses to an
     // empty set, and an empty set enables nobody.
-    expect(isGovernedEconomicsReadinessEnabled(organizationA, parseIntegrationOrganizationIds(undefined))).toBe(
-      false,
-    );
+    expect(
+      isGovernedEconomicsReadinessEnabled(
+        organizationA,
+        parseIntegrationOrganizationIds(undefined),
+      ),
+    ).toBe(false);
   });
 
   it("is on for an enabled organization whatever case its ID arrives in", () => {

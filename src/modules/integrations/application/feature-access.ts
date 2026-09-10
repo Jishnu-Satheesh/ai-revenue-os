@@ -68,7 +68,10 @@ export function isGovernedReportProjectionEnabled(
 
 export function assertGovernedReportProjectionEnabled(organizationId: string): void {
   if (!isGovernedReportProjectionEnabled(organizationId)) {
-    throw new DomainError("FEATURE_NOT_AVAILABLE", "Deterministic report projection is not enabled for this organization.");
+    throw new DomainError(
+      "FEATURE_NOT_AVAILABLE",
+      "Deterministic report projection is not enabled for this organization.",
+    );
   }
 }
 
