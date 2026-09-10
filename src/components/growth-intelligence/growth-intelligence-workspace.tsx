@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, CheckCircle2, Clock3, RefreshCw, Settings2, Sparkles } from "lucide-react";
 
 import { formatWindow } from "@/components/analysis/format";
-import { WindowMonthPicker } from "@/components/analysis/window-range-picker";
+import { WindowRangePicker } from "@/components/analysis/window-range-picker";
 import { BusinessPerformanceCard } from "@/components/growth-intelligence/business-performance-card";
 import { DataGaps } from "@/components/growth-intelligence/data-gaps";
 import { InsightsList } from "@/components/growth-intelligence/insights-list";
@@ -30,6 +30,7 @@ import type { ResearchPipelineView } from "@/modules/growth-intelligence/applica
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageContentLoader } from "@/components/ui/page-content-loader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -40,11 +41,71 @@ import {
 } from "@/components/ui/select";
 import { growthIntelligencePath } from "@/lib/routes";
 import {
-  enumerateCoveredMonths,
   type BusinessPerformanceCardView,
   type PerformanceFilterState,
 } from "@/modules/analysis/application/channels-overview";
 import type { GrowthIntelligenceView } from "@/modules/growth-intelligence/application/read-model";
+
+/**
+ * Watches the aggregate build status for the picked range while the loader
+ * is up. Any settled verdict -- figures ready or nothing left to wait for --
+ * re-reads the page from the server, which is where the card (or the honest
+ * note) is decided. A dropped poll is retried, never mistaken for an answer.
+ */
+function PerformanceBuildWatcher({
+  organizationId,
+  from,
+  to,
+  channelIds,
+}: {
+  organizationId: string;
+  from: string;
+  to: string;
+  channelIds: readonly string[];
+}) {
+  const router = useRouter();
+  const channelsKey = [...channelIds].sort().join(",");
+
+  useEffect(() => {
+    if (channelsKey.length === 0) return;
+    const url =
+      `/api/organizations/${organizationId}/growth-intelligence/performance-build` +
+      `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` +
+      `&channels=${encodeURIComponent(channelsKey)}`;
+    const controller = new AbortController();
+    let stopped = false;
+
+    async function poll(): Promise<void> {
+      if (stopped) return;
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        const body = (await response.json()) as { state: string };
+        if (stopped) return;
+        if (body.state === "ready" || body.state === "failed") {
+          stopped = true;
+          clearInterval(timer);
+          router.refresh();
+        }
+      } catch {
+        // A dropped poll is not a failed build: keep the previous state and
+        // keep polling.
+      }
+    }
+
+    const timer = setInterval(() => {
+      void poll();
+    }, 2000);
+    void poll();
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      controller.abort();
+    };
+  }, [organizationId, from, to, channelsKey, router]);
+
+  return null;
+}
 
 const TAB_IDS = ["overview", "recommendations", "actions", "insights"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -69,12 +130,22 @@ function PerformanceSummary({
   timeZone,
   organizationId,
   filters,
+  buildPending,
+  buildFailed,
+  buildRefused,
+  canRequestBuild,
+  pendingChannelIds,
 }: {
   card: BusinessPerformanceCardView | null;
   fetchedAt: string | null;
   timeZone: string;
   organizationId: string;
   filters: PerformanceFilterState | null;
+  buildPending: boolean;
+  buildFailed: boolean;
+  buildRefused: boolean;
+  canRequestBuild: boolean;
+  pendingChannelIds: readonly string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -112,7 +183,7 @@ function PerformanceSummary({
     );
   }
 
-  function applyMonth(selection: { from: string; to: string }) {
+  function applyRange(selection: { from: string; to: string }) {
     setParams({ from: selection.from, to: selection.to, window: null });
   }
 
@@ -151,13 +222,13 @@ function PerformanceSummary({
     </Button>
   );
 
-  // The filters exist exactly when some month is reported. Without them the
+  // The filters exist exactly when some range is covered. Without them the
   // picker has no valid selection, so only freshness and refresh remain.
   const filteredOut =
     filters !== null &&
     (filters.channelId !== null || filters.branchId !== null) &&
     (displayedCard?.channelCount ?? 0) === 0;
-  const coveredMonths = filters ? enumerateCoveredMonths(filters.segments) : [];
+  const showCard = !filteredOut && (displayedCard !== null || buildPending);
 
   return (
     <section aria-label="Organization performance" className="flex flex-col gap-4">
@@ -168,10 +239,13 @@ function PerformanceSummary({
             aria-label="Performance filters"
             className="flex flex-wrap items-center gap-2"
           >
-            <WindowMonthPicker
-              months={coveredMonths}
+            <WindowRangePicker
+              segments={filters.segments}
+              windows={filters.coverageWindows}
               selected={{ from: filters.from, to: filters.to }}
-              onApply={applyMonth}
+              today={filters.today}
+              onApply={applyRange}
+              subjectLabel="The approved reports state"
             />
             <Select
               value={filters.channelId ?? "all"}
@@ -223,9 +297,32 @@ function PerformanceSummary({
           {refreshButton}
         </div>
       )}
-      {filters && !filters.resolved ? (
+      {filters && !filters.resolved && !displayedCard && !buildPending ? (
         <p role="status" className="text-sm text-muted-foreground">
-          {`No completed analysis matches ${formatWindow(filters.from, filters.to)} exactly. Pick a reported month to see measured figures.`}
+          {`No completed analysis matches ${formatWindow(filters.from, filters.to)} exactly. Pick a covered range to see measured figures.`}
+        </p>
+      ) : null}
+      {filters && buildFailed && !displayedCard ? (
+        <p role="alert" className="text-sm text-destructive">
+          The build for this period could not complete. Nothing was changed; press Refresh to try
+          again.
+        </p>
+      ) : null}
+      {filters && buildRefused && !displayedCard && !buildPending ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          This scope covers more channels than one automatic build takes. Run the analyses from the
+          Channel Audit page instead.
+        </p>
+      ) : null}
+      {filters &&
+      filters.resolved !== null &&
+      !canRequestBuild &&
+      !displayedCard &&
+      !buildPending &&
+      !buildFailed ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          No finished analysis covers this period yet. Someone with analysis permission can run it
+          from the Channel Audit page.
         </p>
       ) : null}
       {filteredOut ? (
@@ -238,8 +335,28 @@ function PerformanceSummary({
           Refresh failed. The figures and timestamp shown here are still the last successful result.
         </p>
       ) : null}
-      {filteredOut ? null : displayedCard ? (
-        <BusinessPerformanceCard card={displayedCard} />
+      {filteredOut ? null : showCard ? (
+        // The loader lives inside this relative box, so its blurry overlay
+        // covers the page-content viewport only: the dock and navbar sit
+        // outside it and stay interactive. A previous card stays behind the
+        // blur; a first build gets room for the loader to stand in.
+        <div className={displayedCard || !buildPending ? "relative" : "relative min-h-80"}>
+          {displayedCard ? <BusinessPerformanceCard card={displayedCard} /> : null}
+          {buildPending && filters ? (
+            <>
+              <PageContentLoader
+                title="Building this period's figures"
+                detail={`${formatWindow(filters.from, filters.to)} · watching ${pendingChannelIds.length} ${pendingChannelIds.length === 1 ? "channel" : "channels"}`}
+              />
+              <PerformanceBuildWatcher
+                organizationId={organizationId}
+                from={filters.from}
+                to={filters.to}
+                channelIds={pendingChannelIds}
+              />
+            </>
+          ) : null}
+        </div>
       ) : (
         <Card className="p-6">
           <p className="font-medium">Performance reporting is not available yet.</p>
@@ -296,6 +413,11 @@ export function GrowthIntelligenceWorkspace({
   performanceCard,
   fetchedAt,
   performanceFilters,
+  buildPending = false,
+  buildFailed = false,
+  buildRefused = false,
+  canRequestBuild = false,
+  pendingChannelIds = [],
   branches = [],
   selectedBranchId = null,
 }: {
@@ -307,6 +429,11 @@ export function GrowthIntelligenceWorkspace({
   performanceCard: BusinessPerformanceCardView | null;
   fetchedAt: string | null;
   performanceFilters: PerformanceFilterState | null;
+  buildPending?: boolean;
+  buildFailed?: boolean;
+  buildRefused?: boolean;
+  canRequestBuild?: boolean;
+  pendingChannelIds?: readonly string[];
   branches?: MonitoringBranchOption[];
   selectedBranchId?: string | null;
 }) {
@@ -413,6 +540,11 @@ export function GrowthIntelligenceWorkspace({
             filters={performanceFilters}
             timeZone={view.timeZone}
             organizationId={organizationId}
+            buildPending={buildPending}
+            buildFailed={buildFailed}
+            buildRefused={buildRefused}
+            canRequestBuild={canRequestBuild}
+            pendingChannelIds={pendingChannelIds}
           />
 
           <section aria-label="Previous actions" className="flex flex-col gap-4">

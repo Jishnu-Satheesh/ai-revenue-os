@@ -59,6 +59,13 @@ function workspace(
   currentView = view(),
   isCurrentMonth = true,
   filters: PerformanceFilterState | null = defaultFilters(),
+  build: {
+    buildPending?: boolean;
+    buildFailed?: boolean;
+    buildRefused?: boolean;
+    canRequestBuild?: boolean;
+    pendingChannelIds?: readonly string[];
+  } = {},
 ) {
   return render(
     <GrowthIntelligenceWorkspace
@@ -70,6 +77,11 @@ function workspace(
       performanceCard={null}
       fetchedAt="2026-09-07T09:00:00.000Z"
       performanceFilters={filters}
+      buildPending={build.buildPending ?? false}
+      buildFailed={build.buildFailed ?? false}
+      buildRefused={build.buildRefused ?? false}
+      canRequestBuild={build.canRequestBuild ?? true}
+      pendingChannelIds={build.pendingChannelIds ?? []}
     />,
   );
 }
@@ -161,6 +173,7 @@ describe("GrowthIntelligenceWorkspace", () => {
     window.history.replaceState(null, "", "/");
     refresh.mockClear();
     push.mockClear();
+    vi.unstubAllGlobals();
   });
 
   it("opens on the filter row, previous actions, and Top Recommendations in that order", () => {
@@ -169,7 +182,7 @@ describe("GrowthIntelligenceWorkspace", () => {
     expect(text.indexOf("Last fetched")).toBeLessThan(text.indexOf("Previous actions"));
     expect(text.indexOf("Previous actions")).toBeLessThan(text.indexOf("Top Recommendations"));
     expect(screen.getByRole("group", { name: "Performance filters" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Reporting month" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2026-02-01 to 2026-02-28" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Channel" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Location" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /More/ }).getAttribute("href")).toBe(
@@ -177,11 +190,55 @@ describe("GrowthIntelligenceWorkspace", () => {
     );
   });
 
-  it("names an unmatched month instead of showing another month", () => {
+  it("names an unmatched range instead of showing another range", () => {
     workspace(view(), true, defaultFilters({ resolved: null }));
     expect(screen.getByRole("status")).toHaveTextContent(
       /No completed analysis matches 2026-02-01 to 2026-02-28/,
     );
+  });
+
+  it("covers the card area with the loader while a build is outstanding", () => {
+    // Still building on every poll: the watcher keeps watching instead of
+    // refreshing onto a half-built card.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: "building" }) }),
+    );
+    const { container } = workspace(view(), true, defaultFilters(), {
+      buildPending: true,
+      pendingChannelIds: ["ch-1"],
+    });
+    expect(container.querySelector('[data-slot="page-content-loader"]')).toBeTruthy();
+    expect(screen.getByText("Building this period's figures")).toBeTruthy();
+    expect(screen.getByText(/2026-02-01 to 2026-02-28 · watching 1 channel/)).toBeTruthy();
+  });
+
+  it("refreshes onto the card when the build settles", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: "ready" }) }),
+    );
+    workspace(view(), true, defaultFilters(), {
+      buildPending: true,
+      pendingChannelIds: ["ch-1"],
+    });
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  it("states a failed build plainly with a retry path", () => {
+    workspace(view(), true, defaultFilters(), { buildFailed: true });
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not complete/);
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+  });
+
+  it("refuses an over-wide automatic build and names the Channel Audit", () => {
+    workspace(view(), true, defaultFilters(), { buildRefused: true });
+    expect(screen.getByRole("status")).toHaveTextContent(/more channels than one automatic build/);
+  });
+
+  it("tells viewers without the run permission who can build", () => {
+    workspace(view(), true, defaultFilters(), { canRequestBuild: false });
+    expect(screen.getByRole("status")).toHaveTextContent(/Someone with analysis permission/);
   });
 
   it("says so when the filters exclude every channel", () => {
