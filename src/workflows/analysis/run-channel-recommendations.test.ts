@@ -246,6 +246,91 @@ describe("runChannelRecommendations", () => {
   });
 });
 
+const UNCITED_FINDING = "00000000-0000-4000-8000-000000000102";
+
+function gapFillReply(): unknown {
+  return {
+    items: [
+      {
+        citations: [UNCITED_FINDING],
+        limitations: [],
+        supportedActions: ["Move two riders to the dinner rush"],
+        detail: "The retention mix the detectors measured leaves room to act.",
+        headline: "Win back the lapsed dinner orders",
+        label: "recommendation",
+      },
+    ],
+  };
+}
+
+function gapFillDependencies(
+  overrides: Partial<ChannelRecommendationsDependencies> = {},
+): ChannelRecommendationsDependencies {
+  return dependencies({
+    claim: vi.fn(async () => ({
+      outcome: "gapfill_acquired" as const,
+      window: { windowStart: "2026-01-01", windowEnd: "2026-01-05", periodGrain: "day" },
+    })),
+    loadFindings: vi.fn(async () => [findingSummary(), findingSummary({ id: UNCITED_FINDING })]),
+    loadCitedFindingIds: vi.fn(async () => [FINDING]),
+    generator: {
+      providerName: "google",
+      modelId: "test-model",
+      generate: vi.fn(async () => gapFillReply()),
+    },
+    ...overrides,
+  });
+}
+
+describe("runChannelRecommendations gap-fill narration", () => {
+  it("scopes the prompt to findings no filed item cites yet", async () => {
+    const deps = gapFillDependencies();
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    const [system, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).toContain(`<finding id="${UNCITED_FINDING}">`);
+    expect(user).not.toContain(`<finding id="${FINDING}">`);
+    expect(system).toContain("output_contract");
+    const call = vi.mocked(deps.complete).mock.calls[0][0];
+    expect(call.items).toHaveLength(1);
+    expect(call.items[0]!.citations).toEqual([UNCITED_FINDING]);
+    expect(deps.fail).not.toHaveBeenCalled();
+  });
+
+  it("fails processing when the cited set cannot be read or is missing", async () => {
+    const throwing = gapFillDependencies({
+      loadCitedFindingIds: vi.fn(async () => {
+        throw new Error("connection reset");
+      }),
+    });
+    expect((await runChannelRecommendations(payload, throwing)).outcome).toBe("failed");
+    expect(throwing.generator.generate).not.toHaveBeenCalled();
+    expect(vi.mocked(throwing.fail).mock.calls[0][0].code).toBe("NARRATION_PROCESSING_FAILED");
+
+    const missing = dependencies({
+      claim: vi.fn(async () => ({
+        outcome: "gapfill_acquired" as const,
+        window: { windowStart: "2026-01-01", windowEnd: "2026-01-05", periodGrain: "day" },
+      })),
+    });
+    expect((await runChannelRecommendations(payload, missing)).outcome).toBe("failed");
+    expect(vi.mocked(missing.fail).mock.calls[0][0].code).toBe("NARRATION_PROCESSING_FAILED");
+  });
+
+  it("fails processing when every finding is already cited", async () => {
+    const deps = gapFillDependencies({ loadCitedFindingIds: vi.fn(async () => [FINDING, UNCITED_FINDING]) });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.outcome).toBe("failed");
+    expect(deps.generator.generate).not.toHaveBeenCalled();
+    expect(deps.complete).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.fail).mock.calls[0][0].code).toBe("NARRATION_PROCESSING_FAILED");
+  });
+});
+
 describe("runChannelRecommendations channel context threading", () => {
   const pilotContext = {
     channelContext: {

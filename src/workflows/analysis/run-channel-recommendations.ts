@@ -48,6 +48,7 @@ export type ChannelRecommendationWindow = {
 
 export type ChannelRecommendationsClaim =
   | { outcome: "acquired"; window: ChannelRecommendationWindow }
+  | { outcome: "gapfill_acquired"; window: ChannelRecommendationWindow }
   | {
       outcome: "completed" | "not_found" | "not_ready" | "in_progress" | "conflict";
       window?: ChannelRecommendationWindow;
@@ -96,6 +97,17 @@ export type ChannelRecommendationsDependencies = {
     organizationId: string;
     analysisRunId: string;
   }): Promise<readonly NarrationPromptFinding[]>;
+  /**
+   * Findings the run's filed items already cite. The gap-fill narration may
+   * only rest on findings no item cites yet, so the worker needs the cited
+   * set to scope its prompt. Optional so existing callers compile; absent on
+   * a gap-fill claim fails the run rather than risking a duplicate filing
+   * the fence would refuse anyway.
+   */
+  loadCitedFindingIds?(input: {
+    organizationId: string;
+    analysisRunId: string;
+  }): Promise<readonly string[]>;
   /**
    * Stored channel context for the prompt, loaded server-side by the
    * caller (the Trigger task reads the stored org/channel/branch rows).
@@ -215,7 +227,7 @@ export async function runChannelRecommendations(
     correlationId: payload.correlationId,
     claimToken,
   });
-  if (claim.outcome !== "acquired") {
+  if (claim.outcome !== "acquired" && claim.outcome !== "gapfill_acquired") {
     // Recommendations already filed means the run finished this stage, not
     // that it was skipped; every other refusal leaves the stage untouched.
     return {
@@ -223,6 +235,7 @@ export async function runChannelRecommendations(
       recommendationCount: 0,
     };
   }
+  const gapFill = claim.outcome === "gapfill_acquired";
 
   try {
     let findings: readonly NarrationPromptFinding[];
@@ -239,6 +252,37 @@ export async function runChannelRecommendations(
     // only buy a guaranteed rejection.
     if (findings.length === 0) {
       throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
+    }
+
+    if (gapFill) {
+      // The fence leases a gap-fill only while uncited findings exist, and it
+      // refuses any filing that re-cites. Scoping the prompt to the uncited
+      // set here keeps the model from spending its items on chapters that
+      // already have advice. The detector keys travel to the log as
+      // identifiers only — the deterministic coverage signal ADR 0053 asks
+      // for, with no figure attached.
+      if (!dependencies.loadCitedFindingIds) {
+        throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
+      }
+      let cited: readonly string[];
+      try {
+        cited = await dependencies.loadCitedFindingIds({
+          organizationId: payload.organizationId,
+          analysisRunId: payload.analysisRunId,
+        });
+      } catch {
+        throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
+      }
+      const citedSet = new Set(cited);
+      findings = findings.filter((finding) => !citedSet.has(finding.id));
+      logger.info("channel_recommendations.coverage_gap", {
+        organizationId: payload.organizationId,
+        runId: payload.analysisRunId,
+        detectorKeys: [...new Set(findings.map((finding) => finding.detectorKey))].sort(),
+      });
+      if (findings.length === 0) {
+        throw new ChannelRecommendationsFailure("NARRATION_PROCESSING_FAILED");
+      }
     }
 
     // Channel context is advisory, never load-bearing: any throw from the

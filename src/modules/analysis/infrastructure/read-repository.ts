@@ -56,6 +56,25 @@ const MAX_RECOMMENDATION_DECISIONS = 1_000;
 /** The two codes the money band reads, and nothing else. */
 const BAND_CODES = ["WINDOW_GROSS_REVENUE", "ORDER_CANCELLATION_LOSS"] as const;
 /**
+ * Every code the business-performance card reads for one window: the money
+ * band, the funnel window sums (orders placed, menu views), the cancellation
+ * share of orders, and cost-context presence. One row per code per run, except
+ * the funnel detector, which writes one row per stage pair (three).
+ */
+const CARD_CODES = [
+  "WINDOW_GROSS_REVENUE",
+  "ORDER_CANCELLATION_LOSS",
+  "FUNNEL_STAGE_CONVERSION",
+  "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS",
+  "CHANNEL_COST_LOAD_OF_REVENUE",
+  "COMPANY_COST_STRUCTURE_OF_REVENUE",
+] as const;
+/**
+ * The most finding rows one run can contribute to the card read: one per code
+ * above, with the funnel detector's three stage pairs counted separately.
+ */
+const MAX_CARD_FINDINGS_PER_RUN = 10;
+/**
  * Completed runs for one declared window, across every channel in the
  * organization. Not one row per channel: re-running an analysis over the same
  * window does not delete the previous completed run, it adds another one, so
@@ -202,6 +221,89 @@ function toFindingRecord(row: ChannelFindingRow): ChannelFindingRecord {
     calculationDigest: row.calculation_digest,
     createdAt: row.created_at,
   };
+}
+
+/**
+ * The newest completed run per channel for exactly one declared window.
+ *
+ * Newest first, so the first run seen for a channel is the one that stands. A
+ * channel re-analysed over the same window has two completed runs, and the
+ * later answer is the current one. Shared by the money band and the card read
+ * so the two can never resolve "the run for this window" differently.
+ */
+async function loadLatestRunIdsByChannel(
+  supabase: AnalysisClient,
+  input: {
+    organizationId: string;
+    windowStart: string;
+    windowEnd: string;
+    grain: AnalysisGrain;
+  },
+): Promise<Map<string, string>> {
+  const { data: runs, error: runError } = await supabase
+    .from("channel_analysis_runs")
+    .select("id, channel_id, completed_at")
+    .eq("organization_id", input.organizationId)
+    .eq("window_start", input.windowStart)
+    .eq("window_end", input.windowEnd)
+    .eq("period_grain", input.grain)
+    .eq("status", "completed")
+    .not("channel_id", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(MAX_CHANNEL_BAND_RUNS);
+  if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+
+  const latestByChannel = new Map<string, string>();
+  for (const row of runs ?? []) {
+    const channelId = row.channel_id as string;
+    if (!latestByChannel.has(channelId)) latestByChannel.set(channelId, row.id);
+  }
+  return latestByChannel;
+}
+
+/**
+ * Open findings for a set of runs, restricted to an allowlist of codes.
+ *
+ * A superseded finding is the answer a later run replaced. Two figures for
+ * one question on one page is worse than one figure -- the same reason
+ * loadFindingsForRun filters to open findings. Batched because PostgREST folds
+ * an `.in()` filter's values into the request line, and one filter naming
+ * every run id can exceed a common gateway's request-line limit before RLS or
+ * the database ever sees the query.
+ */
+async function loadOpenFindingsForRuns(
+  supabase: AnalysisClient,
+  input: {
+    organizationId: string;
+    runIds: readonly string[];
+    codes: readonly string[];
+    maxPerRun: number;
+    boundErrorCode: string;
+  },
+): Promise<Map<string, ChannelFindingRecord[]>> {
+  const byRun = new Map<string, ChannelFindingRecord[]>();
+  for (let offset = 0; offset < input.runIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
+    const batch = input.runIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
+    const { data, error: findingError } = await supabase
+      .from("channel_findings")
+      .select(CHANNEL_FINDING_COLUMNS)
+      .eq("organization_id", input.organizationId)
+      .in("analysis_run_id", [...batch])
+      .in("code", [...input.codes])
+      .eq("status", "open")
+      .limit(batch.length * input.maxPerRun + 1);
+    if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
+    if ((data ?? []).length > batch.length * input.maxPerRun)
+      throw new ChannelAnalysisReadError(input.boundErrorCode);
+
+    for (const row of data ?? []) {
+      const mapped = toFindingRecord(row);
+      const group = byRun.get(mapped.analysisRunId) ?? [];
+      group.push(mapped);
+      byRun.set(mapped.analysisRunId, group);
+    }
+  }
+  return byRun;
 }
 
 /** The columns a run record is built from, named once so the list a single
@@ -527,64 +629,49 @@ export function createAuthenticatedChannelAnalysisRepository(
     },
 
     async loadChannelBandsForWindow({ organizationId, windowStart, windowEnd, grain }) {
-      const { data: runs, error: runError } = await supabase
-        .from("channel_analysis_runs")
-        .select("id, channel_id, completed_at")
-        .eq("organization_id", organizationId)
-        .eq("window_start", windowStart)
-        .eq("window_end", windowEnd)
-        .eq("period_grain", grain)
-        .eq("status", "completed")
-        .not("channel_id", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(MAX_CHANNEL_BAND_RUNS);
-      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
-
-      // Newest first, so the first run seen for a channel is the one that
-      // stands. A channel re-analysed over the same window has two completed
-      // runs, and the later answer is the current one.
-      const latestByChannel = new Map<string, string>();
-      for (const row of runs ?? []) {
-        const channelId = row.channel_id as string;
-        if (!latestByChannel.has(channelId)) latestByChannel.set(channelId, row.id);
-      }
+      const latestByChannel = await loadLatestRunIdsByChannel(supabase, {
+        organizationId,
+        windowStart,
+        windowEnd,
+        grain,
+      });
       if (latestByChannel.size === 0) return [];
 
-      // Batched for the same reason loadEvidenceWindows batches its metric
-      // reads: PostgREST folds an `.in()` filter's values into the request
-      // line, and one filter naming every channel's run id can exceed a
-      // common gateway's request-line limit before RLS or the database ever
-      // sees the query.
-      const runIds = [...latestByChannel.values()];
-      const byRun = new Map<string, ChannelFindingRecord[]>();
-      for (let offset = 0; offset < runIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
-        const batch = runIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
-        const { data, error: findingError } = await supabase
-          .from("channel_findings")
-          .select(CHANNEL_FINDING_COLUMNS)
-          .eq("organization_id", organizationId)
-          .in("analysis_run_id", batch)
-          .in("code", [...BAND_CODES])
-          // A superseded finding is the answer a later run replaced. Two
-          // figures for one question on one page is worse than one figure --
-          // the same reason loadFindingsForRun filters to open findings, and
-          // this band must never disagree with that page over the same run.
-          .eq("status", "open")
-          // Each detector writes at most one open finding per code per run,
-          // so two band codes read means at most two rows per run id in the
-          // batch.
-          .limit(batch.length * BAND_CODES.length + 1);
-        if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
-        if ((data ?? []).length > batch.length * BAND_CODES.length)
-          throw new ChannelAnalysisReadError("BAND_FINDINGS_NOT_BOUNDED");
+      // Each detector writes at most one open finding per code per run, so
+      // two band codes read means at most two rows per run id in the batch.
+      const byRun = await loadOpenFindingsForRuns(supabase, {
+        organizationId,
+        runIds: [...latestByChannel.values()],
+        codes: [...BAND_CODES],
+        maxPerRun: BAND_CODES.length,
+        boundErrorCode: "BAND_FINDINGS_NOT_BOUNDED",
+      });
 
-        for (const row of data ?? []) {
-          const mapped = toFindingRecord(row);
-          const group = byRun.get(mapped.analysisRunId) ?? [];
-          group.push(mapped);
-          byRun.set(mapped.analysisRunId, group);
-        }
-      }
+      return [...latestByChannel.entries()].map(
+        ([channelId, analysisRunId]): ChannelBandRecord => ({
+          channelId,
+          analysisRunId,
+          findings: byRun.get(analysisRunId) ?? [],
+        }),
+      );
+    },
+
+    async loadChannelCardFindingsForWindow({ organizationId, windowStart, windowEnd, grain }) {
+      const latestByChannel = await loadLatestRunIdsByChannel(supabase, {
+        organizationId,
+        windowStart,
+        windowEnd,
+        grain,
+      });
+      if (latestByChannel.size === 0) return [];
+
+      const byRun = await loadOpenFindingsForRuns(supabase, {
+        organizationId,
+        runIds: [...latestByChannel.values()],
+        codes: [...CARD_CODES],
+        maxPerRun: MAX_CARD_FINDINGS_PER_RUN,
+        boundErrorCode: "CARD_FINDINGS_NOT_BOUNDED",
+      });
 
       return [...latestByChannel.entries()].map(
         ([channelId, analysisRunId]): ChannelBandRecord => ({
@@ -771,42 +858,59 @@ export function createAuthenticatedChannelAnalysisRepository(
         citationsByRecommendation.set(row.recommendation_id, own);
       }
 
-      // A run can be narrated more than once: a re-submission writes new rows
-      // rather than overwriting, and two tellings of one run on one page would
-      // read as two answers to one question. The rows arrive newest-first, so
-      // the first row seen per digest is that submission's newest item -- and
-      // the digest whose newest item is newest overall is the telling the page
-      // shows. Ties keep the first-seen submission, deterministically.
+      // A run can be narrated twice: the first narration plus one gap-fill
+      // that cites only previously-uncited findings (Amendment C, ADR 0053).
+      // The fence guarantees the two tellings cite disjoint findings, so both
+      // show: hiding the first telling behind the second would un-advise
+      // chapters the gap-fill never touched. Rows arrive newest-first, so the
+      // newest telling is kept whole; an older-telling item survives only
+      // when it cites something no newer telling cites — a newer telling
+      // that re-cites a finding replaces the older words about it. Items
+      // without citations carry no receipt and stay with their own telling.
       const newestByDigest = new Map<string, string>();
       for (const row of recommendationRows) {
         if (!newestByDigest.has(row.result_digest)) {
           newestByDigest.set(row.result_digest, row.created_at);
         }
       }
-      const [displayedDigest] = [...newestByDigest.entries()].sort((left, right) =>
-        right[1].localeCompare(left[1]),
-      )[0];
+      const digestOrder = new Map(
+        [...newestByDigest.entries()]
+          .sort((left, right) => right[1].localeCompare(left[1]))
+          .map(([digest], index) => [digest, index]),
+      );
+      // One pass, newest first: the keep decision for an older item must see
+      // every newer telling's citations, so filtering and accumulating cannot
+      // be split across two passes.
+      const citedByNewer = new Set<string>();
+      const displayed: typeof recommendationRows = [];
+      for (const row of recommendationRows) {
+        const citations = citationsByRecommendation.get(row.id) ?? [];
+        if (digestOrder.get(row.result_digest) !== 0) {
+          if (citations.length === 0) continue;
+          if (!citations.some((findingId) => !citedByNewer.has(findingId))) continue;
+        }
+        displayed.push(row);
+        for (const findingId of citations) citedByNewer.add(findingId);
+      }
 
-      return recommendationRows
-        .filter((row) => row.result_digest === displayedDigest)
-        .map(
-          (row): ChannelRecommendationRecord => ({
-            id: row.id,
-            analysisRunId: analysisRunId,
-            channelId: row.channel_id,
-            branchId: row.branch_id,
-            label: row.label,
-            headline: row.headline,
-            detail: row.detail,
-            supportedActions: toStringArray(row.supported_actions),
-            limitations: toStringArray(row.limitations),
-            resultDigest: row.result_digest,
-            citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
-            decisions: decisionsById.get(row.id) ?? [],
-            myFeedback: feedbackById.get(row.id) ?? null,
-            createdAt: row.created_at,
-          }),
-        );
+      return displayed.map(
+        (row): ChannelRecommendationRecord => ({
+          id: row.id,
+          analysisRunId: analysisRunId,
+          channelId: row.channel_id,
+          branchId: row.branch_id,
+          label: row.label,
+          headline: row.headline,
+          detail: row.detail,
+          supportedActions: toStringArray(row.supported_actions),
+          limitations: toStringArray(row.limitations),
+          resultDigest: row.result_digest,
+          citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
+          decisions: decisionsById.get(row.id) ?? [],
+          myFeedback: feedbackById.get(row.id) ?? null,
+          createdAt: row.created_at,
+        }),
+      );
     },
 
     async loadRecommendationViewerState({ organizationId, analysisRunId, viewerId }) {

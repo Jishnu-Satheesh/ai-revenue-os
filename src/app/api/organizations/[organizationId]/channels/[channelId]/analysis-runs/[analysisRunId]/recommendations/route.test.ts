@@ -25,11 +25,15 @@ vi.mock("@/modules/analysis/application/dispatch", () => ({
 
 const repositoryMocks = vi.hoisted(() => ({
   loadRun: vi.fn(),
+  loadRecommendationsForRun: vi.fn(),
+  loadFindingsForRun: vi.fn(),
 }));
 
 vi.mock("@/modules/analysis/infrastructure/read-repository", () => ({
   createAuthenticatedChannelAnalysisRepository: vi.fn(() => ({
     loadRun: repositoryMocks.loadRun,
+    loadRecommendationsForRun: repositoryMocks.loadRecommendationsForRun,
+    loadFindingsForRun: repositoryMocks.loadFindingsForRun,
   })),
 }));
 vi.mock("@/lib/logger", () => ({
@@ -67,6 +71,8 @@ beforeEach(() => {
   });
   mocks.requestChannelRecommendations.mockResolvedValue(true);
   repositoryMocks.loadRun.mockResolvedValue({ id: RUN, channelId: CHANNEL, status: "completed" });
+  repositoryMocks.loadRecommendationsForRun.mockResolvedValue([]);
+  repositoryMocks.loadFindingsForRun.mockResolvedValue([]);
 });
 
 describe("POST run recommendations", () => {
@@ -138,5 +144,51 @@ describe("POST run recommendations", () => {
     const response = await POST(request(), { params });
 
     expect(response.status).toBe(422);
+  });
+
+  it("wakes the gap-fill when a narrated run still has a chapter with data and no advice", async () => {
+    repositoryMocks.loadRecommendationsForRun.mockResolvedValue([
+      { id: "rec-1", citationFindingIds: ["finding-cited"] },
+    ]);
+    repositoryMocks.loadFindingsForRun.mockResolvedValue([
+      { id: "finding-cited", kind: "observation" },
+      { id: "finding-bare", kind: "observation" },
+    ]);
+
+    const response = await POST(request(), { params });
+
+    expect(response.status).toBe(202);
+    expect(mocks.requestChannelRecommendations).toHaveBeenCalledWith(
+      expect.objectContaining({ analysisRunId: RUN }),
+    );
+  });
+
+  it("refuses a narrated run whose every section with data already has advice", async () => {
+    repositoryMocks.loadRecommendationsForRun.mockResolvedValue([
+      { id: "rec-1", citationFindingIds: ["finding-1"] },
+    ]);
+    repositoryMocks.loadFindingsForRun.mockResolvedValue([
+      { id: "finding-1", kind: "observation" },
+    ]);
+
+    const response = await POST(request(), { params });
+
+    expect(response.status).toBe(400);
+    expect(mocks.requestChannelRecommendations).not.toHaveBeenCalled();
+  });
+
+  it("ignores bare needs-data findings: missing inputs are not a gap to fill", async () => {
+    repositoryMocks.loadRecommendationsForRun.mockResolvedValue([
+      { id: "rec-1", citationFindingIds: ["finding-1"] },
+    ]);
+    repositoryMocks.loadFindingsForRun.mockResolvedValue([
+      { id: "finding-1", kind: "observation" },
+      { id: "finding-missing", kind: "needs_data" },
+    ]);
+
+    const response = await POST(request(), { params });
+
+    expect(response.status).toBe(400);
+    expect(mocks.requestChannelRecommendations).not.toHaveBeenCalled();
   });
 });

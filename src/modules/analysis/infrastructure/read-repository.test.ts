@@ -123,6 +123,96 @@ describe("loadRecommendationsForRun", () => {
     expect(loaded.every((rec) => rec.resultDigest === "b".repeat(64))).toBe(true);
   });
 
+  it("shows both tellings when the newer one is a gap-fill over disjoint findings", async () => {
+    // Amendment C: the first narration (group A) cites finding-1, the
+    // gap-fill (group B) cites finding-2. The fence guarantees disjoint
+    // citations, so both tellings show — hiding A behind B would un-advise
+    // the chapter B never touched.
+    const { supabase } = stubClient({
+      channel_recommendations: {
+        data: [
+          recommendationRow({
+            id: "rec-b1",
+            result_digest: "b".repeat(64),
+            created_at: "2026-02-02T10:00:00Z",
+          }),
+          recommendationRow({
+            id: "rec-a1",
+            result_digest: "a".repeat(64),
+            headline: "The first telling",
+            created_at: "2026-02-01T08:00:00Z",
+          }),
+        ],
+        error: null,
+      },
+      channel_recommendation_citations: {
+        data: [
+          { recommendation_id: "rec-b1", finding_id: "finding-2" },
+          { recommendation_id: "rec-a1", finding_id: "finding-1" },
+        ],
+        error: null,
+      },
+    });
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: null,
+    });
+
+    expect(loaded.map((rec) => rec.id)).toEqual(["rec-b1", "rec-a1"]);
+  });
+
+  it("lets a newer telling replace the older words about a re-cited finding", async () => {
+    // The gap-fill cites only uncited findings by fence rule, so a re-cited
+    // finding means a replacement telling: the older item about it drops
+    // while an older item about an untouched finding survives.
+    const { supabase } = stubClient({
+      channel_recommendations: {
+        data: [
+          recommendationRow({
+            id: "rec-b1",
+            result_digest: "b".repeat(64),
+            created_at: "2026-02-02T10:00:00Z",
+          }),
+          recommendationRow({
+            id: "rec-a2",
+            result_digest: "a".repeat(64),
+            headline: "Older words about finding-2",
+            created_at: "2026-02-01T09:00:00Z",
+          }),
+          recommendationRow({
+            id: "rec-a1",
+            result_digest: "a".repeat(64),
+            headline: "Older words about finding-1",
+            created_at: "2026-02-01T08:00:00Z",
+          }),
+        ],
+        error: null,
+      },
+      channel_recommendation_citations: {
+        data: [
+          { recommendation_id: "rec-b1", finding_id: "finding-2" },
+          { recommendation_id: "rec-a2", finding_id: "finding-2" },
+          { recommendation_id: "rec-a1", finding_id: "finding-1" },
+        ],
+        error: null,
+      },
+    });
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: null,
+    });
+
+    expect(loaded.map((rec) => rec.id)).toEqual(["rec-b1", "rec-a1"]);
+  });
+
   it("names answers from the stored snapshot and asks profiles for nothing", async () => {
     const { supabase, asked } = stubClient(
       {
@@ -621,6 +711,156 @@ describe("loadChannelBandsForWindow", () => {
 
     expect(bands).toHaveLength(1);
     expect(bands[0].findings.map((finding) => finding.id)).toEqual(["finding-open"]);
+  });
+});
+
+describe("loadChannelCardFindingsForWindow", () => {
+  const cardFindingRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "finding-1",
+    analysis_run_id: "run-1",
+    channel_id: "channel-1",
+    branch_id: null,
+    detector_key: "test.detector",
+    detector_version: 1,
+    kind: "observation",
+    code: "WINDOW_GROSS_REVENUE",
+    severity: null,
+    priority: null,
+    metric_key: "revenue.gross",
+    period_start: "2026-02-01",
+    period_end: "2026-02-28",
+    value_kind: "money",
+    value_numerator: 6_000_000,
+    value_denominator: null,
+    currency: "AED",
+    monetary_impact_minor_units: null,
+    expected_period_count: 1,
+    observed_period_count: 1,
+    absent_period_count: 0,
+    quality_state: "complete",
+    needs_data_reason: null,
+    limitations: [],
+    calculation_digest: "d".repeat(64),
+    created_at: "2026-03-01T00:00:00Z",
+    status: "open",
+    ...overrides,
+  });
+
+  function cardStub(findingRows: Record<string, unknown>[]) {
+    const codeFilters: unknown[][] = [];
+    const runRows = [
+      { id: "run-1", channel_id: "channel-1", completed_at: "2026-03-01T00:00:00Z" },
+    ];
+    const from = (table: string) => {
+      const eqFilters: [string, unknown][] = [];
+      let codeValues: unknown[] | null = null;
+      const builder = {
+        select: () => builder,
+        eq: (column: string, value: unknown) => {
+          eqFilters.push([column, value]);
+          return builder;
+        },
+        not: () => builder,
+        in: (column: string, values: unknown[]) => {
+          if (column === "code") {
+            codeValues = values;
+            codeFilters.push(values);
+          }
+          return builder;
+        },
+        order: () => builder,
+        limit: () => builder,
+        then: (onFulfilled: (value: QueryResult) => unknown) => {
+          // Apply the code and status filters the way PostgREST would, so a
+          // query that omits them sees every row and one that includes them
+          // sees only the matching rows.
+          let data: Record<string, unknown>[] =
+            table === "channel_analysis_runs"
+              ? runRows
+              : table === "channel_findings"
+                ? findingRows
+                : [];
+          if (table === "channel_findings") {
+            const status = eqFilters.find(([column]) => column === "status")?.[1];
+            data = data.filter(
+              (row) =>
+                (codeValues === null || codeValues.includes(row["code"])) &&
+                (status === undefined || row["status"] === status),
+            );
+          }
+          return Promise.resolve({ data, error: null }).then(onFulfilled);
+        },
+      };
+      return builder;
+    };
+    return {
+      supabase: { from } as unknown as SupabaseClient<Database>,
+      codeFilters,
+    };
+  }
+
+  it("reads the card codes beyond the money band for the latest run", async () => {
+    const rows = [
+      cardFindingRow({ id: "gross" }),
+      cardFindingRow({
+        id: "orders",
+        code: "FUNNEL_STAGE_CONVERSION",
+        metric_key: "listing.placed_orders",
+        value_kind: "ratio",
+        value_numerator: 1200,
+        value_denominator: 50,
+        currency: null,
+      }),
+      cardFindingRow({
+        id: "share",
+        code: "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS",
+        metric_key: "order.cancellation_attribution_count",
+        value_kind: "ratio",
+        value_numerator: 60,
+        value_denominator: 1200,
+        currency: null,
+      }),
+      // Another detector's answer is not the card's business, even when open.
+      cardFindingRow({ id: "other", code: "CHANNEL_REVENUE_SHARE" }),
+    ];
+    const { supabase, codeFilters } = cardStub(rows);
+
+    const records = await createAuthenticatedChannelAnalysisRepository(
+      supabase as unknown as SupabaseClient<Database>,
+    ).loadChannelCardFindingsForWindow({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-02-01",
+      windowEnd: "2026-02-28",
+      grain: "month",
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.findings.map((finding) => finding.id).sort()).toEqual([
+      "gross",
+      "orders",
+      "share",
+    ]);
+    expect(codeFilters).toHaveLength(1);
+    expect(codeFilters[0]).toContain("FUNNEL_STAGE_CONVERSION");
+    expect(codeFilters[0]).toContain("ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS");
+  });
+
+  it("refuses an unbounded findings read rather than silently truncating it", async () => {
+    const rows = Array.from({ length: 11 }, (_, index) =>
+      cardFindingRow({ id: `finding-${index}` }),
+    );
+    const { supabase } = cardStub(rows);
+
+    await expect(
+      createAuthenticatedChannelAnalysisRepository(
+        supabase as unknown as SupabaseClient<Database>,
+      ).loadChannelCardFindingsForWindow({
+        organizationId: ORGANIZATION,
+        windowStart: "2026-02-01",
+        windowEnd: "2026-02-28",
+        grain: "month",
+      }),
+    ).rejects.toThrow("CARD_FINDINGS_NOT_BOUNDED");
   });
 });
 

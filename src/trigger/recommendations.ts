@@ -176,7 +176,7 @@ function toNarrationFinding(row: {
  */
 function toClaim(data: Record<string, unknown> | null): ChannelRecommendationsClaim {
   const outcome = typeof data?.outcome === "string" ? data.outcome : "conflict";
-  if (outcome !== "acquired") {
+  if (outcome !== "acquired" && outcome !== "gapfill_acquired") {
     // Anything outside the RPC's own vocabulary lands on conflict, the one
     // refusal that claims nothing about why.
     return {
@@ -200,7 +200,7 @@ function toClaim(data: Record<string, unknown> | null): ChannelRecommendationsCl
     return { outcome: "conflict" };
   }
   const window: ChannelRecommendationWindow = { windowStart, windowEnd, periodGrain };
-  return { outcome: "acquired", window };
+  return { outcome, window };
 }
 
 function recommendationGenerator() {
@@ -256,6 +256,29 @@ export const channelRecommendationsTask = schemaTask({
           .eq("analysis_run_id", input.analysisRunId);
         if (error) throw new Error(`Channel findings load failed: ${error.code}`);
         return (data ?? []).map(toNarrationFinding);
+      },
+      async loadCitedFindingIds(input) {
+        // The receipts of what the run's filed items already rest on. Read
+        // through the worker client because citations are worker-owned rows;
+        // scoped to this run's items so another window's narration can never
+        // shrink this run's gap-fill folder.
+        const { data: items, error: itemsError } = await supabase
+          .from("channel_recommendations")
+          .select("id")
+          .eq("organization_id", input.organizationId)
+          .eq("analysis_run_id", input.analysisRunId);
+        if (itemsError) throw new Error(`Channel cited findings load failed: ${itemsError.code}`);
+        const recommendationIds = (items ?? []).map((item) => item.id);
+        if (recommendationIds.length === 0) return [];
+        const { data: citations, error: citationsError } = await supabase
+          .from("channel_recommendation_citations")
+          .select("finding_id")
+          .eq("organization_id", input.organizationId)
+          .in("recommendation_id", recommendationIds);
+        if (citationsError) {
+          throw new Error(`Channel cited findings load failed: ${citationsError.code}`);
+        }
+        return [...new Set((citations ?? []).map((citation) => citation.finding_id))];
       },
       async loadPilotContext(input) {
         return loadRecommendationPilotContext(supabase, input);

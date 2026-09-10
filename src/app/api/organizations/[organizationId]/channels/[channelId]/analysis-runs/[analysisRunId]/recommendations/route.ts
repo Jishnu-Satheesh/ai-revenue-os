@@ -11,13 +11,16 @@ import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis
 import { assertGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
 
 /**
- * Wake the narrator for a run that completed without one.
+ * Wake the narrator for a run that completed without one, or gap-fill a run
+ * whose narration left chapters bare (Amendment C, ADR 0053).
  *
  * The detector run already counted, so nothing here recomputes findings --
  * it re-fires the best-effort wake the analysis task sends on completion.
  * The run is read back first (completed, this tenant, this channel), and the
  * claim fence makes a duplicate wake harmless, so a twice-pressed button
- * cannot file a second narration.
+ * cannot file a second narration. A narrated run with no uncovered chapter
+ * is refused here instead: dispatching it would answer 202 and write
+ * nothing.
  */
 
 const paramsSchema = z.object({
@@ -56,7 +59,8 @@ export async function POST(
     // Read by id rather than searched in the page's run list: that list is
     // capped at the handful a page shows, and a run older than the cap is
     // still a run whose narration is missing.
-    const run = await createAuthenticatedChannelAnalysisRepository(context.supabase).loadRun({
+    const repository = createAuthenticatedChannelAnalysisRepository(context.supabase);
+    const run = await repository.loadRun({
       organizationId: routeParams.organizationId,
       channelId: routeParams.channelId,
       analysisRunId: routeParams.analysisRunId,
@@ -74,6 +78,32 @@ export async function POST(
         "VALIDATION_ERROR",
         "Narration can only be requested for a completed analysis run.",
       );
+    }
+
+    // A narrated run admits exactly one gap-fill while a chapter with data
+    // still has no advice. Refusing here — rather than dispatching into the
+    // fence's silent `completed` — keeps the button honest: a press that
+    // could write nothing answers that it will write nothing.
+    const filed = await repository.loadRecommendationsForRun({
+      organizationId: routeParams.organizationId,
+      analysisRunId: run.id,
+      viewerId: null,
+    });
+    if (filed.length > 0) {
+      const findings = await repository.loadFindingsForRun({
+        organizationId: routeParams.organizationId,
+        analysisRunId: run.id,
+      });
+      const cited = new Set(filed.flatMap((item) => item.citationFindingIds));
+      const uncovered = findings.some(
+        (finding) => finding.kind !== "needs_data" && !cited.has(finding.id),
+      );
+      if (!uncovered) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "This analysis already has advice for every section with data.",
+        );
+      }
     }
 
     const dispatched = await requestChannelRecommendations({

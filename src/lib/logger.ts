@@ -47,6 +47,12 @@ type LogContext = {
    * A registry key chosen by a migration, never a tenant's own text.
    */
   templateKey?: string;
+  /**
+   * Detector keys a gap-fill narration was asked to cover, such as
+   * `funnel.stage_conversion`. Registry keys, never tenant text — the same
+   * reason `templateKey` is safe to log.
+   */
+  detectorKeys?: string[];
   /** A canonical YYYY-MM analysis selection. Opaque calendar label. */
   month?: string;
   /** Inclusive local-date window bounds. Opaque calendar labels, like month. */
