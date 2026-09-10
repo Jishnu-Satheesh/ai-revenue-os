@@ -3,7 +3,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BusinessPerformanceCard } from "@/components/growth-intelligence/business-performance-card";
+import {
+  BusinessPerformanceCard,
+  visibleTickIndexes,
+} from "@/components/growth-intelligence/business-performance-card";
 import type { BusinessPerformanceCardView } from "@/modules/analysis/application/channels-overview";
 
 afterEach(cleanup);
@@ -224,5 +227,57 @@ describe("the business performance card", () => {
     expect(
       screen.getByText("No approved report carried menu views for this month."),
     ).toBeInTheDocument();
+  });
+
+  it("thins a crowded empty trend to readable labels, always keeping the latest", () => {
+    const weeks = [
+      "5–11 Jan",
+      "12–18 Jan",
+      "19–25 Jan",
+      "26 Jan–1 Feb",
+      "2–8 Feb",
+      "9–15 Feb",
+      "16–22 Feb",
+      "23 Feb–1 Mar",
+      "2–8 Mar",
+      "9–15 Mar",
+      "16–22 Mar",
+      "23–29 Mar",
+    ];
+    render(
+      <BusinessPerformanceCard
+        card={cardView({
+          trend: {
+            state: "empty",
+            reason: "Fewer than two weeks of the selected period have a completed analysis.",
+            weeks,
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("5–11 Jan")).toBeInTheDocument();
+    expect(screen.queryByText("12–18 Jan")).toBeNull();
+    expect(screen.getByText("23–29 Mar")).toBeInTheDocument();
+  });
+});
+
+describe("visibleTickIndexes", () => {
+  it("keeps every label at six or fewer and the latest past that", () => {
+    expect(visibleTickIndexes(3)).toEqual([true, true, true]);
+    expect(visibleTickIndexes(12)).toEqual([
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+    ]);
   });
 });

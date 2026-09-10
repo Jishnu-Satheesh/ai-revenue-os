@@ -98,11 +98,23 @@ function Tile({ tile, tone }: { tile: PerformanceCardTile; tone?: "danger" }) {
   );
 }
 
+/**
+ * Which of a crowded axis' labels stay readable: the first of each group
+ * plus the last, so the latest point is always named. Six or fewer labels
+ * all stay -- the February card renders byte-identically.
+ */
+export function visibleTickIndexes(total: number, maxLabels = 6): boolean[] {
+  if (total <= maxLabels) return Array.from({ length: total }, () => true);
+  const step = Math.ceil(total / maxLabels);
+  return Array.from({ length: total }, (_, index) => index % step === 0 || index === total - 1);
+}
+
 function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
   if (card.trend.state === "empty") {
     // The axes keep their shape while the plot stays empty: week labels
     // along the bottom, a zero baseline, and the plain reason in the middle
     // where the line would be.
+    const visible = visibleTickIndexes(card.trend.weeks.length);
     return (
       <div
         role="img"
@@ -121,9 +133,9 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
           className="absolute inset-x-4 bottom-3 flex items-start justify-between gap-2 text-xs text-muted-foreground"
           aria-hidden="true"
         >
-          {card.trend.weeks.map((week) => (
-            <span key={week}>{week}</span>
-          ))}
+          {card.trend.weeks.map((week, index) =>
+            visible[index] === true ? <span key={week}>{week}</span> : null,
+          )}
         </div>
       </div>
     );
@@ -144,6 +156,12 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
           value: bucket.minorUnits / 10 ** exponent,
         }))
       : [];
+  // Long ranges crowd the axis: keep about six labels (always the latest)
+  // while every point stays plotted and named for assistive tech above. A
+  // crowded chart also earns a wider right margin so the latest figure --
+  // always shown -- never clips off the edge.
+  const crowded = points.length > 6;
+  const visible = visibleTickIndexes(points.length);
   const scaleTop = roundScaleTop(Math.max(...points.map((point) => point.value)));
   return (
     <div
@@ -152,7 +170,7 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
       aria-label={`Weekly reported sales: ${points.map((point) => `${point.label} ${group.format(point.value)}`).join(", ")}. ${card.trend.state === "ready" ? card.trend.coverageNote : ""}.`}
     >
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={points} margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
+        <LineChart data={points} margin={{ top: 20, right: crowded ? 28 : 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 5" stroke="var(--border)" />
           <XAxis
             dataKey="label"
@@ -160,6 +178,7 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
             axisLine={{ stroke: "var(--border)" }}
             tickMargin={8}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            tickFormatter={(value: string, index: number) => (visible[index] === true ? value : "")}
           />
           <YAxis
             tickLine={false}
@@ -185,8 +204,29 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
               dataKey="value"
               position="top"
               offset={8}
-              formatter={(value: unknown) => group.format(Number(value))}
-              style={{ fontSize: 12, fontWeight: 700, fill: "var(--foreground)" }}
+              content={(props: {
+                x?: number | string;
+                y?: number | string;
+                value?: unknown;
+                index?: number;
+              }) => {
+                // The same thinning as the axis: hidden points keep their dot
+                // and their screen-reader naming, only the floating figure
+                // steps aside.
+                if (visible[props.index ?? 0] !== true) return <g />;
+                return (
+                  <text
+                    x={props.x}
+                    y={props.y}
+                    textAnchor="middle"
+                    fontSize={12}
+                    fontWeight={700}
+                    fill="var(--foreground)"
+                  >
+                    {group.format(Number(props.value))}
+                  </text>
+                );
+              }}
             />
           </Line>
         </LineChart>

@@ -1,6 +1,9 @@
 import { GrowthIntelligenceWorkspace } from "@/components/growth-intelligence/growth-intelligence-workspace";
+import { PerformanceBuildWatcher } from "@/components/growth-intelligence/performance-build-watcher";
 import type { MonitoringBranchOption } from "@/components/growth-intelligence/market-monitoring-dialog";
 import { MarketWatch } from "@/components/growth-intelligence/market-watch";
+import { formatWindow } from "@/components/analysis/format";
+import { PageContentLoader } from "@/components/ui/page-content-loader";
 import {
   parseWorkspaceMonth,
   summarizeServiceArea,
@@ -21,8 +24,10 @@ import { DomainError, toPublicError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import {
   buildBusinessPerformanceCard,
+  pickTrendWindows,
   previousEqualRange,
   resolveOverviewWindow,
+  wholeMonthsOfRange,
   wholeWeeksOfRange,
 } from "@/modules/analysis/application/channels-overview";
 import type {
@@ -317,6 +322,24 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         const trendTargets = wholeWeeksOfRange({ from, to }).filter((week) =>
           analysedWeekKeys.has(`${week.from}|${week.to}`),
         );
+        // Second tier: whole calendar months with a finished month-grain
+        // analysis. Third tier: distinct analysed windows picked for maximum
+        // covered days -- week runs are excluded there because weeks already
+        // have their own tier above.
+        const analysedMonthKeys = new Set(
+          analysedKeys
+            .filter((key) => key.grain === "month")
+            .map((key) => `${key.windowStart}|${key.windowEnd}`),
+        );
+        const monthTargets = wholeMonthsOfRange({ from, to }).filter((month) =>
+          analysedMonthKeys.has(`${month.from}|${month.to}`),
+        );
+        const windowTargets = pickTrendWindows(
+          analysedKeys
+            .filter((key) => key.grain !== "week")
+            .map((key) => ({ from: key.windowStart, to: key.windowEnd })),
+          { from, to },
+        );
 
         // Unknown ids fall back to All rather than failing the page, and a
         // foreign id can only ever do that: every read below stays scoped to
@@ -387,7 +410,7 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         if (cacheUsable && cached !== null) {
           performanceCard = cached.card;
         } else {
-          const [currentBands, previousBands, ...trendBands] = await Promise.all([
+          const [currentBands, previousBands, ...restBands] = await Promise.all([
             analysis.loadChannelRangeCardFindingsForWindow({
               organizationId: context.organizationId,
               windowStart: from,
@@ -406,7 +429,28 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
                 windowEnd: week.to,
               }),
             ),
+            ...monthTargets.map((month) =>
+              analysis.loadChannelCardFindingsForWindow({
+                organizationId: context.organizationId,
+                grain: "month" as const,
+                windowStart: month.from,
+                windowEnd: month.to,
+              }),
+            ),
+            ...windowTargets.map((window) =>
+              analysis.loadChannelRangeCardFindingsForWindow({
+                organizationId: context.organizationId,
+                windowStart: window.from,
+                windowEnd: window.to,
+              }),
+            ),
           ]);
+          const trendBands = restBands.slice(0, trendTargets.length);
+          const monthBands = restBands.slice(
+            trendTargets.length,
+            trendTargets.length + monthTargets.length,
+          );
+          const windowBands = restBands.slice(trendTargets.length + monthTargets.length);
           const current = toFindings(currentBands);
 
           if ([...current.values()].some((findings) => findings.length > 0)) {
@@ -421,6 +465,14 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
               trendWeeks: trendTargets.map((week, index) => ({
                 window: week,
                 records: toFindings(trendBands[index] ?? []),
+              })),
+              trendMonths: monthTargets.map((month, index) => ({
+                window: month,
+                records: toFindings(monthBands[index] ?? []),
+              })),
+              trendWindows: windowTargets.map((window, index) => ({
+                window,
+                records: toFindings(windowBands[index] ?? []),
               })),
               locationCount: new Set(
                 snapshot.branchMappings
@@ -574,7 +626,10 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
   }
 
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col gap-8">
+    // The build overlay lives on this content container, so it takes over
+    // the page-content viewport with its blur while the dock and navbar --
+    // rendered outside it -- stay interactive.
+    <div className="relative flex min-h-0 w-full flex-1 flex-col gap-8">
       <GrowthIntelligenceWorkspace
         view={view}
         organizationId={context.organizationId}
@@ -588,10 +643,23 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         buildFailed={buildFailed}
         buildRefused={buildRefused}
         canRequestBuild={canRequestBuild}
-        pendingChannelIds={pendingChannelIds}
         branches={branches}
         selectedBranchId={branchId}
       />
+      {buildPending && performanceFilters ? (
+        <>
+          <PageContentLoader
+            title="Building this period's figures"
+            detail={`${formatWindow(performanceFilters.from, performanceFilters.to)} · watching ${pendingChannelIds.length} ${pendingChannelIds.length === 1 ? "channel" : "channels"}`}
+          />
+          <PerformanceBuildWatcher
+            organizationId={context.organizationId}
+            from={performanceFilters.from}
+            to={performanceFilters.to}
+            channelIds={pendingChannelIds}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

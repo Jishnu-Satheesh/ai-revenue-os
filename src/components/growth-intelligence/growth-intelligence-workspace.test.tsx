@@ -64,7 +64,6 @@ function workspace(
     buildFailed?: boolean;
     buildRefused?: boolean;
     canRequestBuild?: boolean;
-    pendingChannelIds?: readonly string[];
   } = {},
 ) {
   return render(
@@ -81,7 +80,6 @@ function workspace(
       buildFailed={build.buildFailed ?? false}
       buildRefused={build.buildRefused ?? false}
       canRequestBuild={build.canRequestBuild ?? true}
-      pendingChannelIds={build.pendingChannelIds ?? []}
     />,
   );
 }
@@ -197,32 +195,12 @@ describe("GrowthIntelligenceWorkspace", () => {
     );
   });
 
-  it("covers the card area with the loader while a build is outstanding", () => {
-    // Still building on every poll: the watcher keeps watching instead of
-    // refreshing onto a half-built card.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: "building" }) }),
-    );
+  it("holds the card's shape as skeleton blocks while a build is outstanding", () => {
     const { container } = workspace(view(), true, defaultFilters(), {
       buildPending: true,
-      pendingChannelIds: ["ch-1"],
     });
-    expect(container.querySelector('[data-slot="page-content-loader"]')).toBeTruthy();
-    expect(screen.getByText("Building this period's figures")).toBeTruthy();
-    expect(screen.getByText(/2026-02-01 to 2026-02-28 · watching 1 channel/)).toBeTruthy();
-  });
-
-  it("refreshes onto the card when the build settles", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: "ready" }) }),
-    );
-    workspace(view(), true, defaultFilters(), {
-      buildPending: true,
-      pendingChannelIds: ["ch-1"],
-    });
-    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(container.querySelector('[data-slot="performance-skeleton"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="page-content-loader"]')).toBeNull();
   });
 
   it("states a failed build plainly with a retry path", () => {

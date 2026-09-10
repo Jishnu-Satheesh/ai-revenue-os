@@ -276,6 +276,120 @@ export function wholeWeeksOfRange(range: CoveredMonth): CoveredMonth[] {
   }));
 }
 
+/**
+ * The whole calendar months a picked range contains, for the trend's second
+ * tier. A month counts only when the range covers it fully: a stub month
+ * beside full months would read as a collapse nobody measured.
+ */
+export function wholeMonthsOfRange(range: CoveredMonth): CoveredMonth[] {
+  const months: CoveredMonth[] = [];
+  let start = localPeriodStart(range.from, "month");
+  while (start <= range.to) {
+    const end = localPeriodEnd(start, "month");
+    if (range.from <= start && end <= range.to) months.push({ from: start, to: end });
+    const next = addLocalDays(end, 1);
+    if (next <= start) break;
+    start = next;
+  }
+  return months;
+}
+
+/**
+ * The analysed windows a long range's trend can honestly plot when whole
+ * weeks (and whole months) were never analysed: distinct finished analyses
+ * fully inside the range, picked for maximum covered days without overlap.
+ *
+ * Maximum coverage, not maximum count: for Jan, Jan–Feb, and March analyses
+ * the answer is Jan–Feb + March (the whole quarter), never Jan + March with
+ * February silently dropped. Ties prefer more windows -- finer is more
+ * informative for a trend. The picked range itself is excluded: the tiles
+ * already state its total, and a point containing another point misleads.
+ * Capped so one pathological history cannot fan the card's reads out.
+ */
+export function pickTrendWindows(
+  keys: readonly { from: string; to: string }[],
+  range: CoveredMonth,
+  maxBuckets = 12,
+): CoveredMonth[] {
+  const seen = new Set<string>();
+  const candidates = keys
+    .filter((key) => {
+      const fingerprint = `${key.from}|${key.to}`;
+      if (seen.has(fingerprint)) return false;
+      seen.add(fingerprint);
+      if (key.from === range.from && key.to === range.to) return false;
+      return range.from <= key.from && key.to <= range.to;
+    })
+    .map((key) => ({ from: key.from, to: key.to }))
+    .sort((left, right) =>
+      left.to < right.to ? -1 : left.to > right.to ? 1 : left.from < right.from ? -1 : 1,
+    );
+  // Weighted interval scheduling: best[i] is the best (days, count) pair
+  // using the first i candidates, each candidate either skipped or taken
+  // with the best set ending before it starts.
+  const days = (window: CoveredMonth) => localDaysBetween(window.from, window.to) + 1;
+  const better = (
+    left: { weight: number; count: number },
+    right: { weight: number; count: number },
+  ) => left.weight > right.weight || (left.weight === right.weight && left.count > right.count);
+  const best: { weight: number; count: number }[] = [{ weight: 0, count: 0 }];
+  const ends: string[] = candidates.map((candidate) => candidate.to);
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    if (!candidate) continue;
+    let low = 0;
+    let high = i;
+    while (low < high) {
+      const mid = Math.floor((low + high + 1) / 2);
+      if ((ends[mid - 1] ?? "") < candidate.from) low = mid;
+      else high = mid - 1;
+    }
+    const previous = best[low] ?? { weight: 0, count: 0 };
+    const taken = { weight: previous.weight + days(candidate), count: previous.count + 1 };
+    const skipped = best[i] ?? { weight: 0, count: 0 };
+    best.push(better(taken, skipped) ? taken : skipped);
+  }
+  const picked: CoveredMonth[] = [];
+  let i = candidates.length;
+  while (i > 0) {
+    const current = best[i];
+    const skipped = best[i - 1] ?? { weight: 0, count: 0 };
+    if (current && (current.weight !== skipped.weight || current.count !== skipped.count)) {
+      const candidate = candidates[i - 1];
+      if (candidate) picked.unshift(candidate);
+      let low = 0;
+      let high = i - 1;
+      while (low < high) {
+        const mid = Math.floor((low + high + 1) / 2);
+        if ((ends[mid - 1] ?? "") < (candidate?.from ?? "")) low = mid;
+        else high = mid - 1;
+      }
+      i = low;
+    } else {
+      i -= 1;
+    }
+  }
+  picked.sort((left, right) => (left.from < right.from ? -1 : 1));
+  if (picked.length <= maxBuckets) return picked;
+  return picked
+    .sort((left, right) => days(right) - days(left))
+    .slice(0, maxBuckets)
+    .sort((left, right) => (left.from < right.from ? -1 : 1));
+}
+
+/**
+ * A short bucket label for an analysed window: the year is nearby in the
+ * card header, so same-year windows name only their months.
+ */
+export function compactRange(from: string, to: string): string {
+  const [fromYear, fromMonth, fromDay] = from.split("-").map(Number);
+  const [toYear, toMonth, toDay] = to.split("-").map(Number);
+  const fromLabel = `${monthName(from).slice(0, 3)}`;
+  if (fromYear === toYear && fromMonth === toMonth) return `${fromDay}–${toDay} ${fromLabel}`;
+  if (fromYear === toYear) return `${fromDay} ${fromLabel} – ${toDay} ${monthName(to).slice(0, 3)}`;
+  return prettyRange(from, to);
+}
+
 /** `2026-02-01` reads "February" without a timezone to drift through. */
 export function monthName(date: string): string {
   const [year, month] = date.split("-").map(Number);
@@ -467,6 +581,23 @@ export function buildBusinessPerformanceCard(input: {
   previous: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
   /** Nested analysed weeks, each with the same card findings for its window. */
   trendWeeks: readonly {
+    window: CoveredMonth;
+    records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
+  }[];
+  /**
+   * Nested analysed calendar months, same shape as the weeks: the trend's
+   * second tier when whole weeks were never analysed.
+   */
+  trendMonths: readonly {
+    window: CoveredMonth;
+    records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
+  }[];
+  /**
+   * Distinct analysed windows inside the range, picked for maximum covered
+   * days without overlap: the trend's third tier when neither weeks nor
+   * months were analysed.
+   */
+  trendWindows: readonly {
     window: CoveredMonth;
     records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
   }[];
@@ -760,62 +891,127 @@ export function buildBusinessPerformanceCard(input: {
     monthName(week.from) === monthName(week.to)
       ? `${dayOfMonth(week.from)}–${dayOfMonth(week.to)} ${monthName(week.from).slice(0, 3)}`
       : `${dayOfMonth(week.from)} ${monthName(week.from).slice(0, 3)}–${dayOfMonth(week.to)} ${monthName(week.to).slice(0, 3)}`;
-  const trendBuckets: { label: string; minorUnits: number }[] = [];
-  let trendCurrency: string | null = null;
-  let trendBlockedByCurrency = false;
-  const trendChannels = new Set<string>();
-  for (const week of wholeWeeks) {
-    const figures = grossByChannel(
+  const monthBucketLabel = (month: CoveredMonth) =>
+    input.month.from.slice(0, 4) === input.month.to.slice(0, 4)
+      ? monthName(month.from).slice(0, 3)
+      : `${monthName(month.from).slice(0, 3)} ${month.from.slice(2, 4)}`;
+
+  /** One tier's pass over its entries: same currency rule, same sums. */
+  const collectTier = (
+    entries: readonly {
+      window: CoveredMonth;
+      records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
+    }[],
+    labelOf: (window: CoveredMonth) => string,
+  ) => {
+    const buckets: { label: string; minorUnits: number }[] = [];
+    let currency: string | null = null;
+    let blocked = false;
+    const channels = new Set<string>();
+    for (const entry of entries) {
+      const figures = grossByChannel(entry.records);
+      if (figures.size === 0) continue;
+      const currencies = new Set([...figures.values()].map((figure) => figure.currency));
+      if (currencies.size !== 1) {
+        blocked = true;
+        break;
+      }
+      const [entryCurrency] = currencies;
+      if (currency !== null && entryCurrency !== currency) {
+        blocked = true;
+        break;
+      }
+      currency = entryCurrency ?? currency;
+      for (const id of figures.keys()) channels.add(id);
+      buckets.push({
+        label: labelOf(entry.window),
+        minorUnits: [...figures.values()].reduce((total, figure) => total + figure.minorUnits, 0),
+      });
+    }
+    return { buckets, currency, blocked, channels };
+  };
+
+  // Three tiers, finest first: analysed whole weeks, then analysed whole
+  // calendar months, then distinct analysed windows picked for maximum
+  // coverage. A tier with fewer than two plotted buckets yields to the next;
+  // a coarser tier whose own figures combine cleanly still reads even when a
+  // finer tier mixed currencies -- its runs stand alone, and the note names
+  // the tier shown.
+  const wholeMonths = wholeMonthsOfRange(input.month);
+  const weekEntries = wholeWeeks.map((week) => ({
+    window: week,
+    records:
       input.trendWeeks.find(
         (entry) => entry.window.from === week.from && entry.window.to === week.to,
-      )?.records ?? new Map(),
-    );
-    if (figures.size === 0) continue;
-    const currencies = new Set([...figures.values()].map((figure) => figure.currency));
-    if (currencies.size !== 1) {
-      trendBlockedByCurrency = true;
-      break;
-    }
-    const [currency] = currencies;
-    if (trendCurrency !== null && currency !== trendCurrency) {
-      trendBlockedByCurrency = true;
-      break;
-    }
-    trendCurrency = currency ?? trendCurrency;
-    for (const id of figures.keys()) trendChannels.add(id);
-    trendBuckets.push({
-      label: weekLabel(week),
-      minorUnits: [...figures.values()].reduce((total, figure) => total + figure.minorUnits, 0),
-    });
-  }
-  const trend: PerformanceCardTrend =
-    trendBlockedByCurrency || (trendBuckets.length > 0 && trendCurrency === null)
+      )?.records ?? new Map<string, readonly ChannelFindingRecord[]>(),
+  }));
+  const monthEntries = wholeMonths.map((month) => ({
+    window: month,
+    records:
+      input.trendMonths.find(
+        (entry) => entry.window.from === month.from && entry.window.to === month.to,
+      )?.records ?? new Map<string, readonly ChannelFindingRecord[]>(),
+  }));
+  const windowEntries = [...input.trendWindows].sort((left, right) =>
+    left.window.from < right.window.from ? -1 : 1,
+  );
+  const weekTier = collectTier(weekEntries, weekLabel);
+  const monthTier = collectTier(monthEntries, monthBucketLabel);
+  const windowTier = collectTier(windowEntries, (window) => compactRange(window.from, window.to));
+  const readyTier =
+    !weekTier.blocked && weekTier.buckets.length >= 2 && weekTier.currency !== null
+      ? {
+          buckets: weekTier.buckets,
+          currency: weekTier.currency,
+          coverageNote: wholeMonth
+            ? `${weekTier.buckets.length} of ${wholeWeeks.length} ${monthName(input.month.from)} weeks · ${weekTier.channels.size} of ${input.channels.length} channels`
+            : `${weekTier.buckets.length} of ${wholeWeeks.length} weeks · ${weekTier.channels.size} of ${input.channels.length} channels`,
+        }
+      : !monthTier.blocked && monthTier.buckets.length >= 2 && monthTier.currency !== null
+        ? {
+            buckets: monthTier.buckets,
+            currency: monthTier.currency,
+            coverageNote: `${monthTier.buckets.length} of ${wholeMonths.length} months · ${monthTier.channels.size} of ${input.channels.length} channels`,
+          }
+        : !windowTier.blocked && windowTier.buckets.length >= 2 && windowTier.currency !== null
+          ? {
+              buckets: windowTier.buckets,
+              currency: windowTier.currency,
+              coverageNote: `${windowTier.buckets.length} analysed windows · ${windowTier.channels.size} of ${input.channels.length} channels`,
+            }
+          : null;
+  // A currency split only refuses the card when no tier could plot: the
+  // weeks keep their own reason, coarser tiers share one.
+  const trendBlockedByCurrency =
+    readyTier === null && (weekTier.blocked || monthTier.blocked || windowTier.blocked);
+  const trendCurrencyBlockedInWeeks = readyTier === null && weekTier.blocked;
+  const trend: PerformanceCardTrend = readyTier
+    ? {
+        state: "ready",
+        buckets: readyTier.buckets,
+        currency: readyTier.currency,
+        coverageNote: readyTier.coverageNote,
+      }
+    : trendBlockedByCurrency
       ? {
           state: "empty",
-          reason: "Weeks reported in more than one currency.",
+          reason: trendCurrencyBlockedInWeeks
+            ? "Weeks reported in more than one currency."
+            : "Periods reported in more than one currency.",
           weeks: wholeWeeks.map(weekLabel),
         }
-      : trendBuckets.length >= 2 && trendCurrency
-        ? {
-            state: "ready",
-            buckets: trendBuckets,
-            currency: trendCurrency,
-            coverageNote: wholeMonth
-              ? `${trendBuckets.length} of ${wholeWeeks.length} ${monthName(input.month.from)} weeks · ${trendChannels.size} of ${input.channels.length} channels`
-              : `${trendBuckets.length} of ${wholeWeeks.length} weeks · ${trendChannels.size} of ${input.channels.length} channels`,
-          }
-        : {
-            state: "empty",
-            reason:
-              wholeWeeks.length < 2
-                ? wholeMonth
-                  ? "This month holds fewer than two whole weeks to plot."
-                  : "The selected period holds fewer than two whole weeks to plot."
-                : wholeMonth
-                  ? "Fewer than two weeks of this month have a completed analysis."
-                  : "Fewer than two weeks of the selected period have a completed analysis.",
-            weeks: wholeWeeks.map(weekLabel),
-          };
+      : {
+          state: "empty",
+          reason:
+            wholeWeeks.length < 2
+              ? wholeMonth
+                ? "This month holds fewer than two whole weeks to plot."
+                : "The selected period holds fewer than two whole weeks to plot."
+              : wholeMonth
+                ? "Fewer than two weeks of this month have a completed analysis."
+                : "Fewer than two weeks of the selected period have a completed analysis.",
+          weeks: wholeWeeks.map(weekLabel),
+        };
 
   const orderChannels = currentOrders.size;
   const locationWord = `${input.locationCount} ${input.locationCount === 1 ? "location" : "locations"}`;

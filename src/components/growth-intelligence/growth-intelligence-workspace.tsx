@@ -30,7 +30,7 @@ import type { ResearchPipelineView } from "@/modules/growth-intelligence/applica
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageContentLoader } from "@/components/ui/page-content-loader";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -45,67 +45,6 @@ import {
   type PerformanceFilterState,
 } from "@/modules/analysis/application/channels-overview";
 import type { GrowthIntelligenceView } from "@/modules/growth-intelligence/application/read-model";
-
-/**
- * Watches the aggregate build status for the picked range while the loader
- * is up. Any settled verdict -- figures ready or nothing left to wait for --
- * re-reads the page from the server, which is where the card (or the honest
- * note) is decided. A dropped poll is retried, never mistaken for an answer.
- */
-function PerformanceBuildWatcher({
-  organizationId,
-  from,
-  to,
-  channelIds,
-}: {
-  organizationId: string;
-  from: string;
-  to: string;
-  channelIds: readonly string[];
-}) {
-  const router = useRouter();
-  const channelsKey = [...channelIds].sort().join(",");
-
-  useEffect(() => {
-    if (channelsKey.length === 0) return;
-    const url =
-      `/api/organizations/${organizationId}/growth-intelligence/performance-build` +
-      `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` +
-      `&channels=${encodeURIComponent(channelsKey)}`;
-    const controller = new AbortController();
-    let stopped = false;
-
-    async function poll(): Promise<void> {
-      if (stopped) return;
-      try {
-        const response = await fetch(url, { signal: controller.signal });
-        const body = (await response.json()) as { state: string };
-        if (stopped) return;
-        if (body.state === "ready" || body.state === "failed") {
-          stopped = true;
-          clearInterval(timer);
-          router.refresh();
-        }
-      } catch {
-        // A dropped poll is not a failed build: keep the previous state and
-        // keep polling.
-      }
-    }
-
-    const timer = setInterval(() => {
-      void poll();
-    }, 2000);
-    void poll();
-
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-      controller.abort();
-    };
-  }, [organizationId, from, to, channelsKey, router]);
-
-  return null;
-}
 
 const TAB_IDS = ["overview", "recommendations", "actions", "insights"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -134,7 +73,6 @@ function PerformanceSummary({
   buildFailed,
   buildRefused,
   canRequestBuild,
-  pendingChannelIds,
 }: {
   card: BusinessPerformanceCardView | null;
   fetchedAt: string | null;
@@ -145,7 +83,6 @@ function PerformanceSummary({
   buildFailed: boolean;
   buildRefused: boolean;
   canRequestBuild: boolean;
-  pendingChannelIds: readonly string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -336,26 +273,33 @@ function PerformanceSummary({
         </p>
       ) : null}
       {filteredOut ? null : showCard ? (
-        // The loader lives inside this relative box, so its blurry overlay
-        // covers the page-content viewport only: the dock and navbar sit
-        // outside it and stay interactive. A previous card stays behind the
-        // blur; a first build gets room for the loader to stand in.
-        <div className={displayedCard || !buildPending ? "relative" : "relative min-h-80"}>
-          {displayedCard ? <BusinessPerformanceCard card={displayedCard} /> : null}
-          {buildPending && filters ? (
-            <>
-              <PageContentLoader
-                title="Building this period's figures"
-                detail={`${formatWindow(filters.from, filters.to)} · watching ${pendingChannelIds.length} ${pendingChannelIds.length === 1 ? "channel" : "channels"}`}
-              />
-              <PerformanceBuildWatcher
-                organizationId={organizationId}
-                from={filters.from}
-                to={filters.to}
-                channelIds={pendingChannelIds}
-              />
-            </>
-          ) : null}
+        // Sections never spinner-load: while the page-content overlay covers
+        // the build, the card area holds its shape as quiet skeleton blocks
+        // with no figures to misread.
+        <div
+          data-slot="performance-skeleton"
+          aria-hidden={buildPending && !displayedCard ? true : undefined}
+        >
+          {displayedCard && !buildPending ? (
+            <BusinessPerformanceCard card={displayedCard} />
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {[0, 1, 2, 3].map((tile) => (
+                  <div key={tile} className="flex flex-col gap-2 rounded-xl border p-5">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-8 w-28" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_auto_minmax(0,1fr)]">
+                <Skeleton className="h-64" />
+                <div className="hidden lg:block" aria-hidden="true" />
+                <Skeleton className="h-64" />
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <Card className="p-6">
@@ -417,7 +361,6 @@ export function GrowthIntelligenceWorkspace({
   buildFailed = false,
   buildRefused = false,
   canRequestBuild = false,
-  pendingChannelIds = [],
   branches = [],
   selectedBranchId = null,
 }: {
@@ -433,7 +376,6 @@ export function GrowthIntelligenceWorkspace({
   buildFailed?: boolean;
   buildRefused?: boolean;
   canRequestBuild?: boolean;
-  pendingChannelIds?: readonly string[];
   branches?: MonitoringBranchOption[];
   selectedBranchId?: string | null;
 }) {
@@ -544,7 +486,6 @@ export function GrowthIntelligenceWorkspace({
             buildFailed={buildFailed}
             buildRefused={buildRefused}
             canRequestBuild={canRequestBuild}
-            pendingChannelIds={pendingChannelIds}
           />
 
           <section aria-label="Previous actions" className="flex flex-col gap-4">

@@ -4,11 +4,14 @@ import {
   buildBusinessPerformanceCard,
   buildChannelsOverviewView,
   buildOverviewWindows,
+  compactRange,
   isWholeCalendarMonth,
   monthName,
+  pickTrendWindows,
   previousEqualRange,
   resolveDefaultWindow,
   resolveOverviewWindow,
+  wholeMonthsOfRange,
   wholeWeeksOfRange,
 } from "@/modules/analysis/application/channels-overview";
 import type {
@@ -525,6 +528,53 @@ describe("picked ranges", () => {
     ]);
     expect(monthName("2026-02-01")).toBe("February");
   });
+
+  it("lists whole calendar months fully inside a range", () => {
+    expect(wholeMonthsOfRange({ from: "2026-01-15", to: "2026-03-31" })).toEqual([
+      { from: "2026-02-01", to: "2026-02-28" },
+      { from: "2026-03-01", to: "2026-03-31" },
+    ]);
+    expect(wholeMonthsOfRange({ from: "2026-01-01", to: "2026-03-31" })).toEqual([
+      { from: "2026-01-01", to: "2026-01-31" },
+      { from: "2026-02-01", to: "2026-02-28" },
+      { from: "2026-03-01", to: "2026-03-31" },
+    ]);
+  });
+
+  it("picks analysed windows for maximum covered days without overlap", () => {
+    const range = { from: "2026-01-01", to: "2026-03-31" };
+    // Jan + March would silently drop February; Jan–Feb + March covers all.
+    expect(
+      pickTrendWindows(
+        [
+          { from: "2026-01-01", to: "2026-01-31" },
+          { from: "2026-01-01", to: "2026-02-28" },
+          { from: "2026-03-01", to: "2026-03-31" },
+        ],
+        range,
+      ),
+    ).toEqual([
+      { from: "2026-01-01", to: "2026-02-28" },
+      { from: "2026-03-01", to: "2026-03-31" },
+    ]);
+    // Windows outside the range, and the range itself, never plot.
+    expect(
+      pickTrendWindows(
+        [
+          { from: "2026-01-01", to: "2026-03-31" },
+          { from: "2025-12-01", to: "2026-01-15" },
+          { from: "2026-03-15", to: "2026-04-15" },
+        ],
+        range,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names window buckets compactly", () => {
+    expect(compactRange("2026-02-02", "2026-02-08")).toBe("2–8 Feb");
+    expect(compactRange("2026-01-01", "2026-02-28")).toBe("1 Jan – 28 Feb");
+    expect(compactRange("2025-12-01", "2026-01-31")).toBe("1 Dec – 31 Jan 2026");
+  });
 });
 
 function cardFinding(input: {
@@ -736,6 +786,8 @@ function cardInput(overrides: Partial<Parameters<typeof buildBusinessPerformance
     channelScopeName: null,
     locationScopeName: null,
     reportFiles: ["DeliveryA-Feb.xlsx"],
+    trendMonths: [],
+    trendWindows: [],
     ...overrides,
   };
 }
@@ -1028,6 +1080,108 @@ describe("buildBusinessPerformanceCard over a picked range", () => {
       ],
       currency: "AED",
       coverageNote: "2 of 7 weeks · 2 of 2 channels",
+    });
+  });
+
+  it("falls back to analysed calendar months when weeks were never analysed", () => {
+    const input = rangeInput({ trendWeeks: [] });
+    const monthRecordsFor = (channelId: string, numerator: number) =>
+      monthRecords([
+        {
+          channelId,
+          findings: [cardFinding({ channelId, code: GROSS, valueKind: "money", numerator })],
+        },
+      ]);
+    input.trendMonths = [
+      {
+        window: { from: "2026-01-01", to: "2026-01-31" },
+        records: monthRecordsFor("ch-a", 4_000_000),
+      },
+      {
+        window: { from: "2026-02-01", to: "2026-02-28" },
+        records: monthRecordsFor("ch-a", 6_000_000),
+      },
+    ];
+    const card = buildBusinessPerformanceCard(input);
+    expect(card.trend).toEqual({
+      state: "ready",
+      buckets: [
+        { label: "Jan", minorUnits: 4_000_000 },
+        { label: "Feb", minorUnits: 6_000_000 },
+      ],
+      currency: "AED",
+      coverageNote: "2 of 2 months · 1 of 2 channels",
+    });
+  });
+
+  it("falls back to distinct analysed windows with exact-date labels", () => {
+    const input = rangeInput({ trendWeeks: [], trendMonths: [] });
+    const windowRecordsFor = (channelId: string, numerator: number) =>
+      monthRecords([
+        {
+          channelId,
+          findings: [cardFinding({ channelId, code: GROSS, valueKind: "money", numerator })],
+        },
+      ]);
+    input.trendWindows = [
+      {
+        window: { from: "2026-01-01", to: "2026-02-28" },
+        records: windowRecordsFor("ch-a", 10_000_000),
+      },
+      {
+        window: { from: "2026-03-01", to: "2026-03-31" },
+        records: windowRecordsFor("ch-a", 6_000_000),
+      },
+    ];
+    const card = buildBusinessPerformanceCard({
+      ...input,
+      month: { from: "2026-01-01", to: "2026-03-31" },
+    });
+    expect(card.trend).toEqual({
+      state: "ready",
+      buckets: [
+        { label: "1 Jan – 28 Feb", minorUnits: 10_000_000 },
+        { label: "1–31 Mar", minorUnits: 6_000_000 },
+      ],
+      currency: "AED",
+      coverageNote: "2 analysed windows · 1 of 2 channels",
+    });
+  });
+
+  it("prefers weeks over months and refuses mixed-currency tiers", () => {
+    const input = rangeInput();
+    input.trendMonths = [
+      {
+        window: { from: "2026-01-01", to: "2026-01-31" },
+        records: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: [
+              cardFinding({ channelId: "ch-a", code: GROSS, valueKind: "money", numerator: 1 }),
+            ],
+          },
+        ]),
+      },
+      {
+        window: { from: "2026-02-01", to: "2026-02-28" },
+        records: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: [
+              cardFinding({ channelId: "ch-a", code: GROSS, valueKind: "money", numerator: 1 }),
+            ],
+          },
+        ]),
+      },
+    ];
+    // Weeks (from cardInput's default trendWeeks) win while present.
+    expect(buildBusinessPerformanceCard(input).trend).toMatchObject({ state: "ready" });
+    // A currency split in the weeks yields to the clean months, not to empty.
+    const mixed = rangeInput({ trendWeeks: [] });
+    mixed.trendMonths = input.trendMonths;
+    expect(buildBusinessPerformanceCard(mixed).trend).toMatchObject({
+      state: "ready",
+      coverageNote: "2 of 2 months · 1 of 2 channels",
     });
   });
 });

@@ -501,10 +501,14 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
   tiles -- reported sales, orders placed, menu views, cancelled orders -- show deltas
   against the previous equal-length period over the channels analysed in both periods;
   anything unmeasured stays absent with its reason, never zero.
-- The trend plots whole weeks inside the picked range from nested analysed week windows
-  and states its week and channel coverage. With fewer than two analysable
-  weeks, the axes keep their shape with the plain reason in the middle rather
-  than hiding. Channel shares refuse mixed currencies with a reason.
+- The trend plots the finest honest buckets available: analysed whole weeks first,
+  then analysed whole calendar months in the range, then distinct analysed windows
+  picked for maximum covered days without overlap (each labelled with its exact
+  dates). It states which tier it plots with its week and channel coverage. With
+  fewer than two plottable buckets, the axes keep their shape with the plain reason
+  in the middle rather than hiding. Past about six buckets the axis and value
+  labels thin to readable ticks while every point stays plotted. Channel shares
+  refuse mixed currencies with a reason.
 - The assembled card is cached per organization, range, channel, and location,
   following ADR 0048: the cache holds answers, never verdicts about whether an answer
   is current. A completed analysis for that scope rebuilds the cached card; the
@@ -523,12 +527,15 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
 
 ### 9.10 Page-content loader
 
-- A shared loader covers the page-content viewport only: a blurry overlay
-  background with the docs-exact Spinner centered. The side-menu dock and the top
-  navbar are never covered, and any platform page can reuse the component.
-- It renders only while a polled backend build is outstanding. It never stands in
-  for an honest empty state: no coverage, no permission, and failed builds each keep
-  their own plain message beside the loader's absence.
+- A shared loader covers the page-content viewport while a whole-page action
+  builds: a blurry overlay background with the docs-exact Spinner centered. The
+  side-menu dock and the top navbar are never covered, and any platform page can
+  reuse the component.
+- Sections never spinner-load: while the overlay is up, a loading section holds
+  its shape as quiet skeleton blocks with no figures to misread.
+- The overlay renders only while a polled backend build is outstanding. It never
+  stands in for an honest empty state: no coverage, no permission, and failed
+  builds each keep their own plain message beside the loader's absence.
 
 ## 10. Campaign Opportunity contract
 

@@ -52,6 +52,8 @@ describe("performanceCardViewSchema", () => {
       current: new Map(),
       previous: new Map(),
       trendWeeks: [],
+      trendMonths: [],
+      trendWindows: [],
       locationCount: 0,
       channelScopeName: null,
       locationScopeName: null,
