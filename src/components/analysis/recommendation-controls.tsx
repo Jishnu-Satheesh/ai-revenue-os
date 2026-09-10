@@ -2,9 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ThumbsDown, ThumbsUp, Zap } from "lucide-react";
+import { Clock, ThumbsDown, ThumbsUp, X, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -123,26 +129,102 @@ export function RecommendationControls({
       // border, leading with the lightning mark and then the narrator's words.
       className="flex flex-col gap-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-6"
     >
-      <div className="flex gap-4">
+      {/* Top row: mark plus the four answers as one nowrap icon group.
+          Second row below carries the words full-width, so the text is never
+          squeezed beside the buttons. */}
+      <div className="flex items-center justify-between gap-3">
         <span
           aria-hidden="true"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white"
         >
-          <Zap className="size-5" />
+          <Zap className="size-4" />
         </span>
-        <div className="flex min-w-0 flex-col gap-1.5">
-          {recommendation.label === "needs_data" ? (
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              {LABELS[recommendation.label]}
-            </p>
-          ) : null}
-          <p className="text-[13px] font-medium leading-relaxed">{recommendation.headline}</p>
-          {recommendation.detail ? (
-            <p className="text-[13px] leading-relaxed text-muted-foreground">
-              {recommendation.detail}
-            </p>
-          ) : null}
-        </div>
+        {!recommendation.decision ? (
+          <TooltipProvider>
+            <div className="flex shrink-0 flex-nowrap items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Helpful"
+                    className="size-8 shrink-0 justify-center rounded-full border border-emerald-200 bg-white p-0 text-emerald-600"
+                    aria-pressed={recommendation.myFeedback === true}
+                    disabled={pending}
+                    onClick={() => answer({ helpful: true }, "feedback")}
+                  >
+                    <ThumbsUp aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Mark as helpful</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Not helpful"
+                    className="size-8 shrink-0 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
+                    aria-pressed={recommendation.myFeedback === false}
+                    disabled={pending}
+                    onClick={() => answer({ helpful: false }, "feedback")}
+                  >
+                    <ThumbsDown aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Mark as not helpful</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Snooze"
+                    className="size-8 shrink-0 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
+                    disabled={pending}
+                    onClick={() => setSnoozeOpen(true)}
+                  >
+                    <Clock aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Snooze until later</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Dismiss"
+                    className="size-8 shrink-0 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
+                    disabled={pending}
+                    onClick={() => setDismissOpen(true)}
+                  >
+                    <X aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Dismiss with a reason</TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
+        ) : null}
+      </div>
+
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {recommendation.label === "needs_data" ? (
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            {LABELS[recommendation.label]}
+          </p>
+        ) : null}
+        <p className="text-[13px] font-medium leading-relaxed">{recommendation.headline}</p>
+        {recommendation.detail ? (
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            {recommendation.detail}
+          </p>
+        ) : null}
       </div>
 
       {recommendation.supportedActions.length > 0 ? (
@@ -195,10 +277,8 @@ export function RecommendationControls({
           ) : null}
         </p>
       ) : (
-        // Wraps rather than overflowing: at a narrow main column the four
-        // decision controls plus the two feedback buttons are wider than the
-        // card, and an un-wrapped row pushed a horizontal scrollbar onto the
-        // whole workspace.
+        // Decision pair only: the four icon answers live in the header row, so
+        // this row keeps just Acknowledge and Planned and cannot overflow.
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
             type="button"
@@ -220,52 +300,6 @@ export function RecommendationControls({
           >
             Planned
           </Button>
-          <div className="ml-auto flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Helpful"
-              className="size-8 justify-center rounded-full border border-emerald-200 bg-white p-0 text-emerald-600"
-              aria-pressed={recommendation.myFeedback === true}
-              disabled={pending}
-              onClick={() => answer({ helpful: true }, "feedback")}
-            >
-              <ThumbsUp aria-hidden="true" className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Not helpful"
-              className="size-8 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
-              aria-pressed={recommendation.myFeedback === false}
-              disabled={pending}
-              onClick={() => answer({ helpful: false }, "feedback")}
-            >
-              <ThumbsDown aria-hidden="true" className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
-              disabled={pending}
-              onClick={() => setSnoozeOpen(true)}
-            >
-              Snooze
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
-              disabled={pending}
-              onClick={() => setDismissOpen(true)}
-            >
-              Dismiss
-            </Button>
-          </div>
         </div>
       )}
 

@@ -53,9 +53,7 @@ export type JudgeProvider = {
   generate(system: string, user: string): Promise<unknown>;
 };
 
-export function createRecommendationJudgeProvider(config: {
-  modelId: string;
-}): JudgeProvider {
+export function createRecommendationJudgeProvider(config: { modelId: string }): JudgeProvider {
   const apiKey = env.GOOGLE_GENERATIVE_AI_API_KEY;
   if (!apiKey) {
     throw new DomainError("INTEGRATION_ERROR", "No Google Generative AI credential is configured.");

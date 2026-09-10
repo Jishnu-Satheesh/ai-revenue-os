@@ -24,23 +24,25 @@ const paramsSchema = z.object({
 const bodySchema = z.discriminatedUnion("decision", [
   z.object({ decision: z.literal("acknowledged") }).strict(),
   z.object({ decision: z.literal("planned") }).strict(),
-  z.object({
-    decision: z.literal("dismissed"),
-    /** Why it is being dismissed; a dismissal without one says nothing. */
-    reason: z.string().min(3),
-  }).strict(),
-  z.object({
-    decision: z.literal("snoozed"),
-    /** The future time the narration hides until. */
-    snoozedUntil: z.string().datetime({ offset: true }),
-  }).strict(),
+  z
+    .object({
+      decision: z.literal("dismissed"),
+      /** Why it is being dismissed; a dismissal without one says nothing. */
+      reason: z.string().min(3),
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.literal("snoozed"),
+      /** The future time the narration hides until. */
+      snoozedUntil: z.string().datetime({ offset: true }),
+    })
+    .strict(),
 ]);
 
 export async function POST(
   request: Request,
-  {
-    params,
-  }: { params: Promise<{ organizationId: string; recommendationId: string }> },
+  { params }: { params: Promise<{ organizationId: string; recommendationId: string }> },
 ) {
   const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
   try {

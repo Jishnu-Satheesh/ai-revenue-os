@@ -599,6 +599,8 @@ export type OrganizationRecommendationRecord = {
    * Organization policy and other members' ordering never change.
    */
   preferenceSnoozedUntil: string | null;
+  /** The viewing actor's own quality vote, if they have cast one. */
+  myFeedback?: boolean | null;
 };
 
 export type OrganizationRecommendationLaneRecord = OrganizationRecommendationRecord & {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -195,17 +195,16 @@ function PotentialLostEarnedScale({
     value: { minorUnits: number; currency: string } | null;
     tone: "neutral" | "danger" | "success";
   }[] = [
-    { label: "Potential", value: potential, tone: "neutral" },
-    { label: "Lost", value: figures.lost, tone: "danger" },
-    { label: "Earned", value: figures.earned, tone: "success" },
-  ];
+      { label: "Potential", value: potential, tone: "neutral" },
+      { label: "Lost", value: figures.lost, tone: "danger" },
+      { label: "Earned", value: figures.earned, tone: "success" },
+    ];
 
   return (
     <div
       role="img"
-      aria-label={`Potential ${formatMoney(potential.minorUnits, potential.currency)}${
-        figures.lost ? `; lost ${formatMoney(figures.lost.minorUnits, figures.lost.currency)}` : ""
-      }${figures.earned ? `; earned ${formatMoney(figures.earned.minorUnits, figures.earned.currency)}` : ""}.`}
+      aria-label={`Potential ${formatMoney(potential.minorUnits, potential.currency)}${figures.lost ? `; lost ${formatMoney(figures.lost.minorUnits, figures.lost.currency)}` : ""
+        }${figures.earned ? `; earned ${formatMoney(figures.earned.minorUnits, figures.earned.currency)}` : ""}.`}
       className="relative flex h-56 w-full items-end gap-3 px-6 pb-4"
     >
       <span aria-hidden="true" className="absolute bottom-8 left-0 right-0 h-px bg-border" />
@@ -217,13 +216,12 @@ function PotentialLostEarnedScale({
         return (
           <div key={bar.label} className="flex flex-1 flex-col items-center gap-3">
             <span
-              className={`text-sm font-mono font-bold ${
-                bar.tone === "danger"
+              className={`text-sm font-mono font-bold ${bar.tone === "danger"
                   ? "text-destructive"
                   : bar.tone === "success"
                     ? "text-emerald-600"
                     : "text-foreground"
-              }`}
+                }`}
             >
               {bar.value ? formatWholeMoney(bar.value.minorUnits, bar.value.currency) : "—"}
             </span>
@@ -231,13 +229,12 @@ function PotentialLostEarnedScale({
                 real pixel height instead of an auto-sized flex column. */}
             <div className="flex h-40 w-full items-end">
               <div
-                className={`w-full rounded-t-[2px] ${
-                  bar.tone === "danger"
+                className={`w-full rounded-t-[2px] ${bar.tone === "danger"
                     ? "bg-destructive"
                     : bar.tone === "success"
                       ? "bg-emerald-500"
                       : "bg-slate-200"
-                }`}
+                  }`}
                 style={{ height: `${share}%` }}
               />
             </div>
@@ -287,9 +284,8 @@ function RatioSplitBar({
         className="flex h-8 w-full overflow-hidden rounded-lg bg-muted"
       >
         <div
-          className={`flex h-full items-center bg-chart-2 px-3 ${
-            labelInside ? "justify-start" : "justify-end"
-          }`}
+          className={`flex h-full items-center bg-chart-2 px-3 ${labelInside ? "justify-start" : "justify-end"
+            }`}
           style={{ width: `${percent}%` }}
         >
           {labelInside ? (
@@ -313,7 +309,22 @@ function RatioSplitBar({
  * recomputed: impressions is the top pair's denominator, and each later stage is
  * the previous pair's numerator. A width is always a stored amount's share of
  * the window's impressions, never an invented intermediate figure.
+ *
+ * Bar colour is display-only and follows the step conversion: below 5% red,
+ * below 20% amber, otherwise green. Impressions is the base and stays green.
  */
+function funnelStageTone(fromPrevious: number | null): { bar: string; label: string } {
+  if (fromPrevious === null) return { bar: "bg-emerald-100", label: "text-emerald-700" };
+  if (fromPrevious < 5) return { bar: "bg-destructive/70", label: "text-destructive" };
+  if (fromPrevious < 20) return { bar: "bg-warning/60", label: "text-warning" };
+  return { bar: "bg-emerald-100", label: "text-emerald-700" };
+}
+
+function funnelOverallTone(overall: number): string {
+  if (overall < 5) return "bg-destructive text-destructive-foreground";
+  if (overall < 20) return "bg-warning text-foreground";
+  return "bg-emerald-500 text-white";
+}
 function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] }) {
   const pairs = findings.filter((finding) => finding.code === "FUNNEL_STAGE_CONVERSION");
   const endToEnd = findings.find(
@@ -341,13 +352,13 @@ function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] 
     fromPrevious: number | null;
     findingId: string | null;
   }[] = [
-    {
-      label: "Impressions",
-      count: impressions,
-      fromPrevious: null,
-      findingId: firstPair?.id ?? null,
-    },
-  ];
+      {
+        label: "Impressions",
+        count: impressions,
+        fromPrevious: null,
+        findingId: firstPair?.id ?? null,
+      },
+    ];
 
   for (const meta of stageMeta) {
     const pair = pairs.find((finding) => finding.metricKey === meta.metricKey);
@@ -373,11 +384,16 @@ function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] 
       <div className="flex items-end gap-3">
         {stages.map((stage) => {
           const heightPercent = Math.max(Math.round((stage.count / impressions) * 100), 4);
+          const tone = funnelStageTone(stage.fromPrevious);
           return (
             <div
               key={stage.label}
               className="flex flex-1 flex-col items-center gap-2"
-              title={`${stage.count} ${stage.label}`}
+              title={
+                stage.fromPrevious === null
+                  ? `${stage.count} ${stage.label}`
+                  : `${stage.count} ${stage.label}, ${stage.fromPrevious}% from prior step`
+              }
             >
               <span className="text-sm font-mono font-bold tabular-nums">
                 {formatCount(stage.count)}
@@ -387,21 +403,32 @@ function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] 
               <div className="flex h-40 w-full items-end">
                 <div
                   role="img"
-                  aria-label={`${stage.label}: ${formatCount(stage.count)}.`}
-                  className="w-full rounded-t-md bg-emerald-100"
+                  aria-label={
+                    stage.fromPrevious === null
+                      ? `${stage.label}: ${formatCount(stage.count)}.`
+                      : `${stage.label}: ${formatCount(stage.count)}, ${stage.fromPrevious}% from prior step.`
+                  }
+                  className={`w-full rounded-t-md ${tone.bar}`}
                   style={{ height: `${heightPercent}%` }}
                 />
               </div>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-700">
+              <span className={`text-[9px] font-bold uppercase tracking-widest ${tone.label}`}>
                 {stage.label}
               </span>
+              {stage.fromPrevious !== null ? (
+                <span className={`text-[10px] tabular-nums ${tone.label}`}>
+                  {stage.fromPrevious}% of prior step
+                </span>
+              ) : null}
             </div>
           );
         })}
       </div>
 
       {overall !== null ? (
-        <div className="flex items-center justify-between rounded-lg bg-emerald-500 px-4 py-2 text-white shadow-card">
+        <div
+          className={`flex items-center justify-between rounded-lg px-4 py-2 shadow-card ${funnelOverallTone(overall)}`}
+        >
           <span className="text-[10px] font-bold uppercase tracking-wider">Overall conversion</span>
           <span className="text-xs font-mono font-bold tabular-nums">{overall}%</span>
         </div>
@@ -446,6 +473,81 @@ function ChapterVisual({
   }
   if (blocks.length === 0) return null;
   return <div className="grid gap-6 sm:grid-cols-2">{blocks}</div>;
+}
+
+// ---------------------------------------------------------------------------
+// Chapter nav
+// ---------------------------------------------------------------------------
+
+type ChapterNavItem = {
+  id: string;
+  label: string;
+};
+
+/**
+ * The chapter map, pinned while the story scrolls.
+ *
+ * Sticky because the narrative is long: without it the operator scrolls back
+ * up to jump chapters. The active link follows the section in view via an
+ * IntersectionObserver, so the bar reads as tabs on a folder rather than a
+ * static list. Purely presentational -- every href matches a rendered section
+ * id, and with no observer (tests, old browsers) it degrades to plain anchor
+ * links.
+ */
+function ChapterNav({ items }: { items: readonly ChapterNavItem[] }) {
+  const [activeId, setActiveId] = useState<string | null>(() => items[0]?.id ?? null);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || items.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+        if (visible.length > 0) setActiveId(visible[0].target.id);
+      },
+      // A section counts as "in view" when it crosses the upper-middle of the
+      // scroll area, so the highlight moves as the new chapter takes over
+      // rather than flickering at boundaries.
+      { rootMargin: "-30% 0px -60% 0px", threshold: 0 },
+    );
+    for (const item of items) {
+      const section = document.getElementById(item.id);
+      if (section) observer.observe(section);
+    }
+    return () => observer.disconnect();
+  }, [items]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <nav
+      aria-label="Workspace chapters"
+      className="sticky top-0 z-20 -mx-1 border-b border-border/60 bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+    >
+      <ul className="flex flex-wrap items-center gap-x-1 gap-y-1">
+        {items.map((item) => {
+          const active = item.id === activeId;
+          return (
+            <li key={item.id}>
+              <a
+                href={`#${item.id}`}
+                aria-current={active ? "location" : undefined}
+                onClick={() => setActiveId(item.id)}
+                className={
+                  active
+                    ? "block whitespace-nowrap rounded-md bg-muted px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors"
+                    : "block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                }
+              >
+                {item.label}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -543,11 +645,12 @@ function VerdictBand({
                   onApply={onApplyWindow}
                   disabled={!canRunAnalysis}
                 />
+                {/* Approved reports declare these dates. Days
+                  the provider left blank are counted as absent, not as zero. A range with no
+                  governed evidence analyses as exactly that, not as zero. */}
                 <p className="text-[11px] leading-snug text-muted-foreground">
                   {formatWindow(selectedWindow.from, selectedWindow.to)}
-                  {timeZone ? `, in ${timeZone}` : null}. Approved reports declare these dates. Days
-                  the provider left blank are counted as absent, not as zero. A range with no
-                  governed evidence analyses as exactly that, not as zero.
+                  {timeZone ? `, in ${timeZone}` : null}.
                 </p>
               </>
             ) : (
@@ -656,16 +759,16 @@ function CompactFindingRow({
   const storedRatio = ratioOf(finding);
   const bar = storedRatio
     ? {
-        numerator: storedRatio.numerator,
-        denominator: storedRatio.denominator,
-        label: `Measured ratio: ${storedRatio.numerator} of ${storedRatio.denominator}.`,
-      }
+      numerator: storedRatio.numerator,
+      denominator: storedRatio.denominator,
+      label: `Measured ratio: ${storedRatio.numerator} of ${storedRatio.denominator}.`,
+    }
     : finding.coverage && finding.coverage.expected > 0
       ? {
-          numerator: finding.coverage.observed,
-          denominator: finding.coverage.expected,
-          label: `Evidence coverage: ${finding.coverage.observed} of ${finding.coverage.expected} periods.`,
-        }
+        numerator: finding.coverage.observed,
+        denominator: finding.coverage.expected,
+        label: `Evidence coverage: ${finding.coverage.observed} of ${finding.coverage.expected} periods.`,
+      }
       : null;
   const barPercent = bar
     ? Math.min(Math.max((bar.numerator / bar.denominator) * 100, 0), 100)
@@ -1281,6 +1384,22 @@ export function ChannelWorkspace({
     [recommendationsByFindingId],
   );
 
+  // The sticky bar mirrors exactly what the page renders below: one link per
+  // inline chapter, then the shelves, only when they exist. Memoised so the
+  // scroll-spy does not reset its highlight on every render.
+  const navItems = useMemo<ChapterNavItem[]>(
+    () => [
+      ...inlineChapters.map((chapter) => ({ id: chapter.id, label: chapter.navLabel })),
+      ...(recommendationsByFindingId.further.length > 0
+        ? [{ id: "further-noted", label: "Further noted" }]
+        : []),
+      ...(deferredChapters.length > 0
+        ? [{ id: "awaiting-other-reports", label: "Awaiting other reports" }]
+        : []),
+    ],
+    [inlineChapters, deferredChapters, recommendationsByFindingId],
+  );
+
   const trustChapter = view.chapters.find((chapter) => chapter.id === "trust");
   const coverageFinding = trustChapter?.findings.find(
     (finding) => finding.detectorKey === "evidence.period_coverage",
@@ -1412,6 +1531,13 @@ export function ChannelWorkspace({
     goToReadyWindow(ready);
   }, [appliedWindow, goToReadyWindow, router]);
 
+  // The loader covers the whole page, so a run that failed has to be able to
+  // let go of it. Ready dismisses itself; failed cannot, and without this the
+  // operator is left staring at a sheet that will never advance.
+  const handleLoaderDismiss = useCallback(() => {
+    setAppliedWindow(null);
+  }, []);
+
   return (
     // Sized to its content, not to the viewport: the shell's `main` scrolls,
     // and capping this child's height would clip the narrative mid-chapter.
@@ -1461,6 +1587,7 @@ export function ChannelWorkspace({
           channelId={channel.id}
           window={appliedWindow}
           onReady={handleLoaderReady}
+          onDismiss={handleLoaderDismiss}
         />
       ) : null}
 
@@ -1500,43 +1627,13 @@ export function ChannelWorkspace({
         ) : null}
       </div>
 
-      {/* A compact, accessible map of the story instead of a sticky tracker:
-          the narrative is meant to be scrolled, not navigated around. */}
-      <nav aria-label="Workspace chapters">
-        <ul className="flex flex-wrap items-center gap-x-1 gap-y-1">
-          {inlineChapters.map((chapter) => (
-            <li key={chapter.id}>
-              <a
-                href={`#${chapter.id}`}
-                className="block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                {chapter.navLabel}
-              </a>
-            </li>
-          ))}
-          {recommendationsByFindingId.further.length > 0 ? (
-            <li>
-              <a
-                href="#further-noted"
-                className="block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                Further noted
-              </a>
-            </li>
-          ) : null}
-
-          {deferredChapters.length > 0 ? (
-            <li>
-              <a
-                href="#awaiting-other-reports"
-                className="block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                Awaiting other reports
-              </a>
-            </li>
-          ) : null}
-        </ul>
-      </nav>
+      {/* Pinned chapter map: stays on screen while the story scrolls, with the
+          section in view marked. The key remounts it when the chapter list
+          changes, so the highlight restarts on the first chapter. */}
+      <ChapterNav
+        key={navItems.map((item) => item.id).join(",")}
+        items={navItems}
+      />
 
       <section aria-label="Findings & recommendations" className="flex flex-col gap-10">
         {inlineChapters.map((chapter) => {
@@ -1750,8 +1847,8 @@ function ChapterShell({
           )}
           {/* All findings need data -> the card body is the explanation. */}
           {chapter.state === "needs_data" &&
-          chapter.findings.length > 0 &&
-          chapter.findings.every((finding) => finding.kind === "needs_data") ? (
+            chapter.findings.length > 0 &&
+            chapter.findings.every((finding) => finding.kind === "needs_data") ? (
             <ChapterUnavailableBody chapter={chapter} />
           ) : null}
           {heldFinding && heldFinding.kind === "finding" ? (

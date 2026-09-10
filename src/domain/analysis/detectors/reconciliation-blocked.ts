@@ -103,7 +103,9 @@ export const reconciliationBlockedDetector: DetectorDeclaration = {
     const covered = new Set(accepted.map((point) => point.periodStart));
     const uncovered = expected.filter((start) => !covered.has(start));
     const blocksUncoveredPeriod = held.some((record) =>
-      uncovered.some((start) => coversPeriod(record, start, localPeriodEndInWindow(start, window.grain, window.windowEnd))),
+      uncovered.some((start) =>
+        coversPeriod(record, start, localPeriodEndInWindow(start, window.grain, window.windowEnd)),
+      ),
     );
 
     const starts = held.map((record) => record.periodStart).sort();

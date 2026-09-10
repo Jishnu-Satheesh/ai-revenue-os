@@ -609,7 +609,7 @@ describe("ChannelWorkspace", () => {
     const heatmap = screen.getByRole("region", { name: "Availability heatmap" });
     expect(
       within(heatmap).getByRole("img", {
-        name: "2026-01-06: 355.6 closed minutes of 720 scheduled minutes.",
+        name: "2026-01-06: 5.9 closed hours of 12 scheduled hours.",
       }),
     ).toBeTruthy();
     expect(

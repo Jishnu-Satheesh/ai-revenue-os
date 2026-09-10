@@ -101,15 +101,10 @@ describe("reporting who cancelled", () => {
   });
 
   it("measures attributions against the orders the channel took", () => {
-    const outcomes = run([
-      attribution("2026-01-01", 3, "MERCHANT"),
-      orders("2026-01-01", 12),
-    ]);
+    const outcomes = run([attribution("2026-01-01", 3, "MERCHANT"), orders("2026-01-01", 12)]);
 
     expect(
-      outcomes.find(
-        (outcome) => outcome.code === "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS",
-      ),
+      outcomes.find((outcome) => outcome.code === "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS"),
     ).toMatchObject({ measurement: { valueKind: "ratio", numerator: 3, denominator: 12 } });
   });
 

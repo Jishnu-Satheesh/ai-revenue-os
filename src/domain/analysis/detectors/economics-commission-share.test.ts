@@ -37,7 +37,9 @@ describe("economics.commission_share", () => {
       evidence({ points: [commission("2026-01-01", 1_000), revenue("2026-01-01", 10_000)] }),
     );
 
-    const roles = (outcome as { evidence: readonly { role: string }[] }).evidence.map((e) => e.role);
+    const roles = (outcome as { evidence: readonly { role: string }[] }).evidence.map(
+      (e) => e.role,
+    );
     expect(roles).toContain("component");
     expect(roles).toContain("denominator");
   });
@@ -79,10 +81,14 @@ describe("economics.commission_share", () => {
 
   it("refuses commission without revenue, and revenue without commission", () => {
     expect(
-      economicsCommissionShareDetector.run(evidence({ points: [commission("2026-01-01", 1_000)] }))[0],
+      economicsCommissionShareDetector.run(
+        evidence({ points: [commission("2026-01-01", 1_000)] }),
+      )[0],
     ).toMatchObject({ needsDataReason: "REVENUE_SERIES_ABSENT" });
     expect(
-      economicsCommissionShareDetector.run(evidence({ points: [revenue("2026-01-01", 10_000)] }))[0],
+      economicsCommissionShareDetector.run(
+        evidence({ points: [revenue("2026-01-01", 10_000)] }),
+      )[0],
     ).toMatchObject({ needsDataReason: "COMMISSION_SERIES_ABSENT" });
   });
 

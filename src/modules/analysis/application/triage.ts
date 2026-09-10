@@ -130,9 +130,7 @@ export async function triageRecommendation(
       p_recommendation_id: input.recommendationId,
       p_decision: input.decision,
       p_dismissal_reason:
-        input.decision === "dismissed" && typeof input.reason === "string"
-          ? input.reason
-          : null,
+        input.decision === "dismissed" && typeof input.reason === "string" ? input.reason : null,
       p_actor_id: actorContext.actorId,
       p_snoozed_until:
         input.decision === "snoozed" && typeof input.snoozedUntil === "string"
@@ -156,10 +154,7 @@ export async function recordFeedback(
     !idsSchema.safeParse(input).success ||
     !feedbackVoteSchema.safeParse({ helpful: input.helpful }).success
   ) {
-    throw new DomainError(
-      "VALIDATION_ERROR",
-      "A feedback vote is either helpful or not helpful.",
-    );
+    throw new DomainError("VALIDATION_ERROR", "A feedback vote is either helpful or not helpful.");
   }
 
   await callRpc(

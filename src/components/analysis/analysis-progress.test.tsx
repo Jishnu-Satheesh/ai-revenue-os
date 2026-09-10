@@ -153,4 +153,79 @@ describe("the analysis loader", () => {
       "aria-current",
     );
   });
+
+  it("covers the page rather than sitting in the workspace flow", async () => {
+    // Portalled to the body on purpose: a `fixed` overlay left inside the
+    // workspace is positioned against the first ancestor with a transform,
+    // and this must not silently depend on the workspace never growing one.
+    const { container } = render(<div />);
+    setup([stage("queued")]);
+
+    const overlay = await screen.findByText(/reading approved reports/i);
+    const sheet = overlay.closest('[data-slot="analysis-overlay"]');
+    expect(sheet).not.toBeNull();
+    expect(sheet?.parentElement).toBe(document.body);
+    expect(container.contains(sheet)).toBe(false);
+    expect(sheet).toHaveClass("fixed");
+  });
+
+  it("shimmers the live stage only", async () => {
+    setup([stage("queued"), stage("running")]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/running the checks/i)).toHaveClass("shimmer");
+    });
+    expect(screen.getByText(/reading approved reports/i)).not.toHaveClass("shimmer");
+    expect(screen.getByText(/writing recommendations/i)).not.toHaveClass("shimmer");
+  });
+
+  it("announces the run once, not once per stage row", async () => {
+    // The overlay carries a single live region. A spinner that also claimed
+    // role="status" would make a screen reader read the sheet twice.
+    setup([stage("running")]);
+
+    await screen.findByText(/running the checks/i);
+    expect(document.querySelectorAll('[role="status"]')).toHaveLength(1);
+  });
+
+  it("lets the operator close a failed run, since it will never advance", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(stage("failed"));
+    vi.stubGlobal("fetch", fetchMock);
+    const onDismiss = vi.fn();
+    render(
+      <AnalysisProgress
+        organizationId={ORGANIZATION}
+        channelId={CHANNEL}
+        window={{ from: "2026-01-01", to: "2026-01-04" }}
+        onReady={vi.fn()}
+        onDismiss={onDismiss}
+        pollMs={10}
+      />,
+    );
+
+    const close = await screen.findByRole("button", { name: /close/i });
+    close.click();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the page back its scroll when the loader goes away", async () => {
+    const { unmount } = (() => {
+      const fetchMock = vi.fn().mockResolvedValue(stage("queued"));
+      vi.stubGlobal("fetch", fetchMock);
+      return render(
+        <AnalysisProgress
+          organizationId={ORGANIZATION}
+          channelId={CHANNEL}
+          window={{ from: "2026-01-01", to: "2026-01-04" }}
+          onReady={vi.fn()}
+          pollMs={10}
+        />,
+      );
+    })();
+
+    await screen.findByText(/reading approved reports/i);
+    expect(document.body.style.overflow).toBe("hidden");
+    unmount();
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
 });
