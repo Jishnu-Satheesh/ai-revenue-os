@@ -921,15 +921,14 @@ function chapterRailSummary(chapter: WorkspaceChapterView): {
  *
  * One object rather than six props because every chapter is handed the same
  * set unchanged, and because the ask itself belongs to the run, not to the
- * chapter: the fence files one narration per run, so a press in Cancellations
- * and a press in Funnel are the same press. The workspace owns the state and
- * every gap reads it, which is why pressing one button settles them all.
+ * chapter: a press in Cancellations and a press in Funnel are the same press
+ * — the gap-fill narration reads every uncovered chapter together. The
+ * workspace owns the state and every gap reads it, which is why pressing one
+ * button settles them all.
  */
 type NarrationRequestState = "idle" | "pending" | "requested" | "failed";
 
 type AdviceGapState = {
-  /** True when the run carries any narration at all. */
-  runHasNarrations: boolean;
   /** True when this member may ask for one and there is a run to ask about. */
   canRequest: boolean;
   requestState: NarrationRequestState;
@@ -941,9 +940,10 @@ type AdviceGapState = {
  * chapter. Never a recommendation: where the chapter itself says its inputs
  * are missing, the detector's own sentence is the explanation, and where a
  * narration exists but skipped the chapter, the gap is named rather than
- * papered over. A button appears only when the run has no narrations at all,
- * because the fence files one narration per run and a second submission for
- * the same run is refused -- pressing it then could never fill anything.
+ * papered over. A button appears whenever the member may ask and the chapter
+ * holds findings with data — on an unnarrated run it wakes the first
+ * narration, on a narrated one it wakes the gap-fill that reads every
+ * uncovered chapter together.
  */
 function AdviceGap({
   chapter,
@@ -984,7 +984,7 @@ function AdviceGap({
     );
   }
 
-  if (!gap.runHasNarrations && gap.canRequest) {
+  if (gap.canRequest) {
     return (
       <div className="flex flex-col gap-2">
         <Button
@@ -1003,12 +1003,12 @@ function AdviceGap({
         </Button>
         {gap.requestState === "requested" ? (
           // Said plainly because it is not this section that was asked for.
-          // The narrator reads the whole run at once and decides which
-          // sections it can cite, so it may fill this one, several, or none.
+          // The narrator reads the run's uncovered sections together and
+          // writes only what it can cite, so it may not reach this one.
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Advice requested for this analysis. The narrator reads every section&apos;s findings
-            together and writes only what it can cite, so it may not reach this one. Refresh in a
-            moment to see what it wrote.
+            Advice requested for this analysis. The narrator reads every section still missing
+            advice together and writes only what it can cite, so it may not reach this one.
+            Refresh in a moment to see what it wrote.
           </p>
         ) : null}
         {gap.requestState === "failed" ? (
@@ -1210,12 +1210,11 @@ export function ChannelWorkspace({
 
   const adviceGap = useMemo<AdviceGapState>(
     () => ({
-      runHasNarrations: view.recommendations.length > 0,
       canRequest: canRunAnalysis && runId !== null,
       requestState: narrationState,
       onRequest: requestNarration,
     }),
-    [canRunAnalysis, narrationState, requestNarration, runId, view.recommendations.length],
+    [canRunAnalysis, narrationState, requestNarration, runId],
   );
 
   const allFindings = useMemo<WorkspaceFindingView[]>(
@@ -1309,10 +1308,53 @@ export function ChannelWorkspace({
    * over: it polls the range's status and refreshes the page when the run --
    * findings first, narration after -- is ready to read.
    */
+  // One place decides what "open this range" means: a range that differs
+  // from the URL's window navigates to it so the page displays the run for
+  // that range; a same-window open keeps today's behavior exactly (refresh,
+  // with no extra history entry). Both the instant guard below and the
+  // loader's ready path go through here, so they can never disagree.
+  const goToReadyWindow = useCallback(
+    (selection: AnalysisWindowSelection) => {
+      if (
+        selectedWindow === null ||
+        selection.from !== selectedWindow.from ||
+        selection.to !== selectedWindow.to
+      ) {
+        router.push(
+          `?from=${encodeURIComponent(selection.from)}&to=${encodeURIComponent(selection.to)}`,
+        );
+        return;
+      }
+      router.refresh();
+    },
+    [router, selectedWindow],
+  );
+
   const applyWindow = useCallback(
     (selection: AnalysisWindowSelection) => {
       setMessage(null);
       void (async () => {
+        // A range that is already analysed opens at once: when the status
+        // route reports it ready, a narrated run is waiting to be read, so
+        // going there directly skips starting a duplicate run. Anything else
+        // -- still narrating, still running, failed, nothing yet, or the
+        // check itself failing -- falls through to the POST below, which is
+        // today's behavior with the loader. Only `ready` counts: a
+        // half-narrated run must never open as final.
+        try {
+          const status = await fetch(
+            `/api/organizations/${organizationId}/channels/${channel.id}/analysis/status?from=${encodeURIComponent(selection.from)}&to=${encodeURIComponent(selection.to)}`,
+          );
+          const statusPayload = (await status.json().catch(() => null)) as {
+            stage?: string;
+          } | null;
+          if (status.ok && statusPayload?.stage === "ready") {
+            goToReadyWindow(selection);
+            return;
+          }
+        } catch {
+          // Fail-open to the POST below: the check is a shortcut, never a gate.
+        }
         try {
           const response = await fetch(
             `/api/organizations/${organizationId}/channels/${channel.id}/analysis`,
@@ -1335,6 +1377,15 @@ export function ChannelWorkspace({
             });
             return;
           }
+          const started = (await response.json().catch(() => null)) as {
+            cached?: boolean;
+          } | null;
+          // A cached disposition names the run already on screen: opening it
+          // needs no loader either.
+          if (started?.cached === true) {
+            goToReadyWindow(selection);
+            return;
+          }
           setAppliedWindow(selection);
         } catch {
           setMessage({
@@ -1344,7 +1395,7 @@ export function ChannelWorkspace({
         }
       })();
     },
-    [channel.id, organizationId],
+    [channel.id, goToReadyWindow, organizationId],
   );
 
   // The loader is done when the applied range is ready. When the applied
@@ -1354,17 +1405,12 @@ export function ChannelWorkspace({
   const handleLoaderReady = useCallback(() => {
     const ready = appliedWindow;
     setAppliedWindow(null);
-    if (
-      ready !== null &&
-      (selectedWindow === null ||
-        ready.from !== selectedWindow.from ||
-        ready.to !== selectedWindow.to)
-    ) {
-      router.push(`?from=${encodeURIComponent(ready.from)}&to=${encodeURIComponent(ready.to)}`);
+    if (ready === null) {
+      router.refresh();
       return;
     }
-    router.refresh();
-  }, [appliedWindow, router, selectedWindow]);
+    goToReadyWindow(ready);
+  }, [appliedWindow, goToReadyWindow, router]);
 
   return (
     // Sized to its content, not to the viewport: the shell's `main` scrolls,

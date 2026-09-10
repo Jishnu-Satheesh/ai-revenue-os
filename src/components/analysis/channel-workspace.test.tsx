@@ -781,7 +781,13 @@ describe("ChannelWorkspace", () => {
   // "posts the picked range, not a month" above.
 
   it("posts the picked range, not a month", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    const fetchMock = vi.fn(async (url: unknown) => {
+      // The guard checks status first; nothing is ready here, so Apply posts.
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "queued" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
@@ -789,7 +795,10 @@ describe("ChannelWorkspace", () => {
     await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
     await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    const post = (fetchMock.mock.calls as unknown as [unknown, RequestInit][]).find(
+      (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+    );
+    expect(JSON.parse(post?.[1].body as string)).toEqual({
       from: "2026-01-01",
       to: "2026-01-04",
     });
@@ -798,7 +807,12 @@ describe("ChannelWorkspace", () => {
   it("shows the loader instead of telling the operator to refresh", async () => {
     // The message this replaces read "refresh in a moment to see the result",
     // which asked the operator to do the waiting themselves.
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "queued" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
@@ -880,6 +894,136 @@ describe("ChannelWorkspace", () => {
 
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
     expect(routerMock.push).not.toHaveBeenCalled();
+  });
+
+  it("opens a ready range at once instead of starting a duplicate run", async () => {
+    // The guard GETs the exact from/to first; a ready stage opens the range
+    // with no POST and no loader.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "ready" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/analysis/status?from=2026-01-01&to=2026-01-04",
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+      ),
+    ).toBe(false);
+    expect(screen.queryByText(/reading approved reports/i)).not.toBeInTheDocument();
+  });
+
+  it("navigates to a ready range that differs from the displayed window", async () => {
+    // Same ready shortcut, different destination: the applied range is not on
+    // screen, so opening it pushes rather than refreshing.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "ready" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /all reported/i }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() =>
+      expect(routerMock.push).toHaveBeenCalledWith("?from=2026-01-01&to=2026-01-31"),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+      ),
+    ).toBe(false);
+    expect(screen.queryByText(/reading approved reports/i)).not.toBeInTheDocument();
+  });
+
+  it("starts a new run while the range is still narrating", async () => {
+    // Only `ready` opens instantly: a half-narrated run must never open as
+    // final, so narrating posts exactly as before, with the loader.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "narrating" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/reading approved reports/i)).toBeInTheDocument();
+    const post = (fetchMock.mock.calls as unknown as [unknown, RequestInit][]).find(
+      (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+    );
+    expect(post?.[1].method).toBe("POST");
+    expect(JSON.parse(post?.[1].body as string)).toEqual({ from: "2026-01-01", to: "2026-01-04" });
+  });
+
+  it("starts a new run when the status check itself fails", async () => {
+    // Fail-open: a broken shortcut must never strand the operator without a
+    // run, so a rejected status fetch posts exactly as before.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        throw new Error("network down");
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/reading approved reports/i)).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+      ),
+    ).toBe(true);
+  });
+
+  it("opens at once when the start call reports the run as cached", async () => {
+    // The route's cached disposition (Task 10) names the run already on
+    // screen: opening it needs no loader either.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "queued" }) };
+      }
+      return { ok: true, json: async () => ({ cached: true }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByText(/reading approved reports/i)).not.toBeInTheDocument();
   });
 
   it("says there is no reported range rather than offering a dead control", () => {
@@ -1005,7 +1149,10 @@ describe("ChannelWorkspace", () => {
       ).toBeNull();
     });
 
-    it("explains the gap without a button where narration exists but skipped the chapter", () => {
+    it("offers the gap-fill button where narration exists but skipped the chapter", () => {
+      // Amendment C: a narration that cites findings this page does not show
+      // leaves the chapter uncovered, and the uncovered chapter gets the
+      // button — the run having narrations no longer hides it.
       renderWorkspace({
         ...cancellationChapter(),
         recommendations: [
@@ -1030,9 +1177,81 @@ describe("ChannelWorkspace", () => {
 
       const rail = screen.getByRole("complementary", { name: "Cancellations figures" });
       expect(
-        within(rail).queryByRole("button", { name: /Generate AI recommendation/i }),
+        within(rail).getByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeTruthy();
+    });
+
+    it("shows the button only on the uncovered chapter when its sibling is advised", () => {
+      // The March Talabat shape: cancellations advised, funnel bare. Only
+      // the bare rail offers the gap-fill.
+      renderWorkspace({
+        ...twoChapters(),
+        recommendations: [
+          {
+            id: "rec-cancel",
+            analysisRunId: "run-1",
+            channelId: CHANNEL.id,
+            branchId: "branch-1",
+            label: "recommendation",
+            headline: "Mark items out of stock before service.",
+            detail: "Cancellations land after the order is accepted.",
+            supportedActions: [],
+            limitations: [],
+            citationFindingIds: ["finding-cancel"],
+            resultDigest: "b".repeat(64),
+            decisions: [],
+            myFeedback: null,
+            createdAt: "2026-02-01T00:05:00Z",
+          },
+        ],
+      });
+
+      const funnelRail = screen.getByRole("complementary", { name: "Funnel figures" });
+      expect(
+        within(funnelRail).getByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeTruthy();
+      const cancellationsRail = screen.getByRole("complementary", { name: "Cancellations figures" });
+      expect(
+        within(cancellationsRail).queryByRole("button", { name: /Generate AI recommendation/i }),
       ).toBeNull();
-      expect(within(rail).getByText(/no advice was written for this section/i)).toBeTruthy();
+    });
+
+    it("requests the gap-fill for the displayed run from an uncovered chapter", async () => {
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      renderWorkspace({
+        ...twoChapters(),
+        recommendations: [
+          {
+            id: "rec-cancel",
+            analysisRunId: "run-1",
+            channelId: CHANNEL.id,
+            branchId: "branch-1",
+            label: "recommendation",
+            headline: "Mark items out of stock before service.",
+            detail: "Cancellations land after the order is accepted.",
+            supportedActions: [],
+            limitations: [],
+            citationFindingIds: ["finding-cancel"],
+            resultDigest: "b".repeat(64),
+            decisions: [],
+            myFeedback: null,
+            createdAt: "2026-02-01T00:05:00Z",
+          },
+        ],
+      });
+
+      const funnelRail = screen.getByRole("complementary", { name: "Funnel figures" });
+      fireEvent.click(
+        within(funnelRail).getByRole("button", { name: /Generate AI recommendation/i }),
+      );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+        "/api/organizations/org-1/channels/channel-1/analysis-runs/run-1/recommendations",
+      );
+      vi.unstubAllGlobals();
     });
 
     it("requests narration for the displayed run when the button is pressed", async () => {
@@ -1073,7 +1292,7 @@ describe("ChannelWorkspace", () => {
       vi.unstubAllGlobals();
     });
 
-    it("says the narrator reads the whole run, not only the section pressed", async () => {
+    it("says the narrator reads the uncovered sections, not only the section pressed", async () => {
       const fetchMock = vi.fn<typeof fetch>(
         async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
       );
@@ -1082,7 +1301,7 @@ describe("ChannelWorkspace", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /Generate AI recommendation/i }));
 
-      expect(await screen.findByText(/reads every section's findings together/i)).toBeTruthy();
+      expect(await screen.findByText(/reads every section still missing advice together/i)).toBeTruthy();
       vi.unstubAllGlobals();
     });
 
