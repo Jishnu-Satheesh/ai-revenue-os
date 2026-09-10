@@ -5784,3 +5784,82 @@ through the real routes, not only in tests.
 - **Left running:** `pnpm dev` on :3000 for operator click-through. Staging side effects
   limited to one Deira v2 profile + queued pipeline + request on the canary org (no worker
   attached locally, no spend, no paid calls beyond the 4 probe queries).
+
+### 2026-09-09 · muse-spark · Growth Intelligence header + line tabs (prototype parity)
+
+- Claiming before editing: `src/components/ui/tabs.tsx` (shared line variant),
+  `src/components/growth-intelligence/growth-intelligence-workspace.tsx` (header row,
+  switch to line variant, badge spacing), and
+  `src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx`
+  (remove duplicated title block now owned by the workspace header).
+- User-approved Tier 2 slice: title + Market monitoring on one row with subtitle below;
+  active tab gets green underline + green label only (no boxed border); all count badges
+  kept as gray pills; default pill tabs elsewhere untouched. No schema, migration,
+  event, or export change. Purely presentational, so no tenant-isolation change.
+- Done 2026-09-09: typecheck clean; eslint clean on the 3 source files (test file keeps
+  one pre-existing `_url` warning); prettier clean; vitest 11/11 workspace (incl. 2 new
+  header/line-variant tests) and 33/33 memory. No authenticated browser pixel-check:
+  the page is auth-gated and no E2E credentials exist here. Left uncommitted in the
+  worktree for the user to review.
+
+### 2026-09-09 · muse-spark · Tab strip follow-up: vertical scrollbar + label spacing
+
+- Claiming before editing: `src/components/ui/tabs.tsx` (line-variant bottom padding
+  10px to 14px) and `src/components/growth-intelligence/growth-intelligence-workspace.tsx`
+  (tab-strip wrapper clips vertical overflow). Tier 1 UI fix, user-approved via questions:
+  hide the vertical track only (horizontal swipe kept), subtle +4px label spacing, shared
+  line style so Memory tabs match. No data, schema, or behavior change.
+- Done 2026-09-09: typecheck, eslint, and prettier clean; vitest 11/11 workspace.
+  Left uncommitted for the user to review.
+
+### 2026-09-09 · muse-spark · Performance filter row (prototype parity)
+
+- Claiming before editing: `src/modules/analysis/application/channels-overview.ts`
+  (+ test), `src/components/analysis/window-range-picker.tsx` (+ test),
+  `src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx`,
+  `src/components/growth-intelligence/growth-intelligence-workspace.tsx` (+ test),
+  and a short `specs/022-growth-intelligence.md` amendment.
+- Approved plan: free-range picker limited to covered dates, functional channel and
+  location filters, heading and meta line dropped, Last fetched beside Refresh. No
+  migration; reads stay on authenticated org-scoped repos.
+- Done 2026-09-09: vitest 47/47 across resolver, picker, and workspace suites plus
+  41/41 Channel Audit suite (picker default output byte-identical); eslint 0 errors;
+  prettier clean on touched files. `pnpm typecheck` reported errors only in the other
+  session's uncommitted `channel-workspace.test.tsx` hunks; none in touched files.
+  No authenticated browser pixel-check (auth-gated, no E2E creds). Left uncommitted
+  for the user to review.
+
+### 2026-09-10 · muse-spark · Business performance card (prototype parity)
+
+- Claiming before editing: `src/modules/analysis/application/ports.ts`,
+  `src/modules/analysis/infrastructure/read-repository.ts` (+ test),
+  `src/modules/analysis/application/channels-overview.ts` (+ test),
+  `src/components/analysis/window-range-picker.tsx` (+ test, month mode),
+  `src/components/growth-intelligence/business-performance-card.tsx` (+ test, new),
+  `src/components/growth-intelligence/growth-intelligence-workspace.tsx` (+ test),
+  `src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx`,
+  and a short `specs/022-growth-intelligence.md` amendment.
+- Approved plan (plus whole-month amendment): whole-month picker, rule-composed
+  headline, tiles with previous-month deltas, weekly trend from nested analysed weeks
+  (empty axes + reason otherwise), channel-share bars, two shadcn Dialog modals, full
+  replacement of the old performance sections. No migration; reads stay on
+  authenticated org-scoped repos. Never stash.
+- Done 2026-09-10: vitest 94/94 across card builder, card repository, range+month
+  pickers, performance card, and workspace suites, plus 41/41 Channel Audit suite;
+  eslint 0 errors; prettier clean; typecheck clean in touched files. Spec amended
+  with §9.9. Left uncommitted for the user to review.
+- Verified 2026-09-10 in Chrome DevTools against
+  `.superdesign/growth-intelligence/prototype.html`: prototype content matched
+  node-for-node; both modals opened with matching structure; chart, bars, tint, and
+  footer adjusted to prototype-exact values. Rendered ours through a temporary preview
+  route with prototype-identical figures (route deleted afterwards). Re-ran gates
+  after: vitest 137/137 (6 suites), eslint 0 errors, prettier clean, typecheck fully
+  clean.
+- Resolved 2026-09-10: user chose prototype-exact 60/40, so the chart row is now
+  `1.5fr/1fr` like the prototype file. Card + workspace suites green (20/20),
+  prettier clean. Still uncommitted for review.
+- Shared-tree note 2026-09-10: peer commit `364c5fe` swept my finished
+  `read-repository.ts` card read (+ test) into its narration commit. The committed
+  content is byte-identical to what I verified (working tree shows no diff for those
+  two files, and the 137/137 run covered them), so no repair needed — logging it here
+  so the history stays honest. Committing the rest of my files narrowly around it.

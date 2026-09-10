@@ -472,6 +472,43 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
   two additional retry attempts, five competitors, 20 topics, USD 1 per pipeline and USD 5 per
   organization local day. Quotes must fit before calls; unknown costs remain unknown.
 
+### 9.8 Overview performance filters
+
+- The Overview performance section opens directly on its filter row: a free-range date
+  picker in the Channel Audit style, a channel selector, and a location selector on one
+  end, with Last fetched and Refresh on the other. There is no section heading and no
+  reporting-period line below; the picker names the range and Last fetched sits by Refresh.
+- The picker offers only dates the organization's approved reports cover, with the same
+  grain warnings as the Channel Audit. A picked range becomes figures only through exactly
+  one declared window: the grain with a completed analysis wins, ties break toward the
+  coarser grain, and a range matching no exact window states that plainly instead of
+  showing another range's figures.
+- The channel selector narrows rows, totals, and coverage counts to that channel. The
+  location selector keeps channels actively mapped to that branch; channels with no active
+  mapping are excluded while a location is picked. Filter state travels in `from`, `to`,
+  `channel`, and `location` URL parameters; the legacy `window` value still translates.
+
+### 9.9 Business performance card
+
+- The Overview performance section is one business-performance card over a single
+  calendar month. Its picker offers whole covered months only, newest first; a
+  `from`/`to` range inside one covered month snaps to that month, and anything
+  else falls back to the newest month with a completed analysis.
+- The card header carries a rule-composed headline from measured movement (never
+  a live model call during page rendering), the measured range, the comparison
+  month, and the channel/location scope. Four tiles -- reported sales, orders
+  placed, menu views, cancelled orders -- show previous-month deltas over the
+  channels analysed in both months; anything unmeasured stays absent with its
+  reason, never zero.
+- The trend plots whole weeks of the month from nested analysed week windows
+  and states its week and channel coverage. With fewer than two analysable
+  weeks, the axes keep their shape with the plain reason in the middle rather
+  than hiding. Channel shares refuse mixed currencies with a reason.
+- "View data sources" opens the reporting period, scope, per-metric source
+  notes, and cost context behind the figures. The footer states channel and
+  location coverage, and "Order & fulfillment details" opens order and
+  cancellation totals with the explicit delivery-completion gap.
+
 ## 10. Campaign Opportunity contract
 
 ### 10.1 Eligibility
