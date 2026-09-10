@@ -906,6 +906,121 @@ describe("loadChannelCardFindingsForWindow", () => {
   });
 });
 
+describe("loadChannelRangeCardFindingsForWindow", () => {
+  function rangeStub() {
+    // Newest first, as the query orders them: channel-1 was re-analysed at a
+    // finer grain later, channel-2 only ever ran a span, and the quarterly
+    // row names a grain the card does not read.
+    const runRows = [
+      {
+        id: "run-day",
+        channel_id: "channel-1",
+        period_grain: "day",
+        completed_at: "2026-03-02T00:00:00Z",
+      },
+      {
+        id: "run-span",
+        channel_id: "channel-2",
+        period_grain: "span",
+        completed_at: "2026-03-01T00:00:00Z",
+      },
+      {
+        id: "run-month",
+        channel_id: "channel-1",
+        period_grain: "month",
+        completed_at: "2026-02-01T00:00:00Z",
+      },
+      {
+        id: "run-quarter",
+        channel_id: "channel-3",
+        period_grain: "quarter",
+        completed_at: "2026-03-03T00:00:00Z",
+      },
+    ];
+    const from = (table: string) => {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        not: () => builder,
+        in: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        then: (onFulfilled: (value: QueryResult) => unknown) =>
+          Promise.resolve({
+            data: table === "channel_analysis_runs" ? runRows : [],
+            error: null,
+          }).then(onFulfilled),
+      };
+      return builder;
+    };
+    return { supabase: { from } as unknown as SupabaseClient<Database> };
+  }
+
+  it("reads each channel once at its coarsest completed grain", async () => {
+    const { supabase } = rangeStub();
+
+    const records = await createAuthenticatedChannelAnalysisRepository(
+      supabase as unknown as SupabaseClient<Database>,
+    ).loadChannelRangeCardFindingsForWindow({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-02-28",
+    });
+
+    expect(records.map((record) => [record.channelId, record.analysisRunId]).sort()).toEqual([
+      ["channel-1", "run-month"],
+      ["channel-2", "run-span"],
+    ]);
+  });
+});
+
+describe("loadCompletedRunCountSince", () => {
+  it("counts newer completed runs without reading them", async () => {
+    const seen: { filters: [string, unknown][]; head: boolean } = { filters: [], head: false };
+    const from = () => {
+      const builder = {
+        select: (_columns: string, options?: { count: string; head: boolean }) => {
+          seen.head = options?.head === true;
+          return builder;
+        },
+        eq: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        gt: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        gte: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        lte: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        then: (onFulfilled: (value: QueryResult) => unknown) =>
+          Promise.resolve({ data: [], error: null, count: 2 }).then(onFulfilled),
+      };
+      return builder;
+    };
+    const supabase = { from } as unknown as SupabaseClient<Database>;
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase as unknown as SupabaseClient<Database>,
+    ).loadCompletedRunCountSince({
+      organizationId: ORGANIZATION,
+      since: "2026-03-01T00:00:00Z",
+      windowStartMin: "2025-11-03",
+      windowEndMax: "2026-02-28",
+    });
+
+    expect(count).toBe(2);
+    expect(seen.head).toBe(true);
+    expect(seen.filters).toContainEqual(["status", "completed"]);
+  });
+});
+
 describe("loadAnalysedWindowKeys", () => {
   it("scopes to the organization and to completed runs", async () => {
     const supabase = supabaseStub();

@@ -682,6 +682,56 @@ export function createAuthenticatedChannelAnalysisRepository(
       );
     },
 
+    async loadChannelRangeCardFindingsForWindow({ organizationId, windowStart, windowEnd }) {
+      // Exact dates at any grain, newest first. One bounded read rather than
+      // one per grain: an organization re-analysing the same dates stays one
+      // query, and the per-channel choice below cannot disagree with itself.
+      const { data: runs, error: runError } = await supabase
+        .from("channel_analysis_runs")
+        .select("id, channel_id, period_grain, completed_at")
+        .eq("organization_id", organizationId)
+        .eq("window_start", windowStart)
+        .eq("window_end", windowEnd)
+        .eq("status", "completed")
+        .not("channel_id", "is", null)
+        .order("completed_at", { ascending: false })
+        .limit(MAX_CHANNEL_BAND_RUNS);
+      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+
+      // Coarsest run wins per channel, newest among equals: rows arrive
+      // newest first, so the first row seen at the best rank stands.
+      const rank: Record<string, number> = { month: 0, week: 1, day: 2, span: 3 };
+      const latestByChannel = new Map<string, string>();
+      const rankByChannel = new Map<string, number>();
+      for (const row of runs ?? []) {
+        const channelId = row.channel_id as string;
+        const grainRank = rank[row.period_grain];
+        if (grainRank === undefined) continue;
+        const current = rankByChannel.get(channelId);
+        if (current === undefined || grainRank < current) {
+          rankByChannel.set(channelId, grainRank);
+          latestByChannel.set(channelId, row.id);
+        }
+      }
+      if (latestByChannel.size === 0) return [];
+
+      const rangeByRun = await loadOpenFindingsForRuns(supabase, {
+        organizationId,
+        runIds: [...latestByChannel.values()],
+        codes: [...CARD_CODES],
+        maxPerRun: MAX_CARD_FINDINGS_PER_RUN,
+        boundErrorCode: "CARD_FINDINGS_NOT_BOUNDED",
+      });
+
+      return [...latestByChannel.entries()].map(
+        ([channelId, analysisRunId]): ChannelBandRecord => ({
+          channelId,
+          analysisRunId,
+          findings: rangeByRun.get(analysisRunId) ?? [],
+        }),
+      );
+    },
+
     async loadAnalysedWindowKeys({ organizationId }) {
       const { data, error } = await supabase
         .from("channel_analysis_runs")
@@ -1031,6 +1081,19 @@ export function createAuthenticatedChannelAnalysisRepository(
       if (countError) throw new ChannelAnalysisReadError(countError.code ?? "unknown");
 
       return { id: run.id, status: run.status, recommendationCount: count ?? 0 };
+    },
+
+    async loadCompletedRunCountSince({ organizationId, since, windowStartMin, windowEndMax }) {
+      const { count, error: countError } = await supabase
+        .from("channel_analysis_runs")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("status", "completed")
+        .gt("completed_at", since)
+        .gte("window_start", windowStartMin)
+        .lte("window_end", windowEndMax);
+      if (countError) throw new ChannelAnalysisReadError(countError.code ?? "unknown");
+      return count ?? 0;
     },
   };
   return repository;
