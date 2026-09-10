@@ -6,74 +6,98 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("recharts", () => ({
   Bar: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   BarChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  CartesianGrid: () => null,
-  Cell: () => null,
   Legend: () => null,
-  Pie: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  PieChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   ResponsiveContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Tooltip: () => null,
   XAxis: () => null,
   YAxis: () => null,
 }));
 
-import { ChannelPortfolioChart } from "@/components/channels/channel-portfolio-chart";
-import type { ChannelsOverviewRow } from "@/modules/analysis/application/channels-overview";
+import {
+  ChannelComparisonTooltip,
+  ChannelPortfolioChart,
+  computeAmountScale,
+  formatMajorTick,
+} from "@/components/channels/channel-portfolio-chart";
+import { buildChannelsPortfolioPresentation } from "@/components/channels/channels-presentation";
+import type { ChannelsPortfolioPresentation } from "@/components/channels/channels-presentation";
+import type {
+  ChannelsOverviewRow,
+  ChannelsOverviewView,
+  ChannelsOverviewWindow,
+} from "@/modules/analysis/application/channels-overview";
 
-const rows: ChannelsOverviewRow[] = [
-  {
-    channelId: "talabat",
-    displayName: "Talabat",
-    status: "active",
-    assessed: true,
-    band: {
+const WINDOW_FEB: ChannelsOverviewWindow = {
+  windowStart: "2026-02-01",
+  windowEnd: "2026-02-28",
+  grain: "month",
+  label: "2026-02-01 to 2026-02-28",
+  value: "2026-02-01..2026-02-28..month",
+};
+
+function row(
+  channelId: string,
+  displayName: string,
+  band: ChannelsOverviewRow["band"],
+): ChannelsOverviewRow {
+  return { channelId, displayName, status: "active", assessed: band.state === "complete", band };
+}
+
+/** February §7 reference rows: A + B complete, Direct revenue-only, In-store refused. */
+function februaryRows(): ChannelsOverviewRow[] {
+  return [
+    row("a", "Delivery A", {
       state: "complete",
-      potential: { minorUnits: 55300, currency: "AED" },
-      lost: { minorUnits: 35700, currency: "AED" },
-      earned: { minorUnits: 19600, currency: "AED" },
-    },
-  },
-  {
-    channelId: "keeta",
-    displayName: "Keeta",
-    status: "active",
-    assessed: false,
-    band: {
+      potential: { minorUnits: 8_000_000, currency: "AED" },
+      lost: { minorUnits: 400_000, currency: "AED" },
+      earned: { minorUnits: 7_600_000, currency: "AED" },
+    }),
+    row("b", "Delivery B", {
+      state: "complete",
+      potential: { minorUnits: 4_000_000, currency: "AED" },
+      lost: { minorUnits: 200_000, currency: "AED" },
+      earned: { minorUnits: 3_800_000, currency: "AED" },
+    }),
+    row("direct", "Direct", {
       state: "revenue_only",
-      potential: { minorUnits: 41000, currency: "AED" },
+      potential: { minorUnits: 1_800_000, currency: "AED" },
       lost: null,
       earned: null,
+    }),
+    row("instore", "In-store", { state: "refused", potential: null, lost: null, earned: null }),
+  ];
+}
+
+function portfolioFor(rows: ChannelsOverviewRow[]): ChannelsPortfolioPresentation {
+  const view: ChannelsOverviewView = {
+    windows: [WINDOW_FEB],
+    selectedWindow: WINDOW_FEB,
+    total: {
+      potential: { minorUnits: 12_000_000, currency: "AED" },
+      lost: { minorUnits: 600_000, currency: "AED" },
+      earned: { minorUnits: 11_400_000, currency: "AED" },
     },
-  },
-  {
-    channelId: "noon",
-    displayName: "Noon",
-    status: "active",
-    assessed: false,
-    band: { state: "refused", potential: null, lost: null, earned: null },
-  },
-];
+    coverage: {
+      assessedCount: 2,
+      channelCount: 4,
+      revenueOnlyNames: ["Direct"],
+      unassessedNames: ["In-store"],
+    },
+    refusalReason: null,
+    rows,
+  };
+  return buildChannelsPortfolioPresentation(view);
+}
 
-const total = {
-  potential: { minorUnits: 55300, currency: "AED" },
-  lost: { minorUnits: 35700, currency: "AED" },
-  earned: { minorUnits: 19600, currency: "AED" },
-};
-
-const coverage = {
-  assessedCount: 1,
-  channelCount: 3,
-  revenueOnlyNames: ["Keeta"],
-  unassessedNames: ["Noon"],
-};
-
-function renderReport(reportRows: readonly ChannelsOverviewRow[] = rows) {
+function renderChart(
+  portfolio: ChannelsPortfolioPresentation = portfolioFor(februaryRows()),
+  onInspectChannel: (channelId: string) => void = () => {},
+) {
   return render(
     <ChannelPortfolioChart
-      rows={reportRows}
-      total={total}
-      coverage={coverage}
-      refusalReason={null}
+      portfolio={portfolio}
+      selectedWindow={WINDOW_FEB}
+      onInspectChannel={onInspectChannel}
     />,
   );
 }
@@ -81,100 +105,281 @@ function renderReport(reportRows: readonly ChannelsOverviewRow[] = rows) {
 describe("ChannelPortfolioChart", () => {
   afterEach(cleanup);
 
-  it("shows the selected window as a single decision-oriented report", () => {
-    renderReport();
+  it("shows February reference rows in descending order with whole-unit end values", () => {
+    renderChart();
 
-    const outcome = screen.getByRole("region", { name: "Revenue outcome" });
-    expect(within(outcome).getByText("AED 553.00")).toBeInTheDocument();
-    expect(within(outcome).getByText("AED 196.00")).toBeInTheDocument();
-    expect(within(outcome).getByText("AED 357.00")).toBeInTheDocument();
-    expect(screen.getByTestId("reported-revenue-mix-chart")).toBeInTheDocument();
-    expect(screen.getByTestId("channel-performance-chart")).toBeInTheDocument();
-    expect(screen.getByTestId("loss-contributor-talabat")).toHaveTextContent("AED 357.00");
-    expect(screen.queryByText("Capture gap by channel")).not.toBeInTheDocument();
-  });
-
-  it("keeps revenue-only and unassessed channels explicit without inventing zeroes", () => {
-    renderReport();
-
-    expect(screen.getByRole("button", { name: /Keeta.*loss not recorded/i })).toHaveTextContent(
-      "AED 410.00",
-    );
-    expect(screen.getByText("1 complete")).toBeInTheDocument();
-    expect(screen.getByText("1 revenue-only")).toBeInTheDocument();
-    expect(screen.getByText("1 awaiting analysis")).toBeInTheDocument();
-    expect(screen.getByText(/Noon has no analysis for this window/)).toBeInTheDocument();
-    expect(screen.queryByText("AED 0.00")).not.toBeInTheDocument();
-  });
-
-  it("uses one channel focus across the mix and performance views", () => {
-    renderReport();
-
-    const talabat = screen.getByRole("button", { name: /Focus Talabat/i });
-    fireEvent.click(talabat);
-
-    expect(talabat).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("channel-performance-report")).toHaveAttribute(
-      "data-active-channel",
-      "talabat",
-    );
-  });
-
-  it("refuses cross-currency visuals while retaining exact channel summaries", () => {
-    renderReport([
-      rows[0],
-      {
-        ...rows[1],
-        band: {
-          state: "revenue_only",
-          potential: { minorUnits: 41000, currency: "USD" },
-          lost: null,
-          earned: null,
-        },
-      },
-    ]);
-
-    expect(screen.queryByTestId("reported-revenue-mix-chart")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("channel-performance-chart")).not.toBeInTheDocument();
+    expect(screen.getByText("Revenue by channel")).toBeInTheDocument();
     expect(
-      within(screen.getByRole("region", { name: "Channel performance chart" })).getByText(
-        "Visual comparison is unavailable because channels reported different currencies.",
+      screen.getByText("A shared scale. A clearer view of your channel mix."),
+    ).toBeInTheDocument();
+
+    const region = screen.getByRole("region", { name: "Revenue comparison" });
+    const names = within(region)
+      .getAllByRole("button", { name: /Show band details/ })
+      .map((button) => button.textContent);
+    expect(names).toEqual(["Delivery A", "Delivery B", "Direct", "In-store"]);
+
+    expect(screen.getByText("80,000")).toBeInTheDocument();
+    expect(screen.getByText("40,000")).toBeInTheDocument();
+    expect(screen.getByText("18,000")).toBeInTheDocument();
+    // Refused rows keep the label, neutral in-track text and an em-dash value.
+    expect(screen.getByText("No comparable figure")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Earned = reported revenue minus provider-reported loss. These figures are not profit.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText(/Talabat: AED 553.00 potential/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Keeta: \$410.00 revenue reported/)).toBeInTheDocument();
+    expect(screen.getByText("Earned")).toBeInTheDocument();
+    expect(screen.getByText("Reported loss")).toBeInTheDocument();
+    expect(screen.getByText("Revenue only")).toBeInTheDocument();
   });
 
-  it("preserves currencies without two-decimal minor units", () => {
+  it("computes the reference 0–80k amount domain with 20k ticks", () => {
+    const scale = computeAmountScale(1_800_000, 8_000_000, "AED");
+
+    expect(scale.domain).toEqual([0, 8_000_000]);
+    expect(scale.ticks).toEqual([0, 2_000_000, 4_000_000, 6_000_000, 8_000_000]);
+    expect(scale.ticks.map((tick) => formatMajorTick(tick / 100))).toEqual([
+      "0",
+      "20k",
+      "40k",
+      "60k",
+      "80k",
+    ]);
+  });
+
+  it("switches to one-decimal shares and never clears the active choice", () => {
+    renderChart();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Show shares" }));
+    expect(screen.getByText("58.0%")).toBeInTheDocument();
+    expect(screen.getByText("29.0%")).toBeInTheDocument();
+    expect(screen.getByText("13.0%")).toBeInTheDocument();
+
+    // Clicking the active choice must not clear the selected value.
+    fireEvent.click(screen.getByRole("radio", { name: "Show shares" }));
+    expect(screen.getByText("58.0%")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Show amounts" }));
+    expect(screen.getByText("80,000")).toBeInTheDocument();
+    expect(screen.queryByText("58.0%")).toBeNull();
+  });
+
+  it("emits the inspected channel for keyboard and touch detail without a second model", () => {
+    const onInspectChannel = vi.fn();
+    renderChart(portfolioFor(februaryRows()), onInspectChannel);
+
+    const detail = screen.getByRole("button", { name: /Delivery A:.*Show band details/ });
+    // Intl separates the currency code with a non-breaking space, so assert
+    // the code and the figures as separate fragments.
+    const label = detail.getAttribute("aria-label") ?? "";
+    expect(label).toContain("reported revenue AED");
+    expect(label).toContain("80,000.00");
+    expect(label).toContain("76,000.00");
+    expect(label).toContain("4,000.00");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(detail);
+    expect(onInspectChannel).toHaveBeenCalledTimes(1);
+    expect(onInspectChannel).toHaveBeenCalledWith("a");
+  });
+
+  it("refuses mixed-currency visuals while keeping original-currency values", () => {
+    const mixed = februaryRows();
+    mixed[1] = row("b", "Delivery B", {
+      state: "complete",
+      potential: { minorUnits: 4_000_000, currency: "USD" },
+      lost: { minorUnits: 200_000, currency: "USD" },
+      earned: { minorUnits: 3_800_000, currency: "USD" },
+    });
+    renderChart(portfolioFor(mixed));
+
+    expect(screen.getByText("Revenue cannot be compared across currencies.")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Show shares" })).toBeDisabled();
+    // Exact per-channel figures stay inspectable, so nothing is lost.
+    const deliveryA =
+      screen.getByRole("button", { name: /Delivery A:/ }).getAttribute("aria-label") ?? "";
+    expect(deliveryA).toContain("AED");
+    expect(deliveryA).toContain("80,000.00");
+    const deliveryB =
+      screen.getByRole("button", { name: /Delivery B:/ }).getAttribute("aria-label") ?? "";
+    expect(deliveryB).toContain("40,000.00");
+    expect(screen.getByText("80,000")).toBeInTheDocument();
+    expect(screen.getByText("40,000")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Revenue comparison" })).toBeInTheDocument();
+  });
+
+  it("keeps signed adjustments out of Share while Amount stays signed", () => {
+    const rows = [
+      row("a", "Delivery A", {
+        state: "complete",
+        potential: { minorUnits: 8_000_000, currency: "AED" },
+        lost: { minorUnits: 400_000, currency: "AED" },
+        earned: { minorUnits: 7_600_000, currency: "AED" },
+      }),
+      row("direct", "Direct", {
+        state: "revenue_only",
+        potential: { minorUnits: -500_000, currency: "AED" },
+        lost: null,
+        earned: null,
+      }),
+    ];
+    renderChart(portfolioFor(rows));
+
+    // Amount keeps the signed figure (−500,000 minor = −5,000 major);
+    // nothing is clamped to a positive bar.
+    expect(screen.getByText("-5,000")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Show shares" }));
+    expect(
+      screen.getByText("Share comparison is unavailable for signed adjustments."),
+    ).toBeInTheDocument();
+  });
+
+  it("calls an all-zero total what it is and refuses only the proportional view", () => {
+    const rows = [
+      row("a", "Delivery A", {
+        state: "complete",
+        potential: { minorUnits: 0, currency: "AED" },
+        lost: { minorUnits: 0, currency: "AED" },
+        earned: { minorUnits: 0, currency: "AED" },
+      }),
+    ];
+    renderChart(portfolioFor(rows));
+
+    // Zero stays zero: no nonzero minimum bar, no invented nonzero domain.
+    expect(screen.getByText("0")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Show shares" }));
+    expect(
+      screen.getByText("No proportional comparison is available for zero reported revenue."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the exact tooltip with channel, period and recorded figures", () => {
     render(
-      <ChannelPortfolioChart
-        rows={[
+      <ChannelComparisonTooltip
+        active
+        payload={[
           {
-            ...rows[0],
-            band: {
+            payload: {
+              channelId: "a",
+              name: "Delivery A",
               state: "complete",
-              potential: { minorUnits: 12_345, currency: "JPY" },
-              lost: { minorUnits: 4_000, currency: "JPY" },
-              earned: { minorUnits: 8_345, currency: "JPY" },
+              reportedMinor: 8_000_000,
+              earnedMinor: 7_600_000,
+              lostMinor: 400_000,
+              currency: "AED",
             },
           },
         ]}
-        total={{
-          potential: { minorUnits: 12_345, currency: "JPY" },
-          lost: { minorUnits: 4_000, currency: "JPY" },
-          earned: { minorUnits: 8_345, currency: "JPY" },
-        }}
-        coverage={{
-          assessedCount: 1,
-          channelCount: 1,
-          revenueOnlyNames: [],
-          unassessedNames: [],
-        }}
-        refusalReason={null}
+        period="1 February 2026 – 28 February 2026"
       />,
     );
 
-    expect(screen.getByRole("region", { name: "Revenue outcome" })).toHaveTextContent("¥12,345");
-    expect(screen.getByTestId("loss-contributor-talabat")).toHaveTextContent("¥4,000");
+    expect(screen.getByText("Delivery A")).toBeInTheDocument();
+    expect(screen.getByText("1 February 2026 – 28 February 2026")).toBeInTheDocument();
+    expect(screen.getByText("AED 80,000.00")).toBeInTheDocument();
+    expect(screen.getByText("AED 76,000.00")).toBeInTheDocument();
+    expect(screen.getByText("AED 4,000.00")).toBeInTheDocument();
+  });
+
+  it("says Not recorded for revenue-only tooltips instead of inventing zeroes", () => {
+    render(
+      <ChannelComparisonTooltip
+        active
+        payload={[
+          {
+            payload: {
+              channelId: "direct",
+              name: "Direct",
+              state: "revenue_only",
+              reportedMinor: 1_800_000,
+              earnedMinor: null,
+              lostMinor: null,
+              currency: "AED",
+            },
+          },
+        ]}
+        period="1 February 2026 – 28 February 2026"
+      />,
+    );
+
+    expect(screen.getByText("AED 18,000.00")).toBeInTheDocument();
+    expect(screen.getAllByText("Not recorded")).toHaveLength(2);
+    expect(screen.queryByText("AED 0.00")).toBeNull();
+  });
+
+  it("preserves currencies without two-decimal minor units in tooltips", () => {
+    const { unmount } = render(
+      <ChannelComparisonTooltip
+        active
+        payload={[
+          {
+            payload: {
+              channelId: "tokyo",
+              name: "Tokyo",
+              state: "complete",
+              reportedMinor: 12_345,
+              earnedMinor: 8_345,
+              lostMinor: 4_000,
+              currency: "JPY",
+            },
+          },
+        ]}
+        period="1 February 2026 – 28 February 2026"
+      />,
+    );
+    expect(screen.getByText("¥12,345")).toBeInTheDocument();
+    expect(screen.getByText("¥4,000")).toBeInTheDocument();
+    unmount();
+
+    render(
+      <ChannelComparisonTooltip
+        active
+        payload={[
+          {
+            payload: {
+              channelId: "manama",
+              name: "Manama",
+              state: "complete",
+              reportedMinor: 12_345,
+              earnedMinor: 12_000,
+              lostMinor: 345,
+              currency: "BHD",
+            },
+          },
+        ]}
+        period="1 February 2026 – 28 February 2026"
+      />,
+    );
+    expect(document.body.textContent).toContain("12.345");
+  });
+
+  it("orders unknown amounts last with deterministic ID ties", () => {
+    const onInspectChannel = vi.fn();
+    const rows = [
+      row("zeta", "Same", {
+        state: "revenue_only",
+        potential: { minorUnits: 1_000_000, currency: "AED" },
+        lost: null,
+        earned: null,
+      }),
+      row("instore", "In-store", { state: "refused", potential: null, lost: null, earned: null }),
+      row("alpha", "Same", {
+        state: "revenue_only",
+        potential: { minorUnits: 1_000_000, currency: "AED" },
+        lost: null,
+        earned: null,
+      }),
+    ];
+    renderChart(portfolioFor(rows), onInspectChannel);
+
+    const names = screen.getAllByRole("button", { name: /Show band details/ });
+    // Equal amounts sort by display name, then channel ID; unknowns last.
+    expect(names.map((button) => button.textContent)).toEqual(["Same", "Same", "In-store"]);
+    // The first tied row is the lower channel ID: inspection proves the order.
+    fireEvent.click(names[0] as HTMLElement);
+    expect(onInspectChannel).toHaveBeenCalledWith("alpha");
   });
 });

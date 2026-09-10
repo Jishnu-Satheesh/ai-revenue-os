@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { formatMoney } from "@/components/analysis/format";
 import styles from "@/components/channels/channels-landing.module.css";
 import { ChannelIcon } from "@/components/channels/channel-icons";
 import type {
@@ -14,7 +15,10 @@ import {
   formatChannelsWindowOption,
   MIXED_CURRENCY_COMPARISON_REASON,
 } from "@/components/channels/channels-presentation";
-import { ChannelPortfolioChart } from "@/components/channels/channel-portfolio-chart";
+import {
+  ChannelPortfolioChart,
+  formatWholeMajorUnits,
+} from "@/components/channels/channel-portfolio-chart";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -178,6 +182,194 @@ function ReportingWindowDialog({
   );
 }
 
+/**
+ * V03 four-metric strip (Task 3). Headline visuals round to whole major units;
+ * each value carries the exact figure in its accessible name without adding
+ * visible buttons. Null is an em dash with the actual reason, never a
+ * converted total or a currency prefix pretending over a zero.
+ */
+function PortfolioSummaryStrip({ portfolio }: { portfolio: ChannelsPortfolioPresentation }) {
+  const reported = portfolio.reportedTotal;
+  const earned = portfolio.earnedTotal;
+  const lost = portfolio.lostTotal;
+  const channels = (count: number) => (count === 1 ? "channel" : "channels");
+
+  return (
+    <section aria-label="Channel performance summary" className={styles.statStrip}>
+      <div
+        className={styles.statCell}
+        role="group"
+        aria-label={
+          reported
+            ? `Reported revenue ${formatMoney(reported.minorUnits, reported.currency)}, across ${portfolio.reportedCount} of ${portfolio.activeCount} active ${channels(portfolio.activeCount)}.`
+            : `Reported revenue unavailable. ${portfolio.comparisonReason ?? ""}`
+        }
+      >
+        <p className={styles.statLabel}>Reported revenue</p>
+        <p className={styles.statValue}>
+          {reported ? (
+            <>
+              <span className={styles.statPrefix}>{reported.currency}</span>
+              <span>{formatWholeMajorUnits(reported.minorUnits, reported.currency)}</span>
+            </>
+          ) : (
+            <span>—</span>
+          )}
+        </p>
+        <p className={styles.statNote}>
+          {reported
+            ? `Across ${portfolio.reportedCount} of ${portfolio.activeCount} active ${channels(portfolio.activeCount)}`
+            : (portfolio.comparisonReason ?? "No reported revenue figure.")}
+        </p>
+      </div>
+
+      <div
+        className={styles.statCell}
+        role="group"
+        aria-label={
+          earned
+            ? `Earned ${formatMoney(earned.minorUnits, earned.currency)}, revenue less loss across ${portfolio.completeCount} ${channels(portfolio.completeCount)}.`
+            : `Earned unavailable. ${portfolio.earnedReason ?? ""}`
+        }
+      >
+        <p className={styles.statLabel}>Earned</p>
+        <p className={styles.statValue}>
+          {earned ? (
+            <>
+              <span className={styles.statPrefix}>{earned.currency}</span>
+              <span>{formatWholeMajorUnits(earned.minorUnits, earned.currency)}</span>
+            </>
+          ) : (
+            <span>—</span>
+          )}
+        </p>
+        <p className={styles.statNote}>
+          {earned
+            ? `Revenue less loss · ${portfolio.completeCount} ${channels(portfolio.completeCount)}`
+            : (portfolio.earnedReason ?? "No earned figure.")}
+        </p>
+      </div>
+
+      <div
+        className={styles.statCell}
+        role="group"
+        aria-label={
+          lost
+            ? `Provider-reported loss ${formatMoney(lost.minorUnits, lost.currency)}, across ${portfolio.completeCount} ${channels(portfolio.completeCount)}.`
+            : `Provider-reported loss unavailable. ${portfolio.earnedReason ?? ""}`
+        }
+      >
+        <p className={styles.statLabel}>Provider-reported loss</p>
+        <p className={styles.statValue}>
+          {lost ? (
+            <>
+              <span className={styles.statPrefix}>{lost.currency}</span>
+              <span>{formatWholeMajorUnits(lost.minorUnits, lost.currency)}</span>
+            </>
+          ) : (
+            <span>—</span>
+          )}
+        </p>
+        <p className={styles.statNote}>
+          {lost
+            ? `Reported loss · ${portfolio.completeCount} ${channels(portfolio.completeCount)}`
+            : (portfolio.earnedReason ?? "No reported loss figure.")}
+        </p>
+      </div>
+
+      <div
+        className={styles.statCell}
+        role="group"
+        aria-label={`Channel coverage ${portfolio.reportedCount} of ${portfolio.activeCount}. Channels with reported revenue.`}
+      >
+        <p className={styles.statLabel}>Channel coverage</p>
+        <p className={styles.statValue}>
+          <span>
+            {portfolio.reportedCount} / {portfolio.activeCount}
+          </span>
+        </p>
+        <p className={styles.statNote}>Channels with reported revenue</p>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Read-only band detail for one inspected channel (Task 3). ChannelsRollup
+ * owns `inspectedChannelId`; the chart's row buttons only emit the ID, so
+ * keyboard/touch inspection opens these same exact values without a second
+ * evidence model. Task 4 expands this dialog into the full data-coverage
+ * dialog (D02), reusing the inspected ID as its focused channel.
+ */
+function ChannelBandDetailDialog({
+  portfolio,
+  selected,
+  channelId,
+  onClose,
+}: {
+  portfolio: ChannelsPortfolioPresentation;
+  selected: ChannelsOverviewWindow;
+  channelId: string | null;
+  onClose: () => void;
+}) {
+  const row = channelId ? portfolio.rows.find((entry) => entry.channelId === channelId) : undefined;
+  return (
+    <Dialog
+      open={channelId !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        className={`${styles.theme} max-w-[calc(100vw-28px)] sm:max-w-[520px]`}
+      >
+        <DialogHeader className="flex-row items-center justify-between border-b pb-4">
+          <div className="grid gap-1">
+            <DialogTitle>{row?.displayName ?? "Channel details"}</DialogTitle>
+            <DialogDescription>{formatFullRange(selected)}</DialogDescription>
+          </div>
+          <DialogClose asChild>
+            <Button variant="ghost" size="icon" className="size-[38px]" aria-label="Close dialog">
+              <ChannelIcon name="close" />
+            </Button>
+          </DialogClose>
+        </DialogHeader>
+        {row ? (
+          <dl className="grid gap-2 py-1 text-sm">
+            <div className="flex items-center justify-between gap-4 border-b py-2.5">
+              <dt className="text-muted-foreground">Reported revenue</dt>
+              <dd className="text-right font-medium tabular-nums">
+                {row.band.potential
+                  ? formatMoney(row.band.potential.minorUnits, row.band.potential.currency)
+                  : "No comparable revenue figure for this window."}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-b py-2.5">
+              <dt className="text-muted-foreground">Earned</dt>
+              <dd className="text-right font-medium tabular-nums">
+                {row.band.state === "complete" && row.band.earned
+                  ? formatMoney(row.band.earned.minorUnits, row.band.earned.currency)
+                  : "Not recorded"}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-2.5">
+              <dt className="text-muted-foreground">Provider-reported loss</dt>
+              <dd className="text-right font-medium tabular-nums">
+                {row.band.state === "complete" && row.band.lost
+                  ? formatMoney(row.band.lost.minorUnits, row.band.lost.currency)
+                  : "Not recorded"}
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="py-1 text-sm text-muted-foreground">Channel is no longer available.</p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UnavailableRollup() {
   const router = useRouter();
   return (
@@ -213,6 +405,7 @@ function ReadyRollup({
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [infoOpen, setInfoOpen] = useState(false);
+  const [inspectedChannelId, setInspectedChannelId] = useState<string | null>(null);
 
   const portfolio = buildChannelsPortfolioPresentation(view);
   const selected = view.selectedWindow;
@@ -296,12 +489,23 @@ function ReadyRollup({
       ) : null}
 
       {selected ? (
-        <ChannelPortfolioChart
-          rows={view.rows}
-          total={view.total}
-          coverage={view.coverage}
-          refusalReason={view.refusalReason}
-        />
+        <>
+          <PortfolioSummaryStrip portfolio={portfolio} />
+          {/* Keyed by organization + window so the Amount/Share choice resets
+              on either change; directory filtering never remounts this. */}
+          <ChannelPortfolioChart
+            key={`${organizationId}::${selected.value}`}
+            portfolio={portfolio}
+            selectedWindow={selected}
+            onInspectChannel={setInspectedChannelId}
+          />
+          <ChannelBandDetailDialog
+            portfolio={portfolio}
+            selected={selected}
+            channelId={inspectedChannelId}
+            onClose={() => setInspectedChannelId(null)}
+          />
+        </>
       ) : (
         <p className="text-sm text-muted-foreground">Choose a reporting window.</p>
       )}

@@ -28,11 +28,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("recharts", () => ({
   Bar: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   BarChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  CartesianGrid: () => null,
-  Cell: () => null,
   Legend: () => null,
-  Pie: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  PieChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   ResponsiveContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Tooltip: () => null,
   XAxis: () => null,
@@ -260,7 +256,8 @@ describe("ChannelsRollup", () => {
     // figure from another window is shown above the unresolved request.
     expect(screen.getByText("Choose a reporting window.")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Reporting period" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Revenue outcome" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Channel performance summary" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Revenue comparison" })).toBeNull();
     expect(screen.getByText("Reported scope")).toBeInTheDocument();
     expect(screen.queryByText(/Reported scope ·/)).toBeNull();
   });
@@ -283,5 +280,146 @@ describe("ChannelsRollup", () => {
 
     expect(screen.getByRole("region", { name: "Channel portfolio analysis" })).toBeInTheDocument();
     expect(screen.queryByText("Loading reporting window…")).toBeNull();
+  });
+
+  it("shows the February reference strip with exact totals and counts", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
+
+    const summary = screen.getByRole("region", { name: "Channel performance summary" });
+    expect(within(summary).getByText("Reported revenue")).toBeInTheDocument();
+    expect(within(summary).getByText("138,000")).toBeInTheDocument();
+    expect(within(summary).getByText("Across 3 of 4 active channels")).toBeInTheDocument();
+    expect(within(summary).getByText("Earned")).toBeInTheDocument();
+    expect(within(summary).getByText("114,000")).toBeInTheDocument();
+    expect(within(summary).getByText("Revenue less loss · 2 channels")).toBeInTheDocument();
+    expect(within(summary).getByText("Provider-reported loss")).toBeInTheDocument();
+    expect(within(summary).getByText("6,000")).toBeInTheDocument();
+    expect(within(summary).getByText("Reported loss · 2 channels")).toBeInTheDocument();
+    expect(within(summary).getByText("Channel coverage")).toBeInTheDocument();
+    expect(within(summary).getByText("3 / 4")).toBeInTheDocument();
+    expect(within(summary).getByText("Channels with reported revenue")).toBeInTheDocument();
+    // Headline visuals round; each stat cell exposes the exact figure via its
+    // group accessible name (role="group" so browse-mode AT announces it).
+    // Intl separates the currency code with a non-breaking space, so match it
+    // with \s (a literal space would miss).
+    expect(
+      within(summary).getByRole("group", { name: /Reported revenue AED\s138,000\.00/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(summary).getByRole("group", { name: /Earned AED\s114,000\.00/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(summary).getByRole("group", { name: /Provider-reported loss AED\s6,000\.00/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(summary).getByRole("group", { name: /Channel coverage 3 of 4/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("states an em dash with the reason when earned and loss have no complete band", () => {
+    const revenueOnly = view({
+      rows: [
+        row("direct", "Direct", {
+          state: "revenue_only",
+          potential: { minorUnits: 1_800_000, currency: "AED" },
+          lost: null,
+          earned: null,
+        }),
+      ],
+    });
+    render(
+      <ChannelsRollup organizationId="org-1" analysis={{ state: "ready", view: revenueOnly }} />,
+    );
+
+    const summary = screen.getByRole("region", { name: "Channel performance summary" });
+    expect(within(summary).getByText("18,000")).toBeInTheDocument();
+    // Both the Earned and the loss note state the same honest reason.
+    expect(
+      within(summary).getAllByText(
+        "No channel has both a revenue figure and a recorded loss for this window.",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("keeps the AED earned subtotal honest when only the revenue-only row is foreign", () => {
+    const rows = [
+      row("a", "Delivery A", {
+        state: "complete",
+        potential: { minorUnits: 8_000_000, currency: "AED" },
+        lost: { minorUnits: 400_000, currency: "AED" },
+        earned: { minorUnits: 7_600_000, currency: "AED" },
+      }),
+      row("direct", "Direct", {
+        state: "revenue_only",
+        potential: { minorUnits: 1_800_000, currency: "USD" },
+        lost: null,
+        earned: null,
+      }),
+    ];
+    render(<ChannelsRollup organizationId="org-1" analysis={ready({ rows })} />);
+
+    const summary = screen.getByRole("region", { name: "Channel performance summary" });
+    // Reported refuses across currencies instead of converting…
+    expect(
+      within(summary).getByText("Revenue cannot be compared across currencies."),
+    ).toBeInTheDocument();
+    // …while the currency-consistent earned subtotal stays, explicitly scoped.
+    expect(within(summary).getByText("76,000")).toBeInTheDocument();
+    expect(within(summary).getByText("Revenue less loss · 1 channel")).toBeInTheDocument();
+  });
+
+  it("renders a genuine zero as zero, never as a missing figure", () => {
+    const rows = [
+      row("a", "Delivery A", {
+        state: "complete",
+        potential: { minorUnits: 0, currency: "AED" },
+        lost: { minorUnits: 0, currency: "AED" },
+        earned: { minorUnits: 0, currency: "AED" },
+      }),
+    ];
+    render(<ChannelsRollup organizationId="org-1" analysis={ready({ rows })} />);
+
+    const summary = screen.getByRole("region", { name: "Channel performance summary" });
+    expect(within(summary).getAllByText("0")).toHaveLength(3);
+    expect(within(summary).getByText("1 / 1")).toBeInTheDocument();
+  });
+
+  it("resets the Amount/Share choice when the organization or window changes", () => {
+    const { rerender } = render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Show shares" }));
+    expect(screen.getByText("58.0%")).toBeInTheDocument();
+
+    rerender(
+      <ChannelsRollup
+        organizationId="org-1"
+        analysis={ready({ selectedWindow: WINDOW_MARCH_MONTH })}
+      />,
+    );
+    expect(screen.queryByText("58.0%")).toBeNull();
+    expect(screen.getByText("80,000")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Show shares" }));
+    expect(screen.getByText("58.0%")).toBeInTheDocument();
+    rerender(<ChannelsRollup organizationId="org-2" analysis={ready()} />);
+    expect(screen.queryByText("58.0%")).toBeNull();
+  });
+
+  it("opens the same band details from a chart row for keyboard and touch", async () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Delivery A:.*Show band details/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Delivery A" });
+    expect(within(dialog).getByText("1 February 2026 – 28 February 2026")).toBeInTheDocument();
+    expect(within(dialog).getByText("AED 80,000.00")).toBeInTheDocument();
+    expect(within(dialog).getByText("AED 76,000.00")).toBeInTheDocument();
+    expect(within(dialog).getByText("AED 4,000.00")).toBeInTheDocument();
+    // Read-only: a close control and nothing that writes.
+    expect(within(dialog).getByRole("button", { name: "Close dialog" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /save|refresh|start/i })).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delivery A" })).toBeNull());
   });
 });
