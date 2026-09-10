@@ -70,7 +70,9 @@ describe("readiness copy", () => {
   it("states no figure, because readiness has none", () => {
     for (const reason of everyReason) {
       const copy = describeReadinessReason(reason);
-      expect(`${copy.explanation} ${copy.nextStep ?? ""}`, reason).not.toMatch(/\d+(\.\d+)?\s*%|\d{3,}/);
+      expect(`${copy.explanation} ${copy.nextStep ?? ""}`, reason).not.toMatch(
+        /\d+(\.\d+)?\s*%|\d{3,}/,
+      );
     }
   });
 

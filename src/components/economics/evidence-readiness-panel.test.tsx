@@ -119,7 +119,10 @@ describe("EvidenceReadinessPanel", () => {
         tuple({
           state: "ready_for_economics",
           blockers: [
-            { explanation: "Comes from provider reports rather than a rate you can enter.", nextStep: null },
+            {
+              explanation: "Comes from provider reports rather than a rate you can enter.",
+              nextStep: null,
+            },
           ],
         }),
       ],
@@ -147,7 +150,9 @@ describe("EvidenceReadinessPanel", () => {
         tuple({
           state: "blocked",
           stateLabel: "Blocked",
-          blockers: [{ explanation: "Two reports cover overlapping dates.", nextStep: "Choose one." }],
+          blockers: [
+            { explanation: "Two reports cover overlapping dates.", nextStep: "Choose one." },
+          ],
         }),
       ],
     });
@@ -179,7 +184,13 @@ describe("EvidenceReadinessPanel", () => {
       costCoverage: {
         outcome: "checked",
         components: [
-          { key: "commission", label: "Commission", covered: false, tier: null, operatorCanResolve: true },
+          {
+            key: "commission",
+            label: "Commission",
+            covered: false,
+            tier: null,
+            operatorCanResolve: true,
+          },
         ],
       },
     });

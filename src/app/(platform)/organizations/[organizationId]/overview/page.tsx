@@ -49,7 +49,8 @@ export default async function OverviewPage({ params }: PageProps) {
 
   const priorWindow = {
     rangeStart: new Date(
-      window.rangeStart.getTime() - (window.rangeEndExclusive.getTime() - window.rangeStart.getTime()),
+      window.rangeStart.getTime() -
+        (window.rangeEndExclusive.getTime() - window.rangeStart.getTime()),
     ),
     rangeEndExclusive: window.rangeStart,
   };

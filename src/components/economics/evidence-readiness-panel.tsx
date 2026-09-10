@@ -3,7 +3,13 @@ import { CircleCheck, CircleDashed, CircleSlash, TriangleAlert } from "lucide-re
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { EvidenceReadinessState } from "@/domain/economics/readiness";
 import type {
@@ -25,15 +31,14 @@ import type {
  * finances into a bundle that outlives the request.
  */
 
-const TONE: Readonly<
-  Record<EvidenceReadinessState, "success" | "warning" | "neutral" | "danger">
-> = {
-  ready_for_economics: "success",
-  partial_evidence: "warning",
-  needs_data: "neutral",
-  not_comparable: "warning",
-  blocked: "danger",
-};
+const TONE: Readonly<Record<EvidenceReadinessState, "success" | "warning" | "neutral" | "danger">> =
+  {
+    ready_for_economics: "success",
+    partial_evidence: "warning",
+    needs_data: "neutral",
+    not_comparable: "warning",
+    blocked: "danger",
+  };
 
 function StateIcon({ state }: { state: EvidenceReadinessState }) {
   if (state === "ready_for_economics")
@@ -41,7 +46,9 @@ function StateIcon({ state }: { state: EvidenceReadinessState }) {
   if (state === "blocked")
     return <CircleSlash aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-danger" />;
   if (state === "needs_data")
-    return <CircleDashed aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />;
+    return (
+      <CircleDashed aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+    );
   return <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />;
 }
 

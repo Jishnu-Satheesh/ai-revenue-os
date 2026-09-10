@@ -176,9 +176,7 @@ function toEntry(
     // through feedback: an Approve button here would promise an action the
     // write path must refuse. Legacy entries keep their actions.
     availableActions:
-      blockedReason || item.actionKey === "campaign.governed_draft_v1"
-        ? []
-        : OPPORTUNITY_ACTIONS,
+      blockedReason || item.actionKey === "campaign.governed_draft_v1" ? [] : OPPORTUNITY_ACTIONS,
     ...(blockedReason ? { blockedReason } : {}),
   };
 }
