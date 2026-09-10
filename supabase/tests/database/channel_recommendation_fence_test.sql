@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(66);
+select extensions.plan(72);
 
 -- The narrator's fence (ADR 0037): three worker RPCs that are the only write
 -- path into the recommendations tables. Exercised against real completed runs
@@ -69,7 +69,8 @@ from (values
   ('fa210000-0000-4000-8000-000000000512', '2026-01-02 00:00:00+04', '2026-01-03 00:00:00+04', 90000, 'blocked_overlap'),
   ('fa210000-0000-4000-8000-000000000513', '2026-01-08 00:00:00+04', '2026-01-09 00:00:00+04', 70000, 'current'),
   ('fa210000-0000-4000-8000-000000000514', '2026-02-01 00:00:00+04', '2026-02-02 00:00:00+04', 3863, 'current'),
-  ('fa210000-0000-4000-8000-000000000515', '2026-02-02 00:00:00+04', '2026-02-03 00:00:00+04', 2, 'current')
+  ('fa210000-0000-4000-8000-000000000515', '2026-02-02 00:00:00+04', '2026-02-03 00:00:00+04', 2, 'current'),
+  ('fa210000-0000-4000-8000-000000000516', '2026-02-03 00:00:00+04', '2026-02-04 00:00:00+04', 41000, 'current')
 ) as observations(observation_id, period_start, period_end, numerator, state);
 
 insert into public.channel_analysis_runs (
@@ -102,7 +103,12 @@ insert into public.channel_analysis_runs (
    'fa210000-0000-4000-8000-000000000401'::uuid, 'fa210000-0000-4000-8000-000000000301'::uuid,
    date '2026-02-01', date '2026-02-05', 'day', 'Asia/Dubai', 1,
    '[{"key":"funnel.stage_conversion","calculationVersion":1},{"key":"customer.new_share","calculationVersion":1}]'::jsonb, '[]'::jsonb,
-   repeat('c', 64), 'completed', null, repeat('5', 64), 'fa210000-0000-4000-8000-000000000706'::uuid, now());
+   repeat('c', 64), 'completed', null, repeat('5', 64), 'fa210000-0000-4000-8000-000000000706'::uuid, now()),
+  ('fa210000-0000-4000-8000-000000000607'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000401'::uuid, 'fa210000-0000-4000-8000-000000000301'::uuid,
+   date '2026-02-03', date '2026-02-04', 'day', 'Asia/Dubai', 1,
+   '[{"key":"evidence.period_coverage","calculationVersion":1}]'::jsonb, '[]'::jsonb,
+   repeat('9', 64), 'completed', null, repeat('4', 64), 'fa210000-0000-4000-8000-000000000707'::uuid, now());
 
 insert into public.channel_analysis_runs (
   id, organization_id, channel_id, branch_id, window_start, window_end, period_grain,
@@ -142,7 +148,11 @@ insert into public.channel_findings (
   ('fa210000-0000-4000-8000-000000000507'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
    'fa210000-0000-4000-8000-000000000606'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
    'fa210000-0000-4000-8000-000000000301'::uuid, 'customer.new_share', 1, 'observation',
-   'CUSTOMER_REPEAT_SHARE', 'complete', repeat('7', 64));
+   'CUSTOMER_REPEAT_SHARE', 'complete', repeat('7', 64)),
+  ('fa210000-0000-4000-8000-000000000508'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000607'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
+   'fa210000-0000-4000-8000-000000000301'::uuid, 'evidence.period_coverage', 1, 'observation',
+   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('8', 64));
 
 -- The cross-tenant finding: same shape, another organization's run entirely.
 insert into public.channel_findings (
@@ -166,7 +176,9 @@ insert into public.channel_finding_evidence (
   ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000506'::uuid,
    'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000514'::uuid),
   ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000507'::uuid,
-   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000515'::uuid);
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000515'::uuid),
+  ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000508'::uuid,
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000516'::uuid);
 
 create or replace function pg_temp.claim(
   p_run text, p_correlation text, p_token text,
@@ -378,6 +390,19 @@ select extensions.throws_ok(
        jsonb_build_array(pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000507"]}'::jsonb)), repeat('d', 64)) $$,
   '23514', 'channel recommendations were already filed for this analysis run',
   're-citing a filed finding after the gap-fill is still a second answer');
+
+-- Retry after failure (provider 400 follow-up) ----------------------------------------
+
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000607', 'channel-recs-correlation-000007', 'fa210000-0000-4000-8000-000000000810') ->> 'outcome'), 'acquired', 'a fresh completed run hands out its own lease');
+select extensions.lives_ok(
+  $$ select public.fail_channel_recommendations(
+       'fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000607'::uuid,
+       'fa210000-0000-4000-8000-000000000810'::uuid, 'MODEL_PROVIDER_UNAVAILABLE', repeat('8', 64)) $$,
+  'a narration the provider refused fails safely');
+select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-000000000201', 'fa210000-0000-4000-8000-000000000607') ->> 'failure_code'), 'MODEL_PROVIDER_UNAVAILABLE', 'and says why');
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000607', 'channel-recs-correlation-000008', 'fa210000-0000-4000-8000-000000000811') ->> 'outcome'), 'acquired', 'the press after a failure resumes the terminal lease instead of conflicting forever');
+select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-000000000201', 'fa210000-0000-4000-8000-000000000607') ->> 'attempt_count'), '2', 'and the retry budget counts the resumption');
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000607', 'channel-recs-correlation-000009', 'fa210000-0000-4000-8000-000000000812') ->> 'outcome'), 'conflict', 'while a resumed lease is live and unforgiven, another workflow is still a conflict');
 
 -- Session denial -------------------------------------------------------------------------
 
