@@ -214,6 +214,9 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
                 // and their screen-reader naming, only the floating figure
                 // steps aside.
                 if (visible[props.index ?? 0] !== true) return <g />;
+                // A halo in the card's own colour: on a steep segment the
+                // figure sits on the line itself, and without this the line
+                // strikes through the digits.
                 return (
                   <text
                     x={props.x}
@@ -222,6 +225,10 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
                     fontSize={12}
                     fontWeight={700}
                     fill="var(--foreground)"
+                    stroke="var(--card)"
+                    strokeWidth={4}
+                    strokeLinejoin="round"
+                    paintOrder="stroke"
                   >
                     {group.format(Number(props.value))}
                   </text>
