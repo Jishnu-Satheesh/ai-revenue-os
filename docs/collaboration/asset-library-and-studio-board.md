@@ -5863,3 +5863,26 @@ through the real routes, not only in tests.
   content is byte-identical to what I verified (working tree shows no diff for those
   two files, and the 137/137 run covered them), so no repair needed — logging it here
   so the history stays honest. Committing the rest of my files narrowly around it.
+
+### 2026-09-10 · Codex · Business Memory shared intelligence research and proposal
+
+- Claim before editing: `specs/023-business-memory-shared-intelligence.md`,
+  `adrs/0054-business-memory-shared-context-and-governed-capture.md`,
+  `docs/research/2026-09-10-business-memory-shared-intelligence.md`,
+  `docs/superpowers/plans/2026-09-10-business-memory-shared-intelligence.md`,
+  `docs/superpowers/prompts/2026-09-10-business-memory-shared-intelligence-handoff.md`,
+  and factual status corrections in Spec 004 and ADRs 0011/0012.
+- Scope: repository and read-only hosted-staging investigation, external primary-source
+  research, proposed specification, ADR, execution plan and successor handoff. No feature code,
+  migrations, paid AI runs, provider configuration, or deployment authorized by this task.
+- User confirmed automatic capture with distinct trust levels; the complete architecture and
+  implementation plan remain unapproved. Preserve existing dirty generated/scratch files.
+- Completed proposal: research report with 11 primary external sources and code/staging evidence;
+  Draft Spec 023; Proposed ADR 0054; Tasks 00–13 execution plan; successor handoff.
+  Includes 24 acceptance scenarios, source-rights restrictions for legacy grounded answers,
+  separate context provenance for Channel gap-fill attempts, and per-release health controls.
+- Verification: document relative links, unresolved-marker/whitespace checks and scoped diff checks
+  passed. No application tests, browser acceptance, paid providers, database writes or deployments
+  were run. Automatic capture preference is confirmed; architecture/implementation remain pending
+  approval. Existing `.cursor/mcp.json` and `opencode.json` edits appeared during the session and
+  were left untouched, along with the pre-existing generated/scratch files.

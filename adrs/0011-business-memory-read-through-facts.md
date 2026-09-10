@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted; implementation not started.
+Accepted; read-through fact retrieval and provider projection are implemented. This does not assert full operational acceptance of every original memory requirement. The 2026-09-10 [inspection](../docs/research/2026-09-10-business-memory-shared-intelligence.md) distinguishes current implementation from remaining integrations.
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted; implementation not started.
+Accepted design; the Redis ranking cache is not wired into the inspected retrieval path as of 2026-09-10. Optional invalidation interfaces exist. The underlying Memory module is implemented separately; this cache status is not the status of Business Memory as a whole.
 
 ## Context
 
