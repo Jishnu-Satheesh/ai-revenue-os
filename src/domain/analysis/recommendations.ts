@@ -41,8 +41,13 @@ import { z } from "zod";
  * and grounding apply to every run with findings, not just the three pilot
  * detectors, and a global plain-language block requires short common words,
  * one idea per sentence, and no idioms. All v6 rules keep their intent.
+ *
+ * 8: coverage plus a higher cap (Amendment C). Every chapter holding
+ * observation findings gets at least one citing item, and the per-run cap
+ * rises to 8 so coverage never competes with honest needs_data notes.
+ * See ADR 0053.
  */
-export const RECOMMENDATION_PROMPT_VERSION = 7;
+export const RECOMMENDATION_PROMPT_VERSION = 8;
 
 /**
  * Bumped only when the judge prompt's instructions change.
@@ -60,9 +65,12 @@ export const JUDGE_PROMPT_VERSION = 3;
 
 /**
  * The completion RPC re-checks citations against the findings of the same run,
- * so the narrator may never file more than this many per run.
+ * so the narrator may never file more than this many per run. Eight is six
+ * detector chapters plus two spare slots for needs_data notes (Amendment C,
+ * ADR 0053): coverage must never force a trade-off between a chapter with
+ * data and an honest data gap.
  */
-export const MAX_RECOMMENDATIONS_PER_RUN = 6;
+export const MAX_RECOMMENDATIONS_PER_RUN = 8;
 
 /** How many not-yet-judged recommendations one judge batch may receive. */
 export const MAX_EVALUATION_BATCH = 200;

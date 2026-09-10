@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(57);
+select extensions.plan(58);
 
 -- The narrator's fence (ADR 0037): three worker RPCs that are the only write
 -- path into the recommendations tables. Exercised against real completed runs
@@ -66,7 +66,8 @@ select observation_id::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
   numerator, 'AED', 'measured', state, repeat('c', 64), period_end::timestamptz
 from (values
   ('fa210000-0000-4000-8000-000000000511', '2026-01-01 00:00:00+04', '2026-01-02 00:00:00+04', 120000, 'current'),
-  ('fa210000-0000-4000-8000-000000000512', '2026-01-02 00:00:00+04', '2026-01-03 00:00:00+04', 90000, 'blocked_overlap')
+  ('fa210000-0000-4000-8000-000000000512', '2026-01-02 00:00:00+04', '2026-01-03 00:00:00+04', 90000, 'blocked_overlap'),
+  ('fa210000-0000-4000-8000-000000000513', '2026-01-08 00:00:00+04', '2026-01-09 00:00:00+04', 70000, 'current')
 ) as observations(observation_id, period_start, period_end, numerator, state);
 
 insert into public.channel_analysis_runs (
@@ -122,7 +123,11 @@ insert into public.channel_findings (
   ('fa210000-0000-4000-8000-000000000503'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
    'fa210000-0000-4000-8000-000000000601'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
    'fa210000-0000-4000-8000-000000000301'::uuid, 'evidence.period_coverage', 1, 'observation',
-   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('3', 64));
+   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('3', 64)),
+  ('fa210000-0000-4000-8000-000000000505'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000605'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
+   'fa210000-0000-4000-8000-000000000301'::uuid, 'evidence.period_coverage', 1, 'observation',
+   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('5', 64));
 
 -- The cross-tenant finding: same shape, another organization's run entirely.
 insert into public.channel_findings (
@@ -140,7 +145,9 @@ insert into public.channel_finding_evidence (
   ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000501'::uuid,
    'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000511'::uuid),
   ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000502'::uuid,
-   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000512'::uuid);
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000512'::uuid),
+  ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000505'::uuid,
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000513'::uuid);
 
 create or replace function pg_temp.claim(
   p_run text, p_correlation text, p_token text,
@@ -219,9 +226,9 @@ select extensions.is(pg_temp.complete('fa210000-0000-4000-8000-000000000602', 'f
 
 select extensions.throws_ok(
   $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000602', 'fa210000-0000-4000-8000-000000000802',
-       coalesce((select jsonb_agg(pg_temp.item()) from generate_series(1, 7)), '[]'::jsonb)) $$,
+       coalesce((select jsonb_agg(pg_temp.item()) from generate_series(1, 9)), '[]'::jsonb)) $$,
   'P0001', 'RECOMMENDATION_CAP_EXCEEDED',
-  'seven narrated answers for six chapters is two too many, and is refused outright');
+  'nine narrated answers for six chapters and two data gaps is one too many, and is refused outright');
 
 select extensions.throws_ok(
   $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000602', 'fa210000-0000-4000-8000-000000000802', '[]'::jsonb) $$,
@@ -320,6 +327,12 @@ select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-00000000020
 select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-000000000201', 'fa210000-0000-4000-8000-000000000605') ->> 'result_digest'), repeat('7', 64), 'with the digest of the submission that failed, and nothing deleted');
 select extensions.is((select count(*)::integer from public.channel_recommendations where analysis_run_id = 'fa210000-0000-4000-8000-000000000605'::uuid), 0, 'a failed narration leaves no recommendation behind');
 select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000605', 'channel-recs-correlation-000003', 'fa210000-0000-4000-8000-000000000806') ->> 'outcome'), 'acquired', 'and the run may be claimed again within its retry budget');
+
+-- The Amendment C cap: eight items file ---------------------------------------------
+
+select extensions.is((pg_temp.complete('fa210000-0000-4000-8000-000000000605', 'fa210000-0000-4000-8000-000000000806',
+  coalesce((select jsonb_agg(pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000505"]}'::jsonb)) from generate_series(1, 8)), '[]'::jsonb)
+) ->> 'recommendationCount'), '8', 'eight items — six chapters plus two data gaps — file under the raised cap');
 
 -- Session denial -------------------------------------------------------------------------
 

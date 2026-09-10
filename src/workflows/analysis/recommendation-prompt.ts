@@ -4,6 +4,7 @@ import {
   MAX_RECOMMENDATIONS_PER_RUN,
   RECOMMENDATION_PROMPT_VERSION,
 } from "@/domain/analysis/recommendations";
+import { WORKSPACE_CHAPTERS } from "@/domain/analysis/copy";
 
 /**
  * Builds the narration prompt: one bounded folder and the hard rules.
@@ -114,6 +115,26 @@ const ADVICE_MANDATE = [
   'Use "observation" only when the finding genuinely leaves nothing to act on — a total that is simply the total, or a mix nobody controls.',
   "Restating a figure the operator can already see is not an item. The figure is printed beside your words; repeating it wastes the only space you get.",
   "The operator will read the number for themselves. What they cannot do for themselves is decide what to change on Monday. Write that.",
+].join("\n");
+
+/**
+ * Every section with data gets advice (Amendment C, ADR 0053).
+ *
+ * The March Talabat run filed five items citing four chapters and left the
+ * funnel and retention chapters blank although both held real findings and a
+ * free slot remained: nothing told the narrator each chapter must be covered.
+ * The finding-to-chapter map is derived from the same `WORKSPACE_CHAPTERS`
+ * the page renders, so the prompt and the workspace can never disagree about
+ * which detector belongs where. Deferred chapters carry no detector keys and
+ * are excluded by construction.
+ */
+const COVERAGE_RULES = [
+  "Cover every section with data. A chapter whose findings state observations and no item cites is a section left blank. Do not leave one.",
+  "File at least one item citing each of these chapters wherever its findings appear above as observations:",
+  ...WORKSPACE_CHAPTERS.filter((chapter) => chapter.detectorKeys.length > 0).map(
+    (chapter) => `${chapter.navLabel} (${chapter.id}): ${chapter.detectorKeys.join(", ")}`,
+  ),
+  "Where one item cites findings from several chapters, every cited chapter counts as covered.",
 ].join("\n");
 
 /**
@@ -315,6 +336,8 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     TRUTH_RULES,
     "",
     ADVICE_MANDATE,
+    "",
+    COVERAGE_RULES,
     "",
     ADVICE_RULES,
     "",

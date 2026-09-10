@@ -256,12 +256,37 @@ function nonPilotInput(overrides: Partial<NarrationPromptInput> = {}): Narration
   };
 }
 
-describe("prompt version 7", () => {
-  it("stamps version 7 for context and context-free prompts alike", () => {
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(7);
-    expect(buildNarrationPrompt(input).promptVersion).toBe(7);
-    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(7);
-    expect(buildNarrationPrompt(nonPilotInput()).promptVersion).toBe(7);
+describe("prompt version 8", () => {
+  it("stamps version 8 for context and context-free prompts alike", () => {
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(8);
+    expect(buildNarrationPrompt(input).promptVersion).toBe(8);
+    expect(buildNarrationPrompt(pilotInput()).promptVersion).toBe(8);
+    expect(buildNarrationPrompt(nonPilotInput()).promptVersion).toBe(8);
+  });
+
+  it("requires at least one citing item per chapter holding observation findings", () => {
+    // Amendment C: the March Talabat run left funnel and retention blank
+    // although both held real findings. The prompt now names every detector
+    // chapter and demands coverage, so a bare section is a broken rule, not
+    // a choice.
+    const { system } = buildNarrationPrompt(input);
+
+    expect(system).toContain("Cover every section with data");
+    expect(system).toContain("funnel.stage_conversion");
+    expect(system).toContain("customer.new_share");
+    expect(system).toContain("operations.closed_share");
+    expect(system).toContain("evidence.period_coverage");
+  });
+
+  it("derives the chapter map from the workspace chapters, with deferred chapters excluded", () => {
+    // The prompt and the page read the same WORKSPACE_CHAPTERS, so they can
+    // never disagree about which detector belongs where. Deferred chapters
+    // carry no detector keys and must not appear as coverage duties.
+    const { system } = buildNarrationPrompt(input);
+
+    expect(system).not.toContain("Items (items)");
+    expect(system).not.toContain("Promotions (promotions)");
+    expect(system).not.toContain("Customer Voice (customer-voice)");
   });
 
   it("keeps the retired pilot detector set as documentation", () => {

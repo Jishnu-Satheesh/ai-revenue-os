@@ -89,9 +89,12 @@ describe("the recommendation narration contracts", () => {
     // every run with findings and requires plain English globally
     // (Amendment B). v3: judge names heavy jargon and longwinded prose in
     // issues and reflects them in score; the verdict shape is unchanged.
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(7);
+    // v8: narration prompt requires at least one citing item per chapter
+    // holding observation findings, and the per-run cap rises to 8
+    // (Amendment C).
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(8);
     expect(JUDGE_PROMPT_VERSION).toBe(3);
-    expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(6);
+    expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(8);
     expect(MAX_EVALUATION_BATCH).toBe(200);
   });
 
