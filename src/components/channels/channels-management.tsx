@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ArchiveIcon, TagsIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 import { ChannelIcon } from "@/components/channels/channel-icons";
 import { AboutChannelSetupDialog } from "@/components/channels/channel-coverage-dialog";
+import { ChannelManagementDialog } from "@/components/channels/channel-management-dialog";
 import { ChannelsDirectory } from "@/components/channels/channels-directory";
 import { ChannelsRollup } from "@/components/channels/channels-rollup";
 import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
@@ -595,13 +597,15 @@ export function ChannelSetupPanel({
 export function ChannelsManagement({
   organizationId,
   channels,
+  branches,
   branchMappings,
+  aliases,
   canManage,
   canMapBranches,
   analysis,
-  onAdd,
-  onAboutSetup,
-  onManage,
+  onAdd: onAddProp,
+  onAboutSetup: onAboutSetupProp,
+  onManage: onManageProp,
 }: {
   organizationId: string;
   // Retained for the management dialogs; the V01 title no longer names the
@@ -636,8 +640,39 @@ export function ChannelsManagement({
   onManage?: (channelId: string) => void;
 }) {
   const [aboutSetupOpen, setAboutSetupOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [manageId, setManageId] = useState<string | null>(null);
+  const router = useRouter();
   const portfolio =
     analysis.state === "ready" ? buildChannelsPortfolioPresentation(analysis.view) : null;
+
+  // Task 6 — the D05 manage target resolves live from the snapshot, so a
+  // refresh that drops the selected channel (removed from the allowed set)
+  // closes the dialog with a safe message instead of editing a ghost row.
+  // Selection follows props via render-phase adjustment (the documented
+  // pattern for prop-driven resets); the toast stays in an effect because
+  // notifying is a side effect, not render output.
+  const [prevChannels, setPrevChannels] = useState(channels);
+  const [missingToast, setMissingToast] = useState(false);
+  if (prevChannels !== channels) {
+    setPrevChannels(channels);
+    if (manageId !== null && !channels.some((channel) => channel.id === manageId)) {
+      setManageId(null);
+      setMissingToast(true);
+    } else if (missingToast) {
+      setMissingToast(false);
+    }
+  }
+  const manageChannel =
+    manageId !== null ? (channels.find((channel) => channel.id === manageId) ?? null) : null;
+  useEffect(() => {
+    if (missingToast) toast.info("Channel is no longer available.");
+  }, [missingToast]);
+
+  const handleAdd = onAddProp ?? (() => setCreateOpen(true));
+  const handleManage = onManageProp ?? ((channelId: string) => setManageId(channelId));
+  const handleAboutSetup = onAboutSetupProp ?? (() => setAboutSetupOpen(true));
+  const handleSaved = () => router.refresh();
 
   return (
     <div className={`${styles.root} flex min-h-0 w-full flex-1 flex-col gap-6`}>
@@ -647,7 +682,7 @@ export function ChannelsManagement({
           <p className={styles.subtitle}>See what each channel brings to your business.</p>
         </div>
         {canManage ? (
-          <Button onClick={() => onAdd?.()} className={styles.control}>
+          <Button onClick={() => handleAdd()} className={styles.control}>
             <ChannelIcon name="plus" />
             Add channel
           </Button>
@@ -670,9 +705,9 @@ export function ChannelsManagement({
         portfolio={portfolio}
         canManage={canManage}
         canMapBranches={canMapBranches}
-        onManage={onManage}
-        onAdd={onAdd}
-        onAboutSetup={onAboutSetup ?? (() => setAboutSetupOpen(true))}
+        onManage={handleManage}
+        onAdd={handleAdd}
+        onAboutSetup={handleAboutSetup}
       />
 
       <AboutChannelSetupDialog
@@ -680,6 +715,40 @@ export function ChannelsManagement({
         open={aboutSetupOpen}
         onOpenChange={setAboutSetupOpen}
       />
+
+      {createOpen ? (
+        <ChannelManagementDialog
+          organizationId={organizationId}
+          channel={null}
+          open={createOpen}
+          onOpenChange={(next) => {
+            if (!next) setCreateOpen(false);
+          }}
+          branches={branches ?? []}
+          branchMappings={branchMappings ?? []}
+          aliases={aliases ?? []}
+          canManage={canManage}
+          canMapBranches={canMapBranches}
+          onSaved={handleSaved}
+        />
+      ) : null}
+
+      {manageChannel !== null ? (
+        <ChannelManagementDialog
+          organizationId={organizationId}
+          channel={manageChannel}
+          open
+          onOpenChange={(next) => {
+            if (!next) setManageId(null);
+          }}
+          branches={branches ?? []}
+          branchMappings={branchMappings ?? []}
+          aliases={aliases ?? []}
+          canManage={canManage}
+          canMapBranches={canMapBranches}
+          onSaved={handleSaved}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1073,3 +1073,48 @@
 .dirEmptyAction {
   margin-top: 15px;
 }
+
+/* D04–D06 management dialog (Task 6, visual contract D00/D04–D06).
+ * Disclosure shells for Locations / Report labels: trigger row, live count
+ * and a chevron that points up while expanded. Task 7 fills the forms below
+ * these shells; geometry here stays trigger-only. */
+.disclosureTrigger {
+  font-size: 12px;
+  font-weight: 600;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.disclosureCount {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--channel-subdued);
+}
+
+.disclosureChevron {
+  width: 16px;
+  height: 16px;
+  color: var(--channel-subdued);
+  transition: transform 150ms ease;
+}
+
+.disclosureTrigger[data-state="open"] .disclosureChevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disclosureChevron {
+    transition: none;
+  }
+}
+
+/* D06 AlertDialog follows the D00 520px content width. The generated
+ * primitive caps smaller viewports at its own max, so this scoped override
+ * (unlayered, attribute-specific) carries the portal content explicitly —
+ * the same reason `.theme` rides every portalled surface. */
+.theme[data-slot="alert-dialog-content"] {
+  max-width: min(520px, calc(100vw - 28px));
+  max-height: 90svh;
+  overflow-y: auto;
+}

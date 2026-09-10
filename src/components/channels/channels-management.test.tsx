@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,10 @@ const nav = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: nav.refresh, push: nav.push }),
   useSearchParams: () => new URLSearchParams(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("recharts", () => ({
@@ -26,6 +31,7 @@ vi.mock("recharts", () => ({
 
 import { ChannelsManagement } from "@/components/channels/channels-management";
 import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
+import { toast } from "sonner";
 import type {
   OrganizationBranchRow,
   OrganizationChannelBranchRow,
@@ -422,5 +428,107 @@ describe("ChannelsManagement", () => {
     fireEvent.click(screen.getByRole("button", { name: "About channel setup" }));
     expect(onAboutSetup).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog", { name: "A channel is where you sell" })).toBeNull();
+  });
+});
+
+describe("channel management dialogs (Task 6 wiring)", () => {
+  afterEach(() => cleanup());
+
+  // The D04/D05 dialogs mount TanStack mutation hooks, so these wiring
+  // tests render inside a QueryClientProvider. Suites above never open a
+  // dialog and stay provider-free by design.
+  function renderManagement(props: {
+    channels?: readonly OrganizationChannelRow[];
+    canManage?: boolean;
+    canMapBranches?: boolean;
+    onAdd?: () => void;
+    onManage?: (channelId: string) => void;
+  }) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    return render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={props.channels ?? [channel]}
+        analysis={disabled}
+        canManage={props.canManage ?? false}
+        canMapBranches={props.canMapBranches}
+        onAdd={props.onAdd}
+        onManage={props.onManage}
+      />,
+      { wrapper },
+    );
+  }
+
+  it("opens its own create dialog from Add when no hook is provided", async () => {
+    renderManagement({ canManage: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add channel" }));
+    expect(await screen.findByRole("dialog", { name: "Add a channel" })).toBeInTheDocument();
+    expect(screen.getByText("Add a sales channel to your business directory.")).toBeInTheDocument();
+  });
+
+  it("emits onAdd instead of opening its own dialog when the hook is provided", () => {
+    const onAdd = vi.fn();
+    renderManagement({ canManage: true, onAdd });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add channel" }));
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Add a channel" })).toBeNull();
+  });
+
+  it("opens the manage dialog from the directory ellipsis", async () => {
+    renderManagement({ canManage: true });
+
+    const table = within(screen.getByRole("table", { name: "Channels" }));
+    fireEvent.click(table.getByRole("button", { name: "Manage Keeta" }));
+    expect(await screen.findByRole("dialog", { name: "Manage Keeta" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save channel" })).toBeInTheDocument();
+  });
+
+  it("emits onManage with the channel ID instead of opening its own dialog", () => {
+    const onManage = vi.fn();
+    renderManagement({ canManage: true, onManage });
+
+    const table = within(screen.getByRole("table", { name: "Channels" }));
+    fireEvent.click(table.getByRole("button", { name: "Manage Keeta" }));
+    expect(onManage).toHaveBeenCalledTimes(1);
+    expect(onManage).toHaveBeenCalledWith(channel.id);
+    expect(screen.queryByRole("dialog", { name: "Manage Keeta" })).toBeNull();
+  });
+
+  it("opens read-only Channel details for a viewer", async () => {
+    renderManagement({ canManage: false });
+
+    const table = within(screen.getByRole("table", { name: "Channels" }));
+    fireEvent.click(table.getByRole("button", { name: "View details for Keeta" }));
+    expect(await screen.findByRole("dialog", { name: "Channel details" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save channel" })).not.toBeInTheDocument();
+  });
+
+  it("closes the manage dialog with a safe message when the channel disappears", async () => {
+    const { rerender } = renderManagement({ canManage: true });
+
+    const table = within(screen.getByRole("table", { name: "Channels" }));
+    fireEvent.click(table.getByRole("button", { name: "Manage Keeta" }));
+    await screen.findByRole("dialog", { name: "Manage Keeta" });
+
+    // The original QueryClientProvider wrapper persists across rerender;
+    // only the snapshot changes, so the open dialog observes fresh props.
+    rerender(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[]}
+        analysis={disabled}
+        canManage
+      />,
+    );
+
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith("Channel is no longer available."));
+    expect(screen.queryByRole("dialog", { name: "Manage Keeta" })).toBeNull();
   });
 });
