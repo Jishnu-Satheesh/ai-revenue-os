@@ -6,6 +6,10 @@ import { toast } from "sonner";
 
 import { ChannelIcon } from "@/components/channels/channel-icons";
 import {
+  ChannelLocationForm,
+  ChannelReportLabelForm,
+} from "@/components/channels/channel-mapping-forms";
+import {
   CHANNEL_IDENTITY_ERROR,
   CHANNEL_STATUS_ERROR,
   useChannelIdentityMutation,
@@ -87,24 +91,8 @@ const CHANNEL_CATEGORIES: ReadonlyArray<{ value: ChannelCategory; label: string 
   { value: "other", label: "Other" },
 ];
 
-const ALIAS_SOURCE_SCOPES: ReadonlyArray<{
-  value: ChannelSourceAliasRow["source_scope"];
-  label: string;
-}> = [
-  { value: "manual", label: "Manual label" },
-  { value: "report_package", label: "Report package" },
-  { value: "onboarding", label: "Onboarding" },
-  { value: "normalized_metric", label: "Normalized metric" },
-  { value: "economics_entry", label: "Economics entry" },
-  { value: "cost_rate", label: "Cost rate" },
-];
-
 function labelForCategory(category: ChannelCategory): string {
   return CHANNEL_CATEGORIES.find((entry) => entry.value === category)?.label ?? "Other";
-}
-
-function labelForScope(scope: ChannelSourceAliasRow["source_scope"]): string {
-  return ALIAS_SOURCE_SCOPES.find((entry) => entry.value === scope)?.label ?? scope;
 }
 
 /** First Zod message per field, keyed by the schema property name. */
@@ -647,9 +635,15 @@ function ManageChannelDialog({
   const [identityBaseline, setIdentityBaseline] = useState(channel);
   const [identityRev, setIdentityRev] = useState(0);
   const [confirmAction, setConfirmAction] = useState<"archive" | "restore" | null>(null);
+  const [mappingBusy, setMappingBusy] = useState(false);
+  const [aliasBusy, setAliasBusy] = useState(false);
   const statusTriggerRef = useRef<HTMLButtonElement | null>(null);
 
-  const writePending = identity.isPending || status.isPending;
+  // Every section write — identity, status, mapping, label — holds the dialog
+  // open and blocks dismissal plus conflicting saves while in flight. Each
+  // form still owns its own Save and status, so one section's failure never
+  // rolls back another's validated success.
+  const writePending = identity.isPending || status.isPending || mappingBusy || aliasBusy;
   const archived = channel.status === "archived";
 
   const channelMappings = branchMappings.filter((mapping) => mapping.channel_id === channel.id);
@@ -681,7 +675,9 @@ function ManageChannelDialog({
               <DialogDescription>
                 {canManage
                   ? "Update the channel identity and its reporting labels."
-                  : "Channel identity and reporting configuration."}
+                  : canMapBranches
+                    ? "Channel identity and reporting configuration. You can manage locations and report labels."
+                    : "Channel identity and reporting configuration."}
               </DialogDescription>
             </div>
             <DialogCloseButton />
@@ -725,40 +721,19 @@ function ManageChannelDialog({
                 {locationsSummary(channelMappings)}
               </p>
               <CollapsibleContent>
-                <ul className="grid gap-2 pt-2">
-                  {channelMappings.length === 0 ? (
-                    <li className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                      No location mappings yet. This channel is configured organization-wide.
-                    </li>
-                  ) : (
-                    channelMappings.map((mapping) => {
-                      const branch = branches.find((item) => item.id === mapping.branch_id);
-                      return (
-                        <li
-                          key={mapping.id}
-                          className="grid gap-1 rounded-lg border px-3 py-2 text-sm"
-                        >
-                          <div className="flex items-center justify-between gap-4">
-                            <span className="font-medium">
-                              {branch?.name ?? "Historical location"}
-                            </span>
-                            <span className="text-muted-foreground">
-                              {mapping.status === "active" ? "Active" : "Inactive"}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between gap-4 text-muted-foreground">
-                            <span>Effective from</span>
-                            <span>{mapping.effective_from ?? "—"}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-4 text-muted-foreground">
-                            <span>Effective to</span>
-                            <span>{mapping.effective_to ?? "—"}</span>
-                          </div>
-                        </li>
-                      );
-                    })
-                  )}
-                </ul>
+                <ChannelLocationForm
+                  organizationId={organizationId}
+                  channelId={channel.id}
+                  branches={branches}
+                  mappings={channelMappings}
+                  canMap={canMapBranches === true}
+                  disabled={identity.isPending || status.isPending || aliasBusy}
+                  onPendingChange={setMappingBusy}
+                  onSaved={() => {
+                    toast.success("Location mapping saved.");
+                    onSaved();
+                  }}
+                />
               </CollapsibleContent>
             </Collapsible>
 
@@ -782,32 +757,18 @@ function ManageChannelDialog({
                   : channelAliases.map((alias) => alias.alias).join(", ")}
               </p>
               <CollapsibleContent>
-                <ul className="grid gap-2 pt-2">
-                  {channelAliases.length === 0 ? (
-                    <li className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                      No report labels yet.
-                    </li>
-                  ) : (
-                    channelAliases.map((alias) => (
-                      <li key={alias.id} className="grid gap-1 rounded-lg border px-3 py-2 text-sm">
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="font-medium">{alias.alias}</span>
-                          <span className="text-muted-foreground">
-                            {labelForScope(alias.source_scope)}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4 text-muted-foreground">
-                          <span>Effective from</span>
-                          <span>{alias.effective_from ?? "—"}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4 text-muted-foreground">
-                          <span>Effective to</span>
-                          <span>{alias.effective_to ?? "—"}</span>
-                        </div>
-                      </li>
-                    ))
-                  )}
-                </ul>
+                <ChannelReportLabelForm
+                  organizationId={organizationId}
+                  channelId={channel.id}
+                  aliases={channelAliases}
+                  canMap={canMapBranches === true}
+                  disabled={identity.isPending || status.isPending || mappingBusy}
+                  onPendingChange={setAliasBusy}
+                  onSaved={() => {
+                    toast.success("Report label saved.");
+                    onSaved();
+                  }}
+                />
               </CollapsibleContent>
             </Collapsible>
 

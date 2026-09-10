@@ -33,6 +33,7 @@ import { ChannelsManagement } from "@/components/channels/channels-management";
 import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
 import { toast } from "sonner";
 import type {
+  ChannelSourceAliasRow,
   OrganizationBranchRow,
   OrganizationChannelBranchRow,
   OrganizationChannelRow,
@@ -84,6 +85,23 @@ const inactiveMapping: OrganizationChannelBranchRow = {
   effective_from: null,
   effective_to: null,
   created_by: channel.created_by,
+  created_at: "2026-08-20T00:00:00.000Z",
+  updated_at: "2026-08-20T00:00:00.000Z",
+};
+
+const keetaAlias: ChannelSourceAliasRow = {
+  id: "66666666-6666-4666-8666-666666666666",
+  organization_id: organizationId,
+  channel_id: channel.id,
+  alias: "Keeta orders",
+  normalized_alias: "keeta orders",
+  source_scope: "report_package",
+  source_record_reference: null,
+  status: "active",
+  effective_from: null,
+  effective_to: null,
+  confirmed_at: null,
+  created_by: null,
   created_at: "2026-08-20T00:00:00.000Z",
   updated_at: "2026-08-20T00:00:00.000Z",
 };
@@ -439,6 +457,9 @@ describe("channel management dialogs (Task 6 wiring)", () => {
   // dialog and stay provider-free by design.
   function renderManagement(props: {
     channels?: readonly OrganizationChannelRow[];
+    branches?: readonly OrganizationBranchRow[];
+    branchMappings?: readonly OrganizationChannelBranchRow[];
+    aliases?: readonly ChannelSourceAliasRow[];
     canManage?: boolean;
     canMapBranches?: boolean;
     onAdd?: () => void;
@@ -453,6 +474,9 @@ describe("channel management dialogs (Task 6 wiring)", () => {
         organizationId={organizationId}
         organizationName="Nostaza"
         channels={props.channels ?? [channel]}
+        branches={props.branches ?? []}
+        branchMappings={props.branchMappings ?? []}
+        aliases={props.aliases ?? []}
         analysis={disabled}
         canManage={props.canManage ?? false}
         canMapBranches={props.canMapBranches}
@@ -507,6 +531,72 @@ describe("channel management dialogs (Task 6 wiring)", () => {
     fireEvent.click(table.getByRole("button", { name: "View details for Keeta" }));
     expect(await screen.findByRole("dialog", { name: "Channel details" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save channel" })).not.toBeInTheDocument();
+  });
+
+  it("wires snapshot branches into the map-only Manage mapping form", async () => {
+    const branchDeira: OrganizationBranchRow = {
+      ...branch,
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Deira",
+      slug: "deira",
+    };
+    renderManagement({
+      canManage: false,
+      canMapBranches: true,
+      branches: [branchDeira, branch],
+      branchMappings: [inactiveMapping],
+      aliases: [keetaAlias],
+    });
+
+    const table = within(screen.getByRole("table", { name: "Channels" }));
+    fireEvent.click(table.getByRole("button", { name: "Manage Keeta" }));
+    const dialog = await screen.findByRole("dialog", { name: "Manage Keeta" });
+
+    // Inactive history survives into the editable section's saved list, while
+    // the draft defaults to the first active outlet — never the stored row.
+    // (The directory also captions "No active mappings" in both its desktop
+    // and mobile renderings, so scope that copy to the dialog.)
+    fireEvent.click(within(dialog).getByRole("button", { name: /Locations/ }));
+    expect(within(dialog).getByText("No active mappings")).toBeInTheDocument();
+    // The outlet menu also carries a hidden native option per branch, so pin
+    // the saved-history row by its element.
+    expect(
+      within(dialog).getByText("Al Barsha", { selector: "span.font-medium" }),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("combobox", { name: "Outlet" })).toHaveTextContent("Deira");
+    expect(
+      within(dialog).getByRole("button", { name: "Save location mapping" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Report labels/ }));
+    // The alias appears in the collapsed summary and again in the detail row.
+    expect(screen.getAllByText("Keeta orders")).toHaveLength(2);
+    expect(screen.getByLabelText("Exact report label")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save report label" })).toBeInTheDocument();
+
+    // Identity stays read-only for map-only through the full stack.
+    expect(screen.queryByRole("button", { name: "Save channel" })).not.toBeInTheDocument();
+  });
+
+  it("shows a viewer saved configuration without mapping forms", async () => {
+    renderManagement({
+      canManage: false,
+      branches: [branch],
+      branchMappings: [inactiveMapping],
+      aliases: [keetaAlias],
+    });
+
+    const table = within(screen.getByRole("table", { name: "Channels" }));
+    fireEvent.click(table.getByRole("button", { name: "View details for Keeta" }));
+    await screen.findByRole("dialog", { name: "Channel details" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Locations/ }));
+    expect(screen.getByText("Al Barsha")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Outlet" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Report labels/ }));
+    expect(screen.getAllByText("Keeta orders")).toHaveLength(2);
+    expect(screen.queryByLabelText("Exact report label")).not.toBeInTheDocument();
   });
 
   it("closes the manage dialog with a safe message when the channel disappears", async () => {

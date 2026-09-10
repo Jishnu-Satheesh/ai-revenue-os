@@ -520,3 +520,161 @@ describe("read-only roles", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("mapping and label sections (D07/D08)", () => {
+  it("extends the description and offers both editable sections to a map-only operator", async () => {
+    const fetchMock = setupFetch();
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        mapping: {
+          id: "55555555-5555-4555-8555-555555555555",
+          organization_id: organizationId,
+          channel_id: channel.id,
+          branch_id: branch.id,
+          status: "active",
+          effective_from: null,
+          effective_to: null,
+          created_by: actorId,
+          created_at: "2026-09-10T00:00:00.000Z",
+          updated_at: "2026-09-10T00:00:00.000Z",
+        },
+      }),
+    );
+    const { onSaved } = renderDialog({
+      channel,
+      branches: [branch],
+      branchMappings: [],
+      aliases: [],
+      canManage: false,
+      canMapBranches: true,
+    });
+
+    expect(screen.getByRole("dialog", { name: "Manage Keeta" })).toBeInTheDocument();
+    // Task 6 ruling: the viewer base copy stands; Task 7 adds the grant.
+    expect(
+      screen.getByText(
+        "Channel identity and reporting configuration. You can manage locations and report labels.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save channel" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Locations/ }));
+    expect(screen.getByRole("combobox", { name: "Outlet" })).toHaveTextContent("Al Barsha");
+    expect(screen.getByRole("button", { name: "Save location mapping" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Report labels/ }));
+    expect(screen.getByLabelText("Exact report label")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save report label" })).toBeInTheDocument();
+
+    // Each section saves independently through its own endpoint.
+    fireEvent.click(screen.getByRole("button", { name: "Save location mapping" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Location mapping saved."));
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`/api/organizations/${organizationId}/channels/${channel.id}/branches`);
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toEqual({
+      branchId: branch.id,
+      applicability: "active",
+      effectiveFrom: null,
+      effectiveTo: null,
+    });
+    // One saved section leaves Manage open for the other drafts.
+    expect(screen.getByRole("dialog", { name: "Manage Keeta" })).toBeInTheDocument();
+  });
+
+  it("shows a viewer the saved lists with badges and dates but no forms", () => {
+    setupFetch();
+    renderDialog({
+      channel,
+      branches: [branch],
+      branchMappings: [mapping],
+      aliases: [alias],
+      canManage: false,
+    });
+
+    expect(screen.getByText("Channel identity and reporting configuration.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Locations/ }));
+    expect(screen.getByText("Al Barsha")).toBeInTheDocument();
+    // "Active" also names the channel status line, so pin the badge to its row.
+    const mappingRow = screen.getByText("Al Barsha").closest("li");
+    expect(mappingRow).not.toBeNull();
+    expect(within(mappingRow as HTMLElement).getByText("Active")).toBeInTheDocument();
+    expect(within(mappingRow as HTMLElement).getByText("2026-02-01")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Outlet" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save location mapping" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Report labels/ }));
+    expect(screen.getAllByText("Keeta orders")).toHaveLength(2);
+    expect(screen.getByText("Report package")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Exact report label")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save report label" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an identity success when a later label save fails", async () => {
+    const fetchMock = setupFetch();
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/aliases")) {
+        return Promise.resolve(jsonResponse({ error: true }, 500));
+      }
+      return Promise.resolve(jsonResponse({ channel: { ...channel, display_name: "Keeta X" } }));
+    });
+    const { onSaved } = renderDialog({
+      channel,
+      branches: [branch],
+      branchMappings: [],
+      aliases: [],
+      canManage: true,
+      canMapBranches: true,
+    });
+
+    fireEvent.change(screen.getByLabelText("Channel name"), { target: { value: "Keeta X" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Channel saved."));
+
+    fireEvent.click(screen.getByRole("button", { name: /Report labels/ }));
+    fireEvent.change(screen.getByLabelText("Exact report label"), {
+      target: { value: "Website orders" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save report label" }));
+
+    await screen.findByText("Report label was not saved");
+    expect(
+      screen.getByText("The report label could not be saved. Please try again."),
+    ).toBeInTheDocument();
+    // The failed section keeps its draft; the dialog stays open on Manage.
+    expect(screen.getByLabelText("Exact report label")).toHaveValue("Website orders");
+    expect(screen.getByRole("dialog", { name: "Manage Keeta" })).toBeInTheDocument();
+    // Partial success is explicit: the only announced success is identity.
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith("Channel saved.");
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a denied mapping response override the assumed permission", async () => {
+    const fetchMock = setupFetch();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { error: { code: "FORBIDDEN", message: "Only a branch manager can map locations." } },
+        403,
+      ),
+    );
+    renderDialog({
+      channel,
+      branches: [branch],
+      branchMappings: [],
+      aliases: [],
+      canManage: false,
+      canMapBranches: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Locations/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save location mapping" }));
+
+    await screen.findByText("Location mapping was not saved");
+    expect(screen.getByText("Only a branch manager can map locations.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Outlet" })).toHaveTextContent("Al Barsha");
+    expect(screen.getByRole("dialog", { name: "Manage Keeta" })).toBeInTheDocument();
+  });
+});
