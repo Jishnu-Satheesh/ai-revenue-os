@@ -7,6 +7,13 @@ import type { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatWindow } from "@/components/analysis/format";
 import { addLocalDays } from "@/domain/analysis/calendar";
 import {
@@ -17,6 +24,7 @@ import {
   type CoverageWindow,
 } from "@/domain/analysis/window-selection";
 import type { AnalysisGrain } from "@/domain/analysis/types";
+import { monthName, type CoveredMonth } from "@/modules/analysis/application/channels-overview";
 
 /**
  * Plain words for the grain the warning blames, matched to how an operator
@@ -101,8 +109,15 @@ export function WindowRangePicker(props: {
   today: string;
   onApply: (selection: AnalysisWindowSelection) => void;
   disabled?: boolean;
+  /**
+   * The leading phrase of the grain warning's first sentence. The Channel
+   * Audit leaves the default; an organization-wide surface names its own
+   * subject instead.
+   */
+  subjectLabel?: string;
 }) {
   const { segments, windows, selected, today, onApply, disabled = false } = props;
+  const subject = props.subjectLabel ?? "This channel files";
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<AnalysisWindowSelection>(selected);
   const reactId = React.useId();
@@ -185,7 +200,7 @@ export function WindowRangePicker(props: {
               className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-foreground"
             >
               <p>
-                {`This channel files ${GRAIN_DESCRIPTION[mismatch.grain]}, covering ${formatWindow(mismatch.declaredStart, mismatch.declaredEnd)}. That range can't be split any finer.`}
+                {`${subject} ${GRAIN_DESCRIPTION[mismatch.grain]}, covering ${formatWindow(mismatch.declaredStart, mismatch.declaredEnd)}. That range can't be split any finer.`}
               </p>
               <Button
                 type="button"
@@ -210,5 +225,48 @@ export function WindowRangePicker(props: {
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * The performance card's month control: whole covered months, newest first,
+ * applying on select.
+ *
+ * A month list rather than a calendar because the card reads a month at a
+ * time -- a calendar would invite picking a range the card must then refuse
+ * or silently widen. Months arrive precomputed so this stays presentational
+ * like its range sibling above.
+ */
+export function WindowMonthPicker(props: {
+  months: readonly CoveredMonth[];
+  selected: CoveredMonth;
+  onApply: (selection: CoveredMonth) => void;
+  disabled?: boolean;
+}) {
+  const { months, selected, onApply, disabled = false } = props;
+  const value = months.some((month) => month.from === selected.from && month.to === selected.to)
+    ? `${selected.from}..${selected.to}`
+    : "";
+
+  return (
+    <Select
+      value={value}
+      disabled={disabled || months.length === 0}
+      onValueChange={(next) => {
+        const [from, to] = next.split("..");
+        if (from && to) onApply({ from, to });
+      }}
+    >
+      <SelectTrigger aria-label="Reporting month" className="w-44">
+        <SelectValue placeholder="Select month" />
+      </SelectTrigger>
+      <SelectContent>
+        {months.map((month) => (
+          <SelectItem key={`${month.from}..${month.to}`} value={`${month.from}..${month.to}`}>
+            {`${monthName(month.from)} ${month.from.slice(0, 4)}`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

@@ -3,7 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WindowRangePicker } from "@/components/analysis/window-range-picker";
+import { WindowMonthPicker, WindowRangePicker } from "@/components/analysis/window-range-picker";
 
 afterEach(cleanup);
 
@@ -79,8 +79,19 @@ describe("the window range picker", () => {
     await user.click(screen.getByRole("button", { name: /2026-08-01/ }));
 
     const warning = screen.getByRole("status");
+    expect(within(warning).getByText(/this channel files/i)).toBeInTheDocument();
     expect(within(warning).getByText(/one figure per month/i)).toBeInTheDocument();
     expect(within(warning).getByText(/2026-05-01.*2026-08-31/)).toBeInTheDocument();
+  });
+
+  it("names an organization-wide subject when asked", async () => {
+    const { user } = setup({
+      selected: { from: "2026-08-01", to: "2026-08-04" },
+      subjectLabel: "Your reports file",
+    });
+    await user.click(screen.getByRole("button", { name: /2026-08-01/ }));
+
+    expect(screen.getByText(/your reports file one figure per month/i)).toBeInTheDocument();
   });
 
   it("widens to the range that works in one click", async () => {
@@ -118,5 +129,40 @@ describe("the window range picker", () => {
     await user.click(screen.getByRole("button", { name: /2026-03-10/ }));
 
     expect(screen.getByRole("button", { name: /March 15/ })).toBeDisabled();
+  });
+});
+
+describe("the window month picker", () => {
+  const months = [
+    { from: "2026-02-01", to: "2026-02-28" },
+    { from: "2026-01-01", to: "2026-01-31" },
+  ];
+
+  function setupMonth() {
+    const onApply = vi.fn();
+    render(
+      <WindowMonthPicker
+        months={months}
+        selected={{ from: "2026-02-01", to: "2026-02-28" }}
+        onApply={onApply}
+      />,
+    );
+    return { onApply, user: userEvent.setup() };
+  }
+
+  it("names the selected month on its trigger", () => {
+    setupMonth();
+
+    expect(screen.getByRole("combobox", { name: "Reporting month" })).toHaveTextContent(
+      "February 2026",
+    );
+  });
+
+  it("applies a whole month on select, never a free range", async () => {
+    const { onApply, user } = setupMonth();
+    await user.click(screen.getByRole("combobox", { name: "Reporting month" }));
+    await user.click(screen.getByRole("option", { name: "January 2026" }));
+
+    expect(onApply).toHaveBeenCalledWith({ from: "2026-01-01", to: "2026-01-31" });
   });
 });
