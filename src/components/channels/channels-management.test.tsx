@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -350,5 +350,58 @@ describe("ChannelsManagement", () => {
     );
 
     expect(screen.getByText("1 historical")).toBeInTheDocument();
+  });
+
+  it("opens the About channel setup dialog with a real Integration Hub link", async () => {
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel]}
+        analysis={ready([measuredRow])}
+        canManage={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "About channel setup" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "A channel is where you sell" });
+    expect(
+      within(dialog).getByText(
+        "A marketplace, your website or a physical store can each be a channel. Keep them together here to compare performance and organise reporting.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "Adding a channel does not connect a provider or grant permission to run campaigns. Connections stay in Integration Hub.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "Open Integration Hub" })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/integrations`,
+    );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "A channel is where you sell" })).toBeNull(),
+    );
+  });
+
+  it("emits onAboutSetup instead of opening its own dialog when the hook is provided", async () => {
+    const onAboutSetup = vi.fn();
+    render(
+      <ChannelsManagement
+        organizationId={organizationId}
+        organizationName="Nostaza"
+        channels={[channel]}
+        analysis={ready([measuredRow])}
+        canManage={false}
+        onAboutSetup={onAboutSetup}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "About channel setup" }));
+    expect(onAboutSetup).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "A channel is where you sell" })).toBeNull();
   });
 });

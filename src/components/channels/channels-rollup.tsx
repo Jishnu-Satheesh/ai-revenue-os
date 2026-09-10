@@ -16,6 +16,11 @@ import {
   MIXED_CURRENCY_COMPARISON_REASON,
 } from "@/components/channels/channels-presentation";
 import {
+  ChannelCoverageDialog,
+  ChannelCoverageRail,
+  ComparisonExplanationStrip,
+} from "@/components/channels/channel-coverage-dialog";
+import {
   ChannelPortfolioChart,
   formatWholeMajorUnits,
 } from "@/components/channels/channel-portfolio-chart";
@@ -294,82 +299,6 @@ function PortfolioSummaryStrip({ portfolio }: { portfolio: ChannelsPortfolioPres
   );
 }
 
-/**
- * Read-only band detail for one inspected channel (Task 3). ChannelsRollup
- * owns `inspectedChannelId`; the chart's row buttons only emit the ID, so
- * keyboard/touch inspection opens these same exact values without a second
- * evidence model. Task 4 expands this dialog into the full data-coverage
- * dialog (D02), reusing the inspected ID as its focused channel.
- */
-function ChannelBandDetailDialog({
-  portfolio,
-  selected,
-  channelId,
-  onClose,
-}: {
-  portfolio: ChannelsPortfolioPresentation;
-  selected: ChannelsOverviewWindow;
-  channelId: string | null;
-  onClose: () => void;
-}) {
-  const row = channelId ? portfolio.rows.find((entry) => entry.channelId === channelId) : undefined;
-  return (
-    <Dialog
-      open={channelId !== null}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent
-        showCloseButton={false}
-        className={`${styles.theme} max-w-[calc(100vw-28px)] sm:max-w-[520px]`}
-      >
-        <DialogHeader className="flex-row items-center justify-between border-b pb-4">
-          <div className="grid gap-1">
-            <DialogTitle>{row?.displayName ?? "Channel details"}</DialogTitle>
-            <DialogDescription>{formatFullRange(selected)}</DialogDescription>
-          </div>
-          <DialogClose asChild>
-            <Button variant="ghost" size="icon" className="size-[38px]" aria-label="Close dialog">
-              <ChannelIcon name="close" />
-            </Button>
-          </DialogClose>
-        </DialogHeader>
-        {row ? (
-          <dl className="grid gap-2 py-1 text-sm">
-            <div className="flex items-center justify-between gap-4 border-b py-2.5">
-              <dt className="text-muted-foreground">Reported revenue</dt>
-              <dd className="text-right font-medium tabular-nums">
-                {row.band.potential
-                  ? formatMoney(row.band.potential.minorUnits, row.band.potential.currency)
-                  : "No comparable revenue figure for this window."}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between gap-4 border-b py-2.5">
-              <dt className="text-muted-foreground">Earned</dt>
-              <dd className="text-right font-medium tabular-nums">
-                {row.band.state === "complete" && row.band.earned
-                  ? formatMoney(row.band.earned.minorUnits, row.band.earned.currency)
-                  : "Not recorded"}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between gap-4 py-2.5">
-              <dt className="text-muted-foreground">Provider-reported loss</dt>
-              <dd className="text-right font-medium tabular-nums">
-                {row.band.state === "complete" && row.band.lost
-                  ? formatMoney(row.band.lost.minorUnits, row.band.lost.currency)
-                  : "Not recorded"}
-              </dd>
-            </div>
-          </dl>
-        ) : (
-          <p className="py-1 text-sm text-muted-foreground">Channel is no longer available.</p>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function UnavailableRollup() {
   const router = useRouter();
   return (
@@ -405,7 +334,11 @@ function ReadyRollup({
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [infoOpen, setInfoOpen] = useState(false);
+  // Task 4: `inspectedChannelId` is the chart-opened channel. A chart row
+  // opens the full coverage dialog (D02) focused on that row; the rail's
+  // Review link opens the same dialog unfocused. One dialog, one model.
   const [inspectedChannelId, setInspectedChannelId] = useState<string | null>(null);
+  const [coverageOpen, setCoverageOpen] = useState(false);
 
   const portfolio = buildChannelsPortfolioPresentation(view);
   const selected = view.selectedWindow;
@@ -497,13 +430,31 @@ function ReadyRollup({
             key={`${organizationId}::${selected.value}`}
             portfolio={portfolio}
             selectedWindow={selected}
-            onInspectChannel={setInspectedChannelId}
+            onInspectChannel={(channelId) => {
+              setInspectedChannelId(channelId);
+              setCoverageOpen(true);
+            }}
+            coverageRail={
+              <ChannelCoverageRail
+                portfolio={portfolio}
+                onReview={() => {
+                  setInspectedChannelId(null);
+                  setCoverageOpen(true);
+                }}
+              />
+            }
+            explanationStrip={<ComparisonExplanationStrip portfolio={portfolio} />}
           />
-          <ChannelBandDetailDialog
+          <ChannelCoverageDialog
+            organizationId={organizationId}
             portfolio={portfolio}
-            selected={selected}
-            channelId={inspectedChannelId}
-            onClose={() => setInspectedChannelId(null)}
+            selectedWindow={selected}
+            open={coverageOpen}
+            onOpenChange={(open) => {
+              setCoverageOpen(open);
+              if (!open) setInspectedChannelId(null);
+            }}
+            focusedChannelId={inspectedChannelId}
           />
         </>
       ) : (

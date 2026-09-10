@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { ChannelIcon } from "@/components/channels/channel-icons";
+import { AboutChannelSetupDialog } from "@/components/channels/channel-coverage-dialog";
 import { ChannelsRollup } from "@/components/channels/channels-rollup";
 import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
 import styles from "@/components/channels/channels-landing.module.css";
@@ -787,6 +788,7 @@ export function ChannelsManagement({
   canManage,
   analysis,
   onAdd,
+  onAboutSetup,
 }: {
   organizationId: string;
   // Retained for the directory and management dialogs; the V01 title no
@@ -807,8 +809,16 @@ export function ChannelsManagement({
    * no dialog itself, so this slice never ships a half-wired create form.
    */
   onAdd?: () => void;
+  /**
+   * Task 4 seam for the About channel setup dialog (D03), same pattern as
+   * `onAdd`: when provided, the directory header link emits here and the
+   * caller owns the dialog. Without it, Management opens its own read-only
+   * D03, so the link always lands somewhere useful.
+   */
+  onAboutSetup?: () => void;
 }) {
   const router = useRouter();
+  const [aboutSetupOpen, setAboutSetupOpen] = useState(false);
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>("all");
   const availableMappings = branchMappings ?? [];
   const availableAliases = aliases ?? [];
@@ -870,22 +880,41 @@ export function ChannelsManagement({
               evidence link.
             </p>
           </div>
-          <ToggleGroup
-            type="single"
-            value={directoryFilter}
-            onValueChange={(value) => {
-              if (value) setDirectoryFilter(value as DirectoryFilter);
-            }}
-            variant="outline"
-            size="sm"
-            spacing={0}
-            aria-label="Filter channel directory"
-          >
-            <ToggleGroupItem value="all">All</ToggleGroupItem>
-            <ToggleGroupItem value="measured">Measured</ToggleGroupItem>
-            <ToggleGroupItem value="attention">Needs attention</ToggleGroupItem>
-            <ToggleGroupItem value="archived">Archived</ToggleGroupItem>
-          </ToggleGroup>
+          {/* Task 4 seam: Task 5 rebuilds this header into V07; the About link
+              already emits `onAboutSetup` and falls back to the local D03. */}
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            <Button
+              type="button"
+              variant="link"
+              onClick={() => {
+                if (onAboutSetup) {
+                  onAboutSetup();
+                } else {
+                  setAboutSetupOpen(true);
+                }
+              }}
+              className="h-auto gap-[7px] px-0 text-xs font-bold text-primary no-underline hover:no-underline max-[650px]:text-[10px]"
+            >
+              About channel setup
+              <ChannelIcon name="up" className="size-[18px]" />
+            </Button>
+            <ToggleGroup
+              type="single"
+              value={directoryFilter}
+              onValueChange={(value) => {
+                if (value) setDirectoryFilter(value as DirectoryFilter);
+              }}
+              variant="outline"
+              size="sm"
+              spacing={0}
+              aria-label="Filter channel directory"
+            >
+              <ToggleGroupItem value="all">All</ToggleGroupItem>
+              <ToggleGroupItem value="measured">Measured</ToggleGroupItem>
+              <ToggleGroupItem value="attention">Needs attention</ToggleGroupItem>
+              <ToggleGroupItem value="archived">Archived</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
         </div>
 
         {channels.length === 0 ? (
@@ -995,6 +1024,12 @@ export function ChannelsManagement({
           </Card>
         )}
       </section>
+
+      <AboutChannelSetupDialog
+        organizationId={organizationId}
+        open={aboutSetupOpen}
+        onOpenChange={setAboutSetupOpen}
+      />
     </div>
   );
 }

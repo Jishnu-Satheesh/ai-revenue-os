@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Bar, BarChart, XAxis, YAxis } from "recharts";
 
 import { formatMoney } from "@/components/analysis/format";
@@ -330,16 +330,22 @@ function toChartData(rows: readonly ComparisonRow[], totalMinor: number | null):
  * The V04 comparison Card: header with Amount/Share toggle, legend, one
  * horizontal stacked plot with outer label/value gutters, axis, refusal
  * states and the earned-definition footer. Task 4 appends the coverage rail
- * beside the plot inside this same Card.
+ * beside the plot inside this same Card (`coverageRail`) and the revenue-only
+ * explanation at the Card bottom (`explanationStrip`); both are optional so
+ * the plot alone renders exactly as before when they are absent.
  */
 export function ChannelPortfolioChart({
   portfolio,
   selectedWindow,
   onInspectChannel,
+  coverageRail,
+  explanationStrip,
 }: {
   portfolio: ChannelsPortfolioPresentation;
   selectedWindow: ChannelsOverviewWindow | null;
   onInspectChannel: (channelId: string) => void;
+  coverageRail?: ReactNode;
+  explanationStrip?: ReactNode;
 }) {
   const [mode, setMode] = useState<ComparisonDisplayMode>("amount");
   const [reducedMotion] = useState(
@@ -386,6 +392,243 @@ export function ChannelPortfolioChart({
 
   const barsVisible = currency !== null && rows.length > 0 && (mode === "amount" || shareReady);
 
+  // Task 4 seam: the plot column on its own. Without `coverageRail` it
+  // renders exactly as before; with it, it sits in the grid's plot cell
+  // beside the rail inside this same Card.
+  const plot = (
+    <>
+      {barsVisible ? (
+        <div className="mt-[22px] mb-[9px] flex flex-wrap gap-x-[17px] gap-y-2 text-[10px] text-muted-foreground max-[650px]:gap-x-2.5 max-[650px]:text-[9px]">
+          <span className="flex items-center">
+            <span
+              aria-hidden="true"
+              className="mr-[5px] inline-block size-[7px] rounded-[2px] bg-(--channel-earned)"
+            />
+            Earned
+          </span>
+          <span className="flex items-center">
+            <span
+              aria-hidden="true"
+              className="mr-[5px] inline-block size-[7px] rounded-[2px] bg-(--channel-loss)"
+            />
+            Reported loss
+          </span>
+          <span className="flex items-center">
+            <span
+              aria-hidden="true"
+              className="mr-[5px] inline-block size-[7px] rounded-[2px] bg-(--channel-reported)"
+            />
+            Revenue only
+          </span>
+        </div>
+      ) : null}
+
+      {rows.length === 0 ? (
+        <p className="mt-[22px] text-sm leading-relaxed text-muted-foreground">
+          No active channels to compare.
+        </p>
+      ) : currency === null || scale === null ? (
+        <div className="mt-[22px] grid gap-3">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {portfolio.comparisonReason ?? "Revenue cannot be compared across currencies."}
+          </p>
+          <ul aria-label="Channel figures in original currencies" className="grid gap-2">
+            {rows.map((row) => (
+              <li
+                key={row.channelId}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 text-sm"
+              >
+                <button
+                  type="button"
+                  onClick={() => onInspectChannel(row.channelId)}
+                  aria-label={`${describeComparisonRow(row, period)} Show band details.`}
+                  className="min-w-0 truncate text-left text-[11px] font-semibold"
+                >
+                  {row.name}
+                </button>
+                <span className="text-xs font-semibold tabular-nums">
+                  {row.reportedMinor !== null && row.currency !== null ? (
+                    <>
+                      <span className="mr-1 text-[10px] font-medium text-muted-foreground">
+                        {row.currency}
+                      </span>
+                      {formatWholeMajorUnits(row.reportedMinor, row.currency)}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">No comparable figure</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : mode === "share" && !shareReady ? (
+        <div className="mt-[22px] grid gap-3">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {portfolio.comparisonReason ??
+              "No proportional comparison is available for zero reported revenue."}
+          </p>
+          <ul aria-label="Channel reported revenue" className="grid gap-2">
+            {rows.map((row) => (
+              <li
+                key={row.channelId}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 text-sm"
+              >
+                <button
+                  type="button"
+                  onClick={() => onInspectChannel(row.channelId)}
+                  aria-label={`${describeComparisonRow(row, period)} Show band details.`}
+                  className="min-w-0 truncate text-left text-[11px] font-semibold"
+                >
+                  {row.name}
+                </button>
+                <span aria-hidden="true" className="text-[11px] font-semibold tabular-nums">
+                  {row.reportedMinor === null ? (
+                    <span className="font-normal text-muted-foreground">—</span>
+                  ) : (
+                    formatWholeMajorUnits(row.reportedMinor, currency)
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className={styles.compareGrid}>
+          <div className={styles.compareNames}>
+            {rows.map((row) => (
+              <div key={row.channelId} className={styles.compareCell}>
+                <button
+                  type="button"
+                  onClick={() => onInspectChannel(row.channelId)}
+                  aria-label={`${describeComparisonRow(row, period)} Show band details.`}
+                  title={row.name}
+                  className={styles.compareNameButton}
+                >
+                  {row.name}
+                </button>
+              </div>
+            ))}
+          </div>
+          <div aria-hidden="true" className={styles.comparePlot}>
+            <ChartContainer
+              config={comparisonConfig}
+              className="aspect-auto w-full"
+              style={{ height: chartHeight }}
+            >
+              <BarChart
+                accessibilityLayer
+                data={data}
+                layout="vertical"
+                margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+              >
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={false}
+                  tickLine={false}
+                  axisLine={false}
+                  width={0}
+                />
+                {showShare ? (
+                  <XAxis
+                    type="number"
+                    domain={[0, 100]}
+                    ticks={[0, 25, 50, 75, 100]}
+                    tickFormatter={(value: number) => `${value}%`}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 9 }}
+                    tickMargin={6}
+                    height={AXIS_HEIGHT}
+                    interval={0}
+                  />
+                ) : (
+                  <XAxis
+                    type="number"
+                    domain={scale.domain}
+                    ticks={scale.ticks}
+                    tickFormatter={(value: number) => formatMajorTick(Number(value) / factor)}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 9 }}
+                    tickMargin={6}
+                    height={AXIS_HEIGHT}
+                    interval={0}
+                  />
+                )}
+                <ChartTooltip
+                  cursor={{ fill: "var(--channel-soft)", opacity: 0.7 }}
+                  content={<ChannelComparisonTooltip period={period} />}
+                />
+                <Bar
+                  dataKey={showShare ? "earnedShare" : "earnedBar"}
+                  stackId="revenue"
+                  fill="var(--color-earned)"
+                  barSize={17}
+                  radius={[3, 0, 0, 3]}
+                  background={{ fill: "var(--channel-soft)" }}
+                  isAnimationActive={!reducedMotion}
+                />
+                <Bar
+                  dataKey={showShare ? "lostShare" : "lostBar"}
+                  stackId="revenue"
+                  fill="var(--color-lost)"
+                  barSize={17}
+                  radius={[0, 3, 3, 0]}
+                  background={{ fill: "var(--channel-soft)" }}
+                  isAnimationActive={!reducedMotion}
+                />
+                <Bar
+                  dataKey={showShare ? "reportedShare" : "reportedBar"}
+                  stackId="revenue"
+                  fill="var(--color-reported)"
+                  barSize={17}
+                  radius={[3, 3, 3, 3]}
+                  background={{ fill: "var(--channel-soft)" }}
+                  isAnimationActive={!reducedMotion}
+                />
+              </BarChart>
+            </ChartContainer>
+            {rows.map((row, index) =>
+              row.state === "refused" ? (
+                <div
+                  key={row.channelId}
+                  aria-hidden="true"
+                  className={styles.compareNoFigure}
+                  style={{ top: index * rowHeight, height: rowHeight }}
+                >
+                  No comparable figure
+                </div>
+              ) : null,
+            )}
+          </div>
+          <div aria-hidden="true" className={styles.compareValues}>
+            {rows.map((row) =>
+              row.state === "refused" || row.reportedMinor === null ? (
+                <div key={row.channelId} className={styles.compareCell}>
+                  <span className={styles.compareDash}>—</span>
+                </div>
+              ) : showShare && totalMinor ? (
+                <div key={row.channelId} className={styles.compareCell}>
+                  <span className={styles.compareEndValue}>
+                    {formatShareValue((row.reportedMinor / totalMinor) * 100)}
+                  </span>
+                </div>
+              ) : (
+                <div key={row.channelId} className={styles.compareCell}>
+                  <span className={styles.compareEndValue}>
+                    {formatWholeMajorUnits(row.reportedMinor, currency)}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <Card
       role="region"
@@ -426,241 +669,27 @@ export function ChannelPortfolioChart({
         </ToggleGroup>
       </CardHeader>
 
-      <CardContent className="px-[25px] pt-0 pb-[15px] max-[1200px]:px-[18px] max-[1200px]:pb-4 max-[650px]:px-4">
-        {barsVisible ? (
-          <div className="mt-[22px] mb-[9px] flex flex-wrap gap-x-[17px] gap-y-2 text-[10px] text-muted-foreground max-[650px]:gap-x-2.5 max-[650px]:text-[9px]">
-            <span className="flex items-center">
-              <span
-                aria-hidden="true"
-                className="mr-[5px] inline-block size-[7px] rounded-[2px] bg-(--channel-earned)"
-              />
-              Earned
-            </span>
-            <span className="flex items-center">
-              <span
-                aria-hidden="true"
-                className="mr-[5px] inline-block size-[7px] rounded-[2px] bg-(--channel-loss)"
-              />
-              Reported loss
-            </span>
-            <span className="flex items-center">
-              <span
-                aria-hidden="true"
-                className="mr-[5px] inline-block size-[7px] rounded-[2px] bg-(--channel-reported)"
-              />
-              Revenue only
-            </span>
-          </div>
-        ) : null}
-
-        {rows.length === 0 ? (
-          <p className="mt-[22px] text-sm leading-relaxed text-muted-foreground">
-            No active channels to compare.
-          </p>
-        ) : currency === null || scale === null ? (
-          <div className="mt-[22px] grid gap-3">
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {portfolio.comparisonReason ?? "Revenue cannot be compared across currencies."}
-            </p>
-            <ul aria-label="Channel figures in original currencies" className="grid gap-2">
-              {rows.map((row) => (
-                <li
-                  key={row.channelId}
-                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 text-sm"
-                >
-                  <button
-                    type="button"
-                    onClick={() => onInspectChannel(row.channelId)}
-                    aria-label={`${describeComparisonRow(row, period)} Show band details.`}
-                    className="min-w-0 truncate text-left text-[11px] font-semibold"
-                  >
-                    {row.name}
-                  </button>
-                  <span className="text-xs font-semibold tabular-nums">
-                    {row.reportedMinor !== null && row.currency !== null ? (
-                      <>
-                        <span className="mr-1 text-[10px] font-medium text-muted-foreground">
-                          {row.currency}
-                        </span>
-                        {formatWholeMajorUnits(row.reportedMinor, row.currency)}
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">No comparable figure</span>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : mode === "share" && !shareReady ? (
-          <div className="mt-[22px] grid gap-3">
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {portfolio.comparisonReason ??
-                "No proportional comparison is available for zero reported revenue."}
-            </p>
-            <ul aria-label="Channel reported revenue" className="grid gap-2">
-              {rows.map((row) => (
-                <li
-                  key={row.channelId}
-                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 text-sm"
-                >
-                  <button
-                    type="button"
-                    onClick={() => onInspectChannel(row.channelId)}
-                    aria-label={`${describeComparisonRow(row, period)} Show band details.`}
-                    className="min-w-0 truncate text-left text-[11px] font-semibold"
-                  >
-                    {row.name}
-                  </button>
-                  <span aria-hidden="true" className="text-[11px] font-semibold tabular-nums">
-                    {row.reportedMinor === null ? (
-                      <span className="font-normal text-muted-foreground">—</span>
-                    ) : (
-                      formatWholeMajorUnits(row.reportedMinor, currency)
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
+      <CardContent
+        className={
+          coverageRail
+            ? "p-0"
+            : "px-[25px] pt-0 pb-[15px] max-[1200px]:px-[18px] max-[1200px]:pb-4 max-[650px]:px-4"
+        }
+      >
+        {coverageRail ? (
+          <div className={styles.compareBody}>
+            <div className={styles.comparePlotCell}>{plot}</div>
+            {coverageRail}
           </div>
         ) : (
-          <div className={styles.compareGrid}>
-            <div className={styles.compareNames}>
-              {rows.map((row) => (
-                <div key={row.channelId} className={styles.compareCell}>
-                  <button
-                    type="button"
-                    onClick={() => onInspectChannel(row.channelId)}
-                    aria-label={`${describeComparisonRow(row, period)} Show band details.`}
-                    title={row.name}
-                    className={styles.compareNameButton}
-                  >
-                    {row.name}
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div aria-hidden="true" className={styles.comparePlot}>
-              <ChartContainer
-                config={comparisonConfig}
-                className="aspect-auto w-full"
-                style={{ height: chartHeight }}
-              >
-                <BarChart
-                  accessibilityLayer
-                  data={data}
-                  layout="vertical"
-                  margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-                >
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    tick={false}
-                    tickLine={false}
-                    axisLine={false}
-                    width={0}
-                  />
-                  {showShare ? (
-                    <XAxis
-                      type="number"
-                      domain={[0, 100]}
-                      ticks={[0, 25, 50, 75, 100]}
-                      tickFormatter={(value: number) => `${value}%`}
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fontSize: 9 }}
-                      tickMargin={6}
-                      height={AXIS_HEIGHT}
-                      interval={0}
-                    />
-                  ) : (
-                    <XAxis
-                      type="number"
-                      domain={scale.domain}
-                      ticks={scale.ticks}
-                      tickFormatter={(value: number) => formatMajorTick(Number(value) / factor)}
-                      tickLine={false}
-                      axisLine={false}
-                      tick={{ fontSize: 9 }}
-                      tickMargin={6}
-                      height={AXIS_HEIGHT}
-                      interval={0}
-                    />
-                  )}
-                  <ChartTooltip
-                    cursor={{ fill: "var(--channel-soft)", opacity: 0.7 }}
-                    content={<ChannelComparisonTooltip period={period} />}
-                  />
-                  <Bar
-                    dataKey={showShare ? "earnedShare" : "earnedBar"}
-                    stackId="revenue"
-                    fill="var(--color-earned)"
-                    barSize={17}
-                    radius={[3, 0, 0, 3]}
-                    background={{ fill: "var(--channel-soft)" }}
-                    isAnimationActive={!reducedMotion}
-                  />
-                  <Bar
-                    dataKey={showShare ? "lostShare" : "lostBar"}
-                    stackId="revenue"
-                    fill="var(--color-lost)"
-                    barSize={17}
-                    radius={[0, 3, 3, 0]}
-                    background={{ fill: "var(--channel-soft)" }}
-                    isAnimationActive={!reducedMotion}
-                  />
-                  <Bar
-                    dataKey={showShare ? "reportedShare" : "reportedBar"}
-                    stackId="revenue"
-                    fill="var(--color-reported)"
-                    barSize={17}
-                    radius={[3, 3, 3, 3]}
-                    background={{ fill: "var(--channel-soft)" }}
-                    isAnimationActive={!reducedMotion}
-                  />
-                </BarChart>
-              </ChartContainer>
-              {rows.map((row, index) =>
-                row.state === "refused" ? (
-                  <div
-                    key={row.channelId}
-                    aria-hidden="true"
-                    className={styles.compareNoFigure}
-                    style={{ top: index * rowHeight, height: rowHeight }}
-                  >
-                    No comparable figure
-                  </div>
-                ) : null,
-              )}
-            </div>
-            <div aria-hidden="true" className={styles.compareValues}>
-              {rows.map((row) =>
-                row.state === "refused" || row.reportedMinor === null ? (
-                  <div key={row.channelId} className={styles.compareCell}>
-                    <span className={styles.compareDash}>—</span>
-                  </div>
-                ) : showShare && totalMinor ? (
-                  <div key={row.channelId} className={styles.compareCell}>
-                    <span className={styles.compareEndValue}>
-                      {formatShareValue((row.reportedMinor / totalMinor) * 100)}
-                    </span>
-                  </div>
-                ) : (
-                  <div key={row.channelId} className={styles.compareCell}>
-                    <span className={styles.compareEndValue}>
-                      {formatWholeMajorUnits(row.reportedMinor, currency)}
-                    </span>
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
+          plot
         )}
       </CardContent>
 
       <CardFooter className="mt-5 block border-t border-border bg-transparent px-[25px] pt-[13px] pb-[15px] text-[11px] leading-[1.6] text-muted-foreground max-[1200px]:px-[18px] max-[650px]:px-4">
         Earned = reported revenue minus provider-reported loss. These figures are not profit.
       </CardFooter>
+      {explanationStrip}
     </Card>
   );
 }

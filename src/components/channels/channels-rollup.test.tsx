@@ -405,21 +405,137 @@ describe("ChannelsRollup", () => {
     expect(screen.queryByText("58.0%")).toBeNull();
   });
 
-  it("opens the same band details from a chart row for keyboard and touch", async () => {
+  it("opens the full coverage dialog focused on the chart row for keyboard and touch", async () => {
     render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Delivery A:.*Show band details/ }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Delivery A" });
-    expect(within(dialog).getByText("1 February 2026 – 28 February 2026")).toBeInTheDocument();
-    expect(within(dialog).getByText("AED 80,000.00")).toBeInTheDocument();
-    expect(within(dialog).getByText("AED 76,000.00")).toBeInTheDocument();
-    expect(within(dialog).getByText("AED 4,000.00")).toBeInTheDocument();
+    // Task 4: the chart row opens D02 (not a second one-channel dialog),
+    // focused on the inspected channel's section in the same dialog.
+    const dialog = await screen.findByRole("dialog", { name: "Data coverage" });
+    const section = within(dialog).getByLabelText("Delivery A, Measured");
+    expect(within(section).getByText("AED 80,000.00")).toBeInTheDocument();
+    expect(within(section).getByText("AED 76,000.00")).toBeInTheDocument();
+    expect(within(section).getByText("AED 4,000.00")).toBeInTheDocument();
+    expect(document.activeElement?.getAttribute("id")).toBe("channel-coverage-row-a");
+    // The full list travels with the focused row: revenue-only and refused
+    // stay visible beside it.
+    expect(within(dialog).getByLabelText("Direct, Revenue only")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("In-store, Needs review")).toBeInTheDocument();
     // Read-only: a close control and nothing that writes.
     expect(within(dialog).getByRole("button", { name: "Close dialog" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: /save|refresh|start/i })).toBeNull();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delivery A" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Data coverage" })).toBeNull());
+  });
+
+  it("shows the coverage rail beside the plot with counts and a working review link", async () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
+
+    const comparison = screen.getByRole("region", { name: "Revenue comparison" });
+    const rail = within(comparison).getByRole("complementary", { name: "Data coverage" });
+    expect(within(rail).getByText("The complete picture")).toBeInTheDocument();
+    expect(
+      within(rail).getByText(
+        (_, element) => element?.tagName === "P" && element.textContent === "2 / 4 channels",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(rail).getByText("have both revenue and loss data for this reporting window."),
+    ).toBeInTheDocument();
+    expect(within(rail).getByText("Revenue + loss").parentElement).toHaveTextContent("2");
+    expect(within(rail).getByText("Revenue only").parentElement).toHaveTextContent("1");
+    expect(within(rail).getByText("No comparable figure").parentElement).toHaveTextContent("1");
+
+    fireEvent.click(within(rail).getByRole("button", { name: "Review data coverage" }));
+    const dialog = await screen.findByRole("dialog", { name: "Data coverage" });
+    expect(
+      within(dialog).getByText("1 February 2026 – 28 February 2026 · Reported scope · AED"),
+    ).toBeInTheDocument();
+  });
+
+  it("explains the revenue-only channel below the comparison", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready()} />);
+
+    const comparison = screen.getByRole("region", { name: "Revenue comparison" });
+    expect(
+      within(comparison).getByText(
+        "Direct has revenue data, but no recorded loss. Included in reported revenue; excluded from earned and loss totals.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("states the complete-band rule when every channel is measured", () => {
+    render(
+      <ChannelsRollup
+        organizationId="org-1"
+        analysis={ready({ rows: februaryRows().slice(0, 2) })}
+      />,
+    );
+
+    const comparison = screen.getByRole("region", { name: "Revenue comparison" });
+    expect(
+      within(comparison).getByText(
+        "Only channels with both revenue and loss contribute to earned and loss totals.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps coverage honest when no channel is active", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={ready({ rows: [] })} />);
+
+    const comparison = screen.getByRole("region", { name: "Revenue comparison" });
+    const rail = within(comparison).getByRole("complementary", { name: "Data coverage" });
+    expect(
+      within(rail).getByText(
+        (_, element) => element?.tagName === "P" && element.textContent === "0 / 0 channels",
+      ),
+    ).toBeInTheDocument();
+    // Chart empty state, rail sentence, explanation strip and the summary's
+    // reported-revenue note all say the same honest thing; no segment
+    // strip, no fake zeros.
+    expect(screen.getAllByText("No active channels to compare.")).toHaveLength(4);
+  });
+
+  it("renders no coverage counts at all when the read fails", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={{ state: "unavailable" }} />);
+
+    expect(screen.getByText("Channel performance is unavailable")).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Data coverage" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review data coverage" })).toBeNull();
+    expect(screen.queryByText("Revenue + loss")).toBeNull();
+  });
+
+  it("keeps every coverage row visible when earned is null", async () => {
+    const revenueOnly = view({
+      rows: [
+        row("direct", "Direct", {
+          state: "revenue_only",
+          potential: { minorUnits: 1_800_000, currency: "AED" },
+          lost: null,
+          earned: null,
+        }),
+        row("instore", "In-store", {
+          state: "refused",
+          potential: null,
+          lost: null,
+          earned: null,
+        }),
+      ],
+    });
+    render(
+      <ChannelsRollup organizationId="org-1" analysis={{ state: "ready", view: revenueOnly }} />,
+    );
+
+    const comparison = screen.getByRole("region", { name: "Revenue comparison" });
+    const rail = within(comparison).getByRole("complementary", { name: "Data coverage" });
+    expect(within(rail).getByText("Revenue only").parentElement).toHaveTextContent("1");
+
+    fireEvent.click(within(rail).getByRole("button", { name: "Review data coverage" }));
+    const dialog = await screen.findByRole("dialog", { name: "Data coverage" });
+    expect(within(dialog).getByLabelText("Direct, Revenue only")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("In-store, Needs review")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Measured")).toBeNull();
   });
 });
