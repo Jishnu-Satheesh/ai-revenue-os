@@ -1196,8 +1196,11 @@ remains an operation concern; it is not the cache identity.
 
 Generation is a second fenced worker, not a phase of the detector run (ADR 0037). It claims a
 completed analysis run through a security-definer RPC, reads that run's findings alone with no tools
-and no retrieval, and files at most six schema-validated recommendations whose citations the
-completion RPC re-checks against the findings of the same run. Each recommendation records the
+and no retrieval, and files at most eight schema-validated recommendations whose citations the
+completion RPC re-checks against the findings of the same run. Every chapter holding observation
+findings receives at least one citing item; missing inputs still never become recommendations.
+A run whose first narration left chapters uncovered admits exactly one gap-fill narration,
+restricted to findings no existing item cites. Each recommendation records the
 prompt version that produced it. A failed or refused narration leaves the run's findings visible
 untouched, which section 11.4 requires as the fallback.
 
@@ -1247,6 +1250,16 @@ completes. The judge (version 3) still flags invented values and now also names 
 jargon, unexplained technical terms, or longwinded prose. The version-5 playbook design
 stands as history in ADR 0050, the Amendment A grounding decision in ADR 0051; the
 binding rule is section 14 — see ADR 0052.
+
+Coverage and gap-fill (2026-09-10, channel recommendations, Amendment C): narration
+prompt version 8 requires at least one citing item for every chapter holding
+observation findings (cancellations, availability, funnel, retention, money,
+trust), and the per-run cap rises from 6 to 8 so coverage never competes with
+honest needs-data notes. A run whose narration left chapters uncovered admits
+exactly one gap-fill narration citing only previously-uncited findings; the
+workspace shows a per-section generate button only on uncovered chapters, only
+to members with retry permission. Runs narrated under prompt v7 keep whatever
+they filed — no backfill. See ADR 0053.
 
 ## 12. Public API contracts
 
@@ -1382,11 +1395,13 @@ provider payloads, credentials, or customer PII.
   docs, forums, and merchant discussions first. The model still emits no URLs (the output shape has
   no URL field), findings remain the only cited evidence, every action stays human-supervised, and
   output still passes the same schema-validation and citation re-check fence. Narration prompt
-  version 7 states the global plain-English rule (short common words, one idea per sentence,
-  no idioms, numbers as figures); the judge (version 3) checks it. This superseded the
+  version 8 states the global plain-English rule (short common words, one idea per sentence,
+  no idioms, numbers as figures) plus the coverage rule (every chapter holding observation
+  findings gets at least one citing item, within a per-run cap of 8); the judge (version 3) checks the wording while coverage is enforced deterministically (see ADR 0053). This superseded the
   original section 11.4 pilot paragraph's playbook and empty-web-slot sentences, and then the
   Amendment A pilot-only wording — that paragraph now
-  describes the global rollout; see ADR 0052. ADRs 0050 and 0051
+  describes the global rollout; see ADR 0052. The Amendment C coverage and
+  gap-fill rules above stand under ADR 0053. ADRs 0050 and 0051
   stand as history.
 - Redact or remove customer names, phone numbers, email addresses, delivery addresses, free-text
   order notes, and unrestricted review text unless a declared detector needs minimized content and
