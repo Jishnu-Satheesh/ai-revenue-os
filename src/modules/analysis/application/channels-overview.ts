@@ -1,6 +1,7 @@
 import {
   addLocalDays,
   enumerateLocalPeriodStarts,
+  localDaysBetween,
   localPeriodEnd,
   localPeriodStart,
 } from "@/domain/analysis/calendar";
@@ -233,67 +234,43 @@ export function resolveDefaultWindow(input: {
 }
 
 /**
- * A whole calendar month the card picker can offer: the first and last day.
+ * A picked covered range: the first and last day. Whole calendar months are
+ * the common case, but any covered range reads here -- see ADR 0055.
  */
 export type CoveredMonth = { from: string; to: string };
 
 /**
- * Every whole calendar month fully inside one coverage stretch, newest first.
- *
- * Whole months only, because the card reads a month at a time: a month
- * straddling a coverage gap would ask for days nobody declared, and a partial
- * month would compare against a previous month of a different length without
- * saying so.
+ * The equal-length period immediately before the picked range: the same count
+ * of days, ending the day the range opens. Deltas compare the range against
+ * this period over the channels analysed in both, so a 59-day pick compares
+ * against the 59 days before it rather than against a calendar month of a
+ * different length without saying so.
  */
-export function enumerateCoveredMonths(segments: readonly CoverageSegment[]): CoveredMonth[] {
-  const months: CoveredMonth[] = [];
-  for (const segment of segments) {
-    let start = localPeriodStart(segment.start, "month");
-    while (start <= segment.end) {
-      const end = localPeriodEnd(start, "month");
-      // Both edges must hold: the cursor opens on the month containing the
-      // segment's start, which is only covered when the segment starts on its
-      // first day.
-      if (segment.start <= start && end <= segment.end) months.push({ from: start, to: end });
-      const next = addLocalDays(end, 1);
-      if (next <= start) break;
-      start = next;
-    }
-  }
-  return months.sort((left, right) =>
-    left.from < right.from ? 1 : left.from > right.from ? -1 : 0,
-  );
+export function previousEqualRange(range: CoveredMonth): CoveredMonth {
+  const days = localDaysBetween(range.from, range.to);
+  const to = addLocalDays(range.from, -1);
+  return { from: addLocalDays(to, -days), to };
 }
 
 /**
- * The single covered month containing a picked range, for translating legacy
- * `from`/`to` links onto the month rule. Null when the range straddles two
- * months or leaves coverage: the page falls back to its default month rather
- * than snapping to a month the operator did not ask about.
+ * Whether the picked range is exactly one calendar month. Whole months keep
+ * the month-named copy the prototype verified ("vs January"); any other range
+ * names its dates instead of pretending to be a month.
  */
-export function snapToCoveredMonth(
-  from: string,
-  to: string,
-  segments: readonly CoverageSegment[],
-): CoveredMonth | null {
+export function isWholeCalendarMonth(range: CoveredMonth): boolean {
   return (
-    enumerateCoveredMonths(segments).find((month) => month.from <= from && to <= month.to) ?? null
+    range.from === localPeriodStart(range.from, "month") &&
+    range.to === localPeriodEnd(range.from, "month")
   );
 }
 
-/** The calendar month immediately before the month beginning `monthStart`. */
-export function previousCalendarMonth(monthStart: string): CoveredMonth {
-  const end = addLocalDays(monthStart, -1);
-  return { from: localPeriodStart(end, "month"), to: end };
-}
-
 /**
- * The whole Monday weeks a month contains, for the trend buckets. Edge days
- * outside a whole week are excluded by construction: plotting a four-day stub
- * beside full weeks would read as a collapse nobody measured.
+ * The whole Monday weeks a picked range contains, for the trend buckets. Edge
+ * days outside a whole week are excluded by construction: plotting a four-day
+ * stub beside full weeks would read as a collapse nobody measured.
  */
-export function wholeWeeksOfMonth(month: CoveredMonth): CoveredMonth[] {
-  return enumerateLocalPeriodStarts(month.from, month.to, "week").map((start) => ({
+export function wholeWeeksOfRange(range: CoveredMonth): CoveredMonth[] {
+  return enumerateLocalPeriodStarts(range.from, range.to, "week").map((start) => ({
     from: start,
     to: localPeriodEnd(start, "week"),
   }));
@@ -369,7 +346,9 @@ export type PerformanceCardShare = {
 };
 
 export type BusinessPerformanceCardView = {
+  /** The picked covered range -- a whole calendar month when the operator picks one. */
   month: CoveredMonth;
+  /** The previous equal-length covered period the deltas compare against. */
   previous: CoveredMonth;
   /** Visible channels behind the card, so the page can tell "no match" from "no data". */
   channelCount: number;
@@ -467,12 +446,13 @@ function comparableChannelIds(
 }
 
 const NO_EARLIER_PERIOD_REASON = "No earlier comparable period was analysed.";
-const NO_COMMON_CHANNEL_REASON = "No channel was analysed in both months.";
+const NO_COMMON_CHANNEL_REASON = "No channel was analysed in both periods.";
 
 /**
- * The business-performance card over one calendar month: four tiles with
- * previous-month deltas, a rule-composed headline, a weekly trend, channel
- * shares, and the payloads behind both modals.
+ * The business-performance card over one picked covered range: four tiles
+ * with deltas against the previous equal-length period, a rule-composed
+ * headline, a weekly trend, channel shares, and the payloads behind both
+ * modals.
  *
  * Pure. Every figure it carries came out of a detector already; the only
  * arithmetic here is presentation -- sums over the visible channels and whole
@@ -498,8 +478,14 @@ export function buildBusinessPerformanceCard(input: {
   /** Report filenames behind the current month's windows. */
   reportFiles: readonly string[];
 }): BusinessPerformanceCardView {
-  const previous = previousCalendarMonth(input.month.from);
-  const deltaLabel = `vs ${monthName(previous.from)}`;
+  const previous = previousEqualRange(input.month);
+  // A whole picked month keeps the month-named copy the prototype verified;
+  // any other range names its dates and its period instead of pretending.
+  const wholeMonth = isWholeCalendarMonth(input.month);
+  const periodPhrase = wholeMonth ? "this month" : "the selected period";
+  const deltaLabel = wholeMonth
+    ? `vs ${monthName(previous.from)}`
+    : `vs ${prettyRange(previous.from, previous.to)}`;
   const byId = new Map(input.channels.map((channel) => [channel.id, channel.displayName]));
 
   const grossByChannel = (records: ReadonlyMap<string, readonly ChannelFindingRecord[]>) => {
@@ -557,7 +543,7 @@ export function buildBusinessPerformanceCard(input: {
     if (base === 0) {
       // A change from zero has no defined proportion; stating one would
       // invent a scale the reports never gave.
-      return { deltaPercent: null, reason: "The earlier month recorded zero." };
+      return { deltaPercent: null, reason: "The earlier period recorded zero." };
     }
     const now = ids.reduce((total, id) => total + (current.get(id) ?? 0), 0);
     return { deltaPercent: Math.round(((now - base) / base) * 100), reason: null };
@@ -619,7 +605,7 @@ export function buildBusinessPerformanceCard(input: {
       ? null
       : salesDeltaBlockedByCurrency
         ? "These channels reported in more than one currency, so no single total can be stated."
-        : "No approved report carried a sales figure for this month.",
+        : `No approved report carried a sales figure for ${periodPhrase}.`,
     deltaPercent: salesDeltaBlockedByCurrency ? null : salesDelta.deltaPercent,
     deltaLabel:
       salesDelta.deltaPercent !== null && !salesDeltaBlockedByCurrency ? deltaLabel : null,
@@ -636,7 +622,9 @@ export function buildBusinessPerformanceCard(input: {
     id: "orders",
     value: ordersTotal !== null ? { kind: "count", value: ordersTotal } : null,
     unavailableReason:
-      ordersTotal !== null ? null : "No approved report carried an order count for this month.",
+      ordersTotal !== null
+        ? null
+        : `No approved report carried an order count for ${periodPhrase}.`,
     deltaPercent: ordersDelta.deltaPercent,
     deltaLabel: ordersDelta.deltaPercent !== null ? deltaLabel : null,
     deltaAbsentReason:
@@ -650,7 +638,7 @@ export function buildBusinessPerformanceCard(input: {
     id: "views",
     value: viewsTotal !== null ? { kind: "count", value: viewsTotal } : null,
     unavailableReason:
-      viewsTotal !== null ? null : "No approved report carried menu views for this month.",
+      viewsTotal !== null ? null : `No approved report carried menu views for ${periodPhrase}.`,
     deltaPercent: viewsDelta.deltaPercent,
     deltaLabel: viewsDelta.deltaPercent !== null ? deltaLabel : null,
     deltaAbsentReason:
@@ -666,7 +654,7 @@ export function buildBusinessPerformanceCard(input: {
     unavailableReason:
       cancelledTotal !== null
         ? null
-        : "No approved report carried a cancellation count for this month.",
+        : `No approved report carried a cancellation count for ${periodPhrase}.`,
     deltaPercent: cancelledDelta.deltaPercent,
     deltaLabel: cancelledDelta.deltaPercent !== null ? deltaLabel : null,
     deltaAbsentReason:
@@ -702,10 +690,12 @@ export function buildBusinessPerformanceCard(input: {
       : cancelledTotal > 0
         ? "Cancellations still need attention."
         : "No cancellations recorded.";
-  // Without a comparison the card still names its month: a lone
+  // Without a comparison the card still names its period: a lone
   // "Cancellations still need attention." would read as a floating warning
-  // rather than a statement about February.
-  const neutralTitle = `Performance for ${monthName(input.month.from)} ${input.month.from.slice(0, 4)}.`;
+  // rather than a statement about the picked range.
+  const neutralTitle = wholeMonth
+    ? `Performance for ${monthName(input.month.from)} ${input.month.from.slice(0, 4)}.`
+    : `Performance for ${prettyRange(input.month.from, input.month.to)}.`;
   const headline =
     firstSentence && secondSentence
       ? `${firstSentence} ${secondSentence}`
@@ -762,12 +752,14 @@ export function buildBusinessPerformanceCard(input: {
     shares !== null
       ? null
       : shareRows.length === 0
-        ? "No channel has a reported sales figure for this month."
+        ? `No channel has a reported sales figure for ${periodPhrase}.`
         : "Channels reported in more than one currency, so shares cannot be combined.";
 
-  const wholeWeeks = wholeWeeksOfMonth(input.month);
+  const wholeWeeks = wholeWeeksOfRange(input.month);
   const weekLabel = (week: CoveredMonth) =>
-    `${dayOfMonth(week.from)}–${dayOfMonth(week.to)} ${monthName(week.from).slice(0, 3)}`;
+    monthName(week.from) === monthName(week.to)
+      ? `${dayOfMonth(week.from)}–${dayOfMonth(week.to)} ${monthName(week.from).slice(0, 3)}`
+      : `${dayOfMonth(week.from)} ${monthName(week.from).slice(0, 3)}–${dayOfMonth(week.to)} ${monthName(week.to).slice(0, 3)}`;
   const trendBuckets: { label: string; minorUnits: number }[] = [];
   let trendCurrency: string | null = null;
   let trendBlockedByCurrency = false;
@@ -808,14 +800,20 @@ export function buildBusinessPerformanceCard(input: {
             state: "ready",
             buckets: trendBuckets,
             currency: trendCurrency,
-            coverageNote: `${trendBuckets.length} of ${wholeWeeks.length} ${monthName(input.month.from)} weeks · ${trendChannels.size} of ${input.channels.length} channels`,
+            coverageNote: wholeMonth
+              ? `${trendBuckets.length} of ${wholeWeeks.length} ${monthName(input.month.from)} weeks · ${trendChannels.size} of ${input.channels.length} channels`
+              : `${trendBuckets.length} of ${wholeWeeks.length} weeks · ${trendChannels.size} of ${input.channels.length} channels`,
           }
         : {
             state: "empty",
             reason:
               wholeWeeks.length < 2
-                ? "This month holds fewer than two whole weeks to plot."
-                : "Fewer than two weeks of this month have a completed analysis.",
+                ? wholeMonth
+                  ? "This month holds fewer than two whole weeks to plot."
+                  : "The selected period holds fewer than two whole weeks to plot."
+                : wholeMonth
+                  ? "Fewer than two weeks of this month have a completed analysis."
+                  : "Fewer than two weeks of the selected period have a completed analysis.",
             weeks: wholeWeeks.map(weekLabel),
           };
 
@@ -849,21 +847,23 @@ export function buildBusinessPerformanceCard(input: {
       menuViewsNote:
         viewChannelNames.length > 0
           ? `${viewChannelNames.join(", ")} listing report only. Menu views are a source-specific traffic measure.`
-          : "No approved report carried menu views for this month.",
+          : `No approved report carried menu views for ${periodPhrase}.`,
       costNote: hasCostContext
-        ? "Cost reports were analysed for this month; profit is still not stated here."
+        ? `Cost reports were analysed for ${periodPhrase}; profit is still not stated here.`
         : "Cost reports are missing, so this screen shows reported sales without claiming profit.",
       reportFiles: files,
     },
     fulfillment: {
       ordersPlaced: ordersTotal,
       ordersAbsentReason:
-        ordersTotal !== null ? null : "No approved report carried an order count for this month.",
+        ordersTotal !== null
+          ? null
+          : `No approved report carried an order count for ${periodPhrase}.`,
       cancelled: cancelledTotal,
       cancelledAbsentReason:
         cancelledTotal !== null
           ? null
-          : "No approved report carried a cancellation count for this month.",
+          : `No approved report carried a cancellation count for ${periodPhrase}.`,
     },
   };
 }

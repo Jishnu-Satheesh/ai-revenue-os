@@ -4,13 +4,12 @@ import {
   buildBusinessPerformanceCard,
   buildChannelsOverviewView,
   buildOverviewWindows,
-  enumerateCoveredMonths,
+  isWholeCalendarMonth,
   monthName,
-  previousCalendarMonth,
+  previousEqualRange,
   resolveDefaultWindow,
   resolveOverviewWindow,
-  snapToCoveredMonth,
-  wholeWeeksOfMonth,
+  wholeWeeksOfRange,
 } from "@/modules/analysis/application/channels-overview";
 import type {
   ChannelBandRecord,
@@ -491,40 +490,35 @@ describe("resolveOverviewWindow", () => {
   });
 });
 
-describe("covered months", () => {
-  const segments = [{ start: "2026-01-15", end: "2026-03-10" }];
-
-  it("offers only whole months fully inside coverage, newest first", () => {
-    expect(enumerateCoveredMonths(segments)).toEqual([{ from: "2026-02-01", to: "2026-02-28" }]);
-    expect(enumerateCoveredMonths([{ start: "2026-01-01", end: "2026-03-31" }])).toEqual([
-      { from: "2026-03-01", to: "2026-03-31" },
-      { from: "2026-02-01", to: "2026-02-28" },
-      { from: "2026-01-01", to: "2026-01-31" },
-    ]);
-  });
-
-  it("snaps a legacy range to its month and refuses straddlers", () => {
-    expect(snapToCoveredMonth("2026-02-05", "2026-02-20", segments)).toEqual({
-      from: "2026-02-01",
-      to: "2026-02-28",
-    });
-    expect(snapToCoveredMonth("2026-01-28", "2026-02-05", segments)).toBeNull();
-    expect(snapToCoveredMonth("2026-04-01", "2026-04-30", segments)).toBeNull();
-  });
-
-  it("steps back exactly one calendar month", () => {
-    expect(previousCalendarMonth("2026-02-01")).toEqual({
-      from: "2026-01-01",
+describe("picked ranges", () => {
+  it("steps back the same day count, ending the day the range opens", () => {
+    expect(previousEqualRange({ from: "2026-02-01", to: "2026-02-28" })).toEqual({
+      from: "2026-01-04",
       to: "2026-01-31",
     });
-    expect(previousCalendarMonth("2026-03-01")).toEqual({
-      from: "2026-02-01",
-      to: "2026-02-28",
+    expect(previousEqualRange({ from: "2026-01-01", to: "2026-02-28" })).toEqual({
+      from: "2025-11-03",
+      to: "2025-12-31",
     });
+  });
+
+  it("recognises whole calendar months for the month-named copy", () => {
+    expect(isWholeCalendarMonth({ from: "2026-02-01", to: "2026-02-28" })).toBe(true);
+    expect(isWholeCalendarMonth({ from: "2026-01-01", to: "2026-02-28" })).toBe(false);
+    expect(isWholeCalendarMonth({ from: "2026-02-05", to: "2026-02-28" })).toBe(false);
   });
 
   it("plots whole Monday weeks, leaving edge stubs out", () => {
-    expect(wholeWeeksOfMonth({ from: "2026-02-01", to: "2026-02-28" })).toEqual([
+    expect(wholeWeeksOfRange({ from: "2026-02-01", to: "2026-02-28" })).toEqual([
+      { from: "2026-02-02", to: "2026-02-08" },
+      { from: "2026-02-09", to: "2026-02-15" },
+      { from: "2026-02-16", to: "2026-02-22" },
+    ]);
+    expect(wholeWeeksOfRange({ from: "2026-01-01", to: "2026-02-28" })).toEqual([
+      { from: "2026-01-05", to: "2026-01-11" },
+      { from: "2026-01-12", to: "2026-01-18" },
+      { from: "2026-01-19", to: "2026-01-25" },
+      { from: "2026-01-26", to: "2026-02-01" },
       { from: "2026-02-02", to: "2026-02-08" },
       { from: "2026-02-09", to: "2026-02-15" },
       { from: "2026-02-16", to: "2026-02-22" },
@@ -927,6 +921,113 @@ describe("buildBusinessPerformanceCard", () => {
       ordersAbsentReason: null,
       cancelled: 120,
       cancelledAbsentReason: null,
+    });
+  });
+});
+
+describe("buildBusinessPerformanceCard over a picked range", () => {
+  const RANGE = { from: "2026-01-01", to: "2026-02-28" };
+
+  function rangeInput(overrides: Partial<Parameters<typeof buildBusinessPerformanceCard>[0]> = {}) {
+    return cardInput({ month: RANGE, ...overrides });
+  }
+
+  it("compares against the previous equal-length period, not a calendar month", () => {
+    const card = buildBusinessPerformanceCard(rangeInput());
+    expect(card.previous).toEqual({ from: "2025-11-03", to: "2025-12-31" });
+    expect(card.tiles.sales.deltaLabel).toBe("vs 3 Nov – 31 Dec 2025");
+  });
+
+  it("names the range in titles and absent reasons instead of a month", () => {
+    const card = buildBusinessPerformanceCard(
+      rangeInput({ current: new Map(), previous: new Map(), trendWeeks: [] }),
+    );
+    expect(card.headline).toBe("Performance for 1 Jan – 28 Feb 2026.");
+    expect(card.tiles.sales.unavailableReason).toBe(
+      "No approved report carried a sales figure for the selected period.",
+    );
+    expect(card.trend).toEqual({
+      state: "empty",
+      reason: "Fewer than two weeks of the selected period have a completed analysis.",
+      weeks: [
+        "5–11 Jan",
+        "12–18 Jan",
+        "19–25 Jan",
+        "26 Jan–1 Feb",
+        "2–8 Feb",
+        "9–15 Feb",
+        "16–22 Feb",
+      ],
+    });
+  });
+
+  it("plots analysed weeks of the range with a month-free coverage note", () => {
+    const input = rangeInput();
+    input.trendWeeks = [
+      {
+        window: { from: "2026-01-05", to: "2026-01-11" },
+        records: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: [
+              cardFinding({
+                channelId: "ch-a",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 2_400_000,
+              }),
+            ],
+          },
+          {
+            channelId: "ch-b",
+            findings: [
+              cardFinding({
+                channelId: "ch-b",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 2_400_000,
+              }),
+            ],
+          },
+        ]),
+      },
+      {
+        window: { from: "2026-01-12", to: "2026-01-18" },
+        records: monthRecords([
+          {
+            channelId: "ch-a",
+            findings: [
+              cardFinding({
+                channelId: "ch-a",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 3_600_000,
+              }),
+            ],
+          },
+          {
+            channelId: "ch-b",
+            findings: [
+              cardFinding({
+                channelId: "ch-b",
+                code: GROSS,
+                valueKind: "money",
+                numerator: 3_600_000,
+              }),
+            ],
+          },
+        ]),
+      },
+    ];
+    const card = buildBusinessPerformanceCard(input);
+    expect(card.trend).toEqual({
+      state: "ready",
+      buckets: [
+        { label: "5–11 Jan", minorUnits: 4_800_000 },
+        { label: "12–18 Jan", minorUnits: 7_200_000 },
+      ],
+      currency: "AED",
+      coverageNote: "2 of 7 weeks · 2 of 2 channels",
     });
   });
 });

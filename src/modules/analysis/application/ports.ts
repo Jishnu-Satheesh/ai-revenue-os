@@ -365,6 +365,21 @@ export type ChannelAnalysisReadPort = {
   }): Promise<ChannelBandRecord[]>;
 
   /**
+   * The card findings of the newest completed run per channel for exact dates
+   * at any grain: the same codes `loadChannelCardFindingsForWindow` reads.
+   *
+   * A channel analysed twice over the same dates at two grains reads once --
+   * the coarsest run wins, newest among equals -- because two figures for one
+   * question on one card is worse than one. Every figure is still a sum over
+   * the very same dates, so grains mix honestly here where windows must not.
+   */
+  loadChannelRangeCardFindingsForWindow(input: {
+    organizationId: string;
+    windowStart: string;
+    windowEnd: string;
+  }): Promise<ChannelBandRecord[]>;
+
+  /**
    * The unbroken stretches of dates this channel's projected packages declare.
    *
    * Declared periods rather than surviving evidence, for the reason the month
@@ -411,4 +426,20 @@ export type ChannelAnalysisReadPort = {
     status: "running" | "completed" | "failed";
     recommendationCount: number;
   } | null>;
+
+  /**
+   * Completed runs newer than `since` inside a date box around the card's
+   * windows: the live currency verdict behind a cached assembled card.
+   *
+   * A box rather than tuple pairs by construction -- a run starting inside
+   * the box for an overlapping-but-different window is a false positive that
+   * rebuilds, while a missed newer run would serve a contradicted answer.
+   * Only ever a count: the caller needs "anything new", never the rows.
+   */
+  loadCompletedRunCountSince(input: {
+    organizationId: string;
+    since: string;
+    windowStartMin: string;
+    windowEndMax: string;
+  }): Promise<number>;
 };
