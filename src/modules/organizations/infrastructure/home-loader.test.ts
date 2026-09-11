@@ -1,0 +1,462 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { DomainError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
+import { hasOrganizationPermission } from "@/domain/access/permissions";
+import { isCampaignsEnabled } from "@/modules/campaigns/application/feature-access";
+import { hasGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
+import { isIntegrationHubEnabled } from "@/modules/integrations/application/feature-access";
+import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
+import { readHomeCampaigns } from "@/modules/campaigns/infrastructure/home-campaign-reader";
+import {
+  readHomeLogo,
+  readHomePosterAssets,
+  readHomeReferenceAssets,
+} from "@/modules/campaigns/infrastructure/home-asset-reader";
+import { loadOrganizationHome } from "@/modules/organizations/infrastructure/home-loader";
+import type { DigitalTwinSnapshot } from "@/modules/organizations/infrastructure/repository";
+
+vi.mock("@/modules/campaigns/application/feature-access", () => ({
+  isCampaignsEnabled: vi.fn(() => true),
+  assertCampaignsEnabled: vi.fn(),
+  parseCampaignOrganizationIds: vi.fn(() => new Set<string>()),
+}));
+
+vi.mock("@/modules/growth-intelligence/application/feature-access", () => ({
+  hasGrowthIntelligenceAccess: vi.fn(() => true),
+  assertGrowthIntelligenceAccess: vi.fn(),
+  parseGrowthIntelligenceOrganizationIds: vi.fn(() => new Set<string>()),
+}));
+
+vi.mock("@/modules/integrations/application/feature-access", () => ({
+  isIntegrationHubEnabled: vi.fn(() => true),
+  assertIntegrationHubEnabled: vi.fn(),
+  parseIntegrationOrganizationIds: vi.fn(() => new Set<string>()),
+  isGovernedReportValidationEnabled: vi.fn(() => false),
+  isGovernedReportProjectionEnabled: vi.fn(() => false),
+  assertGovernedReportProjectionEnabled: vi.fn(),
+  isGovernedEconomicsReadinessEnabled: vi.fn(() => false),
+  isGovernedChannelAnalysisEnabled: vi.fn(() => false),
+  assertGovernedChannelAnalysisEnabled: vi.fn(),
+  assertGovernedEconomicsReadinessEnabled: vi.fn(),
+}));
+
+vi.mock("@/domain/access/permissions", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/domain/access/permissions")>();
+  return {
+    ...actual,
+    hasOrganizationPermission: vi.fn(actual.hasOrganizationPermission),
+  };
+});
+
+const mockGetCampaign = vi.fn();
+const mockGetVersion = vi.fn();
+const mockLatestGenerationRun = vi.fn();
+
+vi.mock("@/modules/campaigns/infrastructure/repository", () => ({
+  createCampaignReadRepository: vi.fn(() => ({
+    getCampaign: (...args: unknown[]) => mockGetCampaign(...args),
+    getVersion: (...args: unknown[]) => mockGetVersion(...args),
+    latestGenerationRun: (...args: unknown[]) =>
+      mockLatestGenerationRun(...args),
+  })),
+}));
+
+vi.mock("@/modules/campaigns/infrastructure/home-campaign-reader", () => ({
+  readHomeCampaigns: vi.fn(async () => []),
+}));
+
+vi.mock("@/modules/campaigns/infrastructure/home-asset-reader", () => ({
+  readHomePosterAssets: vi.fn(async () => []),
+  readHomeReferenceAssets: vi.fn(async () => []),
+  readHomeLogo: vi.fn(async () => null),
+}));
+
+const ORG_ID = "11111111-1111-4111-8111-111111111111";
+const NOW = "2026-09-11T12:00:00.000Z";
+const CORRELATION_ID = "33333333-3333-4333-8333-333333333333";
+const CAMPAIGN_ID = "44444444-4444-4444-8444-444444444441";
+const POSTER_ID = "55555555-5555-4555-8555-555555555551";
+const VERSION_ID = "66666666-6666-4666-8666-666666666661";
+
+function fakeSupabase() {
+  return {
+    from: vi.fn(() => {
+      throw new Error("loader must not query directly; readers own the database port");
+    }),
+    rpc: vi.fn(async () => ({ data: null, error: null })),
+    storage: {
+      from: vi.fn(() => {
+        throw new Error("loader must not sign directly; readers own the storage port");
+      }),
+    },
+  };
+}
+
+function snapshot(): DigitalTwinSnapshot {
+  return {
+    organization: {
+      id: ORG_ID,
+      name: "Al Noor Kitchen",
+      slug: "al-noor-kitchen",
+      industry: "restaurant",
+      country_code: "AE",
+      base_currency: "AED",
+      default_timezone: "Asia/Dubai",
+      industry_pack_slug: "restaurant",
+      branchless_confirmed: false,
+      status: "active",
+      account_id: "77777777-7777-4777-8777-777777777777",
+      created_by: "88888888-8888-4888-888888888888",
+      created_at: "2026-08-01T08:00:00.000Z",
+      updated_at: "2026-08-12T08:00:00.000Z",
+      archived_at: null,
+    },
+    branches: [],
+    profile: null,
+    facts: [],
+    goals: [],
+    constraints: [],
+    policies: [],
+    auditEvents: [],
+  } as unknown as DigitalTwinSnapshot;
+}
+
+function campaignRecord() {
+  return {
+    item: {
+      id: CAMPAIGN_ID,
+      title: "Ramadan Push",
+      state: "draft",
+      sourceKind: "manual_brief",
+      sourceLabel: "Manual brief",
+      updatedAt: "2026-09-10T10:00:00.000Z",
+      awaitingFirstVersion: false,
+      openable: true,
+      generation: { status: "settled", detail: null },
+      version: 1,
+      objective: "Drive iftar orders",
+      channels: ["direct"],
+      spendCeiling: null,
+    },
+    cover: null,
+    coverLabel: null,
+  };
+}
+
+function posterRecord() {
+  return {
+    id: `poster:${POSTER_ID}`,
+    sourceKind: "poster_render",
+    label: "Ramadan Push · hero · iftar spread",
+    sourceLabel: "Finished poster render",
+    reviewLabel: "Review not recorded",
+    reviewState: "unreviewed",
+    recordedAt: "2026-09-09T10:00:00.000Z",
+    image: null,
+    sourceHref: `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_ID}?version=${VERSION_ID}`,
+  };
+}
+
+function referenceRecord() {
+  return {
+    id: `reference:${VERSION_ID}`,
+    sourceKind: "brand_reference",
+    label: "House logo lockup",
+    sourceLabel: "Brand reference",
+    reviewLabel: "Approved reference",
+    reviewState: "approved",
+    recordedAt: "2026-09-08T10:00:00.000Z",
+    image: null,
+    sourceHref: `/organizations/${ORG_ID}/assets`,
+  };
+}
+
+function logoImage() {
+  return {
+    url: "https://signed.example/logo",
+    alt: "Organization logo",
+    width: 400,
+    height: 400,
+    expiresAt: "2026-09-11T12:10:00.000Z",
+  };
+}
+
+const mockedPermissions = vi.mocked(hasOrganizationPermission);
+const mockedCampaignsGate = vi.mocked(isCampaignsEnabled);
+const mockedGrowthGate = vi.mocked(hasGrowthIntelligenceAccess);
+const mockedIntegrationsGate = vi.mocked(isIntegrationHubEnabled);
+const mockedReadCampaigns = vi.mocked(readHomeCampaigns);
+const mockedPosters = vi.mocked(readHomePosterAssets);
+const mockedReferences = vi.mocked(readHomeReferenceAssets);
+const mockedLogo = vi.mocked(readHomeLogo);
+const mockedCreateRepo = vi.mocked(createCampaignReadRepository);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockedCampaignsGate.mockReturnValue(true);
+  mockedGrowthGate.mockReturnValue(true);
+  mockedIntegrationsGate.mockReturnValue(true);
+  mockedPermissions.mockImplementation(
+    (role, permission) =>
+      (
+        {
+          "campaign.read": true,
+          "asset.read": true,
+          "channel.read": true,
+          "growth_intelligence.read": true,
+          "memory.read": true,
+          "integration.read": true,
+          "campaign.create": true,
+          "campaign.edit": true,
+          "campaign.approve": true,
+        } as Record<string, boolean>
+      )[permission] ?? false,
+  );
+  mockedReadCampaigns.mockResolvedValue([]);
+  mockedPosters.mockResolvedValue([]);
+  mockedReferences.mockResolvedValue([]);
+  mockedLogo.mockResolvedValue(null);
+  mockGetCampaign.mockResolvedValue(null);
+  mockGetVersion.mockResolvedValue(null);
+  mockLatestGenerationRun.mockResolvedValue(null);
+  vi.spyOn(logger, "error").mockImplementation(() => {});
+});
+
+function loadWith(supabase: unknown, role: "admin" = "admin") {
+  return loadOrganizationHome({
+    supabase: supabase as never,
+    organizationId: ORG_ID,
+    role,
+    snapshot: snapshot(),
+    correlationId: CORRELATION_ID,
+    now: NOW,
+  });
+}
+
+describe("gated and unauthorized sources are never called", () => {
+  it("campaigns rollout off means no campaign or asset reader runs", async () => {
+    mockedCampaignsGate.mockReturnValue(false);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockedReadCampaigns).not.toHaveBeenCalled();
+    expect(mockedPosters).not.toHaveBeenCalled();
+    expect(mockedReferences).not.toHaveBeenCalled();
+    expect(mockedLogo).not.toHaveBeenCalled();
+    expect(supabase.storage.from).not.toHaveBeenCalled();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(view.campaigns.status).toBe("disabled");
+    expect(view.assets.status).toBe("disabled");
+    expect(view.logo).toBeNull();
+  });
+
+  it("asset.read denied keeps campaign text but skips every cover and gallery reader", async () => {
+    mockedPermissions.mockImplementation((role, permission) =>
+      permission === "asset.read" ? false : permission === "campaign.read",
+    );
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockedReadCampaigns).toHaveBeenCalledTimes(1);
+    expect(mockedReadCampaigns.mock.calls[0]?.[0]).toMatchObject({
+      organizationId: ORG_ID,
+      correlationId: CORRELATION_ID,
+      canReadArtwork: false,
+    });
+    expect(mockedPosters).not.toHaveBeenCalled();
+    expect(mockedReferences).not.toHaveBeenCalled();
+    expect(mockedLogo).not.toHaveBeenCalled();
+    expect(supabase.storage.from).not.toHaveBeenCalled();
+    expect(view.campaigns.status).toBe("ready");
+  });
+
+  it("campaign.read denied disables campaigns and posters but keeps references and logo", async () => {
+    mockedPermissions.mockImplementation((role, permission) =>
+      permission === "campaign.read" ? false : permission === "asset.read",
+    );
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockedReadCampaigns).not.toHaveBeenCalled();
+    expect(mockedPosters).not.toHaveBeenCalled();
+    expect(mockedReferences).toHaveBeenCalledTimes(1);
+    expect(mockedLogo).toHaveBeenCalledTimes(1);
+    expect(view.campaigns.status).toBe("disabled");
+  });
+});
+
+describe("permission bypass is impossible", () => {
+  it("reference denial still gets no logo bytes", async () => {
+    mockedPermissions.mockImplementation((role, permission) => permission === "campaign.read");
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    const supabase = fakeSupabase();
+
+    await loadWith(supabase);
+
+    expect(mockedReferences).not.toHaveBeenCalled();
+    expect(mockedLogo).not.toHaveBeenCalled();
+    expect(mockedReadCampaigns.mock.calls[0]?.[0]).toMatchObject({
+      canReadArtwork: false,
+    });
+  });
+
+  it("campaign-read denial gets no poster bytes via covers or gallery", async () => {
+    mockedPermissions.mockImplementation((role, permission) =>
+      permission === "asset.read" ? true : false,
+    );
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockedReadCampaigns).not.toHaveBeenCalled();
+    expect(mockedPosters).not.toHaveBeenCalled();
+    expect(view.campaigns.status).toBe("disabled");
+    // References stay allowed (asset.read + rollout), so the gallery is ready
+    // from references alone — but no poster bytes flow via covers or gallery.
+    expect(mockedReferences).toHaveBeenCalledTimes(1);
+    expect(view.assets.status).toBe("ready");
+  });
+});
+
+describe("loader touches only database, read, and storage ports", () => {
+  it("performs no direct database, storage, or rpc work itself", async () => {
+    const supabase = fakeSupabase();
+
+    await loadWith(supabase);
+
+    expect(supabase.from).not.toHaveBeenCalled();
+    expect(supabase.storage.from).not.toHaveBeenCalled();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("same session client and organization for every read", () => {
+  it("passes the exact supabase object, organization id, correlation, and now to every reader", async () => {
+    const supabase = fakeSupabase();
+
+    await loadWith(supabase);
+
+    expect(mockedCreateRepo).toHaveBeenCalledTimes(1);
+    expect(mockedCreateRepo.mock.calls[0]?.[0]).toBe(supabase);
+    for (const call of mockedReadCampaigns.mock.calls) {
+      expect(call[0]).toMatchObject({
+        organizationId: ORG_ID,
+        correlationId: CORRELATION_ID,
+        now: NOW,
+      });
+      expect((call[0] as { database: unknown }).database).toBe(supabase);
+      expect(
+        (call[0] as { storage: { storage: unknown } }).storage.storage,
+      ).toBe(supabase.storage);
+    }
+    for (const mock of [mockedPosters, mockedReferences, mockedLogo]) {
+      expect(mock).toHaveBeenCalledTimes(1);
+      const call = mock.mock.calls[0]?.[0] as {
+        database: unknown;
+        storage: { storage: unknown };
+        organizationId: string;
+        correlationId: string;
+        now: string;
+      };
+      expect(call.organizationId).toBe(ORG_ID);
+      expect(call.correlationId).toBe(CORRELATION_ID);
+      expect(call.now).toBe(NOW);
+      expect(call.database).toBe(supabase);
+      expect(call.storage.storage).toBe(supabase.storage);
+    }
+  });
+});
+
+describe("failure isolation", () => {
+  const RAW_SENTINEL = "RAW_DB_PATH_/etc/passwd_SECRET_PAYLOAD";
+
+  it("campaigns failure keeps assets ready and serializes no raw detail", async () => {
+    mockedReadCampaigns.mockRejectedValue(
+      new DomainError("DOMAIN_ERROR", `The campaign preview could not be loaded. ${RAW_SENTINEL}`),
+    );
+    mockedPosters.mockResolvedValue([posterRecord()] as never);
+    mockedReferences.mockResolvedValue([referenceRecord()] as never);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.campaigns.status).toBe("failed");
+    expect(view.assets.status).toBe("ready");
+    expect(view.goals).toEqual([]);
+    const serialized = JSON.stringify(view);
+    expect(serialized).not.toContain(RAW_SENTINEL);
+    expect(serialized).not.toContain("/etc/passwd");
+    expect(serialized).not.toContain("storage_path");
+    expect(logger.error).toHaveBeenCalledWith(
+      "organization_home.section_read_failed",
+      expect.objectContaining({
+        organizationId: ORG_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    );
+    const logged = JSON.stringify(vi.mocked(logger.error).mock.calls);
+    expect(logged).not.toContain(RAW_SENTINEL);
+    expect(logged).not.toContain("/etc/passwd");
+  });
+
+  it("posters-only failure stays ready with partial gallery", async () => {
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    mockedPosters.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."));
+    mockedReferences.mockResolvedValue([referenceRecord()] as never);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.assets.status).toBe("ready");
+    expect(view.assetsPartial).toBe(true);
+    if (view.assets.status === "ready") expect(view.assets.data).toHaveLength(1);
+  });
+
+  it("both gallery sources failing fails assets without failing campaigns", async () => {
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    mockedPosters.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."));
+    mockedReferences.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."));
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.assets.status).toBe("failed");
+    expect(view.campaigns.status).toBe("ready");
+  });
+
+  it("logo failure degrades to null logo with everything else ready", async () => {
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    mockedPosters.mockResolvedValue([posterRecord()] as never);
+    mockedReferences.mockResolvedValue([referenceRecord()] as never);
+    mockedLogo.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home logo could not be loaded."));
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.logo).toBeNull();
+    expect(view.campaigns.status).toBe("ready");
+    expect(view.assets.status).toBe("ready");
+  });
+
+  it("ready sources carry the single request timestamp as fetchedAt", async () => {
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    mockedPosters.mockResolvedValue([posterRecord()] as never);
+    mockedReferences.mockResolvedValue([referenceRecord()] as never);
+    mockedLogo.mockResolvedValue(logoImage() as never);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.campaigns.status).toBe("ready");
+    if (view.campaigns.status === "ready") expect(view.campaigns.fetchedAt).toBe(NOW);
+    expect(view.assets.status).toBe("ready");
+    if (view.assets.status === "ready") expect(view.assets.fetchedAt).toBe(NOW);
+    expect(view.logo).not.toBeNull();
+  });
+});
