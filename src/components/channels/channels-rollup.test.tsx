@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -125,6 +126,24 @@ function view(overrides: Partial<ChannelsOverviewView> = {}): ChannelsOverviewVi
 
 function ready(overrides: Partial<ChannelsOverviewView> = {}): ChannelsLandingAnalysis {
   return { state: "ready", view: view(overrides) };
+}
+
+/** Range navigation the page builds from the same evidence reads as the windows. */
+const RANGE = {
+  segments: [{ start: "2026-01-01", end: "2026-03-31" }],
+  coverageWindows: [
+    {
+      windowStart: "2026-02-01",
+      windowEnd: "2026-02-28",
+      grain: "month" as const,
+      governedRowCount: 20,
+    },
+  ],
+  today: "2026-03-15",
+};
+
+function readyWithRange(overrides: Partial<ChannelsOverviewView> = {}): ChannelsLandingAnalysis {
+  return { state: "ready", view: view(overrides), range: RANGE };
 }
 
 afterEach(cleanup);
@@ -280,6 +299,39 @@ describe("ChannelsRollup", () => {
 
     expect(screen.getByRole("region", { name: "Channel portfolio analysis" })).toBeInTheDocument();
     expect(screen.queryByText("Loading reporting window…")).toBeNull();
+  });
+
+  it("shows the free-range picker instead of the dropdown when range navigation is present", () => {
+    render(<ChannelsRollup organizationId="org-1" analysis={readyWithRange()} />);
+
+    expect(screen.getByRole("button", { name: /2026-02-01 to 2026-02-28/ })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Reporting period" })).toBeNull();
+  });
+
+  it("applies a picked range as from/to and drops the legacy window param", async () => {
+    const user = userEvent.setup();
+    render(<ChannelsRollup organizationId="org-1" analysis={readyWithRange()} />);
+
+    await user.click(screen.getByRole("button", { name: /2026-02-01 to 2026-02-28/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(nav.push).toHaveBeenCalledTimes(1);
+    const url = nav.push.mock.calls[0]?.[0] as string;
+    expect(url).toContain("from=2026-02-01");
+    expect(url).toContain("to=2026-02-28");
+    expect(url).not.toContain("window=");
+  });
+
+  it("seeds the picker from the newest declared window when the URL resolved nothing", () => {
+    render(
+      <ChannelsRollup organizationId="org-1" analysis={readyWithRange({ selectedWindow: null })} />,
+    );
+
+    // The baseline only seeds the calendar draft; no figure from another
+    // window is shown above the unresolved request.
+    expect(screen.getByRole("button", { name: /2026-03-01 to 2026-03-31/ })).toBeInTheDocument();
+    expect(screen.getByText("Choose a reporting window.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Channel performance summary" })).toBeNull();
   });
 
   it("shows the February reference strip with exact totals and counts", () => {

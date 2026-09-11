@@ -1,8 +1,13 @@
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { ChannelsManagement } from "@/components/channels/channels-management";
 import type { ChannelsLandingAnalysis } from "@/components/channels/channels-presentation";
-import { parseChannelsWindow } from "@/components/channels/channels-presentation";
+import {
+  parseChannelsDateRange,
+  parseChannelsWindow,
+} from "@/components/channels/channels-presentation";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
+import type { AnalysisGrain } from "@/domain/analysis/types";
+import { isWindowCovered, type CoverageWindow } from "@/domain/analysis/window-selection";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { logger } from "@/lib/logger";
@@ -10,6 +15,7 @@ import {
   buildChannelsOverviewView,
   buildOverviewWindows,
   resolveDefaultWindow,
+  resolveOverviewWindow,
 } from "@/modules/analysis/application/channels-overview";
 import {
   ChannelAnalysisReadError,
@@ -18,6 +24,20 @@ import {
 import { createChannelService } from "@/modules/channels/application/service";
 import { createAuthenticatedChannelRepository } from "@/modules/channels/infrastructure/repository";
 import { isGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
+
+/**
+ * Today, as the organization's own calendar reads it. `en-CA` renders
+ * `YYYY-MM-DD`, the shape every date on this page already uses. An unusable
+ * zone falls back to UTC rather than failing the whole page -- the picker
+ * presets degrade by hours, nothing else reads this value.
+ */
+function todayInZone(timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "UTC" }).format(new Date());
+  }
+}
 
 /**
  * Keep the diagnostic log free of tenant text. Postgres codes (`42501`) and
@@ -33,7 +53,7 @@ export default async function ChannelsPage({
   searchParams,
 }: {
   params: Promise<{ organizationId: string }>;
-  searchParams: Promise<{ window?: string }>;
+  searchParams: Promise<{ window?: string; from?: string; to?: string }>;
 }) {
   const context = await getOrganizationContext(params);
   const organization = await getOrganization(context.supabase, context.organizationId);
@@ -54,25 +74,62 @@ export default async function ChannelsPage({
   if (workspaceEnabled) {
     try {
       const repository = createAuthenticatedChannelAnalysisRepository(context.supabase);
-      const [evidenceWindows, analysedKeys] = await Promise.all([
+      const [evidenceWindows, analysedKeys, segments] = await Promise.all([
         repository.loadEvidenceWindows({
           organizationId: context.organizationId,
           channelId: null,
           limit: 24,
         }),
         repository.loadAnalysedWindowKeys({ organizationId: context.organizationId }),
+        repository.loadCoverageSegments({
+          organizationId: context.organizationId,
+          channelId: null,
+        }),
       ]);
+      const coverageWindows: CoverageWindow[] = evidenceWindows.map((window) => ({
+        windowStart: window.windowStart,
+        windowEnd: window.windowEnd,
+        grain: window.grain,
+        governedRowCount: window.governedRowCount,
+      }));
 
       // The page resolves which window to answer for before reading any band,
       // because a band read is scoped to one window and the read model cannot
-      // infer which one it was given afterwards. The default resolver runs
+      // infer which one it was given afterwards. A free `?from=&to=` the
+      // approved reports fully cover resolves to exactly one declared window
+      // (grain included); a covered range with no exact declared window, or a
+      // range outside coverage, falls through to the legacy value and then
+      // the default -- never widened or snapped. The default resolver runs
       // only when the URL does not parse; a URL that parses but names no
       // declared window stays explicitly unresolved (`selectedWindow: null`)
       // so the landing suppresses figures instead of showing fallback ones.
-      const requested = parseChannelsWindow((await searchParams).window);
+      const params = await searchParams;
       const declared = buildOverviewWindows(evidenceWindows);
-      const selected =
-        requested ?? resolveDefaultWindow({ windows: declared, analysed: analysedKeys });
+      const freeRange = parseChannelsDateRange(params.from, params.to);
+      let selected: {
+        windowStart: string;
+        windowEnd: string;
+        grain: AnalysisGrain;
+      } | null = null;
+      if (freeRange !== null && isWindowCovered(freeRange.from, freeRange.to, segments)) {
+        const resolution = resolveOverviewWindow({
+          from: freeRange.from,
+          to: freeRange.to,
+          evidenceWindows,
+          analysed: analysedKeys,
+        });
+        selected =
+          resolution.kind === "resolved"
+            ? {
+                windowStart: resolution.windowStart,
+                windowEnd: resolution.windowEnd,
+                grain: resolution.grain,
+              }
+            : null;
+      } else {
+        const requested = parseChannelsWindow(params.window);
+        selected = requested ?? resolveDefaultWindow({ windows: declared, analysed: analysedKeys });
+      }
 
       const bands = selected
         ? await repository.loadChannelBandsForWindow({
@@ -83,6 +140,11 @@ export default async function ChannelsPage({
           })
         : [];
 
+      const timeZone =
+        typeof organization.default_timezone === "string" &&
+        organization.default_timezone.length > 0
+          ? organization.default_timezone
+          : "UTC";
       analysis = {
         state: "ready",
         view: buildChannelsOverviewView({
@@ -91,6 +153,11 @@ export default async function ChannelsPage({
           evidenceWindows,
           selected,
         }),
+        range: {
+          segments,
+          coverageWindows,
+          today: todayInZone(timeZone),
+        },
       };
     } catch (error) {
       // Only a known analysis-read failure degrades to `unavailable` with the

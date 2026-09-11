@@ -9,6 +9,7 @@ import { ChannelIcon } from "@/components/channels/channel-icons";
 import type {
   ChannelsLandingAnalysis,
   ChannelsPortfolioPresentation,
+  ChannelsRangeNavigation,
 } from "@/components/channels/channels-presentation";
 import {
   buildChannelsPortfolioPresentation,
@@ -42,7 +43,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
+import { PageContentLoader } from "@/components/ui/page-content-loader";
+import { WindowRangePicker } from "@/components/analysis/window-range-picker";
 import type {
   ChannelsOverviewView,
   ChannelsOverviewWindow,
@@ -326,9 +328,12 @@ function UnavailableRollup() {
 function ReadyRollup({
   organizationId,
   view,
+  range,
 }: {
   organizationId: string;
   view: ChannelsOverviewView;
+  /** Free-range navigation from the page; null keeps the declared-window dropdown. */
+  range: ChannelsRangeNavigation | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -346,10 +351,35 @@ function ReadyRollup({
   const onWindowChange = (value: string) => {
     const params = new URLSearchParams(searchParams?.toString() ?? "");
     params.set("window", value);
+    params.delete("from");
+    params.delete("to");
     startTransition(() => {
       router.push(`/organizations/${organizationId}/channels?${params.toString()}`);
     });
   };
+
+  // A free range becomes the `?from=&to=` the page resolves to exactly one
+  // declared window; the legacy `window` param is dropped so the two can
+  // never disagree about which question the figures answer.
+  const onRangeApply = (selection: { from: string; to: string }) => {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.set("from", selection.from);
+    params.set("to", selection.to);
+    params.delete("window");
+    startTransition(() => {
+      router.push(`/organizations/${organizationId}/channels?${params.toString()}`);
+    });
+  };
+
+  // The picker needs a baseline selection to display; the resolved window is
+  // it, and the newest declared window stands in on the rare unresolved URL
+  // (figures stay suppressed -- the baseline only seeds the calendar draft).
+  const pickerSelected =
+    selected !== null
+      ? { from: selected.windowStart, to: selected.windowEnd }
+      : view.windows[0] !== undefined
+        ? { from: view.windows[0].windowStart, to: view.windows[0].windowEnd }
+        : null;
 
   if (view.windows.length === 0) {
     return (
@@ -363,32 +393,48 @@ function ReadyRollup({
   }
 
   return (
-    <section aria-label="Channel portfolio analysis" className="grid gap-4">
+    <section aria-label="Channel portfolio analysis" className="relative grid gap-4">
       <div className="mt-7 mb-[23px] flex flex-wrap items-center justify-between gap-3 max-[650px]:mt-6 max-[650px]:mb-[18px]">
         <div className="flex items-center gap-2.5">
-          <Select value={selected?.value ?? ""} onValueChange={onWindowChange} disabled={isPending}>
-            <SelectTrigger
-              aria-label="Reporting period"
-              className="min-h-[38px] border-input bg-card px-2.5 text-xs font-semibold"
+          {range !== null && pickerSelected !== null ? (
+            <WindowRangePicker
+              segments={range.segments}
+              windows={range.coverageWindows}
+              selected={pickerSelected}
+              today={range.today}
+              onApply={onRangeApply}
+              disabled={isPending}
+              subjectLabel="The approved channel reports state"
+            />
+          ) : (
+            <Select
+              value={selected?.value ?? ""}
+              onValueChange={onWindowChange}
+              disabled={isPending}
             >
-              <ChannelIcon name="calendar" className="size-[15px] text-muted-foreground" />
-              <SelectValue
-                placeholder="Choose a reporting window"
-                className="max-w-[165px] truncate"
-              />
-            </SelectTrigger>
-            <SelectContent
-              className={`${styles.theme} max-h-[300px] min-w-[var(--radix-select-trigger-width)]`}
-            >
-              <SelectGroup>
-                {view.windows.map((entry) => (
-                  <SelectItem key={entry.value} value={entry.value}>
-                    {formatChannelsWindowOption(entry, view.windows)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+              <SelectTrigger
+                aria-label="Reporting period"
+                className="min-h-[38px] border-input bg-card px-2.5 text-xs font-semibold"
+              >
+                <ChannelIcon name="calendar" className="size-[15px] text-muted-foreground" />
+                <SelectValue
+                  placeholder="Choose a reporting window"
+                  className="max-w-[165px] truncate"
+                />
+              </SelectTrigger>
+              <SelectContent
+                className={`${styles.theme} max-h-[300px] min-w-[var(--radix-select-trigger-width)]`}
+              >
+                <SelectGroup>
+                  {view.windows.map((entry) => (
+                    <SelectItem key={entry.value} value={entry.value}>
+                      {formatChannelsWindowOption(entry, view.windows)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          )}
           <p className="text-[11px] text-muted-foreground">
             {selected ? scopeCaptionFor(portfolio) : "Reported scope"}
           </p>
@@ -415,10 +461,10 @@ function ReadyRollup({
       </div>
 
       {isPending ? (
-        <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Spinner className="size-3.5" />
-          Loading reporting window…
-        </p>
+        <PageContentLoader
+          title="Loading reporting window…"
+          detail="Fetching the channel figures for the selected dates."
+        />
       ) : null}
 
       {selected ? (
@@ -488,5 +534,11 @@ export function ChannelsRollup({
 }) {
   if (analysis.state === "disabled") return null;
   if (analysis.state === "unavailable") return <UnavailableRollup />;
-  return <ReadyRollup organizationId={organizationId} view={analysis.view} />;
+  return (
+    <ReadyRollup
+      organizationId={organizationId}
+      view={analysis.view}
+      range={analysis.range ?? null}
+    />
+  );
 }

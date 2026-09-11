@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { AnalysisMoney } from "@/domain/analysis/money-split";
 import type { AnalysisGrain } from "@/domain/analysis/types";
+import type { CoverageSegment, CoverageWindow } from "@/domain/analysis/window-selection";
 import type {
   ChannelsOverviewRow,
   ChannelsOverviewView,
@@ -24,7 +25,21 @@ import type { OrganizationChannelRow } from "@/modules/channels/application/port
 export type ChannelsLandingAnalysis =
   | { state: "disabled" }
   | { state: "unavailable" }
-  | { state: "ready"; view: ChannelsOverviewView };
+  | { state: "ready"; view: ChannelsOverviewView; range?: ChannelsRangeNavigation };
+
+/**
+ * Free-range navigation for the reporting-period picker, built by the page
+ * from the same evidence reads as the declared windows, so the calendar can
+ * only offer what the approved reports cover. Optional so degraded states
+ * keep the declared-window dropdown instead of crashing; the toolbar falls
+ * back to it whenever this is absent.
+ */
+export type ChannelsRangeNavigation = {
+  segments: readonly CoverageSegment[];
+  coverageWindows: readonly CoverageWindow[];
+  /** Today on the organization's calendar; drives the picker's presets. */
+  today: string;
+};
 
 /** Active-portfolio summary. Owns sums and presentation decisions, no analysis. */
 export type ChannelsPortfolioPresentation = {
@@ -375,6 +390,24 @@ export function parseChannelsWindow(value: string | undefined): ParsedChannelsWi
   const parsedGrain = WINDOW_GRAIN_SCHEMA.safeParse(grain);
   if (!parsedGrain.success) return null;
   return { windowStart, windowEnd, grain: parsedGrain.data };
+}
+
+/**
+ * Parse a free `?from=&to=` range.
+ *
+ * Strict ISO dates with end >= start; anything else -- including undefined --
+ * returns null so the page falls through to the legacy window or its default.
+ * A pure syntax gate: whether the range is covered is checked by the page
+ * against the loaded segments, never here.
+ */
+export function parseChannelsDateRange(
+  from: string | undefined,
+  to: string | undefined,
+): { from: string; to: string } | null {
+  if (!from || !to) return null;
+  if (!isStrictIsoDate(from) || !isStrictIsoDate(to)) return null;
+  if (to < from) return null;
+  return { from, to };
 }
 
 function parseIsoParts(value: string): { year: number; month: number; day: number } {

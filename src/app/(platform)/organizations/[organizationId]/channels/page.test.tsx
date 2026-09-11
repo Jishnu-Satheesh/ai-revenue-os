@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   loadEvidenceWindows: vi.fn(),
   loadChannelBandsForWindow: vi.fn(),
   loadAnalysedWindowKeys: vi.fn(),
+  loadCoverageSegments: vi.fn(),
   isEnabled: vi.fn(),
   loggerWarn: vi.fn(),
   lastManagementProps: null as null | Record<string, unknown>,
@@ -56,6 +57,7 @@ vi.mock("@/modules/analysis/infrastructure/read-repository", () => ({
     loadEvidenceWindows: mocks.loadEvidenceWindows,
     loadChannelBandsForWindow: mocks.loadChannelBandsForWindow,
     loadAnalysedWindowKeys: mocks.loadAnalysedWindowKeys,
+    loadCoverageSegments: mocks.loadCoverageSegments,
   }),
 }));
 
@@ -130,10 +132,10 @@ const spanEvidence = {
 
 const spanKey = { windowStart: "2026-01-01", windowEnd: "2026-02-28", grain: "span" };
 
-function pageProps(window?: string) {
+function pageProps(params?: { window?: string; from?: string; to?: string }) {
   return {
     params: Promise.resolve({ organizationId: ORGANIZATION }),
-    searchParams: Promise.resolve(window === undefined ? {} : { window }),
+    searchParams: Promise.resolve(params ?? {}),
   };
 }
 
@@ -169,6 +171,7 @@ beforeEach(() => {
   mocks.loadEvidenceWindows.mockResolvedValue([]);
   mocks.loadChannelBandsForWindow.mockResolvedValue([]);
   mocks.loadAnalysedWindowKeys.mockResolvedValue([]);
+  mocks.loadCoverageSegments.mockResolvedValue([]);
   mocks.isEnabled.mockReturnValue(true);
 });
 
@@ -200,6 +203,7 @@ describe("ChannelsPage", () => {
     expect(mocks.loadEvidenceWindows).not.toHaveBeenCalled();
     expect(mocks.loadChannelBandsForWindow).not.toHaveBeenCalled();
     expect(mocks.loadAnalysedWindowKeys).not.toHaveBeenCalled();
+    expect(mocks.loadCoverageSegments).not.toHaveBeenCalled();
     expect(screen.getByTestId("management-shell")).toHaveAttribute(
       "data-analysis-state",
       "disabled",
@@ -209,7 +213,7 @@ describe("ChannelsPage", () => {
   it("reads bands for exactly the window named in the query string", async () => {
     mocks.loadEvidenceWindows.mockResolvedValueOnce([febEvidence]);
 
-    await ChannelsPage(pageProps("2026-02-01..2026-02-28..month"));
+    await ChannelsPage(pageProps({ window: "2026-02-01..2026-02-28..month" }));
 
     expect(mocks.loadChannelBandsForWindow).toHaveBeenCalledWith({
       organizationId: ORGANIZATION,
@@ -226,7 +230,7 @@ describe("ChannelsPage", () => {
     mocks.loadEvidenceWindows.mockResolvedValueOnce([spanEvidence, febEvidence]);
     mocks.loadAnalysedWindowKeys.mockResolvedValueOnce([spanKey]);
 
-    await ChannelsPage(pageProps("2026-01-01..2026-02-28..span"));
+    await ChannelsPage(pageProps({ window: "2026-01-01..2026-02-28..span" }));
 
     expect(mocks.loadChannelBandsForWindow).toHaveBeenCalledWith({
       organizationId: ORGANIZATION,
@@ -244,7 +248,7 @@ describe("ChannelsPage", () => {
     mocks.loadEvidenceWindows.mockResolvedValueOnce([janEvidence, febEvidence]);
     mocks.loadAnalysedWindowKeys.mockResolvedValueOnce([febKey]);
 
-    const page = await ChannelsPage(pageProps(value));
+    const page = await ChannelsPage(pageProps({ window: value }));
     render(page);
 
     // The default resolver picks the newest analysed window: February.
@@ -261,7 +265,7 @@ describe("ChannelsPage", () => {
     mocks.loadEvidenceWindows.mockResolvedValueOnce([febEvidence]);
     mocks.loadAnalysedWindowKeys.mockResolvedValueOnce([febKey]);
 
-    const page = await ChannelsPage(pageProps("2026-05-01..2026-05-31..month"));
+    const page = await ChannelsPage(pageProps({ window: "2026-05-01..2026-05-31..month" }));
     render(page);
 
     // The URL parses, so the default resolver must not run: bands are read
@@ -339,10 +343,109 @@ describe("ChannelsPage", () => {
   it("ignores a malformed window parameter rather than reading a nonsense window", async () => {
     mocks.loadEvidenceWindows.mockResolvedValueOnce([]);
 
-    await ChannelsPage(pageProps("not-a-window"));
+    await ChannelsPage(pageProps({ window: "not-a-window" }));
 
     // No declared windows and an unparseable parameter means there is nothing
     // to band, so no band read is made at all.
     expect(mocks.loadChannelBandsForWindow).not.toHaveBeenCalled();
+  });
+
+  it("resolves a covered free range to its declared window and hands the picker its coverage", async () => {
+    mocks.loadEvidenceWindows.mockResolvedValueOnce([janEvidence, febEvidence]);
+    mocks.loadAnalysedWindowKeys.mockResolvedValueOnce([febKey]);
+    mocks.loadCoverageSegments.mockResolvedValueOnce([{ start: "2026-01-01", end: "2026-02-28" }]);
+
+    const page = await ChannelsPage(pageProps({ from: "2026-02-01", to: "2026-02-28" }));
+    render(page);
+
+    expect(mocks.loadChannelBandsForWindow).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-02-01",
+      windowEnd: "2026-02-28",
+      grain: "month",
+    });
+    const analysis = mocks.lastManagementProps?.analysis as {
+      state: string;
+      range: {
+        segments: unknown;
+        coverageWindows: unknown;
+        today: unknown;
+      };
+    };
+    expect(analysis.range.segments).toEqual([{ start: "2026-01-01", end: "2026-02-28" }]);
+    expect(analysis.range.coverageWindows).toEqual([
+      {
+        windowStart: "2026-01-01",
+        windowEnd: "2026-01-31",
+        grain: "month",
+        governedRowCount: 20,
+      },
+      {
+        windowStart: "2026-02-01",
+        windowEnd: "2026-02-28",
+        grain: "month",
+        governedRowCount: 20,
+      },
+    ]);
+    expect(analysis.range.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("prefers the free range over a legacy window parameter", async () => {
+    mocks.loadEvidenceWindows.mockResolvedValueOnce([janEvidence, febEvidence]);
+    mocks.loadAnalysedWindowKeys.mockResolvedValueOnce([febKey]);
+    mocks.loadCoverageSegments.mockResolvedValueOnce([{ start: "2026-01-01", end: "2026-02-28" }]);
+
+    await ChannelsPage(
+      pageProps({
+        window: "2026-02-01..2026-02-28..month",
+        from: "2026-01-01",
+        to: "2026-01-31",
+      }),
+    );
+
+    // January is covered and declared, so the free range wins over February.
+    expect(mocks.loadChannelBandsForWindow).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-31",
+      grain: "month",
+    });
+  });
+
+  it("falls through to the legacy window when the free range is outside coverage", async () => {
+    mocks.loadEvidenceWindows.mockResolvedValueOnce([janEvidence, febEvidence]);
+    mocks.loadAnalysedWindowKeys.mockResolvedValueOnce([febKey]);
+    mocks.loadCoverageSegments.mockResolvedValueOnce([{ start: "2026-01-01", end: "2026-01-31" }]);
+
+    await ChannelsPage(
+      pageProps({
+        window: "2026-01-01..2026-01-31..month",
+        from: "2026-02-01",
+        to: "2026-02-28",
+      }),
+    );
+
+    // February is outside the loaded coverage, so the January window param
+    // answers instead of a snapped or widened range.
+    expect(mocks.loadChannelBandsForWindow).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-31",
+      grain: "month",
+    });
+  });
+
+  it("leaves a covered range with no exact declared window explicitly unresolved", async () => {
+    mocks.loadEvidenceWindows.mockResolvedValueOnce([febEvidence]);
+    mocks.loadAnalysedWindowKeys.mockResolvedValueOnce([febKey]);
+    mocks.loadCoverageSegments.mockResolvedValueOnce([{ start: "2026-02-01", end: "2026-02-28" }]);
+
+    const page = await ChannelsPage(pageProps({ from: "2026-02-10", to: "2026-02-20" }));
+    render(page);
+
+    // Mid-February is covered but no declared window has those exact dates,
+    // so no band is read and the landing suppresses figures.
+    expect(mocks.loadChannelBandsForWindow).not.toHaveBeenCalled();
+    expect(screen.getByTestId("management-shell")).toHaveAttribute("data-selected-window", "null");
   });
 });

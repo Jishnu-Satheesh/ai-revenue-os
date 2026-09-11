@@ -16,6 +16,7 @@ import {
   countChannelDirectoryFilters,
   formatChannelsWindowOption,
   labelForChannelCategory,
+  parseChannelsDateRange,
   parseChannelsWindow,
   selectChannelDirectoryRows,
 } from "@/components/channels/channels-presentation";
@@ -414,6 +415,26 @@ describe("parseChannelsWindow", () => {
   it("rejects unknown grains", () => {
     expect(parseChannelsWindow("2026-02-01..2026-02-28..year")).toBeNull();
     expect(parseChannelsWindow("2026-02-01..2026-02-28..")).toBeNull();
+  });
+});
+
+describe("parseChannelsDateRange", () => {
+  it("parses a free from/to range for the picker", () => {
+    expect(parseChannelsDateRange("2026-02-01", "2026-02-28")).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
+  });
+
+  it("rejects a free range with missing or malformed ends", () => {
+    expect(parseChannelsDateRange(undefined, "2026-02-28")).toBeNull();
+    expect(parseChannelsDateRange("2026-02-01", undefined)).toBeNull();
+    expect(parseChannelsDateRange("2026-13-40", "2026-02-28")).toBeNull();
+    expect(parseChannelsDateRange("2026-02-01", "not-a-date")).toBeNull();
+  });
+
+  it("rejects a free range that ends before it starts", () => {
+    expect(parseChannelsDateRange("2026-02-28", "2026-02-01")).toBeNull();
   });
 });
 
