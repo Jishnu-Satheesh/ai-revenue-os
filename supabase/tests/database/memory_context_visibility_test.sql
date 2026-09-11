@@ -140,8 +140,14 @@ select extensions.is(
   0, 'a member of another tenant reads no manifests');
 
 reset role;
+-- Revoke fully: the platform resolves access as a union of grants (ADR 0022),
+-- so the account-level default role would keep granting org access after the
+-- org override row alone is deleted. Both rows go.
 delete from public.organization_memberships
 where organization_id = 'fb390000-0000-4000-8000-000000000211'
+  and user_id = 'fb390000-0000-4000-8000-000000000012';
+delete from public.account_memberships
+where account_id = 'fb390000-0000-4000-8000-000000000111'
   and user_id = 'fb390000-0000-4000-8000-000000000012';
 set local role authenticated;
 set local request.jwt.claim.sub = 'fb390000-0000-4000-8000-000000000012';

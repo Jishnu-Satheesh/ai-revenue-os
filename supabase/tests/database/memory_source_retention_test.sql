@@ -170,13 +170,19 @@ select extensions.is(
      and entity_id = 'fb390000-0000-4000-8000-000000000384'),
   'fb39 rights request', 'the audit row carries the reason');
 
--- Descendant retrieval is blocked after erasure.
+-- Descendant retrieval is blocked after erasure. Revalidation is a worker
+-- path (service_role only); the surrounding session is an authenticated
+-- member, so switch roles for this call and restore after.
+set local role service_role;
 select extensions.is(
   (select public.revalidate_memory_context(
     'fb390000-0000-4000-8000-000000000221',
     (select id from public.memory_context_manifests where attempt_key = 'fb39-retention')
   ) ->> 'status'),
   'revoked', 'post-erasure revalidation reports revoked');
+reset role;
+set local role authenticated;
+set local request.jwt.claim.sub = 'fb390000-0000-4000-8000-000000000021';
 
 -- Erasure by direct item identity ------------------------------------------------------------------
 select extensions.is(

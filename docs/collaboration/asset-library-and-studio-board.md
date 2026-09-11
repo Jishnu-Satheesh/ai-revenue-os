@@ -224,6 +224,7 @@ Effort is `model_reasoning_effort` in Codex. Raise it, never lower it, if you ar
 | S7   | Studio Task 7: annotated editing domain + union compositing — claimed: new `src/domain/campaigns/plate-edit.ts` + test, new `src/modules/campaigns/infrastructure/plate-compositor.ts` + test | claude | high | S4 | **done — 28 tests; byte-identical guarantee proved to bite on a single leaked byte** |
 | S8   | Studio Task 8: the edit worker — claimed: new `src/workflows/campaigns/edit-plate.ts` + test, new `src/modules/campaigns/infrastructure/plate-edit-prompt.ts`, `src/workflows/campaigns/contracts.ts` | claude | high | S7 | **done — adapters written and `campaign.edit-plate` registered 2026-09-06; dispatched for real, 926,076 pixels outside the mark unchanged. Row was stale until 2026-09-07** |
 | S9   | Execution-loop deploy + proof, and the four defects a real-member browser walk found — claimed: `supabase/migrations/20260907050000_*`, `20260907051500_*`, `src/domain/campaigns/{measurement,state-machine}.ts`, `src/modules/campaigns/{application/{ports,service},infrastructure/{repository,studio-reader,learning-drafter}}.ts`, `src/components/campaigns/campaign-studio.tsx` | claude | high | S8 | **done — prod `v20260907.2`; 5/5 workers reached a verdict; both migrations applied and the replaced function executed on staging; 4333 tests, typecheck, lint and format green; browser gate passed at 1440 and 390** |
+| OH0  | Organization home Task 0 reconcile + claimed Tasks 1–7 paths (Track A lower-home only; Track B revenue spec-first) — Task 0 owns: `docs/verification/organization-home/progress.md`, this board row, `.superpowers/sdd/2026-09-11-organization-home-implementation/task-0-report.md`. Tasks 1–7 intend: `src/modules/campaigns/application/home-preview-types.ts`, `src/modules/organizations/application/home-types.ts`, `home-service.ts` + test, `src/modules/campaigns/infrastructure/home-campaign-reader.ts` + test, `home-preview-storage.ts` + test, `home-asset-reader.ts` + test, `src/modules/organizations/infrastructure/home-loader.ts` + test, `src/components/organizations/home/*.tsx` + `organization-home.module.css` + tests, `src/app/(platform)/organizations/[organizationId]/overview/page.tsx` + `loading.tsx` + `page.test.tsx`, `e2e/organization-home.spec.ts`, `README.md` + `context/05-module-map.md` entries. No migration, no `database.types.ts`, no new endpoint/worker, no model call. Prior rows are history, not locks | muse-code | high | authorized plan 2026-09-11-organization-home-implementation + growth-feasibility spec | **in-progress — Task 0; Tasks 1–7 todo** |
 
 ### Why the xhigh tasks are xhigh
 
@@ -6431,6 +6432,10 @@ through the real routes, not only in tests.
 - Staging: cursor migration pushed; cursor 44, channel capture 76, runtime 34 — all green. Rulings: unknown errors TRANSIENT_DB bounded at 5; steady-state rescan accepted; embeddings due-scan deferred to later slice.
 - Open gate: first real scheduled reconcile pass still unwitnessed — pgTAP proves callability only.
 
+### 2026-09-11 — Spec 023 Task C dispatched (manifests + assembly, SDD)
+
+- Brief `task-C-brief.md`, BASE 655dad1. Scope: manifests/entries tables + prepare/revalidate/consume RPCs, subject-operation binding, retention erasure, context assembler with budgets, current-state reader, pgTAP + vitest. No consumer wiring, no UI, no new permissions. Implementer drafts, dry-runs, never pushes.
+
 ### 2026-09-11 — Channels free-range picker + loader (approved plan, implemented)
 
 - User: same free from/to calendar as GI/Channel Audit (limited to reported coverage); GI full-page spinner over content (not navbar/side menu) instead of blank while the new dates load.
@@ -6447,3 +6452,48 @@ through the real routes, not only in tests.
 - Inspected current marketing UI in a signed-out browser, root split, tokens/primitives, current invitation sender, fail-open analysis limiter and proxy. Studied Linear, Attio, Raycast and Ramp directly; reference browser limitations are documented in research.
 - Narrow future implementation includes a fixed-recipient endpoint, strict input, fail-closed distributed allowances, safe error/log behavior and provider idempotency. No lead database, tenant query, worker, CRM, autoresponder or migration. Real service-inbox setup and live confirmation remain implementation acceptance gates.
 - This session changed documentation only; no contact email sent, no secrets configured, no production UI/API code written. Unrelated organization-home, memory and channels work preserved.
+
+### 2026-09-11 — Growth Intelligence Your actions tab gap closure (approved plan, implemented)
+
+- User approved the lean plan to bring the live Your actions tab to the planned prototype; tab counts explicitly out of scope.
+- Claim: `src/modules/growth-intelligence/application/read-model.ts` (timeline scope fields + YourActionFilter helpers), `src/components/growth-intelligence/growth-intelligence-workspace.tsx` (actions tab mounts YourActionsTab), new `your-actions-filter.tsx`, `your-actions-list.tsx`, `your-actions-tab.tsx`, `campaign-preparation-card.tsx`, tests for each plus read-model filter tests. No migrations, no new routes, no RLS change.
+- Behavior: header plus explainer, All/Planned/Acknowledged/Snoozed/Dismissed pills mirrored to ?decision with month links preserved, named rows with scope plus activity date plus snooze horizon, Planned emphasized in emerald, Campaign preparation with preparing/ready-link/retry/terminal states from owning-module draft requests, research and draft rows under All only.
+- Gates: 38 new/updated tests green, full growth-intelligence suites green (128 component, 345 module), eslint clean on touched files, prettier applied. `pnpm typecheck` still reports pre-existing failures in untouched files (memory context-service tests, memory current-state-reader, intelligence-card statusPath); none from this change. Stale `.next/dev` generated types removed to unblock the check.
+- Tenant isolation: no new reads or writes; filter and campaign block derive from the existing org-scoped workspace view, actor preferences stay server-side. Tab badges untouched.
+
+### 2026-09-11 — Your actions review follow-up (strict sub-agent review, fixes applied)
+
+- Reviewer verdict was FAIL with 2 MAJORs. One stood, one fell on evidence.
+- Real bug fixed: a completed draft with no stored campaign id fell through to the terminal branch and misread as Could not prepare. New explicit Draft ready branch with honest copy, plus tests for it and for cancelled. `campaign-preparation-card.tsx` only.
+- Misattributed finding refuted: the supportedActions/Top-Recommendations restyle was already in the working tree before this change (present in the first pre-edit reads of `read-model.ts` and `growth-intelligence-workspace.tsx`); `intelligence-card.tsx` and `priority-actions.tsx` were never touched by this change. Concurrent-session work in the shared tree, not scope creep. Verified via `git diff` hunk inspection.
+- Also applied: resolved rows pinned by test as All-only (no Resolved pill, matching the prototype), dismissed-positive filter test, ?decision URL-init tests via hoisted search mock, role=status on the empty state.
+- Deliberately kept: All channels · all locations fallback (matches the approved prototype; never invents a specific name), month links dropping non-month params (parity with the existing changeTab pattern), no back/forward resync effect (a resync would fight the replaceState click flow, same as existing tabs).
+- Gates after fixes: 44 files, 484 tests green across components plus growth-intelligence modules; eslint and prettier clean on all touched files.
+
+### 2026-09-11 — Organization home Task 0 reconcile (docs only, muse-code)
+
+- Ledger at `docs/verification/organization-home/progress.md`: HEAD `9083e35`, all 16
+  design-time source hashes drifted but investigated and non-blocking (14 files are
+  committed-clean with zero intervening commits, so the mismatch is discarded
+  design-time dirt; `globals.css`/`database.types.ts` moved via unrelated
+  style/memory commits), consumed seams verified present, shell recorded (header
+  64px, main owns scroll, inner max 1440px), baseline slice 49/49 exit 0, read-only
+  `information_schema` subset 57/57 present.
+- Added OH0 row claiming Tasks 1–7 intended paths (Track A lower-home only). No `src/`
+  edits, no migration, no stash, no push. Dirty peer files (growth-intelligence,
+  memory, public-landing, channels) preserved untouched.
+- Next: reviewer checks this ledger, then Task 1 defines preview contracts test-first.
+
+### 2026-09-11 — Organization home Track B revenue scenario proposal (docs only, Track B implementer)
+
+- Proposed revenue-scenario spec at `docs/superpowers/specs/2026-09-11-organization-home-revenue-scenario.md`
+  (Proposed, needs user approval) plus ADR draft at `docs/superpowers/plans/2026-09-11-organization-home-revenue-adr-draft.md`
+  (draft, not in `adrs/`). Covers outcome definition, 30-day default horizon, cutoff/freshness,
+  baseline selection rule, per-action estimators, common baseline, no-double-counting,
+  reconciliation, "not yet quantified" states, persistence proposal, scenario ranges, and
+  co-decision recommendations (feasible-set membership, 30-day horizon).
+- Read-only seam citations only: channels-overview, money-split, orders-cancellation-loss,
+  revenue-period-movement, decisions value, campaign-draft-impact, campaigns measurement,
+  synthesis-service overlap checks, campaign-evidence-repository (`impactEvidence: null`).
+  No `src/` edits, no migration, no stash, no commit (left uncommitted for review).
+- Next: user approves spec/ADR, then calculation contract + execution plan follow.
