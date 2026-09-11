@@ -138,9 +138,12 @@ select extensions.is(
 
 -- Completion -------------------------------------------------------------------------------
 
--- The registry check comes after flags: enable capture so the quarantine path is reached.
+-- The registry check comes after flags: enable capture and temporarily
+-- unregister the kind (adapter slices own these rows; the suite transaction
+-- rolls everything back) so the quarantine branch is reached.
 insert into public.memory_integration_settings (organization_id, capture_enabled) values
   ('fb360000-0000-4000-8000-000000000201'::uuid, true);
+delete from public.memory_capture_adapters where source_kind = 'channel_finding';
 
 select extensions.is(
   (select public.complete_memory_capture_event('fb360000-0000-4000-8000-000000000201', 'fb360000-0000-4000-8000-000000000804', 'fb360000-0000-4000-8000-000000000a01') ->> 'status'),
