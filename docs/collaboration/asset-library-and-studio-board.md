@@ -6421,6 +6421,16 @@ through the real routes, not only in tests.
 - Regression green: analysis, recommendations storage/fence/decisions/evaluations, all Task-02 suites, catalogue, grounded consent.
 - Rulings: P0002-withdrawn branches deferred to deletable-source adapters; v_ prefix mandatory for plpgsql locals; withdrawal NULL item is accepted use.
 
+### 2026-09-11 — Spec 023 Task B dispatched (capture dispatch + reconcile)
+
+- SDD brief `task-B-brief.md`, BASE 1619246. Scope: cursor RPC migration + service grants on enqueue helpers, pure dispatch/reconcile runner + tests, Trigger schedules + registration tests, cursor pgTAP. No manifests/reads/UI/embeddings rebuild. Implementer drafts, dry-runs, never pushes.
+
+### 2026-09-11 — Spec 023 Task B done (pump + repair loop live)
+
+- Implementer 3d0af94 + fixes 6f59333/2a4e3ff. Review went Spec ❌ → fix → re-review clean: private-schema calls replaced by public service-only wrappers (my original ruling overruled with record), org rotation persisted, duplicated decision branch removed.
+- Staging: cursor migration pushed; cursor 44, channel capture 76, runtime 34 — all green. Rulings: unknown errors TRANSIENT_DB bounded at 5; steady-state rescan accepted; embeddings due-scan deferred to later slice.
+- Open gate: first real scheduled reconcile pass still unwitnessed — pgTAP proves callability only.
+
 ### 2026-09-11 — Channels free-range picker + loader (approved plan, implemented)
 
 - User: same free from/to calendar as GI/Channel Audit (limited to reported coverage); GI full-page spinner over content (not navbar/side menu) instead of blank while the new dates load.
