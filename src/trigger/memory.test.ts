@@ -90,6 +90,9 @@ describe("Business Memory Trigger registration", () => {
     // No private-schema PostgREST calls: schema exposure is platform config
     // no migration controls, so the worker's only path is the public wrappers.
     expect(trigger).not.toContain(".schema(");
+    // Enqueue answers convert through the shared pure helper, so the
+    // uuid-returning decision wrapper can never be validated as an integer.
+    expect(trigger).toContain("toEnqueuedCount(");
     // Fair org rotation: resume after the freshest rotation marker with
     // wrap-around, persisting each fully-reconciled org.
     expect(trigger).toContain("reconcile_org_cursor");

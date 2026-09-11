@@ -384,6 +384,29 @@ export type CaptureReconcileDependencies = {
 };
 
 /**
+ * Converts a channel enqueue helper answer to an enqueued-event count.
+ * Findings/recommendations helpers return the events inserted; the decision
+ * helper returns the event id, or null when capture is bypassed. Anything
+ * else is a contract violation, never a silent zero: the caller freezes its
+ * page so the next pass retries the same work.
+ */
+export function toEnqueuedCount(identityKind: string, data: unknown): number {
+  if (identityKind === "channel_decision") {
+    if (typeof data !== "string" && data !== null) {
+      throw memoryError("VALIDATION_ERROR");
+    }
+    return data === null ? 0 : 1;
+  }
+  if (identityKind === "channel_findings" || identityKind === "channel_recommendations") {
+    if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
+      throw memoryError("VALIDATION_ERROR");
+    }
+    return data;
+  }
+  throw memoryError("VALIDATION_ERROR");
+}
+
+/**
  * Reconciles one page of source identities for one adapter. The cursor
  * advances past fully reconciled pages only: the first enqueue error (or a
  * malformed identity, which is a paging bug, not a source problem) freezes

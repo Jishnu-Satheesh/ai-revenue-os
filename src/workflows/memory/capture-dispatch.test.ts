@@ -7,6 +7,7 @@ import type { CaptureRepository } from "@/modules/memory/infrastructure/capture-
 import {
   runCaptureDispatch,
   runCaptureReconcile,
+  toEnqueuedCount,
   type CaptureReconcileDependencies,
 } from "@/workflows/memory/capture-dispatch";
 
@@ -414,5 +415,43 @@ describe("runCaptureReconcile", () => {
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
 
     expect(calls.listIdentities).toBeUndefined();
+  });
+});
+
+describe("toEnqueuedCount", () => {
+  it("counts a decision uuid answer as one without throwing", () => {
+    expect(
+      toEnqueuedCount("channel_decision", "88888888-8888-4888-8888-888888888888"),
+    ).toBe(1);
+  });
+
+  it("counts a decision null answer as zero when capture is bypassed", () => {
+    expect(toEnqueuedCount("channel_decision", null)).toBe(0);
+  });
+
+  it("passes findings and recommendations integer counts through", () => {
+    expect(toEnqueuedCount("channel_findings", 2)).toBe(2);
+    expect(toEnqueuedCount("channel_recommendations", 0)).toBe(0);
+  });
+
+  it("refuses a decision integer answer, invalid counts, and unknown kinds", () => {
+    // Regression guard: an integer check applied to the uuid-returning
+    // decision wrapper threw on every decision identity and aborted its
+    // reconcile pass.
+    expect(() => toEnqueuedCount("channel_decision", 1)).toThrow(
+      expect.objectContaining({ code: "VALIDATION_ERROR" }),
+    );
+    expect(() => toEnqueuedCount("channel_findings", 1.5)).toThrow(
+      expect.objectContaining({ code: "VALIDATION_ERROR" }),
+    );
+    expect(() => toEnqueuedCount("channel_findings", -1)).toThrow(
+      expect.objectContaining({ code: "VALIDATION_ERROR" }),
+    );
+    expect(() => toEnqueuedCount("channel_findings", "1")).toThrow(
+      expect.objectContaining({ code: "VALIDATION_ERROR" }),
+    );
+    expect(() => toEnqueuedCount("growth_item", 1)).toThrow(
+      expect.objectContaining({ code: "VALIDATION_ERROR" }),
+    );
   });
 });

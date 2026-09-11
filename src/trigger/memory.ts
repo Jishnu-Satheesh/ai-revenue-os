@@ -17,6 +17,7 @@ import {
 import {
   runCaptureDispatch,
   runCaptureReconcile,
+  toEnqueuedCount,
   type CaptureReconcilePage,
 } from "@/workflows/memory/capture-dispatch";
 import { runEmbedItems } from "@/workflows/memory/embed-items";
@@ -318,10 +319,7 @@ async function enqueueMissingChannel(
         `Memory capture reconcile enqueue failed: ${describeDatabaseError(error)}.`,
       );
     }
-    if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
-      throw new Error("Memory capture reconcile enqueue answer is invalid.");
-    }
-    return data;
+    return toEnqueuedCount(input.identity.kind, data);
   }
 
   if (input.identity.kind === "channel_decision") {
@@ -334,28 +332,7 @@ async function enqueueMissingChannel(
         `Memory capture reconcile enqueue failed: ${describeDatabaseError(error)}.`,
       );
     }
-    if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
-      throw new Error("Memory capture reconcile enqueue answer is invalid.");
-    }
-    return data;
-  }
-
-  if (input.identity.kind === "channel_decision") {
-    const { data, error } = await rpc.rpc("reconcile_memory_channel_decision", {
-      ...args,
-      p_decision_id: input.identity.id,
-    });
-    if (error) {
-      throw new Error(
-        `Memory capture reconcile enqueue failed: ${describeDatabaseError(error)}.`,
-      );
-    }
-    // The decision helper returns the event id, or null when capture is
-    // bypassed: either way at most one event exists afterwards.
-    if (typeof data !== "string" && data !== null) {
-      throw new Error("Memory capture reconcile enqueue answer is invalid.");
-    }
-    return data === null ? 0 : 1;
+    return toEnqueuedCount(input.identity.kind, data);
   }
 
   throw new Error("Memory capture reconcile identity kind is unknown.");
