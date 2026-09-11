@@ -80,24 +80,27 @@ reset role;
 -- Consumer runs: one channel run per org, one growth request, one campaign run.
 insert into public.channel_analysis_runs (
   id, organization_id, window_start, window_end, period_grain, window_timezone,
-  registry_version, detector_versions, metric_versions, input_digest, status, correlation_id
+  registry_version, detector_versions, metric_versions, input_digest, status, completed_at,
+  result_digest, correlation_id
 ) values
   ('fb390000-0000-4000-8000-000000000301'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
    '2026-08-01', '2026-08-31', 'day', 'Asia/Dubai', 1, '[{"detectorKey": "kitchen.timing", "version": 1}]',
-   '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed',
+   '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed', now(),
+   'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
    'fb390000-0000-4000-8000-000000000902'::uuid),
   ('fb390000-0000-4000-8000-000000000302'::uuid, 'fb390000-0000-4000-8000-000000000202'::uuid,
    '2026-08-01', '2026-08-31', 'day', 'Asia/Dubai', 1, '[{"detectorKey": "kitchen.timing", "version": 1}]',
-   '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed',
+   '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed', now(),
+   'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
    'fb390000-0000-4000-8000-000000000903'::uuid);
 
 insert into public.channel_findings (
   id, organization_id, analysis_run_id, detector_key, detector_version, kind,
-  code, severity, priority, calculation_digest
+  code, severity, priority, quality_state, calculation_digest
 ) values (
   'fb390000-0000-4000-8000-000000000311'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
   'fb390000-0000-4000-8000-000000000301'::uuid, 'kitchen.timing', 1, 'finding',
-  'LATE_PLATES', 'high', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  'LATE_PLATES', 'high', 1, 'complete', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 );
 
 insert into public.memory_capture_events (
@@ -148,28 +151,28 @@ insert into public.business_profiles (organization_id, business_model, value_pro
 insert into public.business_facts (id, organization_id, fact_key, value, source, status) values
   ('fb390000-0000-4000-8000-000000000341'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
    'avg_ticket', '42', 'pos', 'verified');
-insert into public.goals (id, organization_id, name, metric, target_value, unit, scope_kind) values
+insert into public.goals (id, organization_id, name, metric, baseline_status, target_value, unit, scope_kind) values
   ('fb390000-0000-4000-8000-000000000342'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
-   'Grow revenue', 'revenue', 100, 'AED', 'organization');
-insert into public.constraints (id, organization_id, name, constraint_type, value, severity, source) values
+   'Grow revenue', 'revenue', 'unknown', 100, 'AED', 'organization');
+insert into public.constraints (id, organization_id, name, constraint_key, constraint_type, value, severity, source) values
   ('fb390000-0000-4000-8000-000000000343'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
-   'No discounts', 'pricing', 'true', 'hard', 'ops');
+   'No discounts', 'no_discounts', 'pricing', 'true', 'hard', 'ops');
 -- Exotic numerics: scale/precision edges for the documented ::text rule.
-insert into public.goals (id, organization_id, name, metric, target_value, unit, scope_kind) values
+insert into public.goals (id, organization_id, name, metric, baseline_status, target_value, unit, scope_kind) values
   ('fb390000-0000-4000-8000-000000000344'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
-   'Stretch goal', 'revenue', 99.50, 'AED', 'organization');
-insert into public.constraints (id, organization_id, name, constraint_type, value, severity, source) values
+   'Stretch goal', 'revenue', 'unknown', 99.50, 'AED', 'organization');
+insert into public.constraints (id, organization_id, name, constraint_key, constraint_type, value, severity, source) values
   ('fb390000-0000-4000-8000-000000000345'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
-   'Ticket floor', 'pricing', '{"min": 19.95}', 'soft', 'ops');
+   'Ticket floor', 'ticket_floor', 'pricing', '{"min": 19.95}', 'soft', 'ops');
 
 insert into public.organization_market_profiles (id, organization_id) values
   ('fb390000-0000-4000-8000-000000000351'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid);
 insert into public.organization_market_profile_versions (
-  id, organization_id, market_profile_id, version, profile_document, profile_digest,
+  id, organization_id, market_profile_id, version, schema_version, profile_document, profile_digest,
   source_policy_digest, proposal_source, correlation_id
 ) values (
   'fb390000-0000-4000-8000-000000000352'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
-  'fb390000-0000-4000-8000-000000000351'::uuid, 1, '{}',
+  'fb390000-0000-4000-8000-000000000351'::uuid, 1, 1, '{}',
   'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
   'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
   'operator', 'fb390000-0000-4000-8000-000000000905'::uuid
@@ -202,7 +205,7 @@ insert into public.campaign_bundle_versions (
 ) values (
   'fb390000-0000-4000-8000-000000000364'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
   'fb390000-0000-4000-8000-000000000362'::uuid, 1, 'fb390000-0000-4000-8000-000000000363'::uuid,
-  ('{"version": 1, "campaignId": "fb390000-0000-4000-8000-000000000362", "generationProfile": "brand_guided", "executionMode": "best_effort"}')::jsonb,
+  ('{"version": 1, "campaignId": "fb390000-0000-4000-8000-000000000362", "generationProfile": "brand_guided", "executionMode": "best_effort", "schemaVersion": "2", "generationPolicy": {"maxVariantsPerDirection": 2, "maxVariantsTotal": 10, "policyExpiresAt": "2027-01-01T00:00:00Z"}, "directions": []}')::jsonb,
   'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
   'brand_guided', 'best_effort'
 );
@@ -229,10 +232,10 @@ select extensions.is(
     'fb390000-0000-4000-8000-000000000908', null, null, null,
     'shared-context-v1',
     ('[' ||
-      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note' || chr(10) || 'Two staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
+      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note\nTwo staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
       '{"sourceKind": "capture_event", "sourceId": "fb390000-0000-4000-8000-000000000321", "title": "Late plates", "summary": ' || to_jsonb((select projection_document::text from public.memory_capture_events where id = 'fb390000-0000-4000-8000-000000000321')) || ', "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
       '{"sourceKind": "business_fact", "sourceId": "fb390000-0000-4000-8000-000000000341", "title": "Average ticket", "summary": "avg_ticket [verified] pos :: 42", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 0, "freshness": "fresh", "sensitivity": "internal"},' ||
-      '{"sourceKind": "business_profile", "sourceId": "fb390000-0000-4000-8000-000000000201", "title": "Profile", "summary": "Dine-in' || chr(10) || 'Family tables", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 0, "freshness": "fresh", "sensitivity": "internal"},' ||
+      '{"sourceKind": "business_profile", "sourceId": "fb390000-0000-4000-8000-000000000201", "title": "Profile", "summary": "Dine-in\nFamily tables", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 0, "freshness": "fresh", "sensitivity": "internal"},' ||
       '{"sourceKind": "goal", "sourceId": "fb390000-0000-4000-8000-000000000342", "title": "Grow revenue", "summary": "Grow revenue [revenue] target 100 AED", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 1, "freshness": "fresh", "sensitivity": "internal"},' ||
       '{"sourceKind": "constraint", "sourceId": "fb390000-0000-4000-8000-000000000343", "title": "No discounts", "summary": "No discounts [pricing/hard] true", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 1, "freshness": "fresh", "sensitivity": "internal"},' ||
       '{"sourceKind": "campaign_version", "sourceId": "fb390000-0000-4000-8000-000000000364", "title": "Weekday push v1", "summary": "v1 brand_guided/best_effort fb390000-0000-4000-8000-000000000362 ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "priority": 0, "optional": true, "section": "current", "statementKind": "campaign_state", "trustRank": 1, "freshness": "fresh", "sensitivity": "internal"}' ||
@@ -258,7 +261,7 @@ select extensions.is(
     'fb390000-0000-4000-8000-000000000909', null, null, null,
     'shared-context-v1',
     ('[' ||
-      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note' || chr(10) || 'Two staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
+      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note\nTwo staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
     ']')::jsonb,
     null
   ) ->> 'status'),
@@ -272,7 +275,7 @@ select extensions.is(
     'fb390000-0000-4000-8000-000000000931', null, null, null,
     'shared-context-v1',
     ('[' ||
-      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note' || chr(10) || 'Two staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
+      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note\nTwo staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
     ']')::jsonb,
     null
   ) ->> 'contextDigest'),
@@ -329,7 +332,7 @@ select extensions.is(
     'fb390000-0000-4000-8000-000000000353', 'fb39-attempt-growth',
     'fb390000-0000-4000-8000-000000000911', null, null, null,
     'shared-context-v1',
-    ('[{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note' || chr(10) || 'Two staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}]')::jsonb,
+    ('[{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note\nTwo staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}]')::jsonb,
     null
   ) ->> 'status'),
   'ready', 'a growth request prepares its own pack');
@@ -389,7 +392,7 @@ select extensions.is(
     'fb390000-0000-4000-8000-000000000301', 'fb39-elevated',
     'fb390000-0000-4000-8000-000000000918', null, null, null,
     'shared-context-v1',
-    ('[{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000335", "title": "Model guess", "summary": "Model guess' || chr(10) || 'Unverified inference.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 1, "freshness": "fresh", "sensitivity": "internal"}]')::jsonb,
+    ('[{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000335", "title": "Model guess", "summary": "Model guess\nUnverified inference.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 1, "freshness": "fresh", "sensitivity": "internal"}]')::jsonb,
     null) $$),
   '23514', 'trust elevation of unverified model output is refused');
 
@@ -401,9 +404,9 @@ select extensions.is(
     'fb390000-0000-4000-8000-000000000919', null, null, null,
     'shared-context-v1',
     ('[' ||
-      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000333", "title": "Other tenant note", "summary": "Other tenant note' || chr(10) || 'Nothing to do with A.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
-      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000334", "title": "Old note", "summary": "Old note' || chr(10) || 'Past its date.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
-      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000336", "title": "Private note", "summary": "Private note' || chr(10) || 'Owner eyes only.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
+      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000333", "title": "Other tenant note", "summary": "Other tenant note\nNothing to do with A.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
+      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000334", "title": "Old note", "summary": "Old note\nPast its date.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
+      '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000336", "title": "Private note", "summary": "Private note\nOwner eyes only.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
       '{"sourceKind": "business_fact", "sourceId": "fb390000-0000-4000-8000-000000000399", "title": "Missing", "summary": "gone [verified] pos :: 1", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 0, "freshness": "fresh", "sensitivity": "internal"}' ||
     ']')::jsonb,
     null
@@ -537,7 +540,7 @@ select extensions.is(
     'fb390000-0000-4000-8000-000000000301', 'fb39-revalidate',
     'fb390000-0000-4000-8000-000000000925', null, null, null,
     'shared-context-v1',
-    ('[{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note' || chr(10) || 'Two staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}]')::jsonb,
+    ('[{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000331", "title": "Evening prep note", "summary": "Evening prep note\nTwo staff on Fridays.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}]')::jsonb,
     null
   ) ->> 'status'),
   'ready', 'the revalidation fixture prepares');

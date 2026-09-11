@@ -66,11 +66,13 @@ reset role;
 
 insert into public.channel_analysis_runs (
   id, organization_id, window_start, window_end, period_grain, window_timezone,
-  registry_version, detector_versions, metric_versions, input_digest, status, correlation_id
+  registry_version, detector_versions, metric_versions, input_digest, status, completed_at,
+  result_digest, correlation_id
 ) values (
   'fb390000-0000-4000-8000-000000000381'::uuid, 'fb390000-0000-4000-8000-000000000211'::uuid,
   '2026-08-01', '2026-08-31', 'day', 'Asia/Dubai', 1, '[{"detectorKey": "kitchen.timing", "version": 1}]',
-  '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed',
+  '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed', now(),
+  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   'fb390000-0000-4000-8000-000000000932'::uuid
 );
 insert into public.memory_items (id, organization_id, memory_type, title, body, origin, knowledge_kind) values
@@ -87,8 +89,8 @@ select public.prepare_memory_context(
   'fb390000-0000-4000-8000-000000000933', null, null, null,
   'shared-context-v1',
   ('[' ||
-    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000391", "title": "Visible note", "summary": "Visible note' || chr(10) || 'Safe for members.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
-    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000392", "title": "Secret note", "summary": "Secret note' || chr(10) || 'Owner eyes only.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
+    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000391", "title": "Visible note", "summary": "Visible note\nSafe for members.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
+    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000392", "title": "Secret note", "summary": "Secret note\nOwner eyes only.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
   ']')::jsonb,
   null
 );

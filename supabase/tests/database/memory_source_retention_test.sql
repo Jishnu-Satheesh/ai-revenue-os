@@ -49,39 +49,44 @@ reset role;
 
 insert into public.channel_analysis_runs (
   id, organization_id, window_start, window_end, period_grain, window_timezone,
-  registry_version, detector_versions, metric_versions, input_digest, status, correlation_id
+  registry_version, detector_versions, metric_versions, input_digest, status, completed_at,
+  result_digest, correlation_id
 ) values (
   'fb390000-0000-4000-8000-000000000383'::uuid, 'fb390000-0000-4000-8000-000000000221'::uuid,
   '2026-08-01', '2026-08-31', 'day', 'Asia/Dubai', 1, '[{"detectorKey": "kitchen.timing", "version": 1}]',
-  '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed',
+  '[]', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'completed', now(),
+  'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   'fb390000-0000-4000-8000-000000000942'::uuid
 );
 insert into public.channel_findings (
   id, organization_id, analysis_run_id, detector_key, detector_version, kind,
-  code, severity, priority, calculation_digest
+  code, severity, priority, quality_state, calculation_digest
 ) values (
   'fb390000-0000-4000-8000-000000000384'::uuid, 'fb390000-0000-4000-8000-000000000221'::uuid,
   'fb390000-0000-4000-8000-000000000383'::uuid, 'kitchen.timing', 1, 'finding',
-  'LATE_PLATES', 'high', 1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  'LATE_PLATES', 'high', 1, 'complete', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 );
 insert into public.memory_capture_events (
   id, organization_id, source_kind, channel_finding_id, source_revision, source_digest,
   event_kind, correlation_id, projection_document, sensitivity, reuse_class,
-  status, completed_at, projected_item_id
+  status, completed_at
 ) values (
   'fb390000-0000-4000-8000-000000000385'::uuid, 'fb390000-0000-4000-8000-000000000221'::uuid,
   'channel_finding', 'fb390000-0000-4000-8000-000000000384'::uuid, 1,
   'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   'recorded', 'fb390000-0000-4000-8000-000000000943'::uuid,
   '{"kind": "finding", "title": "Late plates"}', 'internal', 'internal_reusable',
-  'completed', now(), 'fb390000-0000-4000-8000-000000000386'::uuid
+  'completed', now()
 );
 insert into public.memory_items (id, organization_id, memory_type, title, body, origin, knowledge_kind, capture_event_id) values
   ('fb390000-0000-4000-8000-000000000386'::uuid, 'fb390000-0000-4000-8000-000000000221'::uuid,
    'episode', 'Projected finding', 'Late plates at peak.', 'system_generated', 'observation',
    'fb390000-0000-4000-8000-000000000385'::uuid),
   ('fb390000-0000-4000-8000-000000000387'::uuid, 'fb390000-0000-4000-8000-000000000221'::uuid,
-   'episode', 'Standalone note', 'Kept for the direct path.', 'system_generated', 'observation');
+   'episode', 'Standalone note', 'Kept for the direct path.', 'system_generated', 'observation', null);
+update public.memory_capture_events
+set projected_item_id = 'fb390000-0000-4000-8000-000000000386'
+where id = 'fb390000-0000-4000-8000-000000000385';
 
 select public.prepare_memory_context(
   'fb390000-0000-4000-8000-000000000221', 'channel_advice', 'analysis_run',
@@ -90,8 +95,8 @@ select public.prepare_memory_context(
   'shared-context-v1',
   ('[' ||
     '{"sourceKind": "capture_event", "sourceId": "fb390000-0000-4000-8000-000000000385", "title": "Late plates", "summary": ' || to_jsonb((select projection_document::text from public.memory_capture_events where id = 'fb390000-0000-4000-8000-000000000385')) || ', "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
-    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000386", "title": "Projected finding", "summary": "Projected finding' || chr(10) || 'Late plates at peak.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
-    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000387", "title": "Standalone note", "summary": "Standalone note' || chr(10) || 'Kept for the direct path.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
+    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000386", "title": "Projected finding", "summary": "Projected finding\nLate plates at peak.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"},' ||
+    '{"sourceKind": "memory_item", "sourceId": "fb390000-0000-4000-8000-000000000387", "title": "Standalone note", "summary": "Standalone note\nKept for the direct path.", "priority": 0, "optional": true, "section": "observations", "statementKind": "observation", "trustRank": 2, "freshness": "fresh", "sensitivity": "internal"}' ||
   ']')::jsonb,
   null
 );
