@@ -483,7 +483,7 @@ begin
         return;
       end if;
       v_summary := pg_catalog.left(
-        v_item.title || pg_catalog.coalesce(chr(10) || v_item.body, ''), 600
+        v_item.title || pg_catalog.coalesce(pg_catalog.chr(10) || v_item.body, ''), 600
       );
       v_status := 'ok';
       v_exclusion := null;
@@ -546,7 +546,7 @@ begin
         return;
       end if;
       v_summary := pg_catalog.left(
-        pg_catalog.coalesce(v_profile.business_model, '') || chr(10)
+        pg_catalog.coalesce(v_profile.business_model, '') || pg_catalog.chr(10)
           || pg_catalog.coalesce(v_profile.value_proposition, ''),
         600
       );
@@ -1107,7 +1107,7 @@ begin
           || (v_entry ->> 'sourceId') || '|'
           || pg_catalog.coalesce(v_entry ->> 'revision', '') || '|'
           || (v_entry ->> 'summary');
-        v_canonical := v_canonical || case when v_canonical = '' then '' else chr(10) end || v_line;
+        v_canonical := v_canonical || case when v_canonical = '' then '' else pg_catalog.chr(10) end || v_line;
       end if;
     end loop;
     v_digest := pg_catalog.encode(extensions.digest(v_canonical, 'sha256'), 'hex');

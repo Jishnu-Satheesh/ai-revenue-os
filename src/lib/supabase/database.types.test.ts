@@ -117,6 +117,13 @@ const UNTYPED_TABLES = new Set([
   "memory_capture_events",
   "memory_capture_dependencies",
   "memory_capture_adapters",
+  // Spec 023 governed context packs: manifests and entries are written only
+  // through fenced RPCs (worker/subject prepare, consume, audited erasure)
+  // and read through member RLS policies. No session role holds a write
+  // grant, so a generated row type would imply direct access that does not
+  // exist.
+  "memory_context_manifests",
+  "memory_context_entries",
   // Campaign persistence follows the same narrow-contract rule as decisions.
   // Members read safe projections through the repository; every write that
   // creates a version, records an attestation, or grants an approval goes

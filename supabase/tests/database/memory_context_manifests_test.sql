@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(79);
+select extensions.plan(82);
 
 -- Spec 023 Task C: manifests, entries, prepare/revalidate/consume, subject
 -- binding, attempt-key replay, immutability. Fixture prefix fb39.
@@ -154,6 +154,13 @@ insert into public.goals (id, organization_id, name, metric, target_value, unit,
 insert into public.constraints (id, organization_id, name, constraint_type, value, severity, source) values
   ('fb390000-0000-4000-8000-000000000343'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
    'No discounts', 'pricing', 'true', 'hard', 'ops');
+-- Exotic numerics: scale/precision edges for the documented ::text rule.
+insert into public.goals (id, organization_id, name, metric, target_value, unit, scope_kind) values
+  ('fb390000-0000-4000-8000-000000000344'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
+   'Stretch goal', 'revenue', 99.50, 'AED', 'organization');
+insert into public.constraints (id, organization_id, name, constraint_type, value, severity, source) values
+  ('fb390000-0000-4000-8000-000000000345'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid,
+   'Ticket floor', 'pricing', '{"min": 19.95}', 'soft', 'ops');
 
 insert into public.organization_market_profiles (id, organization_id) values
   ('fb390000-0000-4000-8000-000000000351'::uuid, 'fb390000-0000-4000-8000-000000000201'::uuid);
@@ -275,6 +282,34 @@ select extensions.is(
   (select id from public.memory_context_manifests where attempt_key = 'fb39-attempt-2b') =
   (select id from public.memory_context_manifests where attempt_key = 'fb39-attempt-2'),
   false, 'while each attempt pins its own manifest');
+
+-- Exotic numerics render per the documented rule (numeric ::text keeps its
+-- scale, jsonb ::text keeps its digits): the prepare succeeds only when the
+-- caller summary matches the server recomputation byte-for-byte, so `ready`
+-- plus the stored snapshots prove TS/SQL parity post-push.
+select extensions.is(
+  (select public.prepare_memory_context(
+    'fb390000-0000-4000-8000-000000000201', 'channel_advice', 'analysis_run',
+    'fb390000-0000-4000-8000-000000000301', 'fb39-exotic',
+    'fb390000-0000-4000-8000-000000000934', null, null, null,
+    'shared-context-v1',
+    ('[' ||
+      '{"sourceKind": "goal", "sourceId": "fb390000-0000-4000-8000-000000000344", "title": "Stretch goal", "summary": "Stretch goal [revenue] target 99.50 AED", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 1, "freshness": "fresh", "sensitivity": "internal"},' ||
+      '{"sourceKind": "constraint", "sourceId": "fb390000-0000-4000-8000-000000000345", "title": "Ticket floor", "summary": "Ticket floor [pricing/soft] {\"min\": 19.95}", "priority": 0, "optional": true, "section": "current", "statementKind": "observation", "trustRank": 1, "freshness": "fresh", "sensitivity": "internal"}' ||
+    ']')::jsonb,
+    null
+  ) ->> 'status'),
+  'ready', 'non-integer numerics prepare under the documented rendering');
+select extensions.is(
+  (select safe_snapshot ->> 'summary' from public.memory_context_entries
+   where manifest_id = (select id from public.memory_context_manifests where attempt_key = 'fb39-exotic')
+     and goal_id = 'fb390000-0000-4000-8000-000000000344'),
+  'Stretch goal [revenue] target 99.50 AED', 'the goal keeps its numeric scale');
+select extensions.is(
+  (select safe_snapshot ->> 'summary' from public.memory_context_entries
+   where manifest_id = (select id from public.memory_context_manifests where attempt_key = 'fb39-exotic')
+     and constraint_id = 'fb390000-0000-4000-8000-000000000345'),
+  'Ticket floor [pricing/soft] {"min": 19.95}', 'the constraint keeps its decimal digits');
 
 -- Same-attempt replay returns the pinned manifest, never a second pack.
 select extensions.is(
@@ -655,6 +690,7 @@ set local request.jwt.claim.sub = 'fb390000-0000-4000-8000-000000000001';
 select extensions.is(
   (select public.update_memory_integration_settings('fb390000-0000-4000-8000-000000000201', 'fb390000-0000-4000-8000-000000000001', true, false, true, true, true, false, 'shared-context-v1', 'fb390000-0000-4000-8000-000000000929') is not null),
   true, 'channel context switches off');
+reset role;
 select extensions.is(
   (select public.prepare_memory_context(
     'fb390000-0000-4000-8000-000000000201', 'channel_advice', 'analysis_run',
