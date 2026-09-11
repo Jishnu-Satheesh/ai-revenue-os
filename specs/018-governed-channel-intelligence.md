@@ -1485,6 +1485,30 @@ Add `/organizations/[organizationId]/channels` with:
 - explicit copy that creating a channel does not connect a provider or grant execution authority;
 - archived channels retained in historical filters and evidence.
 
+**Shipped 2026-09-11 (channels redesign, implementation Tasks 1–8).** The landing
+is now comparison-led: a title row with manager-only Add (create dialog with the
+required stable key and the optional provider hint under Advanced identity
+settings); one reporting-period Select over every declared window with a
+`Reported scope · {currency}` caption and a reporting-window dialog; a
+four-metric summary strip (reported revenue, earned, provider-reported loss,
+channel coverage, each with an accessible exact figure); a shared-scale
+horizontal revenue comparison with Amount/Share modes, per-channel exact-figure
+detail, and a coverage rail plus revenue-only explanation strip opening the
+data-coverage dialog; a filterable, searchable, sortable directory
+(Active/Measured/Needs attention/Archived with pre-search counts; desktop table
+plus mobile cards) with tenant-scoped Channel Audit / Open channel / View
+history links and a Manage / View-details entry opening the identity,
+location-mapping, report-label, and archive/restore flows; and an
+about-channel-setup dialog linking the real Integration Hub. Archived channels
+stay out of every active sum, share, and count while remaining in history and
+evidence. Creating a channel still connects no provider and grants no execution
+authority. Evidence: `docs/verification/channels-redesign/`; plan
+`docs/superpowers/plans/2026-09-10-channels-redesign-implementation.md` with
+its visual-contract companion. Residuals recorded in the Task 8 report: dialogs
+return keyboard focus to the page body instead of their opener, and two
+reference text shades were darkened to meet 4.5:1 (`--channel-denominator` to
+`#69746a`, directory filter counts to `#626c65`).
+
 ### 17.2 Channel Economics portfolio
 
 The landing route remains `/organizations/[organizationId]/economics` and becomes a comparison-led
@@ -1501,6 +1525,12 @@ portfolio workspace with:
 
 Exact-range evidence never fabricates a trend. Currency filters never imply conversion unless an
 approved rate exists.
+
+**Unchanged 2026-09-11.** The channels redesign (implementation Tasks 1–8)
+rebuilt only the `/organizations/[organizationId]/channels` landing described
+in 17.1. This portfolio surface and its shared read model are untouched; the
+`channels-overview`, business-performance-card, and channel-detail regression
+suites pass unmodified.
 
 ### 17.3 Channel detail
 

@@ -25,7 +25,12 @@
   --channel-coverage-bg: #f8f9f6;
   --channel-note-bg: #fcfdfb;
   --channel-note-text: #5e685f;
-  --channel-denominator: #9ca59d;
+  /* Task 8 P12 correction: the V05 reference denominator #9ca59d measures
+     2.40:1 on the rail background (19px regular text needs 4.5:1), so the
+     token is darkened to the nearest compliant green-gray, 4.61:1. The
+     headline figure and explanatory sentence already carry the meaning in
+     compliant shades; only this token value changed. */
+  --channel-denominator: #69746a;
   --channel-neutral: #e3e6e1;
   --channel-header-bg: #fafbf9;
   --channel-radius: 12px;
@@ -632,6 +637,12 @@
 
 .dirFilters {
   gap: 3px;
+  /* Task 8 (320px pass): the four counted items total ~369px, wider than a
+     320px viewport or the 358px real-shell content at 390px. Let the items
+     wrap instead of forcing horizontal scroll (V08 "wrapping when
+     necessary"). Single-row widths are unchanged. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .dirFilterItem {
@@ -650,7 +661,11 @@
 .dirFilterCount {
   font-size: 9px;
   margin-left: 5px;
-  color: #899189;
+  /* Task 8 P12 correction: the V08 reference #899189 measures 3.24:1 on
+     white (9px text needs 4.5:1), so the count uses the nearest palette
+     shade compliant on both the resting and the selected (#eef1ee, 4.79:1)
+     chip backgrounds. Counts also ride in each radio's accessible name. */
+  color: #626c65;
 }
 
 /* Wrapper so a disabled evidence filter still surfaces its tooltip. */

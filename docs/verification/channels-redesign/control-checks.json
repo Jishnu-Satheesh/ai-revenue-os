@@ -1,0 +1,326 @@
+[
+  {
+    "id": "C01",
+    "name": "H1 + subtitle",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C02",
+    "name": "manager Add channel",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C03",
+    "name": "period trigger label",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C04",
+    "name": "every exact-range option reachable",
+    "pass": true,
+    "detail": "March 2026 · month // March 2026 · span // 2 Mar 2026 – 8 Mar 2026 // February 2026 // 1 Jan 2026 – 28 Feb 2026 // January 2026"
+  },
+  {
+    "id": "C05",
+    "name": "scope caption",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C06",
+    "name": "context button full-date name",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C07-Reported rev",
+    "name": "stat group Reported revenue AED 138,000",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C07-Channel cove",
+    "name": "stat group Channel coverage 3 of 4",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C10",
+    "name": "share endpoints",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C09-toggle-arrows",
+    "name": "arrows move focus, Enter selects",
+    "pass": true,
+    "detail": "focus=Amount"
+  },
+  {
+    "id": "C12",
+    "name": "four chart rows",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C13",
+    "name": "axis ticks",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C14",
+    "name": "Enter opens D02 focused",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C14-focus",
+    "name": "D02 moves focus inside",
+    "pass": true,
+    "detail": "Delivery A, Measured"
+  },
+  {
+    "id": "C15",
+    "name": "earned formula footer",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C20",
+    "name": "comparison note",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C16",
+    "name": "rail eyebrow+count",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C18",
+    "name": "three count rows",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C19-values",
+    "name": "D02 exact values",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C19-nav",
+    "name": "D02 audit href",
+    "pass": true,
+    "detail": "/organizations/11111111-1111-4111-8111-111111111111/channels/22222222-2222-4222-8222-222222220001"
+  },
+  {
+    "id": "C19-return",
+    "name": "Escape returns focus to Review",
+    "pass": false,
+    "detail": ""
+  },
+  {
+    "id": "C22",
+    "name": "D03 hub href",
+    "pass": true,
+    "detail": "/organizations/11111111-1111-4111-8111-111111111111/integrations"
+  },
+  {
+    "id": "C23",
+    "name": "filter Active 4",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C24",
+    "name": "filter Measured 2",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C25",
+    "name": "filter Needs attention 2",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C26",
+    "name": "filter Archived 1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C25-filter",
+    "name": "attention filters directory rows",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C27-search",
+    "name": "search narrows",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C27-clear",
+    "name": "clear restores",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C28-sort",
+    "name": "aria-sort on header",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C28-asc",
+    "name": "sort toggles",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C29",
+    "name": "column headers",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C34",
+    "name": "audit links exact",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C35",
+    "name": "ellipsis opens D05",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C37",
+    "name": "directory footer",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C04-switch",
+    "name": "january updates strip",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C04-switch-rows",
+    "name": "january updates rows",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "contrast-subdued-on-white",
+    "name": "#69716c on #ffffff >= 4.5",
+    "pass": true,
+    "detail": "5.02"
+  },
+  {
+    "id": "contrast-white-on-primary",
+    "name": "#ffffff on #127451 >= 4.5",
+    "pass": true,
+    "detail": "5.76"
+  },
+  {
+    "id": "contrast-warn-on-warnbg",
+    "name": "#925e2c on #faf2e7 >= 4.5",
+    "pass": true,
+    "detail": "4.90"
+  },
+  {
+    "id": "contrast-measured-on-sage",
+    "name": "#226f50 on #edf5f0 >= 4.5",
+    "pass": true,
+    "detail": "5.47"
+  },
+  {
+    "id": "contrast-revonly-on-neutral",
+    "name": "#626c65 on #f0f2f0 >= 4.5",
+    "pass": true,
+    "detail": "4.84"
+  },
+  {
+    "id": "contrast-note-on-strip",
+    "name": "#5e685f on #fcfdfb >= 4.5",
+    "pass": true,
+    "detail": "5.68"
+  },
+  {
+    "id": "contrast-denominator-19px",
+    "name": "#69746a on #f8f9f6 >= 4.5",
+    "pass": true,
+    "detail": "4.61"
+  },
+  {
+    "id": "contrast-filter-count-9px",
+    "name": "#626c65 on #ffffff >= 4.5",
+    "pass": true,
+    "detail": "5.45"
+  },
+  {
+    "id": "contrast-filter-count-selected",
+    "name": "#626c65 on #eef1ee >= 4.5",
+    "pass": true,
+    "detail": "4.79"
+  },
+  {
+    "id": "focus-ring",
+    "name": "visible focus indicator",
+    "pass": true,
+    "detail": "outline:1px auto oklab(0.707999 -0.00000712276 0.0000166297 / 0.5) shadow:none"
+  },
+  {
+    "id": "plot-aria-hidden",
+    "name": "decorative plot hidden",
+    "pass": true,
+    "detail": "true"
+  },
+  {
+    "id": "tab-order",
+    "name": "first tab stop sane",
+    "pass": true,
+    "detail": "BUTTON::operator"
+  },
+  {
+    "id": "C46-create",
+    "name": "mocked create transitions to Manage",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C55-error",
+    "name": "failed save keeps dialog + error",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C55-retry",
+    "name": "retry succeeds",
+    "pass": true,
+    "detail": "patch calls=2"
+  },
+  {
+    "id": "zoom200-scroll",
+    "name": "no horizontal scroll at 200%",
+    "pass": true,
+    "detail": "0px"
+  },
+  {
+    "id": "zoom200-figures",
+    "name": "headlines readable at 200%",
+    "pass": true,
+    "detail": ""
+  }
+]
