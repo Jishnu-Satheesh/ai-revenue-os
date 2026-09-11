@@ -137,6 +137,8 @@ Cross-client health, readiness, opportunities, blocked actions, run failures, an
 
 Client-specific overview, goals, data, memory, opportunities, integrations, and outcomes.
 
+The Overview route serves the organization home (`src/components/organizations/home/`, composed by `src/modules/organizations/application/home-service.ts` from `loadOrganizationHome` in `src/modules/organizations/infrastructure/home-loader.ts`): identity, campaigns, creative gallery, attention, goals, destinations, and activity. Campaign and creative reads stay source-owned in `src/modules/campaigns/infrastructure/home-campaign-reader.ts` and `home-asset-reader.ts`. See `docs/superpowers/specs/2026-09-11-organization-home-design.md`. The Digital Twin management editors remain mounted below the home on the same route.
+
 ### Revenue Opportunity Feed
 
 Actionable cards rather than passive charts.
