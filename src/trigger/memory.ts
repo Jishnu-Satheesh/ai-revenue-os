@@ -113,7 +113,8 @@ export const memoryCaptureQueue = queue({
  */
 const MEMORY_CAPTURE_DUE_ORG_SCAN_LIMIT = 4;
 
-/** Capture-enabled organizations scanned per fifteen-minute reconcile pass. */
+/** Organizations processed per fifteen-minute reconcile pass; rotation slices
+ * this many with wrap-around (see the reconcile task). */
 const MEMORY_CAPTURE_RECONCILE_ORG_LIMIT = 10;
 
 /** Source identities reconciled per organization per pass (spec bound). */
@@ -285,19 +286,19 @@ async function listChannelIdentities(
 
 /**
  * Reuses the exact enqueue helpers the source transactions run, through the
- * private schema with the execute grants from the cursor migration. Returns
- * the events inserted (0 when the helper found nothing new or capture is
- * disabled for the organization).
+ * thin public service-only wrapper RPCs from the cursor migration (the
+ * established fenced-RPC pattern: security definer, empty search_path,
+ * per-function service_role-only grants). Nothing calls through
+ * schema('private'): private-schema PostgREST calls are dead because schema
+ * exposure is platform config no migration controls. Returns the events
+ * inserted (0 when the helper found nothing new or capture is disabled for
+ * the organization).
  */
 async function enqueueMissingChannel(
   supabase: SupabaseClient<Database>,
   input: { organizationId: string; identity: { kind: string; id: string } },
 ): Promise<number> {
-  const privateRpc = (
-    supabase as unknown as {
-      schema(name: string): StructuralRpcClient;
-    }
-  ).schema("private");
+  const rpc = structuralRpcClient(supabase);
   const args = { p_organization_id: input.organizationId };
 
   if (
@@ -306,9 +307,9 @@ async function enqueueMissingChannel(
   ) {
     const rpcName =
       input.identity.kind === "channel_findings"
-        ? "enqueue_memory_channel_findings"
-        : "enqueue_memory_channel_recommendations";
-    const { data, error } = await privateRpc.rpc(rpcName, {
+        ? "reconcile_memory_channel_findings"
+        : "reconcile_memory_channel_recommendations";
+    const { data, error } = await rpc.rpc(rpcName, {
       ...args,
       p_analysis_run_id: input.identity.id,
     });
@@ -324,7 +325,23 @@ async function enqueueMissingChannel(
   }
 
   if (input.identity.kind === "channel_decision") {
-    const { data, error } = await privateRpc.rpc("enqueue_memory_channel_decision", {
+    const { data, error } = await rpc.rpc("reconcile_memory_channel_decision", {
+      ...args,
+      p_decision_id: input.identity.id,
+    });
+    if (error) {
+      throw new Error(
+        `Memory capture reconcile enqueue failed: ${describeDatabaseError(error)}.`,
+      );
+    }
+    if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
+      throw new Error("Memory capture reconcile enqueue answer is invalid.");
+    }
+    return data;
+  }
+
+  if (input.identity.kind === "channel_decision") {
+    const { data, error } = await rpc.rpc("reconcile_memory_channel_decision", {
       ...args,
       p_decision_id: input.identity.id,
     });
@@ -391,6 +408,33 @@ async function persistCaptureCursor(
   }
 }
 
+async function persistReconcileOrgCursor(
+  supabase: SupabaseClient<Database>,
+  input: { organizationId: string },
+): Promise<void> {
+  const { data, error } = await structuralRpcClient(supabase).rpc(
+    "update_memory_reconcile_org_cursor",
+    {
+      p_organization_id: input.organizationId,
+      p_correlation_id: randomUUID(),
+    },
+  );
+  if (error) {
+    throw new Error(
+      `Memory capture reconcile organization cursor write failed: ${describeDatabaseError(error)}.`,
+    );
+  }
+  const answer = data as { organizationId?: unknown; reconcileOrgCursor?: unknown } | null;
+  if (
+    typeof answer !== "object" ||
+    answer === null ||
+    answer.organizationId !== input.organizationId ||
+    answer.reconcileOrgCursor !== input.organizationId
+  ) {
+    throw new Error("Memory capture reconcile organization cursor write answer is invalid.");
+  }
+}
+
 export const memoryCaptureDispatchOrgTask = schemaTask({
   id: "memory-capture.dispatch-org",
   schema: captureDispatchOrgPayloadSchema,
@@ -452,7 +496,10 @@ export const memoryCaptureDispatchTask = schedules.task({
  * Every fifteen minutes: repair missed integrations per capture-enabled
  * organization, one adapter page each, persisting the returned cursor only
  * when the page fully reconciled and the cursor actually moved (so a failed
- * page retries the same work and a quiet pass writes nothing).
+ * page retries the same work and a quiet pass writes nothing). Organizations
+ * rotate fairly: the scan resumes after the freshest reconcile_org_cursor
+ * with wrap-around, and each fully-reconciled org persists itself as the new
+ * resume point — a fixed top-N rescan would starve org N+1 forever.
  */
 export const memoryCaptureReconcileTask = schedules.task({
   id: "memory-capture.reconcile",
@@ -461,28 +508,54 @@ export const memoryCaptureReconcileTask = schedules.task({
   maxDuration: 300,
   run: async () => {
     const supabase = createMemoryWorkerServiceClient();
+    // One cheap indexed read of uuid-sized rows: every capture-enabled org
+    // plus its rotation marker. The limit bounds processing per pass, not
+    // this listing — wrap-around needs the full order to resume correctly.
     const scan = await untypedCaptureTables(supabase)
       .from("memory_integration_settings")
-      .select("organization_id")
+      .select("organization_id,reconcile_org_cursor,updated_at")
       .eq("capture_enabled", true)
-      .order("organization_id", { ascending: true })
-      .limit(MEMORY_CAPTURE_RECONCILE_ORG_LIMIT);
+      .order("organization_id", { ascending: true });
     if (scan.error) {
       throw new Error(
         `Memory capture reconcile organization scan failed: ${describeDatabaseError(scan.error)}.`,
       );
     }
-    const organizationIds = [
+    const orderedIds = [
       ...new Set(
         (scan.data ?? [])
           .map((row) => row.organization_id)
           .filter((id): id is string => validUuid(id)),
       ),
     ];
+    // Resume after the freshest rotation marker (the last fully-reconciled
+    // org). A missing, corrupt, disabled, or removed marker restarts from
+    // the beginning: re-scanning is bounded and idempotent, starving is not.
+    let resumedAfter: string | null = null;
+    let resumeTouchedAt = "";
+    for (const row of scan.data ?? []) {
+      const marker = row.reconcile_org_cursor;
+      const touchedAt = row.updated_at;
+      if (
+        validUuid(marker) &&
+        typeof touchedAt === "string" &&
+        touchedAt >= resumeTouchedAt &&
+        orderedIds.includes(marker)
+      ) {
+        resumedAfter = marker;
+        resumeTouchedAt = touchedAt;
+      }
+    }
+    const start = resumedAfter ? orderedIds.indexOf(resumedAfter) + 1 : 0;
+    const organizationIds = [...orderedIds.slice(start), ...orderedIds.slice(0, start)].slice(
+      0,
+      MEMORY_CAPTURE_RECONCILE_ORG_LIMIT,
+    );
 
     let scanned = 0;
     let enqueued = 0;
     for (const organizationId of organizationIds) {
+      let orgAdvanced = true;
       for (const adapter of RECONCILE_ADAPTERS) {
         const cursor = await readCaptureCursor(supabase, organizationId, adapter);
         const result = await runCaptureReconcile(
@@ -511,10 +584,17 @@ export const memoryCaptureReconcileTask = schedules.task({
           enqueued: result.enqueued,
           advanced: result.advanced,
         });
+        orgAdvanced = orgAdvanced && result.advanced;
         scanned += result.scanned;
         enqueued += result.enqueued;
       }
+      // Only a fully-reconciled org becomes the resume point: a frozen page
+      // keeps its turn next pass. Adapter cursors already persisted stay
+      // saved, so the retry resumes mid-org rather than redoing it.
+      if (orgAdvanced) {
+        await persistReconcileOrgCursor(supabase, { organizationId });
+      }
     }
-    return { organizations: organizationIds.length, scanned, enqueued };
+    return { organizations: organizationIds.length, scanned, enqueued, resumedAfter };
   },
 });

@@ -2,20 +2,22 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(24);
+select extensions.plan(44);
 
 -- Spec 023 Task B: capture-dispatch cursor plus reconcile power. The cursor
--- RPC is pending review and NOT applied on shared staging yet, so every call
--- to it goes through pg_temp.state_of (a missing function reports a failure
--- code instead of aborting the script) while every value assertion reads a
--- long-lived table that exists already. The three Channel enqueue helpers
--- ARE live (Task A pushed), so the grant proof calls one of them for real.
+-- migration is pending review and NOT applied on shared staging yet, so every
+-- call to a new function goes through pg_temp.state_of (a missing function
+-- reports a failure code instead of aborting the script) while every value
+-- assertion reads a long-lived table that exists already. The three Channel
+-- enqueue helpers ARE live (Task A pushed).
 --
--- NOTE on roles: direct calls below run as the migration owner, the way a
--- nested definer call would. service_role privilege is proven with
--- pg_temp.priv_of catalog lookups; a direct service_role call into the
--- private schema is refused on schema USAGE (pre-existing, deliberately out
--- of scope: the brief grants execute only, nothing else).
+-- NOTE on roles: direct calls below run as the migration owner unless stated,
+-- the way a nested definer call would. service_role privilege is proven with
+-- pg_temp.priv_of catalog lookups AND with real wrapper calls under
+-- `set local role service_role`: the wrappers are public, so the worker role
+-- executes the exact path the reconcile task will take post-push. No
+-- private-schema calls appear anywhere: nothing needs schema USAGE, and none
+-- is granted.
 
 create or replace function pg_temp.state_of(call_sql text)
 returns text language plpgsql as $$
@@ -36,6 +38,22 @@ begin
   return 'false';
 exception when others then
   return 'missing';
+end;
+$$;
+
+-- The rotation column rides the pending migration, so a raw select would
+-- abort the whole suite pre-push (undefined_column, uncatchable in plain
+-- SQL). This accessor reports NULL instead; post-push it reads the value.
+create or replace function pg_temp.rotation_of(p_org uuid)
+returns text language plpgsql as $$
+declare
+  v_cursor uuid;
+begin
+  execute 'select reconcile_org_cursor from public.memory_integration_settings where organization_id = $1'
+    using p_org into v_cursor;
+  return v_cursor::text;
+exception when undefined_column then
+  return null;
 end;
 $$;
 
@@ -94,6 +112,29 @@ insert into public.channel_findings (
    'fb380000-0000-4000-8000-000000000601'::uuid, 'revenue.period_movement', 1, 'finding',
    'REVENUE_DROPPED_VS_PRIOR_PERIOD', 'medium', 50, 'complete',
    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+-- A second completed run with its own finding, reserved for the public
+-- wrapper proof: the private helper already enqueued run 601 above, and the
+-- helpers skip existing (finding, revision) pairs, so replaying 601 through
+-- the wrapper would return 0 and prove nothing about insertion.
+
+insert into public.channel_analysis_runs (
+  id, organization_id, window_start, window_end, period_grain, window_timezone,
+  registry_version, detector_versions, metric_versions, input_digest, status,
+  completed_at, result_digest, correlation_id
+) values
+  ('fb380000-0000-4000-8000-000000000602'::uuid, 'fb380000-0000-4000-8000-000000000201'::uuid,
+   date '2026-02-01', date '2026-02-05', 'day', 'Asia/Dubai', 1, '[{}]'::jsonb, '[]'::jsonb,
+   'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'completed', now(), 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'fb380000-0000-4000-8000-000000000912');
+
+insert into public.channel_findings (
+  id, organization_id, analysis_run_id, detector_key, detector_version, kind, code,
+  severity, priority, quality_state, calculation_digest
+) values
+  ('fb380000-0000-4000-8000-000000000702'::uuid, 'fb380000-0000-4000-8000-000000000201'::uuid,
+   'fb380000-0000-4000-8000-000000000602'::uuid, 'revenue.period_movement', 1, 'finding',
+   'REVENUE_DROPPED_VS_PRIOR_PERIOD', 'medium', 50, 'complete',
+   'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd');
 
 -- The owner enables capture with a distinctive flag mix so the cursor writes
 -- below can prove they flip nothing.
@@ -190,6 +231,89 @@ select extensions.is(
   private.enqueue_memory_channel_findings(
     'fb380000-0000-4000-8000-000000000201', 'fb380000-0000-4000-8000-000000000601')::text,
   '1', 'the findings helper enqueues the completed run for real');
+
+-- Service-only wrappers ---------------------------------------------------------------
+--
+-- All three run below as service_role: the wrappers are public, so these are
+-- the worker's exact post-push call paths, not owner-bypassed approximations.
+
+select extensions.has_function(
+  'public', 'reconcile_memory_channel_findings', 'the findings wrapper exists');
+select extensions.has_function(
+  'public', 'reconcile_memory_channel_recommendations', 'the recommendations wrapper exists');
+select extensions.has_function(
+  'public', 'reconcile_memory_channel_decision', 'the decision wrapper exists');
+select extensions.is(
+  pg_temp.priv_of('service_role', 'public.reconcile_memory_channel_findings(uuid,uuid)'),
+  'true', 'the worker holds the findings wrapper');
+select extensions.is(
+  pg_temp.priv_of('service_role', 'public.reconcile_memory_channel_recommendations(uuid,uuid)'),
+  'true', 'the worker holds the recommendations wrapper');
+select extensions.is(
+  pg_temp.priv_of('service_role', 'public.reconcile_memory_channel_decision(uuid,uuid)'),
+  'true', 'the worker holds the decision wrapper');
+select extensions.is(
+  pg_temp.priv_of('authenticated', 'public.reconcile_memory_channel_findings(uuid,uuid)'),
+  'false', 'members hold no findings wrapper');
+select extensions.is(
+  pg_temp.priv_of('authenticated', 'public.reconcile_memory_channel_recommendations(uuid,uuid)'),
+  'false', 'no recommendations wrapper either');
+select extensions.is(
+  pg_temp.priv_of('authenticated', 'public.reconcile_memory_channel_decision(uuid,uuid)'),
+  'false', 'and no decision wrapper');
+select extensions.is(
+  pg_temp.priv_of('anon', 'public.reconcile_memory_channel_findings(uuid,uuid)'),
+  'false', 'anonymous callers hold no findings wrapper');
+select extensions.is(
+  pg_temp.priv_of('anon', 'public.reconcile_memory_channel_recommendations(uuid,uuid)'),
+  'false', 'no recommendations wrapper either');
+select extensions.is(
+  pg_temp.priv_of('anon', 'public.reconcile_memory_channel_decision(uuid,uuid)'),
+  'false', 'and no decision wrapper');
+
+reset role;
+set local role service_role;
+
+select extensions.is(
+  pg_temp.state_of($$ select public.reconcile_memory_channel_findings('fb380000-0000-4000-8000-000000000201', 'fb380000-0000-4000-8000-000000000602') $$),
+  'no-error', 'the worker replays the findings helper through its wrapper');
+select extensions.is(
+  (select count(*)::integer from public.memory_capture_events where organization_id = 'fb380000-0000-4000-8000-000000000201' and channel_finding_id = 'fb380000-0000-4000-8000-000000000702'),
+  1, 'the wrapper enqueue lands exactly one event');
+
+select extensions.is(
+  pg_temp.state_of($$ select public.reconcile_memory_channel_recommendations('fb380000-0000-4000-8000-000000000201', 'fb380000-0000-4000-8000-000000000601') $$),
+  'no-error', 'the recommendations wrapper runs (no recs on the run, no events)');
+select extensions.is(
+  pg_temp.state_of($$ select public.reconcile_memory_channel_decision('fb380000-0000-4000-8000-000000000201', 'fb380000-0000-4000-8000-000000000d01') $$),
+  'no-error', 'the decision wrapper runs (unknown decision, no event)');
+
+-- Rotation cursor -----------------------------------------------------------------------
+--
+-- The worker marks each fully-reconciled org with its own id; the next scan
+-- resumes after the freshest marker with wrap-around.
+
+select extensions.is(
+  pg_temp.state_of($$ select public.update_memory_reconcile_org_cursor('fb380000-0000-4000-8000-000000000201', 'fb380000-0000-4000-8000-000000000941') $$),
+  'no-error', 'the rotation marker write succeeds');
+select extensions.is(
+  pg_temp.rotation_of('fb380000-0000-4000-8000-000000000201'),
+  'fb380000-0000-4000-8000-000000000201', 'the rotation marker round-trips');
+
+reset role;
+set local role authenticated;
+set local request.jwt.claim.sub = 'fb380000-0000-4000-8000-000000000004';
+
+select extensions.is(
+  pg_temp.state_of($$ select public.update_memory_reconcile_org_cursor('fb380000-0000-4000-8000-000000000201', 'fb380000-0000-4000-8000-000000000942') $$),
+  '42501', 'a member cannot move the rotation marker');
+
+reset role;
+set local role anon;
+
+select extensions.is(
+  pg_temp.state_of($$ select public.update_memory_reconcile_org_cursor('fb380000-0000-4000-8000-000000000201', 'fb380000-0000-4000-8000-000000000943') $$),
+  '42501', 'an anonymous caller cannot either');
 
 select * from extensions.finish();
 

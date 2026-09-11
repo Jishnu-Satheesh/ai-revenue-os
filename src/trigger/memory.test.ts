@@ -51,7 +51,7 @@ describe("Business Memory Trigger registration", () => {
     expect(trigger).toContain("queue: memoryCaptureQueue");
   });
 
-  it("wires dispatch through the leased RPCs and reconcile through the cursor RPC plus channel enqueue helpers", async () => {
+  it("wires dispatch through the leased RPCs and reconcile through the cursor RPCs plus channel wrappers", async () => {
     const trigger = await readFile(resolve(process.cwd(), "src/trigger/memory.ts"), "utf8");
     // The leased claim/load/complete/fail names live behind the capture
     // repository: the schedule drives listDueOrganizations directly, the
@@ -80,12 +80,20 @@ describe("Business Memory Trigger registration", () => {
     }
     for (const rpc of [
       '"update_memory_capture_cursor"',
-      '"enqueue_memory_channel_findings"',
-      '"enqueue_memory_channel_recommendations"',
-      '"enqueue_memory_channel_decision"',
+      '"update_memory_reconcile_org_cursor"',
+      '"reconcile_memory_channel_findings"',
+      '"reconcile_memory_channel_recommendations"',
+      '"reconcile_memory_channel_decision"',
     ]) {
       expect(trigger).toContain(rpc);
     }
+    // No private-schema PostgREST calls: schema exposure is platform config
+    // no migration controls, so the worker's only path is the public wrappers.
+    expect(trigger).not.toContain(".schema(");
+    // Fair org rotation: resume after the freshest rotation marker with
+    // wrap-around, persisting each fully-reconciled org.
+    expect(trigger).toContain("reconcile_org_cursor");
+    expect(trigger).toContain("resumedAfter");
     // The per-org runner validates before the service client exists.
     expect(trigger).toContain("captureDispatchOrgPayloadSchema.parse(payload)");
     expect(trigger).toContain("createMemoryWorkerServiceClient()");
