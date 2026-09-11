@@ -13,6 +13,12 @@ import {
   type NarrationChannelContext,
   type NarrationPromptFinding,
 } from "@/workflows/analysis/recommendation-prompt";
+import {
+  INTERNAL_ONLY_CONTEXT,
+  shareLogFields,
+  type ShareContext,
+  type ShareMode,
+} from "@/workflows/analysis/grounded-share-mode";
 
 /**
  * The narration worker.
@@ -132,6 +138,15 @@ export type ChannelRecommendationsDependencies = {
     analysisRunId: string;
     findings: readonly NarrationPromptFinding[];
   }): Promise<ChannelPilotContext>;
+  /**
+   * Consent-gated shared context (Spec 024). Optional so existing callers
+   * compile; absent means the wiring predates sharing and the run stays
+   * internal-only. Entries arrive pre-allowlisted and bounded by the domain
+   * subset, so the workflow never judges eligibility here.
+   */
+  loadShareContext?(input: {
+    organizationId: string;
+  }): Promise<ShareContext>;
   generator: NarrationGenerator;
   complete(input: {
     organizationId: string;
@@ -230,6 +245,11 @@ export async function runChannelRecommendations(
   /** Present only on `failed`. The same code the fence recorded, so the caller
    * can name the reason without reading `private.channel_recommendation_operations`. */
   failureCode?: ChannelRecommendationFailureCode;
+  /** Which context mode the narration ran in. Internal-only until an active
+   * consent plus a current qualification plus qualified entries all hold. */
+  shareMode: ShareMode;
+  /** Shared entries placed in the prompt. Zero until Spec 023 capture lands. */
+  shareEntryCount: number;
 }> {
   const payload = channelRecommendationsTaskSchema.parse(input);
   const claimToken = crypto.randomUUID();
@@ -242,9 +262,12 @@ export async function runChannelRecommendations(
   if (claim.outcome !== "acquired" && claim.outcome !== "gapfill_acquired") {
     // Recommendations already filed means the run finished this stage, not
     // that it was skipped; every other refusal leaves the stage untouched.
+    // No prompt was built, so no context mode applies beyond internal-only.
     return {
       outcome: claim.outcome === "completed" ? "completed" : "skipped",
       recommendationCount: 0,
+      shareMode: "internal_only",
+      shareEntryCount: 0,
     };
   }
   const gapFill = claim.outcome === "gapfill_acquired";
@@ -340,6 +363,31 @@ export async function runChannelRecommendations(
       }
     }
 
+    // Consent-gated sharing (Spec 024) fails closed for disclosure and open
+    // for narration, exactly like pilot context above: a status miss means
+    // the run completes internal-only, never blocked and never sharing. The
+    // dependency is optional so callers wired before sharing compile; absent
+    // also means internal-only.
+    let share: ShareContext = INTERNAL_ONLY_CONTEXT;
+    if (dependencies.loadShareContext) {
+      try {
+        share = await dependencies.loadShareContext({
+          organizationId: payload.organizationId,
+        });
+      } catch {
+        logger.warn("channel_recommendations.share_context_unavailable", {
+          organizationId: payload.organizationId,
+          runId: payload.analysisRunId,
+        });
+        share = { ...INTERNAL_ONLY_CONTEXT, reason: "status_unavailable" };
+      }
+    }
+    logger.info("channel_recommendations.share_mode", {
+      organizationId: payload.organizationId,
+      runId: payload.analysisRunId,
+      ...shareLogFields(share),
+    });
+
     const prompt = buildNarrationPrompt({
       windowStart: claim.window.windowStart,
       windowEnd: claim.window.windowEnd,
@@ -349,6 +397,9 @@ export async function runChannelRecommendations(
       // Full narrations pass nothing: their prompt stays byte-identical, and
       // a gap-fill without a filed count keeps the old behavior too.
       ...(gapFill && filedCount !== null ? { gapFill: { filedCount } } : {}),
+      // Shared entries render only when the allowlist produced some, so
+      // runs without shareable entries keep byte-identical prompts.
+      ...(share.entries.length > 0 ? { sharedContext: share.entries } : {}),
     });
 
     // Grounding follows the run having findings, not the loader's luck and
@@ -384,7 +435,12 @@ export async function runChannelRecommendations(
       items: submission.items,
     });
 
-    return { outcome: "completed", recommendationCount: submission.items.length };
+    return {
+      outcome: "completed",
+      recommendationCount: submission.items.length,
+      shareMode: share.mode,
+      shareEntryCount: share.entries.length,
+    };
   } catch (error) {
     const code: ChannelRecommendationFailureCode =
       error instanceof ChannelRecommendationsFailure ? error.code : "NARRATION_PROCESSING_FAILED";
@@ -395,6 +451,12 @@ export async function runChannelRecommendations(
       code,
       resultDigest: failureDigest(code),
     });
-    return { outcome: "failed", recommendationCount: 0, failureCode: code };
+    return {
+      outcome: "failed",
+      recommendationCount: 0,
+      failureCode: code,
+      shareMode: "internal_only",
+      shareEntryCount: 0,
+    };
   }
 }

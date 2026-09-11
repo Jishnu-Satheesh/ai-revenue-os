@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(28);
+select extensions.plan(30);
 
 -- Structure -----------------------------------------------------------------
 
@@ -40,7 +40,7 @@ select extensions.is(
 );
 select extensions.is(
   (select count(*)::bigint from public.permissions where scope = 'organization'),
-  45::bigint,
+  47::bigint,
   'the organization vocabulary is seeded'
 );
 select extensions.ok(
@@ -109,6 +109,23 @@ select extensions.ok(
     where organization_role = 'operator' and permission_key = 'memory.write'
   ),
   'but an operator can still write memory'
+);
+select extensions.ok(
+  not exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'operator'
+      and permission_key in ('memory.manage_integrations', 'memory.retry_capture')
+  ),
+  'but an operator cannot change capture settings or retry captures'
+);
+select extensions.ok(
+  exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'admin'
+      and permission_key in ('memory.manage_integrations', 'memory.retry_capture')
+    having count(*) = 2
+  ),
+  'while an admin holds both capture permissions'
 );
 -- Approving the exact version that will run is an operator's job, and always
 -- was in practice: `approve_campaign_bundle` admits one. The catalogue caught up

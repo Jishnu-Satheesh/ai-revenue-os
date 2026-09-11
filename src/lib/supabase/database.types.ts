@@ -2929,6 +2929,10 @@ export type Database = {
         };
         Returns: Record<string, unknown> | null;
       };
+      grounded_share_status: {
+        Args: { p_organization_id: string };
+        Returns: Record<string, unknown> | null;
+      };
       triage_channel_recommendation: {
         Args: {
           p_organization_id: string;

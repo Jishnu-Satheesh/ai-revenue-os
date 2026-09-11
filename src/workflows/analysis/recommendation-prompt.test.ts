@@ -521,6 +521,54 @@ describe("channel context allowlist", () => {
   });
 });
 
+describe("shared business context (Spec 024)", () => {
+  const sharedInput = (sharedContext: NarrationPromptInput["sharedContext"]) =>
+    buildNarrationPrompt({ ...input, sharedContext });
+
+  it("renders no shared block when context is absent or empty", () => {
+    for (const sharedContext of [undefined, null, []] as const) {
+      const { system, user } = sharedInput(sharedContext);
+      expect(user).not.toContain("<shared_business_context>");
+      expect(system).not.toContain("Shared entries are never evidence");
+    }
+  });
+
+  it("renders allowlisted entries fenced as data with sharing rules", () => {
+    const { system, user } = sharedInput([
+      { title: "Friday plan", summary: "Check capacity before the mall event." },
+    ]);
+
+    expect(user).toContain("<shared_business_context>");
+    expect(user).toContain("Friday plan");
+    expect(user).toContain("Check capacity before the mall event.");
+    expect(system).toContain("Shared entries are never evidence");
+    expect(system).toContain("cite only finding ids");
+  });
+
+  it("drops blank entries and undeclared keys", () => {
+    const { user } = sharedInput([
+      { title: "  ", summary: "  " },
+      {
+        title: "Real note",
+        summary: "Real words.",
+        extra: "must not leak",
+      } as unknown as { title: string; summary: string },
+    ]);
+
+    expect(user).toContain("Real note");
+    expect(user).not.toContain("must not leak");
+    expect(user.match(/<shared_entry/g)).toHaveLength(1);
+  });
+
+  it("keeps prompts byte-identical without shared entries", () => {
+    const before = buildNarrationPrompt(input);
+    const after = sharedInput([]);
+
+    expect(after.system).toBe(before.system);
+    expect(after.user).toBe(before.user);
+  });
+});
+
 describe("sha256Hex", () => {
   it("matches known sha-256 vectors", () => {
     expect(sha256Hex("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");

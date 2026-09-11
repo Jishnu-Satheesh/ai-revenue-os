@@ -16,6 +16,11 @@ import {
   type ChannelRecommendationWindow,
 } from "@/workflows/analysis/run-channel-recommendations";
 import {
+  isShareActiveStatus,
+  resolveShareContext,
+  type ShareContext,
+} from "@/workflows/analysis/grounded-share-mode";
+import {
   runChannelRecommendationEvaluations,
   type UnjudgedRecommendation,
 } from "@/workflows/analysis/run-recommendation-evaluations";
@@ -310,6 +315,23 @@ export const channelRecommendationsTask = schemaTask({
       async loadPilotContext(input) {
         return loadRecommendationPilotContext(supabase, input);
       },
+      async loadShareContext(input): Promise<ShareContext> {
+        // Consent-gated sharing (Spec 024): the worker asks the database
+        // whether this organization currently pairs an active consent with a
+        // current Google qualification. Entries stay empty until Spec 023
+        // capture lands qualified rows — an active share with no qualified
+        // corpus proceeds grounded over findings only, honestly labeled.
+        // A status miss throws and the workflow completes internal-only.
+        const { data, error } = await supabase.rpc("grounded_share_status", {
+          p_organization_id: input.organizationId,
+        });
+        if (error) throw new Error(`Grounded share status check failed: ${error.code}`);
+        return resolveShareContext({
+          shareActive: isShareActiveStatus(data),
+          entries: [],
+          excludedCount: 0,
+        });
+      },
       generator: recommendationGenerator(),
       async complete(input) {
         await rpc("complete_channel_recommendations", {
@@ -337,7 +359,8 @@ export const channelRecommendationsTask = schemaTask({
     });
 
     // Counts, identifiers, and the fence's own failure vocabulary. No figure
-    // and no cited row travels to a log.
+    // and no cited row travels to a log — and no shared entry body either,
+    // only the mode and its counts.
     logger.info("channel_recommendations.run_completed", {
       organizationId: payload.organizationId,
       channelId: payload.channelId,
@@ -346,6 +369,8 @@ export const channelRecommendationsTask = schemaTask({
       outcome: result.outcome,
       recommendationCount: result.recommendationCount,
       failureCode: result.failureCode,
+      shareMode: result.shareMode,
+      shareEntryCount: result.shareEntryCount,
     });
 
     // A narration that could not be produced is not a successful run. Returning

@@ -68,8 +68,16 @@ describe("organization role permissions", () => {
     }
   });
 
-  it("lets an operator do the daily work", () => {
-    for (const permission of [
+  it("keeps capture settings and retries above the operator line", () => {
+    for (const permission of ["memory.manage_integrations", "memory.retry_capture"] as const) {
+      expect(hasOrganizationPermission("operator", permission)).toBe(false);
+      expect(hasOrganizationPermission("viewer", permission)).toBe(false);
+      expect(hasOrganizationPermission("admin", permission)).toBe(true);
+      expect(hasOrganizationPermission("owner", permission)).toBe(true);
+    }
+  });
+
+  it("lets an operator do the daily work", () => {    for (const permission of [
       "memory.write",
       "memory.verify",
       "memory.supersede",

@@ -1,5 +1,17 @@
 # Coordination board — Asset Library, then Campaign Studio
 
+<!-- 2026-09-11 Public landing redesign: Codex claims documentation only:
+docs/superpowers/specs/2026-09-11-public-landing-redesign.md,
+docs/superpowers/plans/2026-09-11-public-landing-{research,visual-contract,implementation,handoff}.md.
+User requests Linear-inspired research and a complete handoff for one future coding agent.
+Business owners are the confirmed primary audience. Implementation remains unapproved.
+Existing organization-home, memory, channels, and configuration work is outside this task. -->
+
+<!-- 2026-09-11 Overview follow-up: Codex claims documentation only: organization-home
+design/implementation/data/visual handoff status and growth-feasibility note. User requests
+a new revenue-first performance/scenario section above the previously planned Campaigns
+and other home sections. Investigating calculations; no production or database changes. -->
+
 **Agents:** `claude` (Claude Opus 5, Claude Code) and `codex` (Codex CLI).
 
 > ## WHO OWNS WHAT, AS OF 2026-09-04 — READ THIS FIRST
@@ -5886,3 +5898,513 @@ through the real routes, not only in tests.
   were run. Automatic capture preference is confirmed; architecture/implementation remain pending
   approval. Existing `.cursor/mcp.json` and `opencode.json` edits appeared during the session and
   were left untouched, along with the pre-existing generated/scratch files.
+
+### 2026-09-10 · Provider 400 + retry deadlock (user-reported gap-fill failure)
+
+- Claim: `package.json` + lockfile (`ai` 5.0.0→6.0.280, `@ai-sdk/google` 2.0.0→3.0.122),
+  `adrs/0054-*` (new), fence migration `20260910120000` + TAP. No source file changed.
+  Board entry uncommitted (shared log). Never stash/push.
+- Cause (proven, API's own words): v2 SDK sends the retired `googleSearchRetrieval`
+  shape for any model not matching `gemini-2`; Google stopped accepting it between Sep 9
+  (5 filed rows) and Sep 10 (6 identical 400s). Reproduced locally with full error text,
+  one billed call; repro script deleted. v3-upgrade-then-ai-mismatch detour (10 type
+  errors) reverted with zero trace; v4+ai7 rejected as unneeded scope.
+- Second defect fixed alongside: failed leases pinned the dead correlation, so fresh
+  presses conflicted forever — claim now resumes terminally-failed rows under a new
+  correlation within the ceiling (TAP 72/72 on staging, pushed, committed `3711445`).
+- Commits: `3711445` fence resume, `ae14eee` SDK majors + ADR 0054.
+- Gates: typecheck zero with untouched call sites; vitest 1163/1168 — the 5 failures
+  are a pre-existing expired Meta fixture (`expiresAt 2026-09-10T00:00`, untouched files,
+  zero ai frames in stack), not this change. Live proof: exact gap-fill prompt returns
+  advice JSON (funnel first).
+- OPS OWING: redeploy Trigger worker — bundle still carries SDK v2 until then; March run
+  has 6 burned attempts, 4 left, and its next press resumes under the fix.
+
+### 2026-09-10 · Gap-fill cap refusal (user-reported: new error after SDK fix)
+
+- Claim: `src/domain/analysis/recommendations{,.test}.ts` (prompt v9),
+  `src/workflows/analysis/recommendation-prompt{,.test}.ts`,
+  `src/workflows/analysis/run-channel-recommendations{,.test}.ts`,
+  `src/trigger/recommendations.ts`. No migration; fence untouched. Board stays
+  uncommitted (shared log). Never stash/push.
+- Cause (proven, reproduced live twice): prod run `run_06g8l0bf99rpqlavml9alnpj01`
+  banked `NARRATION_PROCESSING_FAILED` with 0 items — not the provider (SDK v3 works
+  in prod: 30–48s grounded generations, valid JSON). `generateOnce` maps provider
+  throws to `MODEL_PROVIDER_UNAVAILABLE`, so this code meant `complete()` refused:
+  5 filed + model filing one item per uncovered key (4 keys) = 9 > cap 8, all 3
+  attempts. Evidence-currency, labels, UUIDs all ruled out with staging reads.
+  First fix attempt (chapter-counted budget line) failed its own repro — the model
+  files per detector key and `revenue.window_gross` has no chapter — so the budget
+  counts distinct detector keys, not chapters.
+- Fix: worker memoizes the run's filed ids (one shared read for cited-set + count);
+  workflow threads `loadFiledRecommendationCount` into gap-fill, fails fast before
+  any provider call when no slot is free, and binds the exact budget
+  ("at most H more", multi-key items) when keys outnumber slots; prompts without
+  the input stay byte-identical. Live repro with the exact March folder: 2/2 samples
+  file 3 items covering all 4 keys — WOULD FILE OK.
+- Gates: typecheck zero; 89/89 in the four touched suites; full suite 4929/4935 —
+  the 6 failures are pre-existing shared-tree drift (`creative_*` tables untyped per
+  peer WIP commit `2bdd034`, campaigns operator-edit), zero frames in changed code.
+- OPS OWING: push + redeploy Trigger worker (prompt v9 + count dep run in the
+  worker), then press Generate on the March run — resumes under a new correlation
+  via `3711445` and should file 3 items reaching 8/8.
+
+### 2026-09-10 · Filed advice invisible: stale run view-cache (user-reported, screenshot)
+
+- Claim: `src/modules/analysis/application/{view-cache,view-cache.test,ports}.ts`,
+  `src/modules/analysis/infrastructure/read-repository{,.test}.ts`, channel
+  `page.tsx`. No migration; fence/worker/prompt untouched. Committed `e6c2b9e`
+  (hunk-split: same files carry live peer range-card hunks, verified still in
+  the worktree). Board stays uncommitted. Never stash/push.
+- Cause (proven end to end): gap-fill run `run_06g8m8930ua7g4p1gs4m7e9801`
+  COMPLETED, 3 items filed (prompt v9 live in prod as `20260910.4`), run at 8/8 —
+  but the page reads through `readCachedRunPayload`, keyed org+run+ANALYSIS digest,
+  TTL 7d, no invalidation (redis helper exports get/set only). The analysis digest
+  never changes on narration, so every load served the pre-gap-fill 5-item payload;
+  hard refresh cannot beat server-side Redis. "Nothing can go stale" held until
+  Amendment C let a completed run's narration grow afterwards.
+- Fix: key gains the run's filed-recommendation count (`v2`, via new indexed
+  `countRecommendationsForRun` on the read port); page loads the count before the
+  cache read. Filings are insert-only (complete deletes only the lease row), so the
+  count is monotonic — stated in the port comment with the delete-path caveat.
+- Immediate unblock (approved in plan): deleted the single stale key for
+  `72a4cbe1` via Upstash REST (existed→deleted→verified gone); next load rebuilds
+  all 8 from staging. No secrets logged.
+- Gates: typecheck zero in changed files (11 errors all pre-existing peer
+  growth-intelligence WIP, untouched files); 50/50 in the three touched suites;
+  eslint 0 errors. Full-suite re-run not repeated (prior: only pre-existing
+  creative/campaigns drift).
+- OPS OWING: none for staging reads — reload shows 8/8 now. Push + app deploy to
+  carry the v2 key wherever the page is served from.
+
+### 2026-09-10 · GI performance card: range aggregation, cache, auto-build + loader (implemented, unpushed)
+
+- Claim: `specs/022-growth-intelligence.md` §§9.9–9.10, `adrs/0055-*` (accepted),
+  `channels-overview{,.test}.ts` (range builder, month helpers retired),
+  `performance-card-cache{,.test}.ts` (key + view schema + envelope, pure),
+  `ports.ts` + `read-repository{,.test}.ts` (range card read, completed-since),
+  GI `page.tsx`, `growth-intelligence-workspace{,.test}.tsx`,
+  `performance-build/route{,.test}.ts` (new), `page-content-loader.tsx` (new),
+  `spinner.tsx` (docs-exact icon). No migration. Board stays uncommitted.
+  Never stash/push.
+- Diagnosis (user: empty top card, "not available yet", org `2dda45b8`): allow-list
+  holds that org, so the flag is ruled out. Staging (service-key read-only probe)
+  shows projected Jan–Feb-span + March packages and completed day/span/month runs
+  over those exact spans — zero month-grain analyses matching a single calendar
+  month. Under the month-only rule the card can never resolve for this org.
+  Closed in implementation: `report.read` is held by every org role (viewer and
+  up), so the grant suspect is ruled out by code; the March lineage gap is moot
+  because the card now reads runs, not surviving evidence windows. Residual: the
+  deployed app's own env allow-list is unchecked from here — if it lacks the org,
+  the flag is still the cause there.
+- Coordination: peer gap-fill session hunk-split `e6c2b9e` around these range-card
+  hunks; current `read-repository` diffs verified peer-marker-free before commit.
+  Peer's `.cursor/mcp.json`, `opencode.json`, `.superdesign/channels/` left alone.
+- Gates: typecheck clean; eslint 0 errors (1 pre-existing `_url` warning, untouched
+  file region); prettier clean; 277/277 across analysis modules + GI + progress +
+  ui; route 6/6; browser-verified via temp preview (deleted after): loader overlay
+  confined to card box with dock/navbar crisp, Channel Audit calendar parity
+  (presets, disabled uncovered days, Apply). Live staging proof as the user is
+  still open — no credentials here; first permitted page load auto-builds.
+- OPS OWING: push + app deploy to carry this wherever the page is served from.
+
+### 2026-09-10 — Codex: Channel landing design prototype
+
+- User requested a Channel redesign inspired by Growth Intelligence and web references, excluding the inner Channel Audit page; deliver a standalone prototype.
+- Claim: `.superdesign/channels/` (prototype, design brief, browser evidence) and this append-only board entry. No production UI, database, worker, or existing audit changes.
+- Direction: comparison-led white canvas, restrained shared Manrope/emerald language, horizontal revenue comparison and compact channel directory; preserve reported/earned/lost and missing-evidence distinctions.
+- Prototype-only interactions and fictional records are explicitly labelled. Production implementation remains subject to a separately reviewed execution plan.
+- Delivered `.superdesign/channels/prototype.html` plus `brief.md`, desktop/mobile screenshots, and a repeatable `verify.cjs` browser walkthrough. All 26 checks passed at desktop, tablet, 390px and 320px widths; no JavaScript runtime errors. Desktop/mobile screenshots visually inspected. Management changes are local only and reset on reload; no production, database, or Channel Audit edits were made by this task.
+
+### 2026-09-10 — Codex: Channel prototype implementation handoff
+
+- User requested an exhaustive section-by-section implementation plan against current source, for another agent. Planning only; no implementation approval inferred.
+- Claim: `docs/superpowers/plans/2026-09-10-channels-redesign-*`, `.superdesign/channels/implementation-reference/`, handoff archive, and this board append.
+- Compare against HEAD `3940ab0ff9c9fd986da1c37bc590eb345b505582`. Protect shared ChannelSetupPanel, Channel Audit, Growth Intelligence range-card work, shared shell, and existing dirty files. Document every prototype-to-production exception explicitly.
+- Planning delivered: eight execution tasks plus 60 grouped visual/control sign-offs in implementation/visual-contract documents; exact geometry at seven widths, seven dialog references, 19 SVG symbols, source fingerprints and a 21-file ZIP handoff. Planning self-review found and specified the span parser mismatch, unproven all-location caption, archived-total scope, absent Table primitive, and shared ChannelSetupPanel blast radius.
+- Baseline: 33/33 tests in six existing Channel/service/authorization suites passed. All recorded source hashes remained unchanged; no product implementation or staging writes. Plan remains proposed until explicit approval, including its 13 documented prototype-to-production adaptations.
+
+### 2026-09-10 — Channels redesign implementation (SDD, approved all 8 tasks)
+
+- User approved the full 8-task implementation plan for execution via subagent-driven development. Target is the Channels landing `.../channels/page.tsx` only; inner `[channelId]` page, `channel-detail.tsx`, audit workspace, Growth Intelligence behavior, shared shell, and all uncommitted GI changes are preserved. Never stash; never `git add .`; no push.
+- Claim: `src/components/channels/channels-presentation.ts`, `channel-icons.tsx`, `channels-directory.tsx`, `channel-coverage-dialog.tsx`, `channel-management-dialog.tsx`, `channel-mapping-forms.tsx`, `channel-mutations.ts`, `channels-landing.module.css`, `src/components/ui/table.tsx` (shadcn CLI), landing edits to `channels/page.tsx`, `channels-management.tsx`, `channels-rollup.tsx`, `channel-portfolio-chart.tsx`, planned tests + `e2e/channels.spec.ts`, narrow Spec 018 §§17.1–17.2 update, verification evidence under `docs/verification/channels-redesign/`. Ledger: `.superpowers/sdd/2026-09-10-channels-redesign-implementation/progress.md`.
+- COMPLETE 2026-09-11: all 8 tasks implemented, each task-reviewed clean (3 fix rounds total, all verified), final whole-slice review APPROVE-WITH-FOLLOW-UPS with 0 blockers. Commits `98f613a` (T1) → `b686454` (T8). No push (user's step). Board left uncommitted (pre-existing foreign mods, no sweep).
+- FOLLOW-UP F1 (tracked, non-blocking): landing dialogs (D01–D05) don't return keyboard focus to opener (lands on body; trap/initial-focus/Escape pass). Acceptance: open any landing dialog, press Escape, assert `document.activeElement` is the opener; repeat for X and overlay dismissal. Fix in `channels-management.tsx` / `channel-management-dialog.tsx` next slice.
+
+### 2026-09-10 · GI follow-up: full-content loader, 3-tier trend, label thinning (implemented, unpushed)
+
+- Claim: `channels-overview{,.test}.ts` (wholeMonthsOfRange, pickTrendWindows,
+  compactRange, 3-tier trend), GI `page.tsx` (month + window tier reads),
+  `business-performance-card{,.test}.tsx` (visibleTickIndexes, thinned axis +
+  values + empty labels, wider margin when crowded),
+  `growth-intelligence-workspace{,.test}.tsx` (skeleton section, loader box
+  removed), `performance-build-watcher{,.test}.tsx` (new, extracted unchanged),
+  `performance-card-cache.test.ts` (new-input fix), `specs/022` §§9.9–9.10.
+  No migration. Board stays uncommitted. Never stash/push.
+- User-reported: (1) loader boxed to the card section instead of full-content
+  takeover; (2) Jan–Mar trend empty ("fewer than two weeks") with 12 crowded
+  x labels. Fixes per approved plan: overlay moved to the page-content
+  container in `page.tsx` (dock/navbar outside), section holds skeleton blocks;
+  trend tries analysed weeks, then analysed calendar months, then distinct
+  analysed windows picked for maximum covered days (Jan–Feb + Mar, never Jan +
+  Mar dropping Feb); labels thin past 6 buckets, latest always named, full
+  values kept in screen-reader text.
+- Gates: typecheck clean (stale `.next` preview artifact cleared); eslint 0
+  errors; 109/109 across the six touched suites; browser-verified via temp
+  preview (deleted after): 12-point chart readable with "62,000" unclipped,
+  full-content blur with dock/navbar crisp.
+- OPS OWING: push + app deploy.
+
+### 2026-09-10 · Channels redesign Task 1: presentation derivations + icons + landing CSS (done)
+
+- Claim (new files only, no shared-model edits): `src/components/channels/channels-presentation.ts`,
+  `src/components/channels/channels-presentation.test.tsx`,
+  `src/components/channels/channel-icons.tsx`,
+  `src/components/channels/channels-landing.module.css`,
+  `src/components/ui/table.tsx` (shadcn CLI). Report: `.superpowers/sdd/2026-09-10-channels-redesign-implementation/task-1-report.md`.
+- Baseline drift: HEAD is now `7801c96` (GI 3-tier trend landed on top of plan
+  baseline `3940ab0`); the only fingerprint mismatch is the expected
+  `channels-overview.ts` GI extension. Consumed types
+  (ChannelsOverviewView/Row/Window) are unchanged, so no plan fact changed.
+- Table CLI added a stray `cn@0.2.6` dep plus `from "cn"` import; fixed import
+  to `@/lib/utils` and removed the dep, so `package.json`/`pnpm-lock.yaml`
+  are back to baseline. No other dirty paths touched; no stash/add/push.
+- Gates: new suite 28/28; regression 116/116 across 9 suites; `tsc --noEmit`
+  clean; eslint clean; prettier applied to the 5 touched paths only.
+
+### 2026-09-10 — Channels redesign Task 2 (recovery completion, uncommitted)
+
+- Recovery implementer inherited the interrupted Task 2 slice: uncommitted edits in exactly six
+  files, no report. Hunk-by-hunk review vs the Task 2 brief + plan §§3/4/7 + V01/V02/D01 found
+  every hunk compliant, so zero production lines were changed; the recovery contribution is
+  verification, the SetupPanel range-diff proof, this entry, and `task-2-report.md`.
+- Claim: `page.tsx` (span-safe parser, one `analysis` prop, default-only-on-null, unknown-window
+  unresolved, `channels_overview.read_failed` on known read errors only), `channels-management.tsx`
+  landing export (V01 title, manager-only Add via `onAdd`, no dialog), `channels-rollup.tsx`
+  (V02 Select + scope caption + D01 dialog + pending/unavailable/no-window states), and their
+  three test files. `ChannelSetupPanel` + private `ChannelForm`/handlers proven byte-identical
+  via range diff (HEAD 195–775 vs worktree 200–780 clean). No schema/migration; channel-detail
+  expectations unchanged; MonthYearPicker/AppShell/tokens untouched; no service-role in browser.
+- Gates: 63/63 across page(14)/management(11)/rollup(10)/presentation(28); regression 59/59
+  (detail/chart/overview/service/authorization); eslint 0 on six files; `diff --check` clean;
+  tsc exit 0 clean on final re-run (one transient error in foreign untracked `preview-steep/`
+  seen mid-session, removed by its owner before completion; zero in Task 2 files throughout).
+  Header Add stays inert until Task 6 wires `onAdd`. Foreign mid-session GI halo tweak
+  (`business-performance-card.tsx`) preserved untouched. Never
+  stash/add-all/push/format; no database commands.
+
+### 2026-09-11 · GI trend value-label halo (Tier 1 fix, committed `3ea68ac`, unpushed)
+
+- User-reported with screenshot: on a steep tier-3 fall (3,689 → 115 → 39) the
+  floating figures sat on the green line and dots, striking through digits.
+- Fix: value labels paint a halo in the card colour (`stroke var(--card)`,
+  paintOrder stroke) at the same position and size -- nothing moved, so the
+  verified layout is unchanged and the line can no longer obscure a figure.
+- Verified with a temp steep preview via Playwright screenshot (deleted after):
+  "3,689" reads cleanly over the falling line; "115"/"39" readable on dots.
+  jsdom cannot render the recharts label path, so no render test -- unit
+  (8/8), typecheck, eslint, prettier all clean. Board stays uncommitted.
+
+### 2026-09-11 · Task 3 Channels redesign — summary strip + horizontal comparison (Tier-2 slice, uncommitted)
+
+- Implementer replaced the old revenue-outcome/doughnut/vertical-chart/loss-ranking composition
+  with the V03 four-metric strip and the V04 single horizontal stacked comparison Card, inside
+  the Task 2 structure (commit `96de4ae` preserved; toolbar/pending/D01/unresolved states
+  byte-untouched — the rollup diff adds only imports, two new components, one state line, and
+  the composition swap).
+- Claim: `channels-rollup.tsx` (PortfolioSummaryStrip, inspectedChannelId + read-only
+  band-detail dialog, chart keyed by org+window), `channel-portfolio-chart.tsx` (new target
+  props portfolio/selectedWindow/onInspectChannel; Amount/Share ToggleGroup; shared-domain
+  horizontal stacked bars in ChartContainer with outer 95/75px gutters, 17px bars, 49px rows;
+  exact tooltips; mixed/signed/zero refusals; earned-definition footer), their tests, and
+  scoped CSS only. `ChannelPortfolioChart` sole production caller confirmed as ChannelsRollup
+  before removing doughnut/focus code. No schema/migration; pure presentation over RSC props.
+- Seam for Task 4: coverage rail goes beside the plot inside this same Card; the band-detail
+  dialog expands into D02 reusing inspectedChannelId as its focused channel. Text contrast
+  verified (subdued #69716c on white 5.02:1) — no token deviation. Mobile notes stay 11px
+  per the documented P12 correction. Never stash/add-all/push/format; no database commands;
+  peer GI files and `.cursor/mcp.json`/`opencode.json` untouched.
+
+### 2026-09-11 · Task 4 Channels redesign — coverage rail, D02 coverage dialog, V06 strip, D03 setup dialog (Tier-2 slice, uncommitted)
+
+- Implementer added the V05 coverage rail inside the comparison Card beside the plot, expanded
+  the Task 3 one-channel band dialog into the full D02 data-coverage dialog, added the V06
+  revenue-only explanation strip at the Card bottom, and added the D03 About channel setup
+  dialog behind a directory-header `About channel setup` link with an `onAboutSetup` seam
+  (same pattern as Task 2's `onAdd`; Task 5 owns the directory rebuild).
+- Claim: new `channel-coverage-dialog.tsx` (ChannelCoverageRail, ComparisonExplanationStrip,
+  ChannelCoverageDialog with `focusedChannelId`, AboutChannelSetupDialog) + its 16-test suite;
+  `channel-portfolio-chart.tsx` Card-shell extension only (optional `coverageRail` /
+  `explanationStrip` props; plot moved verbatim into a `plot` variable — `git diff -w` shows
+  no plot-internal change); `channels-rollup.tsx` (Task 3 dialog removed, `inspectedChannelId`
+  now feeds D02 as the focused channel, rail/strip wired); `channels-management.tsx`
+  (`onAboutSetup` prop, header link, local D03 fallback); scoped CSS only (new
+  `.compareBody/.comparePlotCell/.coverageRail/.explanationStrip` + 3 scoped neutral vars;
+  no token value changed). Feb 2/4 counts, 2/1/1 rows, revenue-only-only, archived exclusion,
+  `0 / 0` empty, unavailable-renders-nothing all tested. No schema/migration; bands only.
+- Seam/production notes: Card header stays full-width above the plot|rail grid (prototype has
+  the rail full-height; recorded as the one layout adaptation); D02 `Channel Audit` links and
+  D03 `Open Integration Hub` link are real tenant-scoped Next Links; eyebrow keeps prototype
+  source casing (`The complete picture`) with CSS uppercase per contract; mobile notes stay
+  11px per the Task 3 P12 correction. Never stash/add-all/push/format; no database commands;
+  peer GI files and `.cursor/mcp.json`/`opencode.json` untouched.
+- Gates: channels dir 95/95 (dialog 16, rollup 22, chart 11, management 13, presentation 28,
+  detail 5); regression 97/97 (page/overview/service/authorization); `tsc --noEmit` clean;
+  eslint 0 on seven files; prettier clean on eight touched files; `git diff --check` clean.
+  Browser 320px focus/text inspection not run (jsdom focus assertion + CSS review instead) —
+  Task 8 owns pixel verification.
+
+### 2026-09-11 — Overview organization home: design and implementation handoff
+
+- User approved Overview as the home of the organization, with prominent campaigns,
+  creative assets and brand identity. Performance and recommendations belong primarily
+  in Channels/Growth Intelligence; the earlier analytics-led Overview direction is superseded.
+- Claim: `.superdesign/organization-home/`, the Overview entry of `.superdesign/resume.json`,
+  `docs/superpowers/specs/2026-09-11-organization-home-design.md`,
+  `docs/superpowers/plans/2026-09-11-organization-home-*`, and this board entry.
+  Planning/prototype only; no production implementation or staging writes authorized by this entry.
+- Preserve all in-progress Channel files and unrelated working-tree changes. No stash or push.
+- Current source distinguishes campaign assets, rendered posters, brand references, and
+  the not-yet-wired Creative History UI. The handoff must not conflate those records or
+  turn a rendered poster into a human-approved asset. Existing shared shell stays intact.
+- Additional documentation claim: narrow Overview section of `.superdesign/design-system.md`
+  and `docs/design/overview-redesign/README.md` to record the new approved purpose without
+  altering historical report artboards. The current application stays on the report until execution.
+- Delivered: Superdesign draft `7950207a-e504-4ee6-82a8-b86aa05b2464` v2; standalone
+  prototype, 9 browser captures, design spec, exact data contract, 18 visual sign-offs,
+  execution Tasks 0–7 and a 22-file ZIP handoff with an executor prompt.
+- Checks: 41 prototype browser checks passed at 7 widths; 49 existing baseline tests passed;
+  read-only staging catalog confirmed every planned column across 8 RLS-enabled tables.
+  All 16 fingerprinted production source files remain unchanged. No customer rows read,
+  staging writes, provider/model execution, application implementation or deployment.
+- Status: approved product direction; written implementation remains proposed for the successor.
+  Prototype acceptance is not authenticated product acceptance. Board stays uncommitted with
+  the other sessions' accumulated notes; this handoff's own files may be committed separately.
+- Handoff committed as `425f9c4` (26 scoped design/documentation files), not pushed.
+  ZIP integrity verified and all 22 packaged files match their committed sources.
+
+### 2026-09-11 — Channels Task 5: directory, filters, search, sort and navigation (DONE, uncommitted)
+
+- Claim: `src/components/channels/channels-directory.tsx` (new),
+  `src/components/channels/channels-directory.test.tsx` (new, 25 tests),
+  `src/components/channels/channels-presentation.ts` (appended category
+  labels + pre-search counts, displayed-label search fix),
+  `src/components/channels/channels-management.tsx` (landing export rewired
+  to the directory; old directory copy removed),
+  `src/components/channels/channels-landing.module.css` (scoped directory
+  system), both test updates, and
+  `.superpowers/sdd/2026-09-10-channels-redesign-implementation/task-5-report.md`.
+- Produces V07–V10 + V11 directory states: counted Active/Measured/Needs
+  attention/Archived ToggleGroup (evidence filters disabled + explained when
+  analysis is off/unavailable), sync name/category search (≤160 chars,
+  labelled clear), reported-revenue sort toggle with mixed-currency alpha
+  fallback, desktop Table + mobile cards from the same rows, category tiles,
+  revenue/share cells, state badges, `mapped locations` + `historical`
+  captions, Channel Audit / View history / Open channel gate-rule links,
+  `Manage {name}` / `View details for {name}` ellipsis emitting the channel
+  ID via the new `onManage` seam (D05 dialog itself is Task 6; hook inert
+  until then, same pattern as Task 2 `onAdd`).
+- `ChannelSetupPanel`, private `ChannelForm`, `responseMessage`, shared
+  consts proven byte-identical via range diff (report holds the commands);
+  the one removed private-region definition is the pencil-Edit
+  `ChannelDialog`, mandated gone by the brief. Key/hint/alias chips move to
+  D05 (Task 6 handoff); mapping history stays visible now in captions.
+- Gates: channels dir 124/124 (7 files); regression 111/111 (page, detail,
+  overview, service, authorization, money-split) + GI card 18/18; `tsc
+  --noEmit` clean; eslint 0 on six files; prettier clean on seven touched
+  files; `git diff --check` clean. No schema/migration; no fetch in the
+  directory; no `.superdesign` prod import; pixel verification deferred to
+  Task 8. Never stash/add-all/push/format; no database commands; peer GI
+  files and `.cursor/mcp.json`/`opencode.json` untouched.
+
+### 2026-09-11 — Channels Task 6: identity management + status transitions (DONE, uncommitted)
+
+- Claim: `src/components/channels/channel-mutations.ts` (new, 4 hooks),
+  `src/components/channels/channel-mutations.test.tsx` (new, 16 tests),
+  `src/components/channels/channel-management-dialog.tsx` (new, D04+D05+D06),
+  `src/components/channels/channel-management-dialog.test.tsx` (new, 17 tests),
+  `src/components/channels/channels-management.tsx` (landing export wires
+  onAdd/onManage/onAboutSetup to owned dialogs; +6 wiring tests),
+  `src/components/channels/channels-landing.module.css` (disclosure + D06
+  width scope), and
+  `.superpowers/sdd/2026-09-10-channels-redesign-implementation/task-6-report.md`.
+- Produces D04 create (name/category/key order, key required + read-only on
+  edit, provider-hint Collapsible, create-first instruction, boundary
+  callout, `Channel created.` + transition to Manage), D05 manage/viewer
+  (role titles/descriptions, identity Save distinct, Locations/Report-labels
+  Collapsible shells with live counts + saved read-only detail, Task 7 fills
+  the forms), D06 AlertDialog archive/restore (exact copy, focus back to the
+  status trigger via onCloseAutoFocus, pending lock, in-confirmation errors,
+  exact toasts), pending-write dismissal guard + live region, idle
+  dirty-discard, disappeared-channel close with `Channel is no longer
+  available.`. All §5 strings verbatim; Sonner only; retry:false ×4;
+  response validation (UUID id, tenant/channel/status match) in the hooks
+  file; input schemas reused from domain/types.ts, never redefined.
+- `ChannelSetupPanel`, private `ChannelForm`, `responseMessage` proven
+  byte-identical via range diff (report holds the commands); all nine diff
+  hunks sit in imports or the landing export, none in old lines 61–593.
+- Gates: channels 163/163 (10 files); plan §8 focused set 192/192 (13
+  files); shared-model regression 58/58 (3 files); `tsc --noEmit` clean;
+  eslint clean; prettier clean; `git diff --check` clean. No schema/
+  migration/API/endpoint; no service-role in browser; no
+  `application/api.ts` in the client graph; no optimistic money patching
+  (router.refresh via onSaved); pixel/browser pass deferred to Task 8.
+  Never stash/add-all/push/format; no database commands; peer GI files and
+  `.cursor/mcp.json`/`opencode.json` untouched.
+
+### 2026-09-11 — Channels Task 7: location + report-label management (DONE, uncommitted)
+
+- Claim: `src/components/channels/channel-mapping-forms.tsx` (new, D07/D08
+  forms), `src/components/channels/channel-mapping-forms.test.tsx` (new, 16
+  tests), `src/components/channels/channel-management-dialog.tsx` (D05 wiring
+  only), dialog tests +4, management tests +2, and
+  `.superpowers/sdd/2026-09-10-channels-redesign-implementation/task-7-report.md`.
+- Produces D07 (saved rows with real name/`Historical location`,
+  Active/Inactive Badge, dates/`No date limits`; Outlet from active branches
+  only; Applicability; two-col dates; branch-switch loads stored draft, fresh
+  branch starts active + nulls; no-branch message with no enabled Save) and
+  D08 (Tags saved rows with exact text/scope/dates; six real scopes default
+  manual; literal punctuation POST; clears submitted field only after validated
+  response; conflict/network/malformed keep drafts; single flight, no retry).
+- Dialog: independent pending/error/success per section, four-way writePending
+  dismissal guard, per-section toasts, dialog stays open, identity toast
+  survives alias failure (no whole-setup claim); denied server message
+  overrides UI assumptions; map-only description extended by addition per the
+  Task 6 ruling (`...configuration. You can manage locations and report
+  labels.`); viewer base copy untouched.
+- No new API/RPC/migration/CSS/mutation-hook change (hooks already complete);
+  `channels-management.tsx` untouched, SetupPanel byte-identical by absence.
+- Gates: 74/74 (forms+dialog+management+mutations); plan §8 set 214/214 (14
+  files); shared regression 58/58; tsc/eslint/prettier/diff-check clean;
+  `pnpm build` success. No db/playwright (Task 8). Never stash/add-all/push/
+  format; no database commands; peer GI files and `.cursor/mcp.json`/
+  `opencode.json` untouched.
+
+### 2026-09-11 — Channels Task 8: responsive/a11y/visual comparison + release checks (DONE, uncommitted)
+
+- Claim: `src/components/channels/__fixtures__/` (new fixtures + 12-test
+  verification suite), `e2e/channels.spec.ts` (new), temporary harness
+  `src/app/design-review-channels/` (deleted before final build; the plan's
+  `__`-prefixed path never routes because Next.js treats a leading underscore
+  as a private folder — verified 404 — so the identical `notFound()` gate
+  shipped under a routable temp name, gate proven 404-without-flag/200-with),
+  `src/components/channels/channels-landing.module.css` (3 scoped refinements),
+  `docs/verification/channels-redesign/` evidence, Spec 018 §§17.1–17.2, plan
+  Task 8 checklist, and
+  `.superpowers/sdd/2026-09-10-channels-redesign-implementation/task-8-report.md`.
+- Carried items closed: (a) real 320px pass over V05/V06/D02/D03 + all sections
+  at 320x760 — no overlap, filters wrap, dialogs fit/scroll; (b) D02
+  mixed-currency + null-window scope lines now real tests;
+  (c) C54 linkage confirmed as designed (Category announces via selected value,
+  Stable key read-only with adjacent label/description; identical in create
+  form — no churn); (d) unknown-unknown sort ties keep snapshot order and raw
+  category search is a same-result superset — both pinned harmless by test;
+  (e) M3 draft-resync confirmed (open draft kept, saved list refreshes);
+  (f) keyboard/AT pass done incl. group-role stat cells, aria-hidden plot,
+  trap, Escape, arrows, Select keyboard, Enter/Space, focus ring, contrast,
+  200% zoom, no scroll at 320/390/650/768/980/1440.
+- Findings fixed in-slice (allowlisted): directory filter ToggleGroup overflowed
+  73px at 320px — items now wrap (V08); two reference text shades failed
+  contrast and were darkened per P12 (`--channel-denominator` #9ca59d→#69746a
+  4.61:1 on rail; filter counts #899189→#626c65 5.45:1/4.79:1 selected).
+- Residual deviation R1 (reported, not fixed — fix needs non-allowlisted
+  dialog/management files): no dialog returns keyboard focus to its opener
+  (focus lands on body; D06 keeps its designed redirect to the status trigger).
+  Trap/initial-focus/Escape all pass. Remediation pointer in the Task 8 report.
+- Gates: fixtures 12/12; §8 set 226/226 (15 files); shared regression 58/58;
+  browser control inventory 53/54 + states 11/12 (the 2 misses are R1);
+  `pnpm db:test` governed_channels 26/26 pass on staging; e2e channels 2 pass +
+  6 skip (no E2E_* creds in env, manager slot reserved — no roles invented);
+  shell.spec 1 pass + 1 unrelated baseline fail (`/` no longer redirects to
+  /login — pre-existing, untouched by this slice); `pnpm test` 5143 pass, 6
+  unrelated baseline fails (5 expired meta_campaign contract, 1 creative_*
+  types gap — all outside channels, fixed none); typecheck exit 0; touched-path
+  eslint/prettier/diff-check clean; repo-wide lint 56 problems all pre-existing
+  foreign files; final `pnpm build` after temp-route removal (see report).
+- No migration, no role change, no push (commit left to coordinator). Never
+  stash/add-all/push/format; no Supabase/Docker/db:types; peer GI files,
+  `.cursor/mcp.json`/`opencode.json`/`next-env.d.ts`/`tsconfig.tsbuildinfo`
+  preserved as found.
+
+### 2026-09-11 — Platform scrollbar restyle (approved, implemented)
+
+- User: viewport scrollbar looks primitive; wants modern quiet scrollbars platform-wide + no stepper nubs at track ends in modals (Linux Chromium shows them).
+- Claim: `src/app/globals.css` only (+53 lines in `@layer base`). No component/token/layout touched. Never stash/add-all/push/format; peer files preserved.
+- What: thin rounded grey thumb (22% foreground idle, 45% hover) on transparent track; `scrollbar-button:display:none` kills the up/down nubs; Firefox `thin` fallback; forced-colors steps aside. Native scrolling kept (no JS); true fade-on-idle declined as JS territory with a11y cost. Drive-by note: `no-scrollbar` class used by sidebar/command has no definition in-repo (dead class) — left as-is.
+- Gates: prettier clean, eslint n/a (CSS), `pnpm build` exit 0, rules confirmed byte-present in emitted chunk CSS + live computed style (`thin` + color). Headless env Chromium paints overlay-only scrollbars so pixel proof needs a real browser — user to hard-refresh (Ctrl+Shift+R) to bypass cached CSS.
+
+### 2026-09-11 — Channels polish: metric colors, GI-matched type, opaque tooltip, sticky dialogs (approved, implemented)
+
+- User: strip values all-black (wants distinct colors); section titles + axis ticks smaller than Growth Intelligence; chart tooltip translucent over row text; wants modal title/footer sticky globally.
+- Claim: `channels-landing.module.css` (earned/loss value colors, dirTitle 20px/semibold), `channel-portfolio-chart.tsx` (20px card title, 11px muted ticks, opaque tooltip + no enter animation), `channels-rollup.tsx` (tone classes), `ui/dialog.tsx` + `ui/alert-dialog.tsx` (sticky header/footer, no-op when no scroll), visual-contract amendments, this board append. No behavior/permission/copy changes.
+- Root causes: tooltip translucency = Recharts 3.8 Tooltip enter animation (400ms fade, `isAnimationActive:"auto"`) + flat surface; stepper nubs earlier = Linux-Chromium scrollbar buttons (fixed prior commit).
+- Gates: 198/198 channels+ui suites, tsc 0, eslint 0, prettier clean, `pnpm build` exit 0. Pixel proof needs a real browser (env Chromium is overlay-only) — user sign-off on staging. Never stash/add-all/push; peer files preserved.
+
+### 2026-09-11 — Sticky dialog header gap fix (regression from same-day sticky change)
+
+- User screenshot: Data coverage dialog opened pre-scrolled (auto-focus scrolls to the channel row), Deliveroo row bled through a 16px strip above the pinned header.
+- Cause: `sticky top-0` constrains the margin box; my `-mt-4` compensation parked the border box 16px below the stick point whenever sticky engaged. Unscrolled dialogs were unaffected, which is why gates passed.
+- Fix: header keeps its exact resting box, adds only opaque bg + `top-[-16px]` (flush with card edge when stuck). Footer `bottom-0` verified correct as-is (pre-existing `-mb-4` bridges the padding). Offset coupled to content padding: every scrollable dialog uses default p-4; p-0 dialogs never scroll. Claim: `ui/dialog.tsx`, `ui/alert-dialog.tsx`, visual-contract D00 note, this append.
+
+### 2026-09-11 — Business Memory grounded-consent narrow spec (drafting, no provider change)
+
+- Claim: `specs/024-business-memory-grounded-consent.md` (new), this board append only. No migrations, no provider wiring, no Channel/Growth/Campaign code touched.
+- Why: user approved full Spec 023 plan but asked for a narrow opt-in to send private memory to Google Search grounded narration instead of avoiding it fully. That moves a third-party disclosure boundary, so it needs its own spec + approval before any Task 07 wiring.
+- Default stays safe: non-grounded private path per Spec 023. Grounded-share path stays disabled until per-org opt-in + provider qualification + audit land together.
+- Gates for this row: spec draft written, approval questions answered, no code or staging writes.
+
+### 2026-09-11 — Spec 024 Task 01 claimed (pure grounded-share contracts)
+
+- Claiming: `src/domain/memory/grounded-share.ts` (new), `src/domain/memory/grounded-share.test.ts` (new). No migrations, no provider wiring, no Channel/Growth/Campaign edits.
+- Pure domain only: allowlist, exclusion codes, 8 entry and 4096 byte caps, consent v1 wording constant. Hashing stays server-side to respect client-module boundary.
+
+### 2026-09-11 — Spec 024 Task 01 done (pure contracts, no DB or provider change)
+
+- Shipped `src/domain/memory/grounded-share.ts` + 11 tests. Allowlist holds: public/internal + qualified_reusable + observation/recommendation/operator_decision only, money/PII/dead-root/wrong-scope/legacy blocks, 8 entry and 4096 byte deterministic subset, consent v1 wording pinned.
+- Verification: vitest 11/11 + client-boundary 146/146 pass, tsc clean, eslint clean. No migrations, no provider wiring touched.
+
+### 2026-09-11 — Spec 024 Task 02 claimed (consent + qualification storage)
+
+- Claiming: `supabase/migrations/20260911100114_business_memory_grounded_consent.sql` (new), `supabase/tests/database/memory_grounded_consent_test.sql` (new), `src/modules/memory/application/grounded-share-hash.ts` + test (new), `src/lib/supabase/database.types.test.ts` (untyped-table listing only).
+- RPC-only tables, RLS forced, no browser writes. Worker status gated by service role + org scope. No Channel/Growth/Campaign behavior change in this slice.
+
+### 2026-09-11 — Spec 024 Task 02 done (consent + qualification live on staging)
+
+- Migrations pushed: `20260911100114_business_memory_grounded_consent.sql` (consents + qualifications tables, grant/revoke/record/status RPCs), `20260911101806_business_memory_grounded_consent_service_role_deny.sql` (explicit service_role revoke on member-only paths, following `20260824160000` precedent — hosted default privileges grant service_role execute otherwise).
+- pgTAP `memory_grounded_consent_test.sql` 43/43 pass on staging: role gates, replay/conflict, one-active/one-current, revoke-then-regrant, expired-qualification refusal, cross-tenant denial, worker status read. Every new function executed including refusal paths.
+- TS: `grounded-share-hash.ts` server-only wording hash + 2 tests. `database.types.test.ts` lists the 2 new tables as untyped RPC-only surfaces.
+- Verification: memory suites 15 files 151 tests pass, tsc clean, eslint clean. `database.types.test.ts` still fails on 5 `creative_*` tables from peer commit `2bdd034` — pre-existing, unrelated, left alone.
+- No provider wiring touched. Grounded-share cannot run yet: no reader calls the status function and no prompt carries the subset.
+
+### 2026-09-11 — Spec 024 Task 03 claimed (Channel share-mode plumbing)
+
+- Claiming: `src/workflows/analysis/grounded-share-mode.ts` + test (new), `src/workflows/analysis/recommendation-prompt.ts` + test (shared-context block), `src/workflows/analysis/run-channel-recommendations.ts` + test (optional loadShareContext dep), `src/trigger/recommendations.ts` + test (status-read wiring), `src/lib/supabase/database.types.ts` (grounded_share_status Function entry only).
+- Scope: status gating, prompt section, result/log provenance. No fence change, no prompt-version bump, no retrieval wiring, no drawer UI. Subset entries stay empty until Spec 023 capture lands; prompts stay byte-identical until then.
+
+### 2026-09-11 — Spec 024 Task 03 done (Channel share-mode plumbing, no behavior change yet)
+
+- Shipped: `grounded-share-mode.ts` + 6 tests (mode decision, defensive status parse, log fields without bodies), `recommendation-prompt.ts` shared-context block + 4 tests (whitelist render, byte-identical when empty), `run-channel-recommendations.ts` optional loadShareContext dep + shareMode/shareEntryCount results + 4 tests, `trigger/recommendations.ts` status-read wiring + log fields, `database.types.ts` grounded_share_status Function entry only.
+- Proof: 253 tests pass across 7 files, tsc clean, eslint clean. Active-but-empty share verified byte-identical to internal-only prompts. No fence, prompt-version, judge, or retrieval change.
+- Honest limit: entries stay empty with reason corpus_unqualified until Spec 023 capture lands qualified rows. Per-answer drawer labels need the Spec 023 association table and are explicitly deferred.
+- Untouched: `next-env.d.ts` one-line dev/build churn is auto-generated noise, left alone.
+
+### 2026-09-11 — Spec 023 Task 02 claimed (capture storage + leased runtime)
+
+- Claiming: `supabase/migrations/*_business_memory_shared_capture.sql` + `*_business_memory_capture_runtime.sql` (new), `supabase/tests/database/memory_shared_capture_test.sql` + `memory_shared_source_identity_test.sql` + `memory_capture_runtime_test.sql` (new), `src/domain/memory/capture.ts` + test (new), `src/modules/memory/infrastructure/capture-repository.ts` + test (new), `src/lib/supabase/database.types.test.ts` (untyped-table listing only).
+- Rules: additive only, annotation-free. Read every current source definition before editing any forward replacement. No adapters enabled, flags default disabled, no provider behavior change.
+
+### 2026-09-11 — Spec 023 Task 02 done (capture storage + leased runtime live)
+
+- Migrations pushed: `20260911104742_business_memory_shared_capture.sql` (settings, source revisions, capture events, dependencies, adapter registry, item kind/link, 2 permission seeds, settings RPC, private revision allocator), `20260911104746_business_memory_capture_runtime.sql` (due-orgs, claim, load, fail, complete, retry RPCs), plus 2 forward repairs (`..._capture_repair`: event_kind default, service_role revokes; `..._runtime_repair`: bare RETURNING removal). No applied migration edited.
+- Source tables needed zero changes: all 9 backing tables plus branches/channels already carry composite (organization_id, id).
+- pgTAP 105 assertions green: capture 31, source identity 10, runtime 34, catalogue 30. Every new function executed including refusal paths. Neighbors green: memory write/projection, channel decisions.
+- TS: `domain/memory/capture.ts` bounds + retry map, `capture-repository.ts` worker client with defensive parsing, permission mirror + boundary tests, 7 tables listed untyped RPC-only. 190 tests pass, tsc/eslint clean.
+- Two staging truths learned: hosted default privileges grant service_role execute on new functions (explicit revokes required, third occurrence), and live check names drift from base migrations (read staging, not just files).
+- Deferred honestly: complete_'s registered-kind branches (no kinds registered; quarantine path tested), reconcile RPC + dispatch scheduling (ride with adapter slices), context manifests/assembly (Tasks 04-05).
+
+### 2026-09-11 — Channels free-range picker + loader (approved plan, implemented)
+
+- User: same free from/to calendar as GI/Channel Audit (limited to reported coverage); GI full-page spinner over content (not navbar/side menu) instead of blank while the new dates load.
+- Reused shared `WindowRangePicker` + `PageContentLoader` (no forks). Page resolves `?from=&to=` via existing `resolveOverviewWindow` (one declared window incl. grain, never snapped); legacy `?window=` unchanged as fallback; covered-but-undeclared stays unresolved with figures suppressed. `range` is optional on the ready analysis so degraded states keep the old Select (still tested).
+- Claim: `channels-presentation.ts` (range type + parser), `channels-rollup.tsx` (picker + loader overlay), channels `page.tsx` (+segments read, resolution, today), 3 test files, visual-contract P03/toolbar notes, this append. No migrations, no new files, GI/Audit untouched. Peer org-home files preserved.
+- Gates: 204/204 channels+ui suites, tsc 0, eslint 0, build exit 0. Pixel proof needs staging (no real browser here). Never stash/add-all/push.

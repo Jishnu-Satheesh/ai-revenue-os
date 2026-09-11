@@ -78,7 +78,7 @@ describe("runChannelRecommendations", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1, shareMode: "internal_only", shareEntryCount: 0 });
     expect(deps.generator.generate).toHaveBeenCalledTimes(1);
     const [system, user] = vi.mocked(deps.generator.generate).mock.calls[0];
     expect(user).toContain(`<finding id="${FINDING}">`);
@@ -111,7 +111,7 @@ describe("runChannelRecommendations", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1, shareMode: "internal_only", shareEntryCount: 0 });
     expect(generate).toHaveBeenCalledTimes(2);
     expect(deps.complete).toHaveBeenCalledTimes(1);
     expect(deps.fail).not.toHaveBeenCalled();
@@ -127,6 +127,8 @@ describe("runChannelRecommendations", () => {
       outcome: "failed",
       recommendationCount: 0,
       failureCode: "NARRATION_VALIDATION_FAILED",
+      shareMode: "internal_only",
+      shareEntryCount: 0,
     });
     expect(generate).toHaveBeenCalledTimes(2);
     expect(deps.complete).not.toHaveBeenCalled();
@@ -191,7 +193,7 @@ describe("runChannelRecommendations", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "completed", recommendationCount: 0 });
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 0, shareMode: "internal_only", shareEntryCount: 0 });
     expect(deps.loadFindings).not.toHaveBeenCalled();
     expect(deps.generator.generate).not.toHaveBeenCalled();
     expect(deps.complete).not.toHaveBeenCalled();
@@ -205,6 +207,8 @@ describe("runChannelRecommendations", () => {
       expect(await runChannelRecommendations(payload, deps)).toEqual({
         outcome: "skipped",
         recommendationCount: 0,
+        shareMode: "internal_only",
+        shareEntryCount: 0,
       });
       expect(deps.loadFindings).not.toHaveBeenCalled();
       expect(deps.generator.generate).not.toHaveBeenCalled();
@@ -223,6 +227,8 @@ describe("runChannelRecommendations", () => {
       outcome: "failed",
       recommendationCount: 0,
       failureCode: "MODEL_PROVIDER_UNAVAILABLE",
+      shareMode: "internal_only",
+      shareEntryCount: 0,
     });
     expect(generate).toHaveBeenCalledTimes(1);
     expect(deps.complete).not.toHaveBeenCalled();
@@ -288,7 +294,7 @@ describe("runChannelRecommendations gap-fill narration", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1, shareMode: "internal_only", shareEntryCount: 0 });
     const [system, user] = vi.mocked(deps.generator.generate).mock.calls[0];
     expect(user).toContain(`<finding id="${UNCITED_FINDING}">`);
     expect(user).not.toContain(`<finding id="${FINDING}">`);
@@ -374,7 +380,7 @@ describe("runChannelRecommendations gap-fill headroom", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1, shareMode: "internal_only", shareEntryCount: 0 });
     const [system, user] = vi.mocked(deps.generator.generate).mock.calls[0];
     expect(system).toContain("file at most 1 more");
     expect(system).toContain("more than one key");
@@ -446,7 +452,7 @@ describe("runChannelRecommendations channel context threading", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1, shareMode: "internal_only", shareEntryCount: 0 });
     expect(deps.loadPilotContext).toHaveBeenCalledWith({
       organizationId: ORGANIZATION,
       analysisRunId: RUN,
@@ -470,7 +476,7 @@ describe("runChannelRecommendations channel context threading", () => {
 
     const result = await runChannelRecommendations(payload, deps);
 
-    expect(result).toEqual({ outcome: "completed", recommendationCount: 1 });
+    expect(result).toEqual({ outcome: "completed", recommendationCount: 1, shareMode: "internal_only", shareEntryCount: 0 });
     const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
     expect(user).not.toContain("<channel_context>");
     expect(deps.complete).toHaveBeenCalledTimes(1);
@@ -520,5 +526,76 @@ describe("runChannelRecommendations grounding switch", () => {
     const [, user, options] = vi.mocked(deps.generator.generate).mock.calls[0];
     expect(options).toEqual({ useGrounding: true });
     expect(user).not.toContain("<channel_context>");
+  });
+});
+
+describe("runChannelRecommendations share mode (Spec 024)", () => {
+  it("stays internal-only without a share dependency and sends no shared block", async () => {
+    const deps = dependencies();
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.shareMode).toBe("internal_only");
+    expect(result.shareEntryCount).toBe(0);
+    const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).not.toContain("<shared_business_context>");
+  });
+
+  it("completes internal-only when the share loader throws, without blocking narration", async () => {
+    const deps = dependencies({
+      loadShareContext: vi.fn(async () => {
+        throw new Error("status check failed");
+      }),
+    });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.outcome).toBe("completed");
+    expect(result.shareMode).toBe("internal_only");
+    expect(result.shareEntryCount).toBe(0);
+    const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).not.toContain("<shared_business_context>");
+  });
+
+  it("places allowlisted entries in the prompt when sharing is active", async () => {
+    const deps = dependencies({
+      loadShareContext: vi.fn(async () => ({
+        mode: "grounded_share" as const,
+        entries: [{ title: "Friday plan", summary: "Check capacity before the mall event." }],
+        excludedCount: 2,
+        reason: "ready" as const,
+      })),
+    });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.outcome).toBe("completed");
+    expect(result.shareMode).toBe("grounded_share");
+    expect(result.shareEntryCount).toBe(1);
+    const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).toContain("<shared_business_context>");
+    expect(user).toContain("Friday plan");
+  });
+
+  it("keeps the prompt byte-identical for an active-but-empty share", async () => {
+    const without = dependencies();
+    await runChannelRecommendations(payload, without);
+    const [systemBefore, userBefore] = vi.mocked(without.generator.generate).mock.calls[0];
+
+    const active = dependencies({
+      loadShareContext: vi.fn(async () => ({
+        mode: "grounded_share" as const,
+        entries: [],
+        excludedCount: 3,
+        reason: "corpus_unqualified" as const,
+      })),
+    });
+    const result = await runChannelRecommendations(payload, active);
+    const [systemAfter, userAfter] = vi.mocked(active.generator.generate).mock.calls[0];
+
+    expect(result.shareMode).toBe("grounded_share");
+    expect(result.shareEntryCount).toBe(0);
+    expect(systemAfter).toBe(systemBefore);
+    expect(userAfter).toBe(userBefore);
   });
 });

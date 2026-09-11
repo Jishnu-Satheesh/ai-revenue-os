@@ -43,6 +43,14 @@ export type NarrationPromptInput = {
   /** Stored channel identity; absent renders the v4 shape (plus the global plain-language rules). */
   channelContext?: NarrationChannelContext | null;
   /**
+   * Consent-gated shared business context (Spec 024). Only entries the
+   * domain allowlist already approved ever arrive here; the renderer only
+   * reads the whitelisted title and summary. Absent or empty renders no
+   * block at all, so every run without shareable entries stays
+   * byte-identical to what earlier versions built.
+   */
+  sharedContext?: readonly SharedContextEntry[] | null;
+  /**
    * Gap-fill rounds only: how many items this run already filed. Absent, the
    * prompt stays byte-identical to a full narration, so full rounds never see
    * gap-fill rules. Present, the uncovered chapters are counted against the
@@ -326,6 +334,18 @@ function cleanText(value: string | null | undefined): string {
  * Returns null when nothing whitelisted survived, so an empty context renders
  * no block at all.
  */
+/**
+ * One consent-gated shared entry as the prompt may carry it.
+ *
+ * Only these two whitelisted fields ever reach the prompt, in a fixed order.
+ * Extra keys on the input object are never read, so they cannot leak no
+ * matter what the caller passes — the same fence as the channel renderer.
+ */
+export type SharedContextEntry = {
+  title: string;
+  summary: string;
+};
+
 function renderChannelContext(context: NarrationChannelContext): string | null {
   const lines: string[] = [];
   const push = (label: string, value: string | null | undefined): void => {
@@ -351,6 +371,32 @@ function renderChannelContext(context: NarrationChannelContext): string | null {
 }
 
 /**
+ * Renders the consent-gated shared block (Spec 024). Entries arrive
+ * pre-allowlisted, bounded to 8 entries by the domain subset, each summary
+ * already capped upstream. Titles and summaries render trimmed; blank entries
+ * are dropped, and an empty list renders no block at all. Shared entries may
+ * inform the wording of supportedActions only: findings remain the only cited
+ * evidence, and a shared entry is never cited as one.
+ */
+function renderSharedContext(entries: readonly SharedContextEntry[]): string | null {
+  const blocks = entries
+    .map((entry) => {
+      const title = cleanText(entry.title);
+      const summary = cleanText(entry.summary);
+      if (!title && !summary) return null;
+      return [`<shared_entry title="${title || "(untitled)"}">`, summary || "(none)", "</shared_entry>"].join("\n");
+    })
+    .filter((block): block is string => block !== null);
+  if (blocks.length === 0) return null;
+  return ["<shared_business_context>", ...blocks, "</shared_business_context>"].join("\n");
+}
+
+const SHARED_CONTEXT_RULES = [
+  "The fenced shared business context holds organization-approved notes the operator consented to share. Let it inform the wording of supportedActions only.",
+  "Shared entries are never evidence: cite only finding ids, never a shared entry, and never let a shared entry override, contradict, or complete a finding.",
+].join("\n");
+
+/**
  * Builds the narrator's system and user prompts for one analysis run.
  *
  * The user prompt is the folder: the run's window, then every finding of the
@@ -371,6 +417,11 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     ? renderChannelContext(input.channelContext)
     : null;
   const hasChannel = channelBlock !== null;
+  const sharedBlock =
+    input.sharedContext && input.sharedContext.length > 0
+      ? renderSharedContext(input.sharedContext)
+      : null;
+  const hasShared = sharedBlock !== null;
   const headroomLine = gapFillHeadroomLine(input);
 
   const system = [
@@ -390,6 +441,7 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     "",
     PLAIN_RULES,
     ...(hasChannel ? ["", CHANNEL_GROUNDING_RULES] : []),
+    ...(hasShared ? ["", SHARED_CONTEXT_RULES] : []),
     "",
     ADVICE_EXAMPLE,
     "",
@@ -413,6 +465,7 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     ...sortedFindings.map(renderFinding),
     "</findings>",
     ...(channelBlock ? ["", channelBlock] : []),
+    ...(sharedBlock ? ["", sharedBlock] : []),
     "",
     "Cite only finding ids listed above. Nothing outside this list exists.",
     "Respond under the output contract given in your instructions.",
