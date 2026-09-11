@@ -1,0 +1,385 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
+}));
+
+// React's own pending flag is the only thing that shows the refresh state:
+// forcing it here pins the visible pending copy without racing the transition.
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    useTransition: () => [true, (start: () => void) => start()],
+  };
+});
+
+const mocks = {
+  refresh: vi.fn(),
+};
+
+import { OrganizationHome } from "@/components/organizations/home/organization-home";
+import type {
+  HomeActivityItem,
+  HomeAsset,
+  HomeAttentionItem,
+  HomeCampaign,
+  HomeGoal,
+  OrganizationHomeView,
+} from "@/modules/organizations/application/home-types";
+
+afterEach(() => {
+  cleanup();
+  mocks.refresh.mockClear();
+});
+
+const ORG_ID = "11111111-1111-4111-8111-111111111111";
+const CAMPAIGN_1 = "44444444-4444-4444-8444-444444444441";
+const NOW = "2026-09-11T08:00:00.000Z";
+
+function campaign(overrides: Partial<HomeCampaign> = {}): HomeCampaign {
+  return {
+    id: CAMPAIGN_1,
+    title: "Ramadan Push",
+    objective: "Drive iftar orders",
+    state: "ready_for_review",
+    generation: { status: "settled", detail: null },
+    openable: true,
+    updatedAt: "2026-09-10T10:00:00.000Z",
+    actionLabel: "Review campaign",
+    href: `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_1}`,
+    cover: null,
+    coverLabel: null,
+    ...overrides,
+  };
+}
+
+function asset(overrides: Partial<HomeAsset> = {}): HomeAsset {
+  return {
+    id: "poster:55555555-5555-4555-8555-555555555551",
+    sourceKind: "poster_render",
+    label: "Ramadan Push · ramadan-hero · iftar spread",
+    sourceLabel: "Finished poster render",
+    reviewLabel: "Review not recorded",
+    reviewState: "unreviewed",
+    recordedAt: "2026-09-09T10:00:00.000Z",
+    image: {
+      url: "https://signed.example/poster-1",
+      alt: "Ramadan poster render",
+      width: 1200,
+      height: 800,
+      expiresAt: "2026-09-11T08:10:00.000Z",
+    },
+    sourceHref: `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_1}?version=66666666-6666-4666-8666-666666666661`,
+    ...overrides,
+  };
+}
+
+function goal(overrides: Partial<HomeGoal> = {}): HomeGoal {
+  return {
+    id: "33333333-3333-4333-8333-333333333331",
+    name: "Grow orders",
+    target: "500 orders",
+    deadline: "2026-12-31T20:00:00.000Z",
+    scopeLabel: "Organization",
+    ...overrides,
+  };
+}
+
+function attention(overrides: Partial<HomeAttentionItem> = {}): HomeAttentionItem {
+  return {
+    id: `campaign:${CAMPAIGN_1}`,
+    sourceLabel: "Campaign",
+    title: "Ramadan Push",
+    reason: "Campaign is ready for review.",
+    actionLabel: "Review campaign",
+    href: `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_1}`,
+    ...overrides,
+  };
+}
+
+function activity(overrides: Partial<HomeActivityItem> = {}): HomeActivityItem {
+  return {
+    id: `campaign:${CAMPAIGN_1}`,
+    label: "Campaign updated",
+    title: "Ramadan Push",
+    occurredAt: "2026-09-10T10:00:00.000Z",
+    href: `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_1}`,
+    kind: "campaign",
+    ...overrides,
+  };
+}
+
+function view(overrides: Partial<OrganizationHomeView> = {}): OrganizationHomeView {
+  return {
+    organizationId: ORG_ID,
+    name: "Al Noor Kitchen",
+    description: "Family meals",
+    status: "active",
+    timeZone: "Asia/Dubai",
+    currency: "AED",
+    logo: null,
+    locations: [
+      { id: "22222222-2222-4222-8222-222222222221", name: "Deira", kind: "physical" },
+      { id: "22222222-2222-4222-8222-222222222222", name: "Online", kind: "virtual" },
+    ],
+    branchlessConfirmed: false,
+    goals: [goal()],
+    focusGoalId: "33333333-3333-4333-8333-333333333331",
+    permissions: {
+      canCreateCampaign: true,
+      canEditCampaign: true,
+      canReviewCampaign: true,
+      canManageCore: true,
+    },
+    campaigns: { status: "ready", data: [campaign()], fetchedAt: NOW },
+    assets: { status: "ready", data: [asset()], fetchedAt: NOW },
+    assetsPartial: false,
+    attention: [attention()],
+    attentionIncomplete: false,
+    destinations: [
+      {
+        key: "channels",
+        label: "Channels",
+        description: "See organization-owned channels and their mappings.",
+        href: `/organizations/${ORG_ID}/channels`,
+      },
+      {
+        key: "memory",
+        label: "Business Memory",
+        description: "Read business memory that is not sensitive.",
+        href: `/organizations/${ORG_ID}/memory`,
+      },
+    ],
+    activity: [activity()],
+    ...overrides,
+  };
+}
+
+describe("OrganizationHome composition", () => {
+  it("renders sections in reading order: identity, campaigns, library, attention, goals, destinations, activity", () => {
+    render(<OrganizationHome view={view()} />);
+    const headings = screen
+      .getAllByRole("heading")
+      .map((heading) => heading.textContent ?? "");
+    const order = [
+      "Al Noor Kitchen",
+      "Campaigns",
+      "Asset library",
+      "Needs attention",
+      "Goals",
+      "Around your business",
+      "Recent activity",
+    ];
+    let cursor = -1;
+    for (const expected of order) {
+      const index = headings.findIndex(
+        (text, position) => position > cursor && text.includes(expected),
+      );
+      expect(index, `expected heading "${expected}" after position ${cursor}`).toBeGreaterThan(
+        cursor,
+      );
+      cursor = index;
+    }
+  });
+
+  it("keeps an empty module distinct from a failed one", () => {
+    render(
+      <OrganizationHome
+        view={view({
+          campaigns: { status: "failed", code: "HOME_READ_FAILED" },
+          assets: { status: "ready", data: [], fetchedAt: NOW },
+        })}
+      />,
+    );
+    expect(screen.getByText(/campaigns could not be loaded/i)).toBeInTheDocument();
+    expect(screen.getByText(/no saved work yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/recent work could not be loaded/i)).not.toBeInTheDocument();
+  });
+
+  it("warns on a partial gallery while keeping survivors", () => {
+    render(<OrganizationHome view={view({ assetsPartial: true })} />);
+    expect(screen.getByText(/some recent work could not be loaded/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /ramadan push · ramadan-hero · iftar spread/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows pending refresh feedback while refreshing", () => {
+    render(
+      <OrganizationHome
+        view={view({ campaigns: { status: "failed", code: "HOME_READ_FAILED" } })}
+      />,
+    );
+    // The forced pending flag pins this copy; the click-to-refresh wiring is
+    // pinned in the section suites with a live transition.
+    const retry = screen.getByRole("button", { name: /refreshing/i });
+    expect(retry).toBeDisabled();
+  });
+
+  it("shows the saved goal target and lists every goal with its scope", async () => {
+    const user = userEvent.setup();
+    render(
+      <OrganizationHome
+        view={view({
+          goals: [
+            goal(),
+            goal({
+              id: "33333333-3333-4333-8333-333333333332",
+              name: "Deira sprint",
+              target: "200 orders",
+              scopeLabel: "Deira",
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText("500 orders")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /view goals/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Grow orders")).toBeInTheDocument();
+    expect(within(dialog).getByText("Deira sprint")).toBeInTheDocument();
+    expect(dialog.textContent ?? "").toMatch(/Organization/);
+    expect(dialog.textContent ?? "").toMatch(/Deira/);
+  });
+
+  it("renders activity from labels and titles only, with no publish wording", () => {
+    const { container } = render(
+      <OrganizationHome
+        view={view({
+          activity: [
+            activity(),
+            activity({
+              id: "audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1",
+              label: "Goal added",
+              title: "Grow orders",
+              occurredAt: "2026-09-05T10:00:00.000Z",
+              href: "#organization-management",
+              kind: "organization",
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText("Campaign updated")).toBeInTheDocument();
+    expect(screen.getByText("Goal added")).toBeInTheDocument();
+    expect(container.textContent ?? "").not.toMatch(/published/i);
+    expect(container.textContent ?? "").not.toMatch(/payload/i);
+  });
+
+  it("marks long and RTL names to render in their own direction at narrow widths", () => {
+    render(
+      <OrganizationHome
+        view={view({
+          name: "مطبخ النور للعائلات الكبيرة جدا",
+          campaigns: {
+            status: "ready",
+            data: [campaign({ title: "مطبخ النور حملة رمضان الكبيرة" })],
+            fetchedAt: NOW,
+          },
+          attention: [],
+          activity: [],
+        })}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveAttribute("dir", "auto");
+    expect(screen.getByRole("heading", { name: /مطبخ النور حملة/ })).toHaveAttribute(
+      "dir",
+      "auto",
+    );
+  });
+
+  it("shows the viewer campaign wording with no create or manage affordances", () => {
+    render(
+      <OrganizationHome
+        view={view({
+          permissions: {
+            canCreateCampaign: false,
+            canEditCampaign: false,
+            canReviewCampaign: false,
+            canManageCore: false,
+          },
+          campaigns: {
+            status: "ready",
+            data: [campaign({ actionLabel: "View campaign" })],
+            fetchedAt: NOW,
+          },
+        })}
+      />,
+    );
+    const campaigns = screen.getByRole("region", { name: "Campaigns" });
+    expect(
+      within(campaigns).getByRole("link", { name: "View campaign" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /new campaign/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /manage/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("OrganizationHome attention wording", () => {
+  it("counts what is shown and states partial checks explicitly", () => {
+    render(
+      <OrganizationHome
+        view={view({
+          attention: [
+            attention(),
+            attention({
+              id: "org:missing-goals",
+              sourceLabel: "Organization",
+              title: "Add a goal",
+              reason: "No organization goal is on file yet.",
+              actionLabel: "Add it",
+              href: "#organization-management",
+            }),
+          ],
+          attentionIncomplete: true,
+        })}
+      />,
+    );
+    expect(screen.getByText("2 shown")).toBeInTheDocument();
+    expect(screen.getByText(/not everything could be checked/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Nothing in the recent work shown needs attention."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("states a fully-checked empty list exactly once", () => {
+    render(<OrganizationHome view={view({ attention: [], attentionIncomplete: false })} />);
+    expect(
+      screen.getByText("Nothing in the recent work shown needs attention."),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("OrganizationHome header", () => {
+  it("links management to its anchor and creation to the campaign route", () => {
+    render(<OrganizationHome view={view()} />);
+    expect(screen.getByRole("link", { name: /manage/i })).toHaveAttribute(
+      "href",
+      "#organization-management",
+    );
+    expect(screen.getByRole("link", { name: /new campaign/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORG_ID}/campaigns/new`,
+    );
+  });
+
+  it("opens the read-only locations dialog from the context row", async () => {
+    const user = userEvent.setup();
+    render(<OrganizationHome view={view()} />);
+    await user.click(screen.getByRole("button", { name: /2 locations/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Deira")).toBeInTheDocument();
+    expect(within(dialog).getByText("Online")).toBeInTheDocument();
+  });
+
+  it("renders name-only identity when no logo qualified", () => {
+    render(<OrganizationHome view={view({ logo: null })} />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Al Noor Kitchen");
+    expect(screen.queryByRole("img", { name: /logo/i })).not.toBeInTheDocument();
+  });
+});

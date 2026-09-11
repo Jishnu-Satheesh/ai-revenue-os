@@ -1,0 +1,747 @@
+/* Organization home layout. The home root owns container queries over the
+   shell's available content width; it adds no page padding of its own. Band
+   edges (>=960 / 760-959 / 560-759 / 328-559 / <328) follow the visual
+   contract V01-V18 with its exact column, gap, cover and thumbnail numbers. */
+
+.home {
+  container-type: inline-size;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  color: var(--foreground);
+}
+
+/* ------------------------------------------------------------------ header */
+
+.header {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.titleRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  justify-content: space-between;
+}
+
+.identity {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.logoFrame {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.logoFrame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* A failed logo keeps the name-only masthead readable: icon only. */
+.logoFrame .fallbackLabel {
+  display: none;
+}
+
+.title {
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: 32px;
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.description {
+  max-width: 60ch;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.contextRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.contextItem {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 6px;
+}
+
+.divider {
+  margin-top: 12px;
+}
+
+/* -------------------------------------------------------------------- body */
+
+.body {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 30px;
+  align-items: start;
+  margin-top: 28px;
+}
+
+/* Narrow single column: campaigns, library, attention, goals, destinations,
+   activity stack in DOM order. */
+.campaigns,
+.library,
+.attention,
+.goals,
+.destinations,
+.activity {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.railTitle {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+/* --------------------------------------------------------------- campaigns */
+
+.campaignGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.campaignCard {
+  min-width: 0;
+  border-radius: 12px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.campaignCard:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.cover {
+  position: relative;
+  height: 220px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.coverFallback {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.campaignBody {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cardTitle {
+  overflow-wrap: break-word;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.cardText {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.meta {
+  overflow-wrap: break-word;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.compactList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.compactRow {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.compactName {
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ----------------------------------------------------------------- gallery */
+
+.galleryGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.thumb {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.thumb:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.thumbImage {
+  position: relative;
+  height: 140px;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.thumbImage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.thumbMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+}
+
+.thumbLabel {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.thumbSub {
+  overflow-wrap: break-word;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.warning {
+  margin-bottom: 12px;
+}
+
+/* --------------------------------------------------------------- attention */
+
+.attentionPanel {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--muted);
+  padding: 20px;
+}
+
+.attentionList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  gap: 12px;
+}
+
+.attentionRow {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attentionTitle {
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.attentionReason {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.caption {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.emptyNote {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* ------------------------------------------------------------------- goals */
+
+.goalCard {
+  border-radius: 12px;
+}
+
+.goalTarget {
+  margin-top: 8px;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ destinations */
+
+.destGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.destLink {
+  display: flex;
+  min-height: 44px;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 14px;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.destLink:hover {
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+
+.destIcon {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.destText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.destLabel {
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.destDescription {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* ---------------------------------------------------------------- activity */
+
+.activityList {
+  display: flex;
+  flex-direction: column;
+}
+
+.activityRow {
+  display: flex;
+  min-height: 44px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.activityRow:first-child {
+  border-top: 1px solid var(--border);
+}
+
+.activityLabel {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.activityTitle {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.activityLink {
+  border-radius: 4px;
+}
+
+/* ----------------------------------------------------------------- buttons */
+
+.homeButton {
+  min-height: 38px;
+}
+
+.inlineLink {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+}
+
+/* ------------------------------------------------------------------ dialog */
+
+.dialogContent {
+  max-width: 780px;
+}
+
+.dialogGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 26px;
+  padding: 24px;
+  max-height: calc(100dvh - 4rem);
+  overflow-y: auto;
+}
+
+.dialogImage {
+  position: relative;
+  height: 310px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.dialogImage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dialogDetails {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dialogSourceButton {
+  margin-top: 8px;
+  align-self: flex-start;
+}
+
+@media (max-width: 639px) {
+  .dialogGrid {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .dialogImage {
+    height: 245px;
+  }
+
+  .dialogSourceButton {
+    align-self: stretch;
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------------- bands */
+
+/* 328-559: tighter campaign gap and covers, taller thumbnails. */
+@container (min-width: 328px) {
+  .cover {
+    height: 147px;
+  }
+
+  .campaignGrid {
+    gap: 10px;
+  }
+
+  .thumbImage {
+    height: 170px;
+  }
+}
+
+/* 560-759: single main column; campaigns 2 columns with tall covers;
+   gallery 4 columns; attention and goals share a row after the gallery. */
+@container (min-width: 560px) {
+  .body {
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .campaigns,
+  .library,
+  .destinations,
+  .activity {
+    grid-column: 1 / -1;
+  }
+
+  .attention {
+    grid-column: 1;
+  }
+
+  .goals {
+    grid-column: 2;
+  }
+
+  .cover {
+    height: 215px;
+  }
+
+  .campaignGrid {
+    gap: 14px;
+  }
+
+  .galleryGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .thumbImage {
+    height: 140px;
+  }
+
+  .cardTitle {
+    font-size: 14px;
+  }
+}
+
+/* 760-959: primary + 250px rail; campaign covers and gallery shrink. */
+@container (min-width: 760px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr) 250px;
+    column-gap: 22px;
+    row-gap: 30px;
+  }
+
+  .campaigns {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .library {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .attention {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .goals {
+    grid-column: 2;
+    grid-row: 3;
+    /* Rail rhythm is 22px below attention against the 30px section gap. */
+    margin-top: -8px;
+  }
+
+  .destinations {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+
+  .activity {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+
+  .cover {
+    height: 170px;
+  }
+
+  .galleryGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .thumbImage {
+    height: 165px;
+  }
+
+  .destGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .activityList {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0 24px;
+  }
+
+  .cardTitle {
+    font-size: 15px;
+  }
+}
+
+/* >=960: primary + 288px rail with the widest gap. */
+@container (min-width: 960px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr) 288px;
+    column-gap: 28px;
+  }
+
+  .cover {
+    height: 204px;
+  }
+
+  .galleryGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .thumbImage {
+    height: 143px;
+  }
+}
+
+/* <328: campaigns collapse to one column with tall covers. */
+@container (max-width: 327px) {
+  .campaignGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .cover {
+    height: 220px;
+  }
+}
+
+/* Narrow content: smaller h1 and stacked header actions. */
+@container (max-width: 559px) {
+  .title {
+    font-size: 25px;
+  }
+
+  .actions {
+    width: 100%;
+  }
+}
+
+@container (max-width: 327px) {
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions > * {
+    width: 100%;
+  }
+}
+
+/* Touch targets grow on coarse pointers; transitions rest without motion. */
+@media (pointer: coarse) {
+  .homeButton,
+  .inlineLink,
+  .thumb,
+  .destLink,
+  .compactRow a {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home .campaignCard,
+  .home .thumb,
+  .home .destLink {
+    transition: none;
+  }
+}
