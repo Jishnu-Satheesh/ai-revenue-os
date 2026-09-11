@@ -76,6 +76,18 @@ begin
   v_revision := private.allocate_memory_source_revision(
     p_organization_id, 'channel_decision', v_decision.id, v_digest);
 
+  -- Idempotency guard, mirroring the finding/recommendation helpers: a
+  -- retried enqueue after a lost acknowledgement reuses the allocator
+  -- revision and returns the existing event instead of inserting twice.
+  select existing.id into v_event_id
+  from public.memory_capture_events existing
+  where existing.organization_id = p_organization_id
+    and existing.channel_decision_id = v_decision.id
+    and existing.source_revision = v_revision;
+  if found then
+    return v_event_id;
+  end if;
+
   insert into public.memory_capture_events (
     organization_id, source_kind, channel_decision_id, source_revision,
     source_digest, event_kind, occurred_at, correlation_id,

@@ -95,7 +95,7 @@ begin
       v_rec.output_digest,
       v_rec.result_digest,
       v_rec.analysis_run_id::text,
-      v_rec.channel_id::text,
+      coalesce(v_rec.channel_id::text, ''),
       coalesce(v_rec.branch_id::text, ''));
     v_digest := pg_catalog.encode(extensions.digest(v_canonical, 'sha256'), 'hex');
     v_revision := private.allocate_memory_source_revision(
@@ -237,7 +237,7 @@ begin
     v_event.id,
     'channel_recommendation:' || v_rec.id::text,
     v_event.occurred_at,
-    now() + interval '14 days'
+    pg_catalog.now() + interval '14 days'
   ) returning id into v_item_id;
 
   return v_item_id;

@@ -110,11 +110,11 @@ begin
     ) then
       insert into public.memory_capture_events (
         organization_id, source_kind, channel_finding_id, source_revision,
-        source_digest, event_kind, correlation_id, branch_id, channel_id,
+        source_digest, event_kind, occurred_at, correlation_id, branch_id, channel_id,
         reporting_start, reporting_end, projection_document
       ) values (
         p_organization_id, 'channel_finding', v_finding.id, v_revision,
-        v_digest, 'recorded', v_run.correlation_id, v_finding.branch_id,
+        v_digest, 'recorded', v_finding.created_at, v_run.correlation_id, v_finding.branch_id,
         v_finding.channel_id,
         v_run.window_start::timestamptz, v_run.window_end::timestamptz,
         pg_catalog.jsonb_build_object(
@@ -185,11 +185,11 @@ begin
     ) then
       insert into public.memory_capture_events (
         organization_id, source_kind, channel_finding_id, source_revision,
-        source_digest, event_kind, correlation_id, branch_id, channel_id,
+        source_digest, event_kind, occurred_at, correlation_id, branch_id, channel_id,
         reporting_start, reporting_end, projection_document
       ) values (
         p_organization_id, 'channel_finding', v_finding.id, v_revision,
-        v_digest, 'withdrawn', v_run.correlation_id, v_finding.branch_id,
+        v_digest, 'withdrawn', v_finding.superseded_at, v_run.correlation_id, v_finding.branch_id,
         v_finding.channel_id,
         v_finding.period_start::timestamptz, v_finding.period_end::timestamptz,
         pg_catalog.jsonb_build_object(
@@ -287,7 +287,7 @@ begin
     v_event.id,
     'channel_finding:' || v_finding.id::text,
     v_event.occurred_at, v_event.reporting_start, v_event.reporting_end,
-    now() + interval '30 days'
+    pg_catalog.now() + interval '30 days'
   ) returning id into v_item_id;
 
   return v_item_id;

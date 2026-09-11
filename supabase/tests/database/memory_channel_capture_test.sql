@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(70);
+select extensions.plan(76);
 
 -- Spec 023 Task A: channel capture adapters (finding, recommendation,
 -- decision). Registry rows, projectors, and enqueue integrations inside the
@@ -688,6 +688,26 @@ select extensions.is(
    where r.headline = 'fb37 edge primary advice'),
   0, 'the narrative detail never reaches memory');
 select extensions.is(
+  (select i.capture_event_id = e.id and e.projected_item_id = i.id
+   from public.memory_items i
+   join public.memory_capture_events e on e.id = i.capture_event_id
+   join public.channel_recommendations r on r.id = e.channel_recommendation_id
+   where r.headline = 'fb37 edge primary advice'),
+  true, 'recommendation item and event link back to each other');
+select extensions.is(
+  (select pg_temp.delivery_status('fb370000-0000-4000-8000-000000000201'::uuid,
+    (select e.id from public.memory_capture_events e
+     join public.channel_recommendations r on r.id = e.channel_recommendation_id
+     where r.headline = 'fb37 edge primary advice'),
+    'fb370000-0000-4000-8000-0000000008c2'::uuid)),
+  'replayed', 'a duplicate recommendation delivery replays');
+select extensions.is(
+  (select count(*)::integer from public.memory_items i
+   join public.memory_capture_events e on e.id = i.capture_event_id
+   join public.channel_recommendations r on r.id = e.channel_recommendation_id
+   where r.headline = 'fb37 edge primary advice'),
+  1, 'without a second recommendation row');
+select extensions.is(
   (select pg_temp.delivery_status('fb370000-0000-4000-8000-000000000201'::uuid,
     (select e.id from public.memory_capture_events e
      join public.channel_recommendations r on r.id = e.channel_recommendation_id
@@ -797,6 +817,31 @@ select extensions.ok(
       and d.decision = 'acknowledged'
     order by d.created_at limit 1) > 0),
   'the body carries the recorded decision value');
+select extensions.is(
+  (select i.capture_event_id = e.id and e.projected_item_id = i.id
+   from public.memory_items i
+   join public.memory_capture_events e on e.id = i.capture_event_id
+   join public.channel_recommendation_decisions d on d.id = e.channel_decision_id
+   where d.organization_id = 'fb370000-0000-4000-8000-000000000201'::uuid
+     and d.decision = 'acknowledged'
+   order by d.created_at limit 1),
+  true, 'decision item and event link back to each other');
+select extensions.is(
+  (select pg_temp.delivery_status('fb370000-0000-4000-8000-000000000201'::uuid,
+    (select e.id from public.memory_capture_events e
+     join public.channel_recommendation_decisions d on d.id = e.channel_decision_id
+     where d.organization_id = 'fb370000-0000-4000-8000-000000000201'::uuid
+       and d.decision = 'acknowledged'
+     order by d.created_at limit 1),
+    'fb370000-0000-4000-8000-0000000008c4'::uuid)),
+  'replayed', 'a duplicate decision delivery replays');
+select extensions.is(
+  (select count(*)::integer from public.memory_items i
+   join public.memory_capture_events e on e.id = i.capture_event_id
+   join public.channel_recommendation_decisions d on d.id = e.channel_decision_id
+   where d.organization_id = 'fb370000-0000-4000-8000-000000000201'::uuid
+     and d.decision = 'acknowledged'),
+  1, 'without a second decision row');
 select extensions.is(
   pg_temp.state_of($$ select pg_temp.project_finding(
     'fb370000-0000-4000-8000-000000000202'::uuid,
