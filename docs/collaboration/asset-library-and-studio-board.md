@@ -1,8 +1,15 @@
 # Coordination board — Asset Library, then Campaign Studio
 
+<!-- 2026-09-11 Public landing desktop mockup: user requests desktop.png from the
+written plan. Codex claims docs/design/public-landing/desktop.png and
+desktop.prompt.txt only, plus this board entry. Built-in image generation;
+design artifact only, not application implementation or approval of feature code. -->
+
 <!-- 2026-09-11 Public landing redesign: Codex claims documentation only:
 docs/superpowers/specs/2026-09-11-public-landing-redesign.md,
-docs/superpowers/plans/2026-09-11-public-landing-{research,visual-contract,implementation,handoff}.md.
+docs/superpowers/plans/2026-09-11-public-landing-{research,visual-contract,implementation,handoff}.md,
+docs/superpowers/plans/2026-09-11-public-walkthrough-contract.md, and
+adrs/0056-public-walkthrough-email-capture.md (Proposed).
 User requests Linear-inspired research and a complete handoff for one future coding agent.
 Business owners are the confirmed primary audience. Implementation remains unapproved.
 Existing organization-home, memory, channels, and configuration work is outside this task. -->
@@ -6402,9 +6409,31 @@ through the real routes, not only in tests.
 - Two staging truths learned: hosted default privileges grant service_role execute on new functions (explicit revokes required, third occurrence), and live check names drift from base migrations (read staging, not just files).
 - Deferred honestly: complete_'s registered-kind branches (no kinds registered; quarantine path tested), reconcile RPC + dispatch scheduling (ride with adapter slices), context manifests/assembly (Tasks 04-05).
 
+### 2026-09-11 — Spec 023 Task A dispatched (Channel adapters, subagent implementer)
+
+- SDD workspace: `.superpowers/sdd/2026-09-10-business-memory-shared-intelligence/`, ledger `progress.md`, brief `task-A-brief.md`. BASE 1764e77 committed path-limited.
+- Scope: 3 migrations (finding/recommendation/decision adapters) + `memory_channel_capture_test.sql`. SQL only, no TS, no push (controller pushes after review).
+
+### 2026-09-11 — Spec 023 Task A done (Channel adapters live, subagent-built)
+
+- Implementer commits `3d6317d` + fix `5044d43`: registry rows, 3 projectors, enqueue inside completion/triage RPCs, 76-assertion pgTAP. Task review Spec ✅, re-review 6/6 addressed.
+- Controller pushed 3 migrations; staging proof 76/76 green. Two controller repairs: v_source_id rename (42702 killed every registered delivery), old runtime suite adjusted to the registered world.
+- Regression green: analysis, recommendations storage/fence/decisions/evaluations, all Task-02 suites, catalogue, grounded consent.
+- Rulings: P0002-withdrawn branches deferred to deletable-source adapters; v_ prefix mandatory for plpgsql locals; withdrawal NULL item is accepted use.
+
 ### 2026-09-11 — Channels free-range picker + loader (approved plan, implemented)
 
 - User: same free from/to calendar as GI/Channel Audit (limited to reported coverage); GI full-page spinner over content (not navbar/side menu) instead of blank while the new dates load.
 - Reused shared `WindowRangePicker` + `PageContentLoader` (no forks). Page resolves `?from=&to=` via existing `resolveOverviewWindow` (one declared window incl. grain, never snapped); legacy `?window=` unchanged as fallback; covered-but-undeclared stays unresolved with figures suppressed. `range` is optional on the ready analysis so degraded states keep the old Select (still tested).
 - Claim: `channels-presentation.ts` (range type + parser), `channels-rollup.tsx` (picker + loader overlay), channels `page.tsx` (+segments read, resolution, today), 3 test files, visual-contract P03/toolbar notes, this append. No migrations, no new files, GI/Audit untouched. Peer org-home files preserved.
 - Gates: 204/204 channels+ui suites, tsc 0, eslint 0, build exit 0. Pixel proof needs staging (no real browser here). Never stash/add-all/push.
+
+
+### 2026-09-11 — Public landing redesign researched and handed off (proposal)
+
+- User requested a new minimal, interactive Linear-inspired public landing page and a precise handoff to one coding agent. Business owners seeking profitable growth are the confirmed audience.
+- User clarified Book a walkthrough must collect email, phone and business industry in a dialog and send via Resend to a server-configured customer-service inbox. This replaces the initial exploration-only CTA assumption.
+- Created the public-landing design, research, visual/copy/fixture contract, sequential execution plan, agent handoff, walkthrough API/config/delivery contract and proposed ADR 0056. No implementation approval is inferred.
+- Inspected current marketing UI in a signed-out browser, root split, tokens/primitives, current invitation sender, fail-open analysis limiter and proxy. Studied Linear, Attio, Raycast and Ramp directly; reference browser limitations are documented in research.
+- Narrow future implementation includes a fixed-recipient endpoint, strict input, fail-closed distributed allowances, safe error/log behavior and provider idempotency. No lead database, tenant query, worker, CRM, autoresponder or migration. Real service-inbox setup and live confirmation remain implementation acceptance gates.
+- This session changed documentation only; no contact email sent, no secrets configured, no production UI/API code written. Unrelated organization-home, memory and channels work preserved.
