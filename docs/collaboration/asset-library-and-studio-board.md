@@ -6436,6 +6436,13 @@ through the real routes, not only in tests.
 
 - Brief `task-C-brief.md`, BASE 655dad1. Scope: manifests/entries tables + prepare/revalidate/consume RPCs, subject-operation binding, retention erasure, context assembler with budgets, current-state reader, pgTAP + vitest. No consumer wiring, no UI, no new permissions. Implementer drafts, dry-runs, never pushes.
 
+### 2026-09-11 — Spec 023 Task C done (packs, snapshots, erasure live)
+
+- Implementer e357ba6 + fixes d14ec5e/f1f28a8/9083e35/fba55fc/d4653ac. Review Spec ✅; 5 fix rounds (cap) + breaker adjudication. Staging proof 82/22/25 green.
+- Controller repairs: array_append (text[] || literal misresolves), 2 test-role corrections. Next reviewer owns those files in its surface.
+- Traps learned: OUT-param alias lists abort 42601; COALESCE/NULLIF/CAST/current_date are syntax, never qualified; string literals never append to arrays with ||; completed runs need completed_at + result_digest; findings need severity + priority; union-of-grants governs revocation tests.
+- Open: 90-day janitor undecided; abandoned/output-associations ride consumer wiring; first scheduled reconcile unwitnessed.
+
 ### 2026-09-11 — Channels free-range picker + loader (approved plan, implemented)
 
 - User: same free from/to calendar as GI/Channel Audit (limited to reported coverage); GI full-page spinner over content (not navbar/side menu) instead of blank while the new dates load.
