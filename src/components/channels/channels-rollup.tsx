@@ -238,7 +238,7 @@ function PortfolioSummaryStrip({ portfolio }: { portfolio: ChannelsPortfolioPres
         }
       >
         <p className={styles.statLabel}>Earned</p>
-        <p className={styles.statValue}>
+        <p className={`${styles.statValue} ${styles.statValueEarned}`}>
           {earned ? (
             <>
               <span className={styles.statPrefix}>{earned.currency}</span>
@@ -265,7 +265,7 @@ function PortfolioSummaryStrip({ portfolio }: { portfolio: ChannelsPortfolioPres
         }
       >
         <p className={styles.statLabel}>Provider-reported loss</p>
-        <p className={styles.statValue}>
+        <p className={`${styles.statValue} ${styles.statValueLost}`}>
           {lost ? (
             <>
               <span className={styles.statPrefix}>{lost.currency}</span>

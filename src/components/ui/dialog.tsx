@@ -73,8 +73,19 @@ function DialogContent({
 }
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+  // Sticky by default: pins to the card top only when the content scrolls
+  // (short dialogs render byte-identically). Negative margins + padding
+  // compensation keep the resting box unchanged; the solid bg occludes
+  // scrolled content, and rounded-t preserves the card corner.
   return (
-    <div data-slot="dialog-header" className={cn("flex flex-col gap-2", className)} {...props} />
+    <div
+      data-slot="dialog-header"
+      className={cn(
+        "sticky top-0 z-10 -mx-4 -mt-4 flex flex-col gap-2 rounded-t-xl bg-popover px-4 pt-4",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 
@@ -90,7 +101,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end sticky bottom-0 z-10",
         className,
       )}
       {...props}

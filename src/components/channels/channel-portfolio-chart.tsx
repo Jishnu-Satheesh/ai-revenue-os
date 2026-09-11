@@ -265,7 +265,9 @@ export function ChannelComparisonTooltip({
   const datum = payload[0]?.payload;
   if (!datum) return null;
   return (
-    <div className={`${styles.theme} rounded-lg border bg-popover px-3 py-2 text-xs shadow-md`}>
+    <div
+      className={`${styles.theme} relative z-50 rounded-lg border bg-popover px-3 py-2 text-xs opacity-100 shadow-xl ring-1 ring-foreground/10`}
+    >
       <p className="font-semibold text-popover-foreground">{datum.name}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{period}</p>
       {datum.reportedMinor === null || datum.currency === null ? (
@@ -538,7 +540,7 @@ export function ChannelPortfolioChart({
                     tickFormatter={(value: number) => `${value}%`}
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fontSize: 9 }}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                     tickMargin={6}
                     height={AXIS_HEIGHT}
                     interval={0}
@@ -551,7 +553,7 @@ export function ChannelPortfolioChart({
                     tickFormatter={(value: number) => formatMajorTick(Number(value) / factor)}
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fontSize: 9 }}
+                    tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                     tickMargin={6}
                     height={AXIS_HEIGHT}
                     interval={0}
@@ -560,6 +562,8 @@ export function ChannelPortfolioChart({
                 <ChartTooltip
                   cursor={{ fill: "var(--channel-soft)", opacity: 0.7 }}
                   content={<ChannelComparisonTooltip period={period} />}
+                  isAnimationActive={false}
+                  wrapperStyle={{ zIndex: 50 }}
                 />
                 <Bar
                   dataKey={showShare ? "earnedShare" : "earnedBar"}
@@ -637,7 +641,7 @@ export function ChannelPortfolioChart({
     >
       <CardHeader className="flex flex-row items-start justify-between gap-2.5 px-[25px] pt-[23px] max-[1200px]:px-[18px] max-[1200px]:pt-[22px] max-[650px]:flex-col max-[650px]:px-4 max-[650px]:pt-5">
         <div className="grid gap-1">
-          <CardTitle className="text-[17px] font-bold tracking-[-0.5px] max-[650px]:text-base">
+          <CardTitle className="text-xl font-semibold tracking-tight max-[650px]:text-lg">
             Revenue by channel
           </CardTitle>
           <CardDescription className="mt-1.5 text-[11px] leading-[1.6] max-[650px]:text-[10px]">

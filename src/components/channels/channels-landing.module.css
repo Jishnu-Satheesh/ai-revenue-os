@@ -166,6 +166,20 @@
   line-height: 35px;
 }
 
+/*
+ * Semantic metric colors (not decoration): Earned echoes the earned bar
+ * series, loss echoes the loss series; the neutral totals stay ink.
+ * Measured on white: earned 3.75:1, loss 3.18:1 — both clear the 3:1
+ * large-text bar these 28–34px semibold headlines are judged against.
+ */
+.statValueEarned {
+  color: var(--channel-earned);
+}
+
+.statValueLost {
+  color: var(--channel-loss);
+}
+
 .statPrefix {
   font-size: 13px;
   font-weight: 500;
@@ -577,8 +591,9 @@
 
 .dirTitle {
   margin: 0;
-  font-size: 17px;
-  font-weight: 700;
+  /* Matches Growth Intelligence H2 sections (text-xl semibold). */
+  font-size: 20px;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
 }
