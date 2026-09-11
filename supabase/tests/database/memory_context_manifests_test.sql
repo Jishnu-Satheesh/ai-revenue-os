@@ -636,6 +636,9 @@ select extensions.is(
     null
   ) ->> 'status'),
   'ready', 'an authenticated member prepares subject context');
+-- Revoked-table reads: the operations ledger holds no session grant by
+-- design, so these two value assertions run as the migration owner.
+reset role;
 select extensions.is(
   (select operation_kind from public.memory_write_operations
    where idempotency_key = 'subject-context:fb390000-0000-4000-8000-000000000002:fb390000-0000-4000-8000-000000000926'),
@@ -644,6 +647,7 @@ select extensions.is(
   (select actor_id from public.memory_write_operations
    where idempotency_key = 'subject-context:fb390000-0000-4000-8000-000000000002:fb390000-0000-4000-8000-000000000926'),
   'fb390000-0000-4000-8000-000000000002', 'the operation binds the actor');
+set local role authenticated;
 select extensions.is(
   pg_temp.state_of($$ select public.prepare_subject_memory_context(
     'fb390000-0000-4000-8000-000000000201', 'fb390000-0000-4000-8000-000000000002',

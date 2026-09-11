@@ -155,7 +155,10 @@ select extensions.is(
   0, 'a revoked membership hides entries');
 
 -- Withdrawal hides content, keeps ids and digests --------------------------------------------
+-- reset role alone keeps the earlier SET LOCAL claim, which would make the
+-- worker-path call below look like actor forgery; clear it explicitly.
 reset role;
+reset request.jwt.claim.sub;
 select public.erase_memory_source_content(
   'fb390000-0000-4000-8000-000000000211', null, 'memory_item',
   'fb390000-0000-4000-8000-000000000391', 'fb39 visibility withdrawal'

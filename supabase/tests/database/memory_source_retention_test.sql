@@ -113,10 +113,15 @@ select extensions.is(
   ('{"sourceId": "fb390000-0000-4000-8000-000000000384", "erasedEvents": 1, "erasedItems": 1, "erasedEntries": 2}')::jsonb,
   'one call erases the event, the projected item, and both entries');
 
+-- Revoked-table read: sessions hold no grant by design, so this one value
+-- assertion runs as the migration owner; the surrounding RPC calls stay on
+-- their entitled roles.
+reset role;
 select extensions.is(
   (select projection_document from public.memory_capture_events
    where id = 'fb390000-0000-4000-8000-000000000385'),
   '{}'::jsonb, 'the projection document is nulled');
+set local role authenticated;
 select extensions.is(
   (select body from public.memory_items where id = 'fb390000-0000-4000-8000-000000000386'),
   null, 'derived memory text is nulled');
@@ -216,6 +221,7 @@ select extensions.is(
 
 -- Worker path: null actor rides service_role, a forged actor does not.
 reset role;
+reset request.jwt.claim.sub;
 select extensions.is(
   (select public.erase_memory_source_content(
     'fb390000-0000-4000-8000-000000000221', null,
