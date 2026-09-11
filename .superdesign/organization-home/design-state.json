@@ -1,0 +1,8 @@
+{
+  "route": "/organizations/[organizationId]/overview",
+  "projectId": "8393ba3e-6abf-458c-a693-bac68f26161b",
+  "draftId": "7950207a-e504-4ee6-82a8-b86aa05b2464",
+  "version": 2,
+  "previewUrl": "https://p.superdesign.dev/draft/7950207a-e504-4ee6-82a8-b86aa05b2464",
+  "approval": "Organization-home concept approved; written execution plan proposed; no production implementation"
+}

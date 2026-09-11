@@ -1,0 +1,812 @@
+{
+  "checkedAt": "2026-09-10T20:28:40.658Z",
+  "scope": "Read-only schema and policy definitions only; no customer rows, auth session, or signed URL tests",
+  "columns": [
+    {
+      "table_name": "campaign_assets",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "bundle_version_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "asset_key",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "storage_path",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "content_hash",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "mime_type",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "width_px",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "height_px",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "truth_class",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "provenance",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "alt_text",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_assets",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "campaign_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "version",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "parent_version_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "source_snapshot_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "manifest",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "digest",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "generation_profile",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "execution_mode",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "total_spend_ceiling_minor",
+      "data_type": "bigint"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "spend_currency",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "created_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "max_variants_per_direction",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "max_variants_total",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "column_name": "policy_expires_at_utc",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "campaign_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "source_snapshot_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "kind",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "idempotency_key",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "request_digest",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "correlation_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "status",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "claim_token",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "lease_expires_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "attempt",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "base_version_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "base_digest",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "result_version_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "failure_code",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "cost_minor",
+      "data_type": "bigint"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "operator_prompt",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "patch_scope",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "variants_per_direction",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "reference_slots",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "avoid_reference_version_ids",
+      "data_type": "ARRAY"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "negative_rules",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "resolver_version",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "resolution_outcome",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "blueprint",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "column_name": "plan_model_id",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "campaign_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "bundle_version_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "plate_asset_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "plate_generation_run_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "template_key",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "template_version",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "script",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "text_values",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "font_manifest",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "render_digest",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "state",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "refusal_code",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "refusal_detail",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "output_storage_path",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "output_content_hash",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "output_mime_type",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "output_width_px",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "output_height_px",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "verification",
+      "data_type": "jsonb"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "rendered_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "title",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "source_kind",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "brief_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "opportunity_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "state",
+      "data_type": "text"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "created_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "campaigns",
+      "column_name": "idempotency_key",
+      "data_type": "text"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "subject_kind",
+      "data_type": "text"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "subject_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "verdict",
+      "data_type": "text"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "reason_codes",
+      "data_type": "ARRAY"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "note",
+      "data_type": "text"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "reviewed_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "reviewed_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "brand_asset_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "version",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "storage_path",
+      "data_type": "text"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "content_hash",
+      "data_type": "text"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "mime_type",
+      "data_type": "text"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "byte_size",
+      "data_type": "bigint"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "width_px",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "height_px",
+      "data_type": "integer"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "is_usable",
+      "data_type": "boolean"
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "organization_id",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "label",
+      "data_type": "text"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "asset_role",
+      "data_type": "text"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "created_by",
+      "data_type": "uuid"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "conditioning_roles",
+      "data_type": "ARRAY"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "tags",
+      "data_type": "ARRAY"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "scripts",
+      "data_type": "ARRAY"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "ownership",
+      "data_type": "text"
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "column_name": "archived_at",
+      "data_type": "timestamp with time zone"
+    }
+  ],
+  "rls": [
+    {
+      "table_name": "campaign_assets",
+      "rls_enabled": true
+    },
+    {
+      "table_name": "campaign_bundle_versions",
+      "rls_enabled": true
+    },
+    {
+      "table_name": "campaign_generation_runs",
+      "rls_enabled": true
+    },
+    {
+      "table_name": "campaign_poster_renders",
+      "rls_enabled": true
+    },
+    {
+      "table_name": "campaigns",
+      "rls_enabled": true
+    },
+    {
+      "table_name": "creative_asset_reviews",
+      "rls_enabled": true
+    },
+    {
+      "table_name": "organization_brand_asset_versions",
+      "rls_enabled": true
+    },
+    {
+      "table_name": "organization_brand_assets",
+      "rls_enabled": true
+    }
+  ],
+  "policies": [
+    {
+      "schemaname": "public",
+      "tablename": "campaign_assets",
+      "policyname": "members read campaign assets",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_membership() AS organizations_with_membership))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "campaign_bundle_versions",
+      "policyname": "members read bundle versions",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_membership() AS organizations_with_membership))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "campaign_generation_runs",
+      "policyname": "members read campaign generation runs",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_membership() AS organizations_with_membership))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "campaign_poster_renders",
+      "policyname": "members read campaign poster renders",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_membership() AS organizations_with_membership))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "campaigns",
+      "policyname": "members read campaigns",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_membership() AS organizations_with_membership))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "creative_asset_reviews",
+      "policyname": "members read creative asset reviews",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_permission('asset.read'::text) AS organizations_with_permission))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "organization_brand_asset_versions",
+      "policyname": "members read brand asset versions",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_membership() AS organizations_with_membership))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "organization_brand_assets",
+      "policyname": "members read brand assets",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "(organization_id IN ( SELECT private.organizations_with_membership() AS organizations_with_membership))"
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "members can read integration imports",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "((bucket_id = 'integration-imports'::text) AND (cardinality(storage.foldername(name)) = 3) AND ((storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text) AND ((storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text) AND ((storage.foldername(name))[3] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text) AND private.is_organization_member(((storage.foldername(name))[1])::uuid) AND (EXISTS ( SELECT 1\n   FROM integration_data_sources source\n  WHERE ((source.organization_id = ((storage.foldername(objects.name))[1])::uuid) AND (source.id = ((storage.foldername(objects.name))[2])::uuid) AND (source.source_type = 'csv_import'::text)))))"
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "members can read onboarding files",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "((bucket_id = 'onboarding-files'::text) AND ((storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'::text) AND private.is_organization_member(((storage.foldername(name))[1])::uuid))"
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "members read brand asset objects",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "((bucket_id = 'brand-assets'::text) AND (cardinality(storage.foldername(name)) = 3) AND ((storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text) AND private.is_organization_member(((storage.foldername(name))[1])::uuid))"
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "members read campaign asset objects",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "((bucket_id = 'campaign-assets'::text) AND ((storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text) AND ((cardinality(storage.foldername(name)) = 3) OR ((cardinality(storage.foldername(name)) = 4) AND ((storage.foldername(name))[4] = ANY (ARRAY['posters'::text, 'edits'::text])))) AND private.is_organization_member(((storage.foldername(name))[1])::uuid))"
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "members read campaign mask objects",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "((bucket_id = 'campaign-masks'::text) AND (cardinality(storage.foldername(name)) = 3) AND ((storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text) AND private.is_organization_member(((storage.foldername(name))[1])::uuid))"
+    },
+    {
+      "schemaname": "storage",
+      "tablename": "objects",
+      "policyname": "members read creative history objects",
+      "cmd": "SELECT",
+      "roles": [
+        "authenticated"
+      ],
+      "qual": "((bucket_id = 'creative-assets'::text) AND (cardinality(storage.foldername(name)) >= 2) AND ((storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'::text) AND private.is_organization_member(((storage.foldername(name))[1])::uuid))"
+    }
+  ]
+}
