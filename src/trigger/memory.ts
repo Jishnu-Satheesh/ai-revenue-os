@@ -9,6 +9,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { createMemoryWorkerServiceClient } from "@/lib/supabase/service";
 import { createEmbeddingProvider } from "@/modules/memory/infrastructure/embedding-provider";
 import { createCaptureRepository } from "@/modules/memory/infrastructure/capture-repository";
+import { createContextRepository } from "@/modules/memory/infrastructure/context-repository";
 import { createSupabaseMemoryWorkerRepository } from "@/modules/memory/infrastructure/worker-repository";
 import {
   parseMemoryTaskPayload,
@@ -21,6 +22,7 @@ import {
   type CaptureReconcilePage,
 } from "@/workflows/memory/capture-dispatch";
 import { runEmbedItems } from "@/workflows/memory/embed-items";
+import { runEraseSourceContent } from "@/workflows/memory/erase-source-content";
 import { runExpireItems } from "@/workflows/memory/expire-items";
 import { runReembedItem } from "@/workflows/memory/reembed-item";
 
@@ -88,6 +90,30 @@ export const memoryExpireItemsTask = task({
   run: async (payload: unknown, { signal }) => {
     parseMemoryTaskPayload("memory.expire-items", payload);
     return runExpireItems(payload, createWorkerDependencies(signal));
+  },
+});
+
+/**
+ * Rights-driven source erasure (Spec 023 §§11/14). One source identity per
+ * run; the RPC nulls projection documents, safe snapshots, and derived
+ * embeddings while retaining permitted ids/digests/decision metadata, and
+ * writes an audit row for every call. Worker runs ride service_role with a
+ * null actor; only identifiers and counts are logged.
+ */
+export const memoryEraseSourceContentTask = task({
+  id: "memory.erase-source-content",
+  retry,
+  maxDuration: 120,
+  run: async (payload: unknown, { signal }) => {
+    const supabase = createMemoryWorkerServiceClient();
+    const result = await runEraseSourceContent(payload, {
+      erasure: createContextRepository(structuralRpcClient(supabase)),
+      signal,
+    });
+    logger.info("memory.erase_source_content_finished", {
+      outcome: result.outcome,
+    });
+    return result;
   },
 });
 
