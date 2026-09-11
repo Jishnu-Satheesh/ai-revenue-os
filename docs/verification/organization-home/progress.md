@@ -98,3 +98,27 @@
 - Track B: revenue-scenario spec/ADR approval before any calculation code.
 - No migration, no `database.types.ts` edit, no new endpoint/worker/subscription, no
   model call, no stash, no `git add .`, no push at any gate.
+
+## Task 7 — verify experience, tenant boundaries, handoff (2026-09-11, implementer)
+
+- Added (uncommitted): `e2e/organization-home.spec.ts` (3 boundary tests that
+  run everywhere + 16 skip-gated authenticated tests: 12 operator, 2 viewer,
+  2 owner/admin recording their missing-fixture skip; no fixture created or
+  seeded anywhere).
+- Added (uncommitted): `docs/verification/organization-home/verification.md`
+  (sanitized notes: commands + exits + skips + unrelated failures + tenant
+  evidence summary + remaining blocked acceptance; names of E2E variables only,
+  never values) and `.superpowers/sdd/2026-09-11-organization-home-implementation/task-7-report.md`.
+- Board: Task 7 log entry appended (own entry only).
+- Gates: `pnpm typecheck` exit 0; `pnpm lint` exit 1 from 14 pre-existing
+  errors in unrelated files (this slice's spec lints clean); `pnpm test` exit
+  1 from 6 unrelated failures (5 expired `meta_campaign` provider fixture in
+  `operator-edit.test.ts`, 1 `database.types` drift); `pnpm build` exit 0;
+  `pnpm exec playwright test e2e/organization-home.spec.ts` exit 0 (3 passed,
+  16 skipped — no `E2E_*` credentials set here, skip is not pass);
+  `prettier --write` applied to the new spec file only, `git diff --check`
+  exit 0; focused 11-file slice re-run 160/160 green.
+- Blocked: all 16 authenticated scenarios (session-A previews, tenant-B
+  refusal over a live session, per-role flows, seven widths) need one staging
+  run with seeded operator/viewer accounts; owner/admin accounts have no
+  fixture. Left uncommitted for review.
