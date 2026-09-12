@@ -4,6 +4,26 @@
 
 **Draft — architecture and implementation approval pending.** Automatic capture with distinct trust levels is the confirmed product direction. This document defines the proposed implementation, not authority to execute it.
 
+**Amended 2026-09-12 by [Spec 025](025-campaign-experience-and-marketing-loop.md) (Proposed), against
+audit finding F17.** Nothing here is superseded. Three delivery facts are recorded so that Campaign
+work does not build on an assumed foundation:
+
+- Campaign context consumption must be proved by **content**: the rendered planning prompt contains
+  the actual selected entry contents, their source references and usage are saved, source-owned facts
+  stay authoritative, and a retry cannot silently swap the pack. A provenance badge, manifest id or
+  digest alone proves nothing, and a digest-only fixture must fail this acceptance.
+- Three Business Memory migrations exist in source and were **not** observed in the inspected staging
+  migration history: `20260912120000_business_memory_growth_capture`,
+  `20260912130000_business_memory_campaign_capture` and
+  `20260912140000_business_memory_campaign_context_usage`. Because `pnpm db:migrations:push` is
+  all-or-nothing, any Campaign migration pushed during the Spec 025 implementation run would carry
+  them. **No migration is pushed during that run without a separate explicit user decision.**
+- Campaign lifecycle, outcome and lesson capture are implemented as SQL triggers and projection
+  functions inside those unapplied migrations, so their source presence must not be read as staging
+  presence. Delivery status is tracked in four separate fields — source, staging-applied,
+  worker-deployed, live-verified — in
+  `docs/verification/campaigns/2026-09-12-implementation-reconciliation.md`.
+
 This is a Tier 3 extension to Spec 004. It connects existing modules and adds durable storage and worker boundaries, so a separate spec and ADR are warranted. [ADR 0054](../adrs/0054-business-memory-shared-context-and-governed-capture.md) is Proposed. [Research and repository evidence](../docs/research/2026-09-10-business-memory-shared-intelligence.md), [execution plan](../docs/superpowers/plans/2026-09-10-business-memory-shared-intelligence.md), and [handoff](../docs/superpowers/prompts/2026-09-10-business-memory-shared-intelligence-handoff.md) travel with this specification.
 
 Baseline inspected: HEAD `e8c1d6d`, hosted staging 2026-09-10. Existing specs and accepted ADRs continue governing until this proposal is approved. Section 17 identifies exactly which clauses the approved extension must amend.

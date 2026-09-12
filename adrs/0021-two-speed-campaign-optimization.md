@@ -4,6 +4,28 @@
 
 Accepted.
 
+**Amended 2026-09-12 — reinforced, not weakened, by
+[Spec 025](../specs/025-campaign-experience-and-marketing-loop.md) (Proposed), against audit finding
+F14.** The two loops, the wall between them, pause-only autonomy and human-only resume are unchanged.
+The implementation does not currently satisfy this ADR, and the following are recorded as outstanding
+obligations rather than new decisions:
+
+- "Thresholds are deterministic, versioned, and organization-scoped" is **not** met today: allocation
+  thresholds are deployment environment values. They move to a versioned, organization- and
+  campaign-scoped pause policy carrying permitted rule ids and versions, exposure floor, metric
+  reporting delay, window, numeric thresholds and ceilings, currency, approver and effective period.
+  **Every numeric value is explicitly configured and approved. Spec 025 invents no default and no
+  source-code guess**; absent configuration is a visible setup requirement and no authority to act.
+- "A pause is proven by reading the object back, never by the provider acknowledging the write" is
+  **not** met today: the allocation worker updates local variant state through
+  `pause_campaign_variant` and discards the outcome without calling the provider pause path through
+  the Tool Gateway. Confirmed pause becomes: intent → governed invocation → provider read-back →
+  confirmed state, with `requested`, `submitting`, `confirmation_pending`, `confirmed_paused` and
+  `refused`/`failed` as action states. A variant is shown paused only on confirmation; unknown stays
+  urgent and visible, and no surface may claim spend stopped without it.
+- Malformed numeric policy values must be refused at the authoritative boundary. A numeric prefix with
+  trailing text must not be accepted as a policy value.
+
 ## Context
 
 Effective performance marketing reacts within a day or two: underperforming creative is stopped early so budget concentrates on what is working. That is a real and necessary capability.

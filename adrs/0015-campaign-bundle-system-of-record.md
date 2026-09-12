@@ -4,6 +4,25 @@
 
 Accepted.
 
+**Amended 2026-09-12 — extended, not weakened, by
+[ADR 0057](0057-campaign-preparation-approval-vs-exact-output-publication.md) (Proposed) and
+[Spec 025](../specs/025-campaign-experience-and-marketing-loop.md) (Proposed).** Postgres remains
+authoritative and every material edit still creates a new immutable version. Two additions apply to
+the new Campaign path:
+
+- An **immutable campaign proposal version** precedes the bundle. `campaign_proposals`,
+  `campaign_proposal_versions` and `campaign_proposal_decisions` hold identity, immutable documents
+  with digests, and an append-only decision log. Bundle provenance links to the exact proposal version
+  and digest. The approved proposal owns intent until preparation; the immutable bundle and launch
+  set own exact authorized execution. Neither may independently change offer, audience, channels or
+  budget.
+- Campaign source kinds gain `campaign_proposal` with a `proposal_id` and a check requiring exactly
+  the appropriate source link. A qualified Decision opportunity must not be manufactured, and
+  `manual_brief` must not be misused, to avoid that schema amendment. Existing manual and Decision
+  campaigns remain readable unchanged.
+- Campaign bundle manifest **version 3** is authorized for finished-deliverable identity **only
+  together with a V2 backward reader**. Existing V2 records stay readable and unmodified.
+
 ## Context
 
 Campaigns can begin as either a Decision Engine opportunity or a manual operator brief and can be reviewed in Studio or Telegram. If strategy, creative, channel actions, approval, and measurement are stored independently, two surfaces can display or execute different proposals under one campaign name. Trigger.dev state cannot resolve that ambiguity because it is an execution mechanism, not authoritative business state.

@@ -5,6 +5,25 @@
 Approved on 2026-08-31. The product, architecture, and written specification were approved before
 implementation planning began.
 
+**Amended 2026-09-12 by [Spec 025](025-campaign-experience-and-marketing-loop.md) (Proposed),
+against audit findings F07 and F08.** Section 10.1 eligibility is **unchanged** and continues to
+govern the existing governed-draft Decision playbook and `checkDraftEligibility`. It does **not**
+govern the new Campaign proposal admission introduced by Spec 025, which carries the user's confirmed
+decision D07: a source-backed proposal may be presented and approved for preparation while impact is
+shown as unknown and external market research as unavailable, with those gaps explicit. The two
+admission paths and their action keys are separate and must not be merged; the existing execution
+gates are not removed and no fictitious numeric impact may be generated to populate a list.
+
+Two Growth Intelligence obligations are also recorded here:
+
+- The separately named **Campaign-ready opportunities** section belongs after ordinary
+  recommendations, with **Campaign preparation** in Your actions, with purposeful no-proposal,
+  researching, needs-input and failure states. Illustrative prototype campaigns are never copied into
+  production. "Planned" is not renamed to "Approved".
+- `createGrowthIntelligenceOpportunitySource` is defined and tested but has no production invocation
+  found in source. It is reconciled against actual SQL and worker admission rather than assumed
+  absent or assumed live.
+
 Governed by accepted ADR 0044. Extends specs 005, 007, 016, and 018; ADRs 0026, 0037, 0039, 0040,
 and 0043 remain in force except where ADR 0044 explicitly changes release sequencing.
 

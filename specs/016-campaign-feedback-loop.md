@@ -6,6 +6,30 @@ Draft. Supersedes the scope of release-train tasks 14–20 in `docs/superpowers/
 
 Depends on ADRs 0015, 0016, 0017, 0019, 0020, and 0021, and on `specs/012-channel-economics-ledger.md` and `specs/015-metric-registry-and-normalized-metrics.md`.
 
+**Amended 2026-09-12 — the unseen-variant publication wording is superseded for the new Campaign path
+by [ADR 0057](../adrs/0057-campaign-preparation-approval-vs-exact-output-publication.md) (Proposed)
+and [Spec 025](025-campaign-experience-and-marketing-loop.md) (Proposed), carrying the user's
+confirmed decision D05.** The text below is retained unchanged as the historical record and continues
+to govern campaigns, variants and approvals created before ADR 0057 is accepted. For the new path,
+these statements are superseded:
+
+- Section "User stories": *"As an agency operator, I approve one campaign envelope and the platform
+  tests many creative variants inside it, so I get testing volume without approving every image."*
+  — Superseded. The operator approves one envelope to authorize **preparation**, and then reviews
+  every finished image before it is published, including every later variation.
+- Section "UX flow", step 1 *"Approve an envelope"*: *"The operator attests and approves one exact
+  version and digest, as today."* — Retained as Gate 1, renamed in meaning to **preparation
+  approval**. It no longer carries publication authority. A second gate binds each finished output
+  and its content hash before dispatch.
+- Section "Creative variants": *"A variant may set only: asset, hook, caption, hashtags, call to
+  action."* and *"One variant produces one `campaign_action_run`."* — Both retained as bounds on
+  preparation and as execution identity. A variant reaches `campaign_action_run` only after its
+  finished version has been human-reviewed and named in a launch approval.
+- Section "Creative variants": *"Variant caps are enforced by database constraint."* — Unchanged and
+  still enforced. Their meaning is now a **preparation budget**, not a publication authority.
+
+Legacy variant approvals are **not** auto-converted and are not given new meaning retroactively.
+
 ## Business outcome
 
 Close the campaign loop: an approved campaign publishes to a real provider, its results return into the metric warehouse at a grain the platform can reason about, waste is contained within two days, and value is either proven under a preregistered method or honestly reported as unproven.

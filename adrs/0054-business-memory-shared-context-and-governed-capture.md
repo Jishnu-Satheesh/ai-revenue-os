@@ -4,6 +4,21 @@
 
 Proposed — implementation approval pending. The product direction of automatic capture with distinct trust levels is confirmed; the contracts and delivery plan in Spec 023 remain draft.
 
+**Amended 2026-09-12 — Campaign consumption obligations added by
+[Spec 025](../specs/025-campaign-experience-and-marketing-loop.md) (Proposed), against audit finding
+F17.** This ADR is not superseded. Two clarifications bind the Campaign path:
+
+- Business Memory supplies **context and attributed lessons**. It does not own prices, policy,
+  budgets, permissions, measured outcomes or factual truth; source-owned records remain authoritative.
+  Memory context references are provenance, and are distinct from market claim citations.
+- Consumption must be **proved by content, not by identifier**. The rendered planning prompt must
+  contain the actual selected entry contents; naming a manifest id or digest is not proof that context
+  reached the model, and a digest-only fixture must fail that acceptance. Selected entries, their
+  source references and their usage are saved, and a retry may not silently swap the pack.
+- Reusable lessons continue to require the governed review path. Automatic source capture and
+  unverified observations may be recorded without being upgraded to brand rules, verified facts or
+  playbook updates.
+
 ## Context
 
 Business Memory already has a governed store, retrieval and operator workspace. Its cross-feature integration is narrow: Campaign subject descriptions consult it, and an integration projector writes provider records. Channel recommendations and Growth research/synthesis build separate context; their outputs and operator decisions do not enter a common learning loop. Campaign learning submission records a local decision but does not promote anything to memory.

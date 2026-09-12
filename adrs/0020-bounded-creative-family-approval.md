@@ -4,6 +4,35 @@
 
 Accepted. This extends ADR 0017's approval contract. It does not weaken it.
 
+**Amended 2026-09-12 — superseded in part by
+[ADR 0057](0057-campaign-preparation-approval-vs-exact-output-publication.md) (Proposed), which
+carries the user's confirmed decision D05.** The text below is retained unchanged as the historical
+record. It remains authoritative for every campaign, bundle version, creative variant and approval
+created before ADR 0057 is accepted, and for reading that history afterwards. It is **not**
+authoritative for the new Campaign path specified in
+[Spec 025](../specs/025-campaign-experience-and-marketing-loop.md).
+
+For the new path, these statements are superseded:
+
+- "A variant **may vary only the pitch**: imagery, hook, caption, hashtags, and call to action."
+  — Still true as a *bound on what may be prepared*. It is no longer an authority to publish. A
+  finished variation requires its own human review of that exact output before publication.
+- "One human decision can authorize a bounded, expiring, capped family of creative instead of a
+  single image, which makes volume testing possible without an unreviewed public claim."
+  — Superseded. One human decision authorizes *preparation* of that family. Publication of each
+  member requires a second decision on the exact finished output and its content hash. There is no
+  unseen-variation publication mode in the new path.
+- "One variant becomes one campaign action run." — Unchanged as execution identity. It now happens
+  only after that variant's finished version has been reviewed and named in a launch approval.
+- "There is no `schemaVersion: 1` reader. The platform is pre-production; existing development bundle
+  versions are repaired forward by regenerating them through the V2 path."
+  — Retained as the record of one past act taken while no execution history existed. It is **not a
+  precedent**. Manifest version 3 is authorized only together with a V2 backward reader, existing V2
+  records stay readable and unmodified, and no plan may repeat a "delete past data" step.
+
+Legacy approvals are **not** converted to the new model. Nothing recorded under this ADR is
+rewritten, migrated in place, or given new meaning retroactively.
+
 ## Context
 
 Algorithmic creative testing needs many variants per day. Meta's delivery system needs volume to distinguish what resonates, and a system that ships one creative per human decision cannot supply that volume at any realistic operator cost.

@@ -24,14 +24,27 @@
 
 - Impacted files: `docs/collaboration/asset-library-and-studio-board.md`; this design/contracts/visual/implementation package; relevant status/sections of Specs 005, 010, 016, 019, 020, 022, 023 and ADRs 0015, 0017, 0020, 0021, 0049, 0054.
 - New governing feature spec: select the next free `specs/` number using `000-spec-template.md` and name it Campaign experience and marketing loop. Add a proposed ADR for proposal preparation approval versus exact-output publication approval. Do not mark either accepted until the user approves it.
-- [ ] Read current git status, source hashes and staging migration history. Record which existing CP1 Creative History and Spec 023 tasks are implemented, applied and proved, separately.
-- [ ] Carry all confirmed conversation decisions, including D06 and D07, into the formal spec/ADR. Do not re-ask them. Reconcile first/second approval semantics and Campaign proposal admission with current source and SQL invariants; generic execution qualification remains unchanged.
-- [ ] Explicitly supersede unseen-variant publication for the new path; preserve legacy readable history without auto-converting old approvals.
-- [ ] Reconcile immutable proposal → bundle linkage and V2/V3 compatibility. Reject any plan that deletes past data or broadens generic Decision Engine admission as a shortcut.
+- [x] Read current git status, source hashes and staging migration history. Record which existing CP1 Creative History and Spec 023 tasks are implemented, applied and proved, separately.
+- [x] Carry all confirmed conversation decisions, including D06 and D07, into the formal spec/ADR. Do not re-ask them. Reconcile first/second approval semantics and Campaign proposal admission with current source and SQL invariants; generic execution qualification remains unchanged.
+- [x] Explicitly supersede unseen-variant publication for the new path; preserve legacy readable history without auto-converting old approvals.
+- [x] Reconcile immutable proposal → bundle linkage and V2/V3 compatibility. Reject any plan that deletes past data or broadens generic Decision Engine admission as a shortcut.
 - [ ] Have the concrete spec and amended execution plan reviewed before Tier 2/3 code. No numeric allocation or research policy default may be invented by the implementer.
-- [ ] Before production UI work, prepare `.superdesign/campaign-experience/prototype.html` covering portfolio, detail, Studio, Library and Growth proposal review with visibly fictional data, the named empty/error/role states and no real uploads/provider calls. Capture desktop/mobile views, exercise keyboard/navigation/review/edit/upload simulation, and obtain visual review. Treat this as a design artifact, not production acceptance.
+- [ ] **DEFERRED to Task 0b (2026-09-12):** before production UI work, prepare `.superdesign/campaign-experience/prototype.html` covering portfolio, detail, Studio, Library and Growth proposal review with visibly fictional data, the named empty/error/role states and no real uploads/provider calls. Capture desktop/mobile views, exercise keyboard/navigation/review/edit/upload simulation, and obtain visual review. Treat this as a design artifact, not production acceptance.
 - Proof: acceptance checklist maps every audit finding F01–F18 to the tasks below; source-only, staging-applied, worker-deployed and live-verified status have separate fields.
 - Risk/rollback: documentation changes alter intended behavior; unapproved sections remain Proposed, current accepted contracts remain authoritative until explicit amendment.
+
+**Status 2026-09-12 — Task 0 complete as governing documents; no feature code written.** Delivered:
+`specs/025-campaign-experience-and-marketing-loop.md` (Proposed),
+`adrs/0057-campaign-preparation-approval-vs-exact-output-publication.md` (Proposed),
+`docs/verification/campaigns/2026-09-12-implementation-reconciliation.md`, dated amendments to
+ADRs 0015/0017/0020/0021/0049/0054 and Specs 005/010/016/019/020/022/023, and a board entry.
+Remaining Task 0 box: the `.superdesign` prototype, deferred to **Task 0b** immediately before the
+first production UI task.
+
+**Standing constraint for Tasks 1–17:** no migration is pushed to hosted staging during this run
+without a separate explicit user decision — `pnpm db:migrations:push` is all-or-nothing and three
+Business Memory migrations (`20260912120000`, `20260912130000`, `20260912140000`) are already
+pending. Schema tasks may therefore reach **source** status only until that decision is taken.
 
 ## Task 1 — Make generation readiness and failure recovery truthful
 

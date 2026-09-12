@@ -6652,3 +6652,53 @@ through the real routes, not only in tests.
 - User requested desktop.png from the written public landing plan. Built-in image generation succeeded after the interrupted session; generated and visually inspected the full-page desktop mockup, then corrected chapter labels.
 - Saved `docs/design/public-landing/desktop.png` (776 × 2025) and its generation/edit prompt in `desktop.prompt.txt`. This is a design-review artifact with fictional data, not an implemented page or approval of feature code.
 - No app code, email flow, environment settings or database changes.
+
+### 2026-09-12 — Campaign experience rework owned by this session (Task 0: governing documents only)
+
+- **Ownership.** This session owns the Campaign experience and marketing loop rework, on branch
+  `feat/governed-channel-intelligence`, baseline HEAD `c48a37b`. That covers the Campaign module, the
+  Asset Library and Creative Studio surfaces, and — per `AGENTS.md` section 10 — the Growth
+  Intelligence campaign proposal and preparation surfaces. It is driven by
+  `docs/superpowers/plans/2026-09-12-campaign-experience-implementation.md` (Tasks 0–17) and its
+  design, contracts and audit siblings.
+- **Task 0 produced governing documents only. No feature code, no migration, no deployment, no
+  provider call.**
+  - New: `specs/025-campaign-experience-and-marketing-loop.md` (Proposed) — carries confirmed
+    decisions D05/D06/D07, adopts contracts C01–C09, and defines the proposal → preparation approval
+    → reviewed creative → exact-output launch approval → observation → learning journey.
+  - New: `adrs/0057-campaign-preparation-approval-vs-exact-output-publication.md` (Proposed) — the
+    two-gate model. Approving a proposal authorizes *preparation*; publication requires exact review
+    of each finished output, including every later variation.
+  - New: `docs/verification/campaigns/2026-09-12-implementation-reconciliation.md` — CP1 and Spec 023
+    task-by-task status in separate source / staging-applied / worker-deployed / live-verified
+    columns, the immutable proposal → bundle linkage, the V2/V3 rule, and the F01–F18 acceptance
+    checklist.
+  - Amended in place, dated and attributed, superseding without deleting: **ADR 0020** and
+    **Spec 016** (the unseen-variant publication allowance, superseded for the new path only);
+    ADR 0015, ADR 0017, ADR 0021, ADR 0049, ADR 0054 (business memory); Spec 005 (generic Decision
+    execution admission explicitly unchanged), Spec 010, Spec 019, Spec 020, Spec 022, Spec 023.
+- **Files later tasks will touch**, claimed here so the next session can see the intent: the Campaign
+  module (`src/domain/campaigns/`, `src/modules/campaigns/`, `src/workflows/campaigns/`,
+  `src/trigger/campaigns.ts`), Campaign and asset components (`src/components/campaigns/`,
+  `src/components/assets/`), the Growth Intelligence campaign proposal surfaces
+  (`src/modules/growth-intelligence/`, `src/components/growth-intelligence/`), the Meta provider
+  contract (`src/modules/integrations/providers/meta/`), new `campaign_*` migrations and pgTAP
+  suites, and narrow `database.types.ts` entries.
+- **Standing constraints recorded for whoever picks this up.**
+  - **No migration is pushed to hosted staging during this run without a separate explicit user
+    decision.** `pnpm db:migrations:push` is all-or-nothing and three Business Memory migrations
+    (`20260912120000`, `20260912130000`, `20260912140000`) are already pending in source.
+  - The Meta contract's `expiresAt = 2026-09-10` must **not** be extended. Tasks 12/13/14 are written
+    as code but their controlled-account canaries stay blocked — no Meta account, no current official
+    contract evidence.
+  - No numeric operating limit may be invented. Cadence, cooldown, pending-proposal caps, research
+    allowances, budgets, exposure floors and stop thresholds are organization configuration with no
+    default.
+  - Legacy creative-family approvals are never auto-converted, and no task deletes past data.
+- **Deferred:** `.superdesign/campaign-experience/prototype.html` moves to a later dispatch (Task 0b),
+  immediately before the first production UI task.
+- **Could not verify in this dispatch:** no database, Trigger.dev or browser access (both MCP servers
+  timed out), and no test run. Every staging and deployment status in the reconciliation record is
+  carried from the 12 September audit or marked unknown, never guessed.
+- **Next:** controller review of Spec 025, ADR 0057 and the amendments, then Task 1 (truthful
+  generation readiness and failure recovery, F01/F02).

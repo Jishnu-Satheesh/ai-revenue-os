@@ -2,6 +2,31 @@
 
 ## Status
 
+**Amended 2026-09-12 by [Spec 025](025-campaign-experience-and-marketing-loop.md) (Proposed) and
+[ADR 0057](../adrs/0057-campaign-preparation-approval-vs-exact-output-publication.md) (Proposed),
+against audit findings F03, F04 and F05.** The corrected product model below is unchanged and remains
+binding. Its delivery is incomplete, and the following are recorded as outstanding:
+
+- The 2026-09-09 correction is only partly connected. Its domain contracts, selector and core
+  migration exist; no Creative History application, repository, API or UI files were found in the
+  prescribed paths, and the Asset Library still shows References / Campaign output / Dishes rather
+  than Creative History / Products & Subjects / Brand Kit. The correction resumes from the existing
+  migration and schema; tables are not recreated and superseded rejected-image migrations are not
+  reapplied.
+- There is no usable browser upload journey. `AssetUpload` is referenced only by its own tests and is
+  never mounted; its request carries a label and ownership and no file. A usable journey means a
+  visible entry point, file selection and drop, preview, purpose, metadata and rights, per-file
+  reserve/transfer/finalize with authoritative success, retry of failed files, cancellation, and no
+  false success on an HTTP 200 that carries a typed refusal.
+- The library must show actual visual work through session-authorized private previews with exact
+  version identity, bounded signing and expiry refresh. A failed source must not render as an empty
+  library. Finished Creative History is not implemented as generic Brand Kit assets merely because
+  that upload API exists.
+- **Approval of a design as a reusable future reference is a separate decision from publication
+  approval, in both directions**, per ADR 0057. Neither may be set as a side effect of the other. A
+  verdict belongs to a version, not to a folder; folder defaults and human-confirmed metadata are
+  distinct from model suggestions.
+
 **Approved 2026-08-24; corrected in part 2026-09-09.** Tier 3. The declared-subject,
 truth-class and grounding rules remain binding. The Asset Library product model, its
 Creative History schema, and the rejected-evidence route are corrected by ADR 0049 and

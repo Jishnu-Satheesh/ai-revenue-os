@@ -4,6 +4,18 @@
 
 Accepted. User-approved on 2026-09-09 with Campaign Progress CP1.
 
+**Amended 2026-09-12 — restated as outstanding, not superseded, by
+[Spec 025](../specs/025-campaign-experience-and-marketing-loop.md) (Proposed), against audit finding
+F06.** This decision is unchanged and remains binding. The cutover is incomplete in source: the
+corrected narrow types exist, but `CampaignImageGenerationInput.references` is still
+`CampaignImageReference[]`, whose union includes `avoid`, and the final Gemini path still accepts that
+role. Spec 025 requires the cutover to be finished through the real call sites — the final image port
+accepting `FinalImageReference[]` only, Blueprint accepting `BlueprintEvidenceReference[]` only,
+separately constructed and validated rather than a cast or a filtered shared array — and requires the
+proof to be an inspection of the actual adapter payload with a rejected-reference fixture, not a
+type-level test in isolation. Old `avoid_reference_version_ids` receipts remain readable and are never
+rewritten.
+
 This reverses only ADR 0041's rejected-image routing. It retains ADR 0041's
 declared-subject requirement, deterministic grounding resolution, derived truth
 class, and prohibition on generated text. It is implemented by the forward-only

@@ -4,6 +4,25 @@
 
 Accepted.
 
+**Amended 2026-09-12 — extended by
+[ADR 0057](0057-campaign-preparation-approval-vs-exact-output-publication.md) (Proposed) and
+[Spec 025](../specs/025-campaign-experience-and-marketing-loop.md) (Proposed).** Nothing here is
+weakened. Approval still binds an exact immutable version and digest, and every listed material
+change still creates a new version and invalidates approval. The new Campaign path splits approval
+into two gates rather than one:
+
+- **Gate 1, preparation approval**, binds the exact proposal version and digest and authorizes
+  bounded creative preparation only. It reserves no media spend, publishes nothing, confirms no
+  creative and grants no provider authority.
+- **Gate 2, exact-output publication approval**, binds each finished deliverable version and its
+  content hash together with every channel action term, and is what the Tool Gateway's preflight
+  checks against. Every public or money-moving call still passes through that one deterministic
+  Gateway; no second authorization path is introduced.
+- The bootstrap ordering defect in finding F01 is in scope: a dependency or prerequisite failure
+  raised *before* the workflow claims its run must still persist a typed terminal or recoverable
+  blocked outcome. A forever-`queued` domain run beside a FAILED Trigger run is a violation of this
+  ADR's "Postgres records are the authoritative checkpoints" rule.
+
 ## Context
 
 Campaign qualification, generation, approval, scheduling, provider execution, and reconciliation need durable retries and waits. They also include public and money-moving effects that a model or mutable conversation must never authorize. Approval of a campaign name would leave the approved content and limits ambiguous after edits.
