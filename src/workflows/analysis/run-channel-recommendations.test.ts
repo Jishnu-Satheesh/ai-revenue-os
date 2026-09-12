@@ -9,6 +9,8 @@ import { sha256Hex } from "@/workflows/analysis/recommendation-prompt";
 import {
   runChannelRecommendations,
   type ChannelRecommendationsDependencies,
+  type SharePack,
+  type SharePackEntry,
 } from "@/workflows/analysis/run-channel-recommendations";
 
 const RUN = "00000000-0000-4000-8000-0000000000c1";
@@ -597,5 +599,269 @@ describe("runChannelRecommendations share mode (Spec 024)", () => {
     expect(result.shareEntryCount).toBe(0);
     expect(systemAfter).toBe(systemBefore);
     expect(userAfter).toBe(userBefore);
+  });
+});
+
+function packEntry(overrides: Partial<SharePackEntry> & { contextRef: string }): SharePackEntry {
+  return {
+    title: `Title ${overrides.contextRef}`,
+    summary: `Summary ${overrides.contextRef}.`,
+    sensitivity: "internal",
+    reuseClass: "qualified_reusable",
+    knowledgeKind: "observation",
+    hasMoneyAmount: false,
+    hasPii: false,
+    rootsLive: true,
+    scopeOk: true,
+    isLegacyUnqualified: false,
+    priority: 0,
+    ...overrides,
+  };
+}
+
+function packDependencies(
+  pack: SharePack,
+  overrides: Partial<ChannelRecommendationsDependencies> = {},
+): ChannelRecommendationsDependencies {
+  return dependencies({
+    loadShareContext: vi.fn(async () => ({
+      mode: "grounded_share" as const,
+      entries: [],
+      excludedCount: 0,
+      reason: "ready" as const,
+    })),
+    prepareSharePack: vi.fn(async () => pack),
+    ...overrides,
+  });
+}
+
+describe("runChannelRecommendations share packs (Spec 023 §7)", () => {
+  it("threads an allowlisted pack into the prompt and pins the manifest for completion", async () => {
+    const deps = packDependencies({
+      manifestId: "44444444-4444-4444-8444-444444444444",
+      status: "ready",
+      entries: [packEntry({ contextRef: "ctx-0001" }), packEntry({ contextRef: "ctx-0002" })],
+    });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result).toEqual({
+      outcome: "completed",
+      recommendationCount: 1,
+      shareMode: "grounded_share",
+      shareEntryCount: 2,
+    });
+    const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).toContain("<shared_business_context>");
+    expect(user).toContain("Title ctx-0001");
+    const call = vi.mocked(deps.complete).mock.calls[0][0];
+    expect(call.shareManifestId).toBe("44444444-4444-4444-8444-444444444444");
+    expect(call.shareMode).toBe("grounded_share");
+    expect(call.shareProvidedRefs).toEqual(["ctx-0001", "ctx-0002"]);
+  });
+
+  it("subsets pack entries through the domain allowlist: 8 entries, no money, no PII, no confidential", async () => {
+    const entries: SharePackEntry[] = Array.from({ length: 10 }, (_, index) =>
+      packEntry({ contextRef: `ctx-${String(index + 1).padStart(4, "0")}`, priority: index }),
+    );
+    entries.push(
+      packEntry({ contextRef: "ctx-money", hasMoneyAmount: true, priority: -1 }),
+      packEntry({ contextRef: "ctx-pii", hasPii: true, priority: -1 }),
+      packEntry({ contextRef: "ctx-secret", sensitivity: "confidential", priority: -1 }),
+      packEntry({ contextRef: "ctx-legacy", isLegacyUnqualified: true, priority: -1 }),
+    );
+    const deps = packDependencies({ manifestId: "44444444-4444-4444-8444-444444444444", status: "ready", entries });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.shareMode).toBe("grounded_share");
+    expect(result.shareEntryCount).toBe(8);
+    const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    // The lowest-priority eligible tail drops; the ineligible never render even
+    // though they outranked everything eligible.
+    expect(user).toContain("Title ctx-0001");
+    expect(user).toContain("Title ctx-0008");
+    expect(user).not.toContain("Title ctx-0009");
+    expect(user).not.toContain("Title ctx-money");
+    expect(user).not.toContain("Title ctx-pii");
+    expect(user).not.toContain("Title ctx-secret");
+    expect(user).not.toContain("Title ctx-legacy");
+    const call = vi.mocked(deps.complete).mock.calls[0][0];
+    expect(call.shareProvidedRefs).toHaveLength(8);
+  });
+
+  it("keeps the prompt byte-identical when the pack subsets to nothing", async () => {
+    const without = dependencies();
+    await runChannelRecommendations(payload, without);
+    const [systemBefore, userBefore] = vi.mocked(without.generator.generate).mock.calls[0];
+
+    const deps = packDependencies({
+      manifestId: "44444444-4444-4444-8444-444444444444",
+      status: "empty",
+      entries: [packEntry({ contextRef: "ctx-0001", sensitivity: "confidential" })],
+    });
+    const result = await runChannelRecommendations(payload, deps);
+    const [systemAfter, userAfter] = vi.mocked(deps.generator.generate).mock.calls[0];
+
+    expect(result.shareMode).toBe("grounded_share");
+    expect(result.shareEntryCount).toBe(0);
+    expect(systemAfter).toBe(systemBefore);
+    expect(userAfter).toBe(userBefore);
+  });
+
+  it("completes evidence-only when pack preparation throws, never faking provenance", async () => {
+    const deps = packDependencies(
+      { manifestId: "unused", status: "ready", entries: [] },
+      {
+        prepareSharePack: vi.fn(async () => {
+          throw new Error("retrieval exploded");
+        }),
+      },
+    );
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result).toEqual({
+      outcome: "completed",
+      recommendationCount: 1,
+      shareMode: "internal_only",
+      shareEntryCount: 0,
+    });
+    const [, user] = vi.mocked(deps.generator.generate).mock.calls[0];
+    expect(user).not.toContain("<shared_business_context>");
+    const call = vi.mocked(deps.complete).mock.calls[0][0];
+    expect(call.shareManifestId).toBeNull();
+  });
+
+  it("completes evidence-only for an unavailable pack status", async () => {
+    const deps = packDependencies({ manifestId: "unused", status: "unavailable", entries: [] });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.shareMode).toBe("internal_only");
+    expect(result.shareEntryCount).toBe(0);
+    expect(vi.mocked(deps.complete).mock.calls[0][0].shareManifestId).toBeNull();
+  });
+
+  it("never calls pack preparation for an internal-only gate", async () => {
+    const prepareSharePack = vi.fn(async () => ({
+      manifestId: "44444444-4444-4444-8444-444444444444",
+      status: "ready" as const,
+      entries: [packEntry({ contextRef: "ctx-0001" })],
+    }));
+    const deps = dependencies({ prepareSharePack });
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.shareMode).toBe("internal_only");
+    expect(prepareSharePack).not.toHaveBeenCalled();
+  });
+});
+
+describe("runChannelRecommendations share revalidation (Spec 023 §9)", () => {
+  it("completes with the pinned manifest when revalidation is valid", async () => {
+    const revalidateSharePack = vi.fn(async () => "valid" as const);
+    const deps = packDependencies(
+      {
+        manifestId: "44444444-4444-4444-8444-444444444444",
+        status: "ready",
+        entries: [packEntry({ contextRef: "ctx-0001" })],
+      },
+      { revalidateSharePack },
+    );
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.shareMode).toBe("grounded_share");
+    expect(revalidateSharePack).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      manifestId: "44444444-4444-4444-8444-444444444444",
+    });
+    expect(vi.mocked(deps.complete).mock.calls[0][0].shareManifestId).toBe(
+      "44444444-4444-4444-8444-444444444444",
+    );
+  });
+
+  it("takes one bounded fresh attempt on changed and completes with the new manifest", async () => {
+    const freshId = "55555555-5555-4555-8555-555555555555";
+    const prepareSharePack = vi
+      .fn()
+      .mockResolvedValueOnce({
+        manifestId: "44444444-4444-4444-8444-444444444444",
+        status: "ready",
+        entries: [packEntry({ contextRef: "ctx-0001" })],
+      })
+      .mockResolvedValueOnce({
+        manifestId: freshId,
+        status: "ready",
+        entries: [packEntry({ contextRef: "ctx-0002" })],
+      });
+    const revalidateSharePack = vi
+      .fn()
+      .mockResolvedValueOnce("changed" as const)
+      .mockResolvedValueOnce("valid" as const);
+    const deps = packDependencies(
+      { manifestId: "unused", status: "ready", entries: [] },
+      { prepareSharePack, revalidateSharePack },
+    );
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.shareMode).toBe("grounded_share");
+    expect(result.shareEntryCount).toBe(1);
+    expect(prepareSharePack).toHaveBeenCalledTimes(2);
+    const [, secondUser] = vi.mocked(deps.generator.generate).mock.calls[1];
+    expect(secondUser).toContain("Title ctx-0002");
+    const call = vi.mocked(deps.complete).mock.calls[0][0];
+    expect(call.shareManifestId).toBe(freshId);
+    expect(call.shareProvidedRefs).toEqual(["ctx-0002"]);
+  });
+
+  it("falls back to one evidence-only generation when the fresh pack is still changed", async () => {
+    const prepareSharePack = vi.fn(async () => ({
+      manifestId: "44444444-4444-4444-8444-444444444444",
+      status: "ready" as const,
+      entries: [packEntry({ contextRef: "ctx-0001" })],
+    }));
+    const revalidateSharePack = vi.fn(async () => "changed" as const);
+    const deps = packDependencies(
+      { manifestId: "unused", status: "ready", entries: [] },
+      { prepareSharePack, revalidateSharePack },
+    );
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result).toEqual({
+      outcome: "completed",
+      recommendationCount: 1,
+      shareMode: "internal_only",
+      shareEntryCount: 0,
+    });
+    // Original + fresh + evidence-only fallback: bounded at three prompts.
+    expect(vi.mocked(deps.generator.generate).mock.calls).toHaveLength(3);
+    const [, fallbackUser] = vi.mocked(deps.generator.generate).mock.calls[2];
+    expect(fallbackUser).not.toContain("<shared_business_context>");
+    expect(vi.mocked(deps.complete).mock.calls[0][0].shareManifestId).toBeNull();
+  });
+
+  it("regenerates evidence-only on revoked without a second pack attempt", async () => {
+    const prepareSharePack = vi.fn(async () => ({
+      manifestId: "44444444-4444-4444-8444-444444444444",
+      status: "ready" as const,
+      entries: [packEntry({ contextRef: "ctx-0001" })],
+    }));
+    const revalidateSharePack = vi.fn(async () => "revoked" as const);
+    const deps = packDependencies(
+      { manifestId: "unused", status: "ready", entries: [] },
+      { prepareSharePack, revalidateSharePack },
+    );
+
+    const result = await runChannelRecommendations(payload, deps);
+
+    expect(result.shareMode).toBe("internal_only");
+    expect(result.shareEntryCount).toBe(0);
+    expect(prepareSharePack).toHaveBeenCalledTimes(1);
+    const [, fallbackUser] = vi.mocked(deps.generator.generate).mock.calls[1];
+    expect(fallbackUser).not.toContain("<shared_business_context>");
   });
 });

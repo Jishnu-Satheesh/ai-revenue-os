@@ -22,6 +22,7 @@ import {
 import { AnalysisProgress } from "@/components/analysis/analysis-progress";
 import { WindowRangePicker } from "@/components/analysis/window-range-picker";
 import { RecommendationControls } from "@/components/analysis/recommendation-controls";
+import type { ContextUsedData } from "@/components/memory/context-used";
 import {
   figureToneClass,
   findingValueLabel,
@@ -1142,12 +1143,15 @@ function ChapterRail({
   onInspect,
   organizationId,
   adviceGap,
+  memoryContexts,
 }: {
   chapter: WorkspaceChapterView;
   recommendations: readonly WorkspaceRecommendationView[];
   onInspect: (findingId: string) => void;
   organizationId: string;
   adviceGap: AdviceGapState;
+  /** Per-recommendation context provenance, once the read model carries it. */
+  memoryContexts?: Readonly<Record<string, ContextUsedData>>;
 }) {
   const summary = chapterRailSummary(chapter);
   // The green box is the advice slot, so only advice goes in it. Narration
@@ -1200,7 +1204,11 @@ function ChapterRail({
       </div>
 
       {advice ? (
-        <RecommendationControls organizationId={organizationId} recommendation={advice} />
+        <RecommendationControls
+          organizationId={organizationId}
+          recommendation={advice}
+          memoryContext={memoryContexts?.[advice.id]}
+        />
       ) : (
         <AdviceGap chapter={chapter} railReason={summary.reason} gap={adviceGap} />
       )}
@@ -1233,6 +1241,7 @@ export function ChannelWorkspace({
   canRunAnalysis,
   channelsHref,
   economicsHref,
+  memoryContexts,
 }: {
   organizationId: string;
   channel: WorkspaceChannel;
@@ -1253,6 +1262,8 @@ export function ChannelWorkspace({
   canRunAnalysis: boolean;
   channelsHref: string;
   economicsHref: string;
+  /** Per-recommendation context provenance, once the read model carries it. Absent renders the previous workspace exactly. */
+  memoryContexts?: Readonly<Record<string, ContextUsedData>>;
 }) {
   const router = useRouter();
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
@@ -1651,6 +1662,7 @@ export function ChannelWorkspace({
               adviceGap={adviceGap}
               allFindings={allFindings}
               run={view.run}
+              memoryContexts={memoryContexts}
             />
           );
         })}
@@ -1689,6 +1701,7 @@ export function ChannelWorkspace({
                 key={recommendation.id}
                 organizationId={organizationId}
                 recommendation={recommendation}
+                memoryContext={memoryContexts?.[recommendation.id]}
               />
             ))}
           </div>
@@ -1784,6 +1797,7 @@ function ChapterShell({
   adviceGap,
   allFindings,
   run,
+  memoryContexts,
 }: {
   chapter: WorkspaceChapterView;
   /** The finding ordinal, or null for a supplementary chapter. */
@@ -1796,6 +1810,8 @@ function ChapterShell({
   adviceGap: AdviceGapState;
   allFindings: readonly WorkspaceFindingView[];
   run: WorkspaceRunView | null;
+  /** Per-recommendation context provenance, once the read model carries it. */
+  memoryContexts?: Readonly<Record<string, ContextUsedData>>;
 }) {
   const coverageRatio =
     coverageFinding && coverageFinding.kind !== "needs_data" ? ratioOf(coverageFinding) : null;
@@ -1869,6 +1885,7 @@ function ChapterShell({
         onInspect={onInspect}
         organizationId={organizationId}
         adviceGap={adviceGap}
+        memoryContexts={memoryContexts}
       />
     </section>
   );

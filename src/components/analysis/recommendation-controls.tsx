@@ -19,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ContextUsedDrawer, type ContextUsedData } from "@/components/memory/context-used";
 import type { WorkspaceRecommendationView } from "@/modules/analysis/application/read-model";
 
 /**
@@ -51,9 +52,16 @@ type DecisionKind = "acknowledged" | "dismissed" | "planned";
 export function RecommendationControls({
   organizationId,
   recommendation,
+  memoryContext,
 }: {
   organizationId: string;
   recommendation: WorkspaceRecommendationView;
+  /**
+   * Governed context provenance for this recommendation, once the read model
+   * carries it. Absent renders exactly the previous controls: no drawer is
+   * offered for an answer whose context is unknown rather than invented.
+   */
+  memoryContext?: ContextUsedData | null;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -244,6 +252,16 @@ export function RecommendationControls({
         <p className="text-[11px] italic leading-relaxed text-muted-foreground">
           {recommendation.limitations.join(" ")}
         </p>
+      ) : null}
+
+      {memoryContext ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <ContextUsedDrawer
+            organizationId={organizationId}
+            recommendationHeadline={recommendation.headline}
+            data={memoryContext}
+          />
+        </div>
       ) : null}
 
       {error ? (

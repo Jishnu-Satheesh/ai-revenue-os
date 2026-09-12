@@ -18,7 +18,12 @@ import {
   shareLogFields,
   type ShareContext,
   type ShareMode,
+  type SharePromptEntry,
 } from "@/workflows/analysis/grounded-share-mode";
+import {
+  selectGroundedShareSubset,
+  type GroundedShareCandidate,
+} from "@/domain/memory/grounded-share";
 
 /**
  * The narration worker.
@@ -143,10 +148,52 @@ export type ChannelRecommendationsDependencies = {
    * compile; absent means the wiring predates sharing and the run stays
    * internal-only. Entries arrive pre-allowlisted and bounded by the domain
    * subset, so the workflow never judges eligibility here.
+   *
+   * This stays the status gate: `grounded_share` means the database currently
+   * pairs an active consent with a current Google qualification. What the
+   * prompt may actually carry is decided by `prepareSharePack` below, which
+   * assembles the channel_advice pack and subsets it through the domain
+   * allowlist. Until that dep is wired, entries arrive as the gate provides
+   * them (empty until capture lands qualified rows).
    */
   loadShareContext?(input: {
     organizationId: string;
   }): Promise<ShareContext>;
+  /**
+   * Governed channel_advice pack for a grounded_share run (Spec 023 §7).
+   * Optional so existing callers compile; absent means the trigger wiring
+   * predates pack assembly and the run uses `loadShareContext` entries
+   * exactly as before. Present, it is called only when the status gate
+   * reports `grounded_share`, and its entries — not the gate's — are
+   * allowlisted, threaded into the prompt, and pinned by manifest.
+   *
+   * The trigger implements this with the context assembler
+   * (`assembleContextPack` in `src/modules/memory`) over retrieval scoped
+   * to this run, finalized through the context repository; the workflow
+   * never touches storage directly, so tests stub this with fixed packs.
+   * A throw fails closed for disclosure and open for narration: the run
+   * completes evidence-only, honestly labeled internal-only, never with
+   * faked provenance.
+   */
+  prepareSharePack?(input: {
+    organizationId: string;
+    analysisRunId: string;
+    attemptKey: string;
+    correlationId: string;
+  }): Promise<SharePack>;
+  /**
+   * Revalidation of a pinned manifest before completion (Spec 023 §9).
+   * Optional; absent means the run completes over the prepared entries
+   * without a second check, exactly as before. Present, a `changed` answer
+   * triggers one bounded fresh attempt (new pack, new prompt, new
+   * generation); `revoked`/`unavailable` falls back to one evidence-only
+   * generation. The run never completes over entries the database no longer
+   * stands behind.
+   */
+  revalidateSharePack?(input: {
+    organizationId: string;
+    manifestId: string;
+  }): Promise<ShareRevalidation>;
   generator: NarrationGenerator;
   complete(input: {
     organizationId: string;
@@ -159,6 +206,16 @@ export type ChannelRecommendationsDependencies = {
     outputDigest: string;
     resultDigest: string;
     items: readonly NarratedItem[];
+    /**
+     * Provenance of the shared block, when one was pinned and consumed.
+     * Optional so existing callers compile; absent means the run completed
+     * evidence-only. The trigger records it through
+     * `record_channel_recommendation_context` once wired; until then these
+     * fields are carried but not persisted, and nothing claims otherwise.
+     */
+    shareManifestId?: string | null;
+    shareMode?: ShareMode;
+    shareProvidedRefs?: readonly string[];
   }): Promise<void>;
   fail(input: {
     organizationId: string;
@@ -179,6 +236,78 @@ export type ChannelRecommendationsDependencies = {
 export type ChannelPilotContext = {
   channelContext: NarrationChannelContext | null;
 };
+
+/**
+ * One assembled pack entry as the trigger hands it over: the bounded safe
+ * title/summary the prompt may carry, plus the eligibility facts the domain
+ * allowlist judges. The workflow never derives these facts itself — they
+ * arrive from retrieval/projection metadata — it only subsets on them.
+ */
+export type SharePackEntry = {
+  /** Stable per-pack ref (ctx-NNNN) pinned under the manifest. */
+  contextRef: string;
+  title: string;
+  summary: string;
+  sensitivity: GroundedShareCandidate["sensitivity"];
+  reuseClass: GroundedShareCandidate["reuseClass"];
+  knowledgeKind: GroundedShareCandidate["knowledgeKind"];
+  hasMoneyAmount: boolean;
+  hasPii: boolean;
+  rootsLive: boolean;
+  scopeOk: boolean;
+  isLegacyUnqualified: boolean;
+  priority: number;
+};
+
+/**
+ * A pinned channel_advice manifest and the entries assembled under it.
+ * Status mirrors the manifest vocabulary; `unavailable`/`disabled` arrive
+ * with zero entries and complete evidence-only.
+ */
+export type SharePack = {
+  manifestId: string;
+  status: "ready" | "empty" | "partial" | "unavailable" | "disabled";
+  entries: readonly SharePackEntry[];
+};
+
+export type ShareRevalidation = "valid" | "changed" | "revoked" | "unavailable";
+
+/**
+ * Allowlisted prompt entries from an assembled pack: eligible candidates
+ * ordered by priority then ref, capped at 8 entries / 4096 bytes. Ineligible
+ * entries are dropped with their exclusion reported to the log as a count —
+ * bodies never travel to a log — and an empty selection renders no shared
+ * block at all, keeping the prompt byte-identical.
+ */
+function subsetSharePackEntries(entries: readonly SharePackEntry[]): {
+  selected: SharePromptEntry[];
+  providedRefs: string[];
+  excludedCount: number;
+} {
+  const candidates: GroundedShareCandidate[] = entries.map((entry) => ({
+    id: entry.contextRef,
+    sensitivity: entry.sensitivity,
+    reuseClass: entry.reuseClass,
+    knowledgeKind: entry.knowledgeKind,
+    hasMoneyAmount: entry.hasMoneyAmount,
+    hasPii: entry.hasPii,
+    rootsLive: entry.rootsLive,
+    scopeOk: entry.scopeOk,
+    isLegacyUnqualified: entry.isLegacyUnqualified,
+    summary: entry.summary,
+    priority: entry.priority,
+  }));
+  const { selected, excluded } = selectGroundedShareSubset(candidates);
+  const byId = new Map(entries.map((entry) => [entry.contextRef, entry]));
+  return {
+    selected: selected.map((candidate) => {
+      const entry = byId.get(candidate.id);
+      return { title: entry?.title ?? "(untitled)", summary: candidate.summary };
+    }),
+    providedRefs: selected.map((candidate) => candidate.id),
+    excludedCount: excluded.length,
+  };
+}
 
 function failureDigest(code: ChannelRecommendationFailureCode): string {
   // The same convention as the analysis worker: a failure still carries a
@@ -271,6 +400,9 @@ export async function runChannelRecommendations(
     };
   }
   const gapFill = claim.outcome === "gapfill_acquired";
+  // Hoisted while the claim is narrowed to the acquired variants, so the
+  // prompt builder below never re-reads an optional field.
+  const claimWindow = claim.window;
 
   try {
     let findings: readonly NarrationPromptFinding[];
@@ -388,19 +520,74 @@ export async function runChannelRecommendations(
       ...shareLogFields(share),
     });
 
-    const prompt = buildNarrationPrompt({
-      windowStart: claim.window.windowStart,
-      windowEnd: claim.window.windowEnd,
-      periodGrain: claim.window.periodGrain,
-      findings,
-      channelContext: pilot.channelContext,
-      // Full narrations pass nothing: their prompt stays byte-identical, and
-      // a gap-fill without a filed count keeps the old behavior too.
-      ...(gapFill && filedCount !== null ? { gapFill: { filedCount } } : {}),
-      // Shared entries render only when the allowlist produced some, so
-      // runs without shareable entries keep byte-identical prompts.
-      ...(share.entries.length > 0 ? { sharedContext: share.entries } : {}),
-    });
+    // Governed pack (Spec 023 §7): only for a grounded_share gate, only when
+    // the trigger wired assembly. The gate's entries stay the fallback until
+    // that wiring lands; once present, the pack's allowlisted entries replace
+    // them, and the manifest is pinned for revalidation and provenance. Any
+    // throw assembles nothing: the run completes evidence-only, honestly
+    // labeled internal-only, never with faked provenance.
+    let packManifestId: string | null = null;
+    let packProvidedRefs: string[] = [];
+    if (share.mode === "grounded_share" && dependencies.prepareSharePack) {
+      try {
+        const pack = await dependencies.prepareSharePack({
+          organizationId: payload.organizationId,
+          analysisRunId: payload.analysisRunId,
+          attemptKey: crypto.randomUUID(),
+          correlationId: payload.correlationId,
+        });
+        if (pack.status === "unavailable" || pack.status === "disabled") {
+          // Only org + run travel to the log: the logger's closed allowlist
+          // has no manifest/status/count keys, and logger.ts sits outside
+          // this slice (flagged in the swarm report). The pinned manifest
+          // and provided refs persist through complete(), not the log.
+          logger.warn("channel_recommendations.share_pack_unavailable", {
+            organizationId: payload.organizationId,
+            runId: payload.analysisRunId,
+          });
+          share = {
+            ...INTERNAL_ONLY_CONTEXT,
+            reason: pack.status === "disabled" ? "disabled" : "status_unavailable",
+          };
+        } else {
+          const subset = subsetSharePackEntries(pack.entries);
+          packManifestId = pack.manifestId;
+          packProvidedRefs = subset.providedRefs;
+          logger.info("channel_recommendations.share_pack_prepared", {
+            organizationId: payload.organizationId,
+            runId: payload.analysisRunId,
+          });
+          share = {
+            mode: "grounded_share",
+            entries: subset.selected,
+            excludedCount: subset.excludedCount,
+            reason: pack.status === "empty" ? "corpus_unqualified" : "ready",
+          };
+        }
+      } catch {
+        logger.warn("channel_recommendations.share_pack_unavailable", {
+          organizationId: payload.organizationId,
+          runId: payload.analysisRunId,
+        });
+        share = { ...INTERNAL_ONLY_CONTEXT, reason: "status_unavailable" };
+      }
+    }
+
+    function buildPrompt(sharedEntries: readonly SharePromptEntry[]) {
+      return buildNarrationPrompt({
+        windowStart: claimWindow.windowStart,
+        windowEnd: claimWindow.windowEnd,
+        periodGrain: claimWindow.periodGrain,
+        findings,
+        channelContext: pilot.channelContext,
+        // Full narrations pass nothing: their prompt stays byte-identical, and
+        // a gap-fill without a filed count keeps the old behavior too.
+        ...(gapFill && filedCount !== null ? { gapFill: { filedCount } } : {}),
+        // Shared entries render only when the allowlist produced some, so
+        // runs without shareable entries keep byte-identical prompts.
+        ...(sharedEntries.length > 0 ? { sharedContext: sharedEntries } : {}),
+      });
+    }
 
     // Grounding follows the run having findings, not the loader's luck and
     // not any detector allowlist (Amendment B retired the 3-key pilot gate):
@@ -410,37 +597,188 @@ export async function runChannelRecommendations(
     // the existing fail paths below.
     const useGrounding = findings.length > 0;
 
-    let reply = await generateOnce(dependencies.generator, prompt, { useGrounding });
-    let submission = parseSubmission(reply);
-    if (submission === null) {
-      // Exactly one retry: models correct a format miss far more often than
-      // two consecutive misses mean a third would help.
-      reply = await generateOnce(dependencies.generator, prompt, { useGrounding });
-      submission = parseSubmission(reply);
-    }
-    if (submission === null) {
-      throw new ChannelRecommendationsFailure("NARRATION_VALIDATION_FAILED");
+    async function generateSubmission(prompt: {
+      system: string;
+      user: string;
+      promptVersion: number;
+    }): Promise<{ reply: unknown; submission: NarrationSubmission }> {
+      let reply = await generateOnce(dependencies.generator, prompt, { useGrounding });
+      let submission = parseSubmission(reply);
+      if (submission === null) {
+        // Exactly one retry: models correct a format miss far more often than
+        // two consecutive misses mean a third would help.
+        reply = await generateOnce(dependencies.generator, prompt, { useGrounding });
+        submission = parseSubmission(reply);
+      }
+      if (submission === null) {
+        throw new ChannelRecommendationsFailure("NARRATION_VALIDATION_FAILED");
+      }
+      return { reply, submission };
     }
 
-    await dependencies.complete({
-      organizationId: payload.organizationId,
-      analysisRunId: payload.analysisRunId,
-      claimToken,
-      provider: dependencies.generator.providerName,
-      modelId: dependencies.generator.modelId,
-      promptVersion: prompt.promptVersion,
-      promptDigest: sha256Hex(JSON.stringify({ system: prompt.system, user: prompt.user })),
-      outputDigest: sha256Hex(canonicalJson(reply)),
-      resultDigest: sha256Hex(JSON.stringify(submission)),
-      items: submission.items,
+    async function completeSubmission(input: {
+      prompt: { system: string; user: string; promptVersion: number };
+      reply: unknown;
+      submission: NarrationSubmission;
+      manifestId: string | null;
+      mode: ShareMode;
+      providedRefs: readonly string[];
+      entryCount: number;
+    }): Promise<{
+      outcome: "completed";
+      recommendationCount: number;
+      shareMode: ShareMode;
+      shareEntryCount: number;
+    }> {
+      await dependencies.complete({
+        organizationId: payload.organizationId,
+        analysisRunId: payload.analysisRunId,
+        claimToken,
+        provider: dependencies.generator.providerName,
+        modelId: dependencies.generator.modelId,
+        promptVersion: input.prompt.promptVersion,
+        promptDigest: sha256Hex(JSON.stringify({ system: input.prompt.system, user: input.prompt.user })),
+        outputDigest: sha256Hex(canonicalJson(input.reply)),
+        resultDigest: sha256Hex(JSON.stringify(input.submission)),
+        items: input.submission.items,
+        shareManifestId: input.manifestId,
+        shareMode: input.mode,
+        shareProvidedRefs: input.providedRefs,
+      });
+      return {
+        outcome: "completed",
+        recommendationCount: input.submission.items.length,
+        shareMode: input.mode,
+        shareEntryCount: input.entryCount,
+      };
+    }
+
+    let prompt = buildPrompt(share.entries);
+    let generated = await generateSubmission(prompt);
+
+    // Revalidation before completion (Spec 023 §9): only when a manifest is
+    // pinned and the dep exists. `changed` earns one bounded fresh attempt;
+    // `revoked`/`unavailable` falls back to one evidence-only generation so
+    // the run never completes over entries the database withdrew. Without
+    // the dep the run completes over the prepared entries as before.
+    if (packManifestId !== null && dependencies.revalidateSharePack) {
+      let status: ShareRevalidation;
+      try {
+        status = await dependencies.revalidateSharePack({
+          organizationId: payload.organizationId,
+          manifestId: packManifestId,
+        });
+      } catch {
+        status = "unavailable";
+      }
+      logger.info("channel_recommendations.share_revalidated", {
+        organizationId: payload.organizationId,
+        runId: payload.analysisRunId,
+      });
+      if (status === "changed") {
+        let freshEntries: SharePromptEntry[] = [];
+        let freshManifestId: string | null = null;
+        let freshRefs: string[] = [];
+        if (dependencies.prepareSharePack) {
+          try {
+            const fresh = await dependencies.prepareSharePack({
+              organizationId: payload.organizationId,
+              analysisRunId: payload.analysisRunId,
+              attemptKey: crypto.randomUUID(),
+              correlationId: payload.correlationId,
+            });
+            if (fresh.status !== "unavailable" && fresh.status !== "disabled") {
+              const subset = subsetSharePackEntries(fresh.entries);
+              freshEntries = subset.selected;
+              freshRefs = subset.providedRefs;
+              freshManifestId = fresh.manifestId;
+              logger.info("channel_recommendations.share_pack_prepared", {
+                organizationId: payload.organizationId,
+                runId: payload.analysisRunId,
+              });
+            }
+          } catch {
+            logger.warn("channel_recommendations.share_pack_unavailable", {
+              organizationId: payload.organizationId,
+              runId: payload.analysisRunId,
+            });
+          }
+        }
+        if (freshManifestId !== null && dependencies.revalidateSharePack) {
+          prompt = buildPrompt(freshEntries);
+          generated = await generateSubmission(prompt);
+          let freshStatus: ShareRevalidation;
+          try {
+            freshStatus = await dependencies.revalidateSharePack({
+              organizationId: payload.organizationId,
+              manifestId: freshManifestId,
+            });
+          } catch {
+            freshStatus = "unavailable";
+          }
+          logger.info("channel_recommendations.share_revalidated", {
+            organizationId: payload.organizationId,
+            runId: payload.analysisRunId,
+          });
+          if (freshStatus === "valid") {
+            return completeSubmission({
+              prompt,
+              reply: generated.reply,
+              submission: generated.submission,
+              manifestId: freshManifestId,
+              mode: "grounded_share",
+              providedRefs: freshRefs,
+              entryCount: freshEntries.length,
+            });
+          }
+        }
+        // Distinct message names keep the fallback reason observable while
+        // the logger allowlist stays closed: changed → regenerated below,
+        // revoked/unavailable → regenerated in the branch after.
+        logger.info("channel_recommendations.share_regenerated", {
+          organizationId: payload.organizationId,
+          runId: payload.analysisRunId,
+        });
+        prompt = buildPrompt([]);
+        generated = await generateSubmission(prompt);
+        return completeSubmission({
+          prompt,
+          reply: generated.reply,
+          submission: generated.submission,
+          manifestId: null,
+          mode: "internal_only",
+          providedRefs: [],
+          entryCount: 0,
+        });
+      }
+      if (status === "revoked" || status === "unavailable") {
+        logger.info("channel_recommendations.share_regenerated", {
+          organizationId: payload.organizationId,
+          runId: payload.analysisRunId,
+        });
+        prompt = buildPrompt([]);
+        generated = await generateSubmission(prompt);
+        return completeSubmission({
+          prompt,
+          reply: generated.reply,
+          submission: generated.submission,
+          manifestId: null,
+          mode: "internal_only",
+          providedRefs: [],
+          entryCount: 0,
+        });
+      }
+    }
+
+    return completeSubmission({
+      prompt,
+      reply: generated.reply,
+      submission: generated.submission,
+      manifestId: packManifestId,
+      mode: share.mode,
+      providedRefs: packProvidedRefs,
+      entryCount: share.entries.length,
     });
-
-    return {
-      outcome: "completed",
-      recommendationCount: submission.items.length,
-      shareMode: share.mode,
-      shareEntryCount: share.entries.length,
-    };
   } catch (error) {
     const code: ChannelRecommendationFailureCode =
       error instanceof ChannelRecommendationsFailure ? error.code : "NARRATION_PROCESSING_FAILED";
