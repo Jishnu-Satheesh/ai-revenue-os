@@ -428,7 +428,9 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
 
     async listChannelRecommendationRecords(input) {
       const result = await query<Record<string, unknown>[]>(persistence, "channel_recommendations")
-        .select("id,channel_id,branch_id,label,headline,detail,window_start,window_end,created_at")
+        .select(
+          "id,channel_id,branch_id,label,headline,detail,window_start,window_end,created_at,supported_actions,limitations",
+        )
         .eq("organization_id", input.organizationId)
         .order("created_at", { ascending: false })
         .limit(clampLimit(input.limit));
@@ -436,7 +438,7 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const rows = result.data ?? [];
       if (rows.length === 0) return [];
       const recommendationIds = rows.map((row) => String(row.id));
-      const [decisions, preferences, feedback] = await Promise.all([
+      const [decisions, preferences, feedback, citations] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "channel_recommendation_decisions")
           .select("recommendation_id,decision,snoozed_until,created_at")
           .eq("organization_id", input.organizationId)
@@ -452,10 +454,25 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .eq("organization_id", input.organizationId)
           .eq("actor_id", input.actorId)
           .in("recommendation_id", recommendationIds),
+        // Lazy-load the stored finding ids each narration cited, so the card
+        // can name its evidence instead of claiming none was cited.
+        query<Record<string, unknown>[]>(persistence, "channel_recommendation_citations")
+          .select("recommendation_id,finding_id")
+          .eq("organization_id", input.organizationId)
+          .in("recommendation_id", recommendationIds),
       ]);
       if (decisions.error) readFailure();
       if (preferences.error) readFailure();
       if (feedback.error) readFailure();
+      if (citations.error) readFailure();
+      const citationFindingIds = new Map<string, string[]>();
+      for (const citation of citations.data ?? []) {
+        const key = String(citation.recommendation_id);
+        const findingId = String(citation.finding_id);
+        const existing = citationFindingIds.get(key);
+        if (existing) existing.push(findingId);
+        else citationFindingIds.set(key, [findingId]);
+      }
       const latestDecision = new Map<string, Record<string, unknown>>();
       for (const decision of decisions.data ?? []) {
         const key = String(decision.recommendation_id);
@@ -483,6 +500,7 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           pinned.has(String(row.id)),
           preferenceSnoozedUntil.get(String(row.id)) ?? null,
           myFeedback.get(String(row.id)) ?? null,
+          citationFindingIds.get(String(row.id)) ?? [],
         ),
       );
     },
@@ -572,12 +590,19 @@ function mapWorkspaceItem(
 
 const CHANNEL_DECISIONS = new Set(["acknowledged", "dismissed", "planned", "snoozed"]);
 
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
 function mapChannelRecommendationRecord(
   row: Record<string, unknown>,
   decision: Record<string, unknown> | null,
   pinned: boolean,
   preferenceSnoozedUntil: string | null,
   myFeedback: boolean | null,
+  citationFindingIds: string[] = [],
 ): ChannelRecommendationRow {
   const label = String(row.label);
   if (label !== "observation" && label !== "recommendation" && label !== "needs_data") {
@@ -595,6 +620,9 @@ function mapChannelRecommendationRecord(
     windowStart: String(row.window_start),
     windowEnd: String(row.window_end),
     generatedAt: String(row.created_at),
+    supportedActions: toStringArray(row.supported_actions),
+    limitations: toStringArray(row.limitations),
+    citationFindingIds,
     decision:
       decisionValue === null
         ? null

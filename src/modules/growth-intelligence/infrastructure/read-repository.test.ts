@@ -473,6 +473,44 @@ describe("workspace reads", () => {
     expect(rows[0]!.myFeedback).toBe(true);
   });
 
+  it("lazy-loads stored citation ids onto channel rows from their own table", async () => {
+    const db = workspacePersistence({
+      channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
+      channel_recommendation_decisions: [{ data: [], error: null }],
+      channel_recommendation_preferences: [{ data: [], error: null }],
+      channel_recommendation_feedback: [{ data: [], error: null }],
+      channel_recommendation_citations: [
+        {
+          data: [
+            {
+              recommendation_id: "60000000-0000-4000-8000-000000000006",
+              finding_id: "finding-1",
+              organization_id: organizationId,
+            },
+            {
+              recommendation_id: "60000000-0000-4000-8000-000000000006",
+              finding_id: "finding-2",
+              organization_id: organizationId,
+            },
+          ],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const rows = await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId,
+      limit: 100,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.citationFindingIds).toEqual(["finding-1", "finding-2"]);
+    const call = db.calls.find((entry) => entry.table === "channel_recommendation_citations")!;
+    expect(call.filters).toContainEqual(["organization_id", organizationId]);
+  });
+
   it("carries a stored channel snooze with its horizon instead of failing the read", async () => {
     const db = workspacePersistence({
       channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],

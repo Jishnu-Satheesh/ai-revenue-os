@@ -61,6 +61,8 @@ function recommendationCard(): RecommendationCard {
     channelId: CHANNEL,
     branchId: null,
     myFeedback: null,
+    supportedActions: [],
+    limitations: [],
   };
 }
 
@@ -104,6 +106,27 @@ describe("workspace sections", () => {
     expect(screen.getByText("Operator recommendations")).toBeTruthy();
     expect(screen.getByText(/Shift budget/)).toBeTruthy();
     expect(screen.getByText(/Extend Friday hours/)).toBeTruthy();
+    // The full tab renders the same prototype card as the preview.
+    expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
+  });
+
+  it("matches the prototype preview: recommendations only, no opportunities lane", () => {
+    render(
+      <PriorityActions
+        opportunities={[opportunityCard()]}
+        recommendations={[recommendationCard()]}
+        {...shared}
+        hideHeading
+      />,
+    );
+    expect(screen.queryByText("Platform opportunities")).toBeNull();
+    expect(screen.queryByText(/No open platform opportunities/)).toBeNull();
+    expect(screen.queryByText(/Shift budget/)).toBeNull();
+    expect(screen.getByText(/Extend Friday hours/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
+    cleanup();
+    render(<PriorityActions opportunities={[]} recommendations={[]} {...shared} hideHeading />);
+    expect(screen.getByText(/reviewed all current recommendations/)).toBeTruthy();
   });
 
   it("names empty lanes instead of leaving blank gaps", () => {

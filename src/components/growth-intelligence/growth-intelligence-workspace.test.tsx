@@ -186,6 +186,7 @@ describe("GrowthIntelligenceWorkspace", () => {
     expect(screen.getByRole("link", { name: /More/ }).getAttribute("href")).toBe(
       "#recommendations",
     );
+    expect(screen.getByText(/Useful next steps, with the evidence behind each one/)).toBeTruthy();
   });
 
   it("names an unmatched range instead of showing another range", () => {

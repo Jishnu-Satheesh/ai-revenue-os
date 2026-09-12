@@ -139,6 +139,25 @@ describe("buildGrowthIntelligenceView", () => {
     expect(view.priorityActions.opportunities[0]!.actionKey).toBe("campaign.meta_bundle_v1");
   });
 
+  it("carries stored actions, limitations, and citations to the recommendation card", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            supportedActions: ["Check the cancellation reasons before changing availability."],
+            limitations: ["Twenty of fifty-nine days carried evidence."],
+            citationFindingIds: ["finding-1", "finding-2"],
+          }),
+        ],
+      }),
+    );
+    expect(view.priorityActions.recommendations[0]).toMatchObject({
+      supportedActions: ["Check the cancellation reasons before changing availability."],
+      limitations: ["Twenty of fifty-nine days carried evidence."],
+      citationFindingIds: ["finding-1", "finding-2"],
+    });
+  });
+
   it("carries the draft request state and links the created draft", () => {
     const view = buildGrowthIntelligenceView(
       input({

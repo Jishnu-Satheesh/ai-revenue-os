@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Clock, ThumbsDown, ThumbsUp, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,12 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type {
@@ -99,12 +93,13 @@ export function IntelligenceActions({
   const mayDecide = canManage && card.decision === null;
   return (
     <div className="flex w-full flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 border-t border-emerald-100 pt-3">
         {mayDecide ? (
           <>
             <Button
               size="sm"
               variant="outline"
+              className="min-h-[38px] bg-white max-sm:min-h-[42px]"
               disabled={pending}
               onClick={() => post("decisions", decisionBody("acknowledged"))}
             >
@@ -113,26 +108,24 @@ export function IntelligenceActions({
             <Button
               size="sm"
               variant="outline"
+              className="min-h-[38px] bg-white max-sm:min-h-[42px]"
               disabled={pending}
               onClick={() => post("decisions", decisionBody("planned"))}
             >
               Planned
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={pending}
-              onClick={() => setSnoozeOpen(true)}
-            >
-              Snooze
-            </Button>
           </>
         ) : null}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
           <Button
-            size="icon-sm"
-            variant={card.myFeedback === true ? "secondary" : "ghost"}
-            aria-label="Helpful"
+            size="icon"
+            variant={card.myFeedback === true ? "default" : "outline"}
+            className={
+              card.myFeedback === true
+                ? "min-h-[38px] min-w-[38px] max-sm:min-h-[42px] max-sm:min-w-[42px]"
+                : "min-h-[38px] min-w-[38px] bg-white max-sm:min-h-[42px] max-sm:min-w-[42px]"
+            }
+            aria-label={`Helpful: ${card.title}`}
             aria-pressed={card.myFeedback === true}
             disabled={pending}
             onClick={() => post("feedback", { helpful: true })}
@@ -140,9 +133,14 @@ export function IntelligenceActions({
             <ThumbsUp aria-hidden="true" />
           </Button>
           <Button
-            size="icon-sm"
-            variant={card.myFeedback === false ? "secondary" : "ghost"}
-            aria-label="Not helpful"
+            size="icon"
+            variant={card.myFeedback === false ? "default" : "outline"}
+            className={
+              card.myFeedback === false
+                ? "min-h-[38px] min-w-[38px] max-sm:min-h-[42px] max-sm:min-w-[42px]"
+                : "min-h-[38px] min-w-[38px] bg-white max-sm:min-h-[42px] max-sm:min-w-[42px]"
+            }
+            aria-label={`Not helpful: ${card.title}`}
             aria-pressed={card.myFeedback === false}
             disabled={pending}
             onClick={() => post("feedback", { helpful: false })}
@@ -150,16 +148,28 @@ export function IntelligenceActions({
             <ThumbsDown aria-hidden="true" />
           </Button>
           {mayDecide ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="icon-sm" variant="ghost" aria-label="More actions">
-                  <MoreHorizontal aria-hidden="true" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setDismissOpen(true)}>Dismiss</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="min-h-[38px] border-transparent bg-transparent max-sm:min-h-[42px]"
+                disabled={pending}
+                onClick={() => setSnoozeOpen(true)}
+              >
+                <Clock aria-hidden="true" />
+                Snooze
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="min-h-[38px] min-w-[38px] border-transparent bg-transparent px-2 max-sm:min-h-[42px] max-sm:min-w-[42px]"
+                aria-label={`Dismiss: ${card.title}`}
+                disabled={pending}
+                onClick={() => setDismissOpen(true)}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </>
           ) : null}
         </div>
       </div>

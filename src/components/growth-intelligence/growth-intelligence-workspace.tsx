@@ -2,7 +2,7 @@
 
 import { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Clock3, RefreshCw, Settings2, Sparkles } from "lucide-react";
+import { ArrowRight, Clock3, RefreshCw, Settings2 } from "lucide-react";
 
 import { formatWindow } from "@/components/analysis/format";
 import { WindowRangePicker } from "@/components/analysis/window-range-picker";
@@ -425,6 +425,12 @@ export function GrowthIntelligenceWorkspace({
 
   const acted = view.timeline.filter((event) => event.type !== "generated");
   const topRecommendations = view.priorityActions.recommendations.slice(0, 3);
+  const channelNames = new Map(
+    (performanceFilters?.channels ?? []).map((channel) => [channel.id, channel.displayName]),
+  );
+  const branchNames = new Map(
+    (performanceFilters?.branches ?? []).map((branch) => [branch.id, branch.name]),
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -521,17 +527,14 @@ export function GrowthIntelligenceWorkspace({
           </section>
 
           <section aria-label="Top Recommendations" className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="mb-1 flex items-end justify-between gap-3">
               <div>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="size-5 text-primary" aria-hidden="true" />
-                  <h2 className="text-xl font-semibold">Top Recommendations</h2>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  The clearest actions waiting for your decision.
+                <h2 className="text-lg font-bold tracking-tight">Top Recommendations</h2>
+                <p className="mt-1 text-[13px] text-muted-foreground">
+                  Useful next steps, with the evidence behind each one.
                 </p>
               </div>
-              <Button variant="ghost" size="sm" asChild>
+              <Button variant="link" size="sm" asChild className="font-bold text-primary">
                 <a href="#recommendations" onClick={() => setTab("recommendations")}>
                   More <ArrowRight aria-hidden="true" />
                 </a>
@@ -543,6 +546,8 @@ export function GrowthIntelligenceWorkspace({
               organizationId={organizationId}
               timeZone={view.timeZone}
               canManage={canManage}
+              channelNames={channelNames}
+              branchNames={branchNames}
               hideHeading
             />
           </section>
@@ -564,6 +569,8 @@ export function GrowthIntelligenceWorkspace({
             organizationId={organizationId}
             timeZone={view.timeZone}
             canManage={canManage}
+            channelNames={channelNames}
+            branchNames={branchNames}
           />
         </TabsContent>
 

@@ -33,8 +33,17 @@ export type ChannelRecommendationDecision = "acknowledged" | "dismissed" | "plan
  * Channel narration rows arrive through the analysis module's own
  * organization projection; this module never re-derives label grouping,
  * carry-over ageing, or actionability.
+ *
+ * `supportedActions` and `limitations` travel from the stored narration so
+ * the workspace can show what to do next and what the evidence does not
+ * cover. They stay optional so older callers keep compiling; missing means
+ * the row carried none, never a hidden gap.
  */
-export type ChannelRecommendationRow = OrganizationRecommendationRecord;
+export type ChannelRecommendationRow = OrganizationRecommendationRecord & {
+  supportedActions?: readonly string[];
+  limitations?: readonly string[];
+  citationFindingIds?: readonly string[];
+};
 
 export type SynthesizedItemDecision =
   | "acknowledged"
@@ -135,6 +144,18 @@ export type RecommendationCard = CardBase & {
   channelId: string | null;
   branchId: string | null;
   myFeedback: boolean | null;
+  /**
+   * What the stored narration said to do next. Empty means the headline
+   * already says the action; the card never invents steps.
+   */
+  supportedActions: readonly string[];
+  /**
+   * What the stored narration said the evidence does not cover. Empty means
+   * no stored caveat; the card hides the line rather than inventing one.
+   */
+  limitations: readonly string[];
+  /** Stored finding ids the narration cited, when the source carried them. */
+  citationFindingIds?: readonly string[];
   /**
    * Market-research provenance for items produced by a research pipeline.
    * The builders always set this (null when there is no pipeline lineage);
@@ -378,11 +399,21 @@ function toRecommendationCardFromChannel(
   row: OrganizationRecommendationLaneRecord,
 ): RecommendationCard {
   if (row.label !== "recommendation") throw new Error("Recommendation misrouted.");
+  const stored = row as Partial<ChannelRecommendationRow>;
   return {
     ...channelBase(row),
     channelId: row.channelId,
     branchId: row.branchId,
     myFeedback: row.myFeedback ?? null,
+    supportedActions: Array.isArray(stored.supportedActions)
+      ? stored.supportedActions.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    limitations: Array.isArray(stored.limitations)
+      ? stored.limitations.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    citationFindingIds: Array.isArray(stored.citationFindingIds)
+      ? stored.citationFindingIds.filter((entry): entry is string => typeof entry === "string")
+      : [],
     researchProvenance: null,
   };
 }
@@ -443,6 +474,9 @@ function toRecommendationCardFromItem(
     channelId: null,
     branchId: null,
     myFeedback: row.myFeedback,
+    supportedActions: [],
+    limitations: [],
+    citationFindingIds: [],
     researchProvenance: provenance[row.synthesisRunId] ?? null,
   };
 }
