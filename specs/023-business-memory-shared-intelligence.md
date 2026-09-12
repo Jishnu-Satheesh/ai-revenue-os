@@ -12,12 +12,18 @@ work does not build on an assumed foundation:
   the actual selected entry contents, their source references and usage are saved, source-owned facts
   stay authoritative, and a retry cannot silently swap the pack. A provenance badge, manifest id or
   digest alone proves nothing, and a digest-only fixture must fail this acceptance.
-- Three Business Memory migrations exist in source and were **not** observed in the inspected staging
-  migration history: `20260912120000_business_memory_growth_capture`,
-  `20260912130000_business_memory_campaign_capture` and
-  `20260912140000_business_memory_campaign_context_usage`. Because `pnpm db:migrations:push` is
-  all-or-nothing, any Campaign migration pushed during the Spec 025 implementation run would carry
-  them. **No migration is pushed during that run without a separate explicit user decision.**
+- **Corrected 2026-09-13: FIVE `20260912*` migrations exist in source and were not observed in the
+  inspected staging migration history**, not three as first recorded —
+  `20260912030945_business_memory_channel_contexts`,
+  `20260912090000_growth_intelligence_item_contexts`,
+  `20260912120000_business_memory_growth_capture`, `20260912130000_business_memory_campaign_capture`
+  and `20260912140000_business_memory_campaign_context_usage`. The application state of the
+  `20260911*` set is **also unverified**: the 12 September audit reported only that `20260909124757`
+  is present and that the local `20260912*` Memory migrations are absent; it never reported the
+  `20260911*` set as applied. Because `pnpm db:migrations:push` is all-or-nothing, any Campaign
+  migration pushed during the Spec 025 implementation run would carry all of them. **No migration is
+  pushed during that run without a separate explicit user decision**, and the true pending set must be
+  established with `pnpm db:migrations:list` before that decision is taken.
 - Campaign lifecycle, outcome and lesson capture are implemented as SQL triggers and projection
   functions inside those unapplied migrations, so their source presence must not be read as staging
   presence. Delivery status is tracked in four separate fields — source, staging-applied,

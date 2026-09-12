@@ -6686,8 +6686,14 @@ through the real routes, not only in tests.
   suites, and narrow `database.types.ts` entries.
 - **Standing constraints recorded for whoever picks this up.**
   - **No migration is pushed to hosted staging during this run without a separate explicit user
-    decision.** `pnpm db:migrations:push` is all-or-nothing and three Business Memory migrations
-    (`20260912120000`, `20260912130000`, `20260912140000`) are already pending in source.
+    decision.** `pnpm db:migrations:push` is all-or-nothing. **Corrected 2026-09-13: FIVE `20260912*`
+    migrations are pending in source, not three** — `20260912030945_business_memory_channel_contexts`,
+    `20260912090000_growth_intelligence_item_contexts`,
+    `20260912120000_business_memory_growth_capture`,
+    `20260912130000_business_memory_campaign_capture` and
+    `20260912140000_business_memory_campaign_context_usage`. The `20260911*` set's application state
+    is also unverified. Establish the true pending set with `pnpm db:migrations:list` before that
+    decision.
   - The Meta contract's `expiresAt = 2026-09-10` must **not** be extended. Tasks 12/13/14 are written
     as code but their controlled-account canaries stay blocked — no Meta account, no current official
     contract evidence.

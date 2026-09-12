@@ -1,6 +1,6 @@
 # Campaign experience implementation plan — review draft
 
-- **Status:** proposed implementation sequence; no feature code, migration application or provider activation is authorized. Product confirmations, including D06 automatic/scheduled/manual research and D07 supported proposals with evidence gaps, are in the design. This is a handoff for one coding agent working sequentially, using `executing-plans` after authorization.
+- **Status — updated 2026-09-13.** The user gave explicit full approval to implement this plan on 2026-09-12: *"Let's rework on the Campaign module end to end as planned and drafted. I'm giving you the full approval for the implementation."* Feature code for Tasks 1–17 is therefore authorized, subject to each task's own review checkpoint. **Two activation gates remain CLOSED and are not covered by that approval: (1) applying any migration to hosted staging, which needs a separate explicit user decision because `pnpm db:migrations:push` is all-or-nothing over at least five pending `20260912*` migrations; and (2) provider activation — no organic or paid dispatch, no live canary, no extension of the Meta contract's `expiresAt = 2026-09-10`.** Approval to implement is not approval to push migrations or to publish. The superseded original status line read: *"proposed implementation sequence; no feature code, migration application or provider activation is authorized."* Product confirmations, including D06 automatic/scheduled/manual research and D07 supported proposals with evidence gaps, are in the design. This is a handoff for one coding agent working sequentially, using `executing-plans`.
 - **Goal:** complete the business-aware campaign proposal → human approval → reviewed creative → governed launch → observation → clinical learning journey, with a coherent redesign of Campaigns, detail, Creative Studio and Asset Library.
 - **Architecture:** retain immutable Campaign bundles, source-owned intelligence, shared Business Memory, private creative history, deterministic Tool Gateway and hosted Postgres authority. Add explicit proposal approval and exact finished-output launch binding; close the disconnected runtime boundaries before enabling external actions.
 - **Stack:** existing Next.js/TypeScript, shadcn/Tailwind, TanStack Query/Form, Supabase/Postgres/RLS/Storage, Trigger.dev and installed AI/provider adapters. No framework replacement, freeform design engine or new memory vendor.
@@ -24,7 +24,7 @@
 
 - Impacted files: `docs/collaboration/asset-library-and-studio-board.md`; this design/contracts/visual/implementation package; relevant status/sections of Specs 005, 010, 016, 019, 020, 022, 023 and ADRs 0015, 0017, 0020, 0021, 0049, 0054.
 - New governing feature spec: select the next free `specs/` number using `000-spec-template.md` and name it Campaign experience and marketing loop. Add a proposed ADR for proposal preparation approval versus exact-output publication approval. Do not mark either accepted until the user approves it.
-- [x] Read current git status, source hashes and staging migration history. Record which existing CP1 Creative History and Spec 023 tasks are implemented, applied and proved, separately.
+- [ ] Read current git status, source hashes and staging migration history. Record which existing CP1 Creative History and Spec 023 tasks are implemented, applied and proved, separately. **Partially done 2026-09-12: git status, source hashes, CP1 and Spec 023 task-by-task records are complete (reconciliation §1, §4, §5). The staging half is BLOCKED — the Supabase MCP server returned CONNECT_TIMEOUT and `pnpm db:migrations:list` was not run, so no migration's applied state was verified. See reconciliation §2.**
 - [x] Carry all confirmed conversation decisions, including D06 and D07, into the formal spec/ADR. Do not re-ask them. Reconcile first/second approval semantics and Campaign proposal admission with current source and SQL invariants; generic execution qualification remains unchanged.
 - [x] Explicitly supersede unseen-variant publication for the new path; preserve legacy readable history without auto-converting old approvals.
 - [x] Reconcile immutable proposal → bundle linkage and V2/V3 compatibility. Reject any plan that deletes past data or broadens generic Decision Engine admission as a shortcut.
@@ -42,9 +42,19 @@ Remaining Task 0 box: the `.superdesign` prototype, deferred to **Task 0b** imme
 first production UI task.
 
 **Standing constraint for Tasks 1–17:** no migration is pushed to hosted staging during this run
-without a separate explicit user decision — `pnpm db:migrations:push` is all-or-nothing and three
-Business Memory migrations (`20260912120000`, `20260912130000`, `20260912140000`) are already
-pending. Schema tasks may therefore reach **source** status only until that decision is taken.
+without a separate explicit user decision — `pnpm db:migrations:push` is all-or-nothing.
+
+**Corrected 2026-09-13: there are FIVE pending `20260912*` migrations, not three.** They are
+`20260912030945_business_memory_channel_contexts`,
+`20260912090000_growth_intelligence_item_contexts`, `20260912120000_business_memory_growth_capture`,
+`20260912130000_business_memory_campaign_capture` and
+`20260912140000_business_memory_campaign_context_usage`. The earlier count of three was wrong. The
+application state of the `20260911*` Business Memory set is **also unverified** — the 12 September
+audit reported only that `20260909124757` is present and that the local `20260912*` Memory migrations
+are absent; it never reported the `20260911*` set as applied. The blast radius of the user's eventual
+migration decision is therefore at least five migrations and possibly more, and only a
+`pnpm db:migrations:list` against staging can settle it. Schema tasks may reach **source** status only
+until that decision is taken.
 
 ## Task 1 — Make generation readiness and failure recovery truthful
 
@@ -63,6 +73,7 @@ pending. Schema tasks may therefore reach **source** status only until that deci
 
 - Impacted files: existing `src/domain/campaigns/creative-history.ts` and selector; new `src/modules/campaigns/application/creative-history-service.ts`, `infrastructure/creative-history-repository.ts`, `application/creative-history-route-handlers.ts`, `infrastructure/creative-history-route-wiring.ts`; planned `/api/organizations/[organizationId]/assets/creative-history` routes from approved CP1 plan.
 - Read `2026-09-09-creative-history-asset-library-correction.md` Tasks 3–6 and staging core migration first; avoid recreating `creative_items`/folders/version/review tables.
+- **Scope note added 2026-09-13.** CP1 Tasks 1–3 are delivered; **CP1 Tasks 4–9 were never started.** What exists is four domain files, `20260909124757_creative_history_core.sql` and `creative_history_core_test.sql`. This task therefore builds the entire application layer, repository and every route from nothing — it does not "complete missing files" beside working ones. The selection-receipt migration (CP1 Task 6) also does not exist. Size and sequence accordingly. Evidence: `docs/verification/campaigns/2026-09-12-implementation-reconciliation.md` §4 and §10.
 - Tests: service/repository/route tests beside those files; `supabase/tests/database/creative_history_core_test.sql` and new targeted intake/review/receipt pgTAP suites. Contracts: C06.
 - [ ] Prove create folder, prevent descendant cycles, reserve version, upload/finalize, latest review, archived exclusion, confirmed metadata and rights constraints through actual service contracts.
 - [ ] Complete missing forward RPC/storage/receipt bindings, with separate caller permissions for manage and review. Validate source render → history linkage and same-tenant composite references.
@@ -75,6 +86,7 @@ pending. Schema tasks may therefore reach **source** status only until that deci
 
 - Impacted files: `src/components/assets/asset-workspace.tsx`, `asset-upload.tsx`, `asset-library-grid.tsx`, `asset-review-form.tsx`, `subject-list.tsx`, assets page; new `creative-history-grid.tsx`, `creative-history-inspector.tsx`, `creative-folder-tree.tsx`, `asset-query-options.ts` and tests.
 - Contracts: C06/C09 and visual contract section 7. Existing brand-asset API remains for Products & Subjects/Brand Kit; finished history uses Task 2 API.
+- **Scope note added 2026-09-13.** CP1 Task 5 was never started, so this task builds the three-purpose Asset Library surface from the current References / Campaign output / Dishes tabs, against an API that does not exist until Task 2 lands. `AssetUpload` exists but is mounted nowhere, and `assets/page.tsx:83` sets every `previewUrl` to `null` — both the upload journey and real previews are new work, not repairs. Evidence: reconciliation §4 and §10.
 - [ ] Build the three purpose tabs with shareable filters, actual image previews and selected exact-version inspector. Use server permissions and stable organization query keys.
 - [ ] Mount Upload assets in the page header and appropriate empty states. Support file picker/drop, per-file purpose/rights/metadata, duplicate filenames, progress, cancel and retry only failed members.
 - [ ] Validate upload bytes transferred versus final usable result. Test 200+refused, lost response, retry, expired upload URL and processing failure without false success toast.

@@ -28,7 +28,11 @@ these statements are superseded:
 - Section "Creative variants": *"Variant caps are enforced by database constraint."* — Unchanged and
   still enforced. Their meaning is now a **preparation budget**, not a publication authority.
 
-Legacy variant approvals are **not** auto-converted and are not given new meaning retroactively.
+Legacy variant approvals are **not** auto-converted and are not given new meaning retroactively. They
+are also **not standing publication authority**: once ADR 0057 is accepted, no output may be published
+without a Gate 2 review of its exact finished version and content hash, regardless of the rules under
+which its approval was recorded. A legacy envelope keeps its meaning as a record of what was decided;
+it does not keep authority to dispatch an unreviewed output through any compatibility path.
 
 ## Business outcome
 

@@ -90,12 +90,24 @@ pitch nobody saw.
 
 ### Legacy
 
+- **The publication rule is universal and has no legacy exemption.** Once this ADR is accepted, no
+  output may be published without a Gate 2 review of its exact finished version and content hash,
+  **regardless of the rules under which its approval was recorded**. A legacy record is preserved for
+  reading and for historical identity, never as standing publication authority. Any legacy record
+  reaching dispatch must pass Gate 2 or fail closed.
 - **Existing approvals are not converted.** Campaigns, bundle versions, creative variants and
   approvals created under ADR 0020's envelope rules remain readable exactly as recorded, under the
   rules that were in force when they were made. Nothing is rewritten, migrated in place, or given new
-  meaning retroactively.
-- Legacy launch eligibility is explicit rather than implied. Where a legacy record could still reach
-  dispatch, it does so under a named compatibility path or it fails closed.
+  meaning retroactively. What a legacy approval keeps is its meaning **as a record of what was
+  decided**; what it does not keep is authority to launch content no human has reviewed under this
+  ADR.
+- Legacy launch eligibility is explicit rather than implied. A named compatibility path may exist so
+  that a legacy record can still be read, resolved and reconciled — **it is not a route around
+  Gate 2**. A legacy envelope, generation policy, variant cap or creative family authorizes no
+  dispatch of an unreviewed output through any compatibility path, adapter or migration.
+- An object **already running at a provider** when this ADR is accepted keeps its own approved
+  historical identity and its containment, reconciliation and measurement paths. That is continuity of
+  an existing object, not authority to publish a new one.
 - ADR 0020's note that "there is no `schemaVersion: 1` reader" and that pre-production bundles were
   repaired forward is a record of one past act while no execution history existed. It is **not a
   precedent**. No plan under this ADR deletes past data, and any future manifest version ships with a

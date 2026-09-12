@@ -39,9 +39,17 @@ live-verified field.
 ### Standing constraint on migrations during this run
 
 - No migration will be applied to hosted staging during this implementation run without a separate,
-  explicit user decision. `pnpm db:migrations:push` is all-or-nothing, and three Business Memory
-  migrations (`20260912120000`, `20260912130000`, `20260912140000`) are already pending in source.
-  Pushing a new Campaign migration would carry them along.
+  explicit user decision. `pnpm db:migrations:push` is all-or-nothing, and pushing a new Campaign
+  migration would carry every pending migration with it.
+- **Corrected 2026-09-13: there are FIVE pending `20260912*` migrations, not three** —
+  `20260912030945_business_memory_channel_contexts`,
+  `20260912090000_growth_intelligence_item_contexts`,
+  `20260912120000_business_memory_growth_capture`, `20260912130000_business_memory_campaign_capture`
+  and `20260912140000_business_memory_campaign_context_usage`. The earlier count of three understated
+  the blast radius. The application state of the `20260911*` Business Memory set is **also
+  unverified**: the 12 September audit reported only that `20260909124757` is present and that the
+  local `20260912*` Memory migrations are absent, and never reported the `20260911*` set as applied.
+  Only a `pnpm db:migrations:list` against staging can settle the true pending set.
 - Therefore every task that adds schema may reach **source** status only, until that decision is
   taken. Nothing in this specification authorizes a push.
 
@@ -216,6 +224,12 @@ into an existing SQL enum.
   destination, schedule, budget or placement — invalidates the affected launch authority. Already
   running provider objects retain their own approved historical identity and are not deleted to hide
   a version difference.
+- **Gate 2 has no legacy exemption.** Once ADR 0057 is accepted, no output may be published without a
+  Gate 2 review of its exact finished version and content hash, regardless of the rules under which
+  its approval was recorded. Legacy V2 records, envelopes, generation policies, variant caps and
+  creative families are preserved for reading and historical identity, never as standing publication
+  authority. A legacy record reaching dispatch passes Gate 2 or fails closed, and no compatibility
+  path, adapter or migration may be used to route around it.
 - Reference-library approval and publication approval are different decisions in both directions. A
   brand-approved design may perform badly; a profitable ad may be unsuitable as a brand reference.
 
@@ -336,9 +350,13 @@ immutable-history guards and bounded indexes. All changes are additive and forwa
   offer and claim source assertions and measurement prerequisites.
 - **Bundle manifest V3 (authorized 2026-09-12).** Introducing campaign bundle manifest **version 3** is
   authorized for the deliverable-identity work, **conditional on a V2 backward reader shipping with
-  it**. Existing V2 records stay readable, unmodified, and explicitly eligible under legacy launch
-  rules. The historical "there is no V1 reader, repair forward" instruction in ADR 0020 is a record
-  of a past pre-production act and must never be repeated as a "delete past data" step.
+  it**. Existing V2 records stay readable, unmodified, and resolvable — a V2 record can be read,
+  reconciled and displayed without being rewritten. **Readability is not launch authority.** No V2
+  record, legacy envelope, generation policy, variant cap or creative family authorizes the dispatch
+  of an output that has not itself passed Gate 2 review of its exact finished version and content
+  hash. A legacy record reaching dispatch passes Gate 2 or fails closed. The historical "there is no
+  V1 reader, repair forward" instruction in ADR 0020 is a record of a past pre-production act and must
+  never be repeated as a "delete past data" step.
 - **Pause policy (C07).** Versioned organization and campaign pause policy storing permitted
   deterministic rule ids and versions, exposure floor, applicable metric reporting delay, window,
   numeric thresholds and ceilings, currency, approver and effective period. Every numeric value is
@@ -500,6 +518,9 @@ Each of these is a named, persisted, explained state — never a silent gap or a
 - Portfolio, detail, Studio and Library remain usable under no-data, partial failure, stale data,
   expired approval, mobile, keyboard, viewer and cross-tenant denial scenarios.
 - V2 bundle records remain readable and unmodified after V3 is introduced.
+- A legacy V2 record with a pre-ADR-0057 envelope approval, driven at dispatch, **fails closed** unless
+  its exact finished output has passed Gate 2 review. This is tested with a legacy fixture, not
+  assumed from the absence of legacy data in one inspected organization.
 - Every claim of completion states which of the four status fields it satisfies.
 
 ## Test plan
@@ -543,8 +564,13 @@ Each of these is a named, persisted, explained state — never a silent gap or a
 - Rollback stops new admissions and new execution while leaving all history readable. Disabling a
   feature does not stop ads already running at a provider; the containment path stays operational in
   every rollback. There is no rollback to a local-only "paused" assertion.
-- Legacy creative-family approvals are never auto-converted. They remain readable under their own
-  historical rules, and no legacy approval silently acquires new meaning.
+- Legacy creative-family approvals are never auto-converted. They remain readable as the record of
+  what was decided under the rules in force at the time, and no legacy approval silently acquires new
+  meaning. **A legacy approval is not standing publication authority**: once ADR 0057 is accepted, any
+  output reaching dispatch — legacy or new — passes Gate 2 review of its exact finished version and
+  content hash, or fails closed. An object already running at a provider keeps its historical identity
+  and its containment, reconciliation and measurement paths; that is continuity of an existing object,
+  not authority to publish a new one.
 
 ## Activation gates
 

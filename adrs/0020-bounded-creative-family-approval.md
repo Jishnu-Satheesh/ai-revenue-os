@@ -7,10 +7,17 @@ Accepted. This extends ADR 0017's approval contract. It does not weaken it.
 **Amended 2026-09-12 — superseded in part by
 [ADR 0057](0057-campaign-preparation-approval-vs-exact-output-publication.md) (Proposed), which
 carries the user's confirmed decision D05.** The text below is retained unchanged as the historical
-record. It remains authoritative for every campaign, bundle version, creative variant and approval
-created before ADR 0057 is accepted, and for reading that history afterwards. It is **not**
-authoritative for the new Campaign path specified in
+record. It remains authoritative **as the record of how** every campaign, bundle version, creative
+variant and approval created before ADR 0057 is accepted was decided, and for reading that history
+afterwards. It is **not** authoritative for the new Campaign path specified in
 [Spec 025](../specs/025-campaign-experience-and-marketing-loop.md).
+
+**It is not authoritative for any future publication, including publication of legacy content.** Once
+ADR 0057 is accepted, no output may be published without a Gate 2 review of its exact finished version
+and content hash, regardless of the rules under which its approval was recorded. An envelope approved
+under this ADR keeps its meaning as a record of what was decided; it does not keep authority to
+dispatch an output no human has reviewed under ADR 0057. No compatibility path, adapter or migration
+may use this ADR to authorize such a dispatch.
 
 For the new path, these statements are superseded:
 
