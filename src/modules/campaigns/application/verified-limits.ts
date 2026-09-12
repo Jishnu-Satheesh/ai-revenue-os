@@ -43,13 +43,32 @@ export function verifiedChannelLimits(
 
 export type VerifiedChannelLimitsEvidence = {
   /**
-   * `verified` only when the contract parsed, is current, and proves at least
-   * one placement. Anything else is `unverified` with the reason named.
+   * `verified` means **nothing is outstanding**: the contract parsed, is
+   * current, proves at least one placement, and has no blocked or unknown
+   * placement left to explain.
+   *
+   * The invariant is exactly `outcome === "verified"` iff `blockers` is empty,
+   * and it is asserted in the tests. A partially verified contract used to
+   * report `verified` with no blockers at all, which told a caller asking about
+   * one placement that everything was fine because some *other* placement was
+   * proven. "Verified except the one you want" is not verified.
    */
   outcome: "verified" | "unverified";
   limitsByChannel: Partial<Record<CampaignChannel, ChannelContentLimits>>;
   /** Always launch-phase. These block publishing, never drafting. */
   blockers: readonly CampaignReadinessBlocker[];
+};
+
+/**
+ * Placements a caller actually intends to publish to.
+ *
+ * Optional, and the default is "all of them" rather than "none of them": a
+ * caller that does not say what it needs is asking whether the contract is
+ * wholly sound, and gets told about every placement that is not.
+ */
+export type ChannelLimitsQuery = {
+  /** Contract placement keys, e.g. `instagram.feed_image`. */
+  requestedPlacementKeys?: readonly string[];
 };
 
 const META_PROVIDER_KEY = "meta_campaign";
@@ -64,6 +83,7 @@ const META_PROVIDER_KEY = "meta_campaign";
  */
 export function verifiedChannelLimitsEvidence(
   now: Date = new Date(),
+  query: ChannelLimitsQuery = {},
 ): VerifiedChannelLimitsEvidence {
   const limits: Partial<Record<CampaignChannel, ChannelContentLimits>> = {};
 
@@ -110,8 +130,29 @@ export function verifiedChannelLimitsEvidence(
     };
   }
 
+  const blockers: CampaignReadinessBlocker[] = [];
+  const described = new Set<string>();
+
   for (const placement of contract.placements) {
-    if (placement.verificationStatus !== "verified") continue;
+    described.add(placement.key);
+
+    if (placement.verificationStatus !== "verified") {
+      // Named one by one rather than summarised. "This platform is not fully
+      // verified" is not something a person can act on; "your Instagram story
+      // cannot be published yet" is.
+      blockers.push(
+        campaignReadinessBlocker({
+          code: "provider_placement_blocked",
+          phase: "launch",
+          actionKey: placement.key,
+          explanation: `Publishing to ${placement.key.replace(".", " ")} is not proven yet, so nothing may be sent to it.`,
+          repair: { kind: "reverify_provider_contract", providerKey: contract.providerKey },
+          deterministic: true,
+        }),
+      );
+      continue;
+    }
+
     const channel = placement.key.split(".")[0];
     if (channel !== "instagram" && channel !== "facebook") continue;
     limits[channel] = {
@@ -120,25 +161,42 @@ export function verifiedChannelLimitsEvidence(
     };
   }
 
-  if (Object.keys(limits).length === 0) {
-    return {
-      outcome: "unverified",
-      limitsByChannel: limits,
-      blockers: [
-        campaignReadinessBlocker({
-          code: "provider_content_limits_unverified",
-          phase: "launch",
-          actionKey: `${contract.providerKey}.all_placements`,
-          explanation:
-            "We cannot yet prove this platform's caption and hashtag limits, so its posts cannot be checked before publishing.",
-          repair: { kind: "reverify_provider_contract", providerKey: contract.providerKey },
-          deterministic: true,
-        }),
-      ],
-    };
+  // A placement the contract has never heard of is a different failure from one
+  // it describes and refuses, and it has a different cause: somebody asked to
+  // publish somewhere our record does not cover.
+  for (const requested of query.requestedPlacementKeys ?? []) {
+    if (described.has(requested)) continue;
+    blockers.push(
+      campaignReadinessBlocker({
+        code: "provider_placement_unknown",
+        phase: "launch",
+        actionKey: requested,
+        explanation: `Our record of this platform does not cover ${requested.replace(".", " ")}, so we cannot say whether a post there would be accepted.`,
+        repair: { kind: "reverify_provider_contract", providerKey: contract.providerKey },
+        deterministic: true,
+      }),
+    );
   }
 
-  return { outcome: "verified", limitsByChannel: limits, blockers: [] };
+  if (Object.keys(limits).length === 0) {
+    blockers.push(
+      campaignReadinessBlocker({
+        code: "provider_content_limits_unverified",
+        phase: "launch",
+        actionKey: `${contract.providerKey}.all_placements`,
+        explanation:
+          "We cannot yet prove this platform's caption and hashtag limits, so its posts cannot be checked before publishing.",
+        repair: { kind: "reverify_provider_contract", providerKey: contract.providerKey },
+        deterministic: true,
+      }),
+    );
+  }
+
+  return {
+    outcome: blockers.length === 0 ? "verified" : "unverified",
+    limitsByChannel: limits,
+    blockers,
+  };
 }
 
 export type InternalDraftContentContract = {
@@ -177,8 +235,9 @@ export type InternalDraftContentContract = {
  */
 export function internalDraftContentContract(
   now: Date = new Date(),
+  query: ChannelLimitsQuery = {},
 ): InternalDraftContentContract {
-  const evidence = verifiedChannelLimitsEvidence(now);
+  const evidence = verifiedChannelLimitsEvidence(now, query);
   return {
     limitsByChannel: evidence.limitsByChannel,
     deferredLaunchBlockers: evidence.blockers,

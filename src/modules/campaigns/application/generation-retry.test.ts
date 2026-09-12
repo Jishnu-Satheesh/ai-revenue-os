@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { decideGenerationRetry } from "@/modules/campaigns/application/generation-retry";
+import {
+  decideGenerationRetry,
+  providerContractBlockerStillStands,
+} from "@/modules/campaigns/application/generation-retry";
 import type { GenerationRunSnapshot } from "@/modules/campaigns/application/ports";
 
 const SNAPSHOT = "aa000000-0000-4000-8000-000000000001";
@@ -67,6 +70,52 @@ describe("starting generation again", () => {
       outcome: "permitted",
       reason: "no_previous_run",
     });
+  });
+
+  it("allows it once the contract the last attempt died on has been reverified", () => {
+    // The blocker class this whole task is about. Reverifying a provider
+    // contract does not change a campaign's pinned evidence, so keying
+    // "prerequisite changed" on the snapshot alone made this case unreachable:
+    // the campaign would have been refused forever on a problem already fixed.
+    const decision = decideGenerationRetry({
+      latestRun: run(),
+      requestedSourceSnapshotId: SNAPSHOT,
+      blockerStillStands: () => false,
+    });
+
+    expect(decision).toEqual({ outcome: "permitted", reason: "blocker_cleared" });
+  });
+
+  it("still refuses while that contract is genuinely still out of date", () => {
+    expect(
+      decideGenerationRetry({
+        latestRun: run(),
+        requestedSourceSnapshotId: SNAPSHOT,
+        blockerStillStands: () => true,
+      }).outcome,
+    ).toBe("refused");
+  });
+
+  it("asks the question against the real contract by default", () => {
+    // Today's checked-in contract is past its review date, so the blocker
+    // stands and the refusal holds -- proving the default probe is wired and
+    // not a constant. R5: the date is not touched to make this pass.
+    const repair = { kind: "reverify_provider_contract", providerKey: "meta_campaign" } as const;
+
+    expect(providerContractBlockerStillStands(repair, new Date("2026-09-13T00:00:00.000Z"))).toBe(
+      true,
+    );
+    // Inside the review window the same question answers the other way, which
+    // is what makes a reverified contract release the retry.
+    expect(providerContractBlockerStillStands(repair, new Date("2026-08-12T00:00:00.000Z"))).toBe(
+      false,
+    );
+  });
+
+  it("stays conservative about a repair it cannot observe", () => {
+    // Evidence a person may or may not have supplied is not something this can
+    // check, so it does not assume they did.
+    expect(providerContractBlockerStillStands({ kind: "supply_campaign_evidence" })).toBe(true);
   });
 
   it("refuses a cancelled run whose evidence has since disappeared", () => {

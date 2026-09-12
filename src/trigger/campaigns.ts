@@ -255,14 +255,6 @@ export const generateCampaignBundleTask = schemaTask({
     const parsed = parseCampaignGenerationPayload(payload);
     const supabase = createCampaignWorkerServiceClient();
     const runs = createCampaignRunStore(supabase as unknown as CampaignRunPersistence);
-    // One loader per run. The claim token arrives with each read, so nothing
-    // here needs to claim a second time. The shared-memory manifest is pinned
-    // to the claimed run inside the loader; only its digest travels forward
-    // in provenance, never restricted bytes.
-    const context = createGenerationContextLoader(
-      supabase as unknown as GenerationContextPersistence,
-      { organizationId: parsed.organizationId, runId: parsed.runId },
-    );
     // Everything below is built inside `build`, so a fault while assembling it
     // is recorded against the run instead of leaving the row queued forever.
     const result = await withGenerationBootstrapRecovery({
@@ -270,6 +262,14 @@ export const generateCampaignBundleTask = schemaTask({
       recorder: runs,
       log: (event, fields) => logger.error(event, fields),
       build: (): GenerateBundleDependencies => {
+        // One loader per run. The claim token arrives with each read, so nothing
+        // here needs to claim a second time. The shared-memory manifest is pinned
+        // to the claimed run inside the loader; only its digest travels forward
+        // in provenance, never restricted bytes.
+        const context = createGenerationContextLoader(
+          supabase as unknown as GenerationContextPersistence,
+          { organizationId: parsed.organizationId, runId: parsed.runId },
+        );
         const router = campaignRouter();
         const generation = createGeminiRepairCall({ router });
         return {
@@ -339,11 +339,6 @@ export const reviseCampaignBundleTask = schemaTask({
     const parsed = parseCampaignRevisionPayload(payload);
     const supabase = createCampaignWorkerServiceClient();
     const runs = createCampaignRunStore(supabase as unknown as CampaignRunPersistence);
-    const context = createGenerationContextLoader(
-      supabase as unknown as GenerationContextPersistence,
-      { organizationId: parsed.organizationId, runId: parsed.runId },
-    );
-
     // The shared-memory manifest is pinned to the claimed run inside the
     // loader (claim token), and only its digest travels in provenance. A
     // material revision publishes a new immutable version; a changed pack is
@@ -353,6 +348,10 @@ export const reviseCampaignBundleTask = schemaTask({
       recorder: runs,
       log: (event, fields) => logger.error(event, fields),
       build: (): ReviseBundleDependencies => {
+        const context = createGenerationContextLoader(
+          supabase as unknown as GenerationContextPersistence,
+          { organizationId: parsed.organizationId, runId: parsed.runId },
+        );
         return {
           runs,
           source: context.revisionSource,
@@ -418,15 +417,15 @@ export const generateCampaignVariantsTask = schemaTask({
     const parsed = parseCampaignVariantPayload(payload);
     const supabase = createCampaignWorkerServiceClient();
     const runs = createCampaignRunStore(supabase as unknown as CampaignRunPersistence);
-    const generationContext = createGenerationContextLoader(
-      supabase as unknown as GenerationContextPersistence,
-      { organizationId: parsed.organizationId, runId: parsed.runId },
-    );
     const result = await withGenerationBootstrapRecovery({
       run: bootstrapRun(parsed, "campaign.generate-variants"),
       recorder: runs,
       log: (event, fields) => logger.error(event, fields),
       build: (): GenerateVariantsDependencies => {
+        const generationContext = createGenerationContextLoader(
+          supabase as unknown as GenerationContextPersistence,
+          { organizationId: parsed.organizationId, runId: parsed.runId },
+        );
         const router = campaignRouter();
         const generation = createGeminiRepairCall({ router });
         return {

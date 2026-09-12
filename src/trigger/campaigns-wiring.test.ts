@@ -9,6 +9,7 @@ import {
   verifiedChannelLimits,
   verifiedChannelLimitsEvidence,
 } from "@/modules/campaigns/application/verified-limits";
+import { createGenerationContextLoader } from "@/modules/campaigns/infrastructure/generation-readers";
 import {
   CampaignGenerationBootstrapError,
   withGenerationBootstrapRecovery,
@@ -50,6 +51,11 @@ function recorder(
   return {
     failBootstrap: vi.fn(async (_input: FailBootstrapInput) => outcome),
   };
+}
+
+/** A worker client that cannot be produced, the way a missing secret behaves. */
+function unavailableWorkerPersistence(): never {
+  throw new Error("the campaign worker service client could not be created");
 }
 
 function runIdentity(taskId = "campaign.generate-bundle") {
@@ -252,7 +258,7 @@ describe("an internal draft is not held to unverifiable publishing limits", () =
     for (const blocker of draft.deferredLaunchBlockers) expect(blocker.phase).toBe("launch");
   });
 
-  it("carries a verified limit through to the draft when the contract proves one", () => {
+  it("carries whatever a current contract proves through to the draft", () => {
     // Before the review date the same reader returns whatever the contract
     // actually proves, so the draft contract is not a permanent empty map.
     const beforeExpiry = new Date("2026-08-12T00:00:00.000Z");
@@ -261,7 +267,67 @@ describe("an internal draft is not held to unverifiable publishing limits", () =
       verifiedChannelLimits(beforeExpiry),
     );
   });
+
+  it("names every blocked placement even while the contract is current", () => {
+    // The failure this covers: a contract inside its review date but with no
+    // usable placement used to answer `verified` with an empty blocker list,
+    // so a caller asking about Instagram was told everything was fine.
+    const evidence = verifiedChannelLimitsEvidence(new Date("2026-08-12T00:00:00.000Z"));
+
+    expect(evidence.outcome).toBe("unverified");
+    const blocked = evidence.blockers.filter(
+      (blocker) => blocker.code === "provider_placement_blocked",
+    );
+    expect(blocked.length).toBeGreaterThan(0);
+    // Named one by one, so the client can say which post cannot be published.
+    expect(blocked.map((blocker) => blocker.actionKey)).toContain("instagram.feed_image");
+    for (const blocker of blocked) expect(blocker.phase).toBe("launch");
+  });
+
+  it("says so when asked about a placement the contract has never heard of", () => {
+    const evidence = verifiedChannelLimitsEvidence(new Date("2026-08-12T00:00:00.000Z"), {
+      requestedPlacementKeys: ["tiktok.feed_video"],
+    });
+
+    const unknown = evidence.blockers.filter(
+      (blocker) => blocker.code === "provider_placement_unknown",
+    );
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]?.actionKey).toBe("tiktok.feed_video");
+    expect(evidence.outcome).toBe("unverified");
+  });
+
+  it("only ever reports verified when it has nothing left to explain", () => {
+    for (const at of ["2026-08-12T00:00:00.000Z", DEPLOYED_RUN_CREATED_AT.toISOString()]) {
+      const evidence = verifiedChannelLimitsEvidence(new Date(at));
+      expect(evidence.outcome === "verified").toBe(evidence.blockers.length === 0);
+    }
+  });
 });
+
+const GENERATION_TASK_IDS = [
+  "campaign.generate-bundle",
+  "campaign.revise-bundle",
+  "campaign.generate-variants",
+] as const;
+
+/**
+ * Everything a generation task does before its recovery begins.
+ *
+ * This slice is the whole risk surface. A construction that happens here has
+ * the defect this task fixed: it can throw with no claim, no lease and nothing
+ * able to record why, leaving the row `queued` forever.
+ */
+function preludeBeforeRecovery(source: string, taskId: string): string {
+  const taskAt = source.indexOf(`id: "${taskId}"`);
+  expect(taskAt).toBeGreaterThan(-1);
+  const runAt = source.indexOf("run: async (payload, { signal }) => {", taskAt);
+  const recoveryAt = source.indexOf("withGenerationBootstrapRecovery({", runAt);
+  expect(runAt).toBeGreaterThan(-1);
+  expect(recoveryAt).toBeGreaterThan(runAt);
+  // Comments are prose about factories, not calls to them.
+  return source.slice(runAt, recoveryAt).replace(/^\s*\/\/.*$/gm, "");
+}
 
 describe("the registered generation tasks use the recovery", () => {
   it("wraps every generation task's dependency construction", async () => {
@@ -272,9 +338,63 @@ describe("the registered generation tasks use the recovery", () => {
     // exception escapes exactly as it did in the deployed run.
     expect(source.match(/build: \(\): \w+Dependencies => \{/g)).toHaveLength(3);
     expect(source.match(/invoke: \(dependencies\) =>/g)).toHaveLength(3);
-    // The model router and provider are the expensive part of the dependency
-    // set and must be inside a build thunk, never hoisted out of it again.
-    expect(source).not.toMatch(/\n {4}const router = campaignRouter\(\);/);
+  });
+
+  it.each(GENERATION_TASK_IDS)(
+    "%s constructs nothing but the client and the run store before the recovery begins",
+    async (taskId) => {
+      const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
+      const prelude = preludeBeforeRecovery(source, taskId);
+
+      // A structural guard, not a substring search: it enumerates every factory
+      // call in the unguarded window and demands the set be exactly the two that
+      // have to be there. Moving any construction back out -- the generation
+      // context loader, the model router, a planner, a reader -- fails this, which
+      // a `toContain` assertion on the build thunk would not.
+      const constructed = new Set(
+        (prelude.match(/\b(?:create[A-Z]\w*|campaignRouter)\(/g) ?? []).map((call) =>
+          call.slice(0, -1),
+        ),
+      );
+
+      expect([...constructed].sort()).toEqual([
+        // Accepted, and it cannot move: the recorder must exist before anything
+        // can be recorded, so a failure to build these two is the one bootstrap
+        // gap that has no durable store to report itself to.
+        "createCampaignRunStore",
+        "createCampaignWorkerServiceClient",
+      ]);
+    },
+  );
+
+  it("records a fault raised while the real generation context loader is constructed", async () => {
+    // Exercises the production factory through the production recovery, rather
+    // than asserting on the text of the file that calls it. The loader is now
+    // built inside the thunk, so an exception evaluating its arguments is a
+    // recorded outcome instead of a run left waiting for a worker forever.
+    const failures = recorder();
+    const invoke = vi.fn(async () => ({ status: "published" as const }));
+
+    const thrown = (await withGenerationBootstrapRecovery({
+      run: runIdentity(),
+      recorder: failures,
+      build: () => ({
+        context: createGenerationContextLoader(unavailableWorkerPersistence(), {
+          organizationId: ORGANIZATION_ID,
+          runId: RUN_ID,
+        }),
+      }),
+      invoke,
+    }).catch((error: unknown) => error)) as CampaignGenerationBootstrapError;
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(thrown).toBeInstanceOf(CampaignGenerationBootstrapError);
+    expect(failures.failBootstrap).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      runId: RUN_ID,
+      taskId: "campaign.generate-bundle",
+      failureCode: "bootstrap:worker_start_failed",
+    });
   });
 
   it("stops retrying a deterministic prerequisite instead of billing for it twice", async () => {

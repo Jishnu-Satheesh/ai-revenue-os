@@ -51,6 +51,10 @@ export const campaignReadinessBlockerCodes = [
   "content_changed",
   "provider_contract_expired",
   "provider_content_limits_unverified",
+  /** The contract describes this placement and says it is not usable. */
+  "provider_placement_blocked",
+  /** The contract does not describe this placement at all. */
+  "provider_placement_unknown",
   "provider_mapping_missing",
   "provider_mapping_ambiguous",
   "provider_scope_revoked",

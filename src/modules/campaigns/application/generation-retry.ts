@@ -1,7 +1,9 @@
 import {
   describeCampaignGenerationFailure,
   type CampaignReadinessBlocker,
+  type CampaignReadinessRepairTarget,
 } from "@/domain/campaigns/readiness";
+import { verifiedChannelLimitsEvidence } from "@/modules/campaigns/application/verified-limits";
 import type { GenerationRunSnapshot } from "@/modules/campaigns/application/ports";
 
 /**
@@ -25,7 +27,12 @@ import type { GenerationRunSnapshot } from "@/modules/campaigns/application/port
 export type GenerationRetryDecision =
   | {
       outcome: "permitted";
-      reason: "no_previous_run" | "previous_run_unfinished" | "prerequisite_changed" | "retryable";
+      reason:
+        | "no_previous_run"
+        | "previous_run_unfinished"
+        | "prerequisite_changed"
+        | "blocker_cleared"
+        | "retryable";
     }
   | {
       outcome: "refused";
@@ -36,10 +43,36 @@ export type GenerationRetryDecision =
       blocker: CampaignReadinessBlocker;
     };
 
+/**
+ * Whether the thing the previous attempt died on is *still* true, asked now.
+ *
+ * The default asks the only repair target the platform can answer for itself:
+ * a provider contract that has since been reverified is no longer expired, and
+ * the blocker is gone. Everything else returns `true` — conservative, because
+ * a repair this function cannot observe is one it must not assume happened.
+ *
+ * This is what makes the second half of the rule reachable. Keying "the
+ * prerequisite changed" on the pinned snapshot alone meant the exact blocker
+ * class this work is about — an expired contract that later becomes valid —
+ * could never permit a new attempt, because reverifying a contract does not
+ * change a campaign's evidence.
+ */
+export function providerContractBlockerStillStands(
+  repair: CampaignReadinessRepairTarget,
+  now: Date = new Date(),
+): boolean {
+  if (repair.kind !== "reverify_provider_contract") return true;
+  return verifiedChannelLimitsEvidence(now).blockers.some(
+    (blocker) => blocker.code === "provider_contract_expired",
+  );
+}
+
 export function decideGenerationRetry(input: {
   latestRun: GenerationRunSnapshot | null;
   /** The snapshot this request would generate from. */
   requestedSourceSnapshotId: string;
+  /** Injected so a test can ask the question against a fixed date. */
+  blockerStillStands?: (repair: CampaignReadinessRepairTarget) => boolean;
 }): GenerationRetryDecision {
   const run = input.latestRun;
   if (!run) return { outcome: "permitted", reason: "no_previous_run" };
@@ -57,6 +90,16 @@ export function decideGenerationRetry(input: {
   // naming a different one is asking a different question, and gets to ask it.
   if (run.sourceSnapshotId !== input.requestedSourceSnapshotId) {
     return { outcome: "permitted", reason: "prerequisite_changed" };
+  }
+
+  // The snapshot is not the only prerequisite that can change. A blocker whose
+  // repair has actually been carried out — the contract reverified, the
+  // platform's rules checked again — is no longer a reason to refuse, and
+  // refusing anyway would strand the campaign permanently on a problem that is
+  // already fixed.
+  const stillStands = input.blockerStillStands ?? providerContractBlockerStillStands;
+  if (!stillStands(described.blocker.repair)) {
+    return { outcome: "permitted", reason: "blocker_cleared" };
   }
 
   return {
