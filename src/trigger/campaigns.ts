@@ -1,4 +1,4 @@
-import { logger, queue, schemaTask, tasks } from "@trigger.dev/sdk";
+import { AbortTaskRunError, logger, queue, schemaTask, tasks } from "@trigger.dev/sdk";
 
 import { createModelRouter } from "@/ai/model-router";
 import { env } from "@/lib/env";
@@ -77,9 +77,18 @@ import {
   SETTLE_OUTCOME_MAX_DURATION_SECONDS,
   REVISE_BUNDLE_MAX_DURATION_SECONDS,
 } from "@/workflows/campaigns/durations";
-import { generateCampaignBundle } from "@/workflows/campaigns/generate-bundle";
-import { generateCampaignVariants } from "@/workflows/campaigns/generate-variants";
-import { reviseCampaignBundle } from "@/workflows/campaigns/revise-bundle";
+import {
+  generateCampaignBundle,
+  type GenerateBundleDependencies,
+} from "@/workflows/campaigns/generate-bundle";
+import {
+  generateCampaignVariants,
+  type GenerateVariantsDependencies,
+} from "@/workflows/campaigns/generate-variants";
+import {
+  reviseCampaignBundle,
+  type ReviseBundleDependencies,
+} from "@/workflows/campaigns/revise-bundle";
 import {
   createCampaignRunStore,
   type CampaignRunPersistence,
@@ -112,7 +121,11 @@ import {
 } from "@/modules/campaigns/infrastructure/variant-planner";
 import { createConsoleCampaignGenerationSink } from "@/ai/campaign-generation-provider";
 import { createCampaignVersionWriter } from "@/modules/campaigns/infrastructure/repository";
-import { verifiedChannelLimits } from "@/modules/campaigns/application/verified-limits";
+import { internalDraftContentContract } from "@/modules/campaigns/application/verified-limits";
+import {
+  CampaignGenerationBootstrapError,
+  withGenerationBootstrapRecovery,
+} from "@/workflows/campaigns/run-bootstrap";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 
 /**
@@ -144,6 +157,69 @@ export const campaignGenerationQueue = queue({
   name: "campaign-generation",
   concurrencyLimit: 1,
 });
+
+/** The identity every bootstrap failure is recorded and logged against. */
+function bootstrapRun(
+  parsed: { organizationId: string; campaignId: string; runId: string; correlationId: string },
+  taskId: string,
+) {
+  return {
+    organizationId: parsed.organizationId,
+    campaignId: parsed.campaignId,
+    runId: parsed.runId,
+    correlationId: parsed.correlationId,
+    taskId,
+  };
+}
+
+/**
+ * The limits an internal draft is drawn under, and the launch blockers it is
+ * already carrying.
+ *
+ * Drafting is not publishing. An out-of-date provider contract stops the second
+ * and has no business stopping the first — but the draft it produces is not
+ * publishable yet either, and that fact is logged here rather than discovered
+ * at dispatch. See contract C01 and audit finding F01.
+ */
+function draftContentLimits(parsed: {
+  organizationId: string;
+  campaignId: string;
+  runId: string;
+  correlationId: string;
+}) {
+  const draft = internalDraftContentContract();
+  if (draft.deferredLaunchBlockers.length > 0) {
+    logger.warn("campaign.draft_carries_launch_blockers", {
+      organizationId: parsed.organizationId,
+      campaignId: parsed.campaignId,
+      runId: parsed.runId,
+      correlationId: parsed.correlationId,
+      blockerCodes: draft.deferredLaunchBlockers.map((blocker) => blocker.code),
+    });
+  }
+  return draft.limitsByChannel;
+}
+
+/**
+ * Stops Trigger retrying a prerequisite that cannot change between attempts.
+ *
+ * The deployed run that prompted this work burned two attempts on an expired
+ * provider contract. The second attempt could not have gone differently from
+ * the first: nothing about a lapsed review date is transient. `AbortTaskRunError`
+ * fails the run immediately, so the record still says FAILED — it just stops
+ * paying for the same answer twice.
+ *
+ * Anything non-deterministic, and anything the workflow itself threw, is
+ * rethrown untouched so the ordinary retry still applies.
+ */
+function refuseUnrepeatableBootstrapFailure(error: unknown): never {
+  if (error instanceof CampaignGenerationBootstrapError && error.deterministic) {
+    throw new AbortTaskRunError(
+      `campaign generation refused before start: ${error.failureCode} (recorded: ${error.recorded.outcome})`,
+    );
+  }
+  throw error;
+}
 
 tasks.onCancel(async ({ task: taskId, payload }) => {
   if (
@@ -187,49 +263,54 @@ export const generateCampaignBundleTask = schemaTask({
       supabase as unknown as GenerationContextPersistence,
       { organizationId: parsed.organizationId, runId: parsed.runId },
     );
-    const router = campaignRouter();
-    const generation = createGeminiRepairCall({ router });
-
-    const result = await generateCampaignBundle(
-      parsed,
-      {
-        runs,
-        snapshots: context.snapshots,
-        candidates: createReferenceCandidateReader(
-          supabase as unknown as GenerationContextPersistence,
-        ),
-        referenceObjects: createSupabaseReferenceObjectReader(supabase),
-        referenceContext: createGenerationReferenceContextWriter(
-          supabase as unknown as GenerationReferenceContextPersistence,
-        ),
-        blueprintPlanner: createBlueprintPlanner({
-          provider: generation.provider,
-          repair: generation,
-        }),
-        planner: createCampaignPlanner(
-          {
+    // Everything below is built inside `build`, so a fault while assembling it
+    // is recorded against the run instead of leaving the row queued forever.
+    const result = await withGenerationBootstrapRecovery({
+      run: bootstrapRun(parsed, "campaign.generate-bundle"),
+      recorder: runs,
+      log: (event, fields) => logger.error(event, fields),
+      build: (): GenerateBundleDependencies => {
+        const router = campaignRouter();
+        const generation = createGeminiRepairCall({ router });
+        return {
+          runs,
+          snapshots: context.snapshots,
+          candidates: createReferenceCandidateReader(
+            supabase as unknown as GenerationContextPersistence,
+          ),
+          referenceObjects: createSupabaseReferenceObjectReader(supabase),
+          referenceContext: createGenerationReferenceContextWriter(
+            supabase as unknown as GenerationReferenceContextPersistence,
+          ),
+          blueprintPlanner: createBlueprintPlanner({
             provider: generation.provider,
-            router,
-            storage: createSupabaseCampaignAssetStorage(supabase),
-            telemetry: createConsoleCampaignGenerationSink(),
+            repair: generation,
+          }),
+          planner: createCampaignPlanner(
+            {
+              provider: generation.provider,
+              router,
+              storage: createSupabaseCampaignAssetStorage(supabase),
+              telemetry: createConsoleCampaignGenerationSink(),
+            },
+            {
+              organizationId: parsed.organizationId,
+              campaignId: parsed.campaignId,
+              correlationId: parsed.correlationId,
+            },
+          ),
+          publisher: {
+            publish: (input) =>
+              createCampaignVersionWriter(supabase as unknown as CampaignPersistence).createVersion(
+                input,
+              ),
           },
-          {
-            organizationId: parsed.organizationId,
-            campaignId: parsed.campaignId,
-            correlationId: parsed.correlationId,
-          },
-        ),
-        publisher: {
-          publish: (input) =>
-            createCampaignVersionWriter(supabase as unknown as CampaignPersistence).createVersion(
-              input,
-            ),
-        },
-        limitsByChannel: verifiedChannelLimits(),
-        isCancelled: () => signal.aborted,
+          limitsByChannel: draftContentLimits(parsed),
+          isCancelled: () => signal.aborted,
+        };
       },
-      signal,
-    );
+      invoke: (dependencies) => generateCampaignBundle(parsed, dependencies, signal),
+    }).catch(refuseUnrepeatableBootstrapFailure);
 
     logger.info("campaign.generation_finished", {
       organizationId: parsed.organizationId,
@@ -267,43 +348,47 @@ export const reviseCampaignBundleTask = schemaTask({
     // loader (claim token), and only its digest travels in provenance. A
     // material revision publishes a new immutable version; a changed pack is
     // a new bounded attempt, never an in-place edit.
-    const result = await reviseCampaignBundle(
-      parsed,
-      {
-        runs,
-        source: context.revisionSource,
-        prompts: context.revisionPrompts,
-        planner: createRevisionPlanner({ provider: createGeminiCampaignGenerationProvider() }),
-        publisher: {
-          publish: (input) =>
-            createCampaignVersionWriter(supabase as unknown as CampaignPersistence).createVersion(
-              input,
-            ),
-        },
-        // Revalidates the pinned manifest before patching. Null when no pack
-        // was pinned: generation still runs on the snapshot alone. An
-        // unavailable pack (flag off) also runs on, never fails.
-        revalidateMemoryContext: async ({ manifestId }) => {
-          if (!manifestId) return "absent";
-          const worker = supabase as unknown as {
-            rpc(
-              name: string,
-              args: Record<string, unknown>,
-            ): Promise<{ data: unknown; error: { code?: string } | null }>;
-          };
-          const { data, error } = await worker.rpc("revalidate_memory_context", {
-            p_organization_id: parsed.organizationId,
-            p_manifest_id: manifestId,
-          });
-          if (error) return "revoked";
-          const status = (data as { status?: unknown } | null)?.status;
-          if (status === "valid" || status === "changed" || status === "revoked") return status;
-          return "absent";
-        },
-        isCancelled: () => signal.aborted,
+    const result = await withGenerationBootstrapRecovery({
+      run: bootstrapRun(parsed, "campaign.revise-bundle"),
+      recorder: runs,
+      log: (event, fields) => logger.error(event, fields),
+      build: (): ReviseBundleDependencies => {
+        return {
+          runs,
+          source: context.revisionSource,
+          prompts: context.revisionPrompts,
+          planner: createRevisionPlanner({ provider: createGeminiCampaignGenerationProvider() }),
+          publisher: {
+            publish: (input) =>
+              createCampaignVersionWriter(supabase as unknown as CampaignPersistence).createVersion(
+                input,
+              ),
+          },
+          // Revalidates the pinned manifest before patching. Null when no pack
+          // was pinned: generation still runs on the snapshot alone. An
+          // unavailable pack (flag off) also runs on, never fails.
+          revalidateMemoryContext: async ({ manifestId }: { manifestId: string | null }) => {
+            if (!manifestId) return "absent" as const;
+            const worker = supabase as unknown as {
+              rpc(
+                name: string,
+                args: Record<string, unknown>,
+              ): Promise<{ data: unknown; error: { code?: string } | null }>;
+            };
+            const { data, error } = await worker.rpc("revalidate_memory_context", {
+              p_organization_id: parsed.organizationId,
+              p_manifest_id: manifestId,
+            });
+            if (error) return "revoked" as const;
+            const status = (data as { status?: unknown } | null)?.status;
+            if (status === "valid" || status === "changed" || status === "revoked") return status;
+            return "absent" as const;
+          },
+          isCancelled: () => signal.aborted,
+        };
       },
-      signal,
-    );
+      invoke: (dependencies) => reviseCampaignBundle(parsed, dependencies, signal),
+    }).catch(refuseUnrepeatableBootstrapFailure);
 
     logger.info("campaign.revision_finished", {
       organizationId: parsed.organizationId,
@@ -337,44 +422,47 @@ export const generateCampaignVariantsTask = schemaTask({
       supabase as unknown as GenerationContextPersistence,
       { organizationId: parsed.organizationId, runId: parsed.runId },
     );
-    const router = campaignRouter();
-    const generation = createGeminiRepairCall({ router });
-
-    const result = await generateCampaignVariants(
-      parsed,
-      {
-        runs,
-        context: createVariantContextLoader(supabase as never),
-        snapshots: generationContext.snapshots,
-        candidates: createReferenceCandidateReader(
-          supabase as unknown as GenerationContextPersistence,
-        ),
-        referenceObjects: createSupabaseReferenceObjectReader(supabase),
-        referenceContext: createGenerationReferenceContextWriter(
-          supabase as unknown as GenerationReferenceContextPersistence,
-        ),
-        blueprintPlanner: createBlueprintPlanner({
-          provider: generation.provider,
-          repair: generation,
-        }),
-        planner: createVariantPlanner(
-          {
+    const result = await withGenerationBootstrapRecovery({
+      run: bootstrapRun(parsed, "campaign.generate-variants"),
+      recorder: runs,
+      log: (event, fields) => logger.error(event, fields),
+      build: (): GenerateVariantsDependencies => {
+        const router = campaignRouter();
+        const generation = createGeminiRepairCall({ router });
+        return {
+          runs,
+          context: createVariantContextLoader(supabase as never),
+          snapshots: generationContext.snapshots,
+          candidates: createReferenceCandidateReader(
+            supabase as unknown as GenerationContextPersistence,
+          ),
+          referenceObjects: createSupabaseReferenceObjectReader(supabase),
+          referenceContext: createGenerationReferenceContextWriter(
+            supabase as unknown as GenerationReferenceContextPersistence,
+          ),
+          blueprintPlanner: createBlueprintPlanner({
             provider: generation.provider,
-            router,
-            storage: createSupabaseCampaignAssetStorage(supabase),
-          },
-          {
-            organizationId: parsed.organizationId,
-            campaignId: parsed.campaignId,
-            correlationId: parsed.correlationId,
-          },
-        ),
-        variants: createCampaignVariantStore(supabase as never),
-        isCancelled: () => signal.aborted,
-        promptVersionId: CAMPAIGN_VARIANT_PROMPT_VERSION,
+            repair: generation,
+          }),
+          planner: createVariantPlanner(
+            {
+              provider: generation.provider,
+              router,
+              storage: createSupabaseCampaignAssetStorage(supabase),
+            },
+            {
+              organizationId: parsed.organizationId,
+              campaignId: parsed.campaignId,
+              correlationId: parsed.correlationId,
+            },
+          ),
+          variants: createCampaignVariantStore(supabase as never),
+          isCancelled: () => signal.aborted,
+          promptVersionId: CAMPAIGN_VARIANT_PROMPT_VERSION,
+        };
       },
-      signal,
-    );
+      invoke: (dependencies) => generateCampaignVariants(parsed, dependencies, signal),
+    }).catch(refuseUnrepeatableBootstrapFailure);
 
     logger.info("campaign.variants_finished", {
       organizationId: parsed.organizationId,

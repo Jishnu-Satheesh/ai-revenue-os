@@ -459,6 +459,34 @@ export const verifiedProviderContractSchema = z
 export type VerifiedProviderContract = z.infer<typeof verifiedProviderContractSchema>;
 export type VerifiedProviderContractInput = z.input<typeof verifiedProviderContractSchema>;
 
+/**
+ * A contract that exists but cannot be relied on right now.
+ *
+ * Typed rather than a bare `Error` because callers have to tell this apart from
+ * every other exception without matching on message text. A worker that dies
+ * on an expired contract must record a deterministic prerequisite failure and
+ * stop retrying; a worker that dies on a network fault must retry. String
+ * matching to decide that is how the wrong one gets chosen after a reword.
+ *
+ * The messages are unchanged: they are the wording the deployed failed run
+ * recorded, and keeping them keeps that evidence searchable.
+ */
+export class ProviderContractVerificationError extends Error {
+  readonly providerKey: string;
+  readonly reason: "expired" | "verified_in_future";
+
+  constructor(providerKey: string, reason: "expired" | "verified_in_future") {
+    super(
+      reason === "expired"
+        ? `Provider contract verification is expired: ${providerKey}`
+        : `Provider contract verification is in the future: ${providerKey}`,
+    );
+    this.name = "ProviderContractVerificationError";
+    this.providerKey = providerKey;
+    this.reason = reason;
+  }
+}
+
 export function parseVerifiedProviderContract(
   input: unknown,
   now: Date = new Date(),
@@ -466,11 +494,11 @@ export function parseVerifiedProviderContract(
   const contract = verifiedProviderContractSchema.parse(input);
 
   if (new Date(contract.verifiedAt) > now) {
-    throw new Error(`Provider contract verification is in the future: ${contract.providerKey}`);
+    throw new ProviderContractVerificationError(contract.providerKey, "verified_in_future");
   }
 
   if (new Date(contract.expiresAt) <= now) {
-    throw new Error(`Provider contract verification is expired: ${contract.providerKey}`);
+    throw new ProviderContractVerificationError(contract.providerKey, "expired");
   }
 
   return contract;
