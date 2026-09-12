@@ -9,6 +9,7 @@ import {
   memorySnapshotQueryOptions,
   type MemorySearchInput,
 } from "@/components/memory/query-options";
+import { IntegrationHealthPanel } from "@/components/memory/integration-health";
 import { LessonsTab } from "@/components/memory/lessons-tab";
 import { NoteDialog } from "@/components/memory/note-dialog";
 import { ReviewTab } from "@/components/memory/review-tab";
@@ -128,6 +129,14 @@ export function MemoryWorkspaceClient({
         <SnapshotFact label="Your ceiling" value={sensitivityLabels[snapshot.ceiling]} />
         <SnapshotFact label="Retrieval" value={retrievalHealth} />
       </Card>
+
+      {/*
+        Connection health reads real queue/manifest counts through the health
+        endpoint when the owning slice has landed; until then it reports
+        "not available yet" rather than zero. Snapshot counts above stay the
+        source of truth for what this workspace actually holds.
+      */}
+      <IntegrationHealthPanel organizationId={organizationId} role={role} />
 
       {canWrite ? (
         <div className="flex justify-end">

@@ -1,0 +1,67 @@
+Generation mode: built-in image_gen. New image, no reference inputs.
+
+Use case: ui-mockup.
+Create a polished high-fidelity full-page DESKTOP website design mockup as one PNG. This is the original RIO public landing page, titled "The growth briefing", for business owners seeking profitable growth. Follow the supplied design precisely, with premium editorial craft and coherent business information. This is a flat website screenshot, not a photo, device mockup, design presentation board, or annotated wireframe.
+
+CANVAS: tall full-page desktop screenshot, ideally 1280 pixels wide by 3840 pixels tall, roughly 1:3 aspect ratio. Show the entire page from navbar through footer, all eight sections, with nothing clipped. The viewport is DESKTOP: retain wide two-column layouts and generous horizontal margins throughout; do not convert it to a mobile page because the image is tall. Render sharp, legible text. Page content is approximately 1052px wide centered within 1280px. No browser chrome, external labels or extra panels. Walkthrough dialog is CLOSED in this default page image.
+
+DESIGN SYSTEM: Entire page warm graphite #101110. Off-white foreground #F3F2EE. Cards #181A19. Muted body #ADB2AC. Thin borders #343A35. Recessed surfaces #222523. Pale indigo #B2B8FF exclusively for primary buttons, active tabs, chart bars and small selected markers. Primary button text #14162B. Amber #E7C681 only for missing data/review states. Restrained modern Manrope sans typography: medium-weight large headings with tight tracking, readable regular body. Hero headline approximately64px at this canvas scale, chapter titles38px, body16px, demo labels13px. No gradient typography. No glow, purple fog, big gradients, decorative spheres, glassmorphism, photos, floating revenue badges, customer logos or illustrations of robots. This should feel as precisely art-directed as Linear, but be an ORIGINAL business-intelligence design, not a copy. Pixel-crisp vectorlike UI details.
+
+PAGE RHYTHM: quiet wide sections with fine horizontal separators and approximately72-88px padding above/below major chapters. Alternate visual/text placement as specified. Small mono chapter labels, thin connectors, editorial whitespace. Most content sits directly on the canvas, with bordered Cards reserved for actual example interfaces, not a grid of identical feature cards. Gentle corner radii12px for main product surface and8px inside.
+
+TOP NAV: 56px tall. Left: small indigo rounded square containing R, next to RIO wordmark. Right: "Product", "How it works", "Your control", "Sign in", and a pale indigo button "Book a walkthrough". Thin bottom rule.
+
+SECTION 1 HERO: roughly64px top padding. Tiny uppercase eyebrow "BUSINESS INTELLIGENCE, DESIGNED FOR THE AI ERA". Below, dominant left-aligned heading on two lines exactly:
+"A clearer path to"
+"profitable growth."
+Below, restrained body max570px: "RIO brings your business reports, goals, and constraints together to help you understand performance and decide what to do next."
+Then primary pale-indigo button "Book a walkthrough", quiet secondary text "Explore the example" with small right arrow. Below small text "Evidence behind the advice. People in control."
+
+Below hero text after36px: a beautiful full-width product illustration with actual readable comparison data. Top line "From business signal to next step"; caption "Interactive product illustration · fictional data."; period "Example business · 1–28 Aug 2026 · AED". Four equal tabs "Signal", "Evidence", "Action", "Review" with Signal selected and a fine indigo underline. Main Signal panel title "More sales. The same amount after fees." Below, a clean two-row comparison table with column headers "Channel", "Sales", "After channel fees"; Channel A = "AED 12,000" sales and "AED 9,000" after fees; Channel B = "AED 10,000" sales and "AED 9,000" after fees. You may use short subtle bars behind the sales column as supplementary visualization, but do not obscure the numbers. Small note: "Product costs and other expenses are not included." No sidebar, fake browser address, approval button or live badge.
+
+SECTION 2 PRINCIPLES: separated by thin rules, approx220px high. Intro "A useful recommendation starts with understanding your business." Then three equal editorial columns separated with short fine vertical rules (not cards):
+"Context before conclusions." / "Your goals and constraints belong beside the numbers."
+"Evidence you can inspect." / "Understand what supports the advice and what is still missing."
+"Decisions stay with you." / "Review consequential changes before they happen."
+
+SECTION 3 UNDERSTAND: asymmetric two columns, text left40%, visual right60%. Tiny "01 / UNDERSTAND". Heading "Your business, in context." Body "Bring reports, goals, and operating constraints into one place. Give every recommendation a clear starting point." Supporting line "Start with the information you have. Keep missing information visible."
+Visual right: three small simple labeled source rows "Business reports", "Goals", "Constraints", with thin elegant branching evidence lines into a larger structured context Card titled "A shared picture of the business". It contains compact rows:
+"Priority" — "Improve profitable sales"
+"Channels" — "Channel A and Channel B"
+"Spending" — "Review before increasing"
+"Product costs" — "Not supplied" in amber
+Caption "Illustrative business context."
+This precise line motif is RIO's distinctive graphic language, not a complicated node editor.
+
+SECTION 4 DECIDE: reverse layout, recommendation Card left55%, text right40%. Tiny "02 / DECIDE". Heading "Know what deserves your attention." Body "See a recommendation alongside its reasoning, supporting evidence, and limits. Useful advice can start before every answer is known." Quiet link "Follow the reasoning →".
+Card top "Example recommendation", small amber-outline status "For your review". Main card title "Review Channel A’s fees before increasing spend." Body "Channel A has higher sales, but both channels leave AED 9,000 after the recorded fees. Check the fee breakdown and product costs before deciding where to invest." Small source tags "Channel A example report" and "Channel B example report". Bottom separated note "Impact not estimated" and "Product costs are missing." NO made-up ROI, confidence percentage or completed action.
+
+SECTION 5 COMPARE: wide chapter with tiny "03 / COMPARE". Heading left "More sales are only part of the picture." Body right "Compare the costs behind the headline before deciding where to grow."
+Wide chart panel beneath. Caption "Illustrative comparison · 1–28 Aug 2026 · AED". At right, compact two-state segmented control "Sales" (selected) and "After channel fees" (unselected). Chart: two horizontally oriented PALE INDIGO bars starting at same left zero, Channel A longer value AED12,000, Channel B five-sixths as long value AED10,000. Fixed simple axis labels AED0 / AED6,000 / AED12,000. Fine gridlines only.
+Below chart, compact visible table headings "Channel", "Sales", "Recorded fees", "Selected amount": Channel A AED12,000 / AED3,000 / AED12,000; Channel B AED10,000 / AED1,000 / AED10,000.
+Below panel or along bottom clear text "Channel A reports more sales." and "Review the fee breakdown and missing costs before increasing spend." Small but readable limitation "Amounts after channel fees are not gross profit. Product costs and other expenses are not included."
+
+SECTION 6 CONTROL: text left40%, example record right55%. Tiny "04 / CONTROL". Heading "AI brings the analysis. You make the call." Body "Review the evidence and set the boundaries. Spending and public-facing changes require the relevant permissions and approvals."
+Three quiet checkline statements "Evidence stays attached.", "Missing information stays visible.", "Planning an action does not mark it complete."
+Visual: immaculate static Card, heading "Example decision record", amber status "Awaiting review". Three neatly aligned rows connected by a fine vertical rule:
+"Recommendation prepared" — "Review Channel A’s fees"
+"Information needed" — "Product costs have not been supplied"
+"Human decision" — "Awaiting review"
+Caption "Illustration only. No business action is taken."
+Do not display completed execution, profit gain, names or dates in this card.
+
+SECTION 7 FAQ: centered narrower column about730px. Heading "A few practical questions." Four CLOSED accordion rows with thin bottom rules and small plus icons on the right:
+"Do I need all my systems connected?"
+"Will RIO change my budgets or publish automatically?"
+"Are these real business results?"
+"Can my agency use RIO with me?"
+Do not add answers in the closed default state.
+
+SECTION 8 CLOSING: generous breathing room, centered heading "Make your next decision a clearer one." Body "See how RIO could support the decisions in your business." Primary "Book a walkthrough", secondary "Explore the example →". Clean graphite background, no gradient.
+
+FOOTER: thin top rule. Left R monogram / RIO and "Business intelligence for thoughtful growth." Right links "Product", "Your control", "Questions", "Sign in". Bottom small "© 2026 RIO".
+
+QUALITY: This is the concrete planned design, not a concept that changes the requirements. Meticulous alignments, natural typography, restrained contrast and readable meaningful product UI. Preserve exact key headlines, all section order, correct fixture arithmetic and labels. Show no real customer names, claims of realized profit, invented integrations, gratuitous badges, fake URLs, signup, pricing, testimonials or extra content. All content fits inside one finished tall desktop PNG.
+
+
+Final edit (built-in image_gen): Change the eyebrow above "AI brings the analysis. You make the call." to "04 / CONTROL". Remove "05 / FAQ" and "06 / GET STARTED" eyebrows. Preserve all other design/content and return the full desktop PNG.

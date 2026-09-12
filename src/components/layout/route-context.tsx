@@ -76,7 +76,9 @@ export function deriveRouteCrumbs(
   if (segments.length === 0) return [];
 
   const crumbs: RouteCrumb[] = [];
+  let pathSoFar = "";
   for (const [index, segment] of segments.entries()) {
+    pathSoFar += `/${segment}`;
     if (segment === "organizations" && uuidPattern.test(segments[index + 1] ?? "")) continue;
     /**
      * Only the id directly after `organizations` is an organization.
@@ -90,9 +92,12 @@ export function deriveRouteCrumbs(
     const isOrganization = uuidPattern.test(segment) && segments[index - 1] === "organizations";
     crumbs.push({
       label: labelForSegment(segment, labels),
-      // Only link to routes that exist: Overview is the organization's landing
-      // surface. Every other segment is a label, not a link.
-      href: isOrganization ? overviewPath(segment) : undefined,
+      // The organization crumb links to Overview, its landing surface, rather
+      // than the bare `/organizations/<id>`, which has no page. Every other
+      // crumb links to the route at its own path -- each segment up to here
+      // owns a page (`campaigns`, `campaigns/<id>`, `campaigns/<id>/studio`,
+      // and so on), so the accumulated prefix is always a real destination.
+      href: isOrganization ? overviewPath(segment) : pathSoFar,
       current: false,
     });
   }

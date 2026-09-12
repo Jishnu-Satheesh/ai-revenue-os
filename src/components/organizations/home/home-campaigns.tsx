@@ -4,29 +4,41 @@ import { ArrowRight, Megaphone, Plus } from "lucide-react";
 import { HomePreviewImage } from "@/components/organizations/home/home-preview-image";
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type {
   HomeCampaign,
   HomeSection,
 } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
 
-function formatInstant(value: string, timeZone: string): string {
+function formatShortDate(value: string, timeZone: string): string {
   const formatted = new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
     timeZone,
   }).format(new Date(value));
-  // en-GB abbreviates September as "Sept"; the reference writes "Sep". The
-  // org timezone name always trails the time, separated exactly as shown.
-  return `${formatted.replace("Sept", "Sep").replace(",", " ·")}, ${timeZone}`;
+  // en-GB abbreviates September as "Sept"; the reference writes "Sep".
+  // The day is still resolved in the organization timezone.
+  return formatted.replace("Sept", "Sep");
+}
+
+function stateTone(state: HomeCampaign["state"]): "success" | "warning" {
+  // Reference tags (prototype campaign cards): amber "Ready for review",
+  // green "Draft". Amber marks the states that need a look; every other
+  // state — draft, approved, scheduled, in-flight, finished, cancelled —
+  // stays green. Soft tints come from the shared StatusBadge tones.
+  switch (state) {
+    case "ready_for_review":
+    case "needs_data":
+    case "blocked":
+    case "failed":
+      return "warning";
+    default:
+      return "success";
+  }
 }
 
 function readableState(state: HomeCampaign["state"]): string {
@@ -39,9 +51,11 @@ function readableState(state: HomeCampaign["state"]): string {
 /**
  * Campaigns: the first two records as large cover cards plus an optional
  * third compact row, all from the derived CTA/href verbatim. A no-version
- * record links to the portfolio (never a detail link or spinner), the
- * fallback artwork source label stays visible, and each record appears once.
- * Gated sources render nothing; failures stay local with a shared Retry.
+ * record links to the portfolio (never a detail link or spinner). Each card
+ * carries the cover label as a chip overlaid on the artwork, a soft-tint
+ * state tag, and a divider foot row with a short date plus an inline text
+ * CTA; each record appears once. Gated sources render nothing; failures
+ * stay local with a shared Retry.
  */
 export function HomeCampaigns({
   organizationId,
@@ -121,10 +135,16 @@ export function HomeCampaigns({
                       image={homeCampaign.cover}
                       frameClassName={styles.coverFallback}
                     />
+                    {homeCampaign.coverLabel !== null ? (
+                      <span className={styles.coverChip}>{homeCampaign.coverLabel}</span>
+                    ) : null}
                   </div>
                 ) : null}
                 <CardContent className="flex flex-col gap-1.5 pt-4">
-                  <Badge variant="outline">{readableState(homeCampaign.state)}</Badge>
+                  <StatusBadge
+                    label={readableState(homeCampaign.state)}
+                    tone={stateTone(homeCampaign.state)}
+                  />
                   <h3 dir="auto" className={styles.cardTitle}>
                     {homeCampaign.title}
                   </h3>
@@ -133,21 +153,20 @@ export function HomeCampaigns({
                       {homeCampaign.objective}
                     </p>
                   ) : null}
-                  {homeCampaign.coverLabel !== null ? (
-                    <p className={styles.meta}>{homeCampaign.coverLabel}</p>
-                  ) : null}
-                  <p className={styles.meta}>
-                    Updated{" "}
-                    <time dateTime={homeCampaign.updatedAt}>
-                      {formatInstant(homeCampaign.updatedAt, timeZone)}
-                    </time>
-                  </p>
-                  <Button asChild variant="outline" size="sm" className={styles.homeButton}>
-                    <Link href={homeCampaign.href}>
-                      {homeCampaign.actionLabel}
-                      <ArrowRight aria-hidden="true" data-icon="inline-end" />
-                    </Link>
-                  </Button>
+                  <div className={styles.campaignFoot}>
+                    <p className={styles.meta}>
+                      Updated{" "}
+                      <time dateTime={homeCampaign.updatedAt}>
+                        {formatShortDate(homeCampaign.updatedAt, timeZone)}
+                      </time>
+                    </p>
+                    <Button asChild variant="link" size="sm">
+                      <Link href={homeCampaign.href}>
+                        {homeCampaign.actionLabel}
+                        <ArrowRight aria-hidden="true" data-icon="inline-end" />
+                      </Link>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}

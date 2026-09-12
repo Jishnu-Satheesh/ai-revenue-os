@@ -184,6 +184,78 @@ export function ConfidenceLabel({ confidence }: { confidence?: number }) {
   return <StatusLabel label={`Confidence ${Math.round(confidence * 100)}%`} icon={Gauge} />;
 }
 
+export type KnowledgeState = "recorded" | "suggested" | "planned" | "measured" | "reviewed";
+
+const knowledgeStateLabels: Readonly<Record<KnowledgeState, { label: string; icon: LucideIcon }>> = {
+  recorded: { label: "Recorded", icon: Database },
+  suggested: { label: "Suggested", icon: Lightbulb },
+  planned: { label: "Planned", icon: Clock },
+  measured: { label: "Measured", icon: Gauge },
+  reviewed: { label: "Reviewed", icon: ShieldCheck },
+};
+
+/**
+ * The plain-words state of one memory item (Spec 023 §13 timeline copy).
+ *
+ * Derived from the stored memory type, origin, and verification state only —
+ * never from body text. Captured source projections read as recorded
+ * observations, model-proposed episodes as suggestions, operator decisions as
+ * plans, settled outcomes as measurements, and human-verified lessons as
+ * reviewed. Manual notes, documents, projected facts, and fact proposals carry
+ * no state label: they are workspace content or pending changes, not captured
+ * knowledge, and labelling them would imply a lineage they do not have.
+ */
+export function knowledgeStateFor(input: {
+  memoryType: string;
+  origin: string;
+  verificationState: string;
+}): KnowledgeState | null {
+  if (input.memoryType === "outcome") return "measured";
+  if (input.memoryType === "decision") return "planned";
+  if (input.memoryType === "lesson")
+    return input.verificationState === "verified" ? "reviewed" : "suggested";
+  if (input.memoryType === "episode")
+    return input.origin === "ai_proposed" ? "suggested" : "recorded";
+  return null;
+}
+
+export function KnowledgeStateLabel({
+  memoryType,
+  origin,
+  verificationState,
+}: {
+  memoryType: string;
+  origin: string;
+  verificationState: string;
+}) {
+  const state = knowledgeStateFor({ memoryType, origin, verificationState });
+  if (!state) return null;
+  const entry = knowledgeStateLabels[state];
+  return <StatusLabel label={entry.label} icon={entry.icon} />;
+}
+
+/**
+ * Captured source projections are read-only downstream: the owning feature
+ * stays authoritative, so a correction belongs at the source, not on the
+ * memory copy. Rendered only when the item names its source system — manual
+ * notes have no source to point at, and inventing one would mislead.
+ */
+export function SourceCorrectionNote({
+  sourceSystem,
+  sourceReference,
+}: {
+  sourceSystem?: string;
+  sourceReference?: string;
+}) {
+  if (!sourceSystem) return null;
+  return (
+    <p className="text-[11px] text-muted-foreground">
+      Corrections happen at the source. Open source: {sourceSystem}
+      {sourceReference ? ` · Ref: ${sourceReference}` : ""}.
+    </p>
+  );
+}
+
 /**
  * The provenance strip shared by result cards and the inspection Dialog.
  * Embedding state is optional because a retrieval result does not carry it; it

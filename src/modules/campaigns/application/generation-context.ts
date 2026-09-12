@@ -43,10 +43,18 @@ export const evidenceFactSchema = z.strictObject({
 });
 export type EvidenceFact = z.infer<typeof evidenceFactSchema>;
 
+export const memoryContextRefSchema = z.strictObject({
+  manifestId: z.string().uuid(),
+  digest: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type MemoryContextRef = z.infer<typeof memoryContextRefSchema>;
+
 export const generationContextSchema = z.strictObject({
   organizationId: z.string().uuid(),
   campaignId: z.string().uuid(),
   sourceSnapshotId: z.string().uuid(),
+  memoryContextManifestId: z.string().uuid().nullable(),
+  memoryContextDigest: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
   generationProfile: z.enum(["brand_restricted", "brand_guided", "full_visual_freedom"]),
   objective: z.string().trim().min(1).max(600),
   audience: z.string().trim().min(1).max(600),
@@ -97,6 +105,13 @@ export type GenerationContextInput = {
   /** Injected rather than read from the clock, so generation is reproducible. */
   now: Date;
   scheduleLeadMinutes?: number;
+  /**
+   * The pinned shared-memory manifest for this run, if any. Text-only planning
+   * context: it may shape words, never assertions, spend, policy, or pixels.
+   * Null when memory context is disabled or unavailable; generation still runs
+   * on the pinned snapshot alone.
+   */
+  memoryContext?: MemoryContextRef | null;
 };
 
 /**
@@ -130,10 +145,13 @@ export function buildGenerationContext(input: GenerationContextInput): Generatio
     return { outcome: "needs_data", missing: [...new Set(missing)] };
   }
 
+  const memoryContext = input.memoryContext ?? null;
   const parsed = generationContextSchema.safeParse({
     organizationId: input.organizationId,
     campaignId: input.campaignId,
     sourceSnapshotId: input.sourceSnapshotId,
+    memoryContextManifestId: memoryContext?.manifestId ?? null,
+    memoryContextDigest: memoryContext?.digest ?? null,
     generationProfile: input.generationProfile,
     objective,
     audience,
@@ -233,6 +251,12 @@ export function renderGenerationPrompt(context: GenerationContext): string {
     "",
     "Only state a fact that appears in <verified_facts>, and cite its source key.",
     "Never invent an offer, a price, a metric, a result, or a permission.",
+    "",
+    "<memory_context>",
+    context.memoryContextDigest
+      ? `digest: ${context.memoryContextDigest}\nmanifest: ${context.memoryContextManifestId}\nShared Business Memory supplied text-only planning context for this run. It may shape words, never assertions, spend, policy, or pixels.`
+      : "none. No shared memory context was pinned to this run; build from the verified facts above only.",
+    "</memory_context>",
   ].join("\n");
 }
 

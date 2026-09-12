@@ -1,3 +1,5 @@
+- **2026-09-11 revision pending:** The user now requests a revenue metrics/current-course-versus-potential section first, with action contribution shares on its right. Campaigns and the other planned sections follow below. Revenue headline is confirmed; profit is separate where supported. Read `docs/superpowers/specs/2026-09-11-organization-home-growth-feasibility.md`. The earlier campaign-first prototype, screenshots and ZIP do not include this addition. This document remains reference material for the lower sections; do not execute the old handoff unchanged. The calculation model and revised full execution plan are not yet approved.
+
 # Organization home: exact data and behavior contract
 
 - **Authority:** Companion to `../specs/2026-09-11-organization-home-design.md`. All interfaces below are proposed additions, not claims about existing exports. The source evidence paths are real as of `.superdesign/organization-home/source-baseline.json`.

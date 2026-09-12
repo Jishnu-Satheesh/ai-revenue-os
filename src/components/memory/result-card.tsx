@@ -3,7 +3,11 @@
 import { EyeOff, Link2 } from "lucide-react";
 
 import { ItemChainDialog } from "@/components/memory/item-chain-dialog";
-import { ProvenanceBadges } from "@/components/memory/provenance-badges";
+import {
+  KnowledgeStateLabel,
+  ProvenanceBadges,
+  SourceCorrectionNote,
+} from "@/components/memory/provenance-badges";
 import { Card, CardContent } from "@/components/ui/card";
 import type { MemoryRetrievalResult } from "@/domain/memory/schemas";
 
@@ -33,6 +37,17 @@ export function ResultCard({
             sourceTier={result.provenance.sourceTier}
             sourceSystem={result.provenance.sourceSystem}
             confidence={result.provenance.confidence}
+          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <KnowledgeStateLabel
+              memoryType={result.memoryType}
+              origin={result.provenance.origin}
+              verificationState={result.provenance.verificationState}
+            />
+          </div>
+          <SourceCorrectionNote
+            sourceSystem={result.provenance.sourceSystem}
+            sourceReference={result.provenance.sourceReference}
           />
         </div>
 

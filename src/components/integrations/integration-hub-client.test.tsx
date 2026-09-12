@@ -265,17 +265,22 @@ describe("route-aware app chrome", () => {
    * operator to an organization overview for an organization that does not
    * exist. It stayed invisible while the campaign was the last crumb -- the
    * last crumb's href is cleared -- and became clickable the moment a page was
-   * added below it.
+   * added below it. The campaign crumb should still land on the campaign's own
+   * page, not the organization overview.
    */
-  it("links only the organization crumb, never a deeper id", () => {
+  it("gives every non-current crumb its own route, never a deeper id's overview", () => {
     const campaignId = "783ab4e1-279d-4fba-8dc1-1a33cd3df2e5";
     const crumbs = deriveRouteCrumbs(
       `/organizations/${organizationId}/campaigns/${campaignId}/studio`,
     );
 
-    expect(crumbs[0]?.href).toBe(`/organizations/${organizationId}/overview`);
-    expect(crumbs.find((crumb) => crumb.label === campaignId)?.href).toBeUndefined();
-    expect(crumbs.every((crumb) => crumb.href === undefined || crumb === crumbs[0])).toBe(true);
+    expect(crumbs.map((crumb) => crumb.href)).toEqual([
+      `/organizations/${organizationId}/overview`,
+      `/organizations/${organizationId}/campaigns`,
+      `/organizations/${organizationId}/campaigns/${campaignId}`,
+      // The last crumb is the current page and is never a link.
+      undefined,
+    ]);
   });
 
   it("targets Overview from the organization crumb", () => {

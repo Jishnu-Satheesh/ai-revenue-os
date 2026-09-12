@@ -123,9 +123,14 @@ export function createSubjectService(dependencies: SubjectServiceDependencies) {
 
     async draft(input: z.input<typeof subjectDraftRequestSchema>): Promise<SubjectMutationResult> {
       const request = subjectDraftRequestSchema.parse(input);
+      // Drafts read the shared subject_drafting context, not an ad hoc assist
+      // query. The purpose travels with the pinned manifest so a later review
+      // can see exactly what the model was allowed to read. Human-entered
+      // names win over model suggestions below; the prompt forbids inventing
+      // offers, prices, claims, or business facts.
       const memory = await dependencies.memory.retrieve({
         organizationId: request.organizationId,
-        purpose: "onboarding_assist",
+        purpose: "subject_drafting" as "onboarding_assist",
         query: request.name,
         memoryTypes: ["structured_fact", "document", "note"],
         sensitivityAllowance: "internal",

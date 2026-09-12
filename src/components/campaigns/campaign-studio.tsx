@@ -918,6 +918,29 @@ export function CampaignStudio({
 
           <VersionChangeSummary summary={view.changeSummary} nextVersion={view.versionNumber + 1} />
 
+          <section className="flex flex-col gap-2 rounded-lg border p-3">
+            <RailHeading>Supplied context</RailHeading>
+            <p className="text-xs text-muted-foreground">
+              Built from the pinned source snapshot and the preregistered measurement plan. Shared
+              memory supplied text-only planning context where pinned; only its digest travels with
+              this version.
+            </p>
+            <div className="flex flex-col gap-1 text-xs">
+              <span>
+                <span className="text-muted-foreground">Metric: </span>
+                <span className="font-medium">{view.measurement.primaryMetricKey}</span>
+              </span>
+              <span>
+                <span className="text-muted-foreground">Baseline: </span>
+                <span className="font-medium">{view.measurement.baselineSource}</span>
+              </span>
+            </div>
+            <p className="text-[10px] leading-tight text-muted-foreground">
+              Restricted roots are withheld here. Cited context appears by digest and summary only;
+              assertions, spend, credentials, and asset bytes never leave their own stores.
+            </p>
+          </section>
+
           {view.versions.length < 2 ? null : (
             <section className="flex flex-col gap-2 rounded-lg border p-3">
               <RailHeading>Version history</RailHeading>

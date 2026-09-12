@@ -180,7 +180,9 @@ export const generateCampaignBundleTask = schemaTask({
     const supabase = createCampaignWorkerServiceClient();
     const runs = createCampaignRunStore(supabase as unknown as CampaignRunPersistence);
     // One loader per run. The claim token arrives with each read, so nothing
-    // here needs to claim a second time.
+    // here needs to claim a second time. The shared-memory manifest is pinned
+    // to the claimed run inside the loader; only its digest travels forward
+    // in provenance, never restricted bytes.
     const context = createGenerationContextLoader(
       supabase as unknown as GenerationContextPersistence,
       { organizationId: parsed.organizationId, runId: parsed.runId },
@@ -261,6 +263,10 @@ export const reviseCampaignBundleTask = schemaTask({
       { organizationId: parsed.organizationId, runId: parsed.runId },
     );
 
+    // The shared-memory manifest is pinned to the claimed run inside the
+    // loader (claim token), and only its digest travels in provenance. A
+    // material revision publishes a new immutable version; a changed pack is
+    // a new bounded attempt, never an in-place edit.
     const result = await reviseCampaignBundle(
       parsed,
       {
@@ -273,6 +279,26 @@ export const reviseCampaignBundleTask = schemaTask({
             createCampaignVersionWriter(supabase as unknown as CampaignPersistence).createVersion(
               input,
             ),
+        },
+        // Revalidates the pinned manifest before patching. Null when no pack
+        // was pinned: generation still runs on the snapshot alone. An
+        // unavailable pack (flag off) also runs on, never fails.
+        revalidateMemoryContext: async ({ manifestId }) => {
+          if (!manifestId) return "absent";
+          const worker = supabase as unknown as {
+            rpc(
+              name: string,
+              args: Record<string, unknown>,
+            ): Promise<{ data: unknown; error: { code?: string } | null }>;
+          };
+          const { data, error } = await worker.rpc("revalidate_memory_context", {
+            p_organization_id: parsed.organizationId,
+            p_manifest_id: manifestId,
+          });
+          if (error) return "revoked";
+          const status = (data as { status?: unknown } | null)?.status;
+          if (status === "valid" || status === "changed" || status === "revoked") return status;
+          return "absent";
         },
         isCancelled: () => signal.aborted,
       },

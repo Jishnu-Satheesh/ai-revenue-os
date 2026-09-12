@@ -1,9 +1,31 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// `@/trigger/recommendations` wires a live Supabase client and two AI
+// providers behind `server-only`; none of that runs by importing the module,
+// but it does need to resolve. Only the row-shape schema and mapper under
+// test here ever get called.
+vi.mock("server-only", () => ({}));
+vi.mock("@trigger.dev/sdk", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  schemaTask: vi.fn((config) => config),
+  schedules: { task: vi.fn((config) => config) },
+}));
+vi.mock("@/lib/env", () => ({ env: { RECOMMENDATION_JUDGE_MODEL: "test-model" } }));
+vi.mock("@/lib/supabase/service", () => ({
+  createAnalysisWorkerServiceClient: vi.fn(),
+}));
+vi.mock("@/modules/analysis/infrastructure/recommendation-generation-provider", () => ({
+  createRecommendationGenerationProvider: vi.fn(),
+}));
+vi.mock("@/modules/analysis/infrastructure/recommendation-judge-provider", () => ({
+  createRecommendationJudgeProvider: vi.fn(),
+}));
 
 import { ORGANIZATION, CHANNEL } from "@/domain/analysis/test-fixtures";
+import { unjudgedRecommendationShape, toUnjudged } from "@/trigger/recommendations";
 import {
   channelRecommendationsTaskSchema,
   runChannelRecommendations,
@@ -51,6 +73,70 @@ describe("channel recommendations payload schema", () => {
       channelRecommendationsTaskSchema.safeParse({ ...validPayload, windowStart: "2026-01-01" })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("the judge's unjudged-row shape", () => {
+  // Staging runs run_06g7jjmthe08pf60utruojb601, run_06g886rg2amqv2eu6b7p37fa01,
+  // and run_06g8sq27b5dm5bco6l103vm501 all failed with the same ZodError:
+  // citation_id -> finding_id is a many-to-one foreign key, so PostgREST
+  // embeds channel_findings as one object (or null), never an array. The
+  // schema wrongly required an array and rejected every real row.
+  const baseRow = {
+    id: "00000000-0000-4000-8000-0000000000e1",
+    organization_id: ORGANIZATION,
+    label: "recommendation" as const,
+    headline: "Shift spend to the channel that is actually converting",
+    detail: "Detail copy.",
+    limitations: [],
+    prompt_version: 9,
+  };
+
+  const finding = {
+    detector_key: "spend_efficiency",
+    kind: "insight",
+    code: "SPEND_SHIFT",
+    needs_data_reason: null,
+    value_kind: "money" as const,
+    value_numerator: 12_00,
+    value_denominator: null,
+    monetary_impact_minor_units: 12_00,
+    currency: "AED",
+    limitations: [],
+  };
+
+  it("parses a citation whose finding embeds as a single object, the real PostgREST shape", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed);
+
+    expect(unjudged.citations).toHaveLength(1);
+    expect(unjudged.citations[0].detectorKey).toBe("spend_efficiency");
+  });
+
+  it("parses a citation whose finding is null", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: null }],
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed);
+
+    expect(unjudged.citations[0].detectorKey).toBeNull();
+  });
+
+  it("rejects an array, since the citation-to-finding relationship is many-to-one", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: [finding] }],
+    };
+
+    expect(unjudgedRecommendationShape.safeParse(row).success).toBe(false);
   });
 });
 

@@ -1,0 +1,38 @@
+{
+  "checks": [
+    "February totals match coverage",
+    "Share is derived from reported total",
+    "Period updates totals and list",
+    "Attention filter shows two channels",
+    "Directory filter leaves portfolio unchanged",
+    "Search empty state visible",
+    "Coverage dialog opens",
+    "Escape closes dialog",
+    "Audit page remains excluded",
+    "Local add renders escaped name",
+    "New channel has no invented revenue",
+    "Edit updates directory",
+    "Archived channel leaves active list",
+    "Restore returns channel to active list",
+    "Reload resets prototype changes",
+    "Revenue sort works",
+    "No desktop horizontal overflow",
+    "No mobile horizontal overflow",
+    "Mobile shows readable channel cards",
+    "Mobile navigation opens",
+    "Mobile navigation closes",
+    "Mobile dialog fits viewport",
+    "No narrow mobile overflow",
+    "No tablet overflow",
+    "Empty portfolio does not invent zero revenue",
+    "No JavaScript runtime errors"
+  ],
+  "passed": 26,
+  "errors": [],
+  "viewports": [
+    "1440x1080",
+    "390x844",
+    "320x760",
+    "768x1024"
+  ]
+}

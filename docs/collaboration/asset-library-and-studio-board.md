@@ -1,5 +1,71 @@
 # Coordination board — Asset Library, then Campaign Studio
 
+<!-- 2026-09-12 Campaign visual prototype: user explicitly requests desktop.png
+for each planned page or Prototype.html. Codex claims .superdesign/campaign-experience/
+for a standalone interactive prototype, supporting fictional imagery, page PNGs,
+browser verification and readme; narrow links/status in Campaign handoff and this
+board. Existing app code and all unrelated dirty work remain outside this request.
+Superdesign and agent-browser CLI preflights timed out; use local HTML authoring
+and installed Playwright/Chromium for the requested review artifacts. -->
+
+<!-- 2026-09-12 Campaign discovery decisions confirmed: user accepts D06
+automatic research on meaningful business evidence and a configured schedule,
+plus manual Request a campaign; user accepts D07 presenting source-backed
+proposals with explicit gaps when profit estimates or external research are
+unavailable. Codex updates the same six Campaign planning documents and this
+board. These choices are settled; do not re-ask them. Numeric operating policy
+is organization configuration, not an invented default. Full design/spec/plan
+review and feature implementation remain separate from these product answers.
+This entry supersedes the earlier checkpoint's open D06/D07 status. -->
+
+<!-- 2026-09-12 Campaign redesign planning checkpoint: six documentation files
+saved (handoff, design, visual contract, contracts, 18-task implementation plan,
+18-finding audit). Confirmed full-proposal approval in Growth Intelligence,
+every finished output reviewed including later variants, focused Studio, and
+approved-limit pause with human restart/removal. Research cadence/admission
+decisions and whole-design/spec/plan approval remain open. Exact Trigger failure
+run_06g9cko3ehp1gemp1f1v6k6h01 was retrieved: expired checked-in Meta contract
+throws before generation claim; hosted domain run remains queued/attempt 0.
+Other verified source gaps include unmounted upload/no previews, legacy rejected
+bytes path, raw-asset dispatch, empty adapters/unavailable metrics, local-only
+pause, expired-approval history hiding and shallow campaign-level learning.
+38 baseline tests in 5 files passed. Six-document local links/fences/placeholders
+and git diff --check verified. No application, DB, provider or deployment change.
+Start at docs/superpowers/plans/2026-09-12-campaign-experience-handoff.md. -->
+
+<!-- 2026-09-12 Campaign whole-workflow redesign audit: Codex claims documentation
+only under docs/superpowers/specs/2026-09-12-campaign-experience-*,
+docs/superpowers/plans/2026-09-12-campaign-experience-*, and
+docs/verification/campaigns/2026-09-12-workflow-audit.md, plus this board.
+User requests audit, web/design references, product clarification, and a detailed
+handoff for a future coding agent. No feature implementation or provider activation
+is authorized by this planning task. Existing dirty Campaign/Memory/Home work is
+preserved. First confirmed decision: Growth Intelligence approval covers audience,
+offer, channels, budget, and success measures; prototype.html supplies the intended
+separate Campaign-ready opportunities section. -->
+
+<!-- 2026-09-12 Artwork-led desktop preview: user explicitly requests improved
+desktop.png using the three new platform images. Codex claims
+docs/design/public-landing/v2/desktop.png, desktop.prompt.txt and README.md.
+Design preview only; no feature code or change to walkthrough requirements. -->
+
+<!-- 2026-09-12 Artwork-led desktop preview completed: v2/desktop.png generated
+with all three existing artwork references, inspected for composition and visible
+copy, saved alongside exact prompt. PNG header verified. Prior rejected image
+preserved in parent directory; new composition remains a review candidate. -->
+
+<!-- 2026-09-12 Public landing visual reset: user rejects desktop.png and selects
+separately generated platform imagery. Codex claims docs/design/public-landing/v2/
+and status banners in the public-landing design/visual/implementation/handoff docs.
+The prior visual direction is rejected; generated hero/context/decision assets are
+new proposals. Business-owner audience and Resend walkthrough requirements remain. -->
+
+<!-- 2026-09-12 Public landing artwork pass completed: three standalone generated
+PNG candidates and exact prompts saved in docs/design/public-landing/v2/.
+Hero 1672x941; context and decision 1448x1086. Outputs visually inspected and PNG
+dimensions verified. Prior visual handoff marked rejected; new assets await user
+review. No application code, database, email delivery or environment changes. -->
+
 <!-- 2026-09-11 Public landing desktop mockup: user requests desktop.png from the
 written plan. Codex claims docs/design/public-landing/desktop.png and
 desktop.prompt.txt only, plus this board entry. Built-in image generation;
@@ -6579,3 +6645,10 @@ through the real routes, not only in tests.
   (maps, restyle, props, narration fields, stored-actions test) untouched.
   Tab derives its own scope maps from performanceFilters to avoid sharing
   the peer's maps hunk. Push is the user's step.
+
+
+### 2026-09-12 — Public landing desktop mockup generated
+
+- User requested desktop.png from the written public landing plan. Built-in image generation succeeded after the interrupted session; generated and visually inspected the full-page desktop mockup, then corrected chapter labels.
+- Saved `docs/design/public-landing/desktop.png` (776 × 2025) and its generation/edit prompt in `desktop.prompt.txt`. This is a design-review artifact with fictional data, not an implemented page or approval of feature code.
+- No app code, email flow, environment settings or database changes.

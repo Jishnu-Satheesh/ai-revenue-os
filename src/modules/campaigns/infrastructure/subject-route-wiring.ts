@@ -39,6 +39,11 @@ async function productionContext(
   return context;
 }
 
+/**
+ * Subject drafting reads the shared subject_drafting context, not an ad hoc
+ * assist query. A person names and confirms the subject; person-entered names
+ * win and the drafter never invents offers or prices.
+ */
 function productionServiceFor(context: SubjectRouteContext) {
   const supabase = context.supabase as SupabaseClient<Database>;
   const memory = createMemoryWorkspaceApi({

@@ -153,7 +153,7 @@ describe("model-drafted subject descriptions", () => {
       expect.objectContaining({
         organizationId: ORGANIZATION_ID,
         correlationId: CORRELATION_ID,
-        purpose: "onboarding_assist",
+        purpose: "subject_drafting",
         sensitivityAllowance: "internal",
       }),
     );

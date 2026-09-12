@@ -5,7 +5,11 @@ import { useMemo, useState } from "react";
 import { Clock3, TriangleAlert } from "lucide-react";
 
 import { ItemChainDialog } from "@/components/memory/item-chain-dialog";
-import { ProvenanceBadges } from "@/components/memory/provenance-badges";
+import {
+  KnowledgeStateLabel,
+  ProvenanceBadges,
+  SourceCorrectionNote,
+} from "@/components/memory/provenance-badges";
 import { memoryTimelineQueryOptions } from "@/components/memory/query-options";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -55,6 +59,7 @@ export function TimelineTab({
   branches: readonly MemoryBranchOption[];
 }) {
   const [sourceSystems, setSourceSystems] = useState<string[]>([]);
+  const [memoryTypes, setMemoryTypes] = useState<string[]>([]);
   const [branch, setBranch] = useState<string>(ALL_BRANCHES);
   const timelineQuery = useInfiniteQuery(
     memoryTimelineQueryOptions({
@@ -77,6 +82,24 @@ export function TimelineTab({
     return [...present].sort();
   }, [items, sourceSystems]);
 
+  // The timeline route has no statement-kind parameter, so the kind filter is
+  // applied here, client-side, over the rows already loaded: it can only hide
+  // what is on screen, never claim the server filtered anything. Options come
+  // from the loaded rows, never from an invented list.
+  const availableMemoryTypes = useMemo(() => {
+    const present = new Set<string>(memoryTypes);
+    for (const item of items) present.add(item.memoryType);
+    return [...present].sort();
+  }, [items, memoryTypes]);
+
+  const visibleItems = useMemo(
+    () =>
+      memoryTypes.length === 0
+        ? items
+        : items.filter((item) => memoryTypes.includes(item.memoryType)),
+    [items, memoryTypes],
+  );
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -98,6 +121,28 @@ export function TimelineTab({
             </Select>
           </>
         ) : null}
+        <Label className="shrink-0 text-xs text-muted-foreground">Kind</Label>
+        {availableMemoryTypes.length > 0 ? (
+          <ToggleGroup
+            type="multiple"
+            size="sm"
+            variant="outline"
+            aria-label="Statement kind"
+            value={memoryTypes}
+            onValueChange={setMemoryTypes}
+            className="flex-wrap"
+          >
+            {availableMemoryTypes.map((memoryType) => (
+              <ToggleGroupItem key={memoryType} value={memoryType} className="px-2 text-xs">
+                {memoryType}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            No statement kind is recorded on these entries.
+          </span>
+        )}
         <Label className="shrink-0 text-xs text-muted-foreground">Source</Label>
         {availableSources.length > 0 ? (
           <ToggleGroup
@@ -149,7 +194,7 @@ export function TimelineTab({
           <Skeleton className="h-24 w-full rounded-xl" />
           <Skeleton className="h-24 w-full rounded-xl" />
         </div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -163,7 +208,7 @@ export function TimelineTab({
         </Empty>
       ) : (
         <ol className="space-y-2.5">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <li key={item.id}>
               <Card className="gap-0 py-0 shadow-sm">
                 <CardContent className="space-y-2.5 px-4 py-3.5">
@@ -180,6 +225,14 @@ export function TimelineTab({
                       confidence={item.confidence}
                       embeddingStatus={item.embeddingStatus}
                     />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <KnowledgeStateLabel
+                        memoryType={item.memoryType}
+                        origin={item.origin}
+                        verificationState={item.verificationState}
+                      />
+                    </div>
+                    <SourceCorrectionNote sourceSystem={item.sourceSystem ?? undefined} />
                   </div>
                   {item.body ? (
                     <p className="line-clamp-2 text-sm text-muted-foreground">{item.body}</p>

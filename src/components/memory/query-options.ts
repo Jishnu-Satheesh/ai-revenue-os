@@ -37,6 +37,8 @@ export const memoryQueryKeys = {
   root: (organizationId: string) => ["organizations", organizationId, "memory"] as const,
   snapshot: (organizationId: string) =>
     [...memoryQueryKeys.root(organizationId), "snapshot"] as const,
+  health: (organizationId: string) =>
+    [...memoryQueryKeys.root(organizationId), "health"] as const,
   search: (organizationId: string, queryHash: string) =>
     [...memoryQueryKeys.root(organizationId), "search", queryHash] as const,
   timeline: (organizationId: string, filtersHash: string) =>
@@ -266,6 +268,7 @@ export async function invalidateMemoryQueries(
   await Promise.all(
     [
       memoryQueryKeys.snapshot(organizationId),
+      memoryQueryKeys.health(organizationId),
       [...root, "item"],
       [...root, "search"],
       [...root, "timeline"],
@@ -302,6 +305,252 @@ export function useIdempotencyKey() {
       attempt.current = null;
     },
   };
+}
+
+/**
+ * Connection-health read for the memory workspace (Spec 023 §§13/14).
+ *
+ * The health route is owned by the channel release slice; this query only
+ * reads it. The response is accepted only when it carries a `health` object
+ * with adapter/context arrays — anything else (a missing route, a proxy page,
+ * another endpoint's payload) surfaces as an unavailable-health error rather
+ * than invented counts. The panel renders that state honestly instead of a
+ * silent success.
+ *
+ * The view mirrors what the health service builds (per-adapter
+ * backlog/failures, context use, embedding backlog), but is declared here
+ * structurally so the panel degrades to "unavailable" rather than crashing
+ * when the owning route slice has not landed yet or changes its envelope.
+ * Counts are real or absent — never synthesized.
+ */
+export type MemoryHealthAdapterView = {
+  sourceKind: string;
+  registered: boolean;
+  pending: number;
+  claimed: number;
+  completed: number;
+  failed: number;
+  quarantined: number;
+  obsolete: number;
+  /** Pending + claimed: work waiting for the dispatcher, never silent success. */
+  backlog: number;
+  retryable: number;
+  lastSuccessAt: string | null;
+};
+
+export type MemoryHealthContextView = {
+  purpose: string;
+  ready: number;
+  empty: number;
+  partial: number;
+  unavailable: number;
+  disabled: number;
+  total: number;
+  lastPreparedAt: string | null;
+};
+
+export type MemoryHealthView = {
+  organizationId: string;
+  serverTime: string;
+  adapters: MemoryHealthAdapterView[];
+  contexts: MemoryHealthContextView[];
+  embeddingBacklog: number;
+  canRetry: boolean;
+  canConfigure: boolean;
+};
+
+export type MemoryHealthResponse = { health: MemoryHealthView };
+
+function isNonNegativeInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isAdapterView(row: unknown): row is MemoryHealthAdapterView {
+  if (typeof row !== "object" || row === null) return false;
+  const view = row as Record<string, unknown>;
+  return (
+    typeof view.sourceKind === "string" &&
+    typeof view.registered === "boolean" &&
+    isNonNegativeInt(view.pending) &&
+    isNonNegativeInt(view.claimed) &&
+    isNonNegativeInt(view.completed) &&
+    isNonNegativeInt(view.failed) &&
+    isNonNegativeInt(view.quarantined) &&
+    isNonNegativeInt(view.obsolete) &&
+    isNonNegativeInt(view.backlog) &&
+    isNonNegativeInt(view.retryable) &&
+    (typeof view.lastSuccessAt === "string" || view.lastSuccessAt === null)
+  );
+}
+
+function isContextView(row: unknown): row is MemoryHealthContextView {
+  if (typeof row !== "object" || row === null) return false;
+  const view = row as Record<string, unknown>;
+  return (
+    typeof view.purpose === "string" &&
+    isNonNegativeInt(view.ready) &&
+    isNonNegativeInt(view.empty) &&
+    isNonNegativeInt(view.partial) &&
+    isNonNegativeInt(view.unavailable) &&
+    isNonNegativeInt(view.disabled) &&
+    isNonNegativeInt(view.total) &&
+    (typeof view.lastPreparedAt === "string" || view.lastPreparedAt === null)
+  );
+}
+
+function isHealthResponse(body: unknown): body is MemoryHealthResponse {
+  if (typeof body !== "object" || body === null) return false;
+  const health = (body as { health?: unknown }).health;
+  if (typeof health !== "object" || health === null) return false;
+  const view = health as Record<string, unknown>;
+  return (
+    Array.isArray(view.adapters) &&
+    view.adapters.every(isAdapterView) &&
+    Array.isArray(view.contexts) &&
+    view.contexts.every(isContextView) &&
+    isNonNegativeInt(view.embeddingBacklog) &&
+    typeof view.canRetry === "boolean" &&
+    typeof view.canConfigure === "boolean" &&
+    typeof view.organizationId === "string" &&
+    typeof view.serverTime === "string"
+  );
+}
+
+export function memoryIntegrationHealthQueryOptions(input: {
+  organizationId: string;
+  fetchHealth?: () => Promise<unknown>;
+}) {
+  return {
+    queryKey: memoryQueryKeys.health(input.organizationId),
+    queryFn: async () => {
+      const body = input.fetchHealth
+        ? await input.fetchHealth()
+        : await memoryRequest<unknown>(`${memoryBasePath(input.organizationId)}/health`);
+      if (!isHealthResponse(body)) {
+        throw new MemoryRequestError(
+          "UNEXPECTED_ERROR",
+          "Connection health is not available yet.",
+          503,
+          true,
+        );
+      }
+      return body.health;
+    },
+    // Adapter backlogs move on a worker cadence, not per keystroke; a short
+    // stale window keeps the panel honest without re-requesting on every tab
+    // switch.
+    staleTime: 30_000,
+  };
+}
+
+/**
+ * Explicit domain outcome of a capture retry. HTTP success with `replayed` or
+ * `refused` must never display new-success copy: the caller maps each status
+ * to its own words (see `retryOutcomeCopy` in integration-health.tsx).
+ */
+export type CaptureRetryOutcome =
+  | { status: "retried" }
+  | { status: "replayed" }
+  | { status: "refused"; reason: string };
+
+/**
+ * Identifier-only retry of one failed or quarantined capture. Only failed or
+ * quarantined captures are retryable; anything else is a refusal, not a new
+ * attempt. Authorization failures are refusals too — the caller reports them
+ * instead of throwing a raw error at the operator.
+ */
+export async function requestCaptureRetry(input: {
+  organizationId: string;
+  captureId: string;
+  request?: (url: string, init?: RequestInit) => Promise<Response>;
+}): Promise<CaptureRetryOutcome> {
+  const run = input.request ?? fetch;
+  const response = await run(
+    `${memoryBasePath(input.organizationId)}/captures/${input.captureId}/retry`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (response.ok) {
+    if (body?.replayed === true) return { status: "replayed" };
+    if (body?.status === "refused")
+      return {
+        status: "refused",
+        reason: typeof body.reason === "string" ? body.reason : "The retry was refused.",
+      };
+    return { status: "retried" };
+  }
+  if (response.status === 403 || response.status === 404 || response.status === 409) {
+    const message =
+      body !== null && typeof body === "object" && body !== undefined
+        ? (body as { error?: { message?: unknown } }).error?.message
+        : undefined;
+    return {
+      status: "refused",
+      reason: typeof message === "string" ? message : "The retry was refused.",
+    };
+  }
+  throw new MemoryRequestError(
+    "UNEXPECTED_ERROR",
+    "The retry could not be completed. Please try again.",
+    response.status,
+    true,
+  );
+}
+
+/**
+ * Explicit domain outcome of an integration-settings change. The settings RPC
+ * upserts, so there is no replayed state to report; the distinction that
+ * matters here is applied versus refused.
+ */
+export type IntegrationSettingsOutcome =
+  | { status: "updated" }
+  | { status: "refused"; reason: string };
+
+/**
+ * Owner/admin settings change with explicit booleans. Every flag is sent
+ * every time so the server never has to guess what an omitted field meant.
+ */
+export async function updateMemoryIntegrationSettings(input: {
+  organizationId: string;
+  settings: {
+    captureEnabled: boolean;
+    channelContextEnabled: boolean;
+    growthContextEnabled: boolean;
+    campaignContextEnabled: boolean;
+    subjectContextEnabled: boolean;
+    legacyCorpusQualified: boolean;
+    contextPolicyVersion: string;
+  };
+  request?: (url: string, init?: RequestInit) => Promise<Response>;
+}): Promise<IntegrationSettingsOutcome> {
+  const run = input.request ?? fetch;
+  const response = await run(`${memoryBasePath(input.organizationId)}/integrations`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input.settings),
+  });
+  if (response.ok) return { status: "updated" };
+  if (response.status === 400 || response.status === 403 || response.status === 409) {
+    const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    const message =
+      body !== null && typeof body === "object"
+        ? (body as { error?: { message?: unknown } }).error?.message
+        : undefined;
+    return {
+      status: "refused",
+      reason: typeof message === "string" ? message : "The settings change was refused.",
+    };
+  }
+  throw new MemoryRequestError(
+    "UNEXPECTED_ERROR",
+    "The settings change could not be completed. Please try again.",
+    response.status,
+    true,
+  );
 }
 
 export function memoryItemQueryOptions(input: {

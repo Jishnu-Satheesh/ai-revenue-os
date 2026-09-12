@@ -61,6 +61,9 @@ const unjudgedRecommendationShape = z.object({
   channel_recommendation_citations: z.array(
     z.object({
       finding_id: z.string().uuid(),
+      // A single embedded object, not an array: the citation's finding_id is
+      // a many-to-one foreign key, and PostgREST embeds a to-one relationship
+      // as one object (or null), never a list.
       channel_findings: z
         .object({
           detector_key: z.string().nullable(),
@@ -74,7 +77,6 @@ const unjudgedRecommendationShape = z.object({
           currency: z.string().nullable(),
           limitations: z.unknown(),
         })
-        .array()
         .nullable(),
     }),
   ),
@@ -90,9 +92,7 @@ function toUnjudged(row: z.infer<typeof unjudgedRecommendationShape>): UnjudgedR
     limitations: row.limitations,
     promptVersion: row.prompt_version,
     citations: row.channel_recommendation_citations.map((citation) => {
-      const finding = Array.isArray(citation.channel_findings)
-        ? citation.channel_findings[0]
-        : citation.channel_findings;
+      const finding = citation.channel_findings;
       return {
         findingId: citation.finding_id,
         detectorKey: finding?.detector_key ?? null,
@@ -107,6 +107,9 @@ function toUnjudged(row: z.infer<typeof unjudgedRecommendationShape>): UnjudgedR
 }
 
 export { channelRecommendationsTaskSchema };
+// Exported for the loadUnjudged row-shape regression test only: production
+// code reaches these solely through the evaluate task's own closure.
+export { unjudgedRecommendationShape, toUnjudged };
 
 function toStringArray(value: unknown): string[] {
   return Array.isArray(value)

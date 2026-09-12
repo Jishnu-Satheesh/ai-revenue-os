@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -12,6 +12,7 @@ const mocks = {
 };
 
 import { HomeCampaigns } from "@/components/organizations/home/home-campaigns";
+import styles from "@/components/organizations/home/organization-home.module.css";
 import type {
   HomeCampaign,
   HomeSection,
@@ -139,7 +140,7 @@ describe("HomeCampaigns layouts", () => {
     expect(link).toHaveAttribute("href", `/organizations/${ORG_ID}/campaigns`);
   });
 
-  it("preserves the fallback artwork label instead of hiding it", () => {
+  it("overlays the artwork label as a chip inside the art container", () => {
     render(
       <HomeCampaigns
         organizationId={ORG_ID}
@@ -159,8 +160,89 @@ describe("HomeCampaigns layouts", () => {
         canCreateCampaign
       />,
     );
-    expect(screen.getByText("Campaign image")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Campaign artwork" })).toBeInTheDocument();
+    const card = screen
+      .getByRole("heading", { name: "Ramadan Push" })
+      .closest('[data-slot="card"]');
+    expect(card).not.toBeNull();
+    const chip = within(card as HTMLElement).getByText("Campaign image");
+    expect(chip.tagName).toBe("SPAN");
+    // The chip shares its container with the artwork image: it overlays the
+    // art instead of rendering as a plain-text line in the info block.
+    expect(chip.parentElement?.querySelector("img")).toBeInTheDocument();
+  });
+
+  it("ends each card with a divider foot row: short date left, inline text CTA right", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={ready([campaign()])}
+        canCreateCampaign
+      />,
+    );
+    const card = screen
+      .getByRole("heading", { name: "Ramadan Push" })
+      .closest('[data-slot="card"]');
+    expect(card).not.toBeNull();
+    const cta = within(card as HTMLElement).getByRole("link", {
+      name: /review campaign/i,
+    });
+    expect(cta).toHaveAttribute(
+      "href",
+      `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_1}`,
+    );
+    // Inline emerald text-link, never the old full-width outlined button.
+    expect(cta.className).toContain("text-primary");
+    expect(cta.className).not.toContain(styles.homeButton);
+    const foot = cta.parentElement;
+    expect(foot?.querySelector("time")).not.toBeNull();
+    expect(within(foot as HTMLElement).getAllByRole("link")).toHaveLength(1);
+    expect(within(card as HTMLElement).queryByRole("button")).toBeNull();
+  });
+
+  it("renders short campaign dates with no year or time", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={ready([campaign()])}
+        canCreateCampaign
+      />,
+    );
+    const card = screen
+      .getByRole("heading", { name: "Ramadan Push" })
+      .closest('[data-slot="card"]');
+    expect(card).not.toBeNull();
+    // 2026-09-10T10:00Z is 10 Sep in Asia/Dubai; September also pins the
+    // "Sept" -> "Sep" normalization shared with the activity dates.
+    const date = within(card as HTMLElement).getByText("10 Sep");
+    expect(date.closest("time")).toHaveAttribute(
+      "dateTime",
+      "2026-09-10T10:00:00.000Z",
+    );
+    expect(card?.textContent).not.toMatch(/2026/);
+  });
+
+  it("tints state tags soft green for drafts and soft amber for review states", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={ready([
+          campaign({ state: "draft", actionLabel: "View campaign" }),
+          campaign({
+            id: CAMPAIGN_2,
+            title: "Second Push",
+            state: "ready_for_review",
+            actionLabel: "Review campaign",
+            href: `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_2}`,
+          }),
+        ])}
+        canCreateCampaign
+      />,
+    );
+    expect(screen.getByText("Draft").className).toContain("bg-success/12");
+    expect(screen.getByText("Ready For Review").className).toContain("bg-warning/18");
   });
 
   it("shows viewer wording with no creation affordance", () => {

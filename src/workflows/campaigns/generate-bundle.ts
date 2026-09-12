@@ -106,6 +106,12 @@ export type GenerationSnapshotReader = {
     subjectDescription: string | null;
     creativeDirection: string | null;
     syntheticAssetsAllowed: boolean;
+    /**
+     * The pinned shared-memory manifest for this run, if any. Pinned to the
+     * claimed run so revalidation is a new bounded attempt, never a silent
+     * swap. Text-only: it may shape copy, never assertions, spend, or pixels.
+     */
+    memoryContext?: { manifestId: string; digest: string } | null;
   } | null>;
 };
 
@@ -172,6 +178,13 @@ export type CampaignImageGuidance = {
   blueprintsByAssetId: Readonly<Record<string, ArtDirectionBlueprint>>;
   /** Organization rules appended after the blueprint. */
   hardConstraints: readonly string[];
+  /**
+   * The shared-memory digest carried in provenance, if any. Rejected or
+   * historical design bytes never reach final image generation: only the
+   * digest travels, never the bytes, and text-only context never overrides
+   * assertions, spend, legal, brand, or asset truth.
+   */
+  memoryContextDigest?: string | null;
 };
 
 export type CampaignBlueprintPlanner = {
@@ -324,6 +337,7 @@ export async function generateCampaignBundle(
       syntheticAssetsAllowed: pinned.syntheticAssetsAllowed,
       now: (dependencies.clock ?? (() => new Date()))(),
       scheduleLeadMinutes: dependencies.scheduleLeadMinutes,
+      memoryContext: pinned.memoryContext ?? null,
     });
 
     // A readiness gap is an ordinary outcome, not a failure of the run. It is
@@ -531,6 +545,7 @@ export async function generateCampaignBundle(
         references,
         blueprintsByAssetId,
         hardConstraints: context.hardConstraints,
+        memoryContextDigest: context.memoryContextDigest,
       },
     });
     spentMinor += materialized.costMinor ?? 0;
