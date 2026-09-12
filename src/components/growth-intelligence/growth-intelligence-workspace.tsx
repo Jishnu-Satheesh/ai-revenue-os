@@ -1,9 +1,8 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, CheckCircle2, Clock3, RefreshCw, Settings2, Sparkles } from "lucide-react";
+import { ArrowRight, Clock3, RefreshCw, Settings2, Sparkles } from "lucide-react";
 
 import { formatWindow } from "@/components/analysis/format";
 import { WindowRangePicker } from "@/components/analysis/window-range-picker";
@@ -18,9 +17,9 @@ import {
 import { PriorityActions } from "@/components/growth-intelligence/priority-actions";
 import {
   MARKET_MONITORING_OPEN_EVENT,
-  previousMonth,
   requestMarketMonitoringDialog,
 } from "@/components/growth-intelligence/query-options";
+import { YourActionsTab } from "@/components/growth-intelligence/your-actions-tab";
 import {
   ResearchProgress,
   useResearchPipeline,
@@ -379,7 +378,6 @@ export function GrowthIntelligenceWorkspace({
   branches?: MonitoringBranchOption[];
   selectedBranchId?: string | null;
 }) {
-  const base = growthIntelligencePath(organizationId);
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");
   const [monitoringOpen, setMonitoringOpen] = useState(false);
@@ -570,30 +568,15 @@ export function GrowthIntelligenceWorkspace({
         </TabsContent>
 
         <TabsContent value="actions" className="flex flex-col gap-6">
-          <nav aria-label="Activity month" className="flex flex-wrap items-center gap-3 text-sm">
-            <Badge variant="outline">Activity {view.activityMonth}</Badge>
-            <Link
-              className="font-medium text-primary hover:underline"
-              href={`${base}?month=${previousMonth(view.activityMonth)}#actions`}
-            >
-              Previous month
-            </Link>
-            {isCurrentMonth ? null : (
-              <Link className="font-medium text-primary hover:underline" href={`${base}#actions`}>
-                Back to current month
-              </Link>
-            )}
-          </nav>
-          {acted.length > 0 ? (
-            <IntelligenceTimeline events={acted} timeZone={view.timeZone} />
-          ) : (
-            <Card>
-              <CardContent className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
-                <CheckCircle2 aria-hidden="true" />
-                No recorded actions for this activity month.
-              </CardContent>
-            </Card>
-          )}
+          <YourActionsTab
+            events={acted}
+            opportunities={view.priorityActions.opportunities}
+            organizationId={organizationId}
+            timeZone={view.timeZone}
+            performanceFilters={performanceFilters}
+            activityMonth={view.activityMonth}
+            isCurrentMonth={isCurrentMonth}
+          />
         </TabsContent>
 
         <TabsContent value="insights" className="grid items-start gap-8 lg:grid-cols-2">

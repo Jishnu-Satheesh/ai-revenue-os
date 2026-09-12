@@ -181,7 +181,53 @@ export type TimelineEvent = {
   title: string;
   occurredAt: string;
   reason: string | null;
+  /**
+   * Owning channel/branch for the scope line on Your actions. Null when the
+   * source has no single channel (synthesized cross-market items,
+   * opportunities, research pipelines). Optional so older fixtures compile;
+   * missing means the row carries no scope.
+   */
+  channelId?: string | null;
+  branchId?: string | null;
+  /** Required horizon while the event is a snooze; null otherwise. */
+  snoozedUntil?: string | null;
 };
+
+/**
+ * Decision filters for the Your actions tab. Research and draft lifecycle
+ * rows belong to All only; a named decision filter shows its decision type.
+ */
+export const YOUR_ACTION_FILTERS = [
+  "all",
+  "planned",
+  "acknowledged",
+  "snoozed",
+  "dismissed",
+] as const;
+
+export type YourActionFilter = (typeof YOUR_ACTION_FILTERS)[number];
+
+export function parseYourActionFilter(value: string | null | undefined): YourActionFilter {
+  return value === "planned" ||
+    value === "acknowledged" ||
+    value === "snoozed" ||
+    value === "dismissed"
+    ? value
+    : "all";
+}
+
+/**
+ * Client-side filter for the Your actions list. The caller already excludes
+ * generated rows; All keeps every acted row, a named filter keeps only its
+ * decision type so research and draft rows never leak into a decision slice.
+ */
+export function filterYourActionEvents(
+  events: readonly TimelineEvent[],
+  filter: YourActionFilter,
+): TimelineEvent[] {
+  if (filter === "all") return [...events];
+  return events.filter((event) => event.type === filter);
+}
 
 export type GrowthIntelligenceViewInput = {
   organizationId: string;
@@ -456,8 +502,18 @@ function pushTimeline(
   generatedAt: string,
   decision: string | null,
   decidedAt: string | null,
+  scope?: { channelId?: string | null; branchId?: string | null; snoozedUntil?: string | null },
 ): void {
-  events.push({ type: "generated", source, title, occurredAt: generatedAt, reason: null });
+  events.push({
+    type: "generated",
+    source,
+    title,
+    occurredAt: generatedAt,
+    reason: null,
+    channelId: scope?.channelId ?? null,
+    branchId: scope?.branchId ?? null,
+    snoozedUntil: null,
+  });
   if (decision && decidedAt && decision !== "pinned" && decision !== "unpinned") {
     events.push({
       type: decision as TimelineEventType,
@@ -465,6 +521,9 @@ function pushTimeline(
       title,
       occurredAt: decidedAt,
       reason: null,
+      channelId: scope?.channelId ?? null,
+      branchId: scope?.branchId ?? null,
+      snoozedUntil: scope?.snoozedUntil ?? null,
     });
   }
 }
@@ -624,6 +683,11 @@ export function buildGrowthIntelligenceView(
         row.generatedAt,
         row.decision?.decision ?? null,
         row.decision?.createdAt ?? null,
+        {
+          channelId: row.channelId,
+          branchId: row.branchId,
+          snoozedUntil: row.decision?.snoozedUntil ?? null,
+        },
       );
     }
     for (const row of uniqueItems) {
@@ -634,6 +698,7 @@ export function buildGrowthIntelligenceView(
         row.generatedAt,
         row.decision,
         row.decidedAt,
+        { channelId: null, branchId: null, snoozedUntil: row.snoozedUntil },
       );
     }
     for (const event of input.researchActivity ?? []) {

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { OpportunityFeedItem } from "@/modules/decisions/application/ports";
 import {
   buildGrowthIntelligenceView,
+  filterYourActionEvents,
+  parseYourActionFilter,
   type ChannelRecommendationRow,
   type GrowthIntelligenceViewInput,
   type SynthesizedItemRow,
@@ -484,5 +486,113 @@ describe("research provenance", () => {
     expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
       0,
     );
+  });
+});
+
+describe("Your actions filters", () => {
+  it("falls back to All for unknown decision values", () => {
+    expect(parseYourActionFilter(null)).toBe("all");
+    expect(parseYourActionFilter("research-started")).toBe("all");
+    expect(parseYourActionFilter("planned")).toBe("planned");
+  });
+
+  it("keeps research and draft rows under All only", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            decision: {
+              decision: "planned",
+              snoozedUntil: null,
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+        researchActivity: [
+          {
+            kind: "started" as const,
+            pipelineId: "30000000-0000-4000-8000-000000000003",
+            branchId: "20000000-0000-4000-8000-000000000002",
+            scopeLabel: "Marina",
+            title: "Market research started — Marina",
+            occurredAt: "2026-09-01T08:00:00.000Z",
+            stage: null,
+          },
+        ],
+      }),
+    );
+    const acted = view.timeline.filter((event) => event.type !== "generated");
+    expect(filterYourActionEvents(acted, "all").length).toBe(acted.length);
+    expect(
+      filterYourActionEvents(acted, "planned").every((event) => event.type === "planned"),
+    ).toBe(true);
+    expect(filterYourActionEvents(acted, "planned").length).toBeGreaterThan(0);
+    expect(filterYourActionEvents(acted, "snoozed")).toHaveLength(0);
+  });
+
+  it("isolates dismissed rows under their own filter", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            decision: {
+              decision: "dismissed",
+              snoozedUntil: null,
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+      }),
+    );
+    const acted = view.timeline.filter((event) => event.type !== "generated");
+    expect(filterYourActionEvents(acted, "dismissed").map((event) => event.type)).toEqual([
+      "dismissed",
+    ]);
+    expect(filterYourActionEvents(acted, "planned")).toHaveLength(0);
+  });
+
+  it("keeps resolved rows under All only, with no dedicated pill", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        items: [
+          item({
+            decision: "resolved",
+            decidedAt: "2026-09-03T08:00:00.000Z",
+          }),
+        ],
+      }),
+    );
+    const acted = view.timeline.filter((event) => event.type !== "generated");
+    expect(acted.map((event) => event.type)).toContain("resolved");
+    expect(filterYourActionEvents(acted, "all").map((event) => event.type)).toContain("resolved");
+    for (const filter of ["planned", "acknowledged", "snoozed", "dismissed"] as const) {
+      expect(filterYourActionEvents(acted, filter).some((event) => event.type === "resolved")).toBe(
+        false,
+      );
+    }
+  });
+
+  it("carries channel scope and the snooze horizon on the timeline row", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            channelId: "61000000-0000-4000-8000-000000000061",
+            branchId: "62000000-0000-4000-8000-000000000062",
+            decision: {
+              decision: "snoozed",
+              snoozedUntil: "2026-09-10T00:00:00.000Z",
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+      }),
+    );
+    const snoozed = view.timeline.find((event) => event.type === "snoozed");
+    expect(snoozed).toMatchObject({
+      channelId: "61000000-0000-4000-8000-000000000061",
+      branchId: "62000000-0000-4000-8000-000000000062",
+      snoozedUntil: "2026-09-10T00:00:00.000Z",
+    });
   });
 });
