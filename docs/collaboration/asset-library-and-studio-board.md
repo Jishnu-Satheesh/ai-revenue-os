@@ -6443,6 +6443,10 @@ through the real routes, not only in tests.
 - Traps learned: OUT-param alias lists abort 42601; COALESCE/NULLIF/CAST/current_date are syntax, never qualified; string literals never append to arrays with ||; completed runs need completed_at + result_digest; findings need severity + priority; union-of-grants governs revocation tests.
 - Open: 90-day janitor undecided; abandoned/output-associations ride consumer wiring; first scheduled reconcile unwitnessed.
 
+### 2026-09-11 — Swarm dispatched (5 parallel implementers, BASE 3136228)
+
+- Briefs swarm-1..5 (Channel reads/UI, Growth capture, Growth reads, Campaigns, Ops/backfill). Disjoint allowlists; shared files (database.types test, memory index) controller-merged. No pushes from workers; controller reviews + pushes sequentially, real-world verification last.
+
 ### 2026-09-11 — Channels free-range picker + loader (approved plan, implemented)
 
 - User: same free from/to calendar as GI/Channel Audit (limited to reported coverage); GI full-page spinner over content (not navbar/side menu) instead of blank while the new dates load.
