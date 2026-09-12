@@ -6572,3 +6572,10 @@ through the real routes, not only in tests.
   accounts and record their skip.
 - Next: reviewer checks the e2e file + notes + exits, then one credentialed
   staging run to turn the 16 skips into evidence.
+
+### 2026-09-11 — Your actions slice committed as a0bf01e (no push)
+
+- Staged only owned hunks via patch filtering plus 7 new files; peer hunks
+  (maps, restyle, props, narration fields, stored-actions test) untouched.
+  Tab derives its own scope maps from performanceFilters to avoid sharing
+  the peer's maps hunk. Push is the user's step.
