@@ -6504,3 +6504,67 @@ through the real routes, not only in tests.
   synthesis-service overlap checks, campaign-evidence-repository (`impactEvidence: null`).
   No `src/` edits, no migration, no stash, no commit (left uncommitted for review).
 - Next: user approves spec/ADR, then calculation contract + execution plan follow.
+
+### 2026-09-11 — Organization home Task 2 home campaign reader + preview storage (bounded, muse-spark)
+
+- New, uncommitted: `src/modules/campaigns/infrastructure/home-preview-storage.ts`
+  (`HOME_PREVIEW_TTL_SECONDS = 600`, `signHomePreviewImages`, Task 3 reuses it),
+  `src/modules/campaigns/infrastructure/home-campaign-reader.ts`
+  (`readHomeCampaigns`: 3-id bounded recipe via existing getCampaign/getVersion/
+  latestGenerationRun only, poster-then-asset cover with latest-review gate),
+  plus both `.test.ts` files and the Task 2 report. Imports Task 1 types only.
+- Gates: TDD red (missing modules) then green — brief 4-file command 52/52,
+  `tsc --noEmit` clean, eslint clean, prettier applied. No migration, no
+  `database.types.ts`, no service role, no stash, no commit (left for review).
+- Tenant posture: UUID + org equality at every row/domain boundary; cross-tenant
+  rows fail safe, never render. Rejected artwork yields null cover, no signing,
+  no older-asset retry. Cover failures log `organization_home.preview_failed`
+  with codes only.
+- Next: Task 3 reuses `signHomePreviewImages`/`HOME_PREVIEW_TTL_SECONDS`; Task 4
+  calls `readHomeCampaigns` and settles its `DomainError` into a failed source.
+
+### 2026-09-11 — Organization home Task 3 asset gallery + logo readers (bounded, muse-spark)
+
+- New, uncommitted: `src/modules/campaigns/infrastructure/home-asset-reader.ts`
+  (`readHomePosterAssets`/`readHomeReferenceAssets`/`readHomeLogo` + `HomeAssetPersistence`
+  naming only the five recipe tables with bounded `.in` ≤ 4; reuses Task 2 signing and
+  Task 1 `AssetHomeRecord`, nothing redefined), plus its `.test.ts` and the Task 3 report.
+- Gates: TDD red (missing module) then green — brief 3-file command 50/50 at completion,
+  53/53 after fix round 1/5 (added traversal-path + version-fallback tests). `tsc --noEmit`
+  was red at completion on the test `from` mock tuple type (TS2493; the earlier "clean" was a
+  piped-exit misread) — fixed per review to the `(_bucket: string)` mock signature, re-run
+  exit 0. Eslint 0 errors (1 pre-existing unused-param warning on that prescribed signature).
+  No migration, no `database.types.ts`, no RLS/bucket/worker/endpoint/model change, no stash,
+  no commit (left for review).
+- Tenant posture: UUID + org equality on every row; cross-tenant/mismatched-linkage rows
+  fail the source safe, never render. Rejected references omitted after reading the latest
+  verdict only; storage failure degrades to ready metadata with null image. Logo null on
+  missing/ambiguous/rejected/unreviewed/sign-failure; `brand_context` never read.
+  All logs are `organization_home.preview_failed` with org/correlation/source/code only.
+- Test-seed repair (same file, fail-first draft leftover): `brandVersion` defaults
+  `is_usable: true`, `posterRender` defaults `state: "rendered"` — the faithful query spy
+  applies the brief-mandated filters, so seeds must carry the fields the recipe filters on.
+- Next: Task 4 merges ≤ 4 posters + ≤ 4 refs by recordedAt DESC, composite id ASC, take 4,
+  and settles reader `DomainError`s into failed sources (logo null stays a null logo).
+
+### 2026-09-11 — Organization home Task 7 verify experience + tenant boundaries (no new behavior, muse-spark)
+
+- New, uncommitted: `e2e/organization-home.spec.ts` (3 unauthenticated
+  boundary tests + 16 skip-gated authenticated tests reusing the
+  E2E_INTEGRATION_*/E2E_OPERATOR_*/E2E_VIEWER_* fixture names; nothing created
+  or seeded), `docs/verification/organization-home/verification.md`
+  (sanitized notes), Task 7 ledger section in
+  `docs/verification/organization-home/progress.md`, and the Task 7 report.
+- Gates: typecheck 0; full lint 1 (14 pre-existing errors, all unrelated
+  files); full test 1 (6 unrelated failures: 5 expired meta_campaign provider
+  fixture, 1 database.types drift); build 0; Playwright spec 0 (3 passed,
+  16 skipped — no E2E creds here, skip is not pass); prettier applied to the
+  new spec only; focused 11-file slice re-run 160/160. No src/ behavior
+  change, no migration/types/RLS/bucket/worker/endpoint/model, no stash,
+  no commit (left for review).
+- Tenant posture: unauthenticated page/API refusals proven green with no
+  leakage; session-A/tenant-B proofs stay encoded-but-skipped pending one
+  staging run with seeded accounts. Owner/admin flows have no fixture
+  accounts and record their skip.
+- Next: reviewer checks the e2e file + notes + exits, then one credentialed
+  staging run to turn the 16 skips into evidence.
