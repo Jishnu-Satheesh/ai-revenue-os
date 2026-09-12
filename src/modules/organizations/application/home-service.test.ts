@@ -857,6 +857,115 @@ describe("activity", () => {
     expect(serialized.toLowerCase()).not.toContain("published");
   });
 
+describe("destinations copy", () => {
+  it("uses the reference descriptions verbatim with the Integration Hub label", () => {
+    const view = buildOrganizationHomeView(viewInput("admin", { snap: snapshot(), src: sources() }));
+    expect(view.destinations.map((d) => [d.label, d.description])).toEqual([
+      ["Channels", "See channel performance and explore your reports."],
+      ["Growth Intelligence", "Explore findings, recommendations and your actions."],
+      ["Business Memory", "Keep your business knowledge and decisions together."],
+      ["Integration Hub", "Manage sources and bring in your latest reports."],
+    ]);
+    for (const destination of view.destinations) {
+      expect(destination.href).toContain(ORG_ID);
+    }
+  });
+});
+
+describe("activity labels", () => {
+  it("renders poster timestamps as Poster rendered alongside Reference added", () => {
+    const view = buildOrganizationHomeView(
+      viewInput("admin", {
+        snap: snapshot(),
+        src: sources({
+          campaigns: ready([]),
+          posters: ready([assetRecord()]),
+          references: ready([
+            assetRecord({
+              id: "reference:55555555-5555-4555-8555-555555555553",
+              sourceKind: "brand_reference",
+              sourceLabel: "Brand reference",
+              recordedAt: "2026-09-08T10:00:00.000Z",
+              sourceHref: `/organizations/${ORG_ID}/assets`,
+            }),
+          ]),
+        }),
+      }),
+    );
+    const labels = new Map(view.activity.map((item) => [item.id, item.label]));
+    expect(labels.get("poster:55555555-5555-4555-8555-555555555551")).toBe("Poster rendered");
+    expect(labels.get("reference:55555555-5555-4555-8555-555555555553")).toBe("Reference added");
+  });
+
+  it("maps every allowlisted organization event to its exact design label", () => {
+    const snap = snapshot({
+      branches: [branchRow(BRANCH_1, { name: "Deira" })],
+      goals: [goalRow(GOAL_ORG, { name: "Grow orders" })],
+      auditEvents: [
+        {
+          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab1",
+          organization_id: ORG_ID,
+          account_id: null,
+          event_name: "organization.created",
+          actor_type: "system",
+          actor_id: null,
+          entity_type: "organization",
+          entity_id: ORG_ID,
+          correlation_id: "corr-b1",
+          payload: {},
+          occurred_at: "2026-09-04T10:00:00.000Z",
+        },
+        {
+          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab2",
+          organization_id: ORG_ID,
+          account_id: null,
+          event_name: "branch.created",
+          actor_type: "user",
+          actor_id: null,
+          entity_type: "branch",
+          entity_id: BRANCH_1,
+          correlation_id: "corr-b2",
+          payload: {},
+          occurred_at: "2026-09-03T10:00:00.000Z",
+        },
+        {
+          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab3",
+          organization_id: ORG_ID,
+          account_id: null,
+          event_name: "business_profile.updated",
+          actor_type: "user",
+          actor_id: null,
+          entity_type: "business_profile",
+          entity_id: null,
+          correlation_id: "corr-b3",
+          payload: {},
+          occurred_at: "2026-09-02T10:00:00.000Z",
+        },
+        {
+          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab4",
+          organization_id: ORG_ID,
+          account_id: null,
+          event_name: "goal.created",
+          actor_type: "user",
+          actor_id: null,
+          entity_type: "goal",
+          entity_id: GOAL_ORG,
+          correlation_id: "corr-b4",
+          payload: {},
+          occurred_at: "2026-09-01T10:00:00.000Z",
+        },
+      ],
+    });
+    const view = buildOrganizationHomeView(viewInput("admin", { snap, src: sources() }));
+    const labels = new Map(view.activity.map((item) => [item.id, item.label]));
+    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab1")).toBe("Organization created");
+    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab2")).toBe("Location added");
+    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab3")).toBe(
+      "Business profile updated",
+    );
+    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab4")).toBe("Goal added");
+  });
+});
   it("viewers get null hrefs for organization events", () => {
     const snap = snapshot({
       auditEvents: [

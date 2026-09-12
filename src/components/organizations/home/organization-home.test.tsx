@@ -145,13 +145,13 @@ function view(overrides: Partial<OrganizationHomeView> = {}): OrganizationHomeVi
       {
         key: "channels",
         label: "Channels",
-        description: "See organization-owned channels and their mappings.",
+        description: "See channel performance and explore your reports.",
         href: `/organizations/${ORG_ID}/channels`,
       },
       {
         key: "memory",
         label: "Business Memory",
-        description: "Read business memory that is not sensitive.",
+        description: "Keep your business knowledge and decisions together.",
         href: `/organizations/${ORG_ID}/memory`,
       },
     ],
@@ -168,10 +168,10 @@ describe("OrganizationHome composition", () => {
       .map((heading) => heading.textContent ?? "");
     const order = [
       "Al Noor Kitchen",
-      "Campaigns",
-      "Asset library",
-      "Needs attention",
-      "Goals",
+      "Your campaigns",
+      "Your creative library",
+      "For your attention",
+      "Your focus",
       "Around your business",
       "Recent activity",
     ];
@@ -311,7 +311,7 @@ describe("OrganizationHome composition", () => {
         })}
       />,
     );
-    const campaigns = screen.getByRole("region", { name: "Campaigns" });
+    const campaigns = screen.getByRole("region", { name: "Your campaigns" });
     expect(
       within(campaigns).getByRole("link", { name: "View campaign" }),
     ).toBeInTheDocument();
@@ -356,6 +356,69 @@ describe("OrganizationHome attention wording", () => {
 });
 
 describe("OrganizationHome header", () => {
+  it("shows the eyebrow, sentence-case status, and active-location count", () => {
+    render(<OrganizationHome view={view()} />);
+    expect(screen.getByText("Your organization")).toBeInTheDocument();
+    expect(screen.getByText("Active organization")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "2 active locations" }),
+    ).toBeInTheDocument();
+  });
+
+  it("captions the campaigns and library sections with the reference copy", () => {
+    render(<OrganizationHome view={view()} />);
+    expect(screen.getByText("Recent work, ready to pick up.")).toBeInTheDocument();
+    expect(
+      screen.getByText("A little of what makes your business yours."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Asset Library" }),
+    ).toHaveAttribute("href", `/organizations/${ORG_ID}/assets`);
+  });
+
+  it("names each attention row's source", () => {
+    render(<OrganizationHome view={view()} />);
+    const attention = screen.getByRole("region", { name: "For your attention" });
+    expect(within(attention).getByText("Campaign")).toBeInTheDocument();
+  });
+
+  it("renders activity timestamps with the org timezone name", () => {
+    render(<OrganizationHome view={view()} />);
+    const activity = screen.getByRole("region", { name: "Recent activity" });
+    expect(
+      within(activity).getByText("10 Sep 2026 · 14:00, Asia/Dubai"),
+    ).toBeInTheDocument();
+  });
+
+  it("prompts managers with the reference goal copy linked to management", () => {
+    render(<OrganizationHome view={view({ goals: [], focusGoalId: null })} />);
+    expect(screen.getByText("What are you working towards?")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "your organization details" }),
+    ).toHaveAttribute("href", "#organization-management");
+  });
+
+  it("keeps the viewer goal prompt neutral with no management path", () => {
+    render(
+      <OrganizationHome
+        view={view({
+          goals: [],
+          focusGoalId: null,
+          permissions: {
+            canCreateCampaign: false,
+            canEditCampaign: false,
+            canReviewCampaign: false,
+            canManageCore: false,
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("No goals on file yet.")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "your organization details" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("links management to its anchor and creation to the campaign route", () => {
     render(<OrganizationHome view={view()} />);
     expect(screen.getByRole("link", { name: /manage/i })).toHaveAttribute(
@@ -371,7 +434,7 @@ describe("OrganizationHome header", () => {
   it("opens the read-only locations dialog from the context row", async () => {
     const user = userEvent.setup();
     render(<OrganizationHome view={view()} />);
-    await user.click(screen.getByRole("button", { name: /2 locations/i }));
+    await user.click(screen.getByRole("button", { name: /2 active locations/i }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Deira")).toBeInTheDocument();
     expect(within(dialog).getByText("Online")).toBeInTheDocument();

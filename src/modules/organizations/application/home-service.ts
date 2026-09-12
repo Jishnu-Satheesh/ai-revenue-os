@@ -260,7 +260,7 @@ function buildActivity(input: {
     const isPoster = asset.sourceKind === "poster_render";
     candidates.push({
       id: asset.id,
-      label: isPoster ? "Poster render added" : "Reference added",
+      label: isPoster ? "Poster rendered" : "Reference added",
       title: asset.label,
       occurredAt: asset.recordedAt,
       href: asset.sourceHref,
@@ -320,7 +320,7 @@ function buildDestinations(input: {
     destinations.push({
       key: "channels",
       label: "Channels",
-      description: "See organization-owned channels and their mappings.",
+      description: "See channel performance and explore your reports.",
       href: `/organizations/${input.organizationId}/channels`,
     });
   }
@@ -328,7 +328,7 @@ function buildDestinations(input: {
     destinations.push({
       key: "growth",
       label: "Growth Intelligence",
-      description: "Read governed business and market intelligence.",
+      description: "Explore findings, recommendations and your actions.",
       href: `/organizations/${input.organizationId}/growth-intelligence`,
     });
   }
@@ -336,15 +336,15 @@ function buildDestinations(input: {
     destinations.push({
       key: "memory",
       label: "Business Memory",
-      description: "Read business memory that is not sensitive.",
+      description: "Keep your business knowledge and decisions together.",
       href: `/organizations/${input.organizationId}/memory`,
     });
   }
   if (input.gates.integrations && hasOrganizationPermission(input.role, "integration.read")) {
     destinations.push({
       key: "integrations",
-      label: "Integrations",
-      description: "See connections, data sources, and their health.",
+      label: "Integration Hub",
+      description: "Manage sources and bring in your latest reports.",
       href: `/organizations/${input.organizationId}/integrations`,
     });
   }

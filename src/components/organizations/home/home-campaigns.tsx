@@ -15,7 +15,7 @@ import type {
 import styles from "@/components/organizations/home/organization-home.module.css";
 
 function formatInstant(value: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
+  const formatted = new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -24,6 +24,9 @@ function formatInstant(value: string, timeZone: string): string {
     hourCycle: "h23",
     timeZone,
   }).format(new Date(value));
+  // en-GB abbreviates September as "Sept"; the reference writes "Sep". The
+  // org timezone name always trails the time, separated exactly as shown.
+  return `${formatted.replace("Sept", "Sep").replace(",", " ·")}, ${timeZone}`;
 }
 
 function readableState(state: HomeCampaign["state"]): string {
@@ -56,10 +59,13 @@ export function HomeCampaigns({
   const portfolioHref = `/organizations/${organizationId}/campaigns`;
 
   return (
-    <section id="home-campaigns" aria-label="Campaigns" className={styles.campaigns}>
+    <section id="home-campaigns" aria-label="Your campaigns" className={styles.campaigns}>
       <div className={styles.sectionHead}>
-        <h2 className={styles.sectionTitle}>Campaigns</h2>
-        <Button asChild variant="ghost" size="sm">
+        <div>
+          <h2 className={styles.sectionTitle}>Your campaigns</h2>
+          <p className={styles.caption}>Recent work, ready to pick up.</p>
+        </div>
+        <Button asChild variant="link" size="sm">
           <Link href={portfolioHref}>
             All campaigns
             <ArrowRight aria-hidden="true" data-icon="inline-end" />

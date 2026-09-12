@@ -4,7 +4,7 @@ import type { HomeActivityItem } from "@/modules/organizations/application/home-
 import styles from "@/components/organizations/home/organization-home.module.css";
 
 function formatInstant(value: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
+  const formatted = new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -13,6 +13,9 @@ function formatInstant(value: string, timeZone: string): string {
     hourCycle: "h23",
     timeZone,
   }).format(new Date(value));
+  // en-GB abbreviates September as "Sept"; the reference writes "Sep". The
+  // org timezone name always trails the time, separated exactly as shown.
+  return `${formatted.replace("Sept", "Sep").replace(",", " ·")}, ${timeZone}`;
 }
 
 /**

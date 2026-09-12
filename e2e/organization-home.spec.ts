@@ -164,7 +164,7 @@ test.describe("Organization home operator experience", () => {
       // Truthful empty/metadata state: no artwork staged, so there is
       // nothing to fall back — the home still reads honestly.
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-      await expect(page.getByRole("region", { name: "Needs attention" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "For your attention" })).toBeVisible();
       return;
     }
 
@@ -176,7 +176,7 @@ test.describe("Organization home operator experience", () => {
     await expect(page.getByText("Preview unavailable").first()).toBeVisible();
     // Labels and source links survive the image-only failure.
     await expect(
-      page.getByRole("link", { name: /All campaigns|Open Asset Library/ }).first(),
+      page.getByRole("link", { name: /All campaigns|Asset Library/ }).first(),
     ).toBeVisible();
   });
 
@@ -242,7 +242,9 @@ test.describe("Organization home operator experience", () => {
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
     } else {
-      await expect(page.getByText(/No goals on file yet.|Plus [0-9]+ more/)).toBeVisible();
+      await expect(
+        page.getByText(/What are you working towards\?|No goals on file yet\.|Plus [0-9]+ more/),
+      ).toBeVisible();
     }
     // No progress bars, percentages, or timelines anywhere on this surface.
     expect(await page.locator("#home-goals").innerText()).not.toMatch(/%/);
@@ -260,10 +262,10 @@ test.describe("Organization home operator experience", () => {
     const links = section.getByRole("link");
     expect(await links.count()).toBeGreaterThan(0);
     const allowed = new Map([
-      ["Channels", "See organization-owned channels and their mappings."],
-      ["Growth Intelligence", "Read governed business and market intelligence."],
-      ["Business Memory", "Read business memory that is not sensitive."],
-      ["Integrations", "See connections, data sources, and their health."],
+      ["Channels", "See channel performance and explore your reports."],
+      ["Growth Intelligence", "Explore findings, recommendations and your actions."],
+      ["Business Memory", "Keep your business knowledge and decisions together."],
+      ["Integration Hub", "Manage sources and bring in your latest reports."],
     ]);
     for (const link of await links.all()) {
       const href = (await link.getAttribute("href")) ?? "";
@@ -292,7 +294,7 @@ test.describe("Organization home operator experience", () => {
   test("attention captions its count and never mixes partial with all-clear", async ({ page }) => {
     await page.goto(overviewPath(environment!.organizationId));
 
-    const section = page.getByRole("region", { name: "Needs attention" });
+    const section = page.getByRole("region", { name: "For your attention" });
     await expect(section).toBeVisible();
     const rows = await section.locator("li").count();
     expect(rows).toBeLessThanOrEqual(3);
@@ -311,7 +313,7 @@ test.describe("Organization home operator experience", () => {
   }) => {
     await page.goto(overviewPath(environment!.organizationId));
 
-    const manage = page.getByRole("link", { name: "Manage", exact: true });
+    const manage = page.getByRole("link", { name: "Manage organization", exact: true });
     await expect(manage).toHaveAttribute("href", "#organization-management");
     await expect(page.getByRole("link", { name: "New campaign", exact: true })).toHaveAttribute(
       "href",
@@ -408,10 +410,12 @@ test.describe("Organization home viewer restrictions", () => {
     await page.goto(overviewPath(environment!.organizationId));
 
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Needs attention" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "For your attention" })).toBeVisible();
     await expect(page.getByRole("link", { name: "New campaign", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Manage", exact: true })).toHaveCount(0);
-    await expect(page.getByText("Add one from organization management")).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "Manage organization", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByText("your organization details")).toHaveCount(0);
   });
 
   test("a viewer's campaign write is refused by the API, not only by the UI", async ({ page }) => {

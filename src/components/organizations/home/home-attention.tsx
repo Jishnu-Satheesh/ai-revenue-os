@@ -19,10 +19,10 @@ export function HomeAttention({
   const shown = items.slice(0, 3);
 
   return (
-    <section id="home-attention" aria-label="Needs attention" className={styles.attention}>
+    <section id="home-attention" aria-label="For your attention" className={styles.attention}>
       <div className={styles.attentionPanel}>
         <div className={styles.sectionHead}>
-          <h2 className={styles.railTitle}>Needs attention</h2>
+          <h2 className={styles.railTitle}>For your attention</h2>
           {shown.length > 0 ? (
             <span className={styles.caption}>
               {shown.length} shown
@@ -45,6 +45,7 @@ export function HomeAttention({
             <ul className={styles.attentionList}>
               {shown.map((item) => (
                 <li key={item.id} className={styles.attentionRow}>
+                  <span className={styles.caption}>{item.sourceLabel}</span>
                   <span dir="auto" className={styles.attentionTitle}>
                     {item.title}
                   </span>

@@ -33,7 +33,7 @@ const DESTINATION_ICONS = {
 } as const;
 
 function formatInstant(value: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
+  const formatted = new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -42,6 +42,9 @@ function formatInstant(value: string, timeZone: string): string {
     hourCycle: "h23",
     timeZone,
   }).format(new Date(value));
+  // en-GB abbreviates September as "Sept"; the reference writes "Sep". The
+  // org timezone name always trails the time, separated exactly as shown.
+  return `${formatted.replace("Sept", "Sep").replace(",", " ·")}, ${timeZone}`;
 }
 
 /**
@@ -77,7 +80,7 @@ export function LocationsControl({
         aria-haspopup="dialog"
       >
         <MapPin aria-hidden="true" data-icon="inline-start" />
-        {locations.length === 1 ? "1 location" : `${locations.length} locations`}
+        {locations.length === 1 ? "1 active location" : `${locations.length} active locations`}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className={styles.dialogContent}>
@@ -121,30 +124,36 @@ export function HomeGoals({
   const focus = goals.find((goal) => goal.id === focusGoalId) ?? null;
 
   return (
-    <section id="home-goals" aria-label="Goals" className={styles.goals}>
+    <section id="home-goals" aria-label="Your focus" className={styles.goals}>
       <div className={styles.sectionHead}>
-        <h2 className={styles.railTitle}>Goals</h2>
+        <h2 className={styles.railTitle}>Your focus</h2>
         {goals.length > 1 ? (
-          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Button type="button" variant="link" size="sm" onClick={() => setOpen(true)}>
             View goals
           </Button>
         ) : null}
       </div>
 
       {focus === null ? (
-        <p className={styles.emptyNote}>
-          {canManageCore ? (
-            <>
-              No goals on file yet.{" "}
-              <Link href="#organization-management" className={styles.inlineLink}>
-                Add one from organization management
-              </Link>
-              .
-            </>
-          ) : (
-            "No goals on file yet."
-          )}
-        </p>
+        <div>
+          <p dir="auto" className={styles.attentionTitle}>
+            <Target aria-hidden="true" className="mr-1.5 inline size-4" />
+            What are you working towards?
+          </p>
+          <p className={styles.emptyNote}>
+            {canManageCore ? (
+              <>
+                Add a goal in{" "}
+                <Link href="#organization-management" className={styles.inlineLink}>
+                  your organization details
+                </Link>
+                .
+              </>
+            ) : (
+              "No goals on file yet."
+            )}
+          </p>
+        </div>
       ) : (
         <Card className={styles.goalCard}>
           <CardContent className="flex flex-col gap-1 pt-4">

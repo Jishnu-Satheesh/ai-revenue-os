@@ -188,7 +188,7 @@ describe("HomeAssets states", () => {
     const { rerender } = renderGallery([]);
     expect(screen.getByText(/no saved work yet/i)).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /open asset library/i }),
+      screen.getByRole("link", { name: /open the asset library/i }),
     ).toHaveAttribute("href", `/organizations/${ORG_ID}/assets`);
 
     rerender(
