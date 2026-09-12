@@ -65,6 +65,12 @@ function generationContext() {
     organizationId: ORGANIZATION_ID,
     campaignId: CAMPAIGN_ID,
     sourceSnapshotId: SNAPSHOT_ID,
+    // Business Memory (Spec 023) added the pinned context pair to the
+    // generation context. Null here is the truthful fixture: this planner suite
+    // generates without a shared-memory pack, and a fabricated manifest id
+    // would assert provenance the run never had.
+    memoryContextManifestId: null,
+    memoryContextDigest: null,
     generationProfile: "brand_guided" as const,
     objective: "Increase weekday lunch covers",
     audience: "Nearby office workers",

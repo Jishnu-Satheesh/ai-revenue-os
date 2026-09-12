@@ -6708,3 +6708,38 @@ through the real routes, not only in tests.
   carried from the 12 September audit or marked unknown, never guessed.
 - **Next:** controller review of Spec 025, ADR 0057 and the amendments, then Task 1 (truthful
   generation readiness and failure recovery, F01/F02).
+
+## 2026-09-13 — Task 1: truthful generation readiness and bootstrap failure recovery (F01/F02)
+
+- **Files claimed and changed.** New `src/domain/campaigns/readiness.ts` (+ test), new
+  `src/workflows/campaigns/run-bootstrap.ts`, new
+  `src/modules/campaigns/application/generation-retry.ts` (+ test), new
+  `src/trigger/campaigns-wiring.test.ts`, new
+  `supabase/migrations/20260913090000_campaign_generation_bootstrap_recovery.sql` and
+  `supabase/tests/database/campaign_generation_bootstrap_recovery_test.sql`. Changed
+  `src/modules/campaigns/application/verified-limits.ts`, `.../studio-view.ts`, `.../ports.ts`,
+  `src/modules/campaigns/infrastructure/run-repository.ts`, `.../repository.ts`,
+  `src/trigger/campaigns.ts`, `src/modules/integrations/providers/meta/contract.ts`, the campaign
+  generate route, and the fixtures in six existing test files.
+- **What was wrong, in one sentence.** `verifiedChannelLimits()` threw on the expired Meta contract
+  while the Trigger worker was still assembling its dependencies, so `generateCampaignBundle` was
+  never entered, nothing claimed the run, and the domain row has read `queued`/`attempt 0` since
+  12 September while its Trigger run has read FAILED.
+- **What changed.** An expired contract now degrades to "nothing is verified" — the same empty limit
+  map an unverified current contract already returns — instead of raising. Drafting proceeds under a
+  named `internalDraftContentContract()`; the launch blockers travel with the draft rather than
+  being hidden. Dependency construction in all three generation tasks is wrapped in
+  `withGenerationBootstrapRecovery`, which records a `bootstrap:`-prefixed failure against the
+  unclaimed run and aborts the Trigger retry for a deterministic prerequisite.
+- **`campaign_generation_runs` lifecycle — read this before Tasks 6 and 16.** A fifth RPC now exists,
+  `fail_campaign_generation_run_bootstrap`, service-role only. It writes **only** a run still in
+  `queued`, answers `already_claimed` / `already_finished` without writing otherwise, increments
+  `attempt`, leaves `cost_minor` untouched, and refuses any failure code not prefixed `bootstrap:`.
+  No column was added. `GenerationRunSnapshot` gained `updatedAt` and `sourceSnapshotId`.
+- **The Meta contract `expiresAt` was not touched.** It is still `2026-09-10`. The expiry is correct
+  behaviour; what was broken was everything downstream of it.
+- **Not verified, and not claimed.** Both MCP servers returned CONNECT_TIMEOUT for this whole
+  session. The migration was **not** pushed, the pgTAP suite was **not** executed, staging was not
+  queried, and the named failed run was neither retried nor inspected. All hosted and deployed
+  evidence is UNKNOWN/PENDING. The 12 September run `run_06g9cko3ehp1gemp1f1v6k6h01` and its domain
+  row `d2682f4c-…` are untouched historical evidence.

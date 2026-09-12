@@ -309,7 +309,10 @@ function dependencies(overrides = {}) {
   const currentSources = { load: vi.fn(async () => [] as string[]) };
   const adapter = {
     availability: { available: true, provider: "test-adapter" },
-    searchAndFetch: vi.fn(async () => retrievalResult()),
+    // Typed with the port's own request so the recorded call keeps its shape.
+    // An untyped `vi.fn()` records an empty argument tuple, and the leak
+    // assertion below would then be stringifying nothing at all.
+    searchAndFetch: vi.fn(async (_request: ResearchRequest) => retrievalResult()),
   };
   const planQueries = vi.fn((request: ResearchRequest) =>
     buildResearchQueryPlan({
