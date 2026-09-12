@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   toCampaignListItem,
+  toGeneration,
   toStudioView,
   type StudioViewInput,
 } from "@/modules/campaigns/application/studio-view";
@@ -341,5 +342,74 @@ describe("channel readiness on the view", () => {
     );
 
     expect(view.readiness?.[0]?.blockers[0]?.reason).toContain("something_new_we_have_not_seen");
+  });
+});
+
+describe("what a campaign with no proposal yet is told about its generation", () => {
+  const NOW_ISO = "2026-09-13T00:00:00.000Z";
+
+  function run(overrides: Partial<Parameters<typeof toGeneration>[0] & object> = {}) {
+    return {
+      status: "queued",
+      failureCode: null,
+      leaseExpiresAt: null,
+      sourceSnapshotId: "aa000000-0000-4000-8000-000000000001",
+      updatedAt: NOW_ISO,
+      ...overrides,
+    };
+  }
+
+  it("shows a freshly queued run as work in progress", () => {
+    const generation = toGeneration(run({ updatedAt: "2026-09-12T23:58:00.000Z" }), false, NOW_ISO);
+
+    expect(generation.status).toBe("generating");
+    expect(generation.retryable).toBe(false);
+  });
+
+  it("stops calling a run that no worker ever collected work in progress", () => {
+    // The exact shape of the stranded row from 12 September: queued, no lease,
+    // untouched since, while its Trigger run has been FAILED the whole time.
+    const generation = toGeneration(
+      run({ updatedAt: "2026-09-12T15:53:38.115Z" }),
+      false,
+      NOW_ISO,
+    );
+
+    expect(generation.status).toBe("stalled");
+    expect(generation.detail).toMatch(/no worker ever picked it up/i);
+    expect(generation.nextAction).toMatch(/start it again/i);
+    expect(generation.retryable).toBe(true);
+    expect(generation.blocker?.code).toBe("generation_run_stalled");
+  });
+
+  it("refuses to offer a restart for a blocker a restart cannot clear", () => {
+    const generation = toGeneration(
+      run({ status: "failed", failureCode: "bootstrap:provider_contract_expired" }),
+      false,
+      NOW_ISO,
+    );
+
+    expect(generation.status).toBe("failed");
+    // No internal code reaches the client, and no retry is promised: the
+    // review date will be exactly as out of date on the second attempt.
+    expect(generation.detail).not.toMatch(/bootstrap|meta_campaign/i);
+    expect(generation.detail).toMatch(/out of date/i);
+    expect(generation.retryable).toBe(false);
+    expect(generation.blocker?.repair).toEqual({
+      kind: "reverify_provider_contract",
+      providerKey: "meta_campaign",
+    });
+  });
+
+  it("offers a restart once the missing details are the only thing in the way", () => {
+    const generation = toGeneration(
+      run({ status: "failed", failureCode: "needs_data:brand_voice,objective" }),
+      false,
+      NOW_ISO,
+    );
+
+    expect(generation.detail).toContain("brand_voice");
+    expect(generation.nextAction).toMatch(/add the missing details/i);
+    expect(generation.retryable).toBe(true);
   });
 });

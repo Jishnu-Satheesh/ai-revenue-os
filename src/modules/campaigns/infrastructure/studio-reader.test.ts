@@ -89,6 +89,8 @@ describe("reading the portfolio", () => {
         status: "claimed",
         failureCode: null,
         leaseExpiresAt: "2026-08-17T12:00:00.000Z",
+        sourceSnapshotId: "aa000000-0000-4000-8000-000000000001",
+        updatedAt: "2026-08-17T10:55:00.000Z",
       })),
     });
 
@@ -108,6 +110,8 @@ describe("reading the portfolio", () => {
         status: "claimed",
         failureCode: null,
         leaseExpiresAt: "2026-08-17T10:00:00.000Z",
+        sourceSnapshotId: "aa000000-0000-4000-8000-000000000001",
+        updatedAt: "2026-08-17T10:55:00.000Z",
       })),
     });
 
@@ -123,6 +127,8 @@ describe("reading the portfolio", () => {
         status: "failed",
         failureCode: "needs_data:brand_voice,objective",
         leaseExpiresAt: null,
+        sourceSnapshotId: "aa000000-0000-4000-8000-000000000001",
+        updatedAt: "2026-08-17T10:55:00.000Z",
       })),
     });
 

@@ -174,7 +174,7 @@ export function createCampaignReadRepository(
       if (!organizationId || !campaignId) campaignDatabaseError();
       const { data, error } = await persistence
         .from("campaign_generation_runs")
-        .select("status, failure_code, lease_expires_at")
+        .select("status, failure_code, lease_expires_at, updated_at, source_snapshot_id")
         .order("created_at", { ascending: false })
         .limit(1)
         .eq("organization_id", organizationId)
@@ -184,12 +184,16 @@ export function createCampaignReadRepository(
         status: string;
         failure_code: string | null;
         lease_expires_at: string | null;
+        updated_at: string;
+        source_snapshot_id: string;
       }[];
       return row
         ? {
             status: row.status,
             failureCode: row.failure_code,
             leaseExpiresAt: row.lease_expires_at,
+            updatedAt: row.updated_at,
+            sourceSnapshotId: row.source_snapshot_id,
           }
         : null;
     },

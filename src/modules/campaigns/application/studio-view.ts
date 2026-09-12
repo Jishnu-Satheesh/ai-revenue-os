@@ -6,6 +6,11 @@ import type {
   CampaignHashtagSet,
 } from "@/domain/campaigns/schemas";
 import { explainReadinessCode } from "@/domain/campaigns/channel-capabilities";
+import {
+  describeCampaignGenerationFailure,
+  type CampaignReadinessBlocker,
+} from "@/domain/campaigns/readiness";
+import { GENERATE_BUNDLE_LEASE_SECONDS } from "@/workflows/campaigns/durations";
 import { diffManifestChanges } from "@/domain/campaigns/diff";
 import { approvalStatus, type CampaignState } from "@/domain/campaigns/state-machine";
 import type { ChannelReadiness } from "@/modules/campaigns/infrastructure/readiness-reader";
@@ -51,7 +56,31 @@ export type CampaignGeneration = {
   status: CampaignGenerationStatus;
   /** Safe, code-derived wording. Never a provider or model message. */
   detail: string | null;
+  /** What the person should do next, in their own terms. Null when nothing. */
+  nextAction: string | null;
+  /**
+   * Whether starting again could genuinely produce a different outcome.
+   *
+   * False for a deterministic blocker. Offering a retry that must fail
+   * identically wastes the client's time and, once a model is involved, their
+   * money -- the deployed run this was written for spent two attempts proving
+   * a review date had not changed in the eleven seconds between them.
+   */
+  retryable: boolean;
+  /** The typed blocker behind a failed or stalled run, for the repair route. */
+  blocker: CampaignReadinessBlocker | null;
 };
+
+/**
+ * How long a run may sit unclaimed before the screen stops calling it "building".
+ *
+ * Derived from the generation lease rather than chosen. The lease is already the
+ * platform's statement of how long one attempt may legitimately hold a run, so a
+ * queued row older than a full lease has outlived any worker that could still be
+ * working on it. Picking a fresh number here would be inventing an operating
+ * limit nobody configured.
+ */
+const STALE_QUEUE_MILLISECONDS = GENERATE_BUNDLE_LEASE_SECONDS * 1_000;
 
 export type CampaignListItem = {
   id: string;
@@ -87,32 +116,79 @@ export function toGeneration(
   hasVersion: boolean,
   now: string,
 ): CampaignGeneration {
-  if (hasVersion) return { status: "settled", detail: null };
+  if (hasVersion) {
+    return { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null };
+  }
 
   if (!run) {
     return {
       status: "stalled",
       detail: "No generation has been started for this campaign yet.",
+      nextAction: "Start building this campaign.",
+      retryable: true,
+      blocker: null,
     };
   }
 
   if (run.status === "failed" || run.status === "cancelled") {
+    const described = describeCampaignGenerationFailure(run.failureCode);
     return {
       status: "failed",
-      detail: failureDetail(run.failureCode),
+      detail: described.clientCopy,
+      nextAction: described.nextAction,
+      retryable: described.retryable,
+      blocker: described.blocker,
     };
   }
 
   if (run.status === "claimed" || run.status === "queued") {
     const leaseLive =
       run.leaseExpiresAt !== null && new Date(run.leaseExpiresAt).getTime() > Date.parse(now);
-    // A queued run has no lease yet and is legitimately waiting for a worker.
-    if (leaseLive || run.status === "queued") {
-      return { status: "generating", detail: "Building the first proposal." };
+    if (leaseLive) {
+      return {
+        status: "generating",
+        detail: "Building the first proposal.",
+        nextAction: null,
+        retryable: false,
+        blocker: null,
+      };
     }
+
+    // A queued run is waiting for a worker -- but only for so long.
+    //
+    // This is the reconciliation half of audit finding F02. The deployed run
+    // that prompted this work has read `queued`, attempt 0, no lease, since 12
+    // September, while its Trigger run has been FAILED the whole time. The
+    // screen showed a spinner for a job nobody was doing. Reading the row's own
+    // age answers that without writing anything, so no request path ever
+    // decides the fate of a run a worker might still hold.
+    if (run.status === "queued") {
+      const waited = Date.parse(now) - Date.parse(run.updatedAt);
+      if (Number.isFinite(waited) && waited <= STALE_QUEUE_MILLISECONDS) {
+        return {
+          status: "generating",
+          detail: "Building the first proposal.",
+          nextAction: null,
+          retryable: false,
+          blocker: null,
+        };
+      }
+      const described = describeCampaignGenerationFailure("generation_run_stalled");
+      return {
+        status: "stalled",
+        detail: described.clientCopy,
+        nextAction: described.nextAction,
+        retryable: described.retryable,
+        blocker: described.blocker,
+      };
+    }
+
     return {
       status: "stalled",
       detail: "Generation stopped responding and did not finish. It can be started again.",
+      nextAction: "Start it again.",
+      retryable: true,
+      blocker: null,
     };
   }
 
@@ -121,25 +197,10 @@ export function toGeneration(
   return {
     status: "stalled",
     detail: "Generation reported success but produced no proposal. It can be started again.",
+    nextAction: "Start it again.",
+    retryable: true,
+    blocker: null,
   };
-}
-
-/**
- * Turns a stored failure code into wording an operator can act on.
- *
- * `needs_data:` codes carry the missing keys, which are the useful part: the
- * operator can go and supply them. Everything else stays generic, because a
- * failure code is not written for a customer to read.
- */
-function failureDetail(failureCode: string | null): string {
-  if (!failureCode) return "Generation failed. It can be started again.";
-  if (failureCode.startsWith("needs_data:")) {
-    const missing = failureCode.slice("needs_data:".length).split(",").filter(Boolean);
-    return missing.length > 0
-      ? `Generation needs more information first: ${missing.join(", ")}.`
-      : "Generation needs more information before it can run.";
-  }
-  return "Generation failed. It can be started again.";
 }
 
 export type StudioApproval =

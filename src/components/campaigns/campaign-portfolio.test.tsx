@@ -22,7 +22,7 @@ function item(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     updatedAt: "2026-08-15T09:30:00.000Z",
     awaitingFirstVersion: false,
     openable: true,
-    generation: { status: "settled", detail: null },
+    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null },
     version: 2,
     objective: "Raise incremental gross profit on weekday evenings",
     channels: ["instagram", "meta_ads"],
@@ -79,7 +79,7 @@ describe("the portfolio states only what the campaign has produced", () => {
       item({
         awaitingFirstVersion: true,
         openable: false,
-        generation: { status: "generating", detail: "Building the first proposal." },
+        generation: { status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null },
         version: null,
         objective: null,
         channels: [],
@@ -145,7 +145,7 @@ describe("a campaign with no proposal cannot be opened", () => {
   }
 
   it("offers no link at all, rather than a link that 404s", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
     const card = within(screen.getByRole("listitem"));
 
     // Neither the title nor the review control may navigate. The detail route
@@ -155,13 +155,13 @@ describe("a campaign with no proposal cannot be opened", () => {
   });
 
   it("keeps the title readable even though it is no longer a link", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
 
     expect(screen.getByText("Weekday evening demand lift")).toBeInTheDocument();
   });
 
   it("shows a spinner only while a worker is actually running", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
     const card = within(screen.getByRole("listitem"));
 
     expect(card.getByText(/building the first proposal/i)).toBeInTheDocument();
@@ -175,6 +175,9 @@ describe("a campaign with no proposal cannot be opened", () => {
       pending({
         status: "stalled",
         detail: "Generation stopped responding and did not finish. It can be started again.",
+        nextAction: "Start it again.",
+        retryable: true,
+        blocker: null,
       }),
     ]);
     const card = within(screen.getByRole("listitem"));
@@ -188,6 +191,9 @@ describe("a campaign with no proposal cannot be opened", () => {
       pending({
         status: "failed",
         detail: "Generation needs more information first: brand_voice, objective.",
+        nextAction: "Start it again.",
+        retryable: true,
+        blocker: null,
       }),
     ]);
     const card = within(screen.getByRole("listitem"));
@@ -203,6 +209,9 @@ describe("a campaign with no proposal cannot be opened", () => {
       pending({
         status: "stalled",
         detail: "Generation stopped responding and did not finish. It can be started again.",
+        nextAction: "Start it again.",
+        retryable: true,
+        blocker: null,
       }),
     ]);
     const card = within(screen.getByRole("listitem"));
@@ -211,7 +220,7 @@ describe("a campaign with no proposal cannot be opened", () => {
   });
 
   it("does not offer a restart while a worker still holds the run", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal." })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
     const card = within(screen.getByRole("listitem"));
 
     expect(card.queryByRole("button", { name: /generate again/i })).not.toBeInTheDocument();

@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { apiErrorResponse } from "@/lib/api/organization-context";
+import { DomainError } from "@/lib/errors";
+import { decideGenerationRetry } from "@/modules/campaigns/application/generation-retry";
 import { generateRequestSchema } from "@/modules/campaigns/application/api-schemas";
 import {
   campaignRouteContext,
@@ -39,6 +41,21 @@ export async function POST(
     if (!campaign) return apiErrorResponse(new Error("This campaign is not available."));
 
     const snapshotId = await latestSnapshotId(context, campaignId);
+
+    // A retry that cannot go differently is refused before anything is queued.
+    //
+    // "Generate again" wakes a worker and calls an image model. When the last
+    // attempt died on something that has not changed since — an out-of-date
+    // provider contract, evidence that is gone — pressing it again buys the
+    // identical failure and bills for it. A request against different pinned
+    // evidence is a different question and is always allowed through.
+    const retry = decideGenerationRetry({
+      latestRun: await repository.latestGenerationRun(context.organizationId, campaignId),
+      requestedSourceSnapshotId: snapshotId,
+    });
+    if (retry.outcome === "refused") {
+      throw new DomainError("DOMAIN_ERROR", `${retry.clientCopy} ${retry.nextAction}`);
+    }
 
     // Enqueues the run *and* hands it to the worker. Recording intent without
     // dispatching is the failure this route exists to recover from, so it must

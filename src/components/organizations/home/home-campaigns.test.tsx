@@ -35,7 +35,7 @@ function campaign(overrides: Partial<HomeCampaign> = {}): HomeCampaign {
     title: "Ramadan Push",
     objective: "Drive iftar orders",
     state: "ready_for_review",
-    generation: { status: "settled", detail: null },
+    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null },
     openable: true,
     updatedAt: "2026-09-10T10:00:00.000Z",
     actionLabel: "Review campaign",

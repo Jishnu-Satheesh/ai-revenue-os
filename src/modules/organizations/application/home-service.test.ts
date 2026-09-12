@@ -56,7 +56,7 @@ function listItem(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     updatedAt: "2026-09-10T10:00:00.000Z",
     awaitingFirstVersion: false,
     openable: true,
-    generation: { status: "settled", detail: null },
+    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null },
     version: 2,
     objective: "Drive iftar orders",
     channels: ["direct"],
@@ -393,7 +393,7 @@ describe("permissions", () => {
   const draftSrc = () =>
     sources({
       campaigns: ready([
-        campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null } }),
+        campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
       ]),
       posters: ready([]),
       references: ready([]),
@@ -547,14 +547,14 @@ describe("attention ranking", () => {
               title: "Stalled old",
               state: "draft",
               updatedAt: "2026-09-01T10:00:00.000Z",
-              generation: { status: "stalled", detail: "Generation stopped responding." },
+              generation: { status: "stalled", detail: "Generation stopped responding.", nextAction: "Start it again.", retryable: true, blocker: null },
             }),
             campaignRecord({
               id: CAMPAIGN_2,
               title: "Fresh review",
               state: "ready_for_review",
               updatedAt: "2026-09-10T10:00:00.000Z",
-              generation: { status: "settled", detail: null },
+              generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null },
             }),
           ]),
           posters: ready([]),
@@ -572,8 +572,8 @@ describe("attention ranking", () => {
         snap: attentionSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, title: "Blocked", state: "blocked", generation: { status: "settled", detail: null } }),
-            campaignRecord({ id: CAMPAIGN_2, title: "Review", state: "ready_for_review", generation: { status: "settled", detail: null } }),
+            campaignRecord({ id: CAMPAIGN_1, title: "Blocked", state: "blocked", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
+            campaignRecord({ id: CAMPAIGN_2, title: "Review", state: "ready_for_review", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -593,7 +593,7 @@ describe("attention ranking", () => {
               id: CAMPAIGN_1,
               title: "Both",
               state: "blocked",
-              generation: { status: "failed", detail: "Generation failed." },
+              generation: { status: "failed", detail: "Generation failed.", nextAction: "Start it again.", retryable: true, blocker: null },
             }),
           ]),
           posters: ready([]),
@@ -670,7 +670,7 @@ describe("campaign CTAs", () => {
         snap: ctaSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null } }),
+            campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -685,7 +685,7 @@ describe("campaign CTAs", () => {
         snap: ctaSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, state: "scheduled", generation: { status: "settled", detail: null } }),
+            campaignRecord({ id: CAMPAIGN_1, state: "scheduled", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
           ]),
           posters: ready([]),
           references: ready([]),
