@@ -1180,3 +1180,55 @@ describe("market research spend ledger", () => {
     expect(ledger).toEqual({ knownMicrosUsd: 0, unknownCount: 1, latencyMs: 0 });
   });
 });
+
+describe("runMarketResearch brief threading", () => {
+  it("pins the brief before retrieval and threads manifest identity without leaking private bytes", async () => {
+    const briefManifestId = "50000000-0000-4000-8000-000000000005";
+    const researchBrief = vi.fn(async () => ({
+      manifestId: briefManifestId,
+      contextDigest: "b".repeat(64),
+      status: "ready" as const,
+      contextRefs: ["ctx-0001"],
+      evidenceOnly: false,
+      briefFingerprint: "d".repeat(64),
+    }));
+    const deps = dependencies({ researchBrief });
+    const privateNote = "fb42 internal operator margin note";
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result.outcome).toBe("completed");
+    expect(researchBrief).toHaveBeenCalledOnce();
+    expect(researchBrief).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId, requestId, branchId: null }),
+    );
+    // Retrieval happens after the brief pins, and the adapter request stays
+    // a deterministic public function: no private bytes in provider input.
+    expect(deps.adapter.searchAndFetch).toHaveBeenCalledOnce();
+    const adapterInput = JSON.stringify(deps.adapter.searchAndFetch.mock.calls[0]?.[0]);
+    expect(adapterInput).not.toContain(privateNote);
+    expect(adapterInput).not.toContain(briefManifestId);
+    expect(adapterInput).not.toContain("ctx-0001");
+    // Extraction may use the brief for relevance (refs only); support review
+    // receives source/candidate context only — no brief or memory fields.
+    const extractionPrompt = String(
+      vi.mocked(deps.extraction.transport.complete).mock.calls[0]?.[0]?.prompt ?? "",
+    );
+    expect(extractionPrompt).toContain("ctx-0001");
+    const reviewPrompt = String(
+      vi.mocked(deps.supportReview.transport.complete).mock.calls[0]?.[0]?.prompt ?? "",
+    );
+    expect(reviewPrompt).not.toContain("ctx-0001");
+    expect(reviewPrompt).not.toContain(briefManifestId);
+    expect(deps.evidence.begin).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ briefManifestId, briefStatus: "ready" }),
+      }),
+    );
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ briefManifestId, briefStatus: "ready" }),
+      }),
+    );
+  });
+});

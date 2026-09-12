@@ -438,3 +438,24 @@ describe("extractResearchClaims adversarial cases", () => {
     expect(result.callsIssued).toBe(1);
   });
 });
+
+describe("extraction brief relevance", () => {
+  it("accepts brief refs by identifier without changing admission", async () => {
+    const { transport } = transportFor([{ text: candidateJson(), microsUsd: 140 }]);
+    const complete = vi.mocked(transport.complete);
+    const result = await extractResearchClaims({
+      scope,
+      sources: [source()],
+      budget,
+      transport,
+      spender: spender(),
+      modelId: "gemini-fixture-1",
+      briefRefs: ["ctx-0001", "ctx-0002"],
+    });
+    expect(result.candidates).toHaveLength(1);
+    const prompt = String(complete.mock.calls[0]?.[0]?.prompt ?? "");
+    expect(prompt).toContain("ctx-0001");
+    // Relevance only: no private bodies travel, only refs.
+    expect(prompt).not.toContain("operator note");
+  });
+});

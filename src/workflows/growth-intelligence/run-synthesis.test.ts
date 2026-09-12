@@ -329,4 +329,28 @@ describe("runSynthesis", () => {
       expect.objectContaining({ organizationId, requestId, branchId: null }),
     );
   });
+
+  it("builds its own current pack and retains the parent brief ref", async () => {
+    const manifestId = "50000000-0000-4000-8000-000000000005";
+    const parentBrief = "40000000-0000-4000-8000-000000000004";
+    const synthesisContext = vi.fn(async () => ({
+      manifestId,
+      contextDigest: "c".repeat(64),
+      status: "ready" as const,
+      contextRefs: ["ctx-0001"],
+      parentBriefManifestId: parentBrief,
+    }));
+    const deps = dependencies({ synthesisContext });
+    const result = await runSynthesis(payload, deps);
+    expect(result).toEqual({ outcome: "synthesized", runId, itemCount: 1 });
+    expect(synthesisContext).toHaveBeenCalledOnce();
+    expect(deps.synthesize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          manifestId,
+          parentBriefManifestId: parentBrief,
+        }),
+      }),
+    );
+  });
 });

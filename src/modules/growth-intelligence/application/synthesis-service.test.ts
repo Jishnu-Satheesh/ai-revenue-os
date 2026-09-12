@@ -834,3 +834,44 @@ describe("branch-fenced business synthesis", () => {
     expect(result.outcome).toBe("completed");
   });
 });
+
+describe("synthesis memory context", () => {
+  it("threads context refs without changing eligibility", async () => {
+    const deps = dependencies({
+      provider: providerReturning([
+        {
+          candidates: [
+            candidate({ contextRefs: ["ctx-0001"], narrative: "Recorded demand with cited refs." }),
+          ],
+        },
+      ]),
+    });
+    const baseInput = {
+      organizationId: requestId,
+      requestId,
+      claimToken,
+      branchId: null,
+      channelId: null,
+      profileVersionId,
+      profile,
+      correlationId,
+    };
+    const withContext = {
+      ...baseInput,
+      organizationId,
+      context: {
+        manifestId: "50000000-0000-4000-8000-000000000005",
+        contextDigest: "c".repeat(64),
+        status: "ready" as const,
+        contextRefs: ["ctx-0001"],
+        parentBriefManifestId: null,
+      },
+    };
+    const result = await createSynthesisService(deps).synthesize(withContext);
+    expect(result.outcome).toBe("completed");
+    const compact = vi.mocked(deps.provider.generate).mock.calls[0]?.[0]?.context as {
+      context?: { manifestId: string };
+    };
+    expect(compact.context?.manifestId).toBe("50000000-0000-4000-8000-000000000005");
+  });
+});

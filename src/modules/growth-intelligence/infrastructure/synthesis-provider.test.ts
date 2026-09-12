@@ -381,3 +381,38 @@ describe("branch lineage in the compact input", () => {
     expect(prompt).not.toContain("value_numerator");
   });
 });
+
+describe("synthesis context refs", () => {
+  it("carries memory context by reference and keeps claim ids in evidence fields", () => {
+    const manifestId = "50000000-0000-4000-8000-000000000005";
+    const parsed = toCompactSynthesisInput(
+      compactInput({
+        context: {
+          manifestId,
+          contextDigest: "c".repeat(64),
+          status: "ready",
+          contextRefs: ["ctx-0001", "ctx-0002"],
+          parentBriefManifestId: null,
+        },
+      }),
+    );
+    expect(parsed.context?.manifestId).toBe(manifestId);
+    expect(parsed.context?.contextRefs).toEqual(["ctx-0001", "ctx-0002"]);
+    const prompt = buildSynthesisPrompt(parsed);
+    expect(prompt).toContain(manifestId);
+    expect(prompt).toContain("ctx-0001");
+    // Claim/finding ids stay in evidence fields, never inside context.
+    expect(parsed.claims[0]!.id).toBe(claimId);
+  });
+
+  it("parses candidate contextRefs without letting memory change eligibility", () => {
+    const parsed = parseSynthesisOutput({
+      candidates: [{ ...candidate(), contextRefs: ["ctx-0001"] }],
+    });
+    expect(parsed.outcome).toBe("valid");
+    if (parsed.outcome === "valid") {
+      expect(parsed.candidates[0]!.contextRefs).toEqual(["ctx-0001"]);
+      expect(parsed.candidates[0]!.claimIds).toEqual([claimId]);
+    }
+  });
+});

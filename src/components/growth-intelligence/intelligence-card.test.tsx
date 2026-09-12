@@ -66,6 +66,8 @@ function recommendationCard(overrides: Partial<RecommendationCard> = {}): Recomm
     channelId: "61000000-0000-4000-8000-000000000061",
     branchId: null,
     myFeedback: null,
+    supportedActions: [],
+    limitations: [],
     itemFingerprint: null,
     ...overrides,
   };
@@ -144,9 +146,18 @@ describe("IntelligenceCard", () => {
       />,
     );
     expect(container.querySelector("button")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Helpful" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Helpful: Extend Friday hours" }),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
-    expect(screen.getByRole("link", { name: /channel workspace/i })).toBeTruthy();
+    // The channel path lives behind Why this, not as a card link, so the
+    // preview matches the prototype without losing the repair route. Viewers
+    // get viewing words, never an action they cannot complete.
+    fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
+    expect(screen.getByRole("link", { name: /View in the channel workspace/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/channels/61000000-0000-4000-8000-000000000061`,
+    );
   });
 
   it("links a data gap to its repair surface with the missing input named", () => {
@@ -202,7 +213,7 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Not helpful" }));
+    fireEvent.click(screen.getByRole("button", { name: /Not helpful/ }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
       `/api/organizations/${ORGANIZATION}/growth-intelligence/items/70000000-0000-4000-8000-000000000007/feedback`,
@@ -218,9 +229,182 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
-    for (const name of ["Acknowledge", "Planned", "Snooze", "Helpful", "Not helpful"]) {
+    for (const name of ["Acknowledge", "Planned", "Snooze"]) {
       expect(screen.getByRole("button", { name })).toBeTruthy();
     }
+    expect(
+      screen.getByRole("button", { name: "Helpful: Extend Friday hours" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Not helpful: Extend Friday hours" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Dismiss: Extend Friday hours" }),
+    ).toBeTruthy();
+  });
+
+  it("matches the prototype card: tag plus scope, evidence plus Why this, no badge grid", () => {
+    const channelNames = new Map([
+      ["61000000-0000-4000-8000-000000000061", "Delivery A"],
+    ]);
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          limitations: ["Traffic evidence covers Delivery A only."],
+          supportedActions: ["Check the cancellation reasons before changing availability."],
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+        channelNames={channelNames}
+      />,
+    );
+    expect(screen.getByText("Channel recommendation")).toBeTruthy();
+    expect(screen.getByText("Delivery A")).toBeTruthy();
+    expect(screen.getByText(/Traffic evidence covers Delivery A only/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
+    // Evidence names the stored window and generated date, never a mock
+    // report name; the next step lives only in the dialog, not on the card.
+    expect(screen.getByText(/1 Aug 2026 to 31 Aug 2026.*generated/)).toBeTruthy();
+    expect(
+      screen.queryByText(/Check the cancellation reasons before changing availability/),
+    ).toBeNull();
+    expect(screen.queryByText("Recommendation", { exact: true })).toBeNull();
+    expect(screen.queryByText("Evidence window")).toBeNull();
+    expect(screen.queryByText("Generated", { exact: true })).toBeNull();
+  });
+
+  it("falls back to Organization-wide when the recommendation has no single channel", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          source: { kind: "synthesized_item", id: "70000000-0000-4000-8000-000000000007" },
+          channelId: null,
+          itemFingerprint: "a".repeat(64),
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    expect(screen.getByText("Organization-wide")).toBeTruthy();
+    expect(screen.queryByText("All channels", { exact: true })).toBeNull();
+  });
+
+  it("names the manager path as an answer and the viewer path as a view", () => {
+    const { unmount } = render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
+    expect(screen.getByRole("link", { name: /Answer in the channel workspace/i })).toBeTruthy();
+    cleanup();
+    unmount();
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
+    expect(screen.getByRole("link", { name: /View in the channel workspace/i })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Answer in the channel workspace/i })).toBeNull();
+  });
+
+  it("resolves branch scope from loaded names and admits a missing channel name", () => {
+    const channelNames = new Map([
+      ["61000000-0000-4000-8000-000000000061", "Delivery A"],
+    ]);
+    const branchNames = new Map([["22000000-0000-4000-8000-000000000022", "Downtown"]]);
+    const { unmount } = render(
+      <IntelligenceCard
+        card={recommendationCard({ branchId: "22000000-0000-4000-8000-000000000022" })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+        channelNames={channelNames}
+        branchNames={branchNames}
+      />,
+    );
+    expect(screen.getByText(/Delivery A · Downtown/)).toBeTruthy();
+    cleanup();
+    unmount();
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    expect(screen.getByText("Channel details unavailable")).toBeTruthy();
+  });
+
+  it("hides decide buttons on a recorded answer while keeping votes", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          decision: "planned",
+          decidedAt: "2026-09-02T08:00:00.000Z",
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Planned" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Snooze" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Helpful: Extend Friday hours" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/Marked planned/)).toBeTruthy();
+  });
+
+  it("states honest fallbacks for missing window and missing caveats", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard({ evidenceWindow: null })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    expect(screen.getByText(/No evidence window/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
+    expect(screen.getByText(/next step to investigate/)).toBeTruthy();
+  });
+
+  it("opens Why this with scope, evidence, limitation, and next steps", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          limitations: ["Twenty of fifty-nine days carried evidence."],
+          supportedActions: ["Mark unavailable items in the app before service"],
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
+    const dialog = screen.getByRole("dialog", { name: "Why this recommendation?" });
+    expect(dialog).toBeTruthy();
+    // The limitation shows on the card and again inside the dialog; the next
+    // step lives only in the dialog so the preview matches the prototype.
+    expect(screen.getAllByText(/Twenty of fifty-nine days/).length).toBe(2);
+    expect(
+      screen.getByText(/Mark unavailable items in the app before service/),
+    ).toBeTruthy();
+    // Dialog names the honest scope and evidence, not mock report names.
+    expect(dialog.textContent).toContain("Channel details unavailable");
+    expect(dialog.textContent).toMatch(/1 Aug 2026 to 31 Aug 2026/);
   });
 });
 
@@ -265,5 +449,27 @@ describe("IntelligenceCard research provenance", () => {
     );
     expect(screen.queryByText("From market research")).toBeNull();
     expect(screen.queryByRole("link", { name: /view supporting outcomes/i })).toBeNull();
+  });
+});
+
+describe("IntelligenceCard context provenance", () => {
+  it("distinguishes research brief from synthesis context with degradation copy", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+        contextProvenance={{
+          briefManifestId: "50000000-0000-4000-8000-000000000005",
+          briefStatus: "ready",
+          synthesisManifestId: "60000000-0000-4000-8000-000000000006",
+          synthesisStatus: "partial",
+        }}
+      />,
+    );
+    expect(screen.getByText("Research brief")).toBeTruthy();
+    expect(screen.getByText("Synthesis context")).toBeTruthy();
+    expect(screen.getByText(/cited refs only/i)).toBeTruthy();
   });
 });

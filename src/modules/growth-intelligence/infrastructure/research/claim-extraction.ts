@@ -221,7 +221,11 @@ const EXTRACTION_INSTRUCTIONS =
   "publishedAt/observedAt (ISO or null) and limitations (safe codes or []). " +
   "Cite only the listed source keys. Never invent sources, offsets or dates.";
 
-function buildExtractionPrompt(scope: ApprovedResearchScope, sources: ExtractableSource[]): string {
+function buildExtractionPrompt(
+  scope: ApprovedResearchScope,
+  sources: ExtractableSource[],
+  briefRefs?: readonly string[],
+): string {
   return JSON.stringify({
     phase: CLAIM_EXTRACTION_PHASE,
     instructions: EXTRACTION_INSTRUCTIONS,
@@ -238,6 +242,10 @@ function buildExtractionPrompt(scope: ApprovedResearchScope, sources: Extractabl
       sourceUrl: item.sourceUrl,
       excerptText: item.excerptText,
     })),
+    // Optional relevance hints by reference only (identifiers, never bodies):
+    // the brief may order relevance, never eligibility. Support review never
+    // receives these (it admission-fails on any memory field).
+    ...(briefRefs && briefRefs.length > 0 ? { briefRefs: [...briefRefs].slice(0, 24) } : {}),
   });
 }
 
@@ -474,10 +482,15 @@ export async function extractResearchClaims(input: {
   transport: ResearchModelTransport;
   spender: ResearchModelSpender;
   modelId: string;
+  briefRefs?: unknown;
   now?: () => Date;
   signal?: AbortSignal;
 }): Promise<ClaimExtractionResult> {
   const scope = approvedResearchScopeSchema.parse(input.scope);
+  const briefRefs =
+    input.briefRefs === undefined
+      ? undefined
+      : z.array(z.string().trim().min(1).max(60)).max(24).parse(input.briefRefs);
   const budget = researchModelBudgetSchema.parse(input.budget);
   if (budget.phase !== CLAIM_EXTRACTION_PHASE)
     throw new Error("Extraction requires an extraction budget.");
@@ -507,7 +520,7 @@ export async function extractResearchClaims(input: {
   for (const [batchNumber, batch] of batches.entries()) {
     if (input.signal?.aborted) break;
     if (result.callsIssued >= budget.maxCalls) break;
-    const prompt = buildExtractionPrompt(scope, batch);
+    const prompt = buildExtractionPrompt(scope, batch, briefRefs);
     if (estimateResearchPromptTokens(prompt) > budget.maxInputTokens) {
       result.batchesFailed += 1;
       continue;

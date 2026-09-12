@@ -124,6 +124,29 @@ export function buildResearchQuerySlots(input: {
 }
 
 /**
+ * Memory orders execution only (Swarm 3): every approved slot is preserved;
+ * relevance only reorders, and the order basis is recorded by reference in
+ * the research brief manifest. Memory never changes priority or eligibility.
+ */
+export function applyMemoryExecutionOrder(input: {
+  slots: readonly ResearchQuerySlot[];
+  relevance?: Readonly<Record<string, number>>;
+}): ResearchQuerySlot[] {
+  const slots = [...input.slots];
+  const keys = new Set(slots.map((slot) => slot.slotKey));
+  if (keys.size !== slots.length) {
+    throw new Error("The research query plan must key every slot uniquely.");
+  }
+  const relevance = input.relevance ?? {};
+  return [...slots].sort((left, right) => {
+    const leftScore = relevance[left.slotKey] ?? 0;
+    const rightScore = relevance[right.slotKey] ?? 0;
+    if (leftScore !== rightScore) return rightScore - leftScore;
+    return left.slotKey < right.slotKey ? -1 : 1;
+  });
+}
+
+/**
  * Legacy bounded wrapper for the trigger/workflow path (Task 8 rewires it
  * onto slots): the first maxQueries full-coverage slots, mapped onto the
  * historic query shape. Full coverage lives in buildResearchQuerySlots.

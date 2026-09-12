@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyMemoryExecutionOrder,
   approvedResearchScopeSchema,
   buildResearchQueryPlan,
   buildResearchQuerySlots,
@@ -136,5 +137,29 @@ describe("buildResearchQuerySlots", () => {
 
     expect(slots).toHaveLength(26);
     expect(new Set(slots.map((slot) => slot.slotKey)).size).toBe(26);
+  });
+});
+
+describe("applyMemoryExecutionOrder", () => {
+  it("preserves every approved slot while memory orders execution only", () => {
+    const approvedScope = approvedResearchScopeSchema.parse({
+      ...scope,
+      topics: ["weekend dining", "Kerala food festival"],
+      competitors: [{ name: "Azure Dhow" }],
+    });
+    const slots = buildResearchQuerySlots({ scope: approvedScope });
+    const ordered = applyMemoryExecutionOrder({
+      slots,
+      relevance: { "competitor:azure-dhow": 9 },
+    });
+    expect(ordered.map((slot) => slot.slotKey).sort()).toEqual(
+      slots.map((slot) => slot.slotKey).sort(),
+    );
+    expect(ordered[0]!.slotKey).toBe("competitor:azure-dhow");
+    // Memory never changes priority or eligibility: slot text stays the
+    // deterministic public function, byte-identical apart from order.
+    expect(ordered.map((slot) => slot.text).sort()).toEqual(
+      slots.map((slot) => slot.text).sort(),
+    );
   });
 });

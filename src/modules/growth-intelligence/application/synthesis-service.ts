@@ -139,6 +139,14 @@ export type SynthesisServiceDependencies = {
   signal?: AbortSignal;
 };
 
+export type SynthesizeContextInput = {
+  manifestId: string;
+  contextDigest: string;
+  status: "ready" | "empty" | "partial" | "unavailable" | "disabled";
+  contextRefs: readonly string[];
+  parentBriefManifestId: string | null;
+};
+
 export type SynthesizeInput = {
   organizationId: string;
   requestId: string;
@@ -157,6 +165,14 @@ export type SynthesizeInput = {
   // below still refuse mixed measures and overlapping runs. Requests carry
   // no explicit evidence window, so nothing here infers one.
   evidenceWindow?: SynthesisEvidenceWindow | null;
+  /**
+   * Optional current synthesis pack (Swarm 3). Built from a current
+   * revalidation — an expired parent brief is never blindly reused — and
+   * retained beside the parent brief ref. Recorded by reference in the run
+   * fingerprint and provider input; it never changes candidate priority or
+   * eligibility, which still decide on eligible claims + business freshness.
+   */
+  context?: SynthesizeContextInput | null;
   correlationId: string;
 };
 
@@ -388,6 +404,7 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
 
       const eligible = eligibleContext(marketClaims);
       const findingsById = new Map(findings.map((finding) => [finding.id, finding]));
+      const context = input.context ?? null;
       const runFingerprint = sha256(
         canonicalize({
           requestId: input.requestId,
@@ -397,6 +414,8 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
           findingDigests: findings.map((finding) => finding.digest).sort(),
           claimDigests: marketClaims.map((claim) => claim.digest).sort(),
           synthesisVersion: dependencies.synthesisVersion,
+          contextDigest: context?.contextDigest ?? null,
+          parentBriefManifestId: context?.parentBriefManifestId ?? null,
         }),
       );
 
@@ -468,6 +487,17 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
           preferences: input.preferences ?? { pinnedRefs: [] },
           activityMonth: activityMonthFor(now()),
           businessEvidenceFresh: businessFresh,
+          ...(context
+            ? {
+                context: {
+                  manifestId: context.manifestId,
+                  contextDigest: context.contextDigest,
+                  status: context.status,
+                  contextRefs: [...context.contextRefs].slice(0, 24),
+                  parentBriefManifestId: context.parentBriefManifestId,
+                },
+              }
+            : {}),
         });
       } catch {
         return failRun(SAFE_FAILURE_CODES.CANDIDATE_INVALID);
@@ -496,7 +526,15 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
         const validationIssues: string[] = [];
         const valid: SynthesisProviderCandidate[] = [];
         for (const candidate of parsed.candidates) {
-          const verdict = validateSynthesisCandidate(candidate as SynthesisCandidate, {
+          // Memory refs ride beside evidence, never inside it: strip
+          // contextRefs before deterministic validation so memory can neither
+          // rescue nor sink eligibility. Claim/finding ids stay the only
+          // evidence fields the validator reads.
+          const { contextRefs: _memoryRefs, ...evidenceOnly } = candidate as SynthesisProviderCandidate & {
+            contextRefs?: unknown;
+          };
+          void _memoryRefs;
+          const verdict = validateSynthesisCandidate(evidenceOnly as SynthesisCandidate, {
             eligibleClaims: eligible,
             businessEvidenceFresh: businessFresh,
           });

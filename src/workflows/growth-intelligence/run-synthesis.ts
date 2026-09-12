@@ -91,10 +91,34 @@ export type SynthesisProfileReader = {
 
 export type SynthesisRunner = (input: SynthesizeInput) => Promise<SynthesisServiceResult>;
 
+export type SynthesisContextPack = {
+  manifestId: string;
+  contextDigest: string;
+  status: "ready" | "empty" | "partial" | "unavailable" | "disabled";
+  contextRefs: readonly string[];
+  parentBriefManifestId: string | null;
+};
+
+export type SynthesisContextBuilder = (input: {
+  organizationId: string;
+  requestId: string;
+  branchId: string | null;
+  channelId: string | null;
+  parentBriefManifestId: string | null;
+  correlationId: string;
+}) => Promise<SynthesisContextPack>;
+
 export type SynthesisDependencies = {
   requests: SynthesisRequestOperations;
   profiles: SynthesisProfileReader;
   synthesize: SynthesisRunner;
+  /**
+   * Optional current pack builder (Swarm 3). Synthesis builds its own
+   * current pack, retains the parent brief ref, and revalidates: an expired
+   * parent is never blindly reused — the builder revalidates before return
+   * and the service records both ids in the run fingerprint.
+   */
+  synthesisContext?: SynthesisContextBuilder;
   newClaimToken?: () => string;
   signal?: AbortSignal;
 };
@@ -205,6 +229,27 @@ export async function runSynthesis(
     return failRequest("PROFILE_CONTEXT_INVALID");
   }
 
+  // Synthesis builds its own current pack and retains the parent brief
+  // ref. The builder revalidates before return; an expired parent is never
+  // blindly reused. Research→synthesis handoff stays atomic through the
+  // pipeline finalize path below (the request completes only after the
+  // service persists through its fenced RPC).
+  let synthesisContext: SynthesisContextPack | null = null;
+  if (dependencies.synthesisContext) {
+    try {
+      synthesisContext = await dependencies.synthesisContext({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        branchId: request.branchId,
+        channelId: request.channelId,
+        parentBriefManifestId: null,
+        correlationId: payload.correlationId,
+      });
+    } catch {
+      return failRequest("SYNTHESIS_CONTEXT_UNAVAILABLE");
+    }
+  }
+
   let serviceResult: SynthesisServiceResult;
   try {
     serviceResult = await dependencies.synthesize({
@@ -219,6 +264,17 @@ export async function runSynthesis(
       profileVersionId: profile.versionId,
       profile: context,
       preferences: { pinnedRefs: [] },
+      ...(synthesisContext
+        ? {
+            context: {
+              manifestId: synthesisContext.manifestId,
+              contextDigest: synthesisContext.contextDigest,
+              status: synthesisContext.status,
+              contextRefs: [...synthesisContext.contextRefs],
+              parentBriefManifestId: synthesisContext.parentBriefManifestId,
+            },
+          }
+        : {}),
       correlationId: payload.correlationId,
     });
   } catch (error) {

@@ -107,6 +107,17 @@ const synthesisPreferencesSchema = z
   .object({ pinnedRefs: z.array(z.string().trim().min(2).max(160)).max(50) })
   .strict();
 
+export const synthesisContextRefSchema = z
+  .object({
+    manifestId: uuidSchema,
+    contextDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    status: z.enum(["ready", "empty", "partial", "unavailable", "disabled"]),
+    contextRefs: z.array(z.string().trim().min(1).max(60)).max(24),
+    parentBriefManifestId: uuidSchema.nullable(),
+  })
+  .strict();
+export type SynthesisContextRef = z.infer<typeof synthesisContextRefSchema>;
+
 export const compactSynthesisInputSchema = z
   .object({
     // Exact synthesis scope: the request branch (null is the legacy
@@ -120,6 +131,10 @@ export const compactSynthesisInputSchema = z
     preferences: synthesisPreferencesSchema,
     activityMonth: z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/),
     businessEvidenceFresh: z.boolean(),
+    // Optional memory context by reference (Swarm 3). Summaries travel
+    // through the governed manifest path, never as free text here; claim and
+    // finding ids stay in their evidence fields, never inside context.
+    context: synthesisContextRefSchema.optional(),
   })
   .strict();
 
@@ -141,6 +156,10 @@ const providerCandidateSchema = z
     limitations: z.array(safeCodeSchema).max(20),
     staleBusinessEvidence: z.boolean(),
     missingInput: z.string().trim().min(1).max(160).nullable(),
+    // Optional cited memory refs by identifier only. Memory never changes
+    // priority or eligibility: validation still decides on eligible claims
+    // and business freshness alone; refs are recorded, never trusted.
+    contextRefs: z.array(z.string().trim().min(1).max(60)).max(24).optional(),
   })
   .strict();
 
@@ -251,6 +270,11 @@ export function buildSynthesisPrompt(input: CompactSynthesisInput): string {
     `<preferences>${serializeUntrusted(input.preferences)}</preferences>`,
     `<activity_month>${input.activityMonth}</activity_month>`,
     `<business_evidence_fresh>${input.businessEvidenceFresh ? "true" : "false"}</business_evidence_fresh>`,
+    ...(input.context
+      ? [
+          `<memory_context manifest="${input.context.manifestId}" digest="${input.context.contextDigest.slice(0, 12)}" status="${input.context.status}" parent_brief="${input.context.parentBriefManifestId ?? "none"}">${serializeUntrusted(input.context.contextRefs)}</memory_context>`,
+        ]
+      : []),
     `<output_contract>${JSON.stringify(outputContract)}</output_contract>`,
   ];
   return lines.join("\n");

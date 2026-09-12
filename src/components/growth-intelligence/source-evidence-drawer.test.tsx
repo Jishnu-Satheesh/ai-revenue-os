@@ -74,3 +74,31 @@ describe("SourceEvidenceDrawer erased sources", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 });
+
+describe("SourceEvidenceDrawer context provenance", () => {
+  it("distinguishes the research brief from the synthesis manifest with degradation copy", async () => {
+    const { growthItemContextQueryKey } = await import(
+      "@/components/growth-intelligence/source-evidence-drawer"
+    );
+    expect(growthItemContextQueryKey("org-1", "item-1")).toEqual([
+      "growth-item-contexts",
+      "org-1",
+      "item-1",
+    ]);
+    render(
+      <SourceEvidenceDrawer
+        sources={sources}
+        context={{
+          briefManifestId: "50000000-0000-4000-8000-000000000005",
+          briefStatus: "ready",
+          synthesisManifestId: "60000000-0000-4000-8000-000000000006",
+          synthesisStatus: "partial",
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /view sources \(1\)/i }));
+    expect(screen.getByText("Research brief:")).toBeTruthy();
+    expect(screen.getByText("Synthesis context:")).toBeTruthy();
+    expect(screen.getByText(/cited refs only/i)).toBeTruthy();
+  });
+});

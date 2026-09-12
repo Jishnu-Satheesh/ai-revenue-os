@@ -126,6 +126,8 @@ export type MarketResearchEngines = {
     transport: ResearchModelTransport;
     spender: ResearchModelSpender;
     modelId: string;
+    /** Optional brief relevance refs (identifiers only, never bodies). */
+    briefRefs?: unknown;
     now: () => Date;
     signal?: AbortSignal;
   }) => Promise<ClaimExtractionResult>;
@@ -210,6 +212,25 @@ export type MarketResearchCurrentSources = {
   load(input: { organizationId: string; profileVersionId: string }): Promise<readonly string[]>;
 };
 
+export type MarketResearchBrief = {
+  manifestId: string | null;
+  contextDigest: string | null;
+  status: "ready" | "empty" | "partial" | "unavailable" | "disabled";
+  contextRefs: readonly string[];
+  evidenceOnly: boolean;
+  briefFingerprint: string | null;
+};
+
+export type MarketResearchBriefBuilder = (input: {
+  organizationId: string;
+  requestId: string;
+  branchId: string | null;
+  profileVersionId: string;
+  sourcePolicyDigest: string;
+  attemptKey: string;
+  correlationId: string;
+}) => Promise<MarketResearchBrief>;
+
 export type MarketResearchDependencies = {
   requests: MarketResearchClaim;
   profiles: MarketResearchProfiles;
@@ -223,6 +244,15 @@ export type MarketResearchDependencies = {
   planQueries: (request: ResearchRequest) => ResearchQuery[];
   buildScope: (document: MarketProfileDocumentV1 | MarketProfileDocumentV2) => ResearchRequest;
   events: EventPublisher;
+  /**
+   * Optional internal brief (Swarm 3). When present it is built and pinned
+   * under the request's exact approved branch/profile BEFORE retrieval, and
+   * its manifest identity threads into run metadata and events. When absent
+   * the worker keeps its legacy behavior. The brief never reaches
+   * `adapter.searchAndFetch`: external query text stays a deterministic
+   * function of approved public fields only.
+   */
+  researchBrief?: MarketResearchBriefBuilder;
   now?: () => Date;
   newClaimToken?: () => string;
   signal?: AbortSignal;
@@ -469,6 +499,28 @@ export async function runMarketResearch(
     return failRequest("PROFILE_CONTEXT_INVALID");
   }
 
+  // Internal brief pins under the request's exact approved branch/profile
+  // BEFORE retrieval. The brief records the memory manifest by reference;
+  // external query text below stays a deterministic function of approved
+  // public fields — the brief object never reaches adapter.searchAndFetch,
+  // and byte-absence of private bytes holds for URLs, metadata, and logs.
+  let brief: MarketResearchBrief | null = null;
+  if (dependencies.researchBrief) {
+    try {
+      brief = await dependencies.researchBrief({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        branchId: request.branchId,
+        profileVersionId: profile.versionId,
+        sourcePolicyDigest: profile.sourcePolicyDigest,
+        attemptKey: claimToken,
+        correlationId: payload.correlationId,
+      });
+    } catch {
+      return failRequest("BRIEF_UNAVAILABLE");
+    }
+  }
+
   const queryPlanDigest = sha256(canonicalize(queries));
   // The review model authors the support verdicts the links persist, so the
   // run carries its identity; the extraction model travels in events.
@@ -483,10 +535,19 @@ export async function runMarketResearch(
         claimToken,
         profileVersionId: profile.versionId,
         queryPlanDigest,
+        briefFingerprint: brief?.briefFingerprint ?? null,
+        briefManifestId: brief?.manifestId ?? null,
       }),
     ),
     queryPlanDigest,
     correlationId: payload.correlationId,
+    ...(brief
+      ? {
+          briefManifestId: brief.manifestId,
+          briefDigest: brief.contextDigest,
+          briefStatus: brief.status,
+        }
+      : {}),
   };
 
   const begun = await dependencies.evidence.begin({
@@ -594,6 +655,9 @@ export async function runMarketResearch(
       retrievedAt: item.retrievedAt,
     }));
 
+  // Extraction may use the brief for relevance (refs by identifier only);
+  // support review below receives source/candidate context only — no brief,
+  // memory, or contextRefs field is passed there by construction.
   const extraction = await dependencies.engines.extractClaims({
     scope: research.scope,
     sources: extractable,
@@ -601,6 +665,9 @@ export async function runMarketResearch(
     transport: dependencies.extraction.transport,
     spender: dependencies.extraction.spender,
     modelId: dependencies.extraction.modelId,
+    ...(brief && !brief.evidenceOnly && brief.contextRefs.length > 0
+      ? { briefRefs: [...brief.contextRefs] }
+      : {}),
     now,
     signal: dependencies.signal,
   });
@@ -832,6 +899,12 @@ export async function runMarketResearch(
     unknownUsageCount: ledger.unknownCount,
     extractionModel: dependencies.extraction.modelId,
     reviewModel: dependencies.supportReview.modelId,
+    ...(brief
+      ? {
+          briefManifestId: brief.manifestId,
+          briefStatus: brief.status,
+        }
+      : {}),
   };
 
   // Legacy requests carry no pipeline lineage (null, or absent on older
