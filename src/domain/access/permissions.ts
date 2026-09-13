@@ -67,6 +67,7 @@ export const organizationPermissions = [
   "campaign.create",
   "campaign.edit",
   "campaign.approve",
+  "campaign.proposal_approve",
   "campaign.publish",
   "poster.render",
   "asset.read",
@@ -134,6 +135,7 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "campaign.create": "Create a campaign from a brief or an opportunity.",
   "campaign.edit": "Revise a campaign that has not been approved.",
   "campaign.approve": "Approve an exact campaign version for execution.",
+  "campaign.proposal_approve": "Approve a campaign proposal for creative preparation only.",
   "campaign.publish": "Publish an approved campaign to a provider.",
   "poster.render": "Render an approved campaign version as a poster.",
   "asset.read": "Read the organization asset library and subject profiles.",
@@ -247,6 +249,14 @@ const adminPermissions = [
   "memory.retry_capture",
   "opportunity.approve",
   // `campaign.approve` is inherited from the operator bundle above.
+  /**
+   * Agreeing to a proposal, which authorizes creative preparation only. Kept
+   * ABOVE the operator line on purpose, unlike `campaign.approve`: contract C02
+   * separates the person who drafts a proposal from the person who agrees to
+   * it, so an operator may write one and ask for changes but not approve it.
+   * Mirrors `20260913120000_campaign_proposal_preparation_approval.sql`.
+   */
+  "campaign.proposal_approve",
   "campaign.publish",
   "policy.update",
   "budget.modify",

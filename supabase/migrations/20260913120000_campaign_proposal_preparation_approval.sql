@@ -31,20 +31,15 @@
 -- written into a function body.
 
 insert into public.permissions (key, description, scope) values
-  (
-    'campaign.proposal_approve',
-    'Approve a campaign proposal for creative preparation only.',
-    'organization'
-  )
-on conflict (key) do nothing;
+  ('campaign.proposal_approve', 'Approve a campaign proposal for creative preparation only.', 'organization')
+on conflict do nothing;
 
 -- Owner and admin only. Note that `campaign.approve` is held by operators too;
 -- this one deliberately is not, because C02 separates the person who drafts a
 -- proposal from the person who agrees to it.
-insert into public.organization_role_permissions
-  (organization_role, permission_key, permission_scope) values
-  ('owner', 'campaign.proposal_approve', 'organization'),
-  ('admin', 'campaign.proposal_approve', 'organization')
+insert into public.organization_role_permissions (organization_role, permission_key) values
+  ('owner', 'campaign.proposal_approve'),
+  ('admin', 'campaign.proposal_approve')
 on conflict do nothing;
 
 -- 2. Identity ------------------------------------------------------------------
