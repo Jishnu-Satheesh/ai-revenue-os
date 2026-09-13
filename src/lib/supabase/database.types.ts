@@ -124,6 +124,89 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      growth_intelligence_acceptances: {
+        Row: {
+          id: string;
+          organization_id: string;
+          acceptance_key: string;
+          report_version_id: string;
+          item_key: string;
+          kind: "action" | "finding";
+          destination: "Recommendations" | "Insights";
+          grants_execution_approval: boolean;
+          accepted_by: string | null;
+          accepted_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_brief_revisions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          project_id: string;
+          revision_number: number;
+          document: Record<string, unknown>;
+          pinned_to_update_id: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_draft_items: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_version_id: string;
+          item_key: string;
+          kind: "action" | "finding";
+          title: string;
+          detail: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_reports: {
+        Row: {
+          id: string;
+          organization_id: string;
+          project_id: string;
+          branch_id: string;
+          brief_revision_id: string;
+          report_version_id: string;
+          evidence_digest: string;
+          content: Record<string, unknown>;
+          review_state: "pending_review" | "accepted";
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_research_projects: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string;
+          title: string;
+          question: string;
+          mode: "one-time" | "recurring";
+          schedule: Record<string, unknown> | null;
+          lifecycle: "active" | "paused" | "archived";
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       growth_intelligence_requests: {
         Row: {
           id: string;
