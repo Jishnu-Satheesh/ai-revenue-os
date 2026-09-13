@@ -69,6 +69,19 @@ const UNTYPED_TABLES = new Set([
   "campaign_proposals",
   "campaign_proposal_versions",
   "campaign_proposal_decisions",
+  // Research policies, runs, fingerprints and events are written and read
+  // only through the governed research RPCs (`request_`, `claim_`,
+  // `complete_`, `fail_`, `cancel_`, `load_`, `read_ledger`,
+  // `set_policy_current`). No role holds any grant on any of them, so a
+  // generated row type would invite a direct read or insert that skips
+  // admission, the lease, or the event capture. Read through the narrow
+  // contracts in `research-policy-repository.ts` and
+  // `research-run-repository.ts`.
+  "campaign_research_policies",
+  "campaign_research_policy_current",
+  "campaign_research_runs",
+  "campaign_research_source_fingerprints",
+  "campaign_research_events",
   // Creative variants are written only through `append_campaign_creative_variant`,
   // which assigns the slot numbers under a lock, and read through the narrow
   // contract in `variant-repository.ts`. A generated row type would invite a
