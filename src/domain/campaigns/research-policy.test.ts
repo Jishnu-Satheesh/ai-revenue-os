@@ -26,7 +26,7 @@ function policy(overrides: Partial<ResearchPolicy> = {}): ResearchPolicy {
 
 const NOW = new Date("2026-09-13T12:00:00.000Z");
 
-function admitted(overrides: Parameters<typeof admitResearchRequest>[0] = {}) {
+function admitted(overrides: Partial<Parameters<typeof admitResearchRequest>[0]> = {}) {
   return admitResearchRequest({
     policy: policy(),
     knownPolicyVersion: 3,
