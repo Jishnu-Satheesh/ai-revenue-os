@@ -5,9 +5,12 @@ vi.mock("server-only", () => ({}));
 import { MemoryError, memoryError } from "@/domain/memory/errors";
 import type { CaptureRepository } from "@/modules/memory/infrastructure/capture-repository";
 import {
+  embedSweepIdempotencyKey,
   runCaptureDispatch,
   runCaptureReconcile,
+  shouldSweepEmbeddings,
   toEnqueuedCount,
+  type CaptureDispatchCounts,
   type CaptureReconcileDependencies,
 } from "@/workflows/memory/capture-dispatch";
 
@@ -453,5 +456,43 @@ describe("toEnqueuedCount", () => {
     expect(() => toEnqueuedCount("growth_item", 1)).toThrow(
       expect.objectContaining({ code: "VALIDATION_ERROR" }),
     );
+  });
+});
+
+describe("embedding sweep decision", () => {
+  const empty: CaptureDispatchCounts = {
+    claimed: 0,
+    completed: 0,
+    replayed: 0,
+    obsolete: 0,
+    quarantined: 0,
+    retryScheduled: 0,
+    terminal: 0,
+    leaseLost: 0,
+    unsettled: 0,
+  };
+
+  it("sweeps only when the pass projected something", () => {
+    expect(shouldSweepEmbeddings(empty)).toBe(false);
+    expect(shouldSweepEmbeddings({ ...empty, replayed: 3, obsolete: 1 })).toBe(false);
+    expect(shouldSweepEmbeddings({ ...empty, completed: 1 })).toBe(true);
+  });
+
+  it("keys the sweep once per organization per UTC day", () => {
+    expect(embedSweepIdempotencyKey(ORGANIZATION_ID, new Date("2026-09-13T00:30:00.000Z"))).toBe(
+      `embed-after-capture:${ORGANIZATION_ID}:2026-09-13`,
+    );
+    expect(embedSweepIdempotencyKey(ORGANIZATION_ID, new Date("2026-09-13T23:59:59.000Z"))).toBe(
+      embedSweepIdempotencyKey(ORGANIZATION_ID, new Date("2026-09-13T00:00:00.000Z")),
+    );
+    expect(embedSweepIdempotencyKey(ORGANIZATION_ID, new Date("2026-09-14T00:00:00.000Z"))).not.toBe(
+      embedSweepIdempotencyKey(ORGANIZATION_ID, new Date("2026-09-13T00:00:00.000Z")),
+    );
+  });
+
+  it("keeps the key inside the task payload bounds", () => {
+    const key = embedSweepIdempotencyKey(ORGANIZATION_ID, NOW);
+    expect(key.length).toBeGreaterThanOrEqual(16);
+    expect(key.length).toBeLessThanOrEqual(200);
   });
 });

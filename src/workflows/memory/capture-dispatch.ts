@@ -100,6 +100,23 @@ export type CaptureDispatchDependencies = {
 };
 
 /**
+ * Embedding sweep decision (Spec 023 §5 repair loop). Newly projected items
+ * are lexically searchable immediately; the leased embed worker still needs
+ * a ride. The dispatch-org run triggers at most one sweep per organization
+ * per UTC day, only when the pass actually projected something, so quiet
+ * orgs cost nothing and busy orgs never fan out. The sweep reuses the
+ * existing leased `memory.embed-items` batch path unchanged: same claim
+ * tokens, same eligibility, same lexical degrade on provider outage.
+ */
+export function embedSweepIdempotencyKey(organizationId: string, now: Date): string {
+  return `embed-after-capture:${organizationId}:${now.toISOString().slice(0, 10)}`;
+}
+
+export function shouldSweepEmbeddings(counts: CaptureDispatchCounts): boolean {
+  return counts.completed > 0;
+}
+
+/**
  * The database names an error through the Postgres code on the cause the
  * repository preserved. A raw client failure (no code at all) carries no
  * diagnosis either. Either way the message below is never logged or

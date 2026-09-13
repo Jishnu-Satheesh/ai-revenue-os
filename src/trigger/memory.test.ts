@@ -120,4 +120,22 @@ describe("Business Memory Trigger registration", () => {
     expect(runner).toContain("runCaptureDispatch");
     expect(runner).toContain("runCaptureReconcile");
   });
+
+  it("sweeps embeddings after projecting work, and retention nightly", async () => {
+    const trigger = await readFile(resolve(process.cwd(), "src/trigger/memory.ts"), "utf8");
+
+    // New projections hand the leased embed worker its turn: at most one
+    // sweep per org per UTC day, only when something actually projected, and
+    // a failed handoff warns instead of failing committed dispatch work.
+    expect(trigger).toContain("shouldSweepEmbeddings(result.counts)");
+    expect(trigger).toContain("embedSweepIdempotencyKey(parsed.organizationId, new Date())");
+    expect(trigger).toContain('"memory.embed-items"');
+    expect(trigger).toContain("memory.capture_dispatch_embed_sweep_skipped");
+    // Retention redacts expired projection documents only: identifiers,
+    // digests, and links survive, snapshots stay rights-driven.
+    expect(trigger).toContain('id: "memory.retention-sweep"');
+    expect(trigger).toMatch(/schedules\.task\(\{[\s\S]*?cron: "0 2 \* \* \*"/);
+    expect(trigger).toContain('"redact_expired_capture_documents"');
+    expect(trigger).toContain("memory.retention_sweep_finished");
+  });
 });

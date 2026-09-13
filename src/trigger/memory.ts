@@ -16,8 +16,10 @@ import {
   type MemoryWorkerDependencies,
 } from "@/workflows/memory/contracts";
 import {
+  embedSweepIdempotencyKey,
   runCaptureDispatch,
   runCaptureReconcile,
+  shouldSweepEmbeddings,
   toEnqueuedCount,
   type CaptureReconcilePage,
 } from "@/workflows/memory/capture-dispatch";
@@ -463,6 +465,25 @@ export const memoryCaptureDispatchOrgTask = schemaTask({
       leaseLost: result.counts.leaseLost,
       unsettled: result.counts.unsettled,
     });
+    if (shouldSweepEmbeddings(result.counts)) {
+      // New projections are lexically live now; hand the leased embed worker
+      // its turn. A failed handoff must not fail committed dispatch work, so
+      // it degrades to a warning: the next completing pass retries the sweep.
+      try {
+        await tasks.trigger<typeof memoryEmbedItemsTask>("memory.embed-items", {
+          taskName: "memory.embed-items",
+          organizationId: parsed.organizationId,
+          correlationId: randomUUID(),
+          idempotencyKey: embedSweepIdempotencyKey(parsed.organizationId, new Date()),
+        });
+      } catch (error) {
+        logger.warn("memory.capture_dispatch_embed_sweep_skipped", {
+          organizationId: parsed.organizationId,
+          correlationId: parsed.correlationId,
+          reason: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }
     return { counts: result.counts, finishedAt: result.finishedAt };
   },
 });
@@ -599,5 +620,59 @@ export const memoryCaptureReconcileTask = schedules.task({
       }
     }
     return { organizations: organizationIds.length, scanned, enqueued, resumedAfter };
+  },
+});
+
+/**
+ * Daily at 02:00 UTC: redact capture projection documents past their
+ * retention date (Spec 023 §14). Identifiers, digests, revisions, and links
+ * survive; only the stored source text goes, at most 100 rows per
+ * organization per pass. Snapshot redaction stays rights-driven (the erase
+ * path): pinned manifests are audit history, and their expiry rule is a
+ * product decision recorded in the acceptance log, not smuggled in here.
+ */
+export const memoryRetentionSweepTask = schedules.task({
+  id: "memory.retention-sweep",
+  cron: "0 2 * * *",
+  retry,
+  maxDuration: 300,
+  run: async () => {
+    const supabase = createMemoryWorkerServiceClient();
+    const scan = await untypedCaptureTables(supabase)
+      .from("memory_integration_settings")
+      .select("organization_id")
+      .order("organization_id", { ascending: true });
+    if (scan.error) {
+      throw new Error(
+        `Memory retention sweep organization scan failed: ${describeDatabaseError(scan.error)}.`,
+      );
+    }
+    const organizationIds = [
+      ...new Set(
+        (scan.data ?? [])
+          .map((row) => row.organization_id)
+          .filter((id): id is string => validUuid(id)),
+      ),
+    ];
+    let organizations = 0;
+    let redacted = 0;
+    for (const organizationId of organizationIds) {
+      const { data, error } = (await structuralRpcClient(supabase).rpc(
+        "redact_expired_capture_documents",
+        { p_organization_id: organizationId, p_limit: 100 },
+      )) as {
+        data: { redacted?: number } | null;
+        error: { code?: string; message?: string } | null;
+      };
+      if (error) {
+        throw new Error(
+          `Memory retention sweep failed for organization: ${error.code ?? "unknown"}.`,
+        );
+      }
+      organizations += 1;
+      redacted += typeof data?.redacted === "number" ? data.redacted : 0;
+    }
+    logger.info("memory.retention_sweep_finished", { organizations, redacted });
+    return { organizations, redacted };
   },
 });
