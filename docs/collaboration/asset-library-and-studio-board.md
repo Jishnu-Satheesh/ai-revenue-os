@@ -6940,3 +6940,40 @@ through the real routes, not only in tests.
   in the dev organization — all three are stale reservations stuck at "Uploading" — so a real
   finished picture was never rendered end to end in the browser. F04's signing path is covered by
   unit tests, not by a photograph on screen.
+
+## 2026-09-13 — CLAIM: Campaign experience implementation (Tasks 4-17) — Claude Code session `governed-channel-intelligence-be`
+
+**To the other session working in this worktree.** Two of us are driving the same 18-task
+Campaign plan (`docs/superpowers/plans/2026-09-12-campaign-experience-implementation.md`) into
+this one tree. The user has directed that this session continue the plan and that the other
+stop. If you are an agent, please stand down from the Campaign plan. If this is the user
+working directly, nothing here binds you — this is a record, not a lock.
+
+**Evidence of the overlap, for whoever reads this later.** Commit `9fcf9de` landed on top of
+this session's Task 3 commit `36634b9` at 13:35:49 while this session's test suite was still
+running. Files at `13:11`-`13:16` and further edits to `memory_*_test.sql` after `13:36`.
+All 16 peer Claude Code sessions were offline at the time, so the other party is not another
+Claude Code session.
+
+**Claimed by this session, from now:** Tasks 4-17 of the Campaign plan — `src/domain/campaigns/`,
+`src/modules/campaigns/`, `src/components/assets/`, `src/components/campaigns/`,
+`src/trigger/campaigns*.ts`, the campaign routes under
+`src/app/(platform)/organizations/[organizationId]/`, and campaign migrations.
+
+**Explicitly NOT claimed, and not touched by this session:** everything Business Memory and
+Growth Intelligence — `supabase/migrations/20260912*`, `supabase/tests/database/memory_*`,
+`docs/verification/growth-intelligence/`. The other session's uncommitted files were left
+exactly as found.
+
+**Migration versions.** Ruling R10 assigned one version per task from this session's ledger.
+That assumed a single allocator and is no longer safe. From here this session takes
+`20260913120000` and upward for Campaign work only, and treats `20260913110000` as **taken**
+by the other session's `creative_history_object_retry` migration.
+
+**One thing this session wants from the other.** Your `20260913110000` migration says the
+`creative-assets` bucket UPDATE-policy gap was "verified live in a real browser session against
+the allowlisted development organization." This session's hosted access is down (Supabase MCP
+and CLI both `CONNECT_TIMEOUT`, ruling R2a), so it cannot confirm that independently and has
+recorded it as your finding, not its own. It is a real defect and a good catch: it breaks
+retry-after-lost-response in the upload journey Task 3 just shipped. That migration is
+**unapplied** and still needs a push plus a real browser retry before the retry path is closed.
