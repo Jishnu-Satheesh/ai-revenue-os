@@ -72,6 +72,10 @@ insert into public.channel_analysis_runs (
    'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
    'fb400000-0000-4000-8000-000000000903'::uuid);
 
+insert into public.organization_channels (id, organization_id, key, display_name, category, created_by) values
+  ('fb400000-0000-4000-8000-000000000210'::uuid, 'fb400000-0000-4000-8000-000000000201'::uuid, 'talabat', 'Talabat', 'marketplace', 'fb400000-0000-4000-8000-000000000001'::uuid),
+  ('fb400000-0000-4000-8000-000000000211'::uuid, 'fb400000-0000-4000-8000-000000000202'::uuid, 'talabat', 'Talabat', 'marketplace', 'fb400000-0000-4000-8000-000000000003'::uuid);
+
 insert into public.channel_recommendations (
   id, organization_id, channel_id, analysis_run_id, window_start, window_end, period_grain,
   label, headline, detail, prompt_version, prompt_digest, output_digest, provider, model_id, result_digest

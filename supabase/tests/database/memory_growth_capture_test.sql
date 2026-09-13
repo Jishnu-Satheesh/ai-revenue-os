@@ -839,6 +839,11 @@ select extensions.is(
   1, 'erasure enqueues a withdrawn memory event too');
 
 -- Item projection: insight, recommendation, and the missing-data gap -------------
+--
+-- The item events below were enqueued by the synthesis completions above and
+-- claimed under token 8c2 at line 792. Completing them under 8c3 would trip
+-- the lease check (42501) by design, so they complete under 8c2. Token 8c3
+-- claims the erasure-enqueued withdrawn event only (counted, never completed).
 
 select pg_temp.claim_due('fb410000-0000-4000-8000-0000000008c3'::uuid);
 
@@ -847,7 +852,7 @@ select extensions.is(
     (select e.id from public.memory_capture_events e
      join public.growth_intelligence_items i on i.id = e.growth_item_id
      where i.item_fingerprint = repeat('1', 64)),
-    'fb410000-0000-4000-8000-0000000008c3'::uuid)),
+    'fb410000-0000-4000-8000-0000000008c2'::uuid)),
   'completed', 'the insight delivery projects');
 
 select extensions.is(
@@ -863,7 +868,7 @@ select extensions.is(
     (select e.id from public.memory_capture_events e
      join public.growth_intelligence_items i on i.id = e.growth_item_id
      where i.item_fingerprint = repeat('3', 64)),
-    'fb410000-0000-4000-8000-0000000008c3'::uuid)),
+    'fb410000-0000-4000-8000-0000000008c2'::uuid)),
   'completed', 'the recommendation delivery projects');
 
 select extensions.is(
@@ -879,7 +884,7 @@ select extensions.is(
     (select e.id from public.memory_capture_events e
      join public.growth_intelligence_items i on i.id = e.growth_item_id
      where i.item_fingerprint = repeat('5', 64)),
-    'fb410000-0000-4000-8000-0000000008c3'::uuid)),
+    'fb410000-0000-4000-8000-0000000008c2'::uuid)),
   'completed', 'the data-gap delivery projects');
 
 select extensions.ok(
