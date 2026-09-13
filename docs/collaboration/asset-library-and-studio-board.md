@@ -1,5 +1,7 @@
 # Coordination board — Asset Library, then Campaign Studio
 
+<!-- 2026-09-14 Market Monitoring report experience (Tier 3 approved): coordinator owns scope/order/ledger; one implementer, one reviewer, one tester; no other workers. Intended touch set: docs/superpowers/specs/2026-09-14-market-monitoring-report-experience.md, .superpowers/sdd/market-monitoring-report-experience/, src/domain/growth-intelligence/, src/modules/growth-intelligence/, src/components/growth-intelligence/market-watch* + New-research/report-reader/acceptance UI, src/app growth-intelligence routes + report PDF download route, src/trigger/growth-intelligence.ts + GI workflows, new growth_intelligence research-project/report migrations + pgTAP suites, src/lib/supabase/database.types.ts (narrow, own commit). Unrelated Campaign/creative-history dirty work preserved; no stash/reset/clean/push. -->
+
 <!-- 2026-09-13 Task 3 (Asset Library upload/review workspace) finished by a
 continuation agent after a session wall. Prior session's uncommitted work
 (asset-workspace.tsx, asset-upload.tsx, asset-query-options.ts, creative-folder-tree,
@@ -7279,3 +7281,5 @@ visual work done.
 **Not ours, still open:** `permissions.drift.test.ts` fails 4 assertions because
 the research migrations seed `campaign.research_request` and
 `src/domain/access/permissions.ts` does not declare it.
+
+<!-- 2026-09-13 Market Monitoring Slice 2 (persistence + tenant boundaries, implementer): DRAFTED, NOT PUSHED. New forward migration supabase/migrations/20260913202720_growth_intelligence_research_projects_reports.sql (5 org-scoped tables with composite tenant FKs, forced RLS, SELECT-only grants to authenticated/service_role, 3 pure-JSON validators mirroring Slice 1 Zod key-for-key, 4 fenced RPCs) + pgTAP suite supabase/tests/database/growth_intelligence_research_projects_reports_test.sql (103 assertions, two-account isolation) + narrow src/lib/supabase/database.types.ts typing (5 tables, drift test green) + new src/modules/growth-intelligence/infrastructure/research-project-repository.ts + test (17 vitest green, typecheck green). Dry-run lists ONLY the new file as pending; staging untouched (no push/test per brief hard stop — needs reviewer SQL approval + coordinator authorization). Unrelated Campaign/creative-history dirty work preserved; nothing committed, stashed, or pushed. Report: .superpowers/sdd/market-monitoring-report-experience/slice-2-report.md. -->
