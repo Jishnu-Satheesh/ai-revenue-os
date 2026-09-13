@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  campaignListPhase,
   campaignPhase,
+  needsAttention,
   phasePosition,
   type CampaignPhaseInput,
   type DeliverableTally,
@@ -174,5 +176,69 @@ describe("placing a phase on the strip", () => {
   it("gives an ending no position, rather than putting it back at the start", () => {
     expect(phasePosition("settled")).toBeNull();
     expect(phasePosition("stopped")).toBeNull();
+  });
+});
+
+describe("what a list may claim", () => {
+  function listInput(overrides: Record<string, unknown> = {}) {
+    return {
+      state: "approved" as const,
+      hasVersion: true,
+      approvalStatus: "live" as const,
+      settledAt: null,
+      ...overrides,
+    };
+  }
+
+  it("never marks a card incomplete for records the list did not ask for", () => {
+    // Deciding not to read is not the same as reading and failing. Marking
+    // every card "incomplete" would teach operators to ignore a warning that
+    // means something real on the detail page.
+    expect(campaignListPhase(listInput()).undetermined).toEqual([]);
+  });
+
+  it("stops at 'being prepared' rather than claiming how far along it is", () => {
+    const verdict = campaignListPhase(listInput());
+
+    expect(verdict.phase).toBe("preparing_creative");
+    expect(verdict.nextAction).toBeNull();
+  });
+
+  it("asks for review when nothing authorizes the version", () => {
+    expect(campaignListPhase(listInput({ approvalStatus: "none" })).nextAction).toMatchObject({
+      key: "approve_version",
+    });
+  });
+
+  it("says why authority is gone rather than only that review is needed", () => {
+    expect(campaignListPhase(listInput({ approvalStatus: "expired" })).summary).toMatch(/expired/i);
+  });
+
+  it("keeps a settled campaign settled regardless of its approval", () => {
+    expect(
+      campaignListPhase(listInput({ settledAt: "2026-09-01T00:00:00.000Z", approvalStatus: "expired" }))
+        .phase,
+    ).toBe("settled");
+  });
+});
+
+describe("counting what is actually waiting on somebody", () => {
+  it("counts a campaign that needs a review", () => {
+    expect(needsAttention(campaignPhase(input({ deliverables: tally({ approved: 1 }) })))).toBe(
+      true,
+    );
+  });
+
+  it("does not count creative that is still being produced", () => {
+    // Nobody is being waited on; the renderer is still working.
+    expect(
+      needsAttention(campaignPhase(input({ deliverables: tally({ produced: 1, approved: 1 }) }))),
+    ).toBe(false);
+  });
+
+  it("does not count a settled campaign", () => {
+    expect(needsAttention(campaignPhase(input({ settledAt: "2026-09-01T00:00:00.000Z" })))).toBe(
+      false,
+    );
   });
 });

@@ -57,7 +57,10 @@ export async function readCampaignList(
       // Only read the run when there is no version to explain the campaign. A
       // settled campaign's generation history is not what this list is for.
       const run = latest ? null : await read.latestGenerationRun(organizationId, campaign.id);
-      return toCampaignListItem(campaign, latest, run, now);
+      // The most recent approval whatever became of it, so a card can say
+      // "expired" rather than the flat "not approved" a live-only read gives.
+      const approval = latest ? await read.getLatestApproval(organizationId, campaign.id) : null;
+      return toCampaignListItem(campaign, latest, run, now, approval);
     }),
   );
 }

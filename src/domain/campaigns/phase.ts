@@ -367,3 +367,105 @@ export function phasePosition(phase: CampaignPhase): number | null {
   const index = PHASE_SEQUENCE.indexOf(phase);
   return index === -1 ? null : index;
 }
+
+/**
+ * The phase as far as a list can honestly tell.
+ *
+ * The portfolio does not read deliverable records — one list of twenty
+ * campaigns would mean sixty more queries to draw a card. That is a decision
+ * not to ask, which is NOT the same as asking and failing, and it must not be
+ * reported the same way: running the full derivation here would mark every card
+ * "incomplete" and teach operators to ignore a warning that means something
+ * real on the detail page.
+ *
+ * So this claims less. It stops at "creative is authorized and being prepared"
+ * and leaves how far along to the detail page, which does read the records.
+ */
+export function campaignListPhase(input: {
+  state: CampaignState;
+  hasVersion: boolean;
+  approvalStatus: PhaseApprovalStatus;
+  settledAt: string | null;
+}): CampaignPhaseVerdict {
+  if (input.settledAt !== null) {
+    return {
+      phase: "settled",
+      label: PHASE_LABEL.settled,
+      summary: "Ran and measured.",
+      undetermined: [],
+      facts: [],
+      nextAction: null,
+    };
+  }
+
+  if (STOPPED_STATES.has(input.state)) {
+    return {
+      phase: "stopped",
+      label: PHASE_LABEL.stopped,
+      summary:
+        input.state === "blocked" ? "Blocked and will not progress." : "Stopped before it ran.",
+      undetermined: [],
+      facts: [],
+      nextAction: null,
+    };
+  }
+
+  if (!input.hasVersion) {
+    return {
+      phase: "drafting",
+      label: PHASE_LABEL.drafting,
+      summary: "No proposal yet.",
+      undetermined: [],
+      facts: [],
+      nextAction: {
+        key: "generate",
+        label: "Generate the proposal",
+        detail: "Builds the first version from this campaign's brief or opportunity.",
+        permission: "campaign.create",
+        tab: "overview",
+      },
+    };
+  }
+
+  if (!authorizes(input.approvalStatus)) {
+    return {
+      phase: "awaiting_review",
+      label: PHASE_LABEL.awaiting_review,
+      summary:
+        input.approvalStatus === "none"
+          ? "Waiting for review."
+          : `Not authorized — ${approvalFact(input.approvalStatus).toLowerCase()}.`,
+      undetermined: [],
+      facts: [],
+      nextAction: {
+        key: "approve_version",
+        label: "Review this version",
+        detail: "Authorizes creative to be prepared. It does not publish anything.",
+        permission: "campaign.approve",
+        tab: "creative",
+      },
+    };
+  }
+
+  // Deliberately as far as this goes. Whether the outputs exist, have been
+  // reviewed, or may publish is a question only the detail page has asked.
+  return {
+    phase: "preparing_creative",
+    label: PHASE_LABEL.preparing_creative,
+    summary: "Creative is authorized and being prepared.",
+    undetermined: [],
+    facts: [],
+    nextAction: null,
+  };
+}
+
+/**
+ * Whether this campaign is waiting on a person right now.
+ *
+ * A real count of things needing attention, derived from the same next action
+ * the card shows. Not a badge that counts everything unfinished: a campaign
+ * whose creative is still rendering is not waiting on anybody.
+ */
+export function needsAttention(verdict: CampaignPhaseVerdict): boolean {
+  return verdict.nextAction !== null;
+}

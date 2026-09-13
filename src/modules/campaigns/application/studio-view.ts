@@ -13,6 +13,7 @@ import {
 import { GENERATE_BUNDLE_LEASE_SECONDS } from "@/workflows/campaigns/durations";
 import { diffManifestChanges } from "@/domain/campaigns/diff";
 import { approvalStatus, type CampaignState } from "@/domain/campaigns/state-machine";
+import { campaignListPhase, type CampaignPhaseVerdict } from "@/domain/campaigns/phase";
 import type { ChannelReadiness } from "@/modules/campaigns/infrastructure/readiness-reader";
 import type {
   BundleVersionDetail,
@@ -102,6 +103,10 @@ export type CampaignListItem = {
   objective: string | null;
   channels: readonly string[];
   spendCeiling: Money | null;
+  /** The newest version's id, so the list can sign a preview for its artwork. */
+  bundleVersionId: string | null;
+  /** Where this stands, as far as a list can honestly tell. See `campaignListPhase`. */
+  phase: CampaignPhaseVerdict;
 };
 
 /**
@@ -321,6 +326,10 @@ export function toCampaignListItem(
   latest: BundleVersionDetail | null,
   run: GenerationRunSnapshot | null = null,
   now: string = new Date().toISOString(),
+  /** The campaign's most recent approval, whatever became of it. */
+  approval: CampaignApproval | null = null,
+  /** When the outcome settled, if it has. */
+  settledAt: string | null = null,
 ): CampaignListItem {
   const generation = toGeneration(run, latest !== null, now);
   const shared = {
@@ -343,6 +352,13 @@ export function toCampaignListItem(
       objective: null,
       channels: [],
       spendCeiling: null,
+      bundleVersionId: null,
+      phase: campaignListPhase({
+        state: shared.state,
+        hasVersion: false,
+        approvalStatus: "none",
+        settledAt,
+      }),
     };
   }
 
@@ -355,6 +371,13 @@ export function toCampaignListItem(
     objective: latest.manifest.objective,
     channels: channelsOf(latest.manifest),
     spendCeiling: latest.manifest.totalSpendCeiling,
+    bundleVersionId: latest.id,
+    phase: campaignListPhase({
+      state: shared.state,
+      hasVersion: true,
+      approvalStatus: toApproval(approval, latest, now).status,
+      settledAt,
+    }),
   };
 }
 

@@ -15,6 +15,10 @@ import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { createDeliverableRepository } from "@/modules/campaigns/infrastructure/deliverable-repository";
 import type { DeliverablePersistence } from "@/modules/campaigns/infrastructure/deliverable-repository";
 import { createDeliverableService } from "@/modules/campaigns/application/deliverable-service";
+import {
+  readLaunchAuthorized,
+  type LaunchAuthorityReader,
+} from "@/modules/campaigns/infrastructure/launch-repository";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { toGeneration } from "@/modules/campaigns/application/studio-view";
@@ -120,6 +124,15 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
   // of them means it is safe to conclude nothing is waiting for review.
   const deliverables = await readDeliverables(context, resolved.campaignId);
 
+  // Asked, not assumed. Passing a flat `false` here would have claimed every
+  // campaign lacks publication authority; passing a permanent `null` would have
+  // shown a "could not be read" warning on every campaign forever, which is how
+  // a warning that means something real gets trained out of people.
+  const launchAuthorized = await readLaunchAuthorized(
+    context.supabase as unknown as LaunchAuthorityReader,
+    { organizationId: context.organizationId, campaignId: resolved.campaignId },
+  );
+
   // Capability checks, not role checks. Reviewing an output and authorizing a
   // publication are separate rights, and collapsing them into "not a viewer"
   // would hand an operator the publish button C04 keeps above their line.
@@ -131,10 +144,7 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
     hasVersion: true,
     approvalStatus: view.approval.status,
     deliverables: deliverables === null ? null : tallyOf(deliverables),
-    // Launch authority has no reader yet, so this is reported as undetermined
-    // rather than guessed at as `false`. Saying "not authorized" when we did not
-    // look would be a claim we have not earned.
-    launchAuthorized: null,
+    launchAuthorized,
     settledAt: outcome?.settledAt ?? null,
   });
 
@@ -546,3 +556,4 @@ function tallyOf(deliverables: readonly PublishingDeliverable[]): DeliverableTal
     rejected: produced.filter((entry) => entry.eligibility.reasonCode === "rejected").length,
   };
 }
+

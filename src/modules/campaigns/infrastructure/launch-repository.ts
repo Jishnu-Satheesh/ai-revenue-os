@@ -208,3 +208,61 @@ export function createLaunchRepository(client: LaunchPersistence): LaunchStore {
     },
   };
 }
+
+/** The narrow read the detail page needs to answer "may this publish?". */
+export type LaunchAuthorityReader = {
+  from(table: "campaign_launch_approvals"): {
+    select(columns: string): {
+      eq(
+        column: string,
+        value: string,
+      ): {
+        eq(
+          column: string,
+          value: string,
+        ): {
+          eq(
+            column: string,
+            value: string,
+          ): Promise<{ data: unknown[] | null; error: unknown }>;
+        };
+      };
+    };
+  };
+};
+
+/**
+ * Whether a live publication authority exists for this campaign.
+ *
+ * Returns `null` only when the read genuinely failed, and the panel says so
+ * rather than reporting "not authorized" — claiming a campaign lacks authority
+ * when we did not successfully look would send somebody to re-authorize
+ * something already authorized.
+ *
+ * That distinction is why this reader exists at all. A permanent `null` because
+ * nothing bothered to look would put an "incomplete" warning on every campaign
+ * forever, and a warning that is always on is a warning nobody reads — which
+ * would cost the real one its meaning on the day something actually cannot be
+ * read.
+ *
+ * Only `authorized` counts. A superseded or revoked row is history: it records
+ * what was once permitted and permits nothing now.
+ */
+export async function readLaunchAuthorized(
+  client: LaunchAuthorityReader,
+  input: { organizationId: string; campaignId: string },
+): Promise<boolean | null> {
+  try {
+    const { data, error } = await client
+      .from("campaign_launch_approvals")
+      .select("id")
+      .eq("organization_id", input.organizationId)
+      .eq("campaign_id", input.campaignId)
+      .eq("state", "authorized");
+
+    if (error) return null;
+    return Array.isArray(data) && data.length > 0;
+  } catch {
+    return null;
+  }
+}

@@ -106,3 +106,78 @@ export async function readAssetPreviewUrls(
   }
   return urls;
 }
+
+/**
+ * One preview per bundle version, for the portfolio.
+ *
+ * Batched deliberately. Signing per campaign would mean two round trips for
+ * every card on the page, and the usual fix for that — caching the signed
+ * links — is exactly what must not happen to a short-lived credential for a
+ * private bucket.
+ *
+ * A version whose asset cannot be signed simply has no preview. The portfolio
+ * renders that as "preview unavailable" rather than as an empty frame, so a
+ * signing failure never passes for a campaign with no artwork.
+ */
+export async function readListPreviewUrls(
+  database: ListAssetPathReader,
+  storage: SignedUrlSource,
+  input: { organizationId: string; bundleVersionIds: readonly string[] },
+): Promise<Readonly<Record<string, string>>> {
+  const ids = [...new Set(input.bundleVersionIds)];
+  if (ids.length === 0) return {};
+
+  const { data, error } = await database
+    .from("campaign_assets")
+    .select("bundle_version_id,asset_key,storage_path")
+    .eq("organization_id", input.organizationId)
+    .in("bundle_version_id", [...ids]);
+
+  if (error || !data || data.length === 0) return {};
+
+  // The first asset of each version, by a stable key order, so the same
+  // campaign shows the same picture on every render.
+  const firstByVersion = new Map<string, string>();
+  for (const row of [...data].sort((a, b) => a.asset_key.localeCompare(b.asset_key))) {
+    if (!firstByVersion.has(row.bundle_version_id)) {
+      firstByVersion.set(row.bundle_version_id, row.storage_path);
+    }
+  }
+
+  const versionByPath = new Map(
+    [...firstByVersion].map(([versionId, path]) => [path, versionId]),
+  );
+
+  const { data: signed, error: signError } = await storage.storage
+    .from(PREVIEW_BUCKET)
+    .createSignedUrls([...versionByPath.keys()], PREVIEW_TTL_SECONDS);
+
+  if (signError || !signed) return {};
+
+  const urls: Record<string, string> = {};
+  for (const entry of signed) {
+    const versionId = entry.path === null ? undefined : versionByPath.get(entry.path);
+    if (versionId && entry.signedUrl) urls[versionId] = entry.signedUrl;
+  }
+  return urls;
+}
+
+/** The narrow read the portfolio needs: many versions at once. */
+export type ListAssetPathReader = {
+  from(table: "campaign_assets"): {
+    select(columns: string): {
+      eq(
+        column: string,
+        value: string,
+      ): {
+        in(
+          column: string,
+          values: string[],
+        ): Promise<{
+          data: { bundle_version_id: string; asset_key: string; storage_path: string }[] | null;
+          error: unknown;
+        }>;
+      };
+    };
+  };
+};

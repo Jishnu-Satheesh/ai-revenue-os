@@ -7,6 +7,10 @@ import { getOrganizationContext } from "@/lib/api/organization-context";
 import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 import { readCampaignList } from "@/modules/campaigns/infrastructure/studio-reader";
+import {
+  readListPreviewUrls,
+  type ListAssetPathReader,
+} from "@/modules/campaigns/infrastructure/asset-preview";
 
 type PageProps = { params: Promise<{ organizationId: string }> };
 
@@ -19,6 +23,20 @@ export default async function CampaignsPage({ params }: PageProps) {
   const campaigns = await readCampaignList(
     createCampaignReadRepository(context.supabase as unknown as CampaignPersistence),
     context.organizationId,
+  );
+
+  // Signed against the caller's own session, so the private bucket is reached
+  // with the member's permissions rather than around them. A signing failure
+  // costs a thumbnail and nothing else.
+  const previewUrls = await readListPreviewUrls(
+    context.supabase as unknown as ListAssetPathReader,
+    context.supabase as never,
+    {
+      organizationId: context.organizationId,
+      bundleVersionIds: campaigns
+        .map((campaign) => campaign.bundleVersionId)
+        .filter((id): id is string => id !== null),
+    },
   );
 
   return (
@@ -40,6 +58,7 @@ export default async function CampaignsPage({ params }: PageProps) {
         organizationId={context.organizationId}
         campaigns={campaigns}
         timeZone={organization.default_timezone}
+        previewUrls={previewUrls}
       />
     </div>
   );

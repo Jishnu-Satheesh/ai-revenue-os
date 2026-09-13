@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { campaignListPhase } from "@/domain/campaigns/phase";
 
 import type { CampaignListItem } from "@/modules/campaigns/application/studio-view";
 import type {
@@ -61,6 +62,13 @@ function listItem(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     objective: "Drive iftar orders",
     channels: ["direct"],
     spendCeiling: null,
+    bundleVersionId: "d1000000-0000-4000-8000-000000000001",
+    phase: campaignListPhase({
+      state: "ready_for_review",
+      hasVersion: true,
+      approvalStatus: "none",
+      settledAt: null,
+    }),
     ...overrides,
   };
 }

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createLaunchRepository,
   launchFailure,
+  readLaunchAuthorized,
+  type LaunchAuthorityReader,
   type LaunchPersistence,
 } from "@/modules/campaigns/infrastructure/launch-repository";
 
@@ -271,5 +273,75 @@ describe("translating a refusal", () => {
     expect(launchFailure({ message: "something new", code: "XX000" })).toEqual({
       kind: "unavailable",
     });
+  });
+});
+
+describe("whether a publication is authorized", () => {
+  function authorityClient(result: { data: unknown[] | null; error: unknown }) {
+    const seen: { column: string; value: string }[] = [];
+    const client = {
+      from() {
+        return {
+          select: () => ({
+            eq: (c1: string, v1: string) => {
+              seen.push({ column: c1, value: v1 });
+              return {
+                eq: (c2: string, v2: string) => {
+                  seen.push({ column: c2, value: v2 });
+                  return {
+                    eq: (c3: string, v3: string) => {
+                      seen.push({ column: c3, value: v3 });
+                      return Promise.resolve(result);
+                    },
+                  };
+                },
+              };
+            },
+          }),
+        };
+      },
+    };
+    return { client: client as unknown as LaunchAuthorityReader, seen };
+  }
+
+  it("counts only a live authority, never a superseded or revoked one", async () => {
+    const { client, seen } = authorityClient({ data: [{ id: "a" }], error: null });
+
+    await expect(
+      readLaunchAuthorized(client, { organizationId: ORGANIZATION, campaignId: "campaign" }),
+    ).resolves.toBe(true);
+
+    // Superseded rows record what was once permitted and permit nothing now.
+    expect(seen).toContainEqual({ column: "state", value: "authorized" });
+  });
+
+  it("answers false when nothing authorizes a publication", async () => {
+    const { client } = authorityClient({ data: [], error: null });
+
+    await expect(
+      readLaunchAuthorized(client, { organizationId: ORGANIZATION, campaignId: "campaign" }),
+    ).resolves.toBe(false);
+  });
+
+  it("answers 'unknown' when the read failed, never 'not authorized'", async () => {
+    // Reporting a failed read as "not authorized" would send somebody to
+    // re-authorize something that may already be authorized.
+    const { client } = authorityClient({ data: null, error: { message: "connection reset" } });
+
+    await expect(
+      readLaunchAuthorized(client, { organizationId: ORGANIZATION, campaignId: "campaign" }),
+    ).resolves.toBeNull();
+  });
+
+  it("answers 'unknown' rather than throwing into the page render", async () => {
+    const throwing = {
+      from() {
+        throw new Error("offline");
+      },
+    } as unknown as LaunchAuthorityReader;
+
+    await expect(
+      readLaunchAuthorized(throwing, { organizationId: ORGANIZATION, campaignId: "campaign" }),
+    ).resolves.toBeNull();
   });
 });

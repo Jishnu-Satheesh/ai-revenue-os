@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { campaignListPhase } from "@/domain/campaigns/phase";
 
 import { CampaignPortfolio } from "@/components/campaigns/campaign-portfolio";
 import type { CampaignListItem } from "@/modules/campaigns/application/studio-view";
@@ -27,15 +28,26 @@ function item(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     objective: "Raise incremental gross profit on weekday evenings",
     channels: ["instagram", "meta_ads"],
     spendCeiling: { amountMinor: 45_000, currency: "AED" },
+    bundleVersionId: "d1000000-0000-4000-8000-000000000001",
+    phase: campaignListPhase({
+      state: "ready_for_review",
+      hasVersion: true,
+      approvalStatus: "none",
+      settledAt: null,
+    }),
     ...overrides,
   };
 }
 
-function renderPortfolio(campaigns: readonly CampaignListItem[]) {
+function renderPortfolio(
+  campaigns: readonly CampaignListItem[],
+  previewUrls: Readonly<Record<string, string>> = {},
+) {
   return render(
     <CampaignPortfolio
       organizationId={ORGANIZATION_ID}
       campaigns={campaigns}
+      previewUrls={previewUrls}
       timeZone="Asia/Dubai"
     />,
   );
@@ -151,7 +163,7 @@ describe("a campaign with no proposal cannot be opened", () => {
     // Neither the title nor the review control may navigate. The detail route
     // has no version to render, and `disabled` does not stop an anchor.
     expect(card.queryByRole("link")).not.toBeInTheDocument();
-    expect(card.getByRole("button", { name: /review/i })).toBeDisabled();
+    expect(card.getByRole("button", { name: /open/i })).toBeDisabled();
   });
 
   it("keeps the title readable even though it is no longer a link", () => {
@@ -224,7 +236,7 @@ describe("a campaign with no proposal cannot be opened", () => {
     const card = within(screen.getByRole("listitem"));
 
     expect(card.queryByRole("button", { name: /generate again/i })).not.toBeInTheDocument();
-    expect(card.getByRole("button", { name: /review/i })).toBeDisabled();
+    expect(card.getByRole("button", { name: /open/i })).toBeDisabled();
   });
 
   it("says nothing about generation once a proposal exists", () => {
@@ -233,5 +245,128 @@ describe("a campaign with no proposal cannot be opened", () => {
 
     expect(card.queryByRole("status")).not.toBeInTheDocument();
     expect(card.getAllByRole("link").length).toBeGreaterThan(0);
+  });
+});
+
+describe("a filter never rewrites the total", () => {
+  function twelve(): CampaignListItem[] {
+    return Array.from({ length: 12 }, (_, index) =>
+      item({
+        id: `c100000${index}-0000-4000-8000-00000000000${index % 10}`,
+        title: index < 3 ? `Ramadan push ${index}` : `Weekday lunch ${index}`,
+      }),
+    );
+  }
+
+  it("states the true total when nothing is filtered", () => {
+    renderPortfolio(twelve());
+
+    expect(screen.getByText("12 campaigns")).toBeInTheDocument();
+  });
+
+  it("says 'showing 3 of 12' rather than presenting 3 as the total", () => {
+    // A filtered count presented as a total is how somebody concludes work has
+    // disappeared.
+    renderPortfolio(twelve());
+    fireEvent.change(screen.getByRole("searchbox", { name: /search campaigns/i }), {
+      target: { value: "ramadan" },
+    });
+
+    expect(screen.getByText("Showing 3 of 12 campaigns")).toBeInTheDocument();
+  });
+
+  it("still names the true total when a search matches nothing", () => {
+    renderPortfolio(twelve());
+    fireEvent.change(screen.getByRole("searchbox", { name: /search campaigns/i }), {
+      target: { value: "nothing here" },
+    });
+
+    expect(screen.getByText(/nothing matches that search/i)).toBeInTheDocument();
+    expect(screen.getByText(/12 campaigns exist here/i)).toBeInTheDocument();
+  });
+});
+
+describe("the attention count is real", () => {
+  it("counts only campaigns that are waiting on a person", () => {
+    renderPortfolio([
+      // Awaiting review: waiting on somebody.
+      item({ id: "c1000000-0000-4000-8000-000000000001" }),
+      // Creative authorized and being prepared: waiting on the renderer.
+      item({
+        id: "c1000000-0000-4000-8000-000000000002",
+        phase: campaignListPhase({
+          state: "approved",
+          hasVersion: true,
+          approvalStatus: "live",
+          settledAt: null,
+        }),
+      }),
+    ]);
+
+    expect(screen.getByText(/1 is waiting on somebody/i)).toBeInTheDocument();
+  });
+
+  it("says plainly when nothing is waiting", () => {
+    renderPortfolio([
+      item({
+        phase: campaignListPhase({
+          state: "completed",
+          hasVersion: true,
+          approvalStatus: "live",
+          settledAt: "2026-09-01T00:00:00.000Z",
+        }),
+      }),
+    ]);
+
+    expect(screen.getByText(/none are waiting on you/i)).toBeInTheDocument();
+  });
+});
+
+describe("the artwork leads, and says when it cannot", () => {
+  it("shows the signed preview when there is one", () => {
+    const { container } = renderPortfolio([item()], {
+      "d1000000-0000-4000-8000-000000000001": "https://example.test/a.png",
+    });
+
+    // Queried by element rather than role: the artwork carries an empty alt on
+    // purpose, because the title and objective beside it already say what this
+    // campaign is, and a screen reader should not hear it twice.
+    expect(container.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://example.test/a.png",
+    );
+  });
+
+  it("distinguishes artwork that does not exist yet from artwork that failed to load", () => {
+    // Both are an empty rectangle otherwise, and they mean different things.
+    renderPortfolio([item({ awaitingFirstVersion: true, bundleVersionId: null })]);
+    expect(screen.getByText(/no artwork yet/i)).toBeInTheDocument();
+
+    cleanup();
+
+    renderPortfolio([item()]);
+    expect(screen.getByText(/preview unavailable/i)).toBeInTheDocument();
+  });
+});
+
+describe("the same campaigns, two ways of looking", () => {
+  it("offers a gallery and a list, starting on the gallery", () => {
+    renderPortfolio([item()]);
+
+    expect(screen.getByRole("button", { name: /gallery/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /^list$/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("keeps every campaign when the layout changes", () => {
+    renderPortfolio([item(), item({ id: "c1000000-0000-4000-8000-000000000002" })]);
+    fireEvent.click(screen.getByRole("button", { name: /^list$/i }));
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 });
