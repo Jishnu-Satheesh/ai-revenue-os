@@ -17,6 +17,7 @@ function unjudged(overrides: Partial<UnjudgedRecommendation> = {}): UnjudgedReco
     detail: "Every cancellation was ITEM_UNAVAILABLE.",
     limitations: ["Twenty of fifty-nine days carried evidence."],
     promptVersion: 1,
+    context: null,
     citations: [
       {
         findingId: "fb230000-0000-4000-8000-000000000a01",
@@ -162,5 +163,132 @@ describe("runChannelRecommendationEvaluations", () => {
     expect(system).toContain("basic English");
     expect(system).toMatch(/heavy jargon/);
     expect(system).toMatch(/longwinded prose/);
+  });
+
+  it("states the memory non-corroboration rules in the system prompt (judge v4)", async () => {
+    const d = deps();
+
+    await runChannelRecommendationEvaluations(meta, d);
+
+    const system = vi.mocked(d.judge).mock.calls[0]![0];
+    expect(system).toContain("never independent evidence");
+    expect(system).toContain("intent, not proof of execution or success");
+    expect(system).toContain("one voice, not");
+    expect(system).toContain("does not overrule it");
+    expect(system).toContain("Memory alone never creates a finding");
+  });
+
+  it("names the absence of shared context instead of implying a memory read", async () => {
+    const d = deps();
+
+    await runChannelRecommendationEvaluations(meta, d);
+
+    const user = vi.mocked(d.judge).mock.calls[0]![1];
+    expect(user).toContain("(no shared context was recorded for this recommendation)");
+    expect(user).not.toContain("<context ref=");
+  });
+
+  it("carries a correctly referenced plan to the judge with its kind label", async () => {
+    // Spec 023 A05: the operator planned, then the narration cites the plan.
+    // The test proves carriage (the judge receives the discriminating
+    // evidence), not the verdict a live model would return.
+    const d = deps({
+      loadUnjudged: vi.fn(async () => [
+        unjudged({
+          detail: "Per the recorded plan we widened the promise window.",
+          context: {
+            shareMode: "internal_only",
+            manifestDigest: "d".repeat(64),
+            refs: [
+              {
+                ref: "ctx-0001",
+                summary: "Operator planned action on ITEM_UNAVAILABLE cancellations.",
+                statementKind: "operator_decision",
+              },
+            ],
+          },
+        }),
+      ]),
+    });
+
+    await runChannelRecommendationEvaluations(meta, d);
+
+    const user = vi.mocked(d.judge).mock.calls[0]![1];
+    expect(user).toContain('<shared_context mode="internal_only"');
+    expect(user).toContain('<context ref="ctx-0001" kind="operator_decision">');
+    expect(user).toContain("Operator planned action");
+  });
+
+  it("carries stale memory beside the current finding so contradiction is catchable", async () => {
+    // Spec 023 A10: a corrected report supersedes the old observation. The
+    // judge must see both the current finding and the stale memory entry with
+    // their distinct labels; which verdict follows is the model's job.
+    const d = deps({
+      loadUnjudged: vi.fn(async () => [
+        unjudged({
+          detail: "Late plates persist at peak per last month's note.",
+          citations: [
+            {
+              findingId: "fb230000-0000-4000-8000-000000000a02",
+              detectorKey: "kitchen.timing",
+              kind: "finding",
+              headline: "Late plates resolved this week",
+              detail: "No late plates in the current window.",
+              valueSummary: null,
+              limitations: [],
+            },
+          ],
+          context: {
+            shareMode: "internal_only",
+            manifestDigest: null,
+            refs: [
+              {
+                ref: "ctx-0002",
+                summary: "Late plates at peak last month.",
+                statementKind: "observation",
+              },
+            ],
+          },
+        }),
+      ]),
+    });
+
+    await runChannelRecommendationEvaluations(meta, d);
+
+    const user = vi.mocked(d.judge).mock.calls[0]![1];
+    expect(user).toContain("Late plates resolved this week");
+    expect(user).toContain("Late plates at peak last month.");
+    const system = vi.mocked(d.judge).mock.calls[0]![0];
+    expect(system).toContain("does not overrule it");
+  });
+
+  it("carries memory text the findings do not contain so invention is catchable", async () => {
+    // Spec 023 A12: a memory entry that invents a value must be visible to
+    // the judge next to the finding citations, or no verdict could catch it.
+    const d = deps({
+      loadUnjudged: vi.fn(async () => [
+        unjudged({
+          detail: "Margins rose 40 percent after the change.",
+          context: {
+            shareMode: "grounded_share",
+            manifestDigest: "e".repeat(64),
+            refs: [
+              {
+                ref: "ctx-0003",
+                summary: "Margins rose 40 percent, per an old note.",
+                statementKind: "observation",
+              },
+            ],
+          },
+        }),
+      ]),
+    });
+
+    await runChannelRecommendationEvaluations(meta, d);
+
+    const user = vi.mocked(d.judge).mock.calls[0]![1];
+    expect(user).toContain('<shared_context mode="grounded_share"');
+    expect(user).toContain("Margins rose 40 percent, per an old note.");
+    expect(user).toContain("AED 357.00 reported loss");
   });
 });

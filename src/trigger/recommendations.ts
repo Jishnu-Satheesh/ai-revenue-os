@@ -80,9 +80,32 @@ const unjudgedRecommendationShape = z.object({
         .nullable(),
     }),
   ),
+  // Reverse embed over the provenance primary key (organization_id,
+  // recommendation_id): zero rows when the narration ran evidence-only,
+  // exactly one when it pinned a manifest. An array in PostgREST shape,
+  // like the evaluations anti-join above. Default [] keeps older fixtures
+  // (evidence-only by construction) parsing as context null.
+  channel_recommendation_contexts: z
+    .array(
+      z.object({
+        manifest_id: z.string().uuid(),
+        share_mode: z.enum(["internal_only", "grounded_share"]),
+        provided_refs: z.array(z.string()),
+        cited_refs: z.array(z.string()),
+      }),
+    )
+    .default([]),
 });
 
-function toUnjudged(row: z.infer<typeof unjudgedRecommendationShape>): UnjudgedRecommendation {
+export type ContextLookup = {
+  manifestDigest: string | null;
+  entries: { ref: string; summary: string; statementKind: string }[];
+};
+
+function toUnjudged(
+  row: z.infer<typeof unjudgedRecommendationShape>,
+  resolveContext: (manifestId: string) => ContextLookup | null = () => null,
+): UnjudgedRecommendation {
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -103,7 +126,123 @@ function toUnjudged(row: z.infer<typeof unjudgedRecommendationShape>): UnjudgedR
         limitations: toStringArray(finding?.limitations),
       };
     }),
+    context: contextFor(row, resolveContext),
   };
+}
+
+/**
+ * The judge sees what the narration claims to rest on: cited refs resolved
+ * against the pinned manifest, with the share mode that governed the call.
+ * Provided-but-uncited entries informed wording, not claims, so they stay
+ * out. Without a provenance row the answer is evidence-only and context is
+ * null rather than an invented empty set.
+ */
+function contextFor(
+  row: z.infer<typeof unjudgedRecommendationShape>,
+  resolveContext: (manifestId: string) => ContextLookup | null,
+): UnjudgedRecommendation["context"] {
+  const provenance = row.channel_recommendation_contexts[0];
+  if (!provenance) return null;
+  const lookup = resolveContext(provenance.manifest_id);
+  return {
+    shareMode: provenance.share_mode,
+    manifestDigest: lookup?.manifestDigest ?? null,
+    refs: (lookup?.entries ?? [])
+      .filter((entry) => provenance.cited_refs.includes(entry.ref))
+      .map((entry) => ({
+        ref: entry.ref,
+        summary: entry.summary,
+        statementKind: entry.statementKind,
+      })),
+  };
+}
+
+type WorkerSupabase = {
+  from(table: string): {
+    select(columns: string): UntypedSelect;
+  };
+};
+
+type UntypedSelect = PromiseLike<{
+  data: Record<string, unknown>[] | null;
+  error: { code?: string; message?: string } | null;
+}> & {
+  eq(column: string, value: string): UntypedSelect;
+  in(column: string, values: readonly string[]): UntypedSelect;
+};
+
+/**
+ * One batched read of manifests and pinned entries for every provenance row
+ * in the batch, keyed by organization and manifest. Entries carry bounded
+ * safe snapshots, never prompts: the judge is an approved model boundary for
+ * internal context, same as narration. Reads stay explicitly
+ * organization-scoped even though the worker is service_role.
+ */
+async function loadContextLookups(
+  supabase: WorkerSupabase,
+  keys: { organizationId: string; manifestId: string }[],
+): Promise<Map<string, ContextLookup>> {
+  const lookups = new Map<string, ContextLookup>();
+  if (keys.length === 0) return lookups;
+  const organizationIds = [...new Set(keys.map((key) => key.organizationId))];
+  const manifestIds = [...new Set(keys.map((key) => key.manifestId))];
+
+  const manifests = await supabase
+    .from("memory_context_manifests")
+    .select("id,organization_id,context_digest")
+    .in("organization_id", organizationIds)
+    .in("id", manifestIds);
+  if (manifests.error) {
+    throw new Error(`Context manifest load failed: ${manifests.error.code ?? "unknown"}.`);
+  }
+  const digestByKey = new Map(
+    (manifests.data ?? [])
+      .filter(
+        (row): row is { id: string; organization_id: string; context_digest: string } =>
+          typeof row.id === "string" &&
+          typeof row.organization_id === "string" &&
+          typeof row.context_digest === "string",
+      )
+      .map((row) => [`${row.organization_id}:${row.id}`, row.context_digest]),
+  );
+
+  const entries = await supabase
+    .from("memory_context_entries")
+    .select("manifest_id,organization_id,context_ref,summary,statement_kind")
+    .in("organization_id", organizationIds)
+    .in("manifest_id", manifestIds);
+  if (entries.error) {
+    throw new Error(`Context entry load failed: ${entries.error.code ?? "unknown"}.`);
+  }
+  const entriesByKey = new Map<string, ContextLookup["entries"]>();
+  for (const row of entries.data ?? []) {
+    if (
+      typeof row.manifest_id !== "string" ||
+      typeof row.organization_id !== "string" ||
+      typeof row.context_ref !== "string" ||
+      typeof row.summary !== "string" ||
+      typeof row.statement_kind !== "string"
+    ) {
+      continue;
+    }
+    const key = `${row.organization_id as string}:${row.manifest_id as string}`;
+    const list = entriesByKey.get(key) ?? [];
+    list.push({
+      ref: row.context_ref as string,
+      summary: row.summary as string,
+      statementKind: row.statement_kind as string,
+    });
+    entriesByKey.set(key, list);
+  }
+
+  for (const key of keys) {
+    const mapKey = `${key.organizationId}:${key.manifestId}`;
+    lookups.set(mapKey, {
+      manifestDigest: digestByKey.get(mapKey) ?? null,
+      entries: entriesByKey.get(mapKey) ?? [],
+    });
+  }
+  return lookups;
 }
 
 export { channelRecommendationsTaskSchema };
@@ -311,9 +450,7 @@ export const channelRecommendationsTask = schemaTask({
         // The headroom budget for the gap-fill prompt: how many items this
         // run already filed. Same rows the cited set reads above, so the
         // budget and the scoping can never disagree.
-        return (
-          await loadFiledRecommendationIds(input.organizationId, input.analysisRunId)
-        ).length;
+        return (await loadFiledRecommendationIds(input.organizationId, input.analysisRunId)).length;
       },
       async loadPilotContext(input) {
         return loadRecommendationPilotContext(supabase, input);
@@ -435,6 +572,7 @@ export const evaluateRecommendationsTask = schedules.task({
                   value_denominator, monetary_impact_minor_units, currency, limitations
                 )
              ),
+             channel_recommendation_contexts (manifest_id, share_mode, provided_refs, cited_refs),
              channel_recommendation_evaluations!left()`;
           const response = (await supabase
             .from("channel_recommendations")
@@ -448,7 +586,22 @@ export const evaluateRecommendationsTask = schedules.task({
           const { data, error } = response;
           if (error) throw new Error(`Unjudged recommendations load failed: ${error.code}`);
 
-          return (data ?? []).map((row) => toUnjudged(unjudgedRecommendationShape.parse(row)));
+          const parsed = (data ?? []).map((row) => unjudgedRecommendationShape.parse(row));
+          const lookups = await loadContextLookups(
+            supabase as unknown as WorkerSupabase,
+            parsed.flatMap((row) =>
+              row.channel_recommendation_contexts.map((provenance) => ({
+                organizationId: row.organization_id,
+                manifestId: provenance.manifest_id,
+              })),
+            ),
+          );
+          return parsed.map((row) =>
+            toUnjudged(
+              row,
+              (manifestId) => lookups.get(`${row.organization_id}:${manifestId}`) ?? null,
+            ),
+          );
         },
         judge(system, user) {
           return judgeProvider.generate(system, user);

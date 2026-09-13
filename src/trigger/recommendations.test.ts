@@ -138,6 +138,55 @@ describe("the judge's unjudged-row shape", () => {
 
     expect(unjudgedRecommendationShape.safeParse(row).success).toBe(false);
   });
+
+  it("maps a provenance row through the resolver to cited shared context", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: [
+        {
+          manifest_id: "00000000-0000-4000-8000-0000000000c1",
+          share_mode: "internal_only" as const,
+          provided_refs: ["ctx-0001", "ctx-0002"],
+          cited_refs: ["ctx-0001"],
+        },
+      ],
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed, () => ({
+      manifestDigest: "d".repeat(64),
+      entries: [
+        {
+          ref: "ctx-0001",
+          summary: "Operator planned action.",
+          statementKind: "operator_decision",
+        },
+        { ref: "ctx-0002", summary: "Uncited wording influence.", statementKind: "observation" },
+      ],
+    }));
+
+    expect(unjudged.context).toMatchObject({
+      shareMode: "internal_only",
+      manifestDigest: "d".repeat(64),
+    });
+    // Cited refs only: provided-but-uncited entries informed wording, not claims.
+    expect(unjudged.context?.refs).toEqual([
+      { ref: "ctx-0001", summary: "Operator planned action.", statementKind: "operator_decision" },
+    ]);
+  });
+
+  it("leaves context null for evidence-only narrations without provenance", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: [],
+    };
+
+    const unjudged = toUnjudged(unjudgedRecommendationShape.parse(row));
+
+    expect(unjudged.context).toBeNull();
+  });
 });
 
 describe("channel recommendations Trigger registration", () => {

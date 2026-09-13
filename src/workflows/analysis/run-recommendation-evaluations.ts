@@ -37,6 +37,16 @@ export type UnjudgedRecommendation = {
     valueSummary: string | null;
     limitations: string[];
   }[];
+  /**
+   * Governed shared context pinned in the narration prompt, if any. Refs are
+   * the cited subset only: what the answer claims to rest on. The judge reads
+   * them as background under the non-corroboration rules, never as findings.
+   */
+  context: {
+    shareMode: "internal_only" | "grounded_share";
+    manifestDigest: string | null;
+    refs: { ref: string; summary: string; statementKind: string }[];
+  } | null;
 };
 
 export type EvaluationBatchOutcome = {
@@ -83,6 +93,15 @@ No other keys. No prose outside the JSON.`;
     "Portal and device how-to steps — actions the operator performs in their own portal or on their own tablet — are grounding-backed operational advice, not invention on their own. Still flag any invented number, cause, saving, benchmark, attribution, or confidence level as unfaithful.",
     "labelAppropriate: observation states a fact, recommendation suggests a bounded action, needs_data names what missing report would answer it. A needs_data finding dressed up as a recommendation is inappropriate.",
     "inventedValueDetected: true when any value appears that no cited finding contains.",
+    "Shared context: some recommendations were written with organization memory pinned in",
+    "their prompt. When a <shared_context> block lists entries, they are earlier advice,",
+    "plans, or observations — useful background, never independent evidence. A recorded",
+    "plan is intent, not proof of execution or success: a plan cited as a completed",
+    "outcome is unfaithful. Two entries repeating one root are one voice, not",
+    "corroboration: an old suggestion restated is not support. A memory entry",
+    "contradicting a current cited finding does not overrule it: flag stale-memory",
+    "reliance in issues. Memory alone never creates a finding, admits a claim, or",
+    "justifies a number the findings do not contain.",
     "uncertaintyHonest: true when thin evidence is stated as thin (for example, twenty of fifty-nine days), false when confidence outruns coverage.",
     "The operator reads basic English: name heavy jargon, unexplained technical terms, or longwinded prose in issues as well, and reflect them in score.",
     "score: overall advisory usefulness from 1 (harmful or empty) to 5 (accurate and actionable).",
@@ -118,9 +137,29 @@ function buildJudgeUser(item: UnjudgedRecommendation): string {
     "</recommendation>",
     "",
     findings,
+    "",
+    sharedContextBlock(item),
   ]
     .filter((line) => line !== "")
     .join("\n");
+}
+
+function sharedContextBlock(item: UnjudgedRecommendation): string {
+  if (!item.context)
+    return "<shared_context>(no shared context was recorded for this recommendation)</shared_context>";
+  const refs = item.context.refs.length
+    ? item.context.refs
+        .map(
+          (entry) =>
+            `<context ref="${entry.ref}" kind="${entry.statementKind}">\n${entry.summary}\n</context>`,
+        )
+        .join("\n")
+    : "(no cited entries)";
+  return [
+    `<shared_context mode="${item.context.shareMode}" manifest="${item.context.manifestDigest ?? "unknown"}">`,
+    refs,
+    "</shared_context>",
+  ].join("\n");
 }
 
 function canonicalJson(value: unknown): string {

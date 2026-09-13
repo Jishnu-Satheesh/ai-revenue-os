@@ -68,8 +68,13 @@ export const RECOMMENDATION_PROMPT_VERSION = 9;
  * heavy jargon, unexplained technical terms, and longwinded prose in issues
  * and reflects them in score. The verdict shape is unchanged: issues and
  * score already carry it, so no schema or migration was needed.
+ *
+ * 4: the narrator may pin governed Business Memory in its prompt (Spec 023),
+ * so the judge receives the cited shared-context entries with
+ * non-corroboration rules: memory is background, never independent evidence.
+ * The verdict shape is unchanged.
  */
-export const JUDGE_PROMPT_VERSION = 3;
+export const JUDGE_PROMPT_VERSION = 4;
 
 /**
  * The completion RPC re-checks citations against the findings of the same run,
