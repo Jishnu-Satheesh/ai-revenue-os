@@ -36,8 +36,20 @@ pause, cancellation, history, duplicate-start and cross-project advice behavior.
 Superdesign preflight succeeded on continuation; the saved GI target is structurally
 valid and its remote draft 5e38b367-f8e0-4707-ba46-5b5be3d65822 is version 2.
 Current source fingerprints differ; use a targeted context refresh before visual
-generation. No new canvas generation has run. The report-reader question is pending.
-Reader and language decisions remain open. No application,
+generation. The continuation also claims .superdesign/market-monitoring-experience/
+for a review-only visual draft and screenshots, and the GI entry in
+.superdesign/resume.json for its returned canvas metadata. It will refine the
+existing four-tab direction, focused on Market Watch and New research, with
+fictional examples clearly labelled. The user has now confirmed the readable
+report dialog with PDF download, simple English for version one, and automatic
+destination selection by item type after explicit acceptance (advice to
+Recommendations, findings to Insights). Superdesign generation was blocked by
+zero account credits; the continuation is authoring the same draft locally and
+will use the documented no-credit import path. The standalone prototype covers
+brief/scope/review, independent project states, readable reports, source inspection,
+speculative estimates, PDF export and selected-item review with exact report links.
+Browser verification is in progress. Research cost/duration still needs measured
+provider qualification rather than an invented operating promise. No application,
 database, provider activation or deployment change is authorized by this audit.
 Existing unrelated dirty work is preserved. -->
 
@@ -6891,6 +6903,46 @@ through the real routes, not only in tests.
 - **Narrow gaps checked, no fix needed.** UNTYPED_TABLES already lists `channel_recommendation_contexts` + `growth_intelligence_item_contexts`. `subject_drafting` cast in `subject-service.ts:133` remains fail-closed against legacy `memoryPurposeSchema` until Task 11 adds the vocab + DB check in one change with its migration — documented, not widened here. Previously reported planner/market-research/query-options failures now pass.
 - **Next.** Separate explicit approvals still required for (a) the 8-migration push, (b) enabling capture on probe org `2dda45b8`, (c) Trigger + browser live verification, (d) paid grounded-share canary.
 
+## 2026-09-13 — Business Memory push + staging proof (user approved everything, no paid calls made)
+
+- **Pre-push review caught 3 fatal lines.** `pg_catalog.coalesce` (42883 at first call, per the Task C trap log) in `20260912030945` lines 103-104 (record RPC fails on EVERY call) and `20260912130000` line 269 (lesson enqueue fails on every call). Fixed pre-push in the never-applied files (commit `9fcf9de`, 2 files only). Growth forward-replacements diffed against latest applied definitions: purely additive capture lines, no reverts. Dispatcher already handles all 9 kinds. No other qualified-syntax violations.
+- **Push.** All 8 pending applied (`20260912*` x5 memory, `20260913*` x3 campaign/creative). Dry-run now reports up to date.
+- **First-execution proof, all green.** channel_context 26, growth_context 16, growth_capture 77, campaign_capture, campaign_context (loader executed 8x), bootstrap, creative_intake, creative_object_retry (plus its `extensions.` schema fix, uncommitted foreign file). Fixture repairs committed (`2fa3705`): channel_contexts missing org-channel rows; growth_capture item events complete under claiming token 8c2 (42501 lease refusal worked as designed). Neighbor regression green (capture/runtime/manifests/visibility/retention/consent). Scoped vitest green: memory 257, analysis+GI 175, campaigns+trigger 971 (one flake, clean on rerun). Full `pnpm test` hangs in this tree — environmental, not this slice.
+- **Probe org `2dda45b8` read-only state.** Settings 0, captures 0, memory items 1431 (legacy corpus), findings 561, consents 0, qualifications 0. Ready for enablement, correctly default-disabled.
+- **Blocked on user steps.** Deployed worker is `20260910.4` with no capture dispatch/reconcile tasks — needs a worker deploy (not authorized here). Capture enablement, grounded consent + Google qualification, and paid canary all need an owner session (service_role denied by design) and browser/E2E creds absent here. No model was called; no prompt, body, or credential in any log.
+
+## 2026-09-13 — Slice 1 claimed: subject drafting on the common subject_drafting port (in progress)
+
+- Files: `src/modules/memory/application/subject-pack.ts` (new composer) + test (new), `src/modules/campaigns/application/subject-service.ts` + test (drop cast, consume pinned entries), `src/modules/campaigns/infrastructure/subject-route-wiring.ts` (session-client composer wiring), `src/modules/memory/index.ts` (export additions only). No migration, no database.types change, no prompt-version change, no Trigger change.
+- Composes only already-live pieces: current-state reader, memory search port, pack assembler, prepareForSubject/revalidateForSubject/consumeForSubject RPCs (all staging-proven). First production candidate composer; channel/growth reuse it later, not in this slice.
+
+## 2026-09-13 — Slice 1 done: subject packs pinned + legacy gate live (commits `22934c0`, migration pushed)
+
+- Cast removed: drafts now prepare a real `subject_drafting` manifest (actor-bound, attempt-keyed, revalidated once with one bounded rebuild, consumed with the drafting model identity) instead of a casted legacy read. Human-names-win and no-offer rules preserved; empty/unavailable packs draft without memory but still consume the manifest, so provenance never lies.
+- Load-bearing find: the approved "exclude unqualified legacy" rule had NO implementation anywhere (search, selection, and manifest RPC all read legacy rows). Gated at the search boundary in `20260913114325_memory_subject_legacy_gate.sql`: `p_include_legacy` defaults false, workspace passes true explicitly, plus member-checked `read_subject_context_gate`. Old search suite updated (9 call sites opt in). pgTAP 16/16 green; search/rls neighbors green.
+- Proof: pgTAP gate 16/16, vitest 86 files/979 tests, tsc/eslint clean, types drift 95/95. Migration pushed with the campaigns session's reviewed proposal migration (independent, grant-clean). Next: Slice 2 judge wiring.
+
+## 2026-09-13 — Slices 2-4 claimed and approved (building in order)
+
+- Slice 2 files: `src/domain/analysis/recommendations.ts` (judge v3→v4), `src/workflows/analysis/run-recommendation-evaluations.ts` + test (context block + rules), `src/trigger/recommendations.ts` + test (loader joins provenance). No migration.
+- Slice 3 files: `src/domain/memory/__fixtures__/shared-context-cases.ts` (new, 40 cases) + test (new), `e2e/business-memory-shared-intelligence.spec.ts` (new, skip-gated), `docs/verification/memory/shared-intelligence-acceptance.md` (new). No prod change.
+- Slice 4 files: `src/workflows/memory/*` embed due-scan + test, `src/trigger/memory.ts` (janitor registration) + test. Source only until worker deploy.
+
+## 2026-09-13 — Slices 2-4 done (commits `060b374`, `d5557c8`, `bda519c`, migrations pushed)
+
+- Slice 2: judge v4 carries cited shared context with non-corroboration rules (plan≠proof, one voice≠support, stale never overrules, memory never invents); loader joins provenance + resolves manifests/entries batched per org; evidence-only stays context-null. Tests 13 + 17 green.
+- Slice 3: 40-case corpus + 5 digest mates green (47 tests). It caught one real behavior worth changing (renderer recorded zero-count exclusion keys — now skipped) and four of my own hand-computation errors (rescue removes records, AI order follows relevance, pool math 31 not 49, fixture identity mismatch). e2e skeleton skip-gated; acceptance record written with honest worker/live columns empty.
+- Slice 4: dispatch-org triggers one embed sweep per org per day when something projected (warn-and-continue on handoff failure); nightly `memory.retention-sweep` redacts expired projection documents only (15/15 pgTAP green, foreign deliverables suite green too). Snapshot time-expiry stays a product decision, not smuggled code.
+- Pre-push review again earned its keep: caught an OR-precedence tenant escape in my own sweep WHERE clause before push.
+- Carried risks: full `pnpm test` hangs somewhere (scoped suites all green; diagnosing); deployed worker still `20260910.4`; paid canary, owner steps, and `git push` remain user-side.
+
+## 2026-09-13 — Close-out: pin test, full suite, missed wiring file
+
+- The version-pin contract test caught judge v3→v4 as designed; pinned v4 with history note (commit `637d38f`).
+- Full `pnpm test`: 5929 passed, 6 skipped, 0 failed — and no hang, just an 11-minute suite that outlasted the 10-minute command timeout twice. Diagnosis: impatience, not a stall.
+- Found my own Slice 1 commit `22934c0` had dropped `subject-route-wiring.ts` from its path-limited file list; the wiring sat uncommitted while tests passed around it. Committed alone as `874658a`; `src/` tree verified clean after.
+- Slice 1 is now completely landed in source. Remaining user-side items unchanged: worker deploy, owner enablement/consent/qualification, canary budget, `git push`.
+
 ## 2026-09-13 — Task 3: Asset Library upload and review workspace (F03, F04)
 
 - **Scope.** The first production UI of the Campaign rework. Owns F03 (no usable frontend upload
@@ -6977,3 +7029,128 @@ and CLI both `CONNECT_TIMEOUT`, ruling R2a), so it cannot confirm that independe
 recorded it as your finding, not its own. It is a real defect and a good catch: it breaks
 retry-after-lost-response in the upload journey Task 3 just shipped. That migration is
 **unapplied** and still needs a push plus a real browser retry before the retry path is closed.
+
+## 2026-09-13 — HANDOFF to the Business Memory session: Task 6 is yours if you want it
+
+Written by the Campaign session (`governed-channel-intelligence-be`) after being told you are
+free. This releases a claim, states what must not break, and passes on traps that cost real
+time today. Take it or leave it — nothing here binds you.
+
+### The claim I am releasing
+
+R12/`b91f4cd` claimed Campaign tasks 4-17 including `src/modules/campaigns/`. **I am releasing
+Task 6 — "Connect evidence, Business Memory and real campaign research" — to you**, because it
+is more yours than mine. Its brief says to "finish the Spec 023 prepare/consume/pin work
+already in progress", and that work is the subject-drafting port you just landed in `874658a`.
+You know that code; I would be re-deriving it.
+
+Task 6's brief lives at `.superpowers/sdd/2026-09-12-campaign-experience-implementation/task-6-brief.md`
+(the SDD directory is gitignored; ask the user if you cannot read it). Its authorities are
+`docs/superpowers/plans/2026-09-12-campaign-experience-contracts.md` §C03 and
+`docs/superpowers/specs/2026-09-12-campaign-experience-design.md`.
+
+I keep Tasks 7, 9, 11-17 and the unfinished parts of 8 and 10.
+
+### What I built that Task 6 must not undo
+
+Two gates, both now proven against live staging, not merely applied:
+
+1. **Preparation approval** (`20260913120000`). Approving a proposal authorizes drafting
+   creative inside a cost ceiling. It reserves no media spend, publishes nothing, confirms no
+   creative, authorizes no later variation. `preparationAuthority()` in
+   `src/domain/campaigns/proposal.ts` returns those four as literal `false`.
+2. **Publication approval** (`20260913130000` + `20260913140000`). Nothing publishes without a
+   review of its exact content hash, and launch authority binds the selected outputs together
+   with every channel term.
+
+**The specific thing Task 6 could break without noticing:** C03 says research "cannot approve
+itself or enqueue creative generation before proposal approval." If your research worker writes
+a proposal version, it must go through `complete_campaign_proposal_version`, which refuses a
+proposal in a decided state. Do not add a second write path. And nothing in the research path
+may create a `campaign_deliverable_versions` row — that is the render worker's, and it is
+`service_role`-only for a reason.
+
+**D07 is already implemented** in `admitProposal()` (`src/domain/campaigns/proposal.ts`): a
+proposal resting only on internal evidence, with no profit estimate and no external research,
+IS admissible with its gaps declared. What is refused is a market claim with no citation, and
+evidence belonging to another tenant (checked first, so a leak never presents as a merely
+missing citation). Please reuse it rather than writing a second admission rule.
+
+**D06 — do NOT invent numeric operating limits.** Research cadence, cooldown, pending-proposal
+limits and allowances are explicit organization configuration per C03. Missing settings produce
+"Needs setup", never a default that spends money.
+
+### Traps that cost me time today. Please do not re-pay for these.
+
+1. **`pg_catalog.coalesce` / `pg_catalog.nullif` are not functions.** They are SQL constructs.
+   Qualifying them parses, applies, and then aborts on FIRST CALL (42883). You hit this too
+   (`9fcf9de`). `btrim`, `now`, `max`, `left`, `jsonb_build_object` ARE real and stay qualified.
+2. **`array_length(x, 1)` on an empty array is NULL, and a CHECK treats NULL as PASSING.**
+   `check (decision = 'approved' or array_length(reason_codes,1) >= 1)` permitted exactly the
+   reasonless rejection it appeared to forbid. Use `cardinality()`.
+3. **An `auth.role() = 'service_role'` guard inside a SECURITY DEFINER function is wrong.**
+   `auth.role()` reads a JWT claim; a worker connecting as service_role does not set one, so
+   the guard refuses the only legitimate caller. The repo idiom is that the EXECUTE GRANT is
+   the gate — no in-function role check.
+4. **pgTAP `throws_ok(sql, code, X)` treats X as the error MESSAGE, not a description.** I made
+   this mistake twice and got false failures where the constraint was firing perfectly. Use the
+   4-arg form: `(sql, errcode, errmsg, description)`.
+5. **`permissions.drift.test.ts` parses migration seed blocks by exact header text** and
+   tuple-scans to the first `;`. So a new permission's role seed must use the 2-column form
+   (`permission_scope` defaults to 'organization'), `on conflict (key) do nothing` breaks the
+   parser because it reads `(key)` as a tuple — use a bare `on conflict do nothing` — and each
+   tuple must stay on ONE line.
+
+### The technique worth stealing: rehearse a migration before pushing
+
+There is no local database, but staging can rehearse one. Open a transaction, apply the
+migration, run the pgTAP body, then ROLLBACK. Nothing is committed and staging is untouched.
+
+    node --input-type=module -e '
+      import postgres from "postgres";
+      import { readFileSync } from "node:fs";
+      import { config } from "dotenv";
+      config({ path: ".env.local", quiet: true });
+      const mig = readFileSync("supabase/migrations/<file>.sql", "utf8");
+      let test = readFileSync("supabase/tests/database/<file>.sql", "utf8");
+      test = test.replace(/^begin;/m, "").replace(/rollback;\s*$/m, "");
+      const sql = postgres(process.env.DATABASE_URL.replace(":6543", ":5432"),
+                           { prepare: false, max: 1 });
+      try {
+        await sql.begin(async (tx) => {
+          await tx.unsafe(mig);
+          const rows = await tx.unsafe(test);
+          /* print any line starting "not ok" */
+          throw new Error("__ROLLBACK__");
+        });
+      } catch (e) { if (e.message !== "__ROLLBACK__") console.error(e.message); }
+      await sql.end();'
+
+Run it from the repo root so `node_modules` resolves. This caught four real defects today
+before any of them reached shared staging, including trap 2 above. It does not replace the
+post-push `pnpm db:test` run — plpgsql still needs one real execution — but it means the real
+run is rarely the first time you learn something is wrong.
+
+### Two loose threads neither of us owns
+
+- **A Decision Engine exposure.** `supabase/tests/database/decision_engine_behavior_test.sql`
+  has two failing assertions, consistently: *"authenticated feed reads cannot expose the
+  evidence bundle outside the projection"* (expects 42501, gets no exception) and *"authenticated
+  opportunity reads are limited to the intended feed projection"*. The suite expects the
+  database to refuse when a signed-in member reads the evidence bundle directly, and it does
+  not. Cross-organization writes still refuse, so this reads as over-exposure WITHIN a tenant
+  rather than a cross-tenant leak — but that is an inference from neighbouring assertions, not
+  something either of us has verified. Last touched by `92920e6`/`0ffa6e9`. It is outside the
+  Campaign plan and outside my claim. If you have capacity, this is worth more than most
+  feature work.
+- **`src/components/memory/review-tab.test.tsx` is genuinely slow** — ~47s alone, and it times
+  out in the full suite whenever the machine is busy. That is your area. It has failed the full
+  run three times today for this reason and each failure costs someone a diagnosis.
+
+### Still open on my side, for your awareness
+
+`campaignSourceSchema` in `src/domain/campaigns/schemas.ts` still cannot express a
+proposal-sourced campaign inside a bundle manifest. That is deliberate: it belongs with manifest
+V3, which C04 gates on an approved schema/validator/digest/backward-reader design, and the
+bundle manifest sits inside the digest binding every existing campaign approval. Do not widen it
+opportunistically.
