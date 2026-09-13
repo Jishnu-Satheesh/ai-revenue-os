@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { logger } from "@/lib/logger";
 import {
+  BRAND_ASSET_PREVIEW_TTL_SECONDS,
   createAssetLibraryRepository,
+  signBrandAssetPreviews,
   type AssetLibraryPersistence,
 } from "@/modules/campaigns/infrastructure/asset-library-repository";
+
+vi.mock("@/lib/logger", () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
 
 const ORGANIZATION_ID = "10000000-0000-4000-8000-000000000001";
 const ASSET_ID = "20000000-0000-4000-8000-000000000002";
@@ -313,5 +320,83 @@ describe("asset library governed writes", () => {
       code: "VALIDATION_ERROR",
       message: "Please check the asset metadata.",
     });
+  });
+});
+
+describe("signBrandAssetPreviews", () => {
+  function signerReturning(result: {
+    data: { path: string | null; signedUrl: string }[] | null;
+    error: unknown;
+  }) {
+    const createSignedUrls = vi.fn().mockResolvedValue(result);
+    return {
+      client: { storage: { from: () => ({ createSignedUrls }) } } as never,
+      createSignedUrls,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(logger.error).mockClear();
+  });
+
+  it("signs each path with a bounded expiry", async () => {
+    const { client, createSignedUrls } = signerReturning({
+      data: [{ path: "a/b", signedUrl: "https://signed.example/a" }],
+      error: null,
+    });
+
+    await expect(
+      signBrandAssetPreviews(client, ["a/b"], { organizationId: ORGANIZATION_ID }),
+    ).resolves.toEqual({ "a/b": "https://signed.example/a" });
+
+    expect(createSignedUrls).toHaveBeenCalledWith(["a/b"], BRAND_ASSET_PREVIEW_TTL_SECONDS);
+  });
+
+  it("does not call storage at all when there is nothing to sign", async () => {
+    const { client, createSignedUrls } = signerReturning({ data: [], error: null });
+
+    await expect(
+      signBrandAssetPreviews(client, [], { organizationId: ORGANIZATION_ID }),
+    ).resolves.toEqual({});
+    expect(createSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it("reports a signing failure instead of degrading to no previews in silence", async () => {
+    const { client } = signerReturning({ data: null, error: { message: "storage refused" } });
+
+    await expect(
+      signBrandAssetPreviews(client, ["a/b"], { organizationId: ORGANIZATION_ID }),
+    ).resolves.toEqual({});
+
+    expect(logger.error).toHaveBeenCalledWith("asset_library.preview_signing_failed", {
+      organizationId: ORGANIZATION_ID,
+      errorCode: "brand_assets:sign_failed",
+    });
+  });
+
+  it("never logs a storage path or a signed URL", async () => {
+    const { client } = signerReturning({ data: null, error: { message: "storage refused" } });
+
+    await signBrandAssetPreviews(client, ["tenant/secret-path"], {
+      organizationId: ORGANIZATION_ID,
+    });
+
+    const logged = vi.mocked(logger.error).mock.calls.map((call) => JSON.stringify(call));
+    expect(logged.join(" ")).not.toContain("secret-path");
+    expect(logged.join(" ")).not.toContain("https://");
+  });
+
+  it("keeps the paths that did sign when only some come back", async () => {
+    const { client } = signerReturning({
+      data: [
+        { path: "a/b", signedUrl: "https://signed.example/a" },
+        { path: null, signedUrl: "" },
+      ],
+      error: null,
+    });
+
+    await expect(
+      signBrandAssetPreviews(client, ["a/b", "c/d"], { organizationId: ORGANIZATION_ID }),
+    ).resolves.toEqual({ "a/b": "https://signed.example/a" });
   });
 });

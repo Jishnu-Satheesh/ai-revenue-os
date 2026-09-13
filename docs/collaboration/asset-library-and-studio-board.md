@@ -1,5 +1,46 @@
 # Coordination board — Asset Library, then Campaign Studio
 
+<!-- 2026-09-13 Task 3 (Asset Library upload/review workspace) finished by a
+continuation agent after a session wall. Prior session's uncommitted work
+(asset-workspace.tsx, asset-upload.tsx, asset-query-options.ts, creative-folder-tree,
+creative-history-grid, creative-history-inspector, real signed previews on
+assets/page.tsx, and their tests) was verified against the Task 3 brief rather
+than rebuilt. Found already correct: real signed previews (F04), the upload
+dialog mounted in the real route (F03), and the viewer-role hole from Task 0b
+closed at both the control and the mutation function in
+creative-history-inspector.tsx and the upload dialogs. Found and fixed one real
+gap: no test exercised the actual reserve→transfer→finalize sequence for a
+refused/lost-response/expired-upload-URL/retry outcome — added four cases to
+asset-workspace.test.tsx driving the real dialog with mocked fetch and a mocked
+Supabase Storage client. "Expired private preview" decision: the inspector's
+`<img onError>` flips local `previewExpired` state to a named "Preview expired"
+empty state rather than retrying a stale signed URL automatically; this is a
+Task 3 decision, not inherited. Full detail, verification evidence and honest
+gaps in `.superpowers/sdd/2026-09-12-campaign-experience-implementation/task-3-report.md`.
+Existing unrelated dirty work (Market Monitoring audit above, Meta Task 1
+baseline, Growth Intelligence in-flight work) is preserved untouched. -->
+
+<!-- 2026-09-13 Market Monitoring workflow and UX re-review: Codex owns a
+documentation-only discovery audit at docs/verification/growth-intelligence/
+2026-09-13-market-monitoring-workflow-audit.md and this board entry. User asks
+for a detailed current-versus-intended gap analysis, questions before product
+conclusions, and redesign informed by Campaign, Channels, Overview and the web.
+Confirmed: report and draft recommendations for review; user chooses one-time
+or recurring research; speculative competitor financial ranges are allowed with
+clear labels and an explanation of the speculation even without sourced figures.
+Discovery checkpoint: 50 source-backed gap rows and candidate UX in the audit;
+77 focused tests passed. No completed live paid-research or report flow claimed.
+Independent research projects at one location are confirmed by the user.
+The audit now specifies project/brief/update/report responsibilities and proposed
+pause, cancellation, history, duplicate-start and cross-project advice behavior.
+Superdesign preflight succeeded on continuation; the saved GI target is structurally
+valid and its remote draft 5e38b367-f8e0-4707-ba46-5b5be3d65822 is version 2.
+Current source fingerprints differ; use a targeted context refresh before visual
+generation. No new canvas generation has run. The report-reader question is pending.
+Reader and language decisions remain open. No application,
+database, provider activation or deployment change is authorized by this audit.
+Existing unrelated dirty work is preserved. -->
+
 <!-- 2026-09-12 Campaign visual prototype: user explicitly requests desktop.png
 for each planned page or Prototype.html. Codex claims .superdesign/campaign-experience/
 for a standalone interactive prototype, supporting fictional imagery, page PNGs,
@@ -6841,3 +6882,61 @@ through the real routes, not only in tests.
   a permanent panel for the inspector, folder tree collapsing to a Sheet below `lg`, client-local
   upload IDs visible in the UI, verdict filter kept independent from folder selection, rejected
   items staying in-grid with reasons, and the viewer-gate bug shape above.
+
+## 2026-09-13 — Business Memory shared-intelligence review-integrate verification (no push, no paid calls)
+
+- **Scope.** Review existing Swarm 1-5 output in place per user approval of review-integrate over re-dispatch. No files edited, no migration pushed, no model called, no stash, no push.
+- **Staging truth established with DB access.** All 17 `20260911*` memory migrations ARE applied (local == remote). Pending = 5 `20260912*` memory + 3 `20260913*` campaign/creative. Push stays blocked by the Campaign no-push rule; push is all-or-nothing so memory cannot ship alone.
+- **Evidence this session.** vitest: database.types 95/95, domain/memory 77/77, modules/memory+workflows 180/180, campaign subject/memory-source/memory-context 30/30, channel-recommendations+research-brief 41/41, growth synthesis/provenance 46/46, planner/market-research/query-options 66/66. tsc clean. pgTAP on staging: shared-capture/source-identity/runtime, manifests/visibility/retention, channel-capture/cursor, grounded-consent, backfill 34/34 — all PASS. Swarm-2 `memory_growth_capture_test.sql` (plan 77) exists in source; its migration is pending so it was not executed (would fail pre-push by construction).
+- **Narrow gaps checked, no fix needed.** UNTYPED_TABLES already lists `channel_recommendation_contexts` + `growth_intelligence_item_contexts`. `subject_drafting` cast in `subject-service.ts:133` remains fail-closed against legacy `memoryPurposeSchema` until Task 11 adds the vocab + DB check in one change with its migration — documented, not widened here. Previously reported planner/market-research/query-options failures now pass.
+- **Next.** Separate explicit approvals still required for (a) the 8-migration push, (b) enabling capture on probe org `2dda45b8`, (c) Trigger + browser live verification, (d) paid grounded-share canary.
+
+## 2026-09-13 — Task 3: Asset Library upload and review workspace (F03, F04)
+
+- **Scope.** The first production UI of the Campaign rework. Owns F03 (no usable frontend upload
+  journey — `AssetUpload` was referenced only by its own test and had no file input) and F04
+  (library showed no pictures — `assets/page.tsx` mapped every reference to `previewUrl: null`).
+  Built on Task 2's Creative History API. Finished by a continuation pass after the implementing
+  session hit a wall mid-task with the work uncommitted and no report.
+- **Files.** New `creative-history-grid.tsx`, `creative-history-inspector.tsx`,
+  `creative-folder-tree.tsx`, `asset-query-options.ts` and tests; new
+  `assets/page.test.tsx`, `asset-workspace.test.tsx`. Modified `asset-workspace.tsx`,
+  `asset-upload.tsx`, `asset-vocabulary.ts`, `assets/page.tsx`, `asset-library-repository.ts`.
+- **Three purpose tabs** Creative History / Products & Subjects / Brand Kit replace References /
+  Campaign output / Dishes, shareable via `?tab=`. "Dishes" is gone from the tab model — a
+  restaurant concept does not belong in a platform-core tab.
+- **F04 fix.** New `signBrandAssetPreviews` in `asset-library-repository.ts` mints bounded
+  (600s) private signed URLs from the member's own session client, so RLS still decides what can
+  be previewed; a path that fails to sign degrades to "no preview" for that one reference.
+- **The 0b viewer-gate bug shape was closed at the handler**, as that entry asked. `canManage` is
+  re-checked inside the upload `run` and `canReview` inside `submitReview`, so a control reached
+  some other way still refuses. The dialog is additionally not rendered at all for a viewer.
+- **"Expired private preview" decided.** It had no referent in the contract, so Task 0b flagged
+  rather than invented it. Decided here: `previewUrl === null` means the server issued no URL
+  ("No preview available", nothing to retry); an `<img>` `onError` on a URL that *was* issued
+  means the signature lapsed while the tab sat open ("Preview expired" + Reload). Two distinct
+  states, never conflated into a broken image.
+- **Two defects found and fixed in this pass.** (1) `signBrandAssetPreviews` swallowed its
+  Storage error and returned `{}`, so a library showing no pictures because Storage refused was
+  indistinguishable from a library that has none — now logs `asset_library.preview_signing_failed`
+  with tenant + bounded code only (`LogContext` is a closed allowlist, so no path, URL or raw
+  error can ride along). (2) The folder-tree split was `md:`, but Tailwind breakpoints measure the
+  viewport while this tree sits inside the AppShell — at a 768px viewport the expanded sidebar
+  left the design grid ~290px, a single card beside a mostly empty column. Raised to `lg:`,
+  verified in the browser before and after.
+- **Verification.** tsc clean. Full suite 513 files / 5764 passed / 6 skipped / 0 failures — the
+  inherited red baseline is now green, and `run-channel-recommendations.test.ts` passed this run.
+  Browser: real authenticated route at true 390px (device emulation — the browser window itself
+  will not go below 500px) and 768px; upload dialog opened on mobile showing drop zone + file
+  picker; inspector opened as a Sheet at 768 showing the partial-source state honestly. Screens in
+  `docs/verification/campaigns/2026-09-13-*`.
+- **Found, NOT fixed, flagged for the final review.** Platform-core asset UI still hard-codes
+  restaurant concepts outside Task 3's diff: `asset-library-grid.tsx:98` ("a dish you sell"),
+  `subject-list.tsx:57,59` ("No dishes described yet"), and reason codes in the domain enum itself
+  (`wrong_cuisine`, `not_our_plating`, `unappetising`, and `wrong_subject` rendered as "This is
+  not the dish"). Whether these belong to the Restaurant Industry Pack rather than platform core
+  is a product decision, not a mechanical rename, so it was not decided unilaterally here.
+- **Not claimed.** No migration was written or pushed. No completed Creative History item exists
+  in the dev organization — all three are stale reservations stuck at "Uploading" — so a real
+  finished picture was never rendered end to end in the browser. F04's signing path is covered by
+  unit tests, not by a photograph on screen.

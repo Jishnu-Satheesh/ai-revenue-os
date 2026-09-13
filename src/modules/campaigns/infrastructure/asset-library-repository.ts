@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { DomainError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import {
   type BrandAssetPersistenceFailure,
   throwBrandAssetMutationError,
@@ -279,4 +280,55 @@ export function createAssetLibraryRepository(
       });
     },
   };
+}
+
+/** Bounded, like every other private preview this platform signs. */
+export const BRAND_ASSET_PREVIEW_TTL_SECONDS = 600;
+
+export type BrandAssetPreviewSigner = {
+  storage: {
+    from(bucket: "brand-assets"): {
+      createSignedUrls(
+        paths: readonly string[],
+        expiresIn: number,
+      ): Promise<{ data: { path: string | null; signedUrl: string }[] | null; error: unknown }>;
+    };
+  };
+};
+
+/**
+ * The reference library's own version of the same signing step Creative
+ * History already has. The page previously set every `previewUrl` to `null`
+ * — this is the fix, not a new capability: `assetLibraryReferenceSchema`
+ * already carries `storagePath` for exactly this purpose, nothing here reads
+ * a wider Storage credential, and a path that fails to sign degrades to "no
+ * preview" for that one reference rather than failing the whole library.
+ */
+export async function signBrandAssetPreviews(
+  client: BrandAssetPreviewSigner,
+  paths: readonly string[],
+  context: Readonly<{ organizationId: string }>,
+): Promise<Readonly<Record<string, string>>> {
+  if (paths.length === 0) return {};
+  const { data, error } = await client.storage
+    .from("brand-assets")
+    .createSignedUrls([...paths], BRAND_ASSET_PREVIEW_TTL_SECONDS);
+  if (error || !data) {
+    // Degrading to "no preview" is the right behaviour for the member, but it
+    // must not be silent: a library that shows no pictures because Storage
+    // refused looks exactly like a library that has none. `LogContext` is a
+    // closed allowlist on purpose, so this carries only the tenant and a
+    // bounded code — never a path, a URL, or the raw error.
+    logger.error("asset_library.preview_signing_failed", {
+      organizationId: context.organizationId,
+      errorCode: "brand_assets:sign_failed",
+    });
+    return {};
+  }
+
+  const urls: Record<string, string> = {};
+  for (const entry of data) {
+    if (entry.path && entry.signedUrl) urls[entry.path] = entry.signedUrl;
+  }
+  return urls;
 }

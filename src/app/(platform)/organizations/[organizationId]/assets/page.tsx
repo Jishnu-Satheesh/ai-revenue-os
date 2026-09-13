@@ -1,5 +1,3 @@
-import { Images } from "lucide-react";
-
 import { AssetWorkspace } from "@/components/assets/asset-workspace";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
@@ -9,12 +7,10 @@ import { getOrganizationContext } from "@/lib/api/organization-context";
 import { createAssetLibraryService } from "@/modules/campaigns/application/asset-library-service";
 import {
   createAssetLibraryRepository,
+  signBrandAssetPreviews,
   type AssetLibraryPersistence,
+  type BrandAssetPreviewSigner,
 } from "@/modules/campaigns/infrastructure/asset-library-repository";
-import {
-  readCampaignOutput,
-  type CampaignOutputPersistence,
-} from "@/modules/campaigns/infrastructure/campaign-output-reader";
 import {
   createSubjectRepository,
   type SubjectPersistence,
@@ -23,15 +19,22 @@ import {
 type PageProps = { params: Promise<{ organizationId: string }> };
 
 /**
- * The asset library.
+ * The asset library: Creative History, Products & Subjects, and Brand Kit.
  *
  * Every read on this page uses the session's own client, so RLS decides what
- * this member may see. There is no service-role read here.
+ * this member may see. There is no service-role read here, and the signed
+ * preview URLs below are minted from that same session — a private preview
+ * that this member could not otherwise read cannot be signed for them either.
  *
- * The two role questions are answered on the server and passed down as plain
- * booleans, so the interface never offers a control the API would refuse. In
- * particular, confirming a dish description is reserved for an owner or admin
- * even though managing one is not.
+ * Creative History's own folders and designs are fetched client-side by
+ * `AssetWorkspace` (Task 2's API, behind TanStack Query); this page supplies
+ * only what a server component actually has for free: the organization,
+ * this member's exact permissions, and the two brand-asset reference lists
+ * that predate this rework.
+ *
+ * Role questions are answered here and passed down as plain booleans, so the
+ * interface never offers a control the API would refuse. Confirming a subject
+ * is reserved for an owner or admin even though managing one is not.
  */
 export default async function AssetsPage({ params }: PageProps) {
   const context = await getOrganizationContext(params);
@@ -43,32 +46,29 @@ export default async function AssetsPage({ params }: PageProps) {
   });
   const subjectStore = createSubjectRepository(context.supabase as unknown as SubjectPersistence);
 
-  const [references, subjects, campaignOutput] = await Promise.all([
+  const [references, subjects] = await Promise.all([
     library.list({ organizationId: context.organizationId, includeArchived: true }),
     subjectStore.list(context.organizationId),
-    readCampaignOutput(
-      context.supabase as unknown as CampaignOutputPersistence,
-      context.organizationId,
-    ),
   ]);
+
+  // The library previously set every preview to `null` here, so the grid
+  // showed taxonomy labels and no pictures. Each reference already carries
+  // its own storage path; this is the fix, not a new capability — a private,
+  // bounded-expiry signed URL per path, degrading to no preview only for a
+  // path that fails to sign.
+  const previewUrls = await signBrandAssetPreviews(
+    context.supabase as unknown as BrandAssetPreviewSigner,
+    references.map((reference) => reference.storagePath),
+    { organizationId: context.organizationId },
+  );
 
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
-      <div className="flex shrink-0 items-start gap-3">
-        <span className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-          <Images />
-        </span>
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Asset library</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {organization.name} · what we taught it, what it drew, and what we sell
-          </p>
-        </div>
-      </div>
 
       <AssetWorkspace
         organizationId={context.organizationId}
+        timeZone={organization.default_timezone}
         references={references.map((reference) => ({
           brandAssetId: reference.brandAssetId,
           brandAssetVersionId: reference.brandAssetVersionId,
@@ -80,12 +80,11 @@ export default async function AssetsPage({ params }: PageProps) {
           ownership: reference.ownership,
           archivedAt: reference.archivedAt,
           version: reference.version,
-          previewUrl: null,
+          previewUrl: previewUrls[reference.storagePath] ?? null,
           currentVerdict: reference.currentVerdict,
           currentReasonCodes: reference.currentReasonCodes,
           currentReviewedAt: reference.currentReviewedAt,
         }))}
-        campaignOutput={campaignOutput}
         subjects={subjects.map((subject) => ({
           id: subject.id,
           name: subject.name,
@@ -96,7 +95,9 @@ export default async function AssetsPage({ params }: PageProps) {
           archivedAt: subject.archivedAt,
         }))}
         canConfirmSubjects={role === "owner" || role === "admin"}
-        canReview={hasOrganizationPermission(role, "asset.review")}
+        canManageSubjects={hasOrganizationPermission(role, "subject.manage")}
+        canManageAssets={hasOrganizationPermission(role, "asset.manage")}
+        canReviewAssets={hasOrganizationPermission(role, "asset.review")}
       />
     </div>
   );
