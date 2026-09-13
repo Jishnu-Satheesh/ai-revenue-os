@@ -320,6 +320,56 @@ select extensions.throws_ok(
 );
 
 -- ---------------------------------------------------------------------------
+-- Adding a third source kind must not widen what the generic Decision path can
+-- execute. It does not, and the reason is structural rather than a rule
+-- somebody has to remember: the Decision path finds its work by
+-- `opportunity_id`, and the source-link constraint forbids a proposal-sourced
+-- campaign from carrying one at all.
+-- ---------------------------------------------------------------------------
+
+select extensions.is(
+  (select count(*)::int from public.campaigns
+    where proposal_id is not null
+      and (opportunity_id is not null or brief_id is not null)),
+  0,
+  'a proposal-sourced campaign carries no opportunity and no brief, so the Decision path cannot see it'
+);
+
+set local role postgres;
+
+-- The generic creator cannot manufacture one either: it never sets proposal_id,
+-- so the constraint refuses the row rather than producing a campaign that looks
+-- proposal-sourced but is linked to nothing.
+select extensions.throws_ok(
+  format(
+    $$insert into public.campaigns
+        (organization_id, title, source_kind, brief_id, opportunity_id, created_by)
+      values ('d9300000-0000-4000-8000-000000000101'::uuid, 'Smuggled', 'campaign_proposal',
+              null, null, 'd9300000-0000-4000-8000-000000000001'::uuid)$$
+  ),
+  '23514',
+  'new row for relation "campaigns" violates check constraint "campaigns_source_link_check"',
+  'a campaign claiming a proposal source but linked to no proposal is refused'
+);
+
+-- And the reverse: a decision-sourced campaign cannot quietly carry a proposal.
+select extensions.throws_ok(
+  format(
+    $$insert into public.campaigns
+        (organization_id, title, source_kind, proposal_id, created_by)
+      values ('d9300000-0000-4000-8000-000000000101'::uuid, 'Mixed', 'decision_opportunity',
+              %L, 'd9300000-0000-4000-8000-000000000001'::uuid)$$,
+    (select value ->> 'proposal_id' from proposal_state where key = 'proposal')
+  ),
+  '23514',
+  'new row for relation "campaigns" violates check constraint "campaigns_source_link_check"',
+  'a campaign cannot claim one source kind while linked to another'
+);
+
+set local role authenticated;
+set local request.jwt.claim.sub = 'd9300000-0000-4000-8000-000000000001';
+
+-- ---------------------------------------------------------------------------
 -- The record cannot be rewritten after the fact.
 -- ---------------------------------------------------------------------------
 
