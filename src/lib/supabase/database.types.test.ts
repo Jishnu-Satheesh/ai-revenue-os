@@ -43,6 +43,13 @@ const UNTYPED_TABLES = new Set([
   // service role, and read through the narrow contract in webhook-receipts.ts.
   // No session reaches them: a quarantined row has no tenant to scope it to.
   "provider_webhook_receipts",
+  // Publication authority and the exact outputs it covers are written only
+  // through `approve_campaign_launch`, which rechecks every selected output's
+  // review, hash and currency inside one transaction. No role holds an INSERT
+  // grant. A generated row type would invite a direct insert that skips the
+  // last gate before something reaches a public account.
+  "campaign_launch_approvals",
+  "campaign_launch_selections",
   // Finished deliverables, their immutable versions and their reviews are
   // written only through `record_campaign_deliverable_version` (worker) and
   // `review_campaign_deliverable_version` (a person). No role holds an INSERT
