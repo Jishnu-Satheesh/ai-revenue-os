@@ -1,7 +1,7 @@
 import type {
+  BlueprintEvidenceReference,
   CampaignGenerationProvider,
   CampaignGenerationResult,
-  CampaignImageReference,
 } from "@/ai/campaign-generation-provider";
 import {
   artDirectionBlueprintSchema,
@@ -44,7 +44,7 @@ export type BlueprintPlannerInput = {
   brandContext: string;
   subjectDescription: string | null;
   resolution: ReferenceResolution;
-  references: readonly CampaignImageReference[];
+  blueprintEvidence: readonly BlueprintEvidenceReference[];
 };
 
 export type BlueprintPlanResult = {
@@ -81,7 +81,7 @@ export function createBlueprintPlanner(dependencies: {
           "You plan visual treatment only. You cannot choose, rename or change the declared subject, and you cannot plan rendered text.",
         prompt: planningContext(input, resolution),
         outputContract: BLUEPRINT_OUTPUT_CONTRACT,
-        references: input.references,
+        references: input.blueprintEvidence,
         planPurpose: "art_direction_blueprint",
       });
 

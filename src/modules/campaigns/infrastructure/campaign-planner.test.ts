@@ -122,9 +122,9 @@ function imageGuidance() {
         { code: "wrong_subject" as const, description: "Do not substitute another dish." },
       ],
     },
-    references: [
+    finalImageReferences: [
       {
-        role: "avoid" as const,
+        role: "approved_creative" as const,
         ordinal: 0,
         mimeType: "image/png" as const,
         bytes: new Uint8Array([4, 5, 6]),
@@ -274,7 +274,7 @@ describe("campaign planner", () => {
     expect(call.prompt).toContain("<art_direction_blueprint>");
     expect(call.prompt).toContain("Do not render text of any kind, in any script");
     expect(call.prompt).not.toContain(manifest.assets[0]!.altText);
-    expect(call.references).toEqual(imageGuidance().references);
+    expect(call.references).toEqual(imageGuidance().finalImageReferences);
   });
 
   it("fails closed before image spend when governed image guidance is missing", async () => {

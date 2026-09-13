@@ -18,7 +18,7 @@ import type {
   CampaignGenerationResult,
   CampaignGenerationUsage,
   CampaignImageGenerationInput,
-  CampaignImageReference,
+  BlueprintEvidenceReference,
   CampaignPatchInput,
   GeneratedImage,
 } from "@/ai/campaign-generation-provider";
@@ -30,12 +30,16 @@ const REFERENCE_ROLE_ORDER = {
   style_exemplar: 3,
   palette: 4,
   typography: 5,
-  avoid: 6,
+  approved_creative: 6,
+  // Only ever present on a planning call. The final-image path cannot supply
+  // one: `FinalImageReference` has no `rejected_creative` variant. Ordered
+  // last so the refused evidence follows everything it is contrasted against.
+  rejected_creative: 7,
 } as const;
 
 function referenceContent(
   prompt: string,
-  references: readonly CampaignImageReference[],
+  references: readonly BlueprintEvidenceReference[],
 ): UserContent {
   const ordered = [...references].sort(
     (left, right) =>
@@ -148,7 +152,7 @@ export function createGeminiCampaignGenerationProvider(
     body: string,
     outputContract: string,
     repairFailures?: readonly string[],
-    references?: readonly CampaignImageReference[],
+    references?: readonly BlueprintEvidenceReference[],
     planPurpose?: PlanPromptPurpose,
   ): Promise<CampaignGenerationResult> {
     // Resolution happens before the try, so an unconfigured model surfaces as

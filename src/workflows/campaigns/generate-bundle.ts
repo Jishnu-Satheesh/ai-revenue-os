@@ -1,6 +1,10 @@
 import { bundleDigest } from "@/domain/campaigns/digest";
 import { logger } from "@/lib/logger";
-import type { CampaignImageReference } from "@/ai/campaign-generation-provider";
+import type {
+  BlueprintEvidenceReference,
+  FinalImageReference,
+  RejectedCreativeReference,
+} from "@/ai/campaign-generation-provider";
 import type { ArtDirectionBlueprint } from "@/domain/campaigns/art-direction";
 import type { CampaignBundleManifest } from "@/domain/campaigns/schemas";
 import type {
@@ -117,7 +121,7 @@ export type GenerationSnapshotReader = {
 
 export type ReferenceCandidateFile = ReferenceCandidate & {
   storagePath: string;
-  mimeType: CampaignImageReference["mimeType"];
+  mimeType: FinalImageReference["mimeType"];
 };
 
 export type ReferenceCandidateReader = {
@@ -172,8 +176,12 @@ export type CampaignImageGuidance = {
   /** Exact confirmed description pinned for this run, where synthesis is used. */
   subjectDescription: string | null;
   resolution: ReferenceResolution;
-  /** Bytes corresponding to the pinned positive and avoid references. */
-  references: readonly CampaignImageReference[];
+  /**
+   * Bytes the final image model may look at. Typed as `FinalImageReference`,
+   * which has no `rejected_creative` variant — a rejected design cannot be put
+   * here even by mistake.
+   */
+  finalImageReferences: readonly FinalImageReference[];
   /** One validated stage-one plan for every image in the manifest. */
   blueprintsByAssetId: Readonly<Record<string, ArtDirectionBlueprint>>;
   /** Organization rules appended after the blueprint. */
@@ -194,7 +202,8 @@ export type CampaignBlueprintPlanner = {
     brandContext: string;
     subjectDescription: string | null;
     resolution: ReferenceResolution;
-    references: readonly CampaignImageReference[];
+    /** Both sides: positive grounding AND the rejected designs with reasons. */
+    blueprintEvidence: readonly BlueprintEvidenceReference[];
   }): Promise<{
     blueprint: ArtDirectionBlueprint;
     planModelId: string;
@@ -500,7 +509,7 @@ export async function generateCampaignBundle(
         brandContext: declaredBrandContext(pinned.snapshot, context),
         subjectDescription: pinned.subjectDescription,
         resolution,
-        references,
+        blueprintEvidence: references.blueprintEvidence,
       });
       spentMinor += plannedBlueprint.costMinor ?? 0;
       if (spentMinor > payload.costCeilingMinor) {
@@ -542,7 +551,7 @@ export async function generateCampaignBundle(
       imageGuidance: {
         subjectDescription: pinned.subjectDescription,
         resolution,
-        references,
+        finalImageReferences: references.finalImage,
         blueprintsByAssetId,
         hardConstraints: context.hardConstraints,
         memoryContextDigest: context.memoryContextDigest,
@@ -645,40 +654,66 @@ function declaredAssetIds(candidate: unknown): readonly string[] {
   );
 }
 
+/**
+ * The two evidence sets, kept apart by type rather than by discipline.
+ *
+ * `finalImage` is what the model that draws the finished picture may look at.
+ * `blueprintEvidence` is what the art-direction stage may reason over, and it
+ * additionally carries the rejected designs and the reasons they were refused.
+ *
+ * These were one flat array. That array was handed to both stages, so rejected
+ * bytes reached the final image model — asking it to look at the very thing it
+ * must not reproduce. `FinalImageReference` has no `rejected_creative` variant,
+ * so the mistake is now unrepresentable rather than merely discouraged.
+ * See ADR 0049 and contract C06.
+ */
+export type LoadedReferences = {
+  finalImage: readonly FinalImageReference[];
+  blueprintEvidence: readonly BlueprintEvidenceReference[];
+};
+
 export async function loadReferenceBytes(
   resolution: ReferenceResolution,
   candidates: readonly ReferenceCandidateFile[],
   objects: ReferenceObjectReader,
-): Promise<readonly CampaignImageReference[] | null> {
+): Promise<LoadedReferences | null> {
   const byVersion = new Map(
     candidates.map((candidate) => [candidate.brandAssetVersionId, candidate]),
   );
-  const requested = [
-    ...resolution.referenceSlots.map((slot) => ({
-      versionId: slot.brandAssetVersionId,
-      role: slot.role,
-      ordinal: slot.ordinal,
-    })),
-    ...resolution.avoidReferences.map((reference, ordinal) => ({
-      versionId: reference.brandAssetVersionId,
-      role: "avoid" as const,
-      ordinal,
-    })),
-  ];
-  const loaded: CampaignImageReference[] = [];
-  for (const reference of requested) {
-    const candidate = byVersion.get(reference.versionId);
+
+  const finalImage: FinalImageReference[] = [];
+  for (const slot of resolution.referenceSlots) {
+    const candidate = byVersion.get(slot.brandAssetVersionId);
     if (!candidate) return null;
     const bytes = await objects.read(candidate.storagePath);
     if (!bytes) return null;
-    loaded.push({
-      role: reference.role,
-      ordinal: reference.ordinal,
+    finalImage.push({
+      role: slot.role,
+      ordinal: slot.ordinal,
       mimeType: candidate.mimeType,
       bytes,
     });
   }
-  return loaded;
+
+  // A rejected reference that cannot be loaded fails the whole run. Proceeding
+  // without it would silently drop the "do not do this again" evidence and
+  // produce a plan that looks fully informed but is not.
+  const rejected: RejectedCreativeReference[] = [];
+  for (const [ordinal, reference] of resolution.avoidReferences.entries()) {
+    const candidate = byVersion.get(reference.brandAssetVersionId);
+    if (!candidate) return null;
+    const bytes = await objects.read(candidate.storagePath);
+    if (!bytes) return null;
+    rejected.push({
+      role: "rejected_creative",
+      ordinal,
+      mimeType: candidate.mimeType,
+      bytes,
+      reasonCodes: [...reference.reasonCodes],
+    });
+  }
+
+  return { finalImage, blueprintEvidence: [...finalImage, ...rejected] };
 }
 
 export function declaredBrandContext(

@@ -81,10 +81,11 @@ describe("gemini campaign generation provider", () => {
       planPurpose: "art_direction_blueprint",
       references: [
         {
-          role: "avoid",
+          role: "rejected_creative",
           ordinal: 0,
           mimeType: "image/png",
           bytes: new Uint8Array([30]),
+          reasonCodes: ["wrong_subject"],
         },
         {
           role: "subject",
@@ -269,7 +270,7 @@ describe("gemini campaign generation provider", () => {
       heightPx: 1024,
       references: [
         {
-          role: "avoid",
+          role: "approved_creative",
           ordinal: 0,
           mimeType: "image/png",
           bytes: new Uint8Array([30]),
@@ -308,7 +309,7 @@ describe("gemini campaign generation provider", () => {
       "Draw the governed plate.\n\nCompose for a 1024x1024 pixel frame.",
       '<reference role="subject" ordinal="0">',
       '<reference role="style_exemplar" ordinal="1">',
-      '<reference role="avoid" ordinal="0">',
+      '<reference role="approved_creative" ordinal="0">',
     ]);
     expect(
       content
