@@ -19,7 +19,7 @@ import {
   createSubjectRepository,
   type SubjectPersistence,
 } from "@/modules/campaigns/infrastructure/subject-repository";
-import { createMemoryWorkspaceApi } from "@/modules/memory/application/api";
+import { createSessionSubjectPackPort } from "@/modules/memory";
 
 type SubjectPermission = Parameters<SubjectRouteHandlerDependencies["context"]>[1];
 type SubjectRouteParams = Parameters<SubjectRouteHandlerDependencies["context"]>[0];
@@ -42,18 +42,16 @@ async function productionContext(
 /**
  * Subject drafting reads the shared subject_drafting context, not an ad hoc
  * assist query. A person names and confirms the subject; person-entered names
- * win and the drafter never invents offers or prices.
+ * win and the drafter never invents offers or prices. The pack is pinned
+ * under the actor's own session: the prepare call binds actor, purpose, and
+ * tenant before any model sees a summary.
  */
 function productionServiceFor(context: SubjectRouteContext) {
   const supabase = context.supabase as SupabaseClient<Database>;
-  const memory = createMemoryWorkspaceApi({
-    supabase,
-    actor: { userId: context.user.id, role: context.membership.role },
-  }).retrieval;
 
   return createSubjectService({
     store: createSubjectRepository(context.supabase as SubjectPersistence),
-    memory,
+    subjectPack: createSessionSubjectPackPort(supabase),
     // Keep ordinary reads and manual writes independent of model configuration.
     drafter: {
       draft(input) {
