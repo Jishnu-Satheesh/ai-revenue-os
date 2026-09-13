@@ -62,6 +62,77 @@ export type {
   ResearchWorkScopeKey,
   SettleResearchAttempt,
 } from "@/domain/growth-intelligence/research-budget";
+export {
+  applyProjectLifecycle,
+  archiveResearchProject,
+  assertProjectOrganization,
+  cancelResearchUpdate,
+  canReadProjectHistory,
+  canTransitionProjectLifecycle,
+  isProjectEligibleForScheduledStart,
+  isProjectVisibleInActiveList,
+  pauseResearchProject,
+  RESEARCH_PROJECT_CADENCES,
+  RESEARCH_PROJECT_LIFECYCLES,
+  RESEARCH_PROJECT_MODES,
+  researchProjectScheduleSchema,
+  researchProjectSchema,
+  resumeResearchProject,
+} from "@/domain/growth-intelligence/project";
+export type {
+  ResearchProject,
+  ResearchProjectCadence,
+  ResearchProjectLifecycle,
+  ResearchProjectMode,
+  ResearchProjectSchedule,
+} from "@/domain/growth-intelligence/project";
+export {
+  assertBriefRevisionContext,
+  BRIEF_COMPETITOR_SOURCES,
+  BRIEF_FREQUENCIES,
+  BRIEF_INVESTIGATION_AREAS,
+  briefCompetitorSchema,
+  briefRevisionSchema,
+  createNextBriefRevision,
+  isBriefRevisionPinned,
+  normalizeCompetitorName,
+  pinBriefRevisionToUpdate,
+} from "@/domain/growth-intelligence/brief";
+export type {
+  BriefCompetitor,
+  BriefCompetitorSource,
+  BriefFrequency,
+  BriefInvestigationArea,
+  BriefRevision,
+  BriefRevisionChanges,
+} from "@/domain/growth-intelligence/brief";
+export {
+  acceptanceRecordSchema,
+  applyAcceptance,
+  buildAcceptanceKey,
+  DRAFT_ITEM_DESTINATIONS,
+  DRAFT_ITEM_KINDS,
+  draftItemKindSchema,
+  draftItemSchema,
+  resolveDraftItemDestination,
+} from "@/domain/growth-intelligence/acceptance";
+export type {
+  AcceptanceOutcome,
+  AcceptanceRecord,
+  DraftItem,
+  DraftItemDestination,
+  DraftItemKind,
+} from "@/domain/growth-intelligence/acceptance";
+export {
+  assertReportContext,
+  createMarketMonitoringReport,
+  marketMonitoringReportSchema,
+  speculativeEstimateSchema,
+} from "@/domain/growth-intelligence/report";
+export type {
+  MarketMonitoringReport,
+  SpeculativeEstimate,
+} from "@/domain/growth-intelligence/report";
 export { createMarketProfileDigest } from "@/domain/growth-intelligence/profile-digest";
 export { createGrowthIntelligenceRequestFingerprint } from "@/domain/growth-intelligence/request-fingerprint";
 export {
