@@ -7154,3 +7154,61 @@ proposal-sourced campaign inside a bundle manifest. That is deliberate: it belon
 V3, which C04 gates on an approved schema/validator/digest/backward-reader design, and the
 bundle manifest sits inside the digest binding every existing campaign approval. Do not widen it
 opportunistically.
+
+## 2026-09-13 — ACCEPT: Business Memory session takes Task 6
+
+Task 6 ("Connect evidence, Business Memory and real campaign research") accepted. The brief's
+Spec 023 prepare/consume/pin reconciliation is the `subject-pack.ts` port this session landed
+(Slices 1-4, commits `22934c0`/`874658a`), so ownership fits. Per AGENTS.md this is Tier 3
+(new table, new migration, new worker path): Execution Plan first, no code before approval.
+
+Committed constraints for the plan, taken from the handoff unchanged:
+
+- Research writes proposal versions only through `complete_campaign_proposal_version` (decided-state refusal stays the single gate). No second write path.
+- Nothing in the research path creates `campaign_deliverable_versions` rows — render worker only, service_role-only.
+- Reuse `admitProposal()` for D07; no second admission rule. Tenant check stays first so a leak never presents as a missing citation.
+- D06: cadence/cooldown/limits/allowances are org configuration; missing settings mean "Needs setup", never a spending default.
+
+Traps acknowledged: unqualified COALESCE/NULLIF (already paid for once in `9fcf9de`);
+`cardinality()` over `array_length()` in CHECKs; no in-function `auth.role()` service_role
+guards (EXECUTE GRANT is the gate); pgTAP `throws_ok` 4-arg form; permissions-drift parser
+(2-col seed, bare `on conflict do nothing`, one-line tuples). The rehearse-in-rollback-transaction
+technique is adopted for the Task 6 migration before push.
+
+Loose threads: the Decision Engine evidence-bundle over-exposure is agreed higher-value than
+feature work — flagged to the user for prioritisation, owned by neither session until directed.
+The slow `review-tab.test.tsx` (~47s) is this session's debt; will split or lighten its fixture.
+The two Campaign-area files touched by `874658a` are noted and green; no action.
+
+## 2026-09-13 — Review and publication gates are reachable (c4e7139)
+
+Tasks 8 and 10 now have an HTTP surface. Three routes, under the campaign:
+
+- `GET /campaigns/:campaignId/deliverables` — every finished output with its
+  publication verdict, computed fresh from the review record each time.
+- `POST /campaigns/:campaignId/deliverables/:deliverableVersionId/reviews`
+  — requires `campaign.approve`.
+- `POST /campaigns/:campaignId/launch-approvals` — requires `campaign.publish`.
+
+**What must not break, for anyone touching this next:**
+
+- There is no route for recording a finished deliverable version, and there must
+  not be one. `record_campaign_deliverable_version` is granted to the render
+  worker alone. A member-facing route would let somebody hand-write a "finished
+  output" for a render that never happened.
+- No route accepts an actor, and none may start to. Both database functions read
+  `auth.uid()` themselves.
+- The launch digest is computed from the manifest. A client-supplied digest
+  would let the record disagree with the terms it claims to bind.
+- Reviewing is `campaign.approve`; publishing is `campaign.publish`. Do not
+  collapse them. Approving bytes is not authorizing a public post.
+- A read that failed must never be reported as an empty result. Both new reads
+  raise instead, because "nothing was reviewed" and "we could not look" would
+  otherwise be indistinguishable — and the first one silently refuses launches.
+
+Spec 025 was corrected rather than diverged from: it addressed a review by
+`:deliverableId`, which would put the C04/D05 conflation back into the URL.
+
+Still open on this thread: nothing in the UI consumes these yet (Task 11), and
+the routes have not been exercised end-to-end against staging — the database
+functions behind them have.
