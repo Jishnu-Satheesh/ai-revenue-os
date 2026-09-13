@@ -29,10 +29,12 @@ import type { SubjectPackPort } from "@/modules/memory/application/subject-pack"
 export const researchRunSchema = z.strictObject({
   organizationId: z.string().uuid(),
   runId: z.string().uuid(),
-  triggerKind: z.enum(["business_signal", "scheduled", "manual_request", "next_test"]),
-  query: z.string().trim().min(1).max(2000),
   profileVersionId: z.string().uuid().nullable().default(null),
-  evidenceMaxAgeDays: z.number().int().positive().max(365).default(30),
+  /**
+   * Resolved from the binding policy by the scheduler or route — never
+   * defaulted here, because an evidence age is an operating limit (D06).
+   */
+  evidenceMaxAgeDays: z.number().int().positive().max(365),
   /** Measured external spend so far, in minor units. Never estimated. */
   externalCostMinor: z.number().int().nonnegative().default(0),
 });
@@ -52,18 +54,12 @@ export class ResearchClaimLost extends Error {
 }
 
 /** A scheduled firing is research about business evidence, not a new kind. */
-function proposalSourceKind(
-  triggerKind: ResearchRunInput["triggerKind"],
-): CampaignProposalSourceKind {
-  return triggerKind === "scheduled" ? "business_signal" : triggerKind;
+function proposalSourceKind(triggerKind: string): CampaignProposalSourceKind {
+  return triggerKind === "scheduled" ? "business_signal" : (triggerKind as CampaignProposalSourceKind);
 }
 
 export type ResearchServiceDependencies = {
   runs: ResearchRunStore;
-  /** The binding policy version, read worker-side (no member session). */
-  policies: {
-    readCurrentVersion(input: { organizationId: string }): Promise<number | null>;
-  };
   contexts: ResearchContextReader;
   planner: ResearchPlanner;
   proposals: Pick<CampaignProposalService, "request" | "requestRevision">;
@@ -73,7 +69,7 @@ export type ResearchServiceDependencies = {
   isCancelled: () => boolean;
 };
 
-const CLAIM_LEASE_SECONDS = 3600;
+const CLAIM_LEASE_SECONDS = 900;
 
 export function createResearchService(dependencies: ResearchServiceDependencies) {
   async function failClaimed(input: {
@@ -116,22 +112,50 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
         return { status: "cancelled", runId };
       }
 
+      // One claim-bound load: the run, the still-binding policy version, and
+      // the admitted pin. A gone claim throws rather than retries — the run
+      // is either cancelled or owned elsewhere, and neither wants a second
+      // worker doing the same billable work.
+      let loaded;
+      try {
+        loaded = await dependencies.runs.load({
+          organizationId,
+          runId,
+          claimToken: claim.claimToken,
+        });
+      } catch {
+        throw new ResearchClaimLost(runId);
+      }
+
       // The policy that admitted this run must still bind it before any
       // further billable work. A revised policy stops work it never
       // authorized; the failure names that rather than hiding behind a
       // generic error.
-      const currentVersion = await dependencies.policies.readCurrentVersion({ organizationId });
-      if (currentVersion !== claim.policyVersion) {
+      if (loaded.currentPolicyVersion !== claim.policyVersion) {
         return failClaimed({ ...base, failureCode: "policy_revised" });
+      }
+
+      // Runs admitted without a staged question plan from nothing: the
+      // worker never invents what the requester never asked.
+      if (loaded.researchQuestion === null) {
+        return failClaimed({ ...base, failureCode: "question_missing" });
       }
 
       const context = await dependencies.contexts.read({
         organizationId,
         runId,
-        query: input.query,
+        query: loaded.researchQuestion,
         evidenceMaxAgeDays: input.evidenceMaxAgeDays,
         profileVersionId: input.profileVersionId,
         now: dependencies.now(),
+        // The admitted pin, never re-derived: assembling fresh context at
+        // run time could only produce something the admission never approved.
+        pinned: {
+          manifestId: loaded.manifestId ?? "",
+          digest: loaded.digest ?? "",
+          entries: loaded.entries,
+          excludedCount: 0,
+        },
       });
 
       if (dependencies.isCancelled()) {
@@ -142,8 +166,8 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       const planned = await dependencies.planner.plan({
         organizationId,
         runId,
-        query: input.query,
-        triggerKind: input.triggerKind,
+        query: loaded.researchQuestion,
+        triggerKind: loaded.triggerKind,
         context,
       });
       // An unpriced model call follows the generation precedent: measured
@@ -152,18 +176,25 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       // failure never hides what it spent.
       const actualCost = input.externalCostMinor + (planned.modelCostMinor ?? 0);
 
-      // The manifest was prepared and used for planning, so it is consumed
-      // with the planner's identity. A dangling pin fails the run rather
-      // than silently leaking an unconsumed manifest.
-      try {
-        await dependencies.subjectPack.consume({
-          organizationId,
-          manifestId: context.memory.manifestId,
-          modelId: `campaign-research-planner-v${RESEARCH_PLANNER_PROMPT_VERSION}`,
-          modelCalledAt: dependencies.nowIso(),
-        });
-      } catch {
-        return failClaimed({ ...base, actualCostMinor: actualCost, failureCode: "context_consume_failed" });
+      // The admitted pin was used for planning, so it is consumed with the
+      // planner's identity. A dangling pin fails the run rather than silently
+      // leaking an unconsumed manifest. Runs admitted without a pin consume
+      // nothing: there is no manifest to leak.
+      if (loaded.manifestId !== null) {
+        try {
+          await dependencies.subjectPack.consume({
+            organizationId,
+            manifestId: loaded.manifestId,
+            modelId: `campaign-research-planner-v${RESEARCH_PLANNER_PROMPT_VERSION}`,
+            modelCalledAt: dependencies.nowIso(),
+          });
+        } catch {
+          return failClaimed({
+            ...base,
+            actualCostMinor: actualCost,
+            failureCode: "context_consume_failed",
+          });
+        }
       }
 
       if (planned.outcome === "advice") {
@@ -173,8 +204,8 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
             runId,
             claimToken: claim.claimToken,
             proposalId: null,
-            contextManifestId: context.memory.manifestId,
-            contextDigest: context.memory.digest,
+            contextManifestId: loaded.manifestId,
+            contextDigest: loaded.digest,
             qualifiedResearchRequestIds: [],
             actualCostMinor: actualCost,
             outcome: "advice_only",
@@ -197,7 +228,7 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       const opened = await dependencies.proposals.request({
         organizationId,
         request: {
-          sourceKind: proposalSourceKind(input.triggerKind),
+          sourceKind: proposalSourceKind(loaded.triggerKind),
           sourceId: null,
           dedupeFingerprint: null,
         },
@@ -227,8 +258,8 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
           runId,
           claimToken: claim.claimToken,
           proposalId: opened.value.proposalId,
-          contextManifestId: planned.memoryContextManifestId,
-          contextDigest: context.memory.digest,
+          contextManifestId: loaded.manifestId,
+          contextDigest: loaded.digest,
           qualifiedResearchRequestIds: evidenceRequestIds(context),
           actualCostMinor: actualCost,
           outcome: "proposal_prepared",

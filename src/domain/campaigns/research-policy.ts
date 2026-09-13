@@ -40,6 +40,8 @@ export const researchPolicySchema = z.strictObject({
   enabled: z.boolean(),
   timezone: z.string().trim().min(1).max(80),
   evidenceQualificationRuleVersion: z.string().trim().min(1).max(80),
+  /** How old external evidence may be before it stops qualifying. Config, never a default. */
+  evidenceMaxAgeDays: z.number().int().positive().max(365),
   /** Seconds between admitted runs. Zero means no cooldown, stated openly. */
   cooldownSeconds: z.number().int().nonnegative().max(31_536_000),
   maxPendingProposals: z.number().int().positive().max(100),

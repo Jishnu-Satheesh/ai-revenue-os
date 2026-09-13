@@ -47,11 +47,21 @@ function dependencies(
   return {
     runs: {
       claim: async () => ({ runId: RUN_ID, claimToken: CLAIM, policyVersion: 3, budgetMinor: 1000 }),
+      load: async () => ({
+        status: "claimed",
+        triggerKind: "manual_request",
+        policyVersion: 3,
+        budgetMinor: 1000,
+        researchQuestion: "weekday lunch decline",
+        currentPolicyVersion: 3,
+        manifestId: MANIFEST_ID,
+        digest: DIGEST,
+        entries: [],
+      }),
       complete: async () => {},
       fail: async () => {},
       cancel: async () => {},
     },
-    policies: { readCurrentVersion: async () => 3 },
     contexts: { read: async () => testContext() },
     planner: { plan: async () => readyPlan() as never },
     proposals: {
@@ -73,8 +83,7 @@ function runInput(overrides: Record<string, unknown> = {}) {
   return {
     organizationId: ORGANIZATION_ID,
     runId: RUN_ID,
-    triggerKind: "manual_request" as const,
-    query: "weekday lunch decline",
+    evidenceMaxAgeDays: 30,
     ...overrides,
   };
 }
@@ -113,8 +122,21 @@ describe("research service", () => {
     const plan = vi.fn();
     const service = createResearchService(
       dependencies({
-        runs: { ...dependencies().runs, fail },
-        policies: { readCurrentVersion: async () => 4 },
+        runs: {
+          ...dependencies().runs,
+          fail,
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: "weekday lunch decline",
+            currentPolicyVersion: 4,
+            manifestId: MANIFEST_ID,
+            digest: DIGEST,
+            entries: [],
+          }),
+        },
         planner: { plan },
       }),
     );
@@ -203,6 +225,60 @@ describe("research service", () => {
     // Nothing invented a second write path: the governed refusal stands.
     expect(fail).toHaveBeenCalledWith(
       expect.objectContaining({ failureCode: "proposal_inadmissible" }),
+    );
+  });
+
+  it("throws claim-lost when the pin cannot be loaded", async () => {
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          load: async () => {
+            throw { kind: "not_found" };
+          },
+        },
+      }),
+    );
+    await expect(service.run(runInput())).rejects.toBeInstanceOf(ResearchClaimLost);
+  });
+
+  it("fails a run admitted with no staged question instead of inventing one", async () => {
+    const plan = vi.fn();
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: null,
+            currentPolicyVersion: 3,
+            manifestId: null,
+            digest: null,
+            entries: [],
+          }),
+        },
+        planner: { plan },
+      }),
+    );
+    await expect(service.run(runInput())).resolves.toEqual({
+      status: "failed",
+      runId: RUN_ID,
+      failureCode: "question_missing",
+    });
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it("hands the admitted pin to context instead of re-deriving it", async () => {
+    const read = vi.fn(async () => testContext());
+    const service = createResearchService(dependencies({ contexts: { read } }));
+    await service.run(runInput());
+    expect(read).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pinned: expect.objectContaining({ manifestId: MANIFEST_ID, digest: DIGEST }),
+      }),
     );
   });
 

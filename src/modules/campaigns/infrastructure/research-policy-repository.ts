@@ -113,6 +113,7 @@ export type ResearchPolicyRepository = {
     budgetMinor: number;
     allowanceCurrency: string;
     sourceFingerprint: string | null;
+    researchQuestion: string | null;
     requestDigest: string;
     idempotencyKey: string;
     knownPolicyVersion: number | null;
@@ -154,6 +155,7 @@ export function createResearchPolicyRepository(
           budget_minor: input.budgetMinor,
           allowance_currency: input.allowanceCurrency,
           source_fingerprint: input.sourceFingerprint,
+          research_question: input.researchQuestion,
           request_digest: input.requestDigest,
           idempotency_key: input.idempotencyKey,
           known_policy_version: input.knownPolicyVersion,

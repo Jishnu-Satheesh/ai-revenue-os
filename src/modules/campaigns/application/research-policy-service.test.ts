@@ -16,6 +16,7 @@ function policy(): ResearchPolicy {
     enabled: true,
     timezone: "Asia/Dubai",
     evidenceQualificationRuleVersion: "evidence-qualification@2",
+    evidenceMaxAgeDays: 30,
     cooldownSeconds: 0,
     maxPendingProposals: 5,
     perRunAllowance: { amountMinor: 5000, currency: "AED" },

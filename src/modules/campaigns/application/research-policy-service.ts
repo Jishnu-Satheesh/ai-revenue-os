@@ -33,6 +33,8 @@ export const admitResearchSchema = z.strictObject({
   requestedBudget: researchMoneySchema,
   knownPolicyVersion: z.number().int().positive().nullable().default(null),
   sourceFingerprint: z.string().trim().min(8).max(200).nullable().default(null),
+  /** The staged question, stored on the run row — never in a worker payload. */
+  researchQuestion: z.string().trim().min(1).max(2000).nullable().default(null),
   requestDigest: z.string().regex(/^[0-9a-f]{64}$/, "A digest must be SHA-256 hex."),
   idempotencyKey: z.string().trim().min(8).max(200),
 });
@@ -92,6 +94,7 @@ export function createResearchPolicyService(dependencies: {
           budgetMinor: parsed.requestedBudget.amountMinor,
           allowanceCurrency: parsed.requestedBudget.currency,
           sourceFingerprint: parsed.sourceFingerprint,
+          researchQuestion: parsed.researchQuestion,
           requestDigest: parsed.requestDigest,
           idempotencyKey: parsed.idempotencyKey,
           knownPolicyVersion: parsed.knownPolicyVersion,

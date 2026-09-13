@@ -7,7 +7,7 @@ describe("Campaign generation Trigger registration", () => {
   it("registers all generation paths as identifier-only schema tasks on one queue", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
 
-    expect(source.match(/schemaTask\(\{/g)).toHaveLength(11);
+    expect(source.match(/schemaTask\(\{/g)).toHaveLength(12);
     for (const id of [
       'id: "campaign.generate-bundle"',
       'id: "campaign.revise-bundle"',
@@ -23,6 +23,9 @@ describe("Campaign generation Trigger registration", () => {
       'id: "campaign.allocation-cycle"',
       'id: "campaign.settle-outcome"',
       'id: "campaign.propose-learning"',
+      // Research drafts the proposal every later lane depends on. It runs on
+      // its own lane because it spends allowance, not pixels.
+      'id: "campaign.research-proposal"',
     ]) {
       expect(source).toContain(id);
     }
@@ -39,6 +42,9 @@ describe("Campaign generation Trigger registration", () => {
     // A fourth lane. Sweeps are long and frequent; a render is short and
     // somebody is watching it.
     expect(source).toContain("queue: campaignExecutionQueue");
+    // A fifth lane. Research spends allowance, so like generation it runs
+    // one at a time rather than bursting parallel spend.
+    expect(source).toContain("queue: campaignResearchQueue");
     expect(source).toContain("campaignGenerationPayloadSchema");
     expect(source).toContain("campaignRevisionPayloadSchema");
     expect(source).toContain("campaignVariantPayloadSchema");
@@ -46,6 +52,27 @@ describe("Campaign generation Trigger registration", () => {
     expect(source).toContain("campaignPlateEditPayloadSchema");
     expect(source).toContain("campaignSweepPayloadSchema");
     expect(source).toContain("campaignCyclePayloadSchema");
+    expect(source).toContain("campaignResearchPayloadSchema");
+  });
+
+  it("wires research through governed writers and identifier-only payloads", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
+    const research = source.slice(source.indexOf("export const researchCampaignProposalTask"));
+
+    for (const dependency of [
+      "createResearchRunStore",
+      "createResearchContextReader",
+      "createResearchPlanner",
+      "createCampaignProposalService",
+      "createCampaignEvidenceReader",
+      "createAuthenticatedGrowthIntelligenceReadRepository",
+    ]) {
+      expect(research).toContain(dependency);
+    }
+    // The draft travels through the governed proposal writer downstream, and
+    // research itself never touches a deliverable version.
+    expect(research).not.toContain("campaign_deliverable_versions");
+    expect(research).not.toContain("research_question");
   });
 
   it("wires variants through the same governed reference receipt and blueprint path as bundles", async () => {
@@ -77,6 +104,7 @@ describe("Campaign generation Trigger registration", () => {
       "parseCampaignGenerationPayload(payload)",
       "parseCampaignRevisionPayload(payload)",
       "parseCampaignVariantPayload(payload)",
+      "parseCampaignResearchPayload(payload)",
       "createFromOpportunityPayloadSchema.parse(payload)",
     ]) {
       const parsedAt = source.indexOf(parser, source.indexOf("run: async"));

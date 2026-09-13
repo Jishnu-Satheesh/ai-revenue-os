@@ -199,10 +199,24 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
         }
       }
 
-      // A market claim in the prose with no backing citation is the
-      // digest-only failure in its purest form: words about the market with
-      // nothing behind them.
+      // The manifest pointer itself is checked too: a draft naming a
+      // manifest that was never pinned — or any manifest over an empty pack
+      // — cites an envelope, not a source.
+      if (
+        document.memoryContextManifestId !== null &&
+        (document.memoryContextManifestId !== context.memory.manifestId ||
+          context.memory.entries.length === 0)
+      ) {
+        return {
+          outcome: "refused",
+          reasonCode: "memory_citation_without_entry",
+          modelCostMinor: drafted.estimatedCostMinor,
+        };
+      }
       if (marketClaimKeys.length > 0) {
+        // A market claim in the prose with no backing citation is the
+        // digest-only failure in its purest form: words about the market with
+        // nothing behind them.
         const backed = document.evidence.some(
           (reference) => reference.kind === "market_claim_citation",
         );

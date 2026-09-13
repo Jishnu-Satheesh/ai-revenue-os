@@ -39,6 +39,15 @@ export const GENERATE_VARIANTS_MAX_DURATION_SECONDS = 2_700;
 export const GENERATE_VARIANTS_LEASE_SECONDS = 3_000;
 
 /**
+ * One research draft plus its validation reads. Text only, no images: ten
+ * minutes is headroom, and the fifteen-minute lease outlives it per the rule
+ * above. The claim inside the run holds the same fifteen minutes.
+ */
+export const RESEARCH_PROPOSAL_MAX_DURATION_SECONDS = 600;
+
+export const RESEARCH_PROPOSAL_LEASE_SECONDS = 900;
+
+/**
  * Every task ceiling paired with the lease that must outlast it. Exported so
  * the invariant is testable rather than a comment nobody re-reads.
  */
@@ -57,6 +66,11 @@ export const CAMPAIGN_DURATION_PAIRS = [
     taskId: "campaign.revise-bundle",
     maxDurationSeconds: REVISE_BUNDLE_MAX_DURATION_SECONDS,
     leaseSeconds: REVISE_BUNDLE_LEASE_SECONDS,
+  },
+  {
+    taskId: "campaign.research-proposal",
+    maxDurationSeconds: RESEARCH_PROPOSAL_MAX_DURATION_SECONDS,
+    leaseSeconds: RESEARCH_PROPOSAL_LEASE_SECONDS,
   },
 ] as const;
 
@@ -107,6 +121,5 @@ export const ALLOCATION_CYCLE_MAX_DURATION_SECONDS = 600;
 
 /** Reads and arithmetic over one organization's finished campaigns. No provider. */
 export const SETTLE_OUTCOME_MAX_DURATION_SECONDS = 600;
-
 /** Up to two model drafts per settled campaign, so it waits on a provider. */
 export const PROPOSE_LEARNING_MAX_DURATION_SECONDS = 1_200;

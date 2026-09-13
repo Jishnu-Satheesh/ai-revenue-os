@@ -50,6 +50,18 @@ export type ResearchContextDependencies = {
   nowIso: () => string;
 };
 
+export type PinnedResearchMemory = {
+  manifestId: string;
+  digest: string;
+  /**
+   * Exact bounded snapshots served claim-bound by the worker loader.
+   * Content-less entries (erased upstream) are treated as absent here, so
+   * the planner can never cite what it cannot see.
+   */
+  entries: readonly { id: string; title: string | null; body: string | null }[];
+  excludedCount: number;
+};
+
 export function createResearchContextReader(
   dependencies: ResearchContextDependencies,
 ) {
@@ -62,18 +74,26 @@ export function createResearchContextReader(
       evidenceMaxAgeDays: number;
       profileVersionId: string | null;
       now: Date;
+      /**
+       * When the caller already holds the admitted pin (the worker path),
+       * preparation is skipped: re-deriving context at run time could only
+       * assemble something the admission never approved.
+       */
+      pinned?: PinnedResearchMemory;
     }): Promise<ResearchContext> {
       const [source, pack, evidence] = await Promise.all([
         dependencies.readSource({ organizationId: input.organizationId }),
-        // The actor is the run itself, tenant-scoped by organizationId: the
-        // prepared manifest is pinned to this run's purpose and cannot be
-        // mistaken for a person's broader context.
-        dependencies.subjectPack.prepare({
-          organizationId: input.organizationId,
-          actorId: `campaign-research:${input.runId}`,
-          query: input.query,
-          correlationId: input.runId,
-        }),
+        input.pinned
+          ? Promise.resolve(null)
+          : // The actor is the run itself, tenant-scoped by organizationId: the
+            // prepared manifest is pinned to this run's purpose and cannot be
+            // mistaken for a person's broader context.
+            dependencies.subjectPack.prepare({
+              organizationId: input.organizationId,
+              actorId: `campaign-research:${input.runId}`,
+              query: input.query,
+              correlationId: input.runId,
+            }),
         dependencies.evidence.read({
           organizationId: input.organizationId,
           evidenceMaxAgeDays: input.evidenceMaxAgeDays,
@@ -82,18 +102,35 @@ export function createResearchContextReader(
         }),
       ]);
 
+      const present = (input.pinned?.entries ?? []).filter(
+        (entry) => typeof entry.body === "string" && entry.body.length > 0,
+      );
+      const memory: ResearchMemoryContext = input.pinned
+        ? {
+            manifestId: input.pinned.manifestId,
+            digest: input.pinned.digest,
+            entries: present.map((entry) => ({
+              id: entry.id,
+              title: entry.title ?? "(untitled)",
+              body: entry.body as string,
+            })),
+            excludedCount:
+              input.pinned.excludedCount + (input.pinned.entries.length - present.length),
+          }
+        : {
+            manifestId: pack!.manifestId,
+            digest: pack!.contextDigest,
+            entries: pack!.entries.map((entry) => ({
+              id: entry.contextRef,
+              title: entry.title,
+              body: entry.summary,
+            })),
+            excludedCount: pack!.excludedCount,
+          };
+
       return {
         source,
-        memory: {
-          manifestId: pack.manifestId,
-          digest: pack.contextDigest,
-          entries: pack.entries.map((entry) => ({
-            id: entry.contextRef,
-            title: entry.title,
-            body: entry.summary,
-          })),
-          excludedCount: pack.excludedCount,
-        },
+        memory,
         evidence,
         marketingFit: source.operationalBlockers.length > 0 ? "advice_only" : "viable",
       };

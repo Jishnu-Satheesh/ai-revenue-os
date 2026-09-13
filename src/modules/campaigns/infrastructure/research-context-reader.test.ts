@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createResearchContextReader } from "@/modules/campaigns/infrastructure/research-context-reader";
 import type { SubjectPackPort } from "@/modules/memory/application/subject-pack";
@@ -130,5 +130,30 @@ describe("research context reader", () => {
     const context = await reader().read(readInput());
     expect(context.evidence.status).toBe("unavailable");
     expect(context.source.organizationProfile).toBe("Neighbourhood kitchen.");
+  });
+
+  it("uses the admitted pin without preparing, dropping content-less entries", async () => {
+    const prepare = vi.fn();
+    const contextReader = reader({
+      subjectPack: { prepare, consume: async () => {} } as unknown as SubjectPackPort,
+    });
+    const context = await contextReader.read(
+      readInput({
+        pinned: {
+          manifestId: "fb430000-0000-4000-8000-000000000203",
+          digest: "c".repeat(64),
+          entries: [
+            { id: "ctx-0001", title: "Weekday regulars", body: "Office workers fill the room." },
+            { id: "ctx-0002", title: null, body: null },
+          ],
+          excludedCount: 0,
+        },
+      }),
+    );
+    expect(prepare).not.toHaveBeenCalled();
+    expect(context.memory.entries).toEqual([
+      { id: "ctx-0001", title: "Weekday regulars", body: "Office workers fill the room." },
+    ]);
+    expect(context.memory.excludedCount).toBe(1);
   });
 });

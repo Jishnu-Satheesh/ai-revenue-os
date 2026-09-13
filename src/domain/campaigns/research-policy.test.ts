@@ -15,6 +15,7 @@ function policy(overrides: Partial<ResearchPolicy> = {}): ResearchPolicy {
     enabled: true,
     timezone: "Asia/Dubai",
     evidenceQualificationRuleVersion: "evidence-qualification@2",
+    evidenceMaxAgeDays: 30,
     cooldownSeconds: 3600,
     maxPendingProposals: 2,
     perRunAllowance: { amountMinor: 5000, currency: "AED" },

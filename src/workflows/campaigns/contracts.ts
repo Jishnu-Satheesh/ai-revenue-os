@@ -52,6 +52,31 @@ export function parseCampaignRevisionPayload(payload: unknown): CampaignRevision
 }
 
 /**
+ * What a campaign research task is allowed to carry.
+ *
+ * Identifiers only, like generation — and pointedly not the staged question.
+ * The question is the requester's business intent in their own words, so it
+ * lives on the admitted run row and reaches the worker through the
+ * claim-bound loader, never through queue storage, dashboards, or logs.
+ */
+export const campaignResearchPayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  runId: uuidSchema,
+  correlationId: uuidSchema,
+  /**
+   * Resolved from the binding policy by the scheduler or route that admitted
+   * the run. Required here so the worker never falls back to a default for
+   * what counts as a numeric operating limit (D06).
+   */
+  evidenceMaxAgeDays: z.number().int().positive().max(365),
+});
+export type CampaignResearchPayload = z.infer<typeof campaignResearchPayloadSchema>;
+
+export function parseCampaignResearchPayload(payload: unknown): CampaignResearchPayload {
+  return campaignResearchPayloadSchema.parse(payload);
+}
+
+/**
  * The fingerprint of what was asked for.
  *
  * Two enqueues sharing an idempotency key must describe the same work. This is

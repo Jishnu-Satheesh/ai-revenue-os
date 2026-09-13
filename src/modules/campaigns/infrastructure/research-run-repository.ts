@@ -27,6 +27,17 @@ export type ResearchRunStore = {
     runId: string;
     leaseSeconds: number;
   }): Promise<ResearchRunClaim>;
+  /**
+   * Loads everything the worker needs in one claim-bound call: the run, the
+   * still-binding policy version, and the pinned manifest snapshots. Throws
+   * a not_found failure when the claim is gone — the service turns that into
+   * a lost claim rather than retrying landed work.
+   */
+  load(input: {
+    organizationId: string;
+    runId: string;
+    claimToken: string;
+  }): Promise<LoadedResearchContext>;
   complete(input: {
     organizationId: string;
     runId: string;
@@ -56,6 +67,26 @@ function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
+export type LoadedResearchMemoryEntry = {
+  id: string;
+  title: string | null;
+  body: string | null;
+};
+
+export type LoadedResearchContext = {
+  status: string;
+  triggerKind: string;
+  policyVersion: number;
+  budgetMinor: number;
+  /** The staged question, admitted with the run. Null when never asked. */
+  researchQuestion: string | null;
+  /** Null when no policy pointer exists; the recheck then refuses. */
+  currentPolicyVersion: number | null;
+  manifestId: string | null;
+  digest: string | null;
+  entries: readonly LoadedResearchMemoryEntry[];
+};
+
 export function createResearchRunStore(client: ResearchPersistence): ResearchRunStore {
   return {
     async claim(input): Promise<ResearchRunClaim> {
@@ -72,6 +103,38 @@ export function createResearchRunStore(client: ResearchPersistence): ResearchRun
         claimToken: String(row.claim_token),
         policyVersion: Number(row.policy_version),
         budgetMinor: Number(row.budget_minor),
+      };
+    },
+
+    async load(input): Promise<LoadedResearchContext> {
+      const { data, error } = await client.rpc("load_campaign_research_context", {
+        target_organization_id: input.organizationId,
+        input_load: { run_id: input.runId, claim_token: input.claimToken },
+      });
+      if (error) throw researchFailure(error);
+
+      const row = record(data);
+      const rawEntries = Array.isArray(row.manifest_entries) ? row.manifest_entries : [];
+      return {
+        status: String(row.status),
+        triggerKind: String(row.trigger_kind),
+        policyVersion: Number(row.policy_version),
+        budgetMinor: Number(row.budget_minor),
+        researchQuestion:
+          row.research_question === null ? null : String(row.research_question),
+        currentPolicyVersion:
+          row.current_policy_version === null ? null : Number(row.current_policy_version),
+        manifestId:
+          row.context_manifest_id === null ? null : String(row.context_manifest_id),
+        digest: row.context_digest === null ? null : String(row.context_digest),
+        entries: rawEntries.map((entry) => {
+          const item = record(entry);
+          return {
+            id: String(item.id),
+            title: typeof item.title === "string" ? item.title : null,
+            body: typeof item.body === "string" ? item.body : null,
+          };
+        }),
       };
     },
 
