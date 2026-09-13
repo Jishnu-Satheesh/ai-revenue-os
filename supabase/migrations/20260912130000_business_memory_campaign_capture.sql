@@ -266,7 +266,7 @@ begin
     projection_document
   ) values (
     p_organization_id, 'campaign_lesson', v_proposal.id, v_revision,
-    v_digest, 'submitted', pg_catalog.coalesce(v_proposal.decided_at, pg_catalog.now()), pg_catalog.gen_random_uuid(),
+    v_digest, 'submitted', coalesce(v_proposal.decided_at, pg_catalog.now()), pg_catalog.gen_random_uuid(),
     pg_catalog.jsonb_build_object(
       'proposalId', v_proposal.id,
       'campaignId', v_proposal.campaign_id,

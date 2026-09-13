@@ -100,8 +100,8 @@ as $$
 declare
   v_recommendation public.channel_recommendations;
   v_manifest public.memory_context_manifests;
-  v_provided text[] := pg_catalog.coalesce(p_provided_refs, '{}');
-  v_cited text[] := pg_catalog.coalesce(p_cited_refs, '{}');
+  v_provided text[] := coalesce(p_provided_refs, '{}');
+  v_cited text[] := coalesce(p_cited_refs, '{}');
   v_missing integer;
   v_outside integer;
   v_existing public.channel_recommendation_contexts;
