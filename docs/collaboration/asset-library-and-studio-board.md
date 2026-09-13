@@ -34,7 +34,7 @@ Independent research projects at one location are confirmed by the user.
 The audit now specifies project/brief/update/report responsibilities and proposed
 pause, cancellation, history, duplicate-start and cross-project advice behavior.
 Superdesign preflight succeeded on continuation; the saved GI target is structurally
-valid and its remote draft 5e38b367-f8e0-4707-ba46-5b5be3d65822 is version 2.
+valid and its remote draft 5e38b367-f8e0-4707-ba46-5b5be3d65822 was version 2.
 Current source fingerprints differ; use a targeted context refresh before visual
 generation. The continuation also claims .superdesign/market-monitoring-experience/
 for a review-only visual draft and screenshots, and the GI entry in
@@ -44,11 +44,18 @@ fictional examples clearly labelled. The user has now confirmed the readable
 report dialog with PDF download, simple English for version one, and automatic
 destination selection by item type after explicit acceptance (advice to
 Recommendations, findings to Insights). Superdesign generation was blocked by
-zero account credits; the continuation is authoring the same draft locally and
-will use the documented no-credit import path. The standalone prototype covers
+zero account credits; local authoring and the documented no-credit import path
+completed version 3, Growth Intelligence — Market Watch and reports. Its URL is
+https://p.superdesign.dev/draft/5e38b367-f8e0-4707-ba46-5b5be3d65822 .
+The refetched remote HTML matches the local prototype byte for byte. The
+standalone prototype covers
 brief/scope/review, independent project states, readable reports, source inspection,
 speculative estimates, PDF export and selected-item review with exact report links.
-Browser verification is in progress. Research cost/duration still needs measured
+Browser verification passed 45 checks with no JavaScript errors. Thirteen clean
+desktop/phone screenshots and a three-page A4 sample PDF are saved alongside
+the prototype; phone views, PDF text and its first rendered page were inspected.
+The audit and visual README link the complete review artifacts. The GI resume
+entry records version 3 and refreshed context fingerprints. Research cost/duration still needs measured
 provider qualification rather than an invented operating promise. No application,
 database, provider activation or deployment change is authorized by this audit.
 Existing unrelated dirty work is preserved. -->
@@ -7212,3 +7219,63 @@ Spec 025 was corrected rather than diverged from: it addressed a review by
 Still open on this thread: nothing in the UI consumes these yet (Task 11), and
 the routes have not been exercised end-to-end against staging — the database
 functions behind them have.
+
+## 2026-09-13 — DONE: Task 6 research spine landed (Business Memory session)
+
+Task 6's Spec 023 half and the research spine are built, proven, and committed
+unpushed (`521e0af`, `8bfd3b9`, `32111ca`, `5d4490f`, `eb6a9be`, `6f82a03`, `7cfcac9`).
+Four migrations pushed live, each rehearsed rolled-back first and pgTAP-proven
+after (final suite 68 assertions green): runs/policy/events, ledger read,
+claim-bound worker load with pinned entry snapshots, question-on-row,
+policy evidence age. The rehearse technique caught five defects pre-push
+(composite FK, three role-context slips, one wrong errcode).
+
+What holds: single proposal write path, no deliverable rows from research,
+`admitProposal` reused, no invented limits (evidence age is a policy column,
+payloads are identifiers-only), planner refuses digest-only citations, costs
+measured not estimated. Worker `campaign.research-proposal` registered on its
+own lane with the durations lease invariant extended.
+
+Deliberate follow-ups, not gaps: admission route/settings surface (Task 16 or
+Campaign session), lease-expiry sweeper for dead-claimed runs, claim-bound GI
+evidence read (worker currently predicates explicitly on the service client),
+model-assisted drafting is stubbed behind the planner's validated contract.
+The peer's in-flight deliverable files currently break `tsc`; untouched, theirs.
+`git push` and worker deploy remain the user's steps.
+
+## 2026-09-14 — Campaign portfolio and detail redesigned (8c71e23, 15fe04e)
+
+Task 11. The detail page is now five tabs — Overview, Creative, Publishing,
+Results, Activity — above a phase strip that shows both approval gates as
+separate steps. The portfolio leads with real signed artwork.
+
+**The rule worth carrying into any campaign surface:** distinguish *did not ask*
+from *asked and failed*, and never let either render as a zero.
+
+- The detail page reads deliverable records, so an unreadable read shows
+  "could not be read" and withholds the next action entirely.
+- The portfolio deliberately does NOT read them (twenty campaigns would be
+  sixty queries), so it uses `campaignListPhase`, which claims less and warns
+  about nothing. Running the full derivation there would put "incomplete" on
+  every card and train people to ignore the warning that means something real.
+
+**Two live-approval gates removed from historical reads.** The variant fleet and
+the allocation ledger were gated on a LIVE approval, so a campaign that really
+ran showed empty history once its approval expired. C09 wants the opposite.
+Do not re-add a read gate; gate mutations instead.
+
+**Publication still cannot be authorized from the UI, on purpose.** The route
+and its binding exist (c4e7139), but the composer for the terms a publication
+binds to — account, schedule, spend — is Task 13. The screen says so as a
+missing composer rather than misreporting it as a permission problem.
+
+**Browser verification is partial.** Portfolio verified at 1440px and ~500px;
+detail Overview verified at 1440px. The Publishing, Results and Activity tabs
+and a true phone width (~390px, which needs device emulation — `resize_page`
+floors at 500px) are NOT yet exercised in a browser; the chrome-devtools MCP
+dropped mid-pass. Anyone continuing should finish that before calling the
+visual work done.
+
+**Not ours, still open:** `permissions.drift.test.ts` fails 4 assertions because
+the research migrations seed `campaign.research_request` and
+`src/domain/access/permissions.ts` does not declare it.
