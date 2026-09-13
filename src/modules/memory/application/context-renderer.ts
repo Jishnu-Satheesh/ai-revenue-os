@@ -43,6 +43,9 @@ export function renderContextPack(input: {
   }));
 
   const countCode = (code: ContextExclusionCode, count = 1): void => {
+    // Zero-count keys are noise downstream (manifest exclusion_counts,
+    // health panels): a code appears only when something was actually cut.
+    if (count <= 0) return;
     exclusions[code] = (exclusions[code] ?? 0) + count;
   };
 
@@ -82,11 +85,9 @@ export function renderContextPack(input: {
     }
     const dropped = kept.filter((entry) => droppedRefs.has(entry.contextRef));
     if (dropped.some((entry) => !entry.optional) || selectedBytes > CONTEXT_MAX_BYTES) {
-      if (!degradedReasons.includes("MANDATORY_OVERFLOW")) degradedReasons.push("MANDATORY_OVERFLOW");
-      countCode(
-        "MANDATORY_OVERFLOW",
-        dropped.filter((entry) => !entry.optional).length || 1,
-      );
+      if (!degradedReasons.includes("MANDATORY_OVERFLOW"))
+        degradedReasons.push("MANDATORY_OVERFLOW");
+      countCode("MANDATORY_OVERFLOW", dropped.filter((entry) => !entry.optional).length || 1);
     }
     countCode("OVER_BUDGET", dropped.filter((entry) => entry.optional).length);
     kept = kept.filter((entry) => !droppedRefs.has(entry.contextRef));
@@ -116,7 +117,9 @@ export function renderContextPack(input: {
 }
 
 /** Sections in pack order. */
-export function groupBySection(entries: readonly ContextEntry[]): Record<ContextSection, ContextEntry[]> {
+export function groupBySection(
+  entries: readonly ContextEntry[],
+): Record<ContextSection, ContextEntry[]> {
   return {
     current: entries.filter((entry) => entry.section === "current"),
     intent: entries.filter((entry) => entry.section === "intent"),
