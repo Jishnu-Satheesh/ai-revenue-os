@@ -166,6 +166,31 @@ const UNTYPED_TABLES = new Set([
   // RPCs; public row types model the safe read projection only.
   "report_projection_reconciliations",
   "report_projection_reconciliation_resolutions",
+  // ADR 0049 Creative History. `authenticated` holds SELECT and nothing else on
+  // all five: every folder, item, version, verdict and piece of performance
+  // evidence is written by a security-definer RPC that checks asset.manage or
+  // asset.review first. A generated row type carries Insert and Update
+  // alongside Row, so typing these would state a direct write path that the
+  // grants deliberately refuse — the same reason the brand-asset tables these
+  // sit beside are listed here. `creative-history-repository.ts` reads them
+  // through a narrow persistence contract whose strict Zod row schemas fail
+  // loudly if a column is renamed, which is the protection a hand-maintained
+  // type file would otherwise be pretending to give.
+  "creative_folders",
+  "creative_items",
+  "creative_item_versions",
+  "creative_item_reviews",
+  "creative_item_performance_evidence",
+  // Per-recommendation context provenance (Spec 023 / Swarm 1). Written only by
+  // the narration worker through record_channel_recommendation_context and
+  // immutable afterwards; members hold SELECT through a report.read policy and
+  // no write grant. It sits beside memory_context_manifests and
+  // memory_context_entries, which are listed above for the same reason.
+  "channel_recommendation_contexts",
+  // Per-item context associations (Spec 023 / Swarm 3). The table revokes every
+  // privilege from anon, authenticated AND service_role: nothing reaches it
+  // except the fenced definer path. Typing it would imply access no role holds.
+  "growth_intelligence_item_contexts",
 ]);
 
 /**

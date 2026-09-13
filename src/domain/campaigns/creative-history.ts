@@ -137,7 +137,24 @@ export type CreativeHistoryEligibility =
   | "metadata_unconfirmed"
   | "unreviewed";
 
-export function creativeEligibility(item: CreativeHistoryItem): CreativeHistoryEligibility {
+/**
+ * The three facts eligibility actually turns on.
+ *
+ * A stored row is not always a whole `CreativeHistoryItem`: an item whose file
+ * is still uploading has no finalized version to describe, and the read model
+ * still has to say honestly that it is not eligible. Naming the subset lets the
+ * one rule serve both callers instead of being restated — and restated rules
+ * drift, which is how a design nobody reviewed ends up treated as approved.
+ */
+export type CreativeHistoryEligibilityInput = {
+  archivedAt: string | null;
+  confirmedMetadata: CreativeHistoryMetadata | null;
+  currentReview: { verdict: "approved" | "rejected" } | null;
+};
+
+export function creativeEligibility(
+  item: CreativeHistoryEligibilityInput,
+): CreativeHistoryEligibility {
   if (item.archivedAt !== null) return "archived";
   if (item.confirmedMetadata === null) return "metadata_unconfirmed";
   if (item.currentReview === null) return "unreviewed";
