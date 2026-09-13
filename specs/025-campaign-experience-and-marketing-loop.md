@@ -380,9 +380,19 @@ immutable-history guards and bounded indexes. All changes are additive and forwa
   `POST /campaign-proposals/:proposalId/decisions`,
   `POST /campaign-proposals/:proposalId/revisions`, under the organization Campaign module.
 - **Deliverables and launch:** `GET /campaigns/:campaignId/deliverables`,
-  `POST /campaigns/:campaignId/deliverables/:deliverableId/reviews`,
-  `POST /campaigns/:campaignId/launch-approval`. These extend, and do not ambiguously repurpose,
+  `POST /campaigns/:campaignId/deliverables/:deliverableVersionId/reviews`,
+  `POST /campaigns/:campaignId/launch-approvals`. These extend, and do not ambiguously repurpose,
   existing `/approve` behavior; legacy callers keep an explicit compatibility adapter or fail closed.
+  The review path names the **version**, not the deliverable: a review is a verdict on one exact
+  set of bytes, and addressing it by deliverable would put back in the URL precisely the
+  conflation C04 and D05 exist to prevent — a later re-render would inherit an approval nobody
+  gave it. `launch-approvals` is plural because authority accumulates: superseding writes a new
+  approval and leaves the old one readable, so the path names a collection, as `campaign-proposals`
+  above does.
+  There is deliberately **no** route for recording a finished deliverable version.
+  `record_campaign_deliverable_version` is granted to the render worker alone, so a member-facing
+  route could only fail; its absence is what stops a "finished output" being hand-written for a
+  render that never happened.
 - **Research settings:** a permission-checked settings route exposing schedule and timezone,
   qualifying changes, cooldown, pending limit and separate per-run and per-window research
   allowances, plus last evaluation, last successful research, next evaluation and

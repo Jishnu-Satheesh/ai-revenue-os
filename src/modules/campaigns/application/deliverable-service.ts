@@ -93,6 +93,33 @@ export type DeliverableStore = {
     currentVersion: number;
     reviews: readonly CampaignDeliverableReview[];
   } | null>;
+  listForCampaign(input: {
+    organizationId: string;
+    campaignId: string;
+  }): Promise<readonly StoredDeliverableSummary[]>;
+};
+
+/** One deliverable as stored, with its current version and that version's reviews. */
+export type StoredDeliverableSummary = {
+  id: string;
+  channel: string;
+  placement: string;
+  language: string;
+  format: string;
+  ordinal: number;
+  state: string;
+  currentVersion: {
+    id: string;
+    version: number;
+    contentHash: string;
+    createdAt: string;
+  } | null;
+  reviews: readonly CampaignDeliverableReview[];
+};
+
+/** What the review screen needs: the output, and whether it may go out. */
+export type DeliverableSummary = Omit<StoredDeliverableSummary, "reviews"> & {
+  eligibility: PublicationEligibility;
 };
 
 export type DeliverableFailure = {
@@ -232,6 +259,41 @@ export function createDeliverableService(dependencies: { store: DeliverableStore
       });
     },
 
+    /**
+     * Every finished output for a campaign, each with its publication verdict.
+     *
+     * Eligibility is computed here from the reviews rather than read from a
+     * column, for the same reason it is everywhere else: a stored "publishable"
+     * flag is a value some later write could set without anyone having looked
+     * at the bytes.
+     *
+     * A deliverable with no current version yet is listed rather than hidden.
+     * The review screen has to be able to show that something was planned and
+     * has not been produced — silently omitting it would turn an incomplete
+     * campaign into one that merely looks finished.
+     */
+    async listForCampaign(input: {
+      organizationId: string;
+      campaignId: string;
+    }): Promise<readonly DeliverableSummary[]> {
+      const stored = await dependencies.store.listForCampaign(input);
+
+      return stored.map(({ reviews, ...summary }) => ({
+        ...summary,
+        eligibility: summary.currentVersion
+          ? publicationEligibility({
+              version: {
+                id: summary.currentVersion.id,
+                contentHash: summary.currentVersion.contentHash,
+                version: summary.currentVersion.version,
+              },
+              reviews: reviews.map((review) => campaignDeliverableReviewSchema.parse(review)),
+              currentVersion: summary.currentVersion.version,
+            })
+          : { publishable: false, reasonCode: "never_reviewed" },
+      }));
+    },
+
     /** What the plan asked for against what exists. Never a tidied-up count. */
     completion(input: {
       plan: readonly DeliverablePlanItem[];
@@ -243,3 +305,30 @@ export function createDeliverableService(dependencies: { store: DeliverableStore
 }
 
 export type CampaignDeliverableService = ReturnType<typeof createDeliverableService>;
+
+/**
+ * The exact status C04 fixes for each deliverable outcome. Kept in one place so
+ * a route cannot quietly report a refusal as a success.
+ *
+ * `superseded` and `content_changed` are 409, not 422: nothing about the
+ * request was malformed. The output moved underneath it, and the honest answer
+ * is "reload and look at what is there now".
+ */
+export function deliverableOutcomeStatus(outcome: DeliverableOutcome<unknown>): number {
+  switch (outcome.status) {
+    case "saved":
+      return 201;
+    case "replayed":
+      return 200;
+    case "needs_input":
+      return 422;
+    case "superseded":
+    case "content_changed":
+    case "conflict":
+      return 409;
+    case "forbidden":
+      return 403;
+    case "unavailable":
+      return 503;
+  }
+}

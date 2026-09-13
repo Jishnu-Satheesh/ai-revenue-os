@@ -31,6 +31,10 @@ export type DeliverablePersistence = {
         ): Promise<{ data: unknown; error: { message?: string } | null }> & {
           maybeSingle(): Promise<{ data: unknown; error: { message?: string } | null }>;
         };
+        in(
+          column: string,
+          values: readonly string[],
+        ): Promise<{ data: unknown; error: { message?: string } | null }>;
       };
     };
   };
@@ -74,6 +78,10 @@ function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
+function rows(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(record) : [];
+}
+
 export function createDeliverableRepository(client: DeliverablePersistence): DeliverableStore {
   return {
     async recordVersion(input) {
@@ -106,6 +114,96 @@ export function createDeliverableRepository(client: DeliverablePersistence): Del
         reviewId: String(row.review_id),
         outcome: row.outcome === "replayed" ? "replayed" : "saved",
       };
+    },
+
+    async listForCampaign(input) {
+      const deliverableResult = await client
+        .from("campaign_deliverables")
+        .select("id,channel,placement,language,format,ordinal,state,current_version_id")
+        .eq("organization_id", input.organizationId)
+        .eq("campaign_id", input.campaignId);
+
+      // A read that failed is not an empty campaign, and must not be shown as
+      // one: "no outputs yet" and "we could not look" are different answers.
+      if (deliverableResult.error) throw { kind: "unavailable" } satisfies DeliverableFailure;
+
+      const deliverableRows = rows(deliverableResult.data);
+      if (deliverableRows.length === 0) return [];
+
+      const currentVersionIds = deliverableRows
+        .map((row) => (row.current_version_id == null ? null : String(row.current_version_id)))
+        .filter((id): id is string => id !== null);
+
+      const versionById = new Map<string, Record<string, unknown>>();
+      const reviewsByVersion = new Map<string, CampaignDeliverableReview[]>();
+
+      if (currentVersionIds.length > 0) {
+        const versionResult = await client
+          .from("campaign_deliverable_versions")
+          .select("id,version,content_hash,created_at")
+          .eq("organization_id", input.organizationId)
+          .in("id", currentVersionIds);
+
+        if (versionResult.error) throw { kind: "unavailable" } satisfies DeliverableFailure;
+        for (const row of rows(versionResult.data)) versionById.set(String(row.id), row);
+
+        const reviewResult = await client
+          .from("campaign_deliverable_reviews")
+          .select(
+            "id,organization_id,deliverable_id,deliverable_version_id,content_hash,actor_id,decision,reason_codes,note,reviewed_at",
+          )
+          .eq("organization_id", input.organizationId)
+          .in("deliverable_version_id", currentVersionIds);
+
+        if (reviewResult.error) throw { kind: "unavailable" } satisfies DeliverableFailure;
+
+        for (const row of rows(reviewResult.data)) {
+          const parsed = campaignDeliverableReviewSchema.safeParse({
+            id: row.id,
+            organizationId: row.organization_id,
+            deliverableId: row.deliverable_id,
+            deliverableVersionId: row.deliverable_version_id,
+            contentHash: row.content_hash,
+            actorId: row.actor_id,
+            decision: row.decision,
+            reasonCodes: row.reason_codes ?? [],
+            note: row.note ?? null,
+            reviewedAt: row.reviewed_at,
+          });
+          if (!parsed.success) continue;
+
+          const existing = reviewsByVersion.get(parsed.data.deliverableVersionId);
+          if (existing) existing.push(parsed.data);
+          else reviewsByVersion.set(parsed.data.deliverableVersionId, [parsed.data]);
+        }
+      }
+
+      return deliverableRows.map((row) => {
+        const currentId = row.current_version_id == null ? null : String(row.current_version_id);
+        const versionRow = currentId === null ? undefined : versionById.get(currentId);
+
+        return {
+          id: String(row.id),
+          channel: String(row.channel),
+          placement: String(row.placement),
+          language: String(row.language),
+          format: String(row.format),
+          ordinal: Number(row.ordinal),
+          state: String(row.state),
+          // A named current version we cannot read is reported as absent, not
+          // invented. Absent means "not produced", which fails closed.
+          currentVersion:
+            currentId === null || versionRow === undefined
+              ? null
+              : {
+                  id: currentId,
+                  version: Number(versionRow.version),
+                  contentHash: String(versionRow.content_hash),
+                  createdAt: String(versionRow.created_at),
+                },
+          reviews: currentId === null ? [] : (reviewsByVersion.get(currentId) ?? []),
+        };
+      });
     },
 
     async readVersionForPublication(input) {
