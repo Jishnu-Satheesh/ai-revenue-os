@@ -44,6 +44,31 @@ select extensions.has_function(
   'public', 'set_campaign_research_policy_current', array['uuid', 'jsonb'],
   'the pointer moves through a governed writer'
 );
+select extensions.has_function(
+  'public', 'read_campaign_research_ledger', array['uuid'],
+  'admission previews the ledger through a scoped read'
+);
+select extensions.has_function(
+  'public', 'load_campaign_research_context', array['uuid', 'jsonb'],
+  'the worker loads the pin through a claim-bound read'
+);
+
+select extensions.function_privs_are(
+  'public', 'read_campaign_research_ledger', array['uuid'],
+  'authenticated', array['EXECUTE'], 'a signed-in member previews admission inputs'
+);
+select extensions.function_privs_are(
+  'public', 'read_campaign_research_ledger', array['uuid'],
+  'anon', array[]::text[], 'a signed-out request previews nothing'
+);
+select extensions.function_privs_are(
+  'public', 'load_campaign_research_context', array['uuid', 'jsonb'],
+  'authenticated', array[]::text[], 'no member loads a worker pin'
+);
+select extensions.function_privs_are(
+  'public', 'load_campaign_research_context', array['uuid', 'jsonb'],
+  'service_role', array['EXECUTE'], 'the worker loads through the claim-bound read'
+);
 
 select extensions.function_privs_are(
   'public', 'request_campaign_research_run', array['uuid', 'jsonb'],
@@ -130,20 +155,21 @@ insert into public.organization_memberships (organization_id, user_id, role) val
 
 insert into public.campaign_research_policies (
   id, organization_id, version, enabled, schedule_timezone,
-  evidence_qualification_rule_version, cooldown_seconds, max_pending_proposals,
+  evidence_qualification_rule_version, evidence_max_age_days,
+  cooldown_seconds, max_pending_proposals,
   per_run_allowance_minor, window_allowance_minor, allowance_currency, window_days, created_by
 ) values
   ('d9400000-0000-4000-8000-000000000201'::uuid,
    'd9400000-0000-4000-8000-000000000101'::uuid, 1, true, 'Asia/Dubai',
-   'evidence-qualification@2', 3600, 5, 5000, 20000, 'AED', 30,
+   'evidence-qualification@2', 30, 3600, 5, 5000, 20000, 'AED', 30,
    'd9400000-0000-4000-8000-000000000001'::uuid),
   ('d9400000-0000-4000-8000-000000000202'::uuid,
    'd9400000-0000-4000-8000-000000000102'::uuid, 1, true, 'Asia/Dubai',
-   'evidence-qualification@2', 0, 1, 5000, 6000, 'AED', 30,
+   'evidence-qualification@2', 30, 0, 1, 5000, 6000, 'AED', 30,
    'd9400000-0000-4000-8000-000000000002'::uuid),
   ('d9400000-0000-4000-8000-000000000203'::uuid,
    'd9400000-0000-4000-8000-000000000103'::uuid, 1, true, 'Asia/Dubai',
-   'evidence-qualification@2', 0, 10, 5000, 6000, 'AED', 30,
+   'evidence-qualification@2', 30, 0, 10, 5000, 6000, 'AED', 30,
    'd9400000-0000-4000-8000-000000000004'::uuid);
 
 insert into public.campaign_research_policy_current (organization_id, policy_id, set_by) values
@@ -518,6 +544,31 @@ select extensions.ok(
   'cancellation leaves a durable cancelled event'
 );
 
+-- The ledger preview carries the binding policy for the admission
+-- pre-check: precise refusal reasons without spending anything.
+set local role authenticated;
+set local request.jwt.claim.sub = 'd9400000-0000-4000-8000-000000000004';
+
+select extensions.is(
+  (select (value -> 'policy' ->> 'version')::int from (
+    select public.read_campaign_research_ledger(
+      'd9400000-0000-4000-8000-000000000103'::uuid
+    ) as value
+  ) preview),
+  1,
+  'the ledger preview names the binding policy version'
+);
+
+select extensions.is(
+  (select (value -> 'policy' ->> 'evidenceMaxAgeDays')::int from (
+    select public.read_campaign_research_ledger(
+      'd9400000-0000-4000-8000-000000000103'::uuid
+    ) as value
+  ) preview),
+  30,
+  'the ledger preview carries the configured evidence age'
+);
+
 -- ---------------------------------------------------------------------------
 -- The pointer moves forward by version, through the capability, and the old
 -- version stops admitting.
@@ -541,12 +592,13 @@ reset role;
 
 insert into public.campaign_research_policies (
   id, organization_id, version, enabled, schedule_timezone,
-  evidence_qualification_rule_version, cooldown_seconds, max_pending_proposals,
+  evidence_qualification_rule_version, evidence_max_age_days,
+  cooldown_seconds, max_pending_proposals,
   per_run_allowance_minor, window_allowance_minor, allowance_currency, window_days, created_by
 ) values (
   'd9400000-0000-4000-8000-000000000204'::uuid,
   'd9400000-0000-4000-8000-000000000101'::uuid, 2, true, 'Asia/Dubai',
-  'evidence-qualification@3', 3600, 5, 5000, 20000, 'AED', 30,
+  'evidence-qualification@3', 30, 3600, 5, 5000, 20000, 'AED', 30,
   'd9400000-0000-4000-8000-000000000001'::uuid
 );
 
@@ -600,6 +652,230 @@ select extensions.ok(
       and not fp.warranted
   ),
   'an unwarranted signal is remembered as seen, not re-evaluated at full cost'
+);
+
+-- ---------------------------------------------------------------------------
+-- Worker reads: admission binds the pinned manifest, and the loader serves
+-- its exact bounded snapshots to the claim holder only.
+-- ---------------------------------------------------------------------------
+
+reset role;
+
+insert into public.memory_write_operations (
+  id, organization_id, idempotency_key, request_fingerprint, response
+) values (
+  'd9400000-0000-4000-8000-000000000301'::uuid,
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  'research-loader-op', repeat('a', 64), '{}'::jsonb
+);
+
+insert into public.memory_context_manifests (
+  id, organization_id, purpose, policy_version, context_digest, correlation_id,
+  status, attempt_key, subject_operation_id, selected_count, selected_bytes
+) values (
+  'd9400000-0000-4000-8000-000000000302'::uuid,
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  'subject_drafting', 'shared-context-v1', repeat('b', 64),
+  'd9400000-0000-4000-8000-000000000303'::uuid, 'ready', 'research-loader-attempt',
+  'd9400000-0000-4000-8000-000000000301'::uuid, 2, 120
+);
+
+insert into public.memory_context_entries (
+  organization_id, manifest_id, ordinal, context_ref, source_kind, business_fact_id,
+  statement_kind, trust_rank, freshness, sensitivity, safe_snapshot
+) values (
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  'd9400000-0000-4000-8000-000000000302'::uuid,
+  1, 'ctx-0001', 'business_fact', 'd9400000-0000-4000-8000-000000000304'::uuid,
+  'observation', 2, 'fresh', 'internal',
+  jsonb_build_object('title', 'Weekday regulars', 'summary', 'Office workers fill the room.')
+), (
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  'd9400000-0000-4000-8000-000000000302'::uuid,
+  2, 'ctx-0002', 'business_fact', 'd9400000-0000-4000-8000-000000000305'::uuid,
+  'observation', 1, 'fresh', 'internal', '{}'::jsonb
+);
+
+set local role authenticated;
+set local request.jwt.claim.sub = 'd9400000-0000-4000-8000-000000000004';
+
+-- A manifest half travels nowhere: identifiers only, both or neither.
+select extensions.throws_ok(
+  $$select public.request_campaign_research_run(
+      'd9400000-0000-4000-8000-000000000103'::uuid,
+      jsonb_build_object(
+        'trigger_kind', 'manual_request', 'budget_minor', 100,
+        'allowance_currency', 'AED', 'request_digest', repeat('c', 64),
+        'idempotency_key', 'research-c-half-manifest',
+        'context_manifest_id', 'd9400000-0000-4000-8000-000000000302'
+      ))$$,
+  '22023',
+  'campaign_research_invalid',
+  'a manifest id without its digest admits nothing'
+);
+
+-- A pin to another tenant's manifest is not a pin at all.
+select extensions.throws_ok(
+  $$select public.request_campaign_research_run(
+      'd9400000-0000-4000-8000-000000000103'::uuid,
+      jsonb_build_object(
+        'trigger_kind', 'manual_request', 'budget_minor', 100,
+        'allowance_currency', 'AED', 'request_digest', repeat('d', 64),
+        'idempotency_key', 'research-c-foreign-manifest',
+        'context_manifest_id', 'd9400000-0000-4000-8000-000000000302',
+        'context_digest', repeat('0', 64)
+      ))$$,
+  '22023',
+  'campaign_research_invalid',
+  'a digest that does not match the manifest admits nothing'
+);
+
+insert into research_state (key, value)
+select 'run_c2', public.request_campaign_research_run(
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  jsonb_build_object(
+    'trigger_kind', 'manual_request', 'budget_minor', 1000,
+    'allowance_currency', 'AED', 'request_digest', repeat('e', 64),
+    'idempotency_key', 'research-c-pinned-run',
+    'context_manifest_id', 'd9400000-0000-4000-8000-000000000302',
+    'context_digest', repeat('b', 64)
+  )
+);
+
+select extensions.is(
+  (select value ->> 'outcome' from research_state where key = 'run_c2'),
+  'saved',
+  'admission binds the pinned manifest identifiers'
+);
+
+reset role;
+
+select extensions.is(
+  (select context_manifest_id from public.campaign_research_runs run
+   where run.id = (select (value ->> 'run_id')::uuid from research_state where key = 'run_c2')),
+  'd9400000-0000-4000-8000-000000000302'::uuid,
+  'the run row carries the pin the worker will load'
+);
+
+set local role service_role;
+
+insert into research_state (key, value)
+select 'claim_c2', public.claim_campaign_research_run(
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  jsonb_build_object(
+    'run_id', (select value ->> 'run_id' from research_state where key = 'run_c2'),
+    'lease_seconds', 3600
+  )
+);
+
+-- A stranger's token loads nothing.
+select extensions.throws_ok(
+  format(
+    $$select public.load_campaign_research_context(
+        'd9400000-0000-4000-8000-000000000103'::uuid,
+        jsonb_build_object('run_id', %L, 'claim_token', %L))$$,
+    (select value ->> 'run_id' from research_state where key = 'run_c2'),
+    '00000000-0000-4000-8000-000000000000'
+  ),
+  'P0002',
+  'campaign_research_claim_lost',
+  'a wrong claim token loads nothing'
+);
+
+insert into research_state (key, value)
+select 'load_c2', public.load_campaign_research_context(
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  jsonb_build_object(
+    'run_id', (select value ->> 'run_id' from research_state where key = 'run_c2'),
+    'claim_token', (select value ->> 'claim_token' from research_state where key = 'claim_c2')
+  )
+);
+
+select extensions.is(
+  (select (value ->> 'current_policy_version')::int from research_state where key = 'load_c2'),
+  1,
+  'the loader carries the still-binding policy version for the pre-work recheck'
+);
+
+select extensions.is(
+  (select jsonb_array_length(value -> 'manifest_entries') from research_state where key = 'load_c2'),
+  2,
+  'the loader serves the pinned entries in ordinal order'
+);
+
+select extensions.is(
+  (select (value -> 'manifest_entries' -> 0 ->> 'body') from research_state where key = 'load_c2'),
+  'Office workers fill the room.',
+  'the first entry carries its exact bounded snapshot'
+);
+
+select extensions.is(
+  (select (value -> 'manifest_entries' -> 1 ->> 'body') from research_state where key = 'load_c2'),
+  null,
+  'the erased entry arrives content-less, never reconstructed'
+);
+
+-- The staged question is stored on the run row and served back claim-bound,
+-- never through a worker payload.
+select extensions.throws_ok(
+  $$select public.request_campaign_research_run(
+      'd9400000-0000-4000-8000-000000000103'::uuid,
+      jsonb_build_object(
+        'trigger_kind', 'manual_request', 'budget_minor', 0,
+        'allowance_currency', 'AED', 'request_digest', repeat('f', 64),
+        'idempotency_key', 'research-c-long-question',
+        'research_question', repeat('q', 2001)
+      ))$$,
+  '22023',
+  'campaign_research_invalid',
+  'a question longer than the bound admits nothing'
+);
+
+insert into research_state (key, value)
+select 'run_c3', public.request_campaign_research_run(
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  jsonb_build_object(
+    'trigger_kind', 'manual_request', 'budget_minor', 0,
+    'allowance_currency', 'AED', 'request_digest', repeat('a', 64),
+    'idempotency_key', 'research-c-question-run',
+    'research_question', 'why did weekday lunch decline?'
+  )
+);
+
+select extensions.is(
+  (select value ->> 'outcome' from research_state where key = 'run_c3'),
+  'saved',
+  'a zero-budget question-only run admits inside a spent window'
+);
+
+insert into research_state (key, value)
+select 'claim_c3', public.claim_campaign_research_run(
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  jsonb_build_object(
+    'run_id', (select value ->> 'run_id' from research_state where key = 'run_c3'),
+    'lease_seconds', 3600
+  )
+);
+
+insert into research_state (key, value)
+select 'load_c3', public.load_campaign_research_context(
+  'd9400000-0000-4000-8000-000000000103'::uuid,
+  jsonb_build_object(
+    'run_id', (select value ->> 'run_id' from research_state where key = 'run_c3'),
+    'claim_token', (select value ->> 'claim_token' from research_state where key = 'claim_c3')
+  )
+);
+
+select extensions.is(
+  (select value ->> 'research_question' from research_state where key = 'load_c3'),
+  'why did weekday lunch decline?',
+  'the loader serves the admitted question with the pin'
+);
+
+select extensions.is(
+  (select value ->> 'trigger_kind' from research_state where key = 'load_c3'),
+  'manual_request',
+  'the loader serves the trigger kind the worker plans from'
 );
 
 -- Signed-in members read no research table directly: every read travels
