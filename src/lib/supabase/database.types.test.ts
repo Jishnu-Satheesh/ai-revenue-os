@@ -43,6 +43,16 @@ const UNTYPED_TABLES = new Set([
   // service role, and read through the narrow contract in webhook-receipts.ts.
   // No session reaches them: a quarantined row has no tenant to scope it to.
   "provider_webhook_receipts",
+  // Proposals, their revisions and their decisions are written only through
+  // `request_campaign_proposal`, `complete_campaign_proposal_version` and
+  // `decide_campaign_proposal`. No role holds an INSERT grant on any of them.
+  // A generated row type would invite a direct insert that skips the approval
+  // transaction — and that transaction is the only place the capability, the
+  // exact revision and the digest are checked together. Read through the
+  // narrow contract in `proposal-repository.ts`.
+  "campaign_proposals",
+  "campaign_proposal_versions",
+  "campaign_proposal_decisions",
   // Creative variants are written only through `append_campaign_creative_variant`,
   // which assigns the slot numbers under a lock, and read through the narrow
   // contract in `variant-repository.ts`. A generated row type would invite a
