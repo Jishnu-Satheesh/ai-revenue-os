@@ -206,3 +206,56 @@ export async function attestAndApprove(input: {
     actionKeys: input.actionKeys,
   });
 }
+
+/**
+ * Records a person's verdict on one exact finished output.
+ *
+ * The content hash travels with the decision because the approval is of those
+ * exact bytes, not of the output in general. If a re-render landed between the
+ * screen being drawn and the button being pressed, the server refuses rather
+ * than recording an approval of artwork nobody looked at.
+ */
+export function reviewDeliverable(input: {
+  organizationId: string;
+  campaignId: string;
+  deliverableVersionId: string;
+  contentHash: string;
+  decision: "approved" | "rejected";
+  reasonCodes?: readonly string[];
+  note?: string | null;
+  idempotencyKey: string;
+}): Promise<ActionResult<{ outcome: string; reviewId?: string; reasonCode?: string }>> {
+  const { organizationId, campaignId, deliverableVersionId, ...body } = input;
+  return post(
+    `/api/organizations/${organizationId}/campaigns/${campaignId}/deliverables/${deliverableVersionId}/reviews`,
+    body,
+  );
+}
+
+/**
+ * Authorizes publication of an exact set of reviewed outputs.
+ *
+ * The whole manifest goes up and the server computes the digest it binds to.
+ * Sending a digest from here would let the record claim to authorize terms
+ * other than the ones actually written.
+ */
+export function authorizeLaunch(input: {
+  organizationId: string;
+  campaignId: string;
+  manifest: unknown;
+  idempotencyKey: string;
+}): Promise<
+  ActionResult<{
+    outcome: string;
+    launchApprovalId?: string;
+    launchDigest?: string;
+    reasonCode?: string;
+    deliverableVersionId?: string | null;
+  }>
+> {
+  const { organizationId, campaignId, ...body } = input;
+  return post(
+    `/api/organizations/${organizationId}/campaigns/${campaignId}/launch-approvals`,
+    body,
+  );
+}

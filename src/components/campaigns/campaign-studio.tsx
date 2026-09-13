@@ -14,18 +14,8 @@ import {
   Wand2,
 } from "lucide-react";
 
-import { attestAndApprove, decideLearningProposal } from "@/components/campaigns/campaign-actions";
-import {
-  AllocationLedger,
-  type AllocationLedgerEvent,
-} from "@/components/campaigns/allocation-ledger";
+import { attestAndApprove } from "@/components/campaigns/campaign-actions";
 import { VariantGrid, type VariantCard } from "@/components/campaigns/variant-grid";
-import { OutcomeProof, type OutcomeProofData } from "@/components/campaigns/outcome-proof";
-import {
-  LearningReview,
-  type LearningDecision,
-  type LearningProposalData,
-} from "@/components/campaigns/learning-review";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -664,11 +654,6 @@ export function CampaignStudio({
   timeZone,
   variants,
   variantsRemaining,
-  allocationEvents = [],
-  outcome = null,
-  learningProposal = null,
-  canDecideLearning = false,
-  currency = null,
 }: Readonly<{
   view: StudioView;
   organizationId: string;
@@ -677,26 +662,6 @@ export function CampaignStudio({
   /** Creative produced under this approval. Empty until any has been. */
   variants?: readonly VariantCard[];
   variantsRemaining?: Readonly<Record<string, number>>;
-  /**
-   * The fast loop's decisions for this campaign, newest first. Empty until the
-   * loop has run and recorded something worth an operator's attention.
-   */
-  allocationEvents?: readonly AllocationLedgerEvent[];
-  /**
-   * The settled result and its proof, once the evidence loop has settled the
-   * campaign. Null while the outcome window and settlement delay have not yet
-   * passed.
-   */
-  outcome?: OutcomeProofData | null;
-  /**
-   * The learning proposal the evidence loop drafted from the settled outcome,
-   * once one exists. Null until the loop has proposed and none has been decided.
-   */
-  learningProposal?: LearningProposalData | null;
-  /** Whether the viewer may record a decision; viewers may read but not decide. */
-  canDecideLearning?: boolean;
-  /** The organization's currency; money values in both panels render in it. */
-  currency?: string | null;
 }>) {
   const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
@@ -744,24 +709,6 @@ export function CampaignStudio({
 
     toast.success("Approved", { description: "This exact version is now authorized to execute." });
     router.refresh();
-  }
-
-  /**
-   * Records the operator's decision on a learning proposal and refreshes so the
-   * closed proposal renders as history. The decision route only records a
-   * human's choice; it promotes nothing.
-   */
-  async function decideLearning(decision: LearningDecision) {
-    if (!learningProposal) return { ok: false as const, message: "No proposal to decide." };
-    const result = await decideLearningProposal({
-      organizationId,
-      campaignId: view.campaignId,
-      proposalId: learningProposal.id,
-      decision,
-    });
-    if (!result.ok) return { ok: false as const, message: result.message };
-    router.refresh();
-    return { ok: true as const };
   }
 
   return (
@@ -1049,49 +996,8 @@ export function CampaignStudio({
             changes the offer, the claims, the audience, the placement, the schedule or the spend.
           </p>
           <VariantGrid variants={variants ?? []} remaining={variantsRemaining ?? {}} />
-
-          {allocationEvents.length > 0 ? (
-            <div className="mt-4 flex flex-col gap-2">
-              <h3 className="text-base font-semibold">Allocation decisions</h3>
-              <p className="text-sm text-muted-foreground">
-                Every decision the loop made, and why — including the decisions not to act. Each one
-                names the rule, the values it compared, and when.
-              </p>
-              <AllocationLedger events={allocationEvents} timeZone={timeZone} currency={currency} />
-            </div>
-          ) : null}
         </section>
       ) : null}
-
-      {/* The settled result is not gated on a live approval: a campaign that ran
-          and settled keeps its proof after the approval has lapsed. */}
-      {outcome !== null ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">Result</h2>
-          <p className="text-sm text-muted-foreground">
-            The settled verdict and the proof behind it: what was hypothesized, what actually
-            delivered, what it cost, and why the verdict carries its label.
-          </p>
-          <OutcomeProof outcome={outcome} timeZone={timeZone} />
-        </section>
-      ) : null}
-
-      {/* A learning proposal only exists after settlement, and only until an
-          operator decides it. It is the loop's last arrow, and the operator's
-          decision is the last word on whether a lesson leaves its campaign. */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Learning</h2>
-        <p className="text-sm text-muted-foreground">
-          A lesson the evidence loop drafted from this campaign&apos;s own settled outcome. It stays
-          attached to this campaign until you decide otherwise.
-        </p>
-        <LearningReview
-          proposal={learningProposal}
-          canDecide={canDecideLearning}
-          timeZone={timeZone}
-          onDecide={decideLearning}
-        />
-      </section>
 
       <p className="sr-only">Reviewing campaign artwork for {organizationName}.</p>
     </div>
