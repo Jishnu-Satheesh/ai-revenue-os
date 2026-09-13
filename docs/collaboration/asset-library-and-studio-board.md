@@ -6743,3 +6743,54 @@ through the real routes, not only in tests.
   queried, and the named failed run was neither retried nor inspected. All hosted and deployed
   evidence is UNKNOWN/PENDING. The 12 September run `run_06g9cko3ehp1gemp1f1v6k6h01` and its domain
   row `d2682f4c-…` are untouched historical evidence.
+
+## 2026-09-13 — Task 2: Creative History persistence and the upload API
+
+- **Files claimed and finished.** Picked up mid-task from a prior session terminated by a rate
+  limit, whose uncommitted work was on disk with no report. Completed and committed: modified
+  `src/domain/campaigns/creative-history.ts`, `src/lib/supabase/database.types.test.ts`; new
+  `src/modules/campaigns/application/creative-history-service.ts` (+ test),
+  `.../creative-history-route-handlers.ts` (+ test),
+  `src/modules/campaigns/infrastructure/creative-history-repository.ts` (+ test),
+  `.../creative-history-storage.ts` (+ test), `.../creative-history-route-wiring.ts`,
+  `.../creative-history-persistence-error.ts`; new routes under
+  `src/app/api/organizations/[organizationId]/assets/creative-history/`; new
+  `supabase/migrations/20260913100000_creative_history_intake_completion.sql` and
+  `supabase/tests/database/creative_history_intake_test.sql`. Commit `6935cdb`, fix round 1 commit
+  recorded below once made.
+- **The one real defect fixed before anything else.** The prior session's migration was named
+  `20260913090000_creative_history_intake_completion.sql` — the same numeric version prefix Task 1
+  used for `20260913090000_campaign_generation_bootstrap_recovery.sql`. Supabase keys applied
+  migrations by that prefix, so a push would have collided. Renamed to `20260913100000_…` before
+  either was ever pushed, so the fix was free. **This version must stay `20260913100000`.**
+  Reused Task 3's existing five tables (`creative_folders`, `creative_items`,
+  `creative_item_versions`, `creative_item_reviews`, `creative_item_performance_evidence`) — no new
+  table was created.
+- **What the prior session had already gotten right**, verified rather than assumed: the
+  service/repository tests (41 + 18 cases) were complete and passing, not mid-write as the
+  hand-off implied; `database.types.ts`'s `UNTYPED_TABLES` entry already correctly filed all 7
+  previously-unaccounted tables with accurate per-table grant justification.
+- **What was actually missing.** No route-handler test and no storage-adapter test existed despite
+  the brief requiring them — added both (19 + 9 cases). A real architecture-boundary violation
+  (application code importing a concrete infrastructure default, `DEFAULT_ASSET_INTAKE_LIMITS`,
+  at runtime) was only caught by running lint; fixed by injecting
+  `CreativeHistoryIntakeDimensionLimits` as a port from the composition root instead.
+- **Fix round 1 (independent review, three findings, no Critical).** `completeBatch` mislabelled
+  every caught exception as `reason: "upload_missing"` regardless of actual cause — a checksum
+  conflict, a permission failure and a storage outage all rendered as "the file never arrived."
+  Added `item_unavailable | forbidden | invalid_request | unknown` as the batch-only extension of
+  `refused.reason`, mapped from the thrown `DomainError` code, with `unknown` as the only
+  fallback (never borrowing a specific reason for an unspecific cause). Added one test per mapped
+  cause. Corrected two report inaccuracies (missing 403 on the `items/[itemId]` PATCH row; the new
+  batch-reason contract undocumented). `creative_item_performance_evidence` has no write path
+  anywhere in the codebase — the controller has assigned that gap to Task 15 (clinical
+  investigation), not to this task.
+- **Blocked, not passing.** The brief's hosted owner/operator/viewer/cross-tenant and real
+  file-transfer/finalize checkbox is BLOCKED by R2a (Supabase and Trigger MCP both
+  CONNECT_TIMEOUT this session, independently reconfirmed by the reviewer). The two new RPCs
+  (`reserve_creative_item_version`, `confirm_creative_item_metadata`) passed a rigorous static
+  column-by-column check — including a grep of every later migration for the five table names,
+  finding no drift a two-file review could miss — but neither has been executed against staging.
+  That execution remains owed before this slice is complete in fact.
+- **Full detail, exact API surface for Task 3, and the static schema check** are in
+  `.superpowers/sdd/2026-09-12-campaign-experience-implementation/task-2-report.md`.

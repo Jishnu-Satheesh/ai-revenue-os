@@ -9,6 +9,7 @@ import {
   type CreativeHistoryStore,
   type CreativeHistoryVersionRecord,
 } from "@/modules/campaigns/application/creative-history-service";
+import { DomainError } from "@/lib/errors";
 import { DEFAULT_ASSET_INTAKE_LIMITS, ingestCampaignImage } from "@/modules/campaigns/infrastructure/asset-intake";
 import {
   creativeHistoryStorageConfiguration,
@@ -574,7 +575,42 @@ describe("a batch where one file fails", () => {
     });
 
     expect(result.usableCount).toBe(1);
-    expect(result.outcomes[1]).toMatchObject({ status: "refused" });
+    expect(result.outcomes[1]).toMatchObject({ status: "refused", reason: "item_unavailable" });
+  });
+
+  it("names a permission failure as forbidden, not as a missing upload", async () => {
+    readItem.mockRejectedValue(
+      new DomainError("AUTHORIZATION_ERROR", "You do not have permission to change this design library."),
+    );
+
+    const result = await service().completeBatch({
+      organizationId: ORGANIZATION_ID,
+      uploads: [{ itemId: ITEM_ID, versionId: VERSION_ID }],
+    });
+
+    expect(result.outcomes[0]).toMatchObject({ status: "refused", reason: "forbidden" });
+  });
+
+  it("names a rejected request shape as invalid, not as a missing upload", async () => {
+    readItem.mockRejectedValue(new DomainError("VALIDATION_ERROR", "Please check the design details."));
+
+    const result = await service().completeBatch({
+      organizationId: ORGANIZATION_ID,
+      uploads: [{ itemId: ITEM_ID, versionId: VERSION_ID }],
+    });
+
+    expect(result.outcomes[0]).toMatchObject({ status: "refused", reason: "invalid_request" });
+  });
+
+  it("falls back to unknown for a cause with no clearer name, never borrowing a specific one", async () => {
+    readItem.mockRejectedValue(new Error("the database connection reset"));
+
+    const result = await service().completeBatch({
+      organizationId: ORGANIZATION_ID,
+      uploads: [{ itemId: ITEM_ID, versionId: VERSION_ID }],
+    });
+
+    expect(result.outcomes[0]).toMatchObject({ status: "refused", reason: "unknown" });
   });
 });
 

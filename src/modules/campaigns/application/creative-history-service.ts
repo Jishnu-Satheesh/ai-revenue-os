@@ -439,7 +439,25 @@ export type CreativeHistoryCompletionOutcome =
         | "declared_type_mismatch"
         | "corrupt_image"
         | "dimensions_out_of_range"
-        | "storage_failed";
+        | "storage_failed"
+        /**
+         * A batch member's own lookup failed rather than its bytes: the design
+         * or version named in that member could not be found for this tenant
+         * (or was archived out from under it) partway through the batch.
+         * Never used for `complete()`'s single-item path, which lets the same
+         * failure throw and reach the HTTP layer as a 404 instead.
+         */
+        | "item_unavailable"
+        /** A batch member's own permission check failed mid-batch. */
+        | "forbidden"
+        /** A batch member's own request shape was rejected mid-batch. */
+        | "invalid_request"
+        /**
+         * A batch member failed for a reason none of the above name. This is
+         * the only fallback: a thrown cause is never relabelled as one of the
+         * specific reasons above just because it also resulted in a refusal.
+         */
+        | "unknown";
       message: string;
       uploadState: "refused";
     }
@@ -466,6 +484,35 @@ function notAvailable(): never {
 
 function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * What a batch member's own thrown failure actually was, named honestly.
+ *
+ * `completeBatch` cannot let one member's exception fail the batch — the
+ * whole point of a batch is that one bad file does not cost the others — so
+ * it is caught and turned into a `refused` outcome. But `reason` is a
+ * discriminant Task 3 renders as copy: "the file never arrived" is a
+ * different sentence from "you no longer have permission" or "that field was
+ * invalid", and collapsing every thrown cause into `upload_missing` would
+ * make the UI lie about which one happened. Only a cause with no clearer name
+ * falls to `unknown` — nothing here borrows a specific reason for a cause
+ * that was not actually that specific thing.
+ */
+function batchThrowReason(
+  error: unknown,
+): "item_unavailable" | "forbidden" | "invalid_request" | "unknown" {
+  if (!(error instanceof DomainError)) return "unknown";
+  switch (error.code) {
+    case "TENANT_SCOPE_ERROR":
+      return "item_unavailable";
+    case "AUTHORIZATION_ERROR":
+      return "forbidden";
+    case "VALIDATION_ERROR":
+      return "invalid_request";
+    default:
+      return "unknown";
+  }
 }
 
 function versionView(
@@ -918,11 +965,13 @@ export function createCreativeHistoryService(dependencies: CreativeHistoryServic
         } catch (error) {
           // An unavailable member is still just one member. It is reported as
           // refused rather than thrown, so the rest of the batch survives it.
+          // The reason names what actually happened, not what happens to look
+          // similar: see `batchThrowReason`.
           outcomes.push({
             status: "refused",
             itemId: request.itemId,
             versionId: request.versionId,
-            reason: "upload_missing",
+            reason: batchThrowReason(error),
             message:
               error instanceof DomainError
                 ? error.message
