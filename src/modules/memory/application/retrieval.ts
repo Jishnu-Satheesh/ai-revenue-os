@@ -171,6 +171,9 @@ export function createMemoryRetrieval(dependencies: RetrievalDependencies): Memo
               maxAgeDays: query.maxAgeDays,
               includeSuperseded: query.includeSuperseded,
               includeExpired: query.includeExpired,
+              // The workspace is the legacy surface: it shows pre-shared-context
+              // rows alongside new ones. AI context packs never set this.
+              includeLegacy: true,
               lexicalWeight: LEXICAL_WEIGHT,
               semanticWeight: SEMANTIC_WEIGHT,
               limit: query.limit,

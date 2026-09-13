@@ -118,7 +118,7 @@ select extensions.is(
       '25000000-0000-4000-8000-000000000001'::uuid,
       'kitchen staffing evening',
       (select axis_one from search_vectors)
-    ) with ordinality as result(
+    , p_include_legacy => true) with ordinality as result(
       id, memory_type, title, body, structured_value, origin, source_tier, source_system,
       source_reference, verification_state, verified_at, confidence, sensitivity, observed_at,
       effective_from, effective_to, superseded_by_id, trust_rank, freshness, lexical, semantic,
@@ -140,14 +140,14 @@ select extensions.is(
         '25000000-0000-4000-8000-000000000001'::uuid,
         'kitchen staffing evening',
         (select axis_one from search_vectors)
-      ) inner_result
+      , p_include_legacy => true) inner_result
       where inner_result.id = '45000000-0000-4000-8000-000000000001'::uuid
     )
     from public.search_memory_items(
       '25000000-0000-4000-8000-000000000001'::uuid,
       'kitchen staffing evening',
       (select axis_one from search_vectors)
-    ) result
+    , p_include_legacy => true) result
     where result.id = '45000000-0000-4000-8000-000000000002'::uuid
   ),
   true,
@@ -159,7 +159,7 @@ select extensions.is(
     select count(*)
     from public.search_memory_items(
       '25000000-0000-4000-8000-000000000001'::uuid, 'kitchen staffing'
-    )
+    , p_include_legacy => true)
     where id in (
       '45000000-0000-4000-8000-000000000003'::uuid,
       '45000000-0000-4000-8000-000000000004'::uuid
@@ -175,7 +175,7 @@ select extensions.is(
     from public.search_memory_items(
       '25000000-0000-4000-8000-000000000001'::uuid, 'kitchen staffing',
       null, null, null, array['public', 'internal'], null, true, true
-    )
+    , p_include_legacy => true)
     where id in (
       '45000000-0000-4000-8000-000000000003'::uuid,
       '45000000-0000-4000-8000-000000000004'::uuid
@@ -190,7 +190,7 @@ select extensions.is(
     select count(*)
     from public.search_memory_items(
       '25000000-0000-4000-8000-000000000001'::uuid, 'kitchen staffing'
-    )
+    , p_include_legacy => true)
     where id = '45000000-0000-4000-8000-000000000005'::uuid
   ),
   0::bigint,
@@ -204,7 +204,7 @@ select extensions.is(
       '25000000-0000-4000-8000-000000000001'::uuid, 'kitchen staffing',
       null, null, null,
       array['public', 'internal', 'confidential', 'customer_content']
-    )
+    , p_include_legacy => true)
     where id = '45000000-0000-4000-8000-000000000005'::uuid
   ),
   1::bigint,
@@ -216,7 +216,7 @@ select extensions.is(
     select count(*)
     from public.search_memory_items(
       '25000000-0000-4000-8000-000000000001'::uuid, 'kitchen staffing'
-    )
+    , p_include_legacy => true)
     where id = '45000000-0000-4000-8000-000000000006'::uuid
   ),
   0::bigint,
@@ -229,7 +229,7 @@ select extensions.is(
     select count(*) > 0
     from public.search_memory_items(
       '25000000-0000-4000-8000-000000000001'::uuid, 'kitchen staffing', null
-    )
+    , p_include_legacy => true)
   ),
   true,
   'lexical-only retrieval works when no embedding is supplied'

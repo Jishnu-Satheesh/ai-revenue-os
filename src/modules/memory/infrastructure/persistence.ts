@@ -294,6 +294,9 @@ export function createSupabaseMemoryPersistence(
         p_max_age_days: parameters.maxAgeDays ?? null,
         p_include_superseded: parameters.includeSuperseded,
         p_include_expired: parameters.includeExpired,
+        // Unset means the legacy workspace behavior (show everything the caller
+        // may read). AI consumers pass false explicitly; see MemorySearchParameters.
+        p_include_legacy: parameters.includeLegacy ?? true,
         p_lexical_weight: parameters.lexicalWeight,
         p_semantic_weight: parameters.semanticWeight,
         p_limit: parameters.limit,

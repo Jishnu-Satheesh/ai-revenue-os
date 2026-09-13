@@ -86,3 +86,15 @@ export type {
   GoalView,
   LabeledFact,
 } from "@/modules/memory/infrastructure/current-state-reader";
+
+export {
+  createSubjectPackPort,
+} from "@/modules/memory/application/subject-pack";
+export type {
+  SubjectPackDependencies,
+  SubjectPackEntry,
+  SubjectPackPort,
+  SubjectPackResult,
+} from "@/modules/memory/application/subject-pack";
+
+export { createSessionSubjectPackPort } from "@/modules/memory/infrastructure/context-wiring";
