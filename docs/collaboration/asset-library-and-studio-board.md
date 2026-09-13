@@ -6794,3 +6794,50 @@ through the real routes, not only in tests.
   That execution remains owed before this slice is complete in fact.
 - **Full detail, exact API surface for Task 3, and the static schema check** are in
   `.superpowers/sdd/2026-09-12-campaign-experience-implementation/task-2-report.md`.
+
+## 2026-09-13 — Task 0b: campaign experience design prototype
+
+- **Files claimed and finished.** `.superdesign/campaign-experience/prototype.html` (the file an
+  earlier session's stale board comment at the top of this file already named, per R7 — that
+  reservation is now fulfilled, not still open) plus its screenshots and
+  `.superpowers/sdd/2026-09-12-campaign-experience-implementation/task-0b-report.md`. This is a
+  static design artifact — no application code, no migration, nothing that touches staging.
+- **Superdesign skill was invoked and its CLI preflight succeeded** (authenticated, init already
+  complete) — unlike the stale board comment above from 12 Sep, which recorded a CLI timeout. I
+  chose not to run its hosted generation/canvas-review loop anyway, because this task's 19KB
+  visual contract is a precise specification (exact type sizes, exact color semantics, thirteen
+  named failure states) to implement faithfully, not a brief to explore, and the loop's canvas
+  review step has no interactive user to close it in this session. Authored the HTML/CSS directly
+  against the real tokens in `src/app/globals.css` and the three existing reference prototypes'
+  anatomy instead. Full reasoning is in the task-0b report.
+- **All five required surfaces built** (Portfolio, Detail, Studio, Library, Growth proposal
+  review) in one hash-routed static file, plus all 13 named failure/edge states from the task
+  brief and most of the visual contract's own §8 list. One gap: "expired private preview" has no
+  clear referent in the contract or spec I could find, so it isn't modelled — flagged explicitly
+  in the report rather than invented.
+- **A real, load-bearing finding from measurement, not guesswork**: the Studio inspector's
+  1200/800px thresholds in contract §6 are against *available content width*, not viewport width.
+  Measured live in the browser: inside this AppShell shape, content width is under 1200px at
+  *every* required test width including 1440 (1440 viewport → 1185px content). The Studio context
+  inspector therefore renders as a Sheet, not a fixed column, across the entire required
+  verification range — Task 3 should build the Sheet as the default, not the fallback.
+- **Browser verification done with chrome-devtools MCP** (available, used for real — not scripted
+  pokes only): real `click`/`fill`/`press_key` through the proposal-review approve flow, the
+  Studio save-conflict dialog, and an upload simulation with a same-filename collision and one
+  failure; `ArrowRight` keyboard tab navigation confirmed live (aria-selected flips, panel swaps);
+  console confirmed clean after fixing two `<select>` elements missing `id`/`name`; zero
+  horizontal overflow confirmed programmatically at all six required widths
+  (1440/1280/1024/768/390/320) on all five surfaces. Two real narrow-width bugs were found this
+  way and fixed in the same pass: a header breadcrumb crushed to invisible width against the role
+  selector at 390px, and an attention chip's text clipped by a global `nowrap` rule in the Studio
+  rail. Also found and fixed: viewer role only gated visible buttons, not the dialog-open handler
+  itself, so an empty-state's alternate "Upload assets" entry point bypassed the read-only gate —
+  worth remembering when Task 3 wires the real permission check to the mutation, not the button.
+- **Not verified, and not claimed.** This is a design artifact only — it proves nothing about a
+  real route, RLS, authenticated session, or provider call. No file in the upload simulators is
+  transmitted anywhere; no network request reaches Meta or any provider; every figure and image is
+  fictional and visibly labelled as such.
+- **Guidance for Task 3** (Asset Library) is written out in full in the task-0b report: Sheet not
+  a permanent panel for the inspector, folder tree collapsing to a Sheet below `lg`, client-local
+  upload IDs visible in the UI, verdict filter kept independent from folder selection, rejected
+  items staying in-grid with reasons, and the viewer-gate bug shape above.

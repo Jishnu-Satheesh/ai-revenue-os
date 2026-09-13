@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campaign experience · design prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:['Manrope','sans-serif']},colors:{ink:'var(--foreground)',muted:'var(--muted)',subtle:'var(--muted-foreground)',line:'var(--border)',primary:'var(--primary)',warning:'var(--warning)',danger:'var(--danger)',surface:'var(--background)'}}}};</script>
+<style>
+:root{--background:oklch(1 0 0);--foreground:oklch(.145 0 0);--card:oklch(1 0 0);--muted:oklch(.97 0 0);--muted-foreground:oklch(.556 0 0);--border:oklch(.922 0 0);--input:oklch(.922 0 0);--primary:oklch(.508 .118 165.612);--primary-foreground:oklch(.979 .021 166.113);--success:oklch(.58 .13 155);--warning:oklch(.72 .14 80);--danger:oklch(.59 .18 25);--sidebar:oklch(.985 0 0);--chart-1:oklch(.845 .143 164.978);--chart-2:oklch(.696 .17 162.48);--chart-3:oklch(.596 .145 163.225);--chart-4:oklch(.508 .118 165.612);--chart-5:oklch(.432 .095 166.913);--radius:.625rem}
+*{box-sizing:border-box}
+body{margin:0;font-family:Manrope,sans-serif;color:var(--foreground);font-size:14px;line-height:1.5}
+button,a,select,input,textarea{outline-offset:3px;font-family:inherit}
+button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--primary)}
+button:disabled{opacity:.5;cursor:not-allowed}
+iconify-icon{font-size:17px;flex-shrink:0;vertical-align:middle}
+button,a,select{touch-action:manipulation}
+.page-title{font-size:32px;font-weight:800;letter-spacing:-.015em;line-height:1.15}
+@media(max-width:640px){.page-title{font-size:24px}}
+.section-title{font-size:19px;font-weight:700;letter-spacing:-.005em}
+.label-xs{font-size:12px;color:var(--muted-foreground)}
+.subheading{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-foreground)}
+.metric-num{font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.tab[aria-selected=true]{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
+.tab{border-bottom:2px solid transparent;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--border);background:var(--card);border-radius:8px;padding:8px 13px;font-size:13px;font-weight:600;white-space:nowrap;min-height:38px;color:var(--foreground)}
+.btn:hover:not(:disabled){background:var(--muted)}
+.btn-primary{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground)}
+.btn-primary:hover:not(:disabled){background:var(--chart-5)}
+.btn-danger{background:transparent;border-color:color-mix(in oklch,var(--danger) 40%,var(--border));color:var(--danger)}
+.btn-danger:hover:not(:disabled){background:color-mix(in oklch,var(--danger) 6%,white)}
+.btn-sm{padding:5px 10px;min-height:30px;font-size:12px}
+select.btn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.link{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;color:var(--primary);background:none;border:none;padding:0;cursor:pointer}
+.link:hover{text-decoration:underline}
+.chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.chip-action{background:color-mix(in oklch,var(--primary) 12%,white);color:var(--primary)}
+.chip-attention{background:color-mix(in oklch,var(--warning) 16%,white);color:color-mix(in oklch,var(--warning) 65%,black)}
+.chip-failure{background:color-mix(in oklch,var(--danger) 10%,white);color:var(--danger)}
+.chip-unknown{background:var(--muted);color:var(--muted-foreground)}
+.card{border:1px solid var(--border);border-radius:12px;background:var(--card)}
+.poster-frame{aspect-ratio:4/5;border:1px solid var(--border);border-radius:10px 10px 0 0;background:var(--muted);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+.poster-frame svg,.poster-frame img{width:100%;height:100%;object-fit:contain;display:block}
+.poster-cap{border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:6px 10px;font-size:11px;color:var(--muted-foreground);display:flex;align-items:center;justify-content:space-between;gap:6px;background:var(--card)}
+.no-art{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted-foreground);text-align:center;padding:16px}
+.field-label{font-size:12px;font-weight:700;color:var(--muted-foreground);display:block;margin-bottom:6px}
+.field-input{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:13px;background:var(--card);color:var(--foreground)}
+.gate-note{display:flex;gap:8px;border:1px solid color-mix(in oklch,var(--primary) 25%,var(--border));background:color-mix(in oklch,var(--primary) 5%,white);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.6;color:var(--foreground)}
+.phase-strip{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+.phase-step{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--muted-foreground);padding:4px 0}
+.phase-step.done{color:var(--primary)}
+.phase-step.current{color:var(--foreground);font-weight:800}
+.phase-sep{width:22px;height:1px;background:var(--border);margin:0 6px}
+dialog{border:1px solid var(--border);border-radius:16px;padding:0;width:min(760px,calc(100vw - 24px));max-height:calc(100svh - 32px);color:var(--foreground);box-shadow:0 20px 60px rgba(0,0,0,.18)}
+dialog.wide{width:min(920px,calc(100vw - 24px))}
+dialog::backdrop{background:rgba(15,23,20,.35)}
+.dlg-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--card);z-index:2}
+.dlg-body{padding:20px;overflow-y:auto}
+.dlg-foot{border-top:1px solid var(--border);padding:14px 20px;position:sticky;bottom:0;background:var(--card)}
+.sheet-overlay{position:fixed;inset:0;background:rgba(15,23,20,.3);z-index:40}
+.sheet{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);background:var(--card);border-left:1px solid var(--border);z-index:41;display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(0,0,0,.12)}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border)}
+.sheet-body{padding:18px;overflow-y:auto;flex:1}
+[hidden]{display:none!important}
+.anchor-nav{display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;margin-bottom:14px;border-bottom:1px solid var(--border)}
+.anchor-nav button{white-space:nowrap;font-size:12px;font-weight:600;padding:5px 10px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--muted-foreground)}
+.anchor-nav button.active{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.progress-track{height:6px;border-radius:999px;background:var(--muted);overflow:hidden}
+.progress-fill{height:100%;background:var(--primary);border-radius:999px}
+.progress-fill.fail{background:var(--danger)}
+.toast{position:fixed;bottom:18px;left:16px;right:16px;z-index:60;border:1px solid var(--border);background:var(--card);border-radius:10px;padding:12px 16px;font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.15)}
+@media(min-width:640px){.toast{left:auto;right:22px;max-width:380px}}
+[role=tabpanel]:focus{outline:none}
+::selection{background:color-mix(in oklch,var(--primary) 25%,white)}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+.surface-tab[aria-selected=true]{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.rejected-strike{position:relative}
+.folder-item[aria-current=true]{background:color-mix(in oklch,var(--primary) 10%,white);color:var(--primary);font-weight:700}
+</style>
+</head>
+<body class="h-screen overflow-hidden bg-background text-foreground" data-role="manager">
+
+<a href="#main-content" class="sr-only" style="position:absolute;left:-9999px;top:0;padding:10px;background:var(--card);z-index:100" onfocus="this.style.left='8px';this.style.top='8px'" onblur="this.style.left='-9999px'">Skip to main content</a>
+
+<div class="flex h-screen overflow-hidden">
+ <aside class="hidden lg:flex w-60 shrink-0 p-2" aria-label="Organization navigation">
+  <div class="flex w-full flex-col rounded-xl border border-line bg-muted/50 p-3">
+   <a href="#portfolio" class="flex items-center gap-2 px-1 py-3"><span class="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-white" style="background:var(--foreground);color:var(--background)"><iconify-icon icon="lucide:waypoints"></iconify-icon></span><span><span class="block text-[10px] font-bold uppercase tracking-[.14em] text-subtle">Revenue Intelligence</span><span class="text-sm font-bold">AI Revenue OS</span></span></a>
+   <button type="button" data-info="This design uses a fictional organization. Organization switching stays in the existing application sidebar." class="mt-3 flex items-center justify-between gap-2 rounded-lg border border-line bg-white p-3 text-sm font-semibold"><span>Example Kitchen</span><iconify-icon icon="lucide:chevrons-up-down"></iconify-icon></button>
+   <p class="px-3 pt-7 pb-3 text-xs font-medium text-subtle">Workspace</p>
+   <nav class="flex flex-col gap-1 text-[13px] font-medium">
+    <a data-info="Organization Overview remains a separate existing page." href="#" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-subtle"><iconify-icon icon="lucide:layout-dashboard"></iconify-icon>Overview</a>
+    <a data-info="Growth Intelligence's other tabs (Overview, Your actions, Insights) remain the existing page; this prototype covers only the Recommendations → Campaign recommendations section." href="#growth" onclick="go('growth')" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-subtle"><iconify-icon icon="lucide:sparkles"></iconify-icon>Growth Intelligence</a>
+    <a href="#portfolio" onclick="go('portfolio')" class="nav-campaigns flex items-center gap-3 rounded-lg bg-primary/10 px-3 py-2.5 font-bold text-primary"><iconify-icon icon="lucide:megaphone"></iconify-icon>Campaigns</a>
+    <a data-info="Business Memory remains in its existing workspace." href="#" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-subtle"><iconify-icon icon="lucide:brain-circuit"></iconify-icon>Business Memory</a>
+    <a data-info="Channels and Channel Audit remain the existing workspace, unchanged by this redesign." href="#" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-subtle"><iconify-icon icon="lucide:bar-chart-3"></iconify-icon>Channels</a>
+   </nav>
+   <div class="mt-auto flex items-center gap-3 border-t border-line px-2 pt-4 pb-1"><span class="flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-line"><iconify-icon icon="lucide:user-round"></iconify-icon></span><span class="text-sm font-semibold">Example account<span class="block text-xs font-normal text-subtle">Design review</span></span></div>
+  </div>
+ </aside>
+
+ <div class="flex min-w-0 flex-1 flex-col">
+  <header class="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-line px-4 sm:px-6">
+   <div class="flex min-w-0 flex-1 items-center gap-3 text-xs text-subtle">
+    <button class="lg:hidden btn btn-sm" aria-label="Open navigation" id="mobile-nav-btn"><iconify-icon icon="lucide:menu"></iconify-icon></button>
+    <span class="hidden sm:inline">Example Kitchen</span><span class="hidden sm:inline">/</span><span id="crumb" class="truncate font-semibold text-ink">Campaigns</span>
+   </div>
+   <div class="flex items-center gap-2 shrink-0">
+    <label class="hidden sm:flex items-center gap-2 text-xs text-subtle" for="role-select">Viewing as</label>
+    <select id="role-select" class="btn btn-sm" style="min-height:30px;max-width:118px" aria-label="Preview role">
+     <option value="manager">Manager (can approve)</option>
+     <option value="viewer">Viewer (read-only)</option>
+    </select>
+    <span class="chip border border-line text-subtle hidden sm:inline-flex" style="background:transparent">Design preview · Illustrative data</span>
+   </div>
+  </header>
+
+  <nav aria-label="Prototype surfaces" class="flex gap-2 overflow-x-auto border-b border-line px-4 py-2 sm:px-6" style="background:var(--muted)/30">
+   <span class="label-xs pt-1.5 pr-1 hidden md:inline">Prototype navigation (not a production tab bar):</span>
+   <button class="surface-tab btn btn-sm" data-surface="portfolio" onclick="go('portfolio')">1 · Portfolio</button>
+   <button class="surface-tab btn btn-sm" data-surface="detail" onclick="go('detail')">2 · Campaign detail</button>
+   <button class="surface-tab btn btn-sm" data-surface="studio" onclick="go('studio')">3 · Creative Studio</button>
+   <button class="surface-tab btn btn-sm" data-surface="library" onclick="go('library')">4 · Asset Library</button>
+   <button class="surface-tab btn btn-sm" data-surface="growth" onclick="go('growth')">5 · Growth proposal review</button>
+  </nav>
+
+  <main id="main-content" tabindex="-1" class="min-h-0 flex-1 overflow-y-auto">
+   <div class="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:py-8" id="content-shell">
+
+<!-- ============================= PORTFOLIO ============================= -->
+<section id="surface-portfolio" aria-labelledby="portfolio-h">
+ <div class="flex flex-wrap items-start justify-between gap-4">
+  <div><h1 id="portfolio-h" class="page-title">Campaigns</h1><p class="mt-1.5 text-sm text-subtle">Your marketing work, from approved idea to results.</p></div>
+  <div class="flex flex-wrap items-center gap-2">
+   <button class="btn btn-primary manager-only" data-open-request><iconify-icon icon="lucide:plus"></iconify-icon>Request a campaign</button>
+   <button class="btn" onclick="go('library')"><iconify-icon icon="lucide:image"></iconify-icon>Asset Library</button>
+  </div>
+ </div>
+ <button class="link mt-2" onclick="go('growth')">Review campaign recommendations <iconify-icon icon="lucide:arrow-right"></iconify-icon></button>
+ <p id="viewer-note-portfolio" hidden class="mt-4 chip chip-unknown">Viewer role — you can review everything below; approval and publishing actions are hidden.</p>
+
+ <div class="mt-6 flex flex-wrap items-center gap-2">
+  <label class="label-xs" for="portfolio-scenario">Preview state (prototype only)</label>
+  <select id="portfolio-scenario" class="btn btn-sm" onchange="renderPortfolio()">
+   <option value="default">Default — mixed portfolio</option>
+   <option value="empty">No data — new organization</option>
+   <option value="one">One campaign</option>
+   <option value="nomatch">No matches for filters</option>
+   <option value="fail">Source failure</option>
+   <option value="partial">Partial source failure</option>
+  </select>
+ </div>
+
+ <section aria-label="Needs your attention" class="mt-5 card p-4 sm:p-5" id="attention-strip">
+  <div class="flex items-center justify-between gap-3"><h2 class="section-title">Needs your attention</h2><span class="chip chip-attention" id="attention-count">4</span></div>
+  <div id="attention-list" class="mt-3 divide-y divide-line"></div>
+  <button class="link mt-3" id="attention-viewall">View all <iconify-icon icon="lucide:arrow-right"></iconify-icon></button>
+ </section>
+
+ <div class="mt-7 flex flex-wrap items-center justify-between gap-3">
+  <div role="tablist" aria-label="Campaign status" class="flex flex-wrap gap-2" id="status-filters"></div>
+  <div class="flex flex-wrap items-center gap-2">
+   <label class="sr-only" for="search">Search campaigns</label>
+   <input id="search" class="field-input" style="width:180px" type="search" placeholder="Search campaigns" oninput="renderPortfolio()">
+   <label class="sr-only" for="channel-filter">Channel</label>
+   <select id="channel-filter" class="btn btn-sm" onchange="renderPortfolio()"><option value="all">All channels</option><option value="organic">Organic</option><option value="paid">Paid</option></select>
+   <label class="sr-only" for="date-filter">Reporting window</label>
+   <select id="date-filter" class="btn btn-sm" onchange="renderPortfolio()"><option value="30">Last 30 days</option><option value="month">This month</option><option value="custom">Custom range</option></select>
+   <div class="flex rounded-lg border border-line overflow-hidden" role="group" aria-label="View">
+    <button class="btn btn-sm" style="border:none;border-radius:0" id="view-gallery-btn" aria-pressed="true" onclick="setView('gallery')"><iconify-icon icon="lucide:layout-grid"></iconify-icon></button>
+    <button class="btn btn-sm" style="border:none;border-radius:0;border-left:1px solid var(--border)" id="view-list-btn" aria-pressed="false" onclick="setView('list')"><iconify-icon icon="lucide:list"></iconify-icon></button>
+   </div>
+  </div>
+ </div>
+ <p class="label-xs mt-2">Performance figures below reflect the selected reporting window (<span id="window-label">last 30 days</span>). Evidence period, last data fetch, schedule and action dates are shown separately per campaign.</p>
+
+ <div id="portfolio-body" class="mt-4"></div>
+</section>
+
+<!-- ============================= DETAIL ============================= -->
+<section id="surface-detail" aria-labelledby="detail-h" hidden>
+ <div class="flex flex-wrap items-center gap-2 mb-3">
+  <label class="label-xs" for="detail-scenario">Preview state (prototype only)</label>
+  <select id="detail-scenario" class="btn btn-sm" onchange="renderDetail()">
+   <option value="default">Default</option>
+   <option value="expired">Expired approval</option>
+   <option value="stale">Stale version selected</option>
+  </select>
+  <label class="label-xs ml-2" for="version-select">Exact version</label>
+  <select id="version-select" class="btn btn-sm" onchange="onVersionChange()">
+   <option value="4">Version 4 (current)</option>
+   <option value="3">Version 3</option>
+   <option value="2">Version 2</option>
+  </select>
+ </div>
+ <div id="expired-banner" hidden class="chip chip-failure mb-3" style="display:flex"><iconify-icon icon="lucide:shield-off"></iconify-icon>Approval expired 3 days ago. Fleet, results, artwork and history stay visible; future publish and budget changes are disabled until a manager re-approves.</div>
+ <div id="stale-banner" hidden class="chip chip-unknown mb-3" style="display:flex"><iconify-icon icon="lucide:history"></iconify-icon>You're viewing version 2 of 4. Actions here apply only to the current version — switch to Version 4 to act on the live campaign.</div>
+ <div class="flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0">
+   <h1 id="detail-h" class="page-title">Ramadan family bundle</h1>
+   <p class="mt-1.5 text-sm text-subtle">Objective: grow weekend family-size orders · Phase: <span class="font-semibold text-ink">Review</span> · Last saved update 12 min ago</p>
+  </div>
+  <div class="flex items-center gap-2">
+   <button class="btn btn-primary" id="detail-primary-action">Review 3 creatives</button>
+   <button class="btn" aria-haspopup="menu" aria-label="More actions"><iconify-icon icon="lucide:more-horizontal"></iconify-icon></button>
+  </div>
+ </div>
+ <div class="mt-5 card p-4 overflow-x-auto">
+  <div class="phase-strip">
+   <span class="phase-step done"><iconify-icon icon="lucide:check-circle-2"></iconify-icon>Proposal</span><span class="phase-sep"></span>
+   <span class="phase-step done"><iconify-icon icon="lucide:check-circle-2"></iconify-icon>Creating</span><span class="phase-sep"></span>
+   <span class="phase-step current"><iconify-icon icon="lucide:circle-dot"></iconify-icon>Review</span><span class="phase-sep"></span>
+   <span class="phase-step"><iconify-icon icon="lucide:circle"></iconify-icon>Scheduled / Live</span><span class="phase-sep"></span>
+   <span class="phase-step"><iconify-icon icon="lucide:circle"></iconify-icon>Results &amp; learning</span>
+  </div>
+ </div>
+
+ <div class="mt-6 overflow-x-auto border-b border-line"><div role="tablist" aria-label="Campaign detail sections" class="flex min-w-max gap-6" id="detail-tabs"></div></div>
+ <div id="detail-panels" class="pt-6"></div>
+</section>
+
+<!-- ============================= STUDIO ============================= -->
+<section id="surface-studio" aria-labelledby="studio-h" hidden>
+ <div class="flex flex-wrap items-center gap-2 mb-2 text-xs text-subtle">
+  <button class="link" onclick="go('detail')"><iconify-icon icon="lucide:arrow-left"></iconify-icon>Back to Creative review</button>
+  <span>·</span><span>Ramadan family bundle</span><span>·</span><span>Evidence-led direction</span>
+ </div>
+ <div class="flex flex-wrap items-center justify-between gap-3">
+  <div><h1 id="studio-h" class="section-title" style="font-size:22px">Family bundle — Instagram feed, English</h1><p class="label-xs mt-1">1080×1350 · Instagram feed · en</p></div>
+  <div class="flex flex-wrap items-center gap-2">
+   <span class="chip" id="studio-status-chip"></span>
+   <button class="btn btn-sm" id="undo-btn" onclick="studioUndo()" aria-label="Undo"><iconify-icon icon="lucide:undo-2"></iconify-icon></button>
+   <button class="btn btn-sm" id="redo-btn" onclick="studioRedo()" aria-label="Redo"><iconify-icon icon="lucide:redo-2"></iconify-icon></button>
+   <button class="btn" onclick="go('detail')">Return to review</button>
+   <button class="btn btn-primary" onclick="studioSave()">Save &amp; render</button>
+  </div>
+ </div>
+ <p id="studio-viewer-note" hidden class="mt-3 chip chip-unknown">Viewer role — Studio is read-only in this preview; editing controls are disabled.</p>
+
+ <div class="mt-5" id="studio-layout">
+  <div class="card overflow-hidden" id="studio-rail" style="min-width:0">
+   <div role="tablist" aria-label="Editing" class="flex border-b border-line" id="studio-rail-tabs">
+    <button class="tab flex-1 py-2.5 text-sm" role="tab" data-rtab="text" aria-selected="true">Text</button>
+    <button class="tab flex-1 py-2.5 text-sm" role="tab" data-rtab="image" aria-selected="false" tabindex="-1">Image</button>
+    <button class="tab flex-1 py-2.5 text-sm" role="tab" data-rtab="layout" aria-selected="false" tabindex="-1">Layout</button>
+   </div>
+   <div class="p-4 space-y-4" id="studio-rail-body"></div>
+  </div>
+
+  <div class="card p-4 flex flex-col" id="studio-canvas-wrap">
+   <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+    <div class="flex items-center gap-1">
+     <button class="btn btn-sm" aria-label="Fit"><iconify-icon icon="lucide:maximize"></iconify-icon></button>
+     <button class="btn btn-sm" aria-label="Zoom in"><iconify-icon icon="lucide:zoom-in"></iconify-icon></button>
+     <button class="btn btn-sm" aria-label="Zoom out"><iconify-icon icon="lucide:zoom-out"></iconify-icon></button>
+     <button class="btn btn-sm" id="before-after-btn" onclick="toggleBeforeAfter()" aria-pressed="false">Before / after</button>
+     <button class="btn btn-sm" aria-pressed="false" onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed')!=='true')">Safe area</button>
+    </div>
+    <span class="chip chip-unknown"><iconify-icon icon="lucide:eye"></iconify-icon>Preview — not the authoritative render</span>
+   </div>
+   <div class="flex-1 min-h-0 flex items-center justify-center rounded-lg" style="background:var(--muted)">
+    <div id="studio-canvas" style="aspect-ratio:4/5;max-height:100%;max-width:100%" class="poster-frame" style="border-radius:8px"></div>
+   </div>
+   <button class="btn btn-sm mt-3" id="studio-inspector-toggle" onclick="openInspectorSheet()">Context inspector <iconify-icon icon="lucide:panel-right"></iconify-icon></button>
+   <div class="mt-3 grid sm:grid-cols-3 gap-2 text-xs" id="studio-checks"></div>
+  </div>
+
+  <aside class="card p-4" id="studio-inspector-col" aria-label="Context inspector">
+   <div id="studio-inspector-content"></div>
+  </aside>
+ </div>
+
+ <div class="mt-6 card p-4" id="upload-simulator">
+  <h2 class="section-title" style="font-size:16px">Change image from Library — simulated upload</h2>
+  <p class="label-xs mt-1">No file is transmitted anywhere in this prototype; selecting files only advances local progress bars.</p>
+  <div class="mt-3 flex flex-wrap items-center gap-2">
+   <label class="btn btn-sm" for="file-sim-input"><iconify-icon icon="lucide:upload"></iconify-icon>Choose files<input id="file-sim-input" type="file" multiple class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden" onchange="simulateUpload(this.files)"></label>
+   <button class="btn btn-sm" onclick="simulateUpload(null)">Or simulate 3 sample files</button>
+  </div>
+  <div id="upload-progress-list" class="mt-4 space-y-3"></div>
+ </div>
+</section>
+
+<!-- ============================= LIBRARY ============================= -->
+<section id="surface-library" aria-labelledby="library-h" hidden>
+ <div class="flex flex-wrap items-start justify-between gap-4">
+  <div><h1 id="library-h" class="page-title">Asset Library</h1><p class="mt-1.5 text-sm text-subtle">Your designs, products and brand.</p></div>
+  <div class="flex flex-wrap items-center gap-2">
+   <button class="btn btn-primary manager-only" data-open-upload><iconify-icon icon="lucide:upload"></iconify-icon>Upload assets</button>
+   <button class="btn manager-only" id="new-folder-btn"><iconify-icon icon="lucide:folder-plus"></iconify-icon>New folder</button>
+  </div>
+ </div>
+ <p id="viewer-note-library" hidden class="mt-3 chip chip-unknown">Viewer role — review only; upload, folder and review actions are hidden.</p>
+
+ <div class="mt-6 overflow-x-auto border-b border-line"><div role="tablist" aria-label="Asset Library sections" class="flex min-w-max gap-6" id="library-tabs">
+  <button class="tab px-1 py-3 text-sm" role="tab" data-ltab="history" aria-selected="true">Creative History</button>
+  <button class="tab px-1 py-3 text-sm text-subtle" role="tab" data-ltab="products" aria-selected="false" tabindex="-1">Products &amp; Subjects</button>
+  <button class="tab px-1 py-3 text-sm text-subtle" role="tab" data-ltab="brand" aria-selected="false" tabindex="-1">Brand Kit</button>
+ </div></div>
+
+ <div id="lib-panel-history" role="tabpanel" class="pt-6">
+  <div class="flex flex-wrap items-center gap-2 mb-4">
+   <label class="label-xs" for="library-scenario">Preview state (prototype only)</label>
+   <select id="library-scenario" class="btn btn-sm" onchange="renderLibraryGrid()">
+    <option value="default">Default</option>
+    <option value="empty">No artwork yet</option>
+   </select>
+   <button class="btn btn-sm lg:hidden ml-auto" id="folder-sheet-btn" onclick="openFolderSheet()"><iconify-icon icon="lucide:folder-tree"></iconify-icon>Folders</button>
+  </div>
+  <div class="grid gap-5" style="grid-template-columns:220px 1fr" id="history-grid-wrap">
+   <nav aria-label="Folders" class="hidden lg:block" id="folder-tree"></nav>
+   <div class="min-w-0">
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+     <label class="sr-only" for="lib-search">Search creative history</label>
+     <input id="lib-search" class="field-input" style="width:170px" type="search" placeholder="Search" oninput="renderLibraryGrid()">
+     <div role="tablist" aria-label="Verdict" class="flex gap-1" id="verdict-filters"></div>
+     <select id="lib-sort" name="lib-sort" class="btn btn-sm" aria-label="Sort"><option>Newest</option><option>Most relevant</option></select>
+     <span class="label-xs ml-auto" id="lib-selected-count"></span>
+    </div>
+    <div id="library-grid" class="grid gap-4" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))"></div>
+   </div>
+  </div>
+ </div>
+
+ <div id="lib-panel-products" role="tabpanel" class="pt-6" hidden>
+  <div class="flex items-center justify-between gap-3 mb-4"><p class="text-sm text-subtle max-w-2xl">Photographs plus confirmed descriptions used to ground creative generation in your real products and subjects.</p><button class="btn btn-sm"><iconify-icon icon="lucide:plus"></iconify-icon>Add subject</button></div>
+  <div class="grid gap-4" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))" id="products-grid"></div>
+ </div>
+
+ <div id="lib-panel-brand" role="tabpanel" class="pt-6" hidden>
+  <p class="text-sm text-subtle max-w-2xl mb-4">Logos, approved palette, typography identity and reusable brand material. Never inferred automatically from past creatives.</p>
+  <div class="grid gap-5 sm:grid-cols-2" id="brand-grid"></div>
+ </div>
+</section>
+
+<!-- ============================= GROWTH PROPOSAL REVIEW ============================= -->
+<section id="surface-growth" aria-labelledby="growth-h" hidden>
+ <div class="flex items-center gap-2 text-xs text-subtle mb-2"><iconify-icon icon="lucide:info"></iconify-icon><span>Reproduced slice of Growth Intelligence → Recommendations tab. Overview / Your actions / Insights &amp; market are the existing page, not part of this prototype.</span></div>
+ <h1 id="growth-h" class="page-title">Growth Intelligence</h1>
+ <p class="mt-1.5 text-sm text-subtle">Your business performance, the actions you've taken, and where to grow next.</p>
+ <div class="mt-6 border-b border-line"><div role="tablist" class="flex gap-8"><span class="tab px-1 py-3 text-sm text-subtle">Overview</span><button class="tab px-1 py-3 text-sm" aria-selected="true">Recommendations <span class="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs">5</span></button><span class="tab px-1 py-3 text-sm text-subtle">Your actions</span><span class="tab px-1 py-3 text-sm text-subtle">Insights &amp; market</span></div></div>
+
+ <div class="mt-7 border-t border-line pt-6" id="campaign-recs-section">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+   <div><h2 class="section-title">Campaign recommendations</h2><p class="mt-1 text-sm text-subtle">Proposals to grow the business, ready for your review.</p></div>
+   <div class="flex items-center gap-2">
+    <button class="btn btn-primary btn-sm manager-only" data-open-request><iconify-icon icon="lucide:plus"></iconify-icon>Request a campaign</button>
+    <button class="btn btn-sm" onclick="openResearchSettings()"><iconify-icon icon="lucide:settings-2"></iconify-icon>Research settings</button>
+   </div>
+  </div>
+  <p id="growth-viewer-note" hidden class="mt-4 chip chip-unknown">Viewer role — you can inspect every proposal; approval, request-changes, snooze and dismiss are hidden.</p>
+  <p class="label-xs mt-3 max-w-2xl">This preview shows every proposal state at once for review. In production the section shows the current evaluation's one state, plus any proposal still awaiting your decision.</p>
+  <div id="proposal-list" class="mt-5 space-y-4"></div>
+ </div>
+</section>
+
+   </div>
+  </main>
+ </div>
+</div>
+
+<!-- Mobile nav drawer -->
+<div id="mobile-nav-sheet" hidden class="sheet-overlay" onclick="if(event.target===this)closeMobileNav()"><nav class="sheet" style="left:0;right:auto;border-left:none;border-right:1px solid var(--border)" aria-label="Organization navigation, mobile">
+ <div class="sheet-head"><span class="font-bold text-sm">Navigation</span><button class="btn btn-sm" onclick="closeMobileNav()" aria-label="Close navigation"><iconify-icon icon="lucide:x"></iconify-icon></button></div>
+ <div class="sheet-body flex flex-col gap-1 text-sm font-medium">
+  <a href="#growth" onclick="go('growth');closeMobileNav()" class="flex items-center gap-3 rounded-lg px-3 py-2.5"><iconify-icon icon="lucide:sparkles"></iconify-icon>Growth Intelligence</a>
+  <a href="#portfolio" onclick="go('portfolio');closeMobileNav()" class="flex items-center gap-3 rounded-lg bg-primary/10 px-3 py-2.5 font-bold text-primary"><iconify-icon icon="lucide:megaphone"></iconify-icon>Campaigns</a>
+  <a href="#library" onclick="go('library');closeMobileNav()" class="flex items-center gap-3 rounded-lg px-3 py-2.5"><iconify-icon icon="lucide:image"></iconify-icon>Asset Library</a>
+ </div>
+</nav></div>
+
+<!-- Generic dialog for simple info / confirmations -->
+<dialog id="generic-dialog" aria-labelledby="generic-dialog-title">
+ <div class="dlg-head"><h2 id="generic-dialog-title" class="text-lg font-bold"></h2><button class="btn btn-sm" onclick="closeDialog('generic-dialog')" aria-label="Close"><iconify-icon icon="lucide:x"></iconify-icon></button></div>
+ <div id="generic-dialog-body" class="dlg-body text-sm leading-relaxed"></div>
+</dialog>
+
+<!-- Proposal review dialog -->
+<dialog id="proposal-dialog" class="wide" aria-labelledby="proposal-dialog-title">
+ <div class="dlg-head"><div><h2 id="proposal-dialog-title" class="text-lg font-bold"></h2><p class="label-xs mt-0.5" id="proposal-dialog-sub"></p></div><button class="btn btn-sm" onclick="closeDialog('proposal-dialog')" aria-label="Close proposal review"><iconify-icon icon="lucide:x"></iconify-icon></button></div>
+ <div class="dlg-body">
+  <div class="anchor-nav" id="proposal-anchor-nav"></div>
+  <div id="proposal-dialog-content" class="space-y-6 text-sm leading-relaxed"></div>
+ </div>
+ <div class="dlg-foot" id="proposal-dialog-foot"></div>
+</dialog>
+
+<!-- Save conflict dialog (stale version / concurrent editor) -->
+<dialog id="conflict-dialog" aria-labelledby="conflict-title">
+ <div class="dlg-head"><h2 id="conflict-title" class="text-lg font-bold">Someone else saved a newer version</h2><button class="btn btn-sm" onclick="closeDialog('conflict-dialog')" aria-label="Close"><iconify-icon icon="lucide:x"></iconify-icon></button></div>
+ <div class="dlg-body text-sm leading-relaxed">
+  <p class="text-subtle">Another editor (or session) saved version 5 while you were working on version 4. Your unsaved changes are kept below — choose how to continue.</p>
+  <div class="mt-4 grid sm:grid-cols-2 gap-3">
+   <div class="card p-3"><p class="text-xs font-bold mb-2">Your changes (unsaved)</p><p class="text-xs text-subtle">Headline: "Family-size, half the fuss"<br>CTA: "Order tonight"</p></div>
+   <div class="card p-3" style="background:var(--muted)"><p class="text-xs font-bold mb-2">Current saved version 5</p><p class="text-xs text-subtle">Headline: "Feed the whole family"<br>CTA: "Order now"</p></div>
+  </div>
+  <p class="label-xs mt-3">Nothing is retargeted silently — pick one path below.</p>
+ </div>
+ <div class="dlg-foot flex flex-wrap gap-2">
+  <button class="btn btn-primary btn-sm" onclick="closeDialog('conflict-dialog');toast('Applied as a new revision on top of version 5.')">Apply my changes as a new revision</button>
+  <button class="btn btn-sm" onclick="closeDialog('conflict-dialog');toast('Reloaded version 5. Your unsaved changes were discarded.')">Reload version 5, discard mine</button>
+  <button class="btn btn-sm" onclick="closeDialog('conflict-dialog')">Keep editing, decide later</button>
+ </div>
+</dialog>
+
+<!-- Upload dialog (Library) -->
+<dialog id="upload-dialog" aria-labelledby="upload-dialog-title">
+ <div class="dlg-head"><h2 id="upload-dialog-title" class="text-lg font-bold">Upload assets</h2><button class="btn btn-sm" onclick="closeDialog('upload-dialog')" aria-label="Close"><iconify-icon icon="lucide:x"></iconify-icon></button></div>
+ <div class="dlg-body text-sm">
+  <p class="text-subtle">No files leave this browser tab. This simulates the intake flow only.</p>
+  <div class="mt-4">
+   <span class="field-label">1. Choose files</span>
+   <div class="flex flex-wrap gap-2">
+    <label class="btn btn-sm" for="lib-file-input">Choose files<input id="lib-file-input" type="file" multiple class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden" onchange="simulateLibraryUpload()"></label>
+    <button class="btn btn-sm" onclick="simulateLibraryUpload(true)">Simulate 4 sample files (1 fails, 2 share a name)</button>
+   </div>
+  </div>
+  <div class="mt-4"><span class="field-label">2. Purpose &amp; folder</span>
+   <div class="grid sm:grid-cols-2 gap-3">
+    <div><label class="field-label" for="up-folder">Folder</label><select id="up-folder" class="field-input"><option>Uncategorized</option><option>Ramadan campaign</option><option>Brand references</option></select></div>
+    <div><label class="field-label" for="up-purpose">Purpose</label><select id="up-purpose" class="field-input"><option>Creative reference</option><option>Product photo</option><option>Brand asset</option></select></div>
+   </div>
+  </div>
+  <div id="lib-upload-progress" class="mt-4 space-y-3"></div>
+ </div>
+ <div class="dlg-foot"><button class="btn btn-primary btn-sm" onclick="closeDialog('upload-dialog');toast('Metadata review saved for the finished uploads.')">Save metadata for finished uploads</button></div>
+</dialog>
+
+<!-- Request a campaign dialog -->
+<dialog id="request-dialog" aria-labelledby="request-title">
+ <div class="dlg-head"><h2 id="request-title" class="text-lg font-bold">Request a campaign</h2><button class="btn btn-sm" onclick="closeDialog('request-dialog')" aria-label="Close"><iconify-icon icon="lucide:x"></iconify-icon></button></div>
+ <div class="dlg-body text-sm">
+  <p class="text-subtle">This goes through the same research and full-proposal review as automatic research — nothing is prepared or spent until you approve a proposal.</p>
+  <label class="field-label mt-4" for="req-problem">What business problem should this address?</label>
+  <textarea id="req-problem" class="field-input" style="min-height:90px" dir="auto" placeholder="e.g. Weekend footfall at the Marina branch has been flat for six weeks…"></textarea>
+ </div>
+ <div class="dlg-foot"><button class="btn btn-primary btn-sm" onclick="closeDialog('request-dialog');toast('Request received. Research will appear in Campaign recommendations.')">Send request</button></div>
+</dialog>
+
+<!-- Research settings dialog -->
+<dialog id="settings-dialog" aria-labelledby="settings-title">
+ <div class="dlg-head"><h2 id="settings-title" class="text-lg font-bold">Research settings</h2><button class="btn btn-sm" onclick="closeDialog('settings-dialog')" aria-label="Close"><iconify-icon icon="lucide:x"></iconify-icon></button></div>
+ <div class="dlg-body text-sm">
+  <div class="flex items-center gap-2 mb-4"><label class="label-xs" for="settings-scenario">Preview state</label><select id="settings-scenario" class="btn btn-sm" onchange="renderSettingsDialog()"><option value="configured">Configured</option><option value="unset">Not yet configured</option><option value="exhausted">Allowance exhausted</option></select></div>
+  <div id="settings-body"></div>
+ </div>
+</dialog>
+
+<!-- Generic sheet host (asset inspector, folder sheet, studio inspector) -->
+<div id="sheet-host" hidden class="sheet-overlay" onclick="if(event.target===this)closeSheet()"></div>
+
+<div id="toast-host"></div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const icon=(n,c='')=>`<iconify-icon icon="lucide:${n}" class="${c}" aria-hidden="true"></iconify-icon>`;
+const money=n=>'AED '+Math.round(n).toLocaleString('en-US');
+let lastFocused=null, currentSurface='portfolio', viewMode='gallery';
+
+/* ---------- role ---------- */
+function applyRole(){
+  const role=$('#role-select').value; document.body.dataset.role=role;
+  const viewer = role==='viewer';
+  $$('.manager-only').forEach(el=>el.hidden=viewer);
+  $('#viewer-note-portfolio').hidden=!viewer;
+  $('#viewer-note-library').hidden=!viewer;
+  $('#growth-viewer-note').hidden=!viewer;
+  $('#studio-viewer-note').hidden=!viewer;
+  $$('#studio-rail input,#studio-rail select,#studio-rail button,#studio-rail textarea').forEach(el=>el.disabled=viewer);
+  const saveBtn=document.querySelector('#surface-studio .btn-primary'); if(saveBtn) saveBtn.disabled=viewer;
+  renderPortfolio(); renderProposals(); renderDetail();
+}
+$('#role-select').addEventListener('change',applyRole);
+
+/* ---------- surface routing ---------- */
+const crumbs={portfolio:'Campaigns',detail:'Ramadan family bundle',studio:'Creative Studio',library:'Asset Library',growth:'Growth Intelligence'};
+function go(surface){
+  currentSurface=surface;
+  ['portfolio','detail','studio','library','growth'].forEach(s=>$('#surface-'+s).hidden=s!==surface);
+  $$('.surface-tab').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.surface===surface)));
+  $('#crumb').textContent=crumbs[surface];
+  $('#main-content').scrollTop=0;
+  history.replaceState(null,'','#'+surface);
+  if(surface==='studio') measureStudio();
+}
+function closeMobileNav(){$('#mobile-nav-sheet').hidden=true}
+$('#mobile-nav-btn').addEventListener('click',()=>$('#mobile-nav-sheet').hidden=false);
+
+/* ---------- dialogs / sheets / toast ---------- */
+function openDialog(id){const d=$('#'+id); lastFocused=document.activeElement; d.showModal(); const f=d.querySelector('button,input,select,textarea,[href]'); if(f) f.focus();}
+function closeDialog(id){const d=$('#'+id); d.close(); if(lastFocused){lastFocused.focus();lastFocused=null}}
+$$('dialog').forEach(d=>d.addEventListener('cancel',()=>{ if(lastFocused){lastFocused.focus();lastFocused=null} }));
+document.addEventListener('click',e=>{
+  const el=e.target.closest('button,a'); if(!el) return;
+  if(el.dataset.info){e.preventDefault();lastFocused=el;$('#generic-dialog-title').textContent='Design preview';$('#generic-dialog-body').innerHTML=`<p class="text-subtle">${el.dataset.info}</p>`;$('#generic-dialog').showModal()}
+  if(el.hasAttribute('data-open-request')){ if(document.body.dataset.role==='viewer'){toast('Viewer role — requesting a campaign needs manager access.');return;} lastFocused=el;openDialog('request-dialog')}
+  if(el.hasAttribute('data-open-upload')){ if(document.body.dataset.role==='viewer'){toast('Viewer role — uploading needs manager access.');return;} lastFocused=el;openDialog('upload-dialog')}
+});
+let toastTimer;
+function toast(text){const t=document.createElement('div');t.className='toast';t.setAttribute('role','status');t.textContent=text;$('#toast-host').innerHTML='';$('#toast-host').appendChild(t);clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.remove(),4500)}
+function openSheet(title,bodyHtml,triggerEl,side){
+  lastFocused=triggerEl||document.activeElement;
+  const host=$('#sheet-host'); host.hidden=false;
+  host.innerHTML=`<div class="sheet" role="dialog" aria-modal="true" aria-label="${title}"><div class="sheet-head"><span class="font-bold text-sm" dir="auto">${title}</span><button class="btn btn-sm" onclick="closeSheet()" aria-label="Close ${title}">${icon('x')}</button></div><div class="sheet-body">${bodyHtml}</div></div>`;
+  const btn=host.querySelector('button'); if(btn) btn.focus();
+  document.addEventListener('keydown',sheetEsc);
+}
+function sheetEsc(e){ if(e.key==='Escape') closeSheet(); }
+function closeSheet(){ $('#sheet-host').hidden=true; $('#sheet-host').innerHTML=''; document.removeEventListener('keydown',sheetEsc); if(lastFocused){lastFocused.focus();lastFocused=null} }
+
+/* ---------- placeholder artwork (inline SVG, no network) ---------- */
+function poster(seed,label){
+  const hues=[164,150,178,140,190];
+  const h=hues[seed%hues.length];
+  return `<svg viewBox="0 0 400 500" role="img" aria-label="${label} — sample placeholder artwork, not a real advertisement" xmlns="http://www.w3.org/2000/svg">
+   <rect width="400" height="500" fill="oklch(0.94 0.02 ${h})"/>
+   <rect x="24" y="24" width="352" height="452" fill="none" stroke="oklch(0.6 0.08 ${h})" stroke-width="2" stroke-dasharray="6 6"/>
+   <circle cx="200" cy="200" r="70" fill="oklch(0.75 0.09 ${h})"/>
+   <text x="200" y="330" text-anchor="middle" font-family="Manrope,sans-serif" font-size="22" font-weight="800" fill="oklch(0.3 0.03 ${h})">SAMPLE ARTWORK</text>
+   <text x="200" y="360" text-anchor="middle" font-family="Manrope,sans-serif" font-size="13" fill="oklch(0.4 0.02 ${h})">Fictional — not a real ad</text>
+  </svg>`;
+}
+function noArt(reason){return `<div class="no-art">${icon('image-off','')}<span class="text-sm font-semibold">No preview available</span><span class="label-xs max-w-[220px]">${reason}</span></div>`}
+
+/* ================= PORTFOLIO ================= */
+const campaigns=[
+ {id:'lunch',title:'Win back lapsed weekday lunch customers',objective:'Recover weekday lunch order volume',phase:'proposal',status:'needs-review',nextAction:'Review proposal',channels:['organic','paid'],schedule:'Not scheduled — pending approval',fact:'Proposed budget '+money(3500),art:null,seed:0},
+ {id:'ramadan',title:'Ramadan family bundle',objective:'Grow weekend family-size orders',phase:'preparing',status:'preparing',nextAction:'Review 3 creatives',channels:['organic','paid'],schedule:'Proposed window: 3 Mar – 24 Mar 2026',fact:'3 of 4 deliverables ready for review',art:1,seed:1},
+ {id:'reopening',title:'Downtown grand reopening',objective:'Announce the renovated Downtown branch',phase:'live',status:'needs-review',nextAction:'Connect Meta to publish paid placements',channels:['organic','paid'],schedule:'Live since 2 Sep 2026, Asia/Dubai',fact:'AED 0 spent — paid blocked · Organic reach 1,240 (delayed 6h)',art:2,seed:2},
+ {id:'brunch',title:'Weekend brunch push',objective:'Fill weekend brunch reservations',phase:'live',status:'live',nextAction:'Awaiting pause confirmation',channels:['paid'],schedule:'Live since 20 Aug 2026, Asia/Dubai',fact:'AED 612 spent to date · 38 tracked orders',art:3,seed:3},
+ {id:'nye',title:'New Year loyalty relaunch',objective:'Re-engage loyalty members',phase:'completed',status:'completed',nextAction:'View clinical review',channels:['organic'],schedule:'Ran 28 Dec 2025 – 4 Jan 2026',fact:'Verdict: Inconclusive — see Clinical review',art:4,seed:4},
+ {id:'combo',title:'Weekday value combo test',objective:'Test a lower-price weekday combo',phase:'completed',status:'completed',nextAction:'View clinical review',channels:['paid'],schedule:'Ran 4 Jul – 25 Jul 2026',fact:'Verdict: Directionally positive — see method & limitations',art:0,seed:0},
+];
+const statusMeta={'needs-review':{label:'Needs review',chip:'chip-attention'},preparing:{label:'Preparing',chip:'chip-action'},scheduled:{label:'Scheduled',chip:'chip-unknown'},live:{label:'Live',chip:'chip-action'},completed:{label:'Completed',chip:'chip-unknown'}};
+const attentionItems=[
+ {label:'Review proposal',title:'Win back lapsed weekday lunch customers',action:()=>go('growth')},
+ {label:'Review 3 creatives',title:'Ramadan family bundle',action:()=>go('detail')},
+ {label:'Publishing needs setup',title:'Downtown grand reopening — no Meta connection',action:()=>go('detail')},
+ {label:'Pause confirmation pending',title:'Weekend brunch push — awaiting provider read-back',action:()=>go('detail')},
+];
+function campaignCard(c){
+  const sm=statusMeta[c.status];
+  const artHtml=c.art===null?noArt('Creative generation begins after approval'):poster(c.seed,c.title);
+  return `<article class="card overflow-hidden" data-cid="${c.id}">
+   <button class="w-full text-left" onclick="go('detail')" aria-label="Open ${c.title}">
+    <div class="poster-frame">${artHtml}</div>
+   </button>
+   <div class="poster-cap"><span>${c.channels.map(ch=>ch==='organic'?'Organic':'Paid').join(' + ')}</span><span>${c.art===null?'No preview':'Sample'}</span></div>
+   <div class="p-4">
+    <div class="flex items-start justify-between gap-2"><h3 class="text-sm font-bold leading-snug">${c.title}</h3><span class="chip ${sm.chip}" style="flex-shrink:0">${sm.label}</span></div>
+    <p class="mt-1.5 text-xs text-subtle">${c.objective}</p>
+    <p class="mt-2 text-xs font-semibold">${c.fact}</p>
+    <p class="label-xs mt-2">${c.schedule}</p>
+    <div class="mt-3 pt-3 border-t border-line flex items-center justify-between gap-2">
+     <button class="link" onclick="go('detail')">${c.nextAction} ${icon('arrow-right')}</button>
+    </div>
+   </div>
+  </article>`;
+}
+function campaignRow(c){
+  const sm=statusMeta[c.status];
+  return `<tr class="border-b border-line last:border-0">
+   <td class="p-3"><div class="w-14 h-14 rounded-md overflow-hidden border border-line" style="background:var(--muted)">${c.art===null?'':poster(c.seed,c.title)}</div></td>
+   <td class="p-3"><p class="text-sm font-semibold">${c.title}</p><p class="label-xs">${c.objective}</p></td>
+   <td class="p-3 text-xs capitalize">${c.phase}</td>
+   <td class="p-3"><span class="chip ${sm.chip}">${sm.label}</span></td>
+   <td class="p-3 text-xs">${c.channels.join(', ')}</td>
+   <td class="p-3 text-xs">${c.schedule}</td>
+   <td class="p-3 text-xs">${c.fact}</td>
+   <td class="p-3 text-xs">12 min ago</td>
+  </tr>`;
+}
+function setView(v){viewMode=v;$('#view-gallery-btn').setAttribute('aria-pressed',String(v==='gallery'));$('#view-list-btn').setAttribute('aria-pressed',String(v==='list'));renderPortfolio()}
+function renderStatusFilters(){
+  const counts={all:campaigns.length};
+  $('#status-filters').innerHTML=['all','needs-review','preparing','scheduled','live','completed'].map(k=>{
+    const active=k===(window._statusFilter||'all');
+    const label=k==='all'?'All':k==='needs-review'?'Needs review':statusMeta[k]?statusMeta[k].label:k;
+    return `<button class="btn btn-sm ${active?'btn-primary':''}" role="tab" aria-selected="${active}" onclick="window._statusFilter='${k}';renderPortfolio()">${label}</button>`;
+  }).join('');
+}
+function renderPortfolio(){
+  renderStatusFilters();
+  const scenario=$('#portfolio-scenario').value;
+  const viewer=document.body.dataset.role==='viewer';
+  $('#attention-list').innerHTML=attentionItems.slice(0,3).map(a=>`<div class="flex items-center justify-between gap-3 py-3"><div><p class="text-sm font-semibold">${a.label}</p><p class="label-xs">${a.title}</p></div>${viewer?'<span class="chip chip-unknown">View only</span>':`<button class="link">Open ${icon('arrow-right')}</button>`}</div>`).join('');
+  $('#attention-count').textContent=attentionItems.length;
+  const body=$('#portfolio-body');
+  if(scenario==='empty'){
+    body.innerHTML=`<div class="card p-10 text-center"><div class="mx-auto w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-4">${icon('megaphone')}</div><h3 class="section-title">No campaigns yet</h3><p class="text-sm text-subtle mt-2 max-w-md mx-auto">Request a campaign, or bring reference designs into the Asset Library so future proposals have something to work from.</p><div class="mt-5 flex justify-center gap-2"><button class="btn btn-primary" data-open-request>Request a campaign</button><button class="btn" onclick="go('library')">Asset Library</button></div></div>`;
+    return;
+  }
+  if(scenario==='fail'){
+    body.innerHTML=`<div class="card p-8 text-center" role="alert"><div class="mx-auto w-12 h-12 rounded-xl flex items-center justify-center mb-4" style="background:color-mix(in oklch,var(--danger) 10%,white)">${icon('cloud-off')}</div><h3 class="section-title">Couldn't load your campaigns</h3><p class="text-sm text-subtle mt-2">The campaign list source didn't respond. Nothing shown here has been lost.</p><button class="btn mt-4" onclick="$('#portfolio-scenario').value='default';renderPortfolio();toast('Loaded.')">Retry</button></div>`;
+    return;
+  }
+  let list=campaigns;
+  if(scenario==='one') list=campaigns.slice(0,1);
+  if(scenario==='nomatch') list=[];
+  if(scenario==='partial') list=campaigns.slice(0,4);
+  const q=$('#search').value.trim().toLowerCase();
+  if(scenario==='default'&&q) list=list.filter(c=>c.title.toLowerCase().includes(q));
+  if(scenario==='default'&&window._statusFilter&&window._statusFilter!=='all') list=list.filter(c=>c.status===window._statusFilter||(window._statusFilter==='needs-review'&&c.status==='needs-review'));
+  let html='';
+  if(scenario==='partial') html+=`<div class="chip chip-unknown mb-4" style="display:flex"><span>${icon('triangle-alert')}</span>Some campaigns couldn't load right now. Showing 4 of 6 available. <button class="link ml-1" onclick="$('#portfolio-scenario').value='default';renderPortfolio()">Retry the rest</button></div>`;
+  if(!list.length){
+    html+=`<div class="card p-8 text-center"><h3 class="section-title">No campaigns match these filters</h3><p class="text-sm text-subtle mt-2">Try a different search term, or clear filters to see everything.</p><button class="btn mt-4" onclick="$('#search').value='';window._statusFilter='all';$('#portfolio-scenario').value='default';renderPortfolio()">Clear filters</button></div>`;
+  } else if(viewMode==='gallery'){
+    html+=`<div class="grid gap-5" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">${list.map(campaignCard).join('')}</div>`;
+  } else {
+    html+=`<div class="overflow-x-auto card"><table class="w-full text-left" style="min-width:820px"><thead class="border-b border-line text-xs text-subtle"><tr><th class="p-3 font-semibold">Art</th><th class="p-3 font-semibold">Title / objective</th><th class="p-3 font-semibold">Phase</th><th class="p-3 font-semibold">Attention</th><th class="p-3 font-semibold">Channels</th><th class="p-3 font-semibold">Schedule</th><th class="p-3 font-semibold">Spend / metric</th><th class="p-3 font-semibold">Last update</th></tr></thead><tbody>${list.map(campaignRow).join('')}</tbody></table></div>`;
+  }
+  body.innerHTML=html;
+}
+window._statusFilter='all';
+
+/* ================= DETAIL ================= */
+const detailTabs=[
+ {id:'overview',label:'Overview'},{id:'creative',label:'Creative'},{id:'publishing',label:'Publishing'},{id:'results',label:'Results'},{id:'activity',label:'Activity'}
+];
+let activeDetailTab='overview';
+function renderDetailTabs(){
+  $('#detail-tabs').innerHTML=detailTabs.map(t=>`<button class="tab px-1 py-3.5 text-sm" role="tab" aria-selected="${t.id===activeDetailTab}" tabindex="${t.id===activeDetailTab?0:-1}" data-dtab="${t.id}">${t.label}</button>`).join('');
+  $$('#detail-tabs [role=tab]').forEach((b,i,arr)=>{
+    b.addEventListener('click',()=>{activeDetailTab=b.dataset.dtab;renderDetail()});
+    b.addEventListener('keydown',e=>{let n=null;if(e.key==='ArrowRight')n=(i+1)%arr.length;if(e.key==='ArrowLeft')n=(i+arr.length-1)%arr.length;if(e.key==='Home')n=0;if(e.key==='End')n=arr.length-1;if(n!==null){e.preventDefault();activeDetailTab=arr[n].dataset.dtab;renderDetail();$$('#detail-tabs [role=tab]')[n].focus()}});
+  });
+}
+function overviewPanel(viewer){
+  return `<div class="grid lg:grid-cols-[1.5fr_1fr] gap-6">
+   <div class="space-y-5">
+    <div class="card p-5"><h3 class="text-sm font-bold">Why this campaign</h3><p class="mt-2 text-sm text-subtle">Weekend family-size orders have been flat for five weeks while single-portion orders grew 9%. Ramadan timing (starting 2 Mar 2026) is a plausible window to promote a family bundle.</p><p class="label-xs mt-2">Evidence: 12 Jan – 9 Feb 2026 · Downtown &amp; Marina, all channels</p></div>
+    <div class="card p-5"><h3 class="text-sm font-bold">Approved audience, offer &amp; budget</h3><dl class="mt-3 grid sm:grid-cols-2 gap-4 text-sm"><div><dt class="label-xs">Audience</dt><dd class="mt-1">Households, Downtown &amp; Marina, weekend dinner searchers</dd></div><div><dt class="label-xs">Offer</dt><dd class="mt-1">Family bundle, 15% off, weekends through Ramadan</dd></div><div><dt class="label-xs">Media budget (proposed)</dt><dd class="mt-1 font-semibold">${money(4200)}</dd></div><div><dt class="label-xs">Success measure</dt><dd class="mt-1">Incremental weekend family-size orders vs. prior 5-week baseline</dd></div></dl></div>
+    <div class="card p-5"><h3 class="text-sm font-bold">Creative preview</h3><div class="mt-3 grid grid-cols-3 gap-2">${[1,2,3].map(i=>`<div class="poster-frame" style="aspect-ratio:1/1">${poster(i,'preview')}</div>`).join('')}</div><p class="label-xs mt-2">Prelaunch — no invented performance metrics shown before delivery begins.</p></div>
+   </div>
+   <div class="space-y-5">
+    <div class="card p-5"><h3 class="text-sm font-bold">Next action</h3><p class="mt-2 text-sm">${viewer?'Review only — approval controls are hidden for your role.':'Review the 3 finished creatives waiting in the Creative tab.'}</p>${viewer?'':'<button class="btn btn-primary btn-sm mt-3" onclick="activeDetailTab=\'creative\';renderDetail()">Review 3 creatives</button>'}</div>
+    <div class="gate-note">${icon('shield-check')}<span><strong>Two-gate approval:</strong> the approved proposal authorized creative <em>preparation</em> only. Publishing — including every later variation — requires reviewing each exact finished output separately in Creative and Publishing.</span></div>
+    <div class="card p-5"><h3 class="text-sm font-bold">Sources</h3><ul class="mt-2 text-sm text-subtle space-y-1 list-disc pl-4"><li>January &amp; February order reports</li><li>Ramadan calendar (public reference)</li><li>Business Memory: prior bundle-pricing lesson</li></ul></div>
+   </div>
+  </div>`;
+}
+const creatives=[
+ {id:'c1',dir:'Control',format:'Instagram feed',lang:'English',state:'Ready for review',verify:'ok'},
+ {id:'c2',dir:'Evidence-led',format:'Instagram feed',lang:'English',state:'Ready for review',verify:'ok'},
+ {id:'c3',dir:'Evidence-led',format:'Instagram story',lang:'Arabic',state:'Ready for review',verify:'ok'},
+ {id:'c4',dir:'Experimental',format:'Meta feed ad',lang:'English',state:'Needs changes',verify:'flagged'},
+];
+function creativePanel(viewer){
+  return `<div class="gate-note mb-4">${icon('shield-check')}<span>Every card below needs its own human review before it can publish — approving one does not approve the others or any future variation.</span></div>
+  <div class="grid gap-4" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${creatives.map(c=>`
+   <div class="card overflow-hidden">
+    <div class="poster-frame" style="aspect-ratio:4/5">${poster(c.id.charCodeAt(1),c.dir)}</div>
+    <div class="p-3">
+     <p class="text-xs font-bold" dir="auto">${c.dir} · ${c.format}</p>
+     <p class="label-xs mt-1">${c.lang} · rev. 2</p>
+     <div class="mt-2 flex flex-wrap gap-1"><span class="chip ${c.state==='Ready for review'?'chip-action':'chip-attention'}">${c.state}</span><span class="chip ${c.verify==='ok'?'chip-action':'chip-attention'}">${c.verify==='ok'?'Verified':'Verification flagged'}</span></div>
+     <div class="mt-3 flex gap-2">
+      <button class="btn btn-sm" onclick="go('studio')" ${viewer?'disabled':''}>Edit</button>
+      <button class="btn btn-sm" ${viewer?'disabled':''}>Review</button>
+     </div>
+    </div>
+   </div>`).join('')}
+   <div class="card p-4 flex flex-col items-center justify-center text-center gap-2" style="border-style:dashed">
+    <p class="text-xs font-bold">Declined — Free-line variant</p><p class="label-xs">Reason: pricing claim unverifiable. Kept for history, not regenerated automatically.</p>
+   </div>
+  </div>`;
+}
+function publishingPanel(viewer,noMeta){
+  const rows=[
+   {out:'Control · Instagram feed',dest:'@example.kitchen (Instagram)',type:'Organic',sched:'3 Mar 2026, 09:00 Asia/Dubai',budget:'—',state:'queued'},
+   {out:'Evidence-led · Meta feed ad',dest:noMeta?'No Meta account connected':'Example Kitchen Ads (Meta)',type:'Paid',sched:'3 Mar 2026, 09:00 Asia/Dubai',budget:money(1800),state:noMeta?'blocked':'scheduled'},
+   {out:'Evidence-led · Instagram story',dest:'@example.kitchen (Instagram)',type:'Organic',sched:'4 Mar 2026, 18:00 Asia/Dubai',budget:'—',state:'submitting'},
+   {out:'Downtown reopening · Meta feed ad',dest:'Example Kitchen Ads (Meta)',type:'Paid',sched:'Sent 2 Sep, 10:02 Asia/Dubai',budget:money(900),state:'unknown'},
+  ];
+  const chipFor=s=>({queued:['chip-unknown','Queued'],scheduled:['chip-action','Scheduled'],submitting:['chip-unknown','Submitting'],blocked:['chip-failure','Blocked'],unknown:['chip-attention','Unknown — awaiting provider confirmation']}[s]);
+  return `${noMeta?`<div class="card p-4 mb-4" style="border-color:color-mix(in oklch,var(--warning) 40%,var(--border))"><div class="flex items-start gap-3">${icon('plug-zap')}<div><p class="text-sm font-bold">No Meta connection</p><p class="text-sm text-subtle mt-1">Paid placements can't submit until Meta is connected for this organization. Organic placements are unaffected.</p><button class="btn btn-sm mt-2" ${viewer?'disabled':''}>Connect Meta</button></div></div></div>`:''}
+  <div class="overflow-x-auto card"><table class="w-full text-left" style="min-width:760px"><thead class="border-b border-line text-xs text-subtle"><tr><th class="p-3 font-semibold">Output / action</th><th class="p-3 font-semibold">Destination</th><th class="p-3 font-semibold">Type</th><th class="p-3 font-semibold">Schedule (Asia/Dubai)</th><th class="p-3 font-semibold">Budget</th><th class="p-3 font-semibold">State</th></tr></thead><tbody>${rows.map(r=>{const[c,l]=chipFor(r.state);return `<tr class="border-b border-line last:border-0"><td class="p-3 text-sm">${r.out}</td><td class="p-3 text-sm">${r.dest}</td><td class="p-3 text-xs">${r.type}</td><td class="p-3 text-xs">${r.sched}</td><td class="p-3 text-xs">${r.budget}</td><td class="p-3"><span class="chip ${c}">${l}</span>${r.state==='unknown'?`<p class="label-xs mt-1">${icon('triangle-alert')} Spending may continue — treat as urgent until confirmed.</p>`:''}</td></tr>`}).join('')}</tbody></table></div>`;
+}
+function resultsPanel(){
+  return `<div class="flex flex-wrap items-center gap-2 mb-4"><label class="label-xs" for="results-window">Window</label><select id="results-window" class="btn btn-sm"><option>2 Sep – 9 Sep 2026</option><option>Last 7 days</option></select><span class="chip chip-attention"><span>${icon('clock-3')}</span>Metrics delayed — last provider update 6h ago</span></div>
+  <div class="grid sm:grid-cols-3 gap-4 mb-5">
+   <div class="card p-4"><p class="label-xs">Actual spend</p><p class="metric-num text-2xl font-extrabold mt-1">${money(612)}</p></div>
+   <div class="card p-4"><p class="label-xs">Primary metric — tracked orders</p><p class="metric-num text-2xl font-extrabold mt-1">38</p></div>
+   <div class="card p-4"><p class="label-xs">Delivery diagnostics</p><p class="text-sm mt-1">2 of 4 placements delivering normally; 1 blocked (no Meta connection)</p></div>
+  </div>
+  <div class="card p-5"><h3 class="text-sm font-bold">Clinical review</h3><p class="text-sm text-subtle mt-2">What happened: weekend order volume rose 6% during delivery. Comparison group: the prior 4 non-campaign weekends. Plausible explanations: campaign effect, and a public holiday overlapping one comparison weekend. Evidence for: reach concentrated in targeted audience. Evidence against: holiday weekend alone shows a similar rise in past years. What cannot be known: the campaign's isolated contribution, since the two effects overlap in the same window.</p><p class="mt-3 chip chip-unknown" style="display:inline-flex">${icon('circle-help')}Verdict: Inconclusive</p><p class="label-xs mt-2">Next test proposed: repeat without the holiday overlap before treating this as a reusable lesson.</p></div>`;
+}
+function activityPanel(){
+  const items=[
+   {t:'Proposal approved · rev. 3',by:'You',when:'18 Feb 2026, 14:02',ev:'Evidence: 12 Jan – 9 Feb 2026'},
+   {t:'Creative generation started',by:'System',when:'18 Feb 2026, 14:05',ev:'4 deliverables requested'},
+   {t:'Creative generation — 1 member failed, retried',by:'System',when:'18 Feb 2026, 14:22',ev:'Failure: reference image unavailable'},
+   {t:'3 creatives ready for review',by:'System',when:'18 Feb 2026, 14:31',ev:''},
+   {t:'Pause requested (approved stop rule)',by:'Agent, within approved limits',when:'6 Sep 2026, 09:10',ev:'Cost-per-order exceeded threshold'},
+  ];
+  return `<div class="card divide-y divide-line">${items.map(i=>`<div class="p-4 flex flex-wrap items-start justify-between gap-2"><div><p class="text-sm font-semibold">${i.t}</p><p class="label-xs mt-1">${i.by}${i.ev?' · '+i.ev:''}</p></div><span class="label-xs">${i.when}</span></div>`).join('')}</div>
+  <button class="link mt-4">Technical details (digest, worker IDs) ${icon('arrow-right')}</button>`;
+}
+function renderDetail(){
+  renderDetailTabs();
+  const scenario=$('#detail-scenario').value;
+  const viewer=document.body.dataset.role==='viewer';
+  $('#expired-banner').hidden = scenario!=='expired';
+  $('#stale-banner').hidden = scenario!=='stale';
+  $('#detail-primary-action').disabled = viewer || scenario==='expired';
+  $('#version-select').value = scenario==='stale' ? '2':'4';
+  const noMeta=true;
+  let html='';
+  if(activeDetailTab==='overview') html=overviewPanel(viewer);
+  if(activeDetailTab==='creative') html=creativePanel(viewer);
+  if(activeDetailTab==='publishing') html=publishingPanel(viewer,noMeta);
+  if(activeDetailTab==='results') html=resultsPanel();
+  if(activeDetailTab==='activity') html=activityPanel();
+  $('#detail-panels').innerHTML=html;
+}
+function onVersionChange(){
+  const v=$('#version-select').value;
+  $('#detail-scenario').value = v!=='4' ? 'stale':'default';
+  renderDetail();
+}
+
+/* ================= STUDIO ================= */
+let studioStatus='unsaved', beforeAfter=false;
+const statusChip={unsaved:['chip-attention','Unsaved changes'],saved:['chip-action','Saved'],rendering:['chip-unknown','Rendering'],needschanges:['chip-attention','Needs changes'],ready:['chip-action','Ready for review']};
+function renderStudioStatus(){const[c,l]=statusChip[studioStatus];$('#studio-status-chip').className='chip '+c;$('#studio-status-chip').innerHTML=icon(studioStatus==='rendering'?'loader':'circle')+l}
+function renderStudioCanvas(){
+  $('#studio-canvas').innerHTML = beforeAfter
+    ? `<div style="display:grid;grid-template-columns:1fr 1fr;width:100%;height:100%"><div style="border-right:1px dashed var(--border)">${poster(1,'before')}</div><div>${poster(2,'after')}</div></div>`
+    : poster(2,'current edit');
+}
+function toggleBeforeAfter(){beforeAfter=!beforeAfter;$('#before-after-btn').setAttribute('aria-pressed',String(beforeAfter));renderStudioCanvas()}
+function railText(){return `
+ <div><label class="field-label" for="rail-headline">Headline</label><input id="rail-headline" class="field-input" dir="auto" value="Feed the whole family" oninput="studioStatus='unsaved';renderStudioStatus()"><p class="label-xs mt-1">Original: "Family-size, half the fuss"</p></div>
+ <div><label class="field-label" for="rail-offer">Offer line</label><input id="rail-offer" class="field-input" value="15% off family bundles, weekends"><p class="label-xs mt-1 chip chip-attention" style="display:inline-flex;white-space:normal;text-align:left">${icon('circle-alert')}Offer changes may require a fresh approval — check with your manager.</p></div>
+ <div><label class="field-label" for="rail-cta">CTA</label><input id="rail-cta" class="field-input" value="Order now"></div>
+ <div><label class="field-label" for="rail-free">Free line</label><textarea id="rail-free" class="field-input" dir="auto" style="min-height:60px">إطلالة العائلة على مائدة رمضان — احجز الآن</textarea></div>`}
+function railImage(){return `
+ <div><span class="field-label">Selected subject / background</span><div class="poster-frame" style="aspect-ratio:1/1;max-width:120px">${poster(0,'subject')}</div></div>
+ <button class="btn btn-sm w-full" onclick="go('library')">Change image from Library</button>
+ <button class="btn btn-sm w-full">Annotate an area</button>
+ <button class="btn btn-sm w-full" disabled>Clear/remove region</button>
+ <label class="field-label mt-2" for="rail-ai">Short AI instruction</label><input id="rail-ai" class="field-input" placeholder="e.g. brighten the table setting">
+ <p class="label-xs">Confirming creates a new candidate — the accepted parent is never overwritten.</p>`}
+function railLayout(){return `
+ <span class="field-label">Approved template</span>
+ <div class="grid grid-cols-3 gap-2">${[1,2,3].map(i=>`<button class="poster-frame" style="aspect-ratio:4/5" aria-label="Template ${i}">${poster(i,'template')}</button>`).join('')}</div>
+ <span class="field-label mt-2">Aspect / placement</span>
+ <label class="sr-only" for="rail-aspect">Aspect / placement</label><select id="rail-aspect" name="rail-aspect" class="field-input"><option>Instagram feed 4:5</option><option>Instagram story 9:16</option><option disabled>Meta Reels (not yet supported)</option></select>
+ <p class="label-xs">No freeform canvas, arbitrary layers or uploaded fonts in this workspace.</p>`}
+function measureStudio(){
+  // Measured against the real available content width inside the AppShell (sidebar + page
+  // padding already subtracted), per contract §6's exact 1200/800px thresholds — not the
+  // raw viewport width. At every required test width (incl. 1440) this content width tops
+  // out under 1200px, so the inspector is a Sheet more often than a "desktop" mock would
+  // suggest. See the Task 0b handoff note.
+  const w = $('#content-shell').clientWidth;
+  const inspectorSheetMode = w < 1200;
+  const canvasFirst = w < 800;
+  $('#studio-layout').style.display='grid';
+  $('#studio-layout').style.gap='16px';
+  $('#studio-layout').style.gridTemplateColumns = canvasFirst ? '1fr' : (inspectorSheetMode ? '260px 1fr' : '260px 1fr 280px');
+  if(canvasFirst){ $('#studio-layout').style.gridTemplateAreas="'canvas' 'rail'"; $('#studio-rail').style.gridArea='rail'; $('#studio-canvas-wrap').style.gridArea='canvas'; }
+  else { $('#studio-layout').style.gridTemplateAreas='none'; $('#studio-rail').style.gridArea=''; $('#studio-canvas-wrap').style.gridArea=''; }
+  $('#studio-inspector-col').hidden = inspectorSheetMode;
+  $('#studio-inspector-toggle').hidden = !inspectorSheetMode;
+}
+window.addEventListener('resize',()=>{ if(currentSurface==='studio') measureStudio(); });
+function inspectorContent(){
+  return `<h3 class="text-sm font-bold mb-3">Context inspector</h3>
+  <dl class="space-y-3 text-xs">
+   <div><dt class="label-xs">Proposal terms</dt><dd class="mt-1">Family bundle, 15% off, weekends through Ramadan · budget AED 4,200 (proposed)</dd></div>
+   <div><dt class="label-xs">Positive references</dt><dd class="mt-1">2 brand-approved family-table photos (reason: matches subject &amp; lighting)</dd></div>
+   <div><dt class="label-xs">Negative rules</dt><dd class="mt-1">No price crossed out; no competitor names</dd></div>
+   <div><dt class="label-xs">Provenance</dt><dd class="mt-1">Composed from plate gen-run #481 · text overlay v2</dd></div>
+   <div><dt class="label-xs">Checks</dt><dd class="mt-1 flex flex-wrap gap-1"><span class="chip chip-action">${icon('check')}Exact text</span><span class="chip chip-action">${icon('check')}Fit</span><span class="chip chip-unknown">${icon('circle-help')}Image verification unavailable</span></dd></div>
+  </dl>`;
+}
+function openInspectorSheet(){ openSheet('Context inspector', inspectorContent(), document.activeElement); }
+function studioChecks(){
+  return [
+   ['check','chip-action','Exact text fits'],
+   ['languages','chip-action','Arabic script renders correctly'],
+   ['circle-help','chip-unknown','Image verification unavailable for this provider'],
+  ].map(([i,c,l])=>`<div class="chip ${c}" style="justify-content:flex-start">${icon(i)}${l}</div>`).join('');
+}
+function initStudio(){
+  renderStudioStatus(); renderStudioCanvas();
+  $('#studio-rail-body').innerHTML=railText();
+  $('#studio-inspector-content').innerHTML=inspectorContent();
+  $('#studio-checks').innerHTML=studioChecks();
+  $$('#studio-rail-tabs [role=tab]').forEach((b,i,arr)=>{
+    b.addEventListener('click',()=>{arr.forEach(x=>x.setAttribute('aria-selected','false'));b.setAttribute('aria-selected','true');const map={text:railText,image:railImage,layout:railLayout};$('#studio-rail-body').innerHTML=map[b.dataset.rtab]()});
+    b.addEventListener('keydown',e=>{let n=null;if(e.key==='ArrowRight')n=(i+1)%arr.length;if(e.key==='ArrowLeft')n=(i+arr.length-1)%arr.length;if(n!==null){e.preventDefault();arr[n].click();arr[n].focus()}});
+  });
+  measureStudio();
+}
+function studioUndo(){toast('Local edit undone (not yet saved).')}
+function studioRedo(){toast('Local edit redone (not yet saved).')}
+function studioSave(){
+  studioStatus='rendering';renderStudioStatus();
+  setTimeout(()=>{
+    if($('#detail-scenario') && $('#detail-scenario').value==='stale'){ openDialog('conflict-dialog'); studioStatus='needschanges'; renderStudioStatus(); return; }
+    studioStatus='ready';renderStudioStatus();toast('Saved. Rendering finished — ready for review.');
+  },900);
+}
+document.addEventListener('keydown',e=>{ if((e.metaKey||e.ctrlKey)&&e.key==='z'&&currentSurface==='studio'){e.preventDefault();studioUndo()} });
+
+/* ---- upload simulation (Studio inline) ---- */
+function simulateUpload(files){
+  const names = files ? Array.from(files).map(f=>f.name) : ['family-table.jpg','family-table.jpg','corrupt-scan.heic'];
+  const list=$('#upload-progress-list'); list.innerHTML='';
+  names.forEach((n,idx)=>{
+    const localId='local-'+Date.now()+'-'+idx;
+    const row=document.createElement('div');
+    row.innerHTML=`<div class="flex items-center justify-between gap-2 text-xs mb-1"><span class="font-semibold" dir="auto">${n} <span class="label-xs">(${localId.slice(-6)})</span></span><span class="label-xs" id="st-${localId}">Uploading…</span></div><div class="progress-track"><div class="progress-fill" id="pf-${localId}" style="width:0%"></div></div>`;
+    list.appendChild(row);
+    animateUpload(localId, idx===2);
+  });
+}
+function animateUpload(id,shouldFail){
+  let p=0; const fill=()=>document.getElementById('pf-'+id); const st=()=>document.getElementById('st-'+id);
+  const t=setInterval(()=>{
+    p+=18;
+    if(!fill()) { clearInterval(t); return; }
+    if(shouldFail && p>=54){ fill().style.width='54%'; fill().classList.add('fail'); st().textContent='Failed to finalize — file unreadable'; st().classList.add('text-danger'); clearInterval(t); return; }
+    if(p>=100){ p=100; st().textContent='Uploaded — ready for metadata'; clearInterval(t); }
+    fill().style.width=p+'%';
+  },260);
+}
+
+/* ================= LIBRARY ================= */
+const folders=['All designs','Uncategorized','Ramadan campaign','Brand references'];
+function renderFolders(){
+  $('#folder-tree').innerHTML=`<ul class="space-y-1 text-sm">${folders.map((f,i)=>`<li><button class="folder-item w-full text-left rounded-md px-3 py-2" aria-current="${i===0}" onclick="$$('.folder-item').forEach(b=>b.setAttribute('aria-current','false'));this.setAttribute('aria-current','true');renderLibraryGrid()">${f}</button></li>`).join('')}</ul>`;
+}
+function openFolderSheet(){ openSheet('Folders', `<ul class="space-y-1 text-sm">${folders.map(f=>`<li><button class="folder-item w-full text-left rounded-md px-3 py-2" onclick="closeSheet()">${f}</button></li>`).join('')}</ul>`, document.activeElement); }
+const verdicts=['All','Approved','Rejected','Unreviewed'];
+function renderVerdictFilters(){ $('#verdict-filters').innerHTML=verdicts.map((v,i)=>`<button class="btn btn-sm ${i===0?'btn-primary':''}" role="tab" aria-selected="${i===0}" onclick="$$('#verdict-filters button').forEach(b=>b.classList.remove('btn-primary'));this.classList.add('btn-primary');renderLibraryGrid()">${v}</button>`).join(''); }
+const libraryItems=[
+ {id:'a1',name:'family-table-hero.jpg',type:'Design',verdict:'Approved',date:'2 Sep 2026',seed:1},
+ {id:'a2',name:'lunch-combo-v3.jpg',type:'Design',verdict:'Rejected',reason:'Pricing overlay unreadable on mobile crop',date:'30 Aug 2026',seed:3},
+ {id:'a3',name:'brunch-flatlay.jpg',type:'Design',verdict:'Unreviewed',date:'6 Sep 2026',seed:4},
+ {id:'a4',name:'reopening-banner.jpg',type:'Design',verdict:'Approved',date:'1 Sep 2026',seed:2},
+ {id:'a5',name:'loyalty-card-art.jpg',type:'Design',verdict:'Unreviewed',date:'27 Aug 2026',seed:0},
+];
+function libraryCard(it){
+  return `<button class="card overflow-hidden text-left" onclick="openAssetInspector('${it.id}')">
+   <div class="poster-frame" style="aspect-ratio:4/5">${poster(it.seed,it.name)}</div>
+   <div class="p-3"><p class="text-xs font-semibold truncate" dir="auto">${it.name}</p><p class="label-xs mt-1">${it.type} · v2 · ${it.date}</p>
+   <span class="chip mt-2 ${it.verdict==='Approved'?'chip-action':it.verdict==='Rejected'?'chip-failure':'chip-unknown'}" style="display:inline-flex">${it.verdict}</span></div>
+  </button>`;
+}
+function renderLibraryGrid(){
+  renderFolders(); renderVerdictFilters();
+  const scenario=$('#library-scenario').value;
+  const grid=$('#library-grid');
+  if(scenario==='empty'){ grid.innerHTML=`<div class="card p-10 text-center col-span-full"><div class="mx-auto w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-3">${icon('image-off')}</div><h3 class="section-title" style="font-size:16px">No artwork here yet</h3><p class="text-sm text-subtle mt-2">Upload a past design, or wait for a finished Studio render to arrive here Unreviewed.</p><button class="btn btn-primary btn-sm mt-4" data-open-upload>Upload assets</button></div>`; return; }
+  const q=$('#lib-search').value.trim().toLowerCase();
+  const list = q ? libraryItems.filter(i=>i.name.toLowerCase().includes(q)) : libraryItems;
+  grid.innerHTML = list.map(libraryCard).join('');
+  $('#lib-selected-count').textContent = list.length + ' shown';
+}
+function openAssetInspector(id){
+  const it=libraryItems.find(x=>x.id===id);
+  const body=`<div class="poster-frame mb-4" style="aspect-ratio:4/5">${poster(it.seed,it.name)}</div>
+  <dl class="space-y-3 text-xs">
+   <div><dt class="label-xs">Name</dt><dd class="mt-1 font-semibold" dir="auto">${it.name}</dd></div>
+   <div><dt class="label-xs">Confirmation state</dt><dd class="mt-1"><span class="chip ${it.verdict==='Approved'?'chip-action':it.verdict==='Rejected'?'chip-failure':'chip-unknown'}">${it.verdict}</span></dd></div>
+   ${it.reason?`<div><dt class="label-xs">Rejection reason</dt><dd class="mt-1">${it.reason}</dd></div>`:''}
+   <div><dt class="label-xs">Rights</dt><dd class="mt-1">Owned — internal use</dd></div>
+   <div><dt class="label-xs">Folder</dt><dd class="mt-1">Ramadan campaign</dd></div>
+   <div><dt class="label-xs">Version history</dt><dd class="mt-1">v2 (current) · v1 replaced 30 Aug 2026</dd></div>
+   <div><dt class="label-xs">Source campaign</dt><dd class="mt-1">Ramadan family bundle · render #481</dd></div>
+   <div><dt class="label-xs">Selected-as-reference</dt><dd class="mt-1">Used as a positive reference in 2 later generations</dd></div>
+  </dl>
+  <div class="mt-4 flex flex-wrap gap-2 manager-only" ${document.body.dataset.role==='viewer'?'hidden':''}>
+   <button class="btn btn-sm" onclick="toast('Approved as reference.')">Approve as reference</button>
+   <button class="btn btn-sm" onclick="toast('Rejection needs a reason — captured in the real flow.')">Reject as reference</button>
+   <button class="btn btn-sm">Leave unreviewed</button>
+  </div>`;
+  openSheet(it.name, body, document.activeElement);
+}
+function simulateLibraryUpload(sample){
+  const list=$('#lib-upload-progress'); list.innerHTML='';
+  const names = sample ? ['flyer-draft.jpg','flyer-draft.jpg','table-shot.png','broken.tiff'] : Array.from($('#lib-file-input').files||[]).map(f=>f.name);
+  names.forEach((n,idx)=>{
+    const localId='u-'+Date.now()+'-'+idx;
+    const row=document.createElement('div');
+    row.innerHTML=`<div class="flex items-center justify-between gap-2 text-xs mb-1"><span class="font-semibold" dir="auto">${n} <span class="label-xs">(id ${localId.slice(-6)})</span></span><span class="label-xs" id="lst-${localId}">Uploading…</span></div><div class="progress-track"><div class="progress-fill" id="lpf-${localId}" style="width:0%"></div></div>`;
+    list.appendChild(row);
+    let p=0; const fail = idx===3;
+    const t=setInterval(()=>{p+=20; const f=document.getElementById('lpf-'+localId), s=document.getElementById('lst-'+localId); if(!f){clearInterval(t);return;}
+      if(fail && p>=60){f.style.width='60%';f.classList.add('fail');s.textContent='Failed to finalize — unsupported format';s.classList.add('text-danger');clearInterval(t);return;}
+      if(p>=100){p=100;s.textContent='Uploaded — ready for metadata review';clearInterval(t);}
+      f.style.width=p+'%';
+    },220);
+  });
+}
+function initLibraryTabs(){
+  const map={history:'lib-panel-history',products:'lib-panel-products',brand:'lib-panel-brand'};
+  $$('#library-tabs [role=tab]').forEach((b,i,arr)=>{
+    b.addEventListener('click',()=>{arr.forEach(x=>{x.setAttribute('aria-selected','false');x.classList.add('text-subtle')});b.setAttribute('aria-selected','true');b.classList.remove('text-subtle');Object.values(map).forEach(id=>$('#'+id).hidden=true);$('#'+map[b.dataset.ltab]).hidden=false});
+    b.addEventListener('keydown',e=>{let n=null;if(e.key==='ArrowRight')n=(i+1)%arr.length;if(e.key==='ArrowLeft')n=(i+arr.length-1)%arr.length;if(n!==null){e.preventDefault();arr[n].click();arr[n].focus()}});
+  });
+}
+function initLibraryExtras(){
+  $('#products-grid').innerHTML=['Signature lamb platter','Family bundle tray','Weekend brunch spread'].map((n,i)=>`<div class="card overflow-hidden"><div class="poster-frame" style="aspect-ratio:1/1">${poster(i,n)}</div><div class="p-3"><p class="text-xs font-semibold">${n}</p><p class="label-xs mt-1">${i===2?'Description not yet confirmed':'Confirmed by manager · 20 Aug 2026'}</p></div></div>`).join('');
+  $('#brand-grid').innerHTML=`<div class="card p-4"><h3 class="text-sm font-bold mb-3">Logo &amp; palette</h3><div class="flex gap-2 mb-3">${['var(--primary)','var(--foreground)','var(--muted)'].map(c=>`<span style="width:28px;height:28px;border-radius:6px;background:${c};border:1px solid var(--border)"></span>`).join('')}</div><p class="label-xs">Source: brand guide v2 · rights: owned</p></div>
+   <div class="card p-4"><h3 class="text-sm font-bold mb-3">Typography identity</h3><p class="text-lg font-extrabold">Manrope</p><p class="label-xs mt-1">Approved headline &amp; body typeface</p></div>`;
+}
+
+/* ================= GROWTH PROPOSAL ================= */
+const proposals=[
+ {id:'lunch',state:'ready',title:'Win back lapsed weekday lunch customers',problem:'Weekday lunch orders dropped 18% over the last four weeks while weekend orders held steady.',window:'12 Aug – 8 Sep 2026 · Delivery A &amp; Direct, Downtown',channels:['Organic · Instagram','Paid · Meta'],budget:money(3500),estimate:'Estimated +140 incremental weekday orders over 3 weeks (unvalidated estimate)',readiness:'Ready for your review',rev:3,capLimit:money(80),approved:false},
+ {id:'cancel',state:'researching',title:'Address rising cancellation reasons',note:'Research in progress · started 2 hours ago'},
+ {id:'combo',state:'awaiting',title:'Promote the new lunch combo',note:'Awaiting specific information: combo pricing has not been confirmed.'},
+ {id:'weekend',state:'failed',title:'Investigate weekend traffic dip',note:'Research failed · the external evidence source timed out.'},
+ {id:'none',state:'none',title:'This evaluation cycle',note:"This week's evidence didn't surface a new campaign-worthy problem. Existing recommendations above remain your best next steps."},
+];
+function proposalRow(p,viewer){
+  if(p.state!=='ready'){
+    const meta={researching:['chip-unknown','loader','Research in progress'],awaiting:['chip-attention','circle-alert','Awaiting information'],failed:['chip-failure','x-circle','Research failed'],none:['chip-unknown','check','No proposal warranted']}[p.state];
+    return `<div class="card p-4 flex flex-wrap items-center justify-between gap-3"><div><p class="text-sm font-bold">${p.title}</p><p class="text-xs text-subtle mt-1">${p.note}</p></div><span class="chip ${meta[0]}">${icon(meta[1])}${meta[2]}</span>${p.state==='failed'&&!viewer?'<button class="btn btn-sm">Retry</button>':''}</div>`;
+  }
+  return `<article class="card p-5" data-proposal="${p.id}">
+   <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="min-w-0"><h3 class="text-sm font-bold" dir="auto">${p.title}</h3><p class="text-sm text-subtle mt-1">${p.problem}</p><p class="label-xs mt-2">Evidence: ${p.window}</p></div>
+    <span class="chip chip-action" style="flex-shrink:0">${icon('check')}${p.approved?'Preparing creatives':p.readiness}</span>
+   </div>
+   <div class="mt-3 flex flex-wrap gap-2">${p.channels.map(c=>`<span class="chip chip-unknown">${c}</span>`).join('')}<span class="chip chip-unknown">Proposed budget ${p.budget}</span></div>
+   <p class="label-xs mt-2">${p.estimate}</p>
+   <div class="mt-4 pt-3 border-t border-line flex flex-wrap items-center gap-2" id="proposal-actions-${p.id}">
+    ${p.approved
+      ? `<span class="text-sm">Approved 2 min ago → <strong>Preparing creatives</strong>. <button class="link" onclick="go('detail')">View in Campaign</button></span>`
+      : viewer
+        ? `<button class="btn btn-sm">View full proposal</button><span class="chip chip-unknown">View only</span>`
+        : `<button class="btn btn-primary btn-sm" onclick="openProposal('${p.id}')">Review proposal</button>`}
+   </div>
+  </article>`;
+}
+function renderProposals(){
+  const viewer=document.body.dataset.role==='viewer';
+  $('#proposal-list').innerHTML = proposals.map(p=>proposalRow(p,viewer)).join('');
+}
+const anchorGroups=[
+ ['why','Why this campaign'],['audience','Audience & offer'],['channels','Channels & creative plan'],['budget','Budget & timing'],['success','Success & stop conditions'],['sources','Sources & unknowns']
+];
+function openProposal(id){
+  const p=proposals.find(x=>x.id===id);
+  $('#proposal-dialog-title').textContent=p.title;
+  $('#proposal-dialog-sub').textContent='Proposal revision '+p.rev+' · digest a1f9…3c2';
+  $('#proposal-anchor-nav').innerHTML=anchorGroups.map(([k,l],i)=>`<button data-anchor="${k}" class="${i===0?'active':''}" onclick="jumpAnchor('${k}')">${l}</button>`).join('');
+  $('#proposal-dialog-content').innerHTML=`
+   <section id="anc-why"><h3 class="text-sm font-bold mb-2">Why this campaign</h3><p class="text-subtle">${p.problem} An operational cause (kitchen prep time) was checked and ruled out — weekday prep times are unchanged. The gap concentrates in new lunch searches, consistent with a demand-side problem.</p></section>
+   <section id="anc-audience"><h3 class="text-sm font-bold mb-2">Audience &amp; offer</h3><p class="text-subtle">Weekday lunch searchers within 3km of Downtown who ordered before but lapsed 3+ weeks. Offer: 10% off combo lunch, weekdays 11:30–14:00, 3-week window.</p></section>
+   <section id="anc-channels"><h3 class="text-sm font-bold mb-2">Channels &amp; creative plan</h3><p class="text-subtle">Organic: Instagram feed + story. Paid: Meta feed ads, Downtown radius targeting. 4 deliverables planned across Control and Evidence-led directions.</p></section>
+   <section id="anc-budget"><h3 class="text-sm font-bold mb-2">Budget &amp; timing</h3><p class="text-subtle">Proposed media budget: ${p.budget} (pending approval). Preparation cost limit: ${p.capLimit} (separate line — platform generation cost, not media spend). Proposed window: 3 weeks starting the Monday after approval, Asia/Dubai.</p></section>
+   <section id="anc-success"><h3 class="text-sm font-bold mb-2">Success &amp; stop conditions</h3><p class="text-subtle">Success: incremental weekday lunch orders vs. the prior 4-week baseline. Stop condition: pause if cost-per-order exceeds AED 45 after 5 days' delivery, pending your review of the pause.</p></section>
+   <section id="anc-sources"><h3 class="text-sm font-bold mb-2">Sources &amp; unknowns</h3>
+    <p class="label-xs font-bold mt-2">Business observations</p><p class="text-subtle">Weekday lunch orders down 18% over 4 weeks (source reports).</p>
+    <p class="label-xs font-bold mt-2">Hypotheses</p><p class="text-subtle">A demand-side, not operational, cause — untested until the campaign runs.</p>
+    <p class="label-xs font-bold mt-2">Missing evidence</p><p class="text-subtle">Profit impact not yet estimated — cost data incomplete for Delivery A. External market research unavailable for this scope.</p>
+   </section>`;
+  $('#proposal-dialog-foot').innerHTML = `
+   <div class="gate-note mb-3">${icon('shield-check')}<span><strong>Approving prepares creatives only.</strong> Publishing each finished post or ad — including every later variation — requires its own review after you see the exact output.</span></div>
+   <div class="flex flex-wrap gap-2">
+    <button class="btn btn-primary btn-sm" onclick="approveProposal('${p.id}')">Approve &amp; prepare creatives</button>
+    <button class="btn btn-sm" onclick="openRequestChanges('${p.id}')">Request changes</button>
+    <button class="btn btn-sm" aria-haspopup="menu" onclick="toast('Snooze / Dismiss recorded in the real flow, with a saved reason.')">Snooze / Dismiss</button>
+   </div>`;
+  const dlgBody=$('.dlg-body','#proposal-dialog')||$('#proposal-dialog .dlg-body');
+  dlgBody.addEventListener('scroll',highlightAnchor,{passive:true});
+  lastFocused=document.activeElement; $('#proposal-dialog').showModal();
+  $('#proposal-dialog .btn-primary')?.focus();
+}
+function jumpAnchor(k){ $('#anc-'+k).scrollIntoView({behavior:'smooth',block:'start'}); }
+function highlightAnchor(){
+  const body=$('#proposal-dialog .dlg-body'); if(!body) return;
+  const sections=anchorGroups.map(([k])=>$('#anc-'+k)).filter(Boolean);
+  let current=sections[0];
+  for(const s of sections){ if(s.getBoundingClientRect().top - body.getBoundingClientRect().top < 80) current=s; }
+  $$('#proposal-anchor-nav button').forEach(b=>b.classList.toggle('active', current && b.dataset.anchor===current.id.replace('anc-','')));
+}
+function approveProposal(id){
+  const p=proposals.find(x=>x.id===id); p.approved=true;
+  closeDialog('proposal-dialog'); renderProposals();
+  toast('Approved. Preparation cost limit '+p.capLimit+' applies. Creative preparation is starting.');
+}
+function openRequestChanges(id){
+  $('#generic-dialog-title').textContent='Request changes';
+  $('#generic-dialog-body').innerHTML=`<label class="field-label" for="rc-text">What should change?</label><textarea id="rc-text" class="field-input" dir="auto" style="min-height:100px"></textarea><button class="btn btn-primary btn-sm mt-3" onclick="closeDialog('generic-dialog');closeDialog('proposal-dialog');toast('Change request saved to this proposal.')">Send</button>`;
+  $('#generic-dialog').showModal();
+}
+function renderSettingsDialog(){
+  const s=$('#settings-scenario').value;
+  const el=$('#settings-body');
+  if(s==='unset'){ el.innerHTML=`<p class="text-subtle">Automatic research hasn't been configured for this organization yet.</p><button class="btn btn-primary btn-sm mt-3" onclick="closeDialog('settings-dialog');toast('Setup would start here in the real flow.')">Set up research</button>`; return; }
+  const exhausted = s==='exhausted';
+  el.innerHTML=`
+   <div class="flex items-center justify-between mb-3"><span class="text-sm font-semibold">Automatic research</span><span class="chip chip-action">${icon('check')}Enabled</span></div>
+   <dl class="space-y-3 text-xs">
+    <div><dt class="label-xs">Schedule</dt><dd class="mt-1">Weekly, Mondays 06:00 Asia/Dubai</dd></div>
+    <div><dt class="label-xs">Qualifying business changes</dt><dd class="mt-1">A metric moves 15%+ vs. its 4-week baseline, or a new source is connected</dd></div>
+    <div><dt class="label-xs">Cooldown</dt><dd class="mt-1">14 days between proposals for the same issue</dd></div>
+    <div><dt class="label-xs">Pending-proposal limit</dt><dd class="mt-1">Max 3 open proposals at once</dd></div>
+    <div><dt class="label-xs">Research allowance</dt><dd class="mt-1 ${exhausted?'text-danger font-semibold':''}">${exhausted?'Exhausted — 5 of 5 runs used, resets 1 Oct 2026':'2 of 5 runs used this month, resets 1 Oct 2026'}</dd></div>
+    <div><dt class="label-xs">Last evaluation</dt><dd class="mt-1">Today 06:00 — no new proposal warranted</dd></div>
+    <div><dt class="label-xs">Last successful research</dt><dd class="mt-1">28 Aug 2026</dd></div>
+    <div><dt class="label-xs">Next scheduled evaluation</dt><dd class="mt-1">Mon, 14 Sep 2026, 06:00 Asia/Dubai</dd></div>
+   </dl>
+   <p class="label-xs mt-3">Pausing research leaves existing campaign monitoring running. Only managers can save changes here; viewers see this as read-only.</p>
+   ${document.body.dataset.role==='viewer'?'':'<button class="btn btn-sm mt-3">Pause automatic research</button>'}`;
+}
+function openResearchSettings(){ lastFocused=document.activeElement; renderSettingsDialog(); $('#settings-dialog').showModal(); }
+
+/* ---------- init ---------- */
+renderPortfolio();
+renderProposals();
+renderDetailTabsInit:{ renderDetail(); }
+initStudio();
+renderFolders(); renderVerdictFilters(); renderLibraryGrid(); initLibraryTabs(); initLibraryExtras();
+go(location.hash ? location.hash.slice(1) : 'portfolio');
+window.addEventListener('popstate',()=>go(location.hash.slice(1)||'portfolio'));
+</script>
+</body>
+</html>
