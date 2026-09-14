@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  brandContextFromBrandAssets,
+  mergeBrandContext,
+} from "@/domain/onboarding/canonical-promotion";
 import { toCostRateRows } from "@/domain/onboarding/cost-rates";
 import type { Database } from "@/lib/supabase/database.types";
 import { DomainError } from "@/lib/errors";
@@ -65,6 +69,53 @@ function raise(message: string, cause?: unknown): never {
  * Correcting a typo is not a commission tier change, and only a new date opens
  * a new effective period.
  */
+/**
+ * Writes one section's answers into the canonical business profile, keeping
+ * every other section's.
+ *
+ * Sections complete in any order and each promotes its own keys, so this can
+ * never be a whole-row write. It used to be: business identity upserted the
+ * profile with `brand_context` replaced outright and `languages`,
+ * `customer_segments` and `operating_model` reset to empty, which quietly
+ * discarded whatever another section had already put there.
+ *
+ * Read-then-write, rather than a jsonb merge in SQL. Two sections promoted at
+ * the same instant could still lose one side, but onboarding is one operator
+ * answering one section at a time, and the alternative is an RPC and a
+ * migration for a race this flow does not have. The read runs under the
+ * caller's own session, so RLS decides whether this profile is theirs to see.
+ */
+async function promoteBusinessProfile(
+  supabase: OnboardingClient,
+  input: {
+    organizationId: string;
+    userId: string;
+    brandContext: Record<string, unknown> | null;
+    /** Absent leaves whatever is on record; null is not a value here. */
+    valueProposition?: string;
+  },
+): Promise<void> {
+  const { data: existing, error: readError } = await supabase
+    .from("business_profiles")
+    .select("*")
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+  if (readError) raise("Business profile could not be read.", readError);
+
+  const { error } = await supabase.from("business_profiles").upsert({
+    organization_id: input.organizationId,
+    value_proposition: input.valueProposition ?? existing?.value_proposition ?? null,
+    brand_context: mergeBrandContext(existing?.brand_context, input.brandContext),
+    source: "operator",
+    updated_by: input.userId,
+    customer_segments: existing?.customer_segments ?? [],
+    languages: existing?.languages ?? [],
+    operating_model: existing?.operating_model ?? {},
+    business_model: existing?.business_model ?? null,
+  });
+  if (error) raise("Business profile could not be promoted.", error);
+}
+
 async function promoteCostRates(
   supabase: OnboardingClient,
   input: { organizationId: string; payload: Record<string, unknown> },
@@ -315,6 +366,22 @@ export function createOnboardingRepository(supabase: OnboardingClient): Onboardi
         await promoteCostRates(supabase, input);
         return;
       }
+
+      // Brand assets was collected and never promoted, so `brand_context`
+      // kept no voice however carefully the section was filled in, and every
+      // campaign in the organization reported `brand_voice` missing.
+      if (input.sectionKey === "brand_assets") {
+        const brandContext = brandContextFromBrandAssets(input.payload);
+        if (brandContext) {
+          await promoteBusinessProfile(supabase, {
+            organizationId: input.organizationId,
+            userId: input.userId,
+            brandContext,
+          });
+        }
+        return;
+      }
+
       if (input.sectionKey !== "business_identity") return;
       const organizationPatch: Database["public"]["Tables"]["organizations"]["Update"] = {};
       if (typeof input.payload.name === "string" && input.payload.name.trim())
@@ -332,24 +399,18 @@ export function createOnboardingRepository(supabase: OnboardingClient): Onboardi
         typeof input.payload.valueProposition === "string" ||
         typeof input.payload.legalIdentity === "string"
       ) {
-        const { error } = await supabase.from("business_profiles").upsert({
-          organization_id: input.organizationId,
-          value_proposition:
-            typeof input.payload.valueProposition === "string"
-              ? input.payload.valueProposition
-              : null,
-          brand_context:
+        await promoteBusinessProfile(supabase, {
+          organizationId: input.organizationId,
+          userId: input.userId,
+          brandContext:
             typeof input.payload.legalIdentity === "string"
               ? { legalIdentity: input.payload.legalIdentity }
-              : {},
-          source: "operator",
-          updated_by: input.userId,
-          customer_segments: [],
-          languages: [],
-          operating_model: {},
-          business_model: null,
+              : null,
+          valueProposition:
+            typeof input.payload.valueProposition === "string"
+              ? input.payload.valueProposition
+              : undefined,
         });
-        if (error) raise("Business profile could not be promoted.", error);
       }
     },
   };

@@ -123,7 +123,28 @@ export type BusinessFactInput = z.infer<typeof businessFactInputSchema>;
 export const goalInputSchema = z
   .object({
     name: z.string().trim().min(2).max(160),
+    /** How the goal is worded for a reader. Never used for resolution. */
     metric: z.string().trim().min(2).max(120),
+    /**
+     * The registered metric this goal is measured by.
+     *
+     * Optional, because a goal is allowed to exist before anyone has decided
+     * which registered metric it maps to. But it is the only field campaign
+     * generation can read: `load_campaign_creation_facts` selects goals
+     * `where metric_key is not null`, so a goal without one supplies no
+     * primary metric and no baseline source, and every campaign in the
+     * organization reports both missing.
+     *
+     * The pattern is the column's own check constraint. Validating it here
+     * means an undotted key is refused as a sentence rather than surfacing as
+     * a Postgres constraint name.
+     */
+    metricKey: z
+      .string()
+      .trim()
+      .max(200)
+      .regex(/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/)
+      .optional(),
     baselineStatus: z.enum(["known", "unknown", "estimated"]),
     baselineValue: z.number().nullable().optional(),
     targetValue: z.number(),

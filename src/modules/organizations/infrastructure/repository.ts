@@ -253,6 +253,12 @@ export async function createGoal(
       organization_id: organizationId,
       name: input.name,
       metric: input.metric,
+      // The column campaign generation actually reads. It was never written
+      // here, so `load_campaign_creation_facts` — which selects goals
+      // `where metric_key is not null` — matched nothing, and every campaign
+      // reported `primary_metric` and `baseline_source` missing regardless of
+      // how many goals the organization had.
+      metric_key: input.metricKey ?? null,
       baseline_status: input.baselineStatus,
       baseline_value: input.baselineValue ?? null,
       target_value: input.targetValue,
