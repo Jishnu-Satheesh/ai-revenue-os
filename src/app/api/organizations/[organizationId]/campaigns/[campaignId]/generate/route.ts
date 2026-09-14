@@ -76,7 +76,14 @@ export async function POST(
   }
 }
 
-/** The snapshot this campaign was created with. Reads stay inside RLS. */
+/**
+ * The evidence this campaign would generate from now. Reads stay inside RLS.
+ *
+ * Explicitly the newest. A campaign used to have exactly one snapshot, so this
+ * took whichever row came back and the question never arose; repairing a
+ * campaign's evidence pins a second one, and "whichever row the planner
+ * happened to return" would then decide what a run is built from.
+ */
 async function latestSnapshotId(
   context: { supabase: unknown; organizationId: string },
   campaignId: string,
@@ -91,7 +98,19 @@ async function latestSnapshotId(
           eq(
             column: string,
             value: string,
-          ): Promise<{ data: { id: string }[] | null; error: unknown }>;
+          ): {
+            order(
+              column: string,
+              options: { ascending: boolean },
+            ): {
+              order(
+                column: string,
+                options: { ascending: boolean },
+              ): {
+                limit(count: number): Promise<{ data: { id: string }[] | null; error: unknown }>;
+              };
+            };
+          };
         };
       };
     };
@@ -100,7 +119,12 @@ async function latestSnapshotId(
     .from("campaign_source_snapshots")
     .select("id")
     .eq("organization_id", context.organizationId)
-    .eq("campaign_id", campaignId);
+    .eq("campaign_id", campaignId)
+    // The id breaks a tie between two snapshots captured in the same instant,
+    // so the answer is stable rather than whichever the planner returned first.
+    .order("captured_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1);
   const [row] = data ?? [];
   if (!row) throw new Error("This campaign has no pinned evidence to generate from.");
   return row.id;
