@@ -71,3 +71,75 @@ connectors drop out, so no rule points at nothing.
 - A campaign in `Scheduled / Live` or `Results & learning`. Neither campaign in
   this organization has reached those phases, so those strip positions and the
   Results tab's populated state are covered by unit tests only.
+
+---
+
+# Creative Studio — browser verification
+
+Date: 2026-09-14. Same organization and campaign, same method.
+Compared against visual-contract §6 and `.superdesign/campaign-experience/03-studio-1440.png`.
+
+Proof: `2026-09-14-studio-1440.png`, `2026-09-14-studio-390.png`.
+
+## What was exercised, live
+
+- The three-column composition: editing rail, canvas, context inspector. With the AppShell
+  sidebar the content is ~1120px at a 1440px window, which is below the contract's 1200px
+  threshold, so the inspector is correctly a Sheet at that width rather than a third column.
+  It becomes a column only at `2xl`.
+- **The preview.** It places the campaign's real Malayalam headline into the template's own
+  text box, wrapped by `fitTextToBox` — the renderer's own shrink-to-fit rule — over the real
+  plate. Editing the headline re-wraps it live: a shorter headline moved from three lines to
+  two. It is labelled Preview, with a sentence saying sizes land close to the finished poster
+  and not identical to it.
+- **Undo.** Typed 18 characters into the headline in one burst, clicked Undo once, and the
+  approved text came back. Undo then correctly disabled and the state pill returned to Saved.
+- **The language check.** See below.
+- Text / Image / Layout tabs, the state pill, Return to review, and the adaptive primary
+  button (Render this poster when the approved words are untouched, Save changes once they
+  are not).
+- 390x844: no horizontal overflow, single column, canvas above the controls as §6 requires.
+
+## Defects found in the browser and fixed
+
+**Nothing warned that the words and the chosen language disagreed.** The header read
+"English" while the copy was Malayalam. The language picker chooses which font draws the
+poster; the copy is whatever the approved manifest holds, and nothing stopped those
+disagreeing. Drawing Malayalam with the Latin face is the exact failure the renderer spike
+recorded — seven empty boxes, no exception, a plausible measured width. `findUncoveredGlyphs`
+catches it from the font's cmap, but only after the render has been queued and spent.
+
+Added `src/domain/campaigns/script-detection.ts`, which answers the one question Unicode
+block membership settles on its own: which writing systems are present in a string. The
+Studio now warns before the render and offers the language that would work. It is
+deliberately a mismatch detector and never a coverage check — a block-range approximation
+that returned "covered" would be a green tick nobody earned. It can fire; it can never clear
+anything.
+
+**Undo was per-keystroke.** Reverting a headline would have meant clicking Undo forty times.
+Typing is now coalesced into one history entry per burst per field, and editing after an undo
+discards the redo branch rather than leaving Redo pointing at a draft that no longer follows
+from what is on screen.
+
+## Deliberate divergences from the contract, with reasons
+
+**No single "Save & render" button.** §6 names one. Editing approved copy writes a *new
+version* through `/edits`, and rendering draws *one* version through `/renders`. Chaining
+them client-side would render against a version whose assets this page has not read, which is
+how the wrong picture ends up under the right words. The button therefore says which act it
+is about to perform, and a save routes to the version it created.
+
+**The offer line is not an input.** §6 lists it among the Text tab's fields. The manifest
+holds no governed short offer sentence — `lockedOfferRef` is an internal key, the brief's
+offer text never reaches the manifest, and the only money-typed fields are advertising spend
+ceilings. A text box there would be the one place in the product where somebody could type
+"50% off" onto artwork nobody approved. It is shown with its reason instead, which serves
+§6's own rule that offer changes must never be editable solely as image pixels.
+
+## Not verified here
+
+- A completed render. Queueing one needs a worker; the Posters/verification panel therefore
+  shows its honest "Nothing checked yet" state, and before/after is correctly not offered
+  when there is no "after".
+- The stale-version conflict surface. It is unit-tested and its trigger is a concurrent write
+  to the same version, which this session could not stage against shared staging safely.
