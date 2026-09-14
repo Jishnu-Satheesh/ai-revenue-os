@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Eye, Maximize2, SquareDashed, ZoomIn, ZoomOut } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -128,7 +128,6 @@ export function StudioPreview({
   const [safeArea, setSafeArea] = useState(false);
   const [showRendered, setShowRendered] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const [fitted, setFitted] = useState<readonly FittedBox[] | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const boxes = useMemo(
@@ -138,33 +137,40 @@ export function StudioPreview({
   );
 
   /**
-   * Measurement needs a canvas, so it happens after mount rather than during
-   * render. The server has no `measureText`, and guessing one there would
-   * produce a first paint that disagrees with the second.
+   * Whether text can be measured yet.
+   *
+   * Measurement needs a canvas, which the server does not have, so the first
+   * paint places no text and the one after hydration does. Subscribing to that
+   * as an external fact — which is what it is — keeps the server and hydration
+   * renders identical, where computing it directly would either mismatch the
+   * two or mean a `setState` during an effect and the cascading render that
+   * comes with it.
    */
-  useEffect(() => {
+  const canMeasure = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+
+  const fitted = useMemo((): readonly FittedBox[] | null => {
+    if (!canMeasure) return null;
     const canvas = (canvasRef.current ??= document.createElement("canvas"));
     const context = canvas.getContext("2d");
-    if (!context) {
-      setFitted(null);
-      return;
-    }
+    if (!context) return null;
     const measure = browserMeasure(context, script);
 
-    setFitted(
-      boxes
-        .filter((entry) => entry.value !== null)
-        .map(({ box, value }) => {
-          const outcome = fitTextToBox(value as string, box, measure);
-          return {
-            box,
-            outcome: outcome.fitted
-              ? { fitted: true as const, fontSizePx: outcome.fontSizePx, lines: outcome.lines }
-              : { fitted: false as const, minFontSizePx: outcome.minFontSizePx },
-          };
-        }),
-    );
-  }, [boxes, script]);
+    return boxes
+      .filter((entry) => entry.value !== null)
+      .map(({ box, value }) => {
+        const outcome = fitTextToBox(value as string, box, measure);
+        return {
+          box,
+          outcome: outcome.fitted
+            ? { fitted: true as const, fontSizePx: outcome.fontSizePx, lines: outcome.lines }
+            : { fitted: false as const, minFontSizePx: outcome.minFontSizePx },
+        };
+      });
+  }, [boxes, script, canMeasure]);
 
   const overflowing = (fitted ?? []).flatMap((entry) =>
     entry.outcome.fitted ? [] : [{ slot: entry.box.slot, minFontSizePx: entry.outcome.minFontSizePx }],
@@ -256,8 +262,10 @@ export function StudioPreview({
           data-testid="studio-preview-canvas"
         >
           {showing === "rendered" && renderedUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- a signed,
-            // short-lived Storage URL; the optimizer would cache it past expiry.
+            /* A signed, short-lived Storage URL. It does not go through the
+               Next optimizer, which would cache it past its expiry and cannot
+               fetch a private object in the first place. */
+            /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={renderedUrl}
               alt="The poster as the renderer drew it"
@@ -266,7 +274,8 @@ export function StudioPreview({
           ) : (
             <>
               {plateUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- as above.
+                /* Signed and short-lived, as above. */
+                /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={plateUrl}
                   alt=""
