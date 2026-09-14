@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Search } from "lucide-react";
 
 import { ResearchProjectRow } from "@/components/growth-intelligence/research-project-row";
+import { ReportReaderDialog } from "@/components/growth-intelligence/report-reader";
 import {
   NEW_RESEARCH_OPEN_EVENT,
   parseMonitoringProjectStatus,
@@ -201,7 +202,7 @@ export function MarketWatchProjectsView({
   contextGaps: readonly MarketWatchContextGap[];
   onNewResearch: () => void;
   /**
-   * Slice 5 reader entry point. Absent by default: the Review report
+   * Report reader entry point. Absent by default: the Review report
    * control renders disabled with its reason instead of opening anything.
    */
   onReviewReport?: (reportVersionId: string) => void;
@@ -420,6 +421,7 @@ export function MarketWatchProjectsSection({
   const [projects, setProjects] = useState<ProjectsResponse | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "failed">("loading");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [readerVersionId, setReaderVersionId] = useState<string | null>(null);
   // A started research refreshes the list through this token.
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -510,7 +512,22 @@ export function MarketWatchProjectsSection({
         businessInsights={businessInsights}
         contextGaps={contextGaps}
         onNewResearch={() => setDialogOpen(true)}
-        onReviewReport={onReviewReport}
+        onReviewReport={(reportVersionId) => {
+          if (onReviewReport) {
+            onReviewReport(reportVersionId);
+            return;
+          }
+          setReaderVersionId(reportVersionId);
+        }}
+      />
+      <ReportReaderDialog
+        organizationId={organizationId}
+        reportVersionId={readerVersionId}
+        open={readerVersionId !== null}
+        onOpenChange={(next) => {
+          if (!next) setReaderVersionId(null);
+        }}
+        timeZone={timeZone}
       />
       <NewResearchDialog
         organizationId={organizationId}

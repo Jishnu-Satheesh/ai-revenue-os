@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 import type { MarketProfileView } from "@/modules/growth-intelligence/application/ports";
 import {
   buildMarketWatch,
+  buildMarketWatchProjectList,
+  countMarketWatchProjectsByStatus,
+  filterMarketWatchProjects,
+  selectFeaturedMarketWatchReport,
   type MarketWatchInput,
+  type MarketWatchProjectListItem,
+  type MarketWatchProjectRecord,
+  type MarketWatchProjectReportSummary,
+  type MarketWatchProjectRevisionSummary,
 } from "@/modules/growth-intelligence/application/market-watch";
 
 const organizationId = "10000000-0000-4000-8000-000000000001";
@@ -289,5 +297,217 @@ describe("buildMarketWatch", () => {
         safeFailureCode: "ADAPTER_UNAVAILABLE",
       }),
     ]);
+  });
+});
+
+const downtownId = "20000000-0000-4000-8000-000000000002";
+const marinaId = "21000000-0000-4000-8000-000000000021";
+
+function projectRecord(overrides: Partial<MarketWatchProjectRecord> = {}): MarketWatchProjectRecord {
+  return {
+    projectId: "50000000-0000-4000-8000-000000000005",
+    organizationId,
+    branchId: downtownId,
+    branchName: "Downtown",
+    title: "Prepare for National Day",
+    question: "How should we prepare for National Day?",
+    mode: "one-time",
+    lifecycle: "active",
+    createdAt: "2026-09-10T10:00:00Z",
+    ...overrides,
+  };
+}
+
+function reportSummary(
+  overrides: Partial<MarketWatchProjectReportSummary> = {},
+): MarketWatchProjectReportSummary {
+  return {
+    reportVersionId: "60000000-0000-4000-8000-000000000006",
+    briefRevisionId: "61000000-0000-4000-8000-000000000061",
+    reviewState: "pending_review",
+    createdAt: "2026-09-12T10:00:00Z",
+    takeaway: "Compare family offers and check delivery capacity before choosing a promotion.",
+    ...overrides,
+  };
+}
+
+function revisionSummary(
+  overrides: Partial<MarketWatchProjectRevisionSummary> = {},
+): MarketWatchProjectRevisionSummary {
+  return {
+    revisionId: "61000000-0000-4000-8000-000000000061",
+    revisionNumber: 1,
+    pinnedToUpdateId: "62000000-0000-4000-8000-000000000062",
+    createdAt: "2026-09-10T11:00:00Z",
+    ...overrides,
+  };
+}
+
+function projectList(
+  records: MarketWatchProjectRecord[],
+  reports: Record<string, MarketWatchProjectReportSummary[]> = {},
+  revisions: Record<string, MarketWatchProjectRevisionSummary[]> = {},
+): MarketWatchProjectListItem[] {
+  return buildMarketWatchProjectList({
+    projects: records,
+    reportsByProject: new Map(Object.entries(reports)),
+    revisionsByProject: new Map(Object.entries(revisions)),
+  });
+}
+
+describe("buildMarketWatchProjectList", () => {
+  it("marks a project ready when its latest brief scope has a persisted report", () => {
+    const record = projectRecord();
+    const [item] = projectList([record], { [record.projectId]: [reportSummary()] }, {
+      [record.projectId]: [revisionSummary()],
+    });
+
+    expect(item!.displayState).toBe("ready");
+    expect(item!.stateLabel).toBe("Ready to review");
+    expect(item!.latestReport?.takeaway).toContain("delivery capacity");
+    expect(item!.priorReport).toBeNull();
+  });
+
+  it("marks a pinned scope without a report as researching and retains the prior report", () => {
+    const record = projectRecord();
+    const prior = reportSummary({
+      reportVersionId: "63000000-0000-4000-8000-000000000063",
+      briefRevisionId: "64000000-0000-4000-8000-000000000064",
+      createdAt: "2026-09-08T10:00:00Z",
+    });
+    const [item] = projectList(
+      [record],
+      { [record.projectId]: [prior] },
+      {
+        [record.projectId]: [
+          revisionSummary({ revisionId: "65000000-0000-4000-8000-000000000065", revisionNumber: 2 }),
+        ],
+      },
+    );
+
+    expect(item!.displayState).toBe("researching");
+    expect(item!.stateLabel).toBe("Researching");
+    expect(item!.priorReport?.reportVersionId).toBe(prior.reportVersionId);
+  });
+
+  it("keeps paused projects distinct and links their prior report", () => {
+    const record = projectRecord({ lifecycle: "paused", title: "Local customer feedback" });
+    const [item] = projectList([record], { [record.projectId]: [reportSummary()] }, {
+      [record.projectId]: [revisionSummary()],
+    });
+
+    expect(item!.displayState).toBe("paused");
+    expect(item!.stateLabel).toBe("Monitoring paused");
+    expect(item!.priorReport?.reportVersionId).toBe("60000000-0000-4000-8000-000000000006");
+  });
+
+  it("marks an active project with nothing pinned and nothing persisted as needing attention", () => {
+    const record = projectRecord({ title: "Weekend delivery opportunity" });
+    const [item] = projectList([record]);
+
+    expect(item!.displayState).toBe("needs_attention");
+    expect(item!.stateLabel).toBe("Needs attention");
+    expect(item!.latestReport).toBeNull();
+    expect(item!.priorReport).toBeNull();
+  });
+
+  it("never invents progress figures or promises on any row", () => {
+    const items = projectList(
+      [projectRecord(), projectRecord({ projectId: "51000000-0000-4000-8000-000000000051" })],
+      {},
+      {},
+    );
+
+    for (const item of items) {
+      expect(JSON.stringify(item)).not.toMatch(/percent|progress|eta|complete in/i);
+    }
+  });
+});
+
+describe("filterMarketWatchProjects", () => {
+  const ready = projectRecord();
+  const researching = projectRecord({
+    projectId: "51000000-0000-4000-8000-000000000051",
+    title: "Competitor monitoring",
+    question: "Which nearby competitors changed their offers this week?",
+    mode: "recurring",
+  });
+  const paused = projectRecord({
+    projectId: "52000000-0000-4000-8000-000000000052",
+    branchId: marinaId,
+    branchName: "Marina",
+    title: "Local customer feedback",
+    question: "What do regulars praise or complain about?",
+    lifecycle: "paused",
+  });
+  const items = projectList(
+    [ready, researching, paused],
+    {
+      [ready.projectId]: [reportSummary()],
+      [paused.projectId]: [reportSummary({ reportVersionId: "66000000-0000-4000-8000-000000000066" })],
+    },
+    {
+      [ready.projectId]: [revisionSummary()],
+      [researching.projectId]: [
+        revisionSummary({ revisionId: "67000000-0000-4000-8000-000000000067", revisionNumber: 1 }),
+      ],
+      [paused.projectId]: [revisionSummary()],
+    },
+  );
+
+  it("filters the list and the featured report by location consistently", () => {
+    const downtown = filterMarketWatchProjects(items, {
+      branchId: downtownId,
+      search: "",
+      status: "all",
+    });
+
+    expect(downtown.map((item) => item.projectId).sort()).toEqual(
+      [ready.projectId, researching.projectId].sort(),
+    );
+    expect(selectFeaturedMarketWatchReport(downtown)?.projectId).toBe(ready.projectId);
+
+    const marina = filterMarketWatchProjects(items, {
+      branchId: marinaId,
+      search: "",
+      status: "all",
+    });
+    expect(selectFeaturedMarketWatchReport(marina)).toBeNull();
+  });
+
+  it("matches search text literally across title, question and location", () => {
+    const matched = filterMarketWatchProjects(items, {
+      branchId: null,
+      search: "national day",
+      status: "all",
+    });
+    expect(matched.map((item) => item.projectId)).toEqual([ready.projectId]);
+
+    const none = filterMarketWatchProjects(items, {
+      branchId: null,
+      search: "no such project here",
+      status: "all",
+    });
+    expect(none).toEqual([]);
+  });
+
+  it("counts each status once for the compact filter buttons", () => {
+    expect(countMarketWatchProjectsByStatus(items)).toEqual({
+      all: 3,
+      ready: 1,
+      in_progress: 1,
+      paused: 1,
+      needs_attention: 0,
+    });
+  });
+
+  it("features the first ready report and nothing when no report is ready", () => {
+    expect(selectFeaturedMarketWatchReport(items)?.projectId).toBe(ready.projectId);
+    const withoutReady = filterMarketWatchProjects(items, {
+      branchId: null,
+      search: "",
+      status: "in_progress",
+    });
+    expect(selectFeaturedMarketWatchReport(withoutReady)).toBeNull();
   });
 });

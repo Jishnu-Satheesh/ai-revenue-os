@@ -6,6 +6,11 @@ import {
   MarketWatchProjectsSection,
   MarketWatchProjectsView,
 } from "@/components/growth-intelligence/market-watch-projects";
+import { briefRevisionSchema } from "@/domain/growth-intelligence/brief";
+import {
+  assembleReportReader,
+  type AssembledReportView,
+} from "@/modules/growth-intelligence/application/report-reader";
 import {
   buildMarketWatchProjectList,
   type MarketWatchProjectListItem,
@@ -390,6 +395,167 @@ describe("MarketWatchProjectsSection", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /retry/i }));
       expect(await screen.findByText("Prepare for National Day")).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("MarketWatchProjectsSection report reader wiring", () => {
+  const REPORT_VERSION = "60000000-0000-4000-8000-000000000006";
+  const REVISION = "61000000-0000-4000-8000-000000000061";
+  const PROJECT = "50000000-0000-4000-8000-000000000005";
+  const CLAIM = "90000000-0000-4000-8000-000000000009";
+
+  function readerView(): AssembledReportView {
+    return assembleReportReader({
+      organizationId: ORGANIZATION,
+      reportRow: {
+        reportId: "64000000-0000-4000-8000-000000000064",
+        reportVersionId: REPORT_VERSION,
+        organizationId: ORGANIZATION,
+        projectId: PROJECT,
+        branchId: DOWNTOWN,
+        briefRevisionId: REVISION,
+        evidenceDigest: "digest-pinned-1",
+        content: {
+          reportId: "64000000-0000-4000-8000-000000000064",
+          reportVersionId: REPORT_VERSION,
+          organizationId: ORGANIZATION,
+          projectId: PROJECT,
+          locationId: DOWNTOWN,
+          briefRevisionId: REVISION,
+          evidenceDigest: "digest-pinned-1",
+          summary: "Compare family offers and check delivery capacity before choosing a promotion.",
+          localMeaning: "Downtown families order early for National Day.",
+          findings: [
+            {
+              key: "finding-1",
+              statement: "Family bundles appear across competitors.",
+              citationSlots: [{ claimId: CLAIM, sourceRef: "S1" }],
+            },
+          ],
+          competitorComparison: [
+            { competitorName: "Rival Kitchen", summary: "Promotes family bundles." },
+          ],
+          gaps: [],
+          draftAdvice: [],
+          sources: [{ sourceRef: "S1", url: "https://rival.example/menu" }],
+        },
+        reviewState: "pending_review",
+        createdAt: "2026-09-12T10:00:00.000Z",
+      },
+      briefRow: {
+        revisionId: REVISION,
+        organizationId: ORGANIZATION,
+        projectId: PROJECT,
+        revisionNumber: 1,
+        document: briefRevisionSchema.parse({
+          revisionId: REVISION,
+          projectId: PROJECT,
+          organizationId: ORGANIZATION,
+          revisionNumber: 1,
+          question: "How should we prepare for National Day?",
+          title: "Prepare for National Day",
+          locationId: DOWNTOWN,
+          researchArea: "Downtown Dubai",
+          competitors: [],
+          investigationAreas: ["demand", "presence", "offers", "reviews", "observable_performance"],
+          evidencePeriods: [],
+          businessContextSnapshotId: "00000000-0000-4000-8000-000000000000",
+          frequency: "once",
+          pinnedToUpdateId: "66000000-0000-4000-8000-000000000066",
+          createdAtUtc: "2026-09-10T11:00:00.000Z",
+        }),
+        createdAt: "2026-09-10T11:00:00.000Z",
+      },
+      project: {
+        projectId: PROJECT,
+        organizationId: ORGANIZATION,
+        branchId: DOWNTOWN,
+        title: "Prepare for National Day",
+        question: "How should we prepare for National Day?",
+      },
+      branchName: "Downtown",
+    });
+  }
+
+  function sectionProps() {
+    return {
+      organizationId: ORGANIZATION,
+      branches,
+      timeZone: "Asia/Dubai",
+      businessInsights: [],
+      contextGaps: [],
+      evidencePeriods: [],
+      canManage: true,
+    };
+  }
+
+  it("opens the pinned reader from Review report and keeps it across filter changes", async () => {
+    const listBody = {
+      projects: [
+        {
+          projectId: PROJECT,
+          organizationId: ORGANIZATION,
+          branchId: DOWNTOWN,
+          branchName: "Downtown",
+          title: "Prepare for National Day",
+          question: "How should we prepare for National Day?",
+          mode: "one-time",
+          lifecycle: "active",
+          createdAt: "2026-09-10T10:00:00Z",
+        },
+      ],
+      reportsByProject: {
+        [PROJECT]: [
+          {
+            reportVersionId: REPORT_VERSION,
+            briefRevisionId: REVISION,
+            reviewState: "pending_review",
+            createdAt: "2026-09-12T10:00:00Z",
+            takeaway: "Compare family offers and check delivery capacity.",
+          },
+        ],
+      },
+      revisionsByProject: {
+        [PROJECT]: [
+          {
+            revisionId: REVISION,
+            revisionNumber: 1,
+            pinnedToUpdateId: "66000000-0000-4000-8000-000000000066",
+            createdAt: "2026-09-10T11:00:00Z",
+          },
+        ],
+      },
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/monitoring/reports/")) {
+        return new Response(JSON.stringify({ report: readerView() }), { status: 200 });
+      }
+      return new Response(JSON.stringify(listBody), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(<MarketWatchProjectsSection {...sectionProps()} />);
+      expect(await screen.findByText("Prepare for National Day")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /review report/i }));
+      expect(await screen.findByText("What matters for Downtown")).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/organizations/${ORGANIZATION}/growth-intelligence/monitoring/reports/${REPORT_VERSION}`,
+        expect.objectContaining({ cache: "no-store" }),
+      );
+
+      // Changing page filters never changes the opened report.
+      fireEvent.change(screen.getByLabelText("Find a research project"), {
+        target: { value: "no such project here" },
+      });
+      expect(await screen.findByText("No projects match these filters")).toBeTruthy();
+      expect(screen.getByText("What matters for Downtown")).toBeTruthy();
+      expect(
+        fetchMock.mock.calls.filter((call) => String(call[0]).includes("/monitoring/reports/")),
+      ).toHaveLength(1);
     } finally {
       vi.unstubAllGlobals();
     }
