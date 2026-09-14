@@ -7,7 +7,6 @@ import {
   BRIEF_INVESTIGATION_AREAS,
   briefCompetitorSchema,
   briefRevisionSchema,
-  type BriefRevision,
 } from "@/domain/growth-intelligence/brief";
 import { researchProjectScheduleSchema } from "@/domain/growth-intelligence/project";
 import { marketMonitoringReportSchema } from "@/domain/growth-intelligence/report";
@@ -20,10 +19,11 @@ import {
   marketProfileCorrelationState,
 } from "@/modules/growth-intelligence/application/api-schemas";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
+import { startMonitoringUpdate } from "@/modules/growth-intelligence/application/market-monitoring-update";
 import {
-  startMonitoringUpdate,
-  type MonitoringUpdateStore,
-} from "@/modules/growth-intelligence/application/market-monitoring-update";
+  createEphemeralMonitoringUpdateStore,
+  isSameMonitoringScope,
+} from "@/modules/growth-intelligence/application/monitoring-scope";
 import {
   createAuthenticatedResearchProjectRepository,
   type ResearchProjectRepository,
@@ -133,8 +133,6 @@ const startBodySchema = z
     }
   });
 
-export type MonitoringStartBody = z.infer<typeof startBodySchema>;
-
 function frequencyForMode(mode: "one-time" | "recurring", cadence?: string): string {
   if (mode === "one-time") return "once";
   return cadence ?? "weekly";
@@ -144,131 +142,6 @@ function deriveTitle(question: string): string {
   const trimmed = question.trim();
   if (trimmed.length <= 80) return trimmed;
   return `${trimmed.slice(0, 80).trimEnd()}…`;
-}
-
-/**
- * Scope equality between a persisted brief document and an incoming start.
- * Same question, title, location, research area, normalized competitors,
- * investigation areas, snapshot and frequency means the same ask: retries
- * and double submits join instead of starting new paid work. A mismatch
- * during active work is scope drift, reported — never silently applied.
- */
-export function isSameMonitoringScope(
-  document: BriefRevision,
-  input: {
-    title: string;
-    question: string;
-    branchId: string;
-    researchArea: string;
-    competitors: z.infer<typeof briefCompetitorSchema>[];
-    investigationAreas: readonly string[];
-    businessContextSnapshotId: string;
-    frequency: string;
-  },
-): boolean {
-  const normalizedCompetitors = z.array(briefCompetitorSchema).parse(input.competitors);
-  return (
-    document.question === input.question &&
-    (document.title ?? "") === input.title &&
-    document.locationId === input.branchId &&
-    document.researchArea === input.researchArea &&
-    JSON.stringify(document.competitors) === JSON.stringify(normalizedCompetitors) &&
-    JSON.stringify([...document.investigationAreas].sort()) ===
-      JSON.stringify([...input.investigationAreas].sort()) &&
-    document.businessContextSnapshotId === input.businessContextSnapshotId &&
-    document.frequency === input.frequency
-  );
-}
-
-/**
- * Request-scoped update store for the start route. Durable in-flight and
- * terminal-failure rows land with the Slice 7 lifecycle migration; until
- * then the route converges on durable pins it can already read (twin
- * project reuse plus the latest pinned brief revision), and this store only
- * carries the fresh reservation through one orchestration call.
- */
-export function createEphemeralMonitoringUpdateStore(): MonitoringUpdateStore {
-  type EphemeralRecord = {
-    organizationId: string;
-    projectId: string;
-    actorId: string;
-    idempotencyKey: string;
-    scopeFingerprint: string;
-    updateId: string;
-    briefRevisionId: string;
-    revisionNumber: number;
-    brief: BriefRevision | null;
-    status: "queued";
-    reportVersionId: null;
-    synthesisReportVersionId: null;
-    coverage: null;
-    knownCostMicrosUsd: number;
-    unknownCostCount: number;
-    dispatched: boolean;
-    createdAt: string;
-    updatedAt: string;
-  };
-  const records = new Map<string, EphemeralRecord>();
-  return {
-    async findActive() {
-      return null;
-    },
-    async open(input) {
-      const record = {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        actorId: input.actorId,
-        idempotencyKey: input.idempotencyKey,
-        scopeFingerprint: input.scopeFingerprint,
-        updateId: input.updateId,
-        briefRevisionId: "",
-        revisionNumber: input.revisionNumber,
-        brief: null,
-        status: "queued" as const,
-        reportVersionId: null,
-        synthesisReportVersionId: null,
-        coverage: null,
-        knownCostMicrosUsd: 0,
-        unknownCostCount: 0,
-        dispatched: false,
-        createdAt: input.nowIso,
-        updatedAt: input.nowIso,
-      };
-      records.set(input.updateId, record);
-      return { record, created: true };
-    },
-    async bindRevision(input) {
-      const record = records.get(input.updateId);
-      if (!record) throw new DomainError("DOMAIN_ERROR", "This research update is not known.");
-      const next = {
-        ...record,
-        briefRevisionId: input.briefRevisionId,
-        revisionNumber: input.revisionNumber,
-        brief: input.brief,
-      };
-      records.set(input.updateId, next);
-      return next;
-    },
-    async get(input) {
-      return records.get(input.updateId) ?? null;
-    },
-    async listUndispatched() {
-      return [];
-    },
-    async markDispatched(input) {
-      const record = records.get(input.updateId);
-      if (!record) throw new DomainError("DOMAIN_ERROR", "This research update is not known.");
-      const next = { ...record, dispatched: true };
-      records.set(input.updateId, next);
-      return next;
-    },
-    async completeResearchAndAttachSynthesis() {
-      throw new DomainError("DOMAIN_ERROR", "The start route never settles research.");
-    },
-    async markTerminal() {
-      throw new DomainError("DOMAIN_ERROR", "The start route never settles research.");
-    },
-  };
 }
 
 export async function GET(

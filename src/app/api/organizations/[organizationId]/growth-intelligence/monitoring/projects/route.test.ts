@@ -37,8 +37,8 @@ vi.mock("@/lib/logger", () => ({
 import {
   GET,
   POST,
-  isSameMonitoringScope,
 } from "@/app/api/organizations/[organizationId]/growth-intelligence/monitoring/projects/route";
+import { isSameMonitoringScope } from "@/modules/growth-intelligence/application/monitoring-scope";
 import { briefRevisionSchema, type BriefRevision } from "@/domain/growth-intelligence/brief";
 
 const ORGANIZATION = "10000000-0000-4000-8000-000000000001";
