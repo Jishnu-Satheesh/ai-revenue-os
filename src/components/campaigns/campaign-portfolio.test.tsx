@@ -190,7 +190,7 @@ describe("an empty portfolio explains itself", () => {
   });
 });
 
-describe("a campaign with no proposal cannot be opened", () => {
+describe("a campaign with no proposal is still reachable", () => {
   function pending(generation: CampaignListItem["generation"]): CampaignListItem {
     return item({
       awaitingFirstVersion: true,
@@ -203,17 +203,22 @@ describe("a campaign with no proposal cannot be opened", () => {
     });
   }
 
-  it("offers no link at all, rather than a link that 404s", () => {
+  it("links to the detail route, which explains why nothing is there", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
     const card = within(cardsOnly()[0]!);
+    const href = `/organizations/${ORGANIZATION_ID}/campaigns/c1000000-0000-4000-8000-000000000001`;
 
-    // Neither the title nor the review control may navigate. The detail route
-    // has no version to render, and `disabled` does not stop an anchor.
-    expect(card.queryByRole("link")).not.toBeInTheDocument();
-    expect(card.getByRole("button", { name: /open/i })).toBeDisabled();
+    // The detail route does not 404 on a version-less campaign. It names
+    // whether the campaign is still being built or whether generation stopped,
+    // which is the answer somebody staring at a stalled card came for. The
+    // attention strip already linked here; the card used to disagree.
+    // The artwork and the title are both links to the same place.
+    const links = card.getAllByRole("link", { name: /weekday evening demand lift/i });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link).toHaveAttribute("href", href);
   });
 
-  it("keeps the title readable even though it is no longer a link", () => {
+  it("keeps the title readable", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
 
     // Scoped to the card: this campaign also appears in the attention strip,
@@ -284,8 +289,10 @@ describe("a campaign with no proposal cannot be opened", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
     const card = within(cardsOnly()[0]!);
 
+    // No restart while a worker still holds the run — starting a second one
+    // would race the first. Opening it is fine; the page says it is building.
     expect(card.queryByRole("button", { name: /generate again/i })).not.toBeInTheDocument();
-    expect(card.getByRole("button", { name: /open/i })).toBeDisabled();
+    expect(card.getByRole("link", { name: /^open/i })).toBeInTheDocument();
   });
 
   it("says nothing about generation once a proposal exists", () => {

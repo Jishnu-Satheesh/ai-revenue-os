@@ -228,18 +228,19 @@ export function CampaignDetailWorkspace({
         onValueChange={(value) => openTab(value as CampaignDetailTab)}
         className="flex min-w-0 flex-col"
       >
-        {/* Underline tabs, scrollable rather than wrapped: five tabs do not fit
-            a phone, and a second row of tabs reads as an unrelated control. */}
+        {/* The `line` variant is the underline tab bar the contract asks for,
+            already in the design system. Scrollable rather than wrapped: five
+            tabs do not fit a phone, and a second row of tabs reads as an
+            unrelated control. `flex-none` keeps them grouped at the left —
+            the variant's triggers are `flex-1`, which would spread five tabs
+            across the full width and stop reading as a tab bar at all. */}
         <TabsList
+          variant="line"
           aria-label="Campaign sections"
-          className="w-full justify-start gap-1 overflow-x-auto rounded-none border-b bg-transparent p-0"
+          className="w-full justify-start overflow-x-auto border-b"
         >
           {TABS.map((key) => (
-            <TabsTrigger
-              key={key}
-              value={key}
-              className="rounded-none border-b-2 border-transparent px-3 pb-2 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-            >
+            <TabsTrigger key={key} value={key} className="flex-none">
               {TAB_LABEL[key]}
             </TabsTrigger>
           ))}

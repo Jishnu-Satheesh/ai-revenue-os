@@ -187,21 +187,13 @@ function CampaignCard({
   return (
     <li className="flex">
       <div className="flex w-full flex-col overflow-hidden rounded-lg border bg-card">
-        {campaign.openable ? (
-          <Link href={href} aria-label={campaign.title} className="block">
-            <Artwork
-              previewUrl={previewUrl}
-              awaitingFirstVersion={campaign.awaitingFirstVersion}
-              className="block h-44 w-full"
-            />
-          </Link>
-        ) : (
+        <Link href={href} aria-label={campaign.title} className="block">
           <Artwork
             previewUrl={previewUrl}
             awaitingFirstVersion={campaign.awaitingFirstVersion}
             className="block h-44 w-full"
           />
-        )}
+        </Link>
 
         <div className="flex items-center justify-between gap-2 border-y px-3 py-1.5 text-xs text-muted-foreground">
           <span>{campaign.spendCeiling ? "Organic + Paid" : "Organic"}</span>
@@ -210,15 +202,15 @@ function CampaignCard({
 
         <div className="flex flex-1 flex-col gap-2 p-4">
           <div className="flex items-start justify-between gap-2">
-            {campaign.openable ? (
-              <Link href={href} className="font-semibold underline-offset-4 hover:underline">
-                {campaign.title}
-              </Link>
-            ) : (
-              // Not a link, rather than a link that 404s. There is no proposal
-              // behind this campaign yet, so the route would render nothing.
-              <span className="font-semibold">{campaign.title}</span>
-            )}
+            {/* Always a link, including when no proposal exists. The detail
+                route answers that case directly — it names whether the campaign
+                is still being built or whether generation stopped, which is
+                exactly what somebody looking at a stalled card wants to know.
+                Withholding the link hid the explanation from the one campaign
+                that needed it. */}
+            <Link href={href} className="font-semibold underline-offset-4 hover:underline">
+              {campaign.title}
+            </Link>
             <Badge variant="secondary" className="shrink-0">
               {phaseBadge(campaign.phase.phase)}
             </Badge>
@@ -239,6 +231,9 @@ function CampaignCard({
             <span className="text-xs text-muted-foreground">
               Updated {updatedLabel(campaign.updatedAt, timeZone)}
             </span>
+            {/* A campaign whose generation stopped gets the button that
+                restarts it; everything else gets the way in. Both are reachable
+                either way — the title above links unconditionally. */}
             {campaign.openable ? (
               <Button variant="ghost" size="sm" asChild>
                 <Link href={href}>
@@ -247,11 +242,14 @@ function CampaignCard({
                 </Link>
               </Button>
             ) : campaign.generation.status === "generating" ? (
-              // `disabled` on a Button with `asChild` renders an anchor, and an
-              // anchor ignores it — which is how a campaign with no version
-              // stayed clickable all the way to a 404.
-              <Button variant="outline" size="sm" disabled>
-                Open
+              // Plainly "Open", not the phase's next action. A run is already in
+              // flight, so labelling this "Generate the proposal" would invite
+              // somebody to start a second one.
+              <Button variant="ghost" size="sm" asChild>
+                <Link href={href}>
+                  Open
+                  <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                </Link>
               </Button>
             ) : (
               <GenerateAgainButton organizationId={organizationId} campaignId={campaign.id} />
@@ -285,13 +283,9 @@ function CampaignRow({
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex flex-wrap items-center gap-2">
-          {campaign.openable ? (
-            <Link href={href} className="truncate font-medium underline-offset-4 hover:underline">
-              {campaign.title}
-            </Link>
-          ) : (
-            <span className="truncate font-medium">{campaign.title}</span>
-          )}
+          <Link href={href} className="truncate font-medium underline-offset-4 hover:underline">
+            {campaign.title}
+          </Link>
           <Badge variant="secondary">{phaseBadge(campaign.phase.phase)}</Badge>
         </span>
         <span className="truncate text-xs text-muted-foreground">
@@ -304,11 +298,9 @@ function CampaignRow({
       <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
         {updatedLabel(campaign.updatedAt, timeZone)}
       </span>
-      {campaign.openable ? (
-        <Button variant="outline" size="sm" asChild className="shrink-0">
-          <Link href={href}>Open</Link>
-        </Button>
-      ) : null}
+      <Button variant="outline" size="sm" asChild className="shrink-0">
+        <Link href={href}>Open</Link>
+      </Button>
     </li>
   );
 }
