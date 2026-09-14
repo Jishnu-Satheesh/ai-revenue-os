@@ -14,6 +14,7 @@ import {
   MarketMonitoringDialog,
   type MonitoringBranchOption,
 } from "@/components/growth-intelligence/market-monitoring-dialog";
+import { MarketWatchProjectsSection } from "@/components/growth-intelligence/market-watch-projects";
 import { PriorityActions } from "@/components/growth-intelligence/priority-actions";
 import {
   MARKET_MONITORING_OPEN_EVENT,
@@ -60,6 +61,33 @@ function formatFetchedAt(value: string, timeZone: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+/**
+ * One named evidence period for the New research dialog's business-context
+ * summary, e.g. "Channel reports · 1–31 Aug 2026". Unparseable windows fall
+ * back to their stored dates rather than failing the section.
+ */
+function formatEvidencePeriod(start: string, end: string, timeZone: string): string | null {
+  try {
+    const formatDay = (value: string) =>
+      new Date(`${value}T00:00:00Z`).toLocaleDateString("en-GB", {
+        timeZone,
+        day: "numeric",
+        month: "short",
+      });
+    const startLabel = formatDay(start);
+    const endLabel = new Date(`${end}T00:00:00Z`).toLocaleDateString("en-GB", {
+      timeZone,
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+    if (startLabel === "Invalid Date" || endLabel === "Invalid Date") return null;
+    return start === end ? endLabel : `${startLabel}–${endLabel}`;
+  } catch {
+    return null;
+  }
 }
 
 function PerformanceSummary({
@@ -602,6 +630,49 @@ export function GrowthIntelligenceWorkspace({
             />
           </div>
           <div className="min-w-0 flex flex-col gap-8">
+            <MarketWatchProjectsSection
+              organizationId={organizationId}
+              branches={branches.map((branch) => ({ id: branch.id, name: branch.name }))}
+              timeZone={view.timeZone}
+              canManage={canManage}
+              businessInsights={view.insights.slice(0, 2).map((insight) => ({
+                id: insight.id,
+                title: insight.title,
+                detail: insight.detail,
+                scopeLabel:
+                  (insight.branchId && branchNames.get(insight.branchId)) ||
+                  (insight.channelId && channelNames.get(insight.channelId)) ||
+                  "All locations",
+                evidencePeriodLabel: insight.evidenceWindow
+                  ? (formatEvidencePeriod(
+                      insight.evidenceWindow.start,
+                      insight.evidenceWindow.end,
+                      view.timeZone,
+                    ) ?? `${insight.evidenceWindow.start}–${insight.evidenceWindow.end}`)
+                  : null,
+              }))}
+              contextGaps={view.dataGaps.slice(0, 3).map((gap) => ({
+                id: gap.id,
+                title: gap.title,
+                scopeLabel:
+                  (gap.channelId && channelNames.get(gap.channelId)) || "All locations",
+                nextAction: gap.missingInput,
+              }))}
+              evidencePeriods={(performanceFilters?.coverageWindows ?? [])
+                .slice()
+                .sort((left, right) => (left.windowEnd < right.windowEnd ? 1 : -1))
+                .slice(0, 3)
+                .map((window) => {
+                  const period = formatEvidencePeriod(
+                    window.windowStart,
+                    window.windowEnd,
+                    view.timeZone,
+                  );
+                  return {
+                    label: `Channel reports · ${period ?? `${window.windowStart}–${window.windowEnd}`}`,
+                  };
+                })}
+            />
             {selectedBranchId ? (
               <BranchResearch
                 organizationId={organizationId}

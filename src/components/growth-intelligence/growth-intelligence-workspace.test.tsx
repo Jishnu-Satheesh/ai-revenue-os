@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { HttpResponse, http } from "msw";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { mswServer } from "@/test/msw/server";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -164,6 +167,18 @@ const card: BusinessPerformanceCardView = {
     cancelledAbsentReason: null,
   },
 };
+
+// Slice 4: the Market Watch projects section reads its list over fetch. An
+// empty list keeps every assertion below on the pre-existing sections. The
+// global MSW server fails unhandled requests, so the handler lives here at
+// file scope covering all three describe blocks below.
+beforeEach(() => {
+  mswServer.use(
+    http.get("*/growth-intelligence/monitoring/projects", () =>
+      HttpResponse.json({ projects: [], reportsByProject: {}, revisionsByProject: {} }),
+    ),
+  );
+});
 
 describe("GrowthIntelligenceWorkspace", () => {
   afterEach(() => {

@@ -443,3 +443,229 @@ export function buildMarketWatch(input: MarketWatchInput): MarketWatchView {
     retryableRequests,
   };
 }
+
+/**
+ * Slice 4: report-led project list views for Market Watch.
+ *
+ * Projects, brief revisions and reports are composed into one row per
+ * project. The row state is plain text over durable rows only — project
+ * lifecycle, the latest brief revision pin, and persisted reports. There
+ * are no durable update-status rows yet (Slice 7 owns them), so a pinned
+ * revision without a report reads as one honest `researching` state: the
+ * view never invents queued-vs-researching splits or completion
+ * percentages, and a failed update is visible only through its retained
+ * prior report until lifecycle rows land.
+ */
+
+export type MarketWatchProjectDisplayState =
+  | "ready"
+  | "researching"
+  | "paused"
+  | "needs_attention";
+
+export const MARKET_WATCH_PROJECT_DISPLAY_LABEL: Record<
+  MarketWatchProjectDisplayState,
+  string
+> = {
+  ready: "Ready to review",
+  researching: "Researching",
+  paused: "Monitoring paused",
+  needs_attention: "Needs attention",
+};
+
+export type MarketWatchProjectReportSummary = {
+  reportVersionId: string;
+  briefRevisionId: string;
+  reviewState: string;
+  createdAt: string;
+  /** The report's own summary sentence; null when the row could not be read. */
+  takeaway: string | null;
+};
+
+export type MarketWatchProjectRevisionSummary = {
+  revisionId: string;
+  revisionNumber: number;
+  pinnedToUpdateId: string | null;
+  createdAt: string;
+};
+
+export type MarketWatchProjectRecord = {
+  projectId: string;
+  organizationId: string;
+  branchId: string;
+  branchName: string;
+  title: string;
+  question: string;
+  mode: "one-time" | "recurring";
+  lifecycle: "active" | "paused" | "archived";
+  createdAt: string;
+};
+
+export type MarketWatchProjectListItem = MarketWatchProjectRecord & {
+  latestReport: MarketWatchProjectReportSummary | null;
+  latestRevision: MarketWatchProjectRevisionSummary | null;
+  displayState: MarketWatchProjectDisplayState;
+  stateLabel: string;
+  /**
+   * The newest persisted report shown beside non-ready rows, so a paused or
+   * researching project keeps its prior report with its date. Null when the
+   * project has never produced a report.
+   */
+  priorReport: MarketWatchProjectReportSummary | null;
+};
+
+export type MarketWatchProjectStatusFilter =
+  | "all"
+  | "ready"
+  | "in_progress"
+  | "paused"
+  | "needs_attention";
+
+export const MARKET_WATCH_PROJECT_STATUS_FILTERS: readonly MarketWatchProjectStatusFilter[] =
+  ["all", "ready", "in_progress", "paused", "needs_attention"];
+
+/**
+ * Derive one row's display state from durable rows only. Ready means the
+ * latest brief scope already has a persisted report; researching means the
+ * latest scope is pinned to background work with no report yet; paused
+ * follows the project lifecycle; needs attention means an active project
+ * with nothing pinned and nothing persisted, so the named next action is
+ * to start research.
+ */
+export function resolveMarketWatchProjectState(input: {
+  lifecycle: MarketWatchProjectRecord["lifecycle"];
+  latestRevision: MarketWatchProjectRevisionSummary | null;
+  latestReport: MarketWatchProjectReportSummary | null;
+  reportedRevisionIds: ReadonlySet<string>;
+}): MarketWatchProjectDisplayState {
+  if (input.lifecycle === "paused" || input.lifecycle === "archived") return "paused";
+  if (
+    input.latestRevision !== null &&
+    input.reportedRevisionIds.has(input.latestRevision.revisionId)
+  ) {
+    return "ready";
+  }
+  if (input.latestRevision !== null && input.latestRevision.pinnedToUpdateId !== null) {
+    return "researching";
+  }
+  // An active project with no pinned scope and no persisted report needs an
+  // explicit start; when an older report exists it stays reviewable.
+  return input.latestReport ? "ready" : "needs_attention";
+}
+
+export function buildMarketWatchProjectList(input: {
+  projects: readonly MarketWatchProjectRecord[];
+  reportsByProject: ReadonlyMap<string, readonly MarketWatchProjectReportSummary[]>;
+  revisionsByProject: ReadonlyMap<string, readonly MarketWatchProjectRevisionSummary[]>;
+}): MarketWatchProjectListItem[] {
+  return input.projects.map((project) => {
+    const reports = [...(input.reportsByProject.get(project.projectId) ?? [])].sort((left, right) =>
+      left.createdAt < right.createdAt ? 1 : left.createdAt > right.createdAt ? -1 : 0,
+    );
+    const revisions = [...(input.revisionsByProject.get(project.projectId) ?? [])].sort(
+      (left, right) => right.revisionNumber - left.revisionNumber,
+    );
+    const latestReport = reports[0] ?? null;
+    const latestRevision = revisions[0] ?? null;
+    const reportedRevisionIds = new Set(reports.map((report) => report.briefRevisionId));
+    const displayState = resolveMarketWatchProjectState({
+      lifecycle: project.lifecycle,
+      latestRevision,
+      latestReport,
+      reportedRevisionIds,
+    });
+    // Ready rows feature their report inline, so no separate prior link is
+    // needed; every other row retains the newest persisted report, if any.
+    const priorReport = displayState === "ready" ? null : latestReport;
+    return {
+      ...project,
+      latestReport,
+      latestRevision,
+      displayState,
+      stateLabel: MARKET_WATCH_PROJECT_DISPLAY_LABEL[displayState],
+      priorReport,
+    };
+  });
+}
+
+export function countMarketWatchProjectsByStatus(
+  items: readonly MarketWatchProjectListItem[],
+): Record<MarketWatchProjectStatusFilter, number> {
+  const counts: Record<MarketWatchProjectStatusFilter, number> = {
+    all: items.length,
+    ready: 0,
+    in_progress: 0,
+    paused: 0,
+    needs_attention: 0,
+  };
+  for (const item of items) {
+    switch (item.displayState) {
+      case "ready":
+        counts.ready += 1;
+        break;
+      case "researching":
+        counts.in_progress += 1;
+        break;
+      case "paused":
+        counts.paused += 1;
+        break;
+      case "needs_attention":
+        counts.needs_attention += 1;
+        break;
+    }
+  }
+  return counts;
+}
+
+export type MarketWatchProjectListFilter = {
+  /** Null means all locations; otherwise an exact branch id. */
+  branchId: string | null;
+  /** Literal operator text matched against title, question and location. */
+  search: string;
+  status: MarketWatchProjectStatusFilter;
+};
+
+/**
+ * Apply location, search and status filters together so the list and the
+ * featured report always agree: callers filter once, then feature from the
+ * filtered rows.
+ */
+export function filterMarketWatchProjects(
+  items: readonly MarketWatchProjectListItem[],
+  filter: MarketWatchProjectListFilter,
+): MarketWatchProjectListItem[] {
+  const needle = filter.search.trim().toLowerCase();
+  return items.filter((item) => {
+    if (filter.branchId !== null && item.branchId !== filter.branchId) return false;
+    switch (filter.status) {
+      case "all":
+        break;
+      case "ready":
+        if (item.displayState !== "ready") return false;
+        break;
+      case "in_progress":
+        if (item.displayState !== "researching") return false;
+        break;
+      case "paused":
+        if (item.displayState !== "paused") return false;
+        break;
+      case "needs_attention":
+        if (item.displayState !== "needs_attention") return false;
+        break;
+    }
+    if (needle.length === 0) return true;
+    const haystack = `${item.title}\n${item.question}\n${item.branchName}`.toLowerCase();
+    return haystack.includes(needle);
+  });
+}
+
+/**
+ * Feature the first ready report of the (already filtered) list. Input
+ * order is newest-first, so the freshest ready report wins and an empty
+ * filtered list features nothing.
+ */
+export function selectFeaturedMarketWatchReport(
+  items: readonly MarketWatchProjectListItem[],
+): MarketWatchProjectListItem | null {
+  return items.find((item) => item.displayState === "ready" && item.latestReport !== null) ?? null;
+}

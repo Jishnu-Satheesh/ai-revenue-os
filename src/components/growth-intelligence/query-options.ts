@@ -76,6 +76,51 @@ export function requestMarketMonitoringDialog(): void {
   window.dispatchEvent(new CustomEvent(MARKET_MONITORING_OPEN_EVENT));
 }
 
+/** Window event that opens the New research dialog from any entry point. */
+export const NEW_RESEARCH_OPEN_EVENT = "growth-intelligence:open-new-research";
+
+export function requestNewResearchDialog(): void {
+  window.dispatchEvent(new CustomEvent(NEW_RESEARCH_OPEN_EVENT));
+}
+
+/**
+ * Stable query key for the report-led Market Watch project list. The
+ * organization travels in the key so one organization's projects can never
+ * satisfy another organization's read; the branch segment keeps
+ * location-scoped reads distinct from the all-locations list.
+ */
+export function monitoringProjectsQueryKey(
+  organizationId: string,
+  branchId: string | null,
+): readonly string[] {
+  return [
+    "growth-intelligence",
+    "monitoring-projects",
+    organizationId,
+    branchId ?? "all",
+  ] as const;
+}
+
+export const MONITORING_PROJECT_STATUS_FILTERS = [
+  "all",
+  "ready",
+  "in_progress",
+  "paused",
+  "needs_attention",
+] as const;
+
+export type MonitoringProjectStatusFilter = (typeof MONITORING_PROJECT_STATUS_FILTERS)[number];
+
+/**
+ * The compact status filter from UI state. Anything unrecognized resolves
+ * to `all` so a bad value shows every project rather than an empty list.
+ */
+export function parseMonitoringProjectStatus(value: string | null | undefined): MonitoringProjectStatusFilter {
+  return (MONITORING_PROJECT_STATUS_FILTERS as readonly string[]).includes(value ?? "")
+    ? (value as MonitoringProjectStatusFilter)
+    : "all";
+}
+
 /**
  * One-line summary of a branch service_area record for the Location
  * dropdown. Strings and string arrays join; anything else is skipped so an
