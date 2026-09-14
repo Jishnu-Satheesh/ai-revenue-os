@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   REPORT_READER_SECTIONS,
   reportDownloadPath,
+  reportReaderPath,
   type AssembledReportView,
   type ReportReaderSectionKey,
 } from "@/modules/growth-intelligence/application/report-reader";
@@ -69,21 +70,285 @@ function CitationButton({
   );
 }
 
+type SelectedDraftAdvice = {
+  itemKey: string;
+  kind: "action" | "finding";
+  title: string;
+  destinationLabel: string;
+};
+
+type AcceptOutcome = {
+  itemKey: string;
+  title: string;
+  destination: string;
+  outcome: "accepted" | "already_accepted";
+};
+
+function acceptErrorMessage(status: number): string {
+  if (status === 403) {
+    return "You do not have permission to accept research for this organization.";
+  }
+  if (status === 404) {
+    return "This report could not be found in your organization.";
+  }
+  return "The selection could not be accepted. Nothing was added — try again.";
+}
+
+/**
+ * Review-and-accept for one report's draft advice. Posts the selection
+ * exactly once per click (single-flight guard plus a fresh idempotency
+ * key); a repeated acceptance answers already-accepted with an
+ * explanation and creates nothing.
+ */
+function AdviceAcceptancePanel({
+  organizationId,
+  reportVersionId,
+  briefRevisionNumber,
+  selectedAdvice,
+  canAccept,
+}: {
+  organizationId: string;
+  reportVersionId: string;
+  briefRevisionNumber: number;
+  selectedAdvice: SelectedDraftAdvice[];
+  canAccept: boolean;
+}) {
+  const [phase, setPhase] = useState<"idle" | "pending" | "done" | "failed">("idle");
+  const [outcomes, setOutcomes] = useState<AcceptOutcome[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const flightRef = useRef(false);
+
+  if (!canAccept) {
+    return (
+      <p className="mt-4 text-xs text-muted-foreground">
+        Accepting needs the manage permission — you can read this report.
+      </p>
+    );
+  }
+
+  const toRecommendations = selectedAdvice.filter((advice) => advice.kind === "action").length;
+  const toInsights = selectedAdvice.length - toRecommendations;
+  const allReplayed = phase === "done" && outcomes.length > 0 && outcomes.every((outcome) => outcome.outcome === "already_accepted");
+
+  async function acceptSelected() {
+    if (flightRef.current) return;
+    flightRef.current = true;
+    setPhase("pending");
+    setError(null);
+    try {
+      const response = await fetch(
+        `${reportReaderPath(organizationId, reportVersionId)}/accept`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            items: selectedAdvice.map((advice) => ({ itemKey: advice.itemKey, kind: advice.kind })),
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        },
+      );
+      const body = (await response.json().catch(() => null)) as {
+        items?: { itemKey: string; destination: string; outcome: string }[];
+      } | null;
+      if (!response.ok || !body || !Array.isArray(body.items)) {
+        throw new Error(acceptErrorMessage(response.status));
+      }
+      const byKey = new Map(selectedAdvice.map((advice) => [advice.itemKey, advice] as const));
+      setOutcomes(
+        body.items.flatMap((item) => {
+          const advice = byKey.get(item.itemKey);
+          if (!advice) return [];
+          if (item.outcome !== "accepted" && item.outcome !== "already_accepted") return [];
+          return [
+            {
+              itemKey: item.itemKey,
+              title: advice.title,
+              destination: item.destination,
+              outcome: item.outcome,
+            },
+          ];
+        }),
+      );
+      setPhase("done");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : "The selection could not be accepted.",
+      );
+      setPhase("failed");
+    } finally {
+      flightRef.current = false;
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border p-4">
+      <p className="text-sm font-semibold">Review and accept</p>
+      {selectedAdvice.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          Select the ideas worth taking forward. Each one keeps its link to this report.
+        </p>
+      ) : (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {selectedAdvice.length} {selectedAdvice.length === 1 ? "item" : "items"} selected
+          {toRecommendations > 0 ? ` · ${toRecommendations} to Recommendations` : ""}
+          {toInsights > 0 ? ` · ${toInsights} to Insights` : ""}. Each accepted item keeps its
+          link to this report (Brief {briefRevisionNumber}).
+        </p>
+      )}
+      <div className="mt-3 flex shrink-0 items-center gap-2">
+        <Button
+          size="sm"
+          disabled={selectedAdvice.length === 0 || phase === "pending"}
+          onClick={acceptSelected}
+        >
+          {phase === "pending" ? "Accepting…" : "Accept selected"}
+        </Button>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Accepting never approves campaign work, spending or publication.
+      </p>
+      {phase === "failed" && error ? (
+        <p role="alert" className="mt-2 text-sm text-destructive">
+          {error}{" "}
+          <button
+            type="button"
+            onClick={acceptSelected}
+            className="font-semibold underline-offset-2 hover:underline"
+          >
+            Retry
+          </button>
+        </p>
+      ) : null}
+      {phase === "done" ? (
+        <div className="mt-2" role="status">
+          {allReplayed ? (
+            <p className="text-sm text-muted-foreground">
+              Already accepted — nothing new was added. Each item keeps its link to this report.
+            </p>
+          ) : null}
+          <ul className="mt-1 flex flex-col gap-1">
+            {outcomes.map((outcome) => (
+              <li key={outcome.itemKey} className="min-w-0 text-sm break-words">
+                {outcome.outcome === "accepted" ? (
+                  <span>
+                    {outcome.title} — accepted to {outcome.destination}.
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {outcome.title} — already accepted; nothing new was added.
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Explicit review for reports with zero draft items: reviewer action plus
+ * an audit event, no feed writes. Never accepts anything.
+ */
+function MarkReviewedPanel({
+  organizationId,
+  reportVersionId,
+  canAccept,
+}: {
+  organizationId: string;
+  reportVersionId: string;
+  canAccept: boolean;
+}) {
+  const [phase, setPhase] = useState<"idle" | "pending" | "done" | "failed">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const flightRef = useRef(false);
+
+  if (!canAccept) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        Accepting needs the manage permission — you can read this report.
+      </p>
+    );
+  }
+
+  async function markReviewed() {
+    if (flightRef.current) return;
+    flightRef.current = true;
+    setPhase("pending");
+    setError(null);
+    try {
+      const response = await fetch(
+        `${reportReaderPath(organizationId, reportVersionId)}/accept`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ markReviewed: true, idempotencyKey: crypto.randomUUID() }),
+        },
+      );
+      if (!response.ok) throw new Error(acceptErrorMessage(response.status));
+      setPhase("done");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : "The review could not be recorded.",
+      );
+      setPhase("failed");
+    } finally {
+      flightRef.current = false;
+    }
+  }
+
+  if (phase === "done") {
+    return (
+      <p className="mt-2 text-sm text-muted-foreground" role="status">
+        Reviewed — this report had no draft advice, so no feed items were created.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2">
+      <Button size="sm" variant="outline" disabled={phase === "pending"} onClick={markReviewed}>
+        {phase === "pending" ? "Recording…" : "Mark as reviewed"}
+      </Button>
+      {phase === "failed" && error ? (
+        <p role="alert" className="mt-2 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * The readable report: section index, lead summary with local meaning
  * first, qualitative findings with inline citations into their source
  * records, competitor comparison, the labelled estimate block, gaps,
- * draft advice as local selection only, and sources.
+ * draft advice with an explicit review-and-accept step, and sources.
  *
- * Selection never writes anywhere: acceptance and feed handoff arrive
- * with the review slice, so toggling a checkbox only counts locally.
+ * Selection review: each draft item carries its type-derived destination
+ * preview (action advice adds to Recommendations, findings add to
+ * Insights). Accepting posts the selection once with an idempotency key;
+ * a repeated acceptance reports the already-accepted state with an
+ * explanation instead of duplicating feed items.
  */
 export function ReportReaderView({
   view,
   timeZone,
+  acceptance,
 }: {
   view: AssembledReportView;
   timeZone: string;
+  /**
+   * Slice 6 review entry point. Absent by default: advice selection stays
+   * local-only with no writes. Present: the advice section offers
+   * accept-selected (single-flight POST with an idempotency key) and the
+   * empty-advice state offers mark-reviewed when `canAccept` is true.
+   * Omitted or false hides the actions with the reason instead (viewer
+   * path); direct calls are still refused by the route.
+   */
+  acceptance?: { organizationId: string; canAccept?: boolean };
 }) {
   const [section, setSection] = useState<ReportReaderSectionKey>("summary");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -262,8 +527,7 @@ export function ReportReaderView({
                 </p>
                 <h4 className="mt-3 text-sm font-semibold">{view.speculativeEstimate.label}</h4>
                 <p className="mt-1 text-2xl font-bold tracking-tight">
-                  {view.speculativeEstimate.rangeText}{" "}
-                  <span className="text-xs font-normal text-muted-foreground">per period</span>
+                  {view.speculativeEstimate.rangeText}
                 </p>
                 <p className="mt-2 max-w-prose text-xs leading-relaxed text-muted-foreground">
                   Speculative estimate, not reported revenue. These are assumed figures, not
@@ -310,9 +574,18 @@ export function ReportReaderView({
               supporting evidence.
             </p>
             {view.draftAdvice.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground">
-                No draft advice was saved with this report.
-              </p>
+              <>
+                <p className="mt-4 text-sm text-muted-foreground">
+                  No draft advice was saved with this report.
+                </p>
+                {acceptance ? (
+                  <MarkReviewedPanel
+                    organizationId={acceptance.organizationId}
+                    reportVersionId={view.identity.reportVersionId}
+                    canAccept={acceptance.canAccept ?? false}
+                  />
+                ) : null}
+              </>
             ) : null}
             {view.draftAdvice.map((advice) => (
               <article
@@ -352,6 +625,22 @@ export function ReportReaderView({
                 decisions.
               </p>
             </div>
+            {acceptance ? (
+              <AdviceAcceptancePanel
+                organizationId={acceptance.organizationId}
+                reportVersionId={view.identity.reportVersionId}
+                briefRevisionNumber={view.identity.briefRevisionNumber}
+                selectedAdvice={view.draftAdvice
+                  .filter((advice) => selected.has(`advice:${advice.itemKey}`))
+                  .map((advice) => ({
+                    itemKey: advice.itemKey,
+                    kind: advice.kind,
+                    title: advice.title,
+                    destinationLabel: advice.destinationLabel,
+                  }))}
+                canAccept={acceptance.canAccept ?? false}
+              />
+            ) : null}
           </div>
         ) : null}
 
@@ -409,7 +698,7 @@ export function ReportReaderView({
       <span className="sr-only" role="status">
         {selected.size === 0
           ? "Nothing selected for review."
-          : `${selected.size} ${selected.size === 1 ? "item" : "items"} selected for review. Acceptance arrives with the review step.`}
+          : `${selected.size} ${selected.size === 1 ? "item" : "items"} selected for review.`}
       </span>
     </div>
   );
@@ -426,12 +715,20 @@ export function ReportReaderDialog({
   open,
   onOpenChange,
   timeZone,
+  canAccept = false,
 }: {
   organizationId: string;
   reportVersionId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   timeZone: string;
+  /**
+   * Review entry point. False by default: read-only viewers see the
+   * advice with the manage-permission reason instead of start/accept
+   * controls. Pass true for managers; direct calls are still refused
+   * by the route.
+   */
+  canAccept?: boolean;
 }) {
   const [payload, setPayload] = useState<AssembledReportView | null>(null);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
@@ -576,6 +873,7 @@ export function ReportReaderDialog({
               key={payload.identity.reportVersionId}
               view={payload}
               timeZone={timeZone}
+              acceptance={{ organizationId, canAccept }}
             />
           ) : loadState === "failed" ? (
             <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-5 sm:p-7">

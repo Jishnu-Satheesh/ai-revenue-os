@@ -189,7 +189,7 @@ describe("MarketWatchProjectsView", () => {
 
     const review = screen.getByRole("button", { name: /review report/i });
     expect(review).toHaveProperty("disabled", true);
-    expect(review.getAttribute("title")).toMatch(/next slice/i);
+    expect(review.getAttribute("title")).toMatch(/unavailable in this view/i);
   });
 
   it("routes Review report through the Slice 5 entry point when provided", () => {
@@ -480,7 +480,7 @@ describe("MarketWatchProjectsSection report reader wiring", () => {
     });
   }
 
-  function sectionProps() {
+  function sectionProps(overrides: Record<string, unknown> = {}) {
     return {
       organizationId: ORGANIZATION,
       branches,
@@ -489,6 +489,7 @@ describe("MarketWatchProjectsSection report reader wiring", () => {
       contextGaps: [],
       evidencePeriods: [],
       canManage: true,
+      ...overrides,
     };
   }
 
@@ -556,6 +557,107 @@ describe("MarketWatchProjectsSection report reader wiring", () => {
       expect(
         fetchMock.mock.calls.filter((call) => String(call[0]).includes("/monitoring/reports/")),
       ).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  function adviceReaderView(): AssembledReportView {
+    const base = readerView();
+    return {
+      ...base,
+      draftAdvice: [
+        {
+          itemKey: "bundle",
+          kind: "action",
+          title: "Draft one clear family bundle",
+          detail: "Name the occasion and what the customer receives.",
+          destinationLabel: "Recommendations",
+        },
+      ],
+    };
+  }
+
+  function adviceListBody() {
+    return {
+      projects: [
+        {
+          projectId: PROJECT,
+          organizationId: ORGANIZATION,
+          branchId: DOWNTOWN,
+          branchName: "Downtown",
+          title: "Prepare for National Day",
+          question: "How should we prepare for National Day?",
+          mode: "one-time",
+          lifecycle: "active",
+          createdAt: "2026-09-10T10:00:00Z",
+        },
+      ],
+      reportsByProject: {
+        [PROJECT]: [
+          {
+            reportVersionId: REPORT_VERSION,
+            briefRevisionId: REVISION,
+            reviewState: "pending_review",
+            createdAt: "2026-09-12T10:00:00Z",
+            takeaway: "Compare family offers and check delivery capacity.",
+          },
+        ],
+      },
+      revisionsByProject: {
+        [PROJECT]: [
+          {
+            revisionId: REVISION,
+            revisionNumber: 1,
+            pinnedToUpdateId: "66000000-0000-4000-8000-000000000066",
+            createdAt: "2026-09-10T11:00:00Z",
+          },
+        ],
+      },
+    };
+  }
+
+  it("hides accept controls with a reason for viewers (canManage false)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/monitoring/reports/")) {
+        return new Response(JSON.stringify({ report: adviceReaderView() }), { status: 200 });
+      }
+      return new Response(JSON.stringify(adviceListBody()), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(<MarketWatchProjectsSection {...sectionProps({ canManage: false })} />);
+      expect(await screen.findByText("Prepare for National Day")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /review report/i }));
+      expect(await screen.findByText("What matters for Downtown")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+      expect(screen.queryByRole("button", { name: /accept selected/i })).toBeNull();
+      expect(screen.getByText(/needs the manage permission/)).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows accept controls for managers (canManage true)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/monitoring/reports/")) {
+        return new Response(JSON.stringify({ report: adviceReaderView() }), { status: 200 });
+      }
+      return new Response(JSON.stringify(adviceListBody()), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(<MarketWatchProjectsSection {...sectionProps({ canManage: true })} />);
+      expect(await screen.findByText("Prepare for National Day")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /review report/i }));
+      expect(await screen.findByText("What matters for Downtown")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+      expect(screen.getByRole("button", { name: /accept selected/i })).toBeTruthy();
+      expect(screen.queryByText(/needs the manage permission/)).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }

@@ -355,7 +355,7 @@ export function MarketWatchProjectsView({
                     disabled={onReviewReport === undefined}
                     title={
                       onReviewReport === undefined
-                        ? "The report reader arrives with the next slice; this opens it then."
+                        ? "Report review is unavailable in this view."
                         : undefined
                     }
                     onClick={() => onReviewReport?.(featured.latestReport!.reportVersionId)}
@@ -528,6 +528,7 @@ export function MarketWatchProjectsSection({
           if (!next) setReaderVersionId(null);
         }}
         timeZone={timeZone}
+        canAccept={canManage}
       />
       <NewResearchDialog
         organizationId={organizationId}

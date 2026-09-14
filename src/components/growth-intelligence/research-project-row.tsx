@@ -32,9 +32,9 @@ export function ResearchProjectRow({
   item: MarketWatchProjectListItem;
   timeZone: string;
   /**
-   * Slice 5 reader entry point. Absent by default: prior-report and review
-   * controls render disabled with their reason instead of navigating
-   * anywhere invented.
+   * Report reader entry point. Absent by default: prior-report controls
+   * render disabled with their reason instead of navigating anywhere
+   * invented.
    */
   onReviewReport?: (reportVersionId: string) => void;
   onOpen?: (projectId: string) => void;
@@ -81,9 +81,7 @@ export function ResearchProjectRow({
               className="h-auto min-w-0 px-0"
               disabled={!readerReady}
               title={
-                readerReady
-                  ? undefined
-                  : "The report reader arrives with the next slice; this link opens it then."
+                readerReady ? undefined : "Report review is unavailable in this view."
               }
               onClick={() => onReviewReport?.(item.priorReport!.reportVersionId)}
             >

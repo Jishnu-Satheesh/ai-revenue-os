@@ -24,11 +24,16 @@ import { renderMarketMonitoringReportPdf } from "@/workflows/reports/market-moni
  * route serves (report row + pinned brief revision + evidence digest), so
  * the download and the dialog can never disagree. Same authorization as
  * the reader: organization scope plus growth_intelligence.read, which
- * viewers hold.
+ * viewers hold. The optional branchId narrows the lookup exactly like the
+ * reader route; a mismatch reads as not-found.
  */
 
 const paramsSchema = z
   .object({ organizationId: z.string().uuid(), reportVersionId: z.string().uuid() })
+  .strict();
+
+const querySchema = z
+  .object({ branchId: z.string().uuid().nullable().optional() })
   .strict();
 
 export async function GET(
@@ -59,9 +64,16 @@ export async function GET(
     }
     correlationId = correlation.parseAfterAuthorization();
 
+    const url = new URL(request.url);
+    const query = querySchema.parse({ branchId: url.searchParams.get("branchId") });
+
     const view = await loadAssembledReportView(
       context.supabase as unknown as ReportReaderPersistence,
-      { organizationId, reportVersionId: parsedParams.reportVersionId },
+      {
+        organizationId,
+        reportVersionId: parsedParams.reportVersionId,
+        ...(query.branchId ? { branchId: query.branchId } : {}),
+      },
     );
     const rendered = renderMarketMonitoringReportPdf(view);
 

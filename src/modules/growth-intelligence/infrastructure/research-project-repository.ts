@@ -366,7 +366,18 @@ export type ResearchProjectRepository = {
     itemKey: string;
     kind: "action" | "finding";
     actorId: string;
-  }): Promise<{ acceptanceKey: string; destination: string; outcome: string }>;
+  }): Promise<{
+    acceptanceKey: string;
+    destination: string;
+    outcome: string;
+    /**
+     * Slice 6 acceptance handoff reads this through: the RPC always returns
+     * false (the table CHECK forbids true), and the service fails closed on
+     * anything else, so accepting research advice can never approve Campaign
+     * execution, spending or publication.
+     */
+    grantsExecutionApproval: boolean;
+  }>;
   /** The project list without archived rows, newest first, bounded. */
   listActiveProjects(input: {
     organizationId: string;
@@ -502,6 +513,7 @@ export function createAuthenticatedResearchProjectRepository(
         acceptanceKey: stringField(row, "acceptanceKey"),
         destination: stringField(row, "destination"),
         outcome: stringField(row, "outcome"),
+        grantsExecutionApproval: booleanField(row, "grantsExecutionApproval"),
       };
     },
 

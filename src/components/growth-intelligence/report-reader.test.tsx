@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { briefRevisionSchema } from "@/domain/growth-intelligence/brief";
@@ -328,8 +329,7 @@ describe("ReportReaderDialog", () => {
     }
   });
 
-  it("closes on Escape and restores focus on Close", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(readerBody()), { status: 200 }));
+  it("closes on Escape and restores focus on Close", async () => {    const fetchMock = vi.fn(async () => new Response(JSON.stringify(readerBody()), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     try {
       const onOpenChange = vi.fn();
@@ -359,6 +359,282 @@ describe("ReportReaderDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
       rerender(harness(false));
       await waitFor(() => expect(document.activeElement).toBe(opener));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("ReportReaderView acceptance", () => {
+  const acceptUrl =
+    `/api/organizations/${ORGANIZATION}/growth-intelligence/monitoring/reports/${REPORT_VERSION}/accept`;
+
+  function adviceView() {
+    return viewFixture({
+      draftAdvice: [
+        {
+          itemKey: "bundle",
+          kind: "action",
+          title: "Draft one clear family bundle",
+          detail: "Name the occasion and what the customer receives.",
+        },
+        {
+          itemKey: "late-note",
+          kind: "finding",
+          title: "Late-night demand is visible in reviews",
+          detail: "Several reviews mention late closing times.",
+        },
+      ],
+    });
+  }
+
+  function acceptResponse(items: { itemKey: string; destination: string; outcome: string }[]) {
+    return new Response(JSON.stringify({ items }), { status: 200 });
+  }
+
+  it("stays local-only without the review entry point", () => {
+    render(<ReportReaderView view={adviceView()} timeZone="Asia/Dubai" />);
+    fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+    expect(screen.queryByRole("button", { name: /accept selected/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /mark as reviewed/i })).toBeNull();
+  });
+
+  it("previews type-derived destinations and posts the selection once with an idempotency key", async () => {
+    const fetchMock = vi.fn(async () =>
+      acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <ReportReaderView
+          view={adviceView()}
+          timeZone="Asia/Dubai"
+          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+      // Per-item destination preview, derived from the item type.
+      expect(screen.getByText("Adds to Recommendations")).toBeTruthy();
+      expect(screen.getByText("Adds to Insights")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+      expect(screen.getByText(/1 to Recommendations/)).toBeTruthy();
+      expect(screen.getByText(/keeps its link to this report \(Brief 1\)/)).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
+      await screen.findByText(/accepted to Recommendations/);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe(acceptUrl);
+      expect(init.method).toBe("POST");
+      const body = JSON.parse(String(init.body)) as {
+        items: { itemKey: string; kind: string }[];
+        idempotencyKey: string;
+      };
+      expect(body.items).toEqual([{ itemKey: "bundle", kind: "action" }]);
+      expect(body.idempotencyKey).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("single-flights rapid accept clicks into one request", async () => {
+    const fetchMock = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <ReportReaderView
+          view={adviceView()}
+          timeZone="Asia/Dubai"
+          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+
+      const accept = screen.getByRole("button", { name: /accept selected/i });
+      fireEvent.click(accept);
+      fireEvent.click(accept);
+      await screen.findByText(/accepted to Recommendations/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("explains an already-accepted replay and creates nothing", async () => {
+    const fetchMock = vi
+      .fn(async () =>
+        acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
+      )
+      .mockImplementationOnce(async () =>
+        acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
+      )
+      .mockImplementationOnce(async () =>
+        acceptResponse([
+          { itemKey: "bundle", destination: "Recommendations", outcome: "already_accepted" },
+        ]),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <ReportReaderView
+          view={adviceView()}
+          timeZone="Asia/Dubai"
+          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+
+      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
+      await screen.findByText(/accepted to Recommendations/);
+
+      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
+      await screen.findByText(/Already accepted — nothing new was added/);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("operates by keyboard: tab to items, Space selects, Enter accepts", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () =>
+      acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <ReportReaderView
+          view={adviceView()}
+          timeZone="Asia/Dubai"
+          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+      const checkbox = screen.getByRole("checkbox", { name: /Draft one clear family bundle/ });
+      checkbox.focus();
+      expect(document.activeElement).toBe(checkbox);
+      await user.keyboard(" ");
+      expect(checkbox).toBeChecked();
+      expect(screen.getByText(/1 to Recommendations/)).toBeTruthy();
+
+      const accept = screen.getByRole("button", { name: /accept selected/i });
+      accept.focus();
+      expect(document.activeElement).toBe(accept);
+      await user.keyboard("{Enter}");
+      await screen.findByText(/accepted to Recommendations/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("offers mark-reviewed with no feed writes when advice is empty", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ itemCount: 0 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <ReportReaderView
+          view={viewFixture({ draftAdvice: [] })}
+          timeZone="Asia/Dubai"
+          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+      expect(screen.getByText("No draft advice was saved with this report.")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /mark as reviewed/i }));
+      await screen.findByText(/no feed items were created/);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe(acceptUrl);
+      expect(JSON.parse(String(init.body))).toMatchObject({ markReviewed: true });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("hides the actions with a reason when the reader cannot accept", () => {
+    render(
+      <ReportReaderView
+        view={adviceView()}
+        timeZone="Asia/Dubai"
+        acceptance={{ organizationId: ORGANIZATION, canAccept: false }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+    expect(screen.queryByRole("button", { name: /accept selected/i })).toBeNull();
+    expect(screen.getByText(/needs the manage permission/)).toBeTruthy();
+  });
+
+  it("hides accept controls by default when canAccept is omitted (viewer-safe)", () => {
+    render(
+      <ReportReaderView view={adviceView()} timeZone="Asia/Dubai" acceptance={{ organizationId: ORGANIZATION }} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+    expect(screen.queryByRole("button", { name: /accept selected/i })).toBeNull();
+    expect(screen.getByText(/needs the manage permission/)).toBeTruthy();
+  });
+
+  it("hides mark-reviewed by default when canAccept is omitted (viewer-safe)", () => {
+    render(
+      <ReportReaderView
+        view={viewFixture({ draftAdvice: [] })}
+        timeZone="Asia/Dubai"
+        acceptance={{ organizationId: ORGANIZATION }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+    expect(screen.queryByRole("button", { name: /mark as reviewed/i })).toBeNull();
+    expect(screen.getAllByText(/needs the manage permission/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows accept controls to managers when canAccept is true", () => {
+    render(
+      <ReportReaderView
+        view={adviceView()}
+        timeZone="Asia/Dubai"
+        acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+
+    expect(screen.getByRole("button", { name: /accept selected/i })).toBeTruthy();
+    expect(screen.queryByText(/needs the manage permission/)).toBeNull();
+  });
+
+  it("shows a safe reason when the route refuses the call", async () => {
+    const fetchMock = vi.fn(async () => new Response("nope", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(
+        <ReportReaderView
+          view={adviceView()}
+          timeZone="Asia/Dubai"
+          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
+
+      await screen.findByRole("alert");
+      expect(screen.getByRole("alert").textContent).toMatch(/permission/);
     } finally {
       vi.unstubAllGlobals();
     }

@@ -31,6 +31,7 @@ import { extractPdfTextLayer } from "@/workflows/reports/pdf-text-layer";
 const ORGANIZATION = "10000000-0000-4000-8000-000000000001";
 const FOREIGN_ORGANIZATION = "11000000-0000-4000-8000-000000000011";
 const BRANCH = "20000000-0000-4000-8000-000000000002";
+const OTHER_BRANCH = "21000000-0000-4000-8000-000000000021";
 const PROJECT = "50000000-0000-4000-8000-000000000005";
 const REVISION_1 = "61000000-0000-4000-8000-000000000061";
 const REPORT_VERSION = "63000000-0000-4000-8000-000000000063";
@@ -169,18 +170,18 @@ function supabaseFake(db: Db) {
   };
 }
 
-function contextWith(db: Db, organizationId: string) {
+function contextWith(db: Db, organizationId: string, role = "owner") {
   mocks.getOrganizationContext.mockResolvedValue({
     organizationId,
     user: { id: USER },
-    membership: { role: "owner" },
+    membership: { role },
     supabase: supabaseFake(db),
   });
 }
 
-function downloadRequest(organizationId: string) {
+function downloadRequest(organizationId: string, path = "/download") {
   return new Request(
-    `https://example.test/api/organizations/${organizationId}/growth-intelligence/monitoring/reports/${REPORT_VERSION}/download`,
+    `https://example.test/api/organizations/${organizationId}/growth-intelligence/monitoring/reports/${REPORT_VERSION}${path}`,
     { headers: {} },
   );
 }
@@ -254,5 +255,37 @@ describe("monitoring report download GET", () => {
     contextWith(dbFixture(), ORGANIZATION);
     const refused = await downloadGet(downloadRequest(ORGANIZATION), params(ORGANIZATION));
     expect(refused.status).toBe(403);
+  });
+
+  it("lets a viewer download the pinned report", async () => {
+    mocks.hasPermission.mockImplementation(
+      (_role: unknown, permission: string) => permission === "growth_intelligence.read",
+    );
+    contextWith(dbFixture(), ORGANIZATION, "viewer");
+
+    const response = await downloadGet(downloadRequest(ORGANIZATION), params(ORGANIZATION));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/pdf");
+  });
+
+  it("refuses a download opened under the wrong location", async () => {
+    mocks.hasPermission.mockReturnValue(true);
+    contextWith(dbFixture(), ORGANIZATION);
+
+    const response = await downloadGet(
+      downloadRequest(ORGANIZATION, `/download?branchId=${OTHER_BRANCH}`),
+      params(ORGANIZATION),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("rejects a malformed report version id", async () => {
+    mocks.hasPermission.mockReturnValue(true);
+    contextWith(dbFixture(), ORGANIZATION);
+
+    const response = await downloadGet(downloadRequest(ORGANIZATION), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, reportVersionId: "not-a-uuid" }),
+    });
+    expect(response.status).toBe(400);
   });
 });
