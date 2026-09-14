@@ -48,9 +48,7 @@ export default async function CampaignsPage({ params }: PageProps) {
         </span>
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Campaigns</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {organization.name} · proposals, review, approval, and business proof
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{organization.name}</p>
         </div>
       </div>
 

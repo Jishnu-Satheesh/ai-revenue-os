@@ -6,7 +6,7 @@ import { type AllocationLedgerEvent } from "@/components/campaigns/allocation-le
 import { type OutcomeProofData } from "@/components/campaigns/outcome-proof";
 import { type LearningProposalData } from "@/components/campaigns/learning-review";
 import { CampaignDetailWorkspace } from "@/components/campaigns/campaign-detail-workspace";
-import type { PublishingDeliverable } from "@/components/campaigns/campaign-publishing";
+import type { ReviewableDeliverable } from "@/components/campaigns/campaign-creative-review";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -139,6 +139,16 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
   const canReviewOutputs = hasOrganizationPermission(context.membership.role, "campaign.approve");
   const canPublish = hasOrganizationPermission(context.membership.role, "campaign.publish");
 
+  // Rendered here, in the organization's timezone, so the client component
+  // never reads the clock during render.
+  const lastUpdatedLabel = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: organization.default_timezone,
+  }).format(new Date(view.versions.find((entry) => entry.isCurrent)?.createdAt ?? Date.now()));
+
   const phase = campaignPhase({
     state: view.state,
     hasVersion: true,
@@ -153,18 +163,6 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
       <RegisterRouteLabel segment={resolved.campaignId} label={view.title} />
 
-      <div className="flex shrink-0 items-start gap-3">
-        <span className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-          <Megaphone />
-        </span>
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{view.title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {view.sourceLabel} · version {view.versionNumber} · {organization.name}
-          </p>
-        </div>
-      </div>
-
       <CampaignDetailWorkspace
         view={view}
         phase={phase}
@@ -176,6 +174,8 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
         variantsRemaining={fleet.remaining}
         deliverables={deliverables ?? []}
         deliverablesReadFailed={deliverables === null}
+        launchAuthorized={launchAuthorized}
+        lastUpdatedLabel={lastUpdatedLabel}
         allocationEvents={allocationEvents}
         outcome={outcome}
         learningProposal={learningProposal}
@@ -530,7 +530,7 @@ async function readFleet(
 async function readDeliverables(
   context: { supabase: unknown; organizationId: string },
   campaignId: string,
-): Promise<readonly PublishingDeliverable[] | null> {
+): Promise<readonly ReviewableDeliverable[] | null> {
   const service = createDeliverableService({
     store: createDeliverableRepository(context.supabase as unknown as DeliverablePersistence),
   });
@@ -547,7 +547,7 @@ async function readDeliverables(
 }
 
 /** Counts of things that exist. Never an estimate, never a tidied-up number. */
-function tallyOf(deliverables: readonly PublishingDeliverable[]): DeliverableTally {
+function tallyOf(deliverables: readonly ReviewableDeliverable[]): DeliverableTally {
   const produced = deliverables.filter((entry) => entry.currentVersion !== null);
   return {
     planned: deliverables.length,

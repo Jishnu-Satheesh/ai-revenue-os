@@ -2,53 +2,53 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { History, Palette } from "lucide-react";
 
-import { AllocationLedger, type AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
-import { decideLearningProposal } from "@/components/campaigns/campaign-actions";
-import { CampaignPhaseStrip } from "@/components/campaigns/campaign-phase-strip";
 import {
-  CampaignPublishing,
-  type PublishingDeliverable,
-} from "@/components/campaigns/campaign-publishing";
+  AllocationLedger,
+  type AllocationLedgerEvent,
+} from "@/components/campaigns/allocation-ledger";
+import { decideLearningProposal } from "@/components/campaigns/campaign-actions";
+import {
+  CampaignCreativeReview,
+  type ReviewableDeliverable,
+} from "@/components/campaigns/campaign-creative-review";
+import { CampaignPhaseStrip } from "@/components/campaigns/campaign-phase-strip";
+import { CampaignPublishing } from "@/components/campaigns/campaign-publishing";
 import { CampaignResults } from "@/components/campaigns/campaign-results";
 import { CampaignStudio } from "@/components/campaigns/campaign-studio";
-import type { LearningDecision, LearningProposalData } from "@/components/campaigns/learning-review";
+import type {
+  LearningDecision,
+  LearningProposalData,
+} from "@/components/campaigns/learning-review";
 import type { OutcomeProofData } from "@/components/campaigns/outcome-proof";
 import type { VariantCard } from "@/components/campaigns/variant-grid";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { CampaignPhaseVerdict } from "@/domain/campaigns/phase";
+import type { CampaignDetailTab, CampaignPhaseVerdict } from "@/domain/campaigns/phase";
 import type { StudioView } from "@/modules/campaigns/application/studio-view";
 
 /**
  * The campaign detail workspace.
  *
- * One campaign has five genuinely different questions asked of it, and they were
- * previously answered by one long scroll: is this worth doing, does the artwork
- * hold up, may these exact outputs go out, what happened, and what did the
- * system do. Each is a different job with a different audience and a different
- * capability behind it, so each gets a tab.
+ * One campaign has five genuinely different questions asked of it, and they
+ * were previously answered by one long scroll: is this worth doing, does the
+ * artwork hold up, may these exact outputs go out, what happened, and what did
+ * the system do. Each is a different job with a different audience and a
+ * different capability behind it, so each gets a tab.
  *
- * The order is the order of the work. Overview states where this stands.
- * Creative is where a version is judged and approved for preparation. Publishing
- * is the second gate, where each finished output is reviewed on its own bytes.
- * Results is what actually happened. Activity is the audit trail.
+ * Reviewing finished outputs lives on Creative, not Publishing. It is a
+ * judgement about the work itself; Publishing answers the separate question of
+ * destination, schedule and spend. Keeping them apart is what stops "the
+ * picture is fine" from quietly reading as "send it".
  *
  * Nothing on Results or Activity is gated on a live approval. History has to
  * outlive authority, or a lapsed approval would quietly erase the record of a
  * campaign that really ran.
  */
-
-export type CampaignDetailTab = "overview" | "creative" | "publishing" | "results" | "activity";
 
 const TAB_LABEL: Readonly<Record<CampaignDetailTab, string>> = {
   overview: "Overview",
@@ -58,14 +58,31 @@ const TAB_LABEL: Readonly<Record<CampaignDetailTab, string>> = {
   activity: "Activity",
 };
 
+const TABS = Object.keys(TAB_LABEL) as CampaignDetailTab[];
+
+/** Ignores an unknown `?tab=` rather than widening anything. */
+function validTab(value: string | null | undefined): CampaignDetailTab | null {
+  return value && (TABS as string[]).includes(value) ? (value as CampaignDetailTab) : null;
+}
+
 function Fact({ label, value }: Readonly<{ label: string; value: React.ReactNode }>) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
-        {label}
-      </span>
+      <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{value}</span>
     </div>
+  );
+}
+
+function Panel({
+  title,
+  children,
+}: Readonly<{ title: string; children: React.ReactNode }>) {
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border bg-card p-4">
+      <h3 className="text-base font-semibold">{title}</h3>
+      {children}
+    </section>
   );
 }
 
@@ -80,12 +97,14 @@ export function CampaignDetailWorkspace({
   variantsRemaining,
   deliverables,
   deliverablesReadFailed,
+  launchAuthorized,
   allocationEvents,
   outcome,
   learningProposal,
   canReviewOutputs,
   canPublish,
   canDecideLearning,
+  lastUpdatedLabel,
   initialTab = "overview",
 }: Readonly<{
   view: StudioView;
@@ -96,9 +115,11 @@ export function CampaignDetailWorkspace({
   currency: string | null;
   variants: readonly VariantCard[];
   variantsRemaining: Readonly<Record<string, number>>;
-  deliverables: readonly PublishingDeliverable[];
+  deliverables: readonly ReviewableDeliverable[];
   /** True when the deliverable list could not be read — not the same as empty. */
   deliverablesReadFailed: boolean;
+  /** `null` when it could not be read. Never rendered as "not authorized". */
+  launchAuthorized: boolean | null;
   allocationEvents: readonly AllocationLedgerEvent[];
   outcome: OutcomeProofData | null;
   learningProposal: LearningProposalData | null;
@@ -107,10 +128,28 @@ export function CampaignDetailWorkspace({
   /** `campaign.publish`: may authorize a publication. Deliberately separate. */
   canPublish: boolean;
   canDecideLearning: boolean;
+  /** Already rendered in the organization's timezone by the page. */
+  lastUpdatedLabel: string;
   initialTab?: CampaignDetailTab;
 }>) {
   const router = useRouter();
-  const [tab, setTab] = useState<CampaignDetailTab>(initialTab);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<CampaignDetailTab>(
+    validTab(searchParams?.get("tab")) ?? initialTab,
+  );
+
+  /**
+   * Moves the tab into the address, so a link to "the Publishing tab of this
+   * campaign" is a real link somebody can send. `replace` rather than `push`:
+   * flicking through tabs should not fill the back button with them.
+   */
+  function openTab(next: CampaignDetailTab) {
+    setTab(next);
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.set("tab", next);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
 
   /**
    * Records the operator's decision on a learning proposal and refreshes so the
@@ -139,93 +178,207 @@ export function CampaignDetailWorkspace({
           ? canReviewOutputs
           : true;
 
+  const produced = deliverables.filter((entry) => entry.currentVersion !== null);
+  const allOutputsReviewed =
+    produced.length > 0 && produced.every((entry) => entry.eligibility.publishable);
+
   return (
     <div className="flex min-h-0 flex-col gap-4">
-      <CampaignPhaseStrip verdict={phase} canAct={canActOnNext} />
+      {/* Header: what this is, where it stands, and the one thing to do next. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h1 className="text-3xl font-semibold tracking-tight">{view.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            Objective: {view.objective} · Phase:{" "}
+            <span className="font-medium text-foreground">{phase.label}</span> · Last saved update{" "}
+            {lastUpdatedLabel}
+          </p>
+        </div>
+
+        {phase.nextAction === null ? null : (
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              onClick={() => openTab(phase.nextAction!.tab)}
+              disabled={!canActOnNext}
+              title={
+                canActOnNext
+                  ? undefined
+                  : `This needs the ${phase.nextAction.permission} capability.`
+              }
+            >
+              {phase.nextAction.label}
+            </Button>
+            {canActOnNext ? null : (
+              // Said rather than hidden. Somebody who cannot do this still needs
+              // to know what the campaign is waiting on, and who it waits for.
+              <span className="text-xs text-muted-foreground">
+                Needs{" "}
+                <span className="font-medium text-foreground">{phase.nextAction.permission}</span>,
+                which your role does not hold.
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <CampaignPhaseStrip verdict={phase} />
 
       <Tabs
         value={tab}
-        onValueChange={(value) => setTab(value as CampaignDetailTab)}
+        onValueChange={(value) => openTab(value as CampaignDetailTab)}
         className="flex min-w-0 flex-col"
       >
-        {/* Scrollable rather than wrapped: five tabs do not fit a phone, and a
-            second row of tabs reads as a second, unrelated control. */}
-        <TabsList aria-label="Campaign sections" className="w-full justify-start overflow-x-auto">
-          {(Object.keys(TAB_LABEL) as CampaignDetailTab[]).map((key) => (
-            <TabsTrigger key={key} value={key}>
+        {/* Underline tabs, scrollable rather than wrapped: five tabs do not fit
+            a phone, and a second row of tabs reads as an unrelated control. */}
+        <TabsList
+          aria-label="Campaign sections"
+          className="w-full justify-start gap-1 overflow-x-auto rounded-none border-b bg-transparent p-0"
+        >
+          {TABS.map((key) => (
+            <TabsTrigger
+              key={key}
+              value={key}
+              className="rounded-none border-b-2 border-transparent px-3 pb-2 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
               {TAB_LABEL[key]}
             </TabsTrigger>
           ))}
         </TabsList>
 
-        <TabsContent value="overview" className="mt-4 flex min-w-0 flex-col gap-4">
-          <Alert>
-            <AlertTitle>Objective</AlertTitle>
-            <AlertDescription className="flex flex-col gap-2">
-              <span>{view.objective}</span>
-              <span className="text-xs">{view.rationale}</span>
-            </AlertDescription>
-          </Alert>
+        <TabsContent value="overview" className="mt-4 min-w-0">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
+            <div className="flex min-w-0 flex-col gap-4">
+              <Panel title="Why this campaign">
+                <p className="text-sm text-muted-foreground">{view.rationale}</p>
+                <p className="text-xs text-muted-foreground">
+                  Measured on {view.measurement.primaryMetricKey} against{" "}
+                  {view.measurement.baselineSource} over the previous{" "}
+                  {view.measurement.baselineLookbackDays} days.
+                </p>
+              </Panel>
 
-          <section className="grid grid-cols-2 gap-4 rounded-lg border p-4 sm:grid-cols-3">
-            <Fact label="Source" value={view.sourceLabel} />
-            <Fact label="Version" value={view.versionNumber} />
-            <Fact
-              label="Channels"
-              value={[...new Set(view.actions.map((action) => action.channel))].sort().join(" · ")}
-            />
-            <Fact label="Actions covered" value={view.actions.length} />
-            <Fact
-              label="Measured on"
-              value={view.measurement.primaryMetricKey}
-            />
-            <Fact label="Outcome window" value={`${view.measurement.outcomeWindowDays} days`} />
-          </section>
+              <Panel title="Approved audience, offer & budget">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Fact
+                    label="Channels"
+                    value={[...new Set(view.actions.map((action) => action.channel))]
+                      .sort()
+                      .join(" · ")}
+                  />
+                  <Fact label="Actions covered" value={view.actions.length} />
+                  <Fact
+                    label="Media budget (proposed)"
+                    value={
+                      view.totalSpendCeiling
+                        ? new Intl.NumberFormat("en-GB", {
+                            style: "currency",
+                            currency: view.totalSpendCeiling.currency,
+                          }).format(view.totalSpendCeiling.amountMinor / 100)
+                        : "No paid spend"
+                    }
+                  />
+                  <Fact
+                    label="Success measure"
+                    value={`${view.measurement.primaryMetricKey}, ${view.measurement.outcomeWindowDays}-day window`}
+                  />
+                </div>
+              </Panel>
 
-          {view.versions.length < 2 ? null : (
-            <section className="flex flex-col gap-2 rounded-lg border p-4">
-              <h3 className="text-base font-semibold">Versions</h3>
-              <p className="text-sm text-muted-foreground">
-                Each version is its own record. Opening an older one shows the artwork and words as
-                they were approved then, never the newest artwork under an older approval.
-              </p>
-              <ul className="flex flex-col gap-1.5">
-                {view.versions.map((entry) => (
-                  <li key={entry.id} className="flex items-center justify-between gap-2 text-sm">
-                    {entry.isCurrent ? (
-                      <span className="font-medium">Version {entry.version}</span>
-                    ) : (
-                      <Link
-                        href={`/organizations/${organizationId}/campaigns/${view.campaignId}?version=${entry.id}`}
-                        className="underline-offset-4 hover:underline"
-                      >
-                        Version {entry.version}
-                      </Link>
-                    )}
-                    {entry.isCurrent ? (
-                      <Badge variant="secondary" className="text-[10px]">
-                        Showing
-                      </Badge>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+              {view.versions.length < 2 ? null : (
+                <Panel title="Versions">
+                  <p className="text-sm text-muted-foreground">
+                    Each version is its own record. Opening an older one shows the artwork and words
+                    as they were approved then, never the newest artwork under an older approval.
+                  </p>
+                  <ul className="flex flex-col gap-1.5">
+                    {view.versions.map((entry) => (
+                      <li key={entry.id} className="flex items-center justify-between gap-2 text-sm">
+                        {entry.isCurrent ? (
+                          <span className="font-medium">Version {entry.version}</span>
+                        ) : (
+                          <Link
+                            href={`/organizations/${organizationId}/campaigns/${view.campaignId}?version=${entry.id}`}
+                            className="underline-offset-4 hover:underline"
+                          >
+                            Version {entry.version}
+                          </Link>
+                        )}
+                        {entry.isCurrent ? (
+                          <Badge variant="secondary" className="text-[10px]">
+                            Showing
+                          </Badge>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+            </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline">
-              <Link
-                href={`/organizations/${organizationId}/campaigns/${view.campaignId}/studio?version=${view.versionId}`}
-              >
-                <Palette data-icon="inline-start" aria-hidden="true" />
-                Creative Studio
-              </Link>
-            </Button>
+            <aside className="flex min-w-0 flex-col gap-4" aria-label="Next steps and sources">
+              <Panel title="Next action">
+                {phase.nextAction === null ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nothing is waiting on anybody. {phase.summary}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">{phase.nextAction.detail}</p>
+                    <Button
+                      className="w-fit"
+                      onClick={() => openTab(phase.nextAction!.tab)}
+                      disabled={!canActOnNext}
+                    >
+                      {phase.nextAction.label}
+                    </Button>
+                  </>
+                )}
+              </Panel>
+
+              {/*
+                The single most load-bearing sentence on this page. Somebody who
+                believes the first approval published something will not look
+                for the second one.
+              */}
+              <section className="flex flex-col gap-2 rounded-lg border bg-accent/40 p-4">
+                <h3 className="text-sm font-semibold">Two-gate approval</h3>
+                <p className="text-xs text-muted-foreground">
+                  The approved proposal authorized creative{" "}
+                  <span className="italic">preparation</span> only. Publishing — including every
+                  later variation — requires reviewing each exact finished output separately in
+                  Creative, and then authorizing the set in Publishing.
+                </p>
+              </section>
+
+              <Panel title="Sources">
+                <p className="text-xs text-muted-foreground">
+                  Built from the pinned source snapshot and the preregistered measurement plan.
+                  Shared memory supplied text-only planning context where pinned; only its digest
+                  travels with this version.
+                </p>
+                <ul className="flex flex-col gap-1 text-sm">
+                  <li>{view.sourceLabel}</li>
+                  <li>Baseline: {view.measurement.baselineSource}</li>
+                </ul>
+                <p className="text-xs text-muted-foreground">
+                  Restricted roots are withheld. Cited context appears by digest and summary only;
+                  assertions, spend, credentials and asset bytes never leave their own stores.
+                </p>
+              </Panel>
+
+              <Button asChild variant="outline" className="w-fit">
+                <Link
+                  href={`/organizations/${organizationId}/campaigns/${view.campaignId}/studio?version=${view.versionId}`}
+                >
+                  <Palette data-icon="inline-start" aria-hidden="true" />
+                  Creative Studio
+                </Link>
+              </Button>
+            </aside>
           </div>
         </TabsContent>
 
-        <TabsContent value="creative" className="mt-4 min-w-0">
+        <TabsContent value="creative" className="mt-4 flex min-w-0 flex-col gap-6">
           <CampaignStudio
             view={view}
             organizationId={organizationId}
@@ -234,17 +387,25 @@ export function CampaignDetailWorkspace({
             variants={variants}
             variantsRemaining={variantsRemaining}
           />
-        </TabsContent>
 
-        <TabsContent value="publishing" className="mt-4 min-w-0">
-          <CampaignPublishing
+          <CampaignCreativeReview
             deliverables={deliverables}
             organizationId={organizationId}
             campaignId={view.campaignId}
             timeZone={timeZone}
             canReview={canReviewOutputs}
-            canPublish={canPublish}
             readFailed={deliverablesReadFailed}
+          />
+        </TabsContent>
+
+        <TabsContent value="publishing" className="mt-4 min-w-0">
+          <CampaignPublishing
+            view={view}
+            organizationId={organizationId}
+            timeZone={timeZone}
+            launchAuthorized={launchAuthorized}
+            canPublish={canPublish}
+            allOutputsReviewed={allOutputsReviewed}
           />
         </TabsContent>
 
@@ -276,11 +437,7 @@ export function CampaignDetailWorkspace({
                 a decision to do nothing.
               </p>
             ) : (
-              <AllocationLedger
-                events={allocationEvents}
-                timeZone={timeZone}
-                currency={currency}
-              />
+              <AllocationLedger events={allocationEvents} timeZone={timeZone} currency={currency} />
             )}
           </section>
 
@@ -292,21 +449,17 @@ export function CampaignDetailWorkspace({
           <Collapsible className="rounded-lg border">
             <CollapsibleTrigger className="flex w-full items-center gap-2 p-4 text-left text-sm font-medium">
               <History className="size-4" aria-hidden="true" />
-              Technical detail
+              Technical details
             </CollapsibleTrigger>
             <CollapsibleContent className="flex flex-col gap-3 border-t p-4">
               <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
-                  Version digest
-                </span>
+                <span className="text-xs text-muted-foreground">Version digest</span>
                 <span className="font-mono text-[10px] break-all text-muted-foreground">
                   {view.digest}
                 </span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
-                  Bundle version id
-                </span>
+                <span className="text-xs text-muted-foreground">Bundle version id</span>
                 <span className="font-mono text-[10px] break-all text-muted-foreground">
                   {view.versionId}
                 </span>
@@ -318,7 +471,7 @@ export function CampaignDetailWorkspace({
                 </p>
               ) : (
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
+                  <span className="text-xs text-muted-foreground">
                     Changed from version {view.changeSummary.fromVersion}
                   </span>
                   <ul className="flex flex-col gap-1 text-xs text-muted-foreground">

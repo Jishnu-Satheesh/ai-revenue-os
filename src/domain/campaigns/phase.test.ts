@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   campaignListPhase,
   campaignPhase,
+  matchesFilter,
   needsAttention,
   phasePosition,
   type CampaignPhaseInput,
@@ -37,8 +38,8 @@ describe("what the word 'approved' is hiding", () => {
   });
 
   it("separates reviewed-but-not-authorized from authorized to publish", () => {
-    expect(campaignPhase(input({ launchAuthorized: false })).phase).toBe("awaiting_publication");
-    expect(campaignPhase(input({ launchAuthorized: true })).phase).toBe("publishing");
+    expect(campaignPhase(input({ launchAuthorized: false })).phase).toBe("review");
+    expect(campaignPhase(input({ launchAuthorized: true })).phase).toBe("scheduled_live");
   });
 
   it("asks for the publication approval only once every output is reviewed", () => {
@@ -52,7 +53,7 @@ describe("an approval that authorizes nothing", () => {
   it.each(["none", "expired", "superseded", "digest_mismatch", "revoked"] as const)(
     "treats %s as awaiting review, because none of them authorize preparation",
     (approvalStatus) => {
-      expect(campaignPhase(input({ approvalStatus })).phase).toBe("awaiting_review");
+      expect(campaignPhase(input({ approvalStatus })).phase).toBe("proposal");
     },
   );
 
@@ -116,7 +117,7 @@ describe("history outliving authority", () => {
       input({ settledAt: "2026-09-01T00:00:00.000Z", approvalStatus: "expired" }),
     );
 
-    expect(outcome.phase).toBe("settled");
+    expect(outcome.phase).toBe("results");
   });
 
   it("reports a settled campaign as having nothing left to do", () => {
@@ -140,7 +141,7 @@ describe("a campaign that is not going anywhere", () => {
       input({ state: "cancelled", settledAt: "2026-09-01T00:00:00.000Z" }),
     );
 
-    expect(outcome.phase).toBe("settled");
+    expect(outcome.phase).toBe("results");
   });
 });
 
@@ -148,7 +149,7 @@ describe("a campaign with no proposal", () => {
   it("asks for generation rather than for a review of nothing", () => {
     const outcome = campaignPhase(input({ hasVersion: false, approvalStatus: "none" }));
 
-    expect(outcome.phase).toBe("drafting");
+    expect(outcome.phase).toBe("proposal");
     expect(outcome.nextAction).toMatchObject({ key: "generate" });
   });
 });
@@ -169,12 +170,11 @@ describe("who the next action belongs to", () => {
 
 describe("placing a phase on the strip", () => {
   it("orders the working phases", () => {
-    expect(phasePosition("drafting")).toBe(0);
-    expect(phasePosition("publishing")).toBe(4);
+    expect(phasePosition("proposal")).toBe(0);
+    expect(phasePosition("results")).toBe(4);
   });
 
-  it("gives an ending no position, rather than putting it back at the start", () => {
-    expect(phasePosition("settled")).toBeNull();
+  it("gives a stopped campaign no position, rather than putting it back at the start", () => {
     expect(phasePosition("stopped")).toBeNull();
   });
 });
@@ -200,7 +200,7 @@ describe("what a list may claim", () => {
   it("stops at 'being prepared' rather than claiming how far along it is", () => {
     const verdict = campaignListPhase(listInput());
 
-    expect(verdict.phase).toBe("preparing_creative");
+    expect(verdict.phase).toBe("creating");
     expect(verdict.nextAction).toBeNull();
   });
 
@@ -218,7 +218,7 @@ describe("what a list may claim", () => {
     expect(
       campaignListPhase(listInput({ settledAt: "2026-09-01T00:00:00.000Z", approvalStatus: "expired" }))
         .phase,
-    ).toBe("settled");
+    ).toBe("results");
   });
 });
 
@@ -240,5 +240,28 @@ describe("counting what is actually waiting on somebody", () => {
     expect(needsAttention(campaignPhase(input({ settledAt: "2026-09-01T00:00:00.000Z" })))).toBe(
       false,
     );
+  });
+});
+
+describe("the portfolio's status groupings", () => {
+  it("groups both gates under 'needs review', because both wait on a person", () => {
+    expect(matchesFilter("proposal", "needs_review")).toBe(true);
+    expect(matchesFilter("review", "needs_review")).toBe(true);
+  });
+
+  it("keeps creative-in-progress out of 'needs review'", () => {
+    expect(matchesFilter("creating", "needs_review")).toBe(false);
+    expect(matchesFilter("creating", "preparing")).toBe(true);
+  });
+
+  it("treats 'completed' as a settled outcome, not an archive somebody chose", () => {
+    // Introducing an archive lifecycle through a visual filter is exactly what
+    // the visual contract forbids.
+    expect(matchesFilter("results", "completed")).toBe(true);
+    expect(matchesFilter("stopped", "completed")).toBe(false);
+  });
+
+  it("shows everything under 'all', including stopped work", () => {
+    expect(matchesFilter("stopped", "all")).toBe(true);
   });
 });

@@ -2,9 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, FileText, LayoutGrid, List, Loader2, Plus, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, Images, LayoutGrid, List, Loader2, Plus } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { GenerateAgainButton } from "@/components/campaigns/generate-again-button";
@@ -16,8 +15,13 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { needsAttention } from "@/domain/campaigns/phase";
-import type { CampaignState } from "@/domain/campaigns/state-machine";
+import {
+  matchesFilter,
+  needsAttention,
+  phaseBadge,
+  PORTFOLIO_FILTERS,
+  type PortfolioFilter,
+} from "@/domain/campaigns/phase";
 import type {
   CampaignGeneration,
   CampaignListItem,
@@ -32,17 +36,21 @@ import type {
  * which is exactly wrong for work whose whole point is that each one looks
  * different.
  *
- * Two honesty rules govern the counts here:
+ * Three honesty rules govern the counts here:
  *
- * Filtering never changes the total. A search box that narrows twelve campaigns
- * to three must still say twelve exist — "3 of 12" — because a filtered count
- * presented as a total is how somebody concludes work has disappeared.
+ * The attention strip's count and its previews are computed separately, and the
+ * count is over every campaign. Three rows must never imply the total is three.
  *
- * The attention count is derived from the same next action each card shows, so
- * the number and the cards can never disagree. It counts campaigns waiting on a
- * person, not everything unfinished: creative still rendering is not waiting on
- * anybody, and counting it would train people to ignore the badge.
+ * Filtering never changes the total. A search that narrows twelve campaigns to
+ * three still says twelve exist — a filtered count presented as a total is how
+ * somebody concludes work has disappeared.
+ *
+ * The status filters are display groupings over real phases, never a new
+ * lifecycle. Nothing here archives a campaign or invents a state it is not in.
  */
+
+/** At most three previews. The count beside them is the real total. */
+const ATTENTION_PREVIEW_LIMIT = 3;
 
 function GenerationNotice({ generation }: Readonly<{ generation: CampaignGeneration }>) {
   if (generation.status === "settled") return null;
@@ -78,31 +86,6 @@ function GenerationNotice({ generation }: Readonly<{ generation: CampaignGenerat
   );
 }
 
-/**
- * Every campaign state gets its own label, including the ones an operator will
- * rarely see. A state missing from this map would render as raw database text
- * in front of a client.
- */
-const STATE: Readonly<
-  Record<
-    CampaignState,
-    { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
-  >
-> = {
-  draft: { label: "Draft", variant: "outline" },
-  needs_data: { label: "Needs data", variant: "secondary" },
-  ready_for_review: { label: "Ready for review", variant: "default" },
-  approved: { label: "Approved", variant: "default" },
-  scheduled: { label: "Scheduled", variant: "default" },
-  executing: { label: "Executing", variant: "default" },
-  measuring: { label: "Measuring", variant: "secondary" },
-  completed: { label: "Completed", variant: "secondary" },
-  partially_completed: { label: "Partially completed", variant: "secondary" },
-  blocked: { label: "Blocked", variant: "destructive" },
-  cancelled: { label: "Cancelled", variant: "outline" },
-  failed: { label: "Failed", variant: "destructive" },
-};
-
 function formatMoney(money: Money | null): string {
   // A null ceiling means the bundle carries no paid action at all. Rendering
   // it as "0.00" would read as a budget of nothing, which is a different claim.
@@ -121,6 +104,35 @@ function updatedLabel(iso: string, timeZone: string): string {
     minute: "2-digit",
     timeZone,
   }).format(new Date(iso));
+}
+
+/**
+ * The fact that matters at this phase, and nothing else.
+ *
+ * A proposal's number is its proposed budget; a completed campaign's is its
+ * result. Showing a proposed budget beside a finished campaign would read as
+ * what it cost. Nothing here is a forecast dressed as an achievement, and a
+ * null never renders as a zero.
+ */
+function phaseFact(campaign: CampaignListItem): string | null {
+  switch (campaign.phase.phase) {
+    case "proposal":
+      return campaign.awaitingFirstVersion
+        ? null
+        : `Proposed budget ${formatMoney(campaign.spendCeiling)}`;
+    case "creating":
+      return "Creative being prepared";
+    case "review":
+      return "Finished outputs waiting for review";
+    case "scheduled_live":
+      // Deliberately not a spend figure. Nothing dispatches yet, so any number
+      // here would be a claim about money that has not moved.
+      return "Authorized to publish";
+    case "results":
+      return "Result measured";
+    case "stopped":
+      return null;
+  }
 }
 
 /**
@@ -144,18 +156,16 @@ function Artwork({
 
   return (
     <span
-      className={`${className} flex items-center justify-center border-b bg-muted px-3 text-center text-[10px] text-muted-foreground`}
+      className={`${className} flex flex-col items-center justify-center gap-1 bg-muted px-3 text-center`}
     >
-      {awaitingFirstVersion ? "No artwork yet" : "Preview unavailable"}
-    </span>
-  );
-}
-
-function NextAction({ campaign }: Readonly<{ campaign: CampaignListItem }>) {
-  if (campaign.phase.nextAction === null) return null;
-  return (
-    <span className="text-xs">
-      <span className="font-medium">{campaign.phase.nextAction.label}</span>
+      <span className="text-xs text-muted-foreground">
+        {awaitingFirstVersion ? "No preview available" : "Preview unavailable"}
+      </span>
+      {awaitingFirstVersion ? (
+        <span className="text-[10px] text-muted-foreground">
+          Creative generation begins after approval
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -171,8 +181,8 @@ function CampaignCard({
   timeZone: string;
   previewUrl: string | null;
 }>) {
-  const state = STATE[campaign.state];
   const href = `/organizations/${organizationId}/campaigns/${campaign.id}`;
+  const fact = phaseFact(campaign);
 
   return (
     <li className="flex">
@@ -182,75 +192,59 @@ function CampaignCard({
             <Artwork
               previewUrl={previewUrl}
               awaitingFirstVersion={campaign.awaitingFirstVersion}
-              className="block h-40 w-full"
+              className="block h-44 w-full"
             />
           </Link>
         ) : (
           <Artwork
             previewUrl={previewUrl}
             awaitingFirstVersion={campaign.awaitingFirstVersion}
-            className="block h-40 w-full"
+            className="block h-44 w-full"
           />
         )}
 
-        <div className="flex flex-1 flex-col gap-3 p-4">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              {campaign.openable ? (
-                <Link href={href} className="font-medium underline-offset-4 hover:underline">
-                  {campaign.title}
-                </Link>
-              ) : (
-                // Not a link, rather than a link that 404s. There is no
-                // proposal behind this campaign yet, so the route it would
-                // open has nothing to render.
-                <span className="font-medium">{campaign.title}</span>
-              )}
-              {campaign.version === null ? null : (
-                <Badge variant="outline">v{campaign.version}</Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {/* The objective lives in a bundle version. Until one exists
-                  there is nothing truthful to put here. */}
-              {campaign.objective ?? "Waiting for the first proposal to be generated."}
-            </p>
+        <div className="flex items-center justify-between gap-2 border-y px-3 py-1.5 text-xs text-muted-foreground">
+          <span>{campaign.spendCeiling ? "Organic + Paid" : "Organic"}</span>
+          <span>{previewUrl ? "Preview" : "No preview"}</span>
+        </div>
+
+        <div className="flex flex-1 flex-col gap-2 p-4">
+          <div className="flex items-start justify-between gap-2">
+            {campaign.openable ? (
+              <Link href={href} className="font-semibold underline-offset-4 hover:underline">
+                {campaign.title}
+              </Link>
+            ) : (
+              // Not a link, rather than a link that 404s. There is no proposal
+              // behind this campaign yet, so the route would render nothing.
+              <span className="font-semibold">{campaign.title}</span>
+            )}
+            <Badge variant="secondary" className="shrink-0">
+              {phaseBadge(campaign.phase.phase)}
+            </Badge>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={state.variant}>{state.label}</Badge>
-            <span className="text-xs text-muted-foreground">{campaign.phase.summary}</span>
-          </div>
+          <p className="text-sm text-muted-foreground">
+            {/* The objective lives in a bundle version. Until one exists there
+                is nothing truthful to put here. */}
+            {campaign.objective ?? "Waiting for the first proposal to be generated."}
+          </p>
+
+          {fact ? <p className="text-sm font-medium">{fact}</p> : null}
+          <p className="text-xs text-muted-foreground">{campaign.phase.summary}</p>
 
           <GenerationNotice generation={campaign.generation} />
 
-          {campaign.awaitingFirstVersion ? null : (
-            <div className="flex flex-wrap gap-4 text-sm">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] tracking-widest text-muted-foreground uppercase">
-                  Channels
-                </span>
-                <span>{campaign.channels.join(" · ")}</span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] tracking-widest text-muted-foreground uppercase">
-                  Spend ceiling
-                </span>
-                <span>{formatMoney(campaign.spendCeiling)}</span>
-              </div>
-            </div>
-          )}
-
           <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-            <span className="flex flex-col gap-0.5">
-              <span className="text-xs text-muted-foreground">
-                Updated {updatedLabel(campaign.updatedAt, timeZone)}
-              </span>
-              <NextAction campaign={campaign} />
+            <span className="text-xs text-muted-foreground">
+              Updated {updatedLabel(campaign.updatedAt, timeZone)}
             </span>
             {campaign.openable ? (
-              <Button variant="outline" size="sm" asChild>
-                <Link href={href}>Open</Link>
+              <Button variant="ghost" size="sm" asChild>
+                <Link href={href}>
+                  {campaign.phase.nextAction?.label ?? "Open"}
+                  <ArrowRight data-icon="inline-end" aria-hidden="true" />
+                </Link>
               </Button>
             ) : campaign.generation.status === "generating" ? (
               // `disabled` on a Button with `asChild` renders an anchor, and an
@@ -280,7 +274,6 @@ function CampaignRow({
   timeZone: string;
   previewUrl: string | null;
 }>) {
-  const state = STATE[campaign.state];
   const href = `/organizations/${organizationId}/campaigns/${campaign.id}`;
 
   return (
@@ -288,7 +281,7 @@ function CampaignRow({
       <Artwork
         previewUrl={previewUrl}
         awaitingFirstVersion={campaign.awaitingFirstVersion}
-        className="block size-14 shrink-0 rounded-md border"
+        className="block size-14 shrink-0 overflow-hidden rounded-md border"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex flex-wrap items-center gap-2">
@@ -299,10 +292,14 @@ function CampaignRow({
           ) : (
             <span className="truncate font-medium">{campaign.title}</span>
           )}
-          <Badge variant={state.variant}>{state.label}</Badge>
+          <Badge variant="secondary">{phaseBadge(campaign.phase.phase)}</Badge>
         </span>
-        <span className="truncate text-xs text-muted-foreground">{campaign.phase.summary}</span>
-        <NextAction campaign={campaign} />
+        <span className="truncate text-xs text-muted-foreground">
+          {campaign.objective ?? "Waiting for the first proposal to be generated."}
+        </span>
+        <span className="truncate text-xs text-muted-foreground">
+          {campaign.channels.join(" · ") || "No channels yet"} · {formatMoney(campaign.spendCeiling)}
+        </span>
       </div>
       <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
         {updatedLabel(campaign.updatedAt, timeZone)}
@@ -313,6 +310,61 @@ function CampaignRow({
         </Button>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * What is waiting on a person, with a real count.
+ *
+ * The count is computed over every campaign; the previews are capped at three.
+ * They are separate on purpose — three rows plus "View all" must never be read
+ * as "there are three things to do".
+ */
+function AttentionStrip({
+  waiting,
+  organizationId,
+  onViewAll,
+}: Readonly<{
+  waiting: readonly CampaignListItem[];
+  organizationId: string;
+  onViewAll: () => void;
+}>) {
+  if (waiting.length === 0) return null;
+  const previews = waiting.slice(0, ATTENTION_PREVIEW_LIMIT);
+
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border bg-card p-4" aria-label="Needs your attention">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Needs your attention</h2>
+        <Badge variant="secondary" className="rounded-full">
+          {waiting.length}
+        </Badge>
+      </div>
+
+      <ul className="flex flex-col divide-y">
+        {previews.map((campaign) => (
+          <li key={campaign.id} className="flex items-center justify-between gap-3 py-2.5">
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="font-medium">{campaign.phase.nextAction?.label}</span>
+              <span className="truncate text-sm text-muted-foreground">{campaign.title}</span>
+            </span>
+            <Button variant="ghost" size="sm" asChild className="shrink-0">
+              <Link href={`/organizations/${organizationId}/campaigns/${campaign.id}`}>
+                Open
+                <ArrowRight data-icon="inline-end" aria-hidden="true" />
+              </Link>
+            </Button>
+          </li>
+        ))}
+      </ul>
+
+      {waiting.length > previews.length ? (
+        <Button variant="link" size="sm" className="w-fit px-0" onClick={onViewAll}>
+          View all {waiting.length}
+          <ArrowRight data-icon="inline-end" aria-hidden="true" />
+        </Button>
+      ) : null}
+    </section>
   );
 }
 
@@ -330,164 +382,251 @@ export function CampaignPortfolio({
 }>) {
   const [layout, setLayout] = useState<"gallery" | "list">("gallery");
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PortfolioFilter>("all");
+  const [channel, setChannel] = useState("all");
 
+  // Over every campaign, never over the filtered set: the strip answers "what
+  // is waiting on me", which a search box does not change.
   const waiting = useMemo(
-    () => campaigns.filter((campaign) => needsAttention(campaign.phase)).length,
+    () => campaigns.filter((campaign) => needsAttention(campaign.phase)),
+    [campaigns],
+  );
+
+  const channels = useMemo(
+    () => [...new Set(campaigns.flatMap((campaign) => campaign.channels))].sort(),
     [campaigns],
   );
 
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (needle === "") return campaigns;
-    return campaigns.filter(
-      (campaign) =>
+    return campaigns.filter((campaign) => {
+      if (!matchesFilter(campaign.phase.phase, filter)) return false;
+      if (channel !== "all" && !campaign.channels.includes(channel)) return false;
+      if (needle === "") return true;
+      return (
         campaign.title.toLowerCase().includes(needle) ||
         (campaign.objective ?? "").toLowerCase().includes(needle) ||
-        campaign.channels.some((channel) => channel.toLowerCase().includes(needle)),
-    );
-  }, [campaigns, query]);
+        campaign.channels.some((entry) => entry.toLowerCase().includes(needle))
+      );
+    });
+  }, [campaigns, query, filter, channel]);
 
   const filtering = shown.length !== campaigns.length;
+  const filtersActive = query.trim() !== "" || filter !== "all" || channel !== "all";
+
+  function clearFilters() {
+    setQuery("");
+    setFilter("all");
+    setChannel("all");
+  }
 
   function previewFor(campaign: CampaignListItem): string | null {
     return campaign.bundleVersionId ? (previewUrls[campaign.bundleVersionId] ?? null) : null;
   }
 
+  if (campaigns.length === 0) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PortfolioHeader organizationId={organizationId} />
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Images />
+            </EmptyMedia>
+            <EmptyTitle>No campaigns yet</EmptyTitle>
+            <EmptyDescription>
+              Start from a Decision Engine opportunity, or request one yourself. Both arrive here as
+              a proposal to review before anything is published.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      <Alert>
-        <Sparkles />
-        <AlertTitle>Two entry points, one governed pipeline</AlertTitle>
-        <AlertDescription>
-          A Decision Engine opportunity and a manual brief create the same kind of campaign and pass
-          the same checks before anything can be approved.
-        </AlertDescription>
-      </Alert>
+      <PortfolioHeader organizationId={organizationId} />
+
+      <AttentionStrip
+        waiting={waiting}
+        organizationId={organizationId}
+        onViewAll={() => {
+          clearFilters();
+          setFilter("needs_review");
+        }}
+      />
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div
+            className="flex flex-wrap gap-1.5"
+            role="group"
+            aria-label="Filter campaigns by status"
+          >
+            {PORTFOLIO_FILTERS.map((entry) => (
+              <Button
+                key={entry.key}
+                type="button"
+                size="sm"
+                variant={filter === entry.key ? "default" : "outline"}
+                aria-pressed={filter === entry.key}
+                onClick={() => setFilter(entry.key)}
+              >
+                {entry.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search campaigns"
+              aria-label="Search campaigns"
+              className="h-9 w-full sm:w-52"
+            />
+            {channels.length < 2 ? null : (
+              <select
+                value={channel}
+                onChange={(event) => setChannel(event.target.value)}
+                aria-label="Filter by channel"
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              >
+                <option value="all">All channels</option>
+                {channels.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {entry}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex rounded-md border p-0.5" role="group" aria-label="Layout">
+              <Button
+                type="button"
+                size="sm"
+                variant={layout === "gallery" ? "secondary" : "ghost"}
+                aria-pressed={layout === "gallery"}
+                onClick={() => setLayout("gallery")}
+              >
+                <LayoutGrid data-icon="inline-start" aria-hidden="true" />
+                Gallery
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={layout === "list" ? "secondary" : "ghost"}
+                aria-pressed={layout === "list"}
+                onClick={() => setLayout("list")}
+              >
+                <List data-icon="inline-start" aria-hidden="true" />
+                List
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-sm">
+          {/*
+            A filtered count never replaces the total. Saying "3 campaigns"
+            while nine are hidden behind a filter is how somebody concludes
+            work has gone missing.
+          */}
+          <span className="font-medium">
+            {filtering
+              ? `Showing ${shown.length} of ${campaigns.length} campaigns`
+              : `${campaigns.length} ${campaigns.length === 1 ? "campaign" : "campaigns"}`}
+          </span>{" "}
+          <span className="text-muted-foreground">
+            {waiting.length === 0
+              ? "None are waiting on you."
+              : `${waiting.length} ${waiting.length === 1 ? "is" : "are"} waiting on somebody.`}
+          </span>
+        </p>
+      </div>
+
+      {shown.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Images />
+            </EmptyMedia>
+            <EmptyTitle>Nothing matches these filters</EmptyTitle>
+            <EmptyDescription>
+              {campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"} exist here; none
+              of them match what you have selected.
+            </EmptyDescription>
+          </EmptyHeader>
+          <Button variant="outline" size="sm" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        </Empty>
+      ) : layout === "gallery" ? (
+        <ul aria-label="Campaigns" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {shown.map((campaign) => (
+            <CampaignCard
+              key={campaign.id}
+              campaign={campaign}
+              organizationId={organizationId}
+              timeZone={timeZone}
+              previewUrl={previewFor(campaign)}
+            />
+          ))}
+        </ul>
+      ) : (
+        <ul aria-label="Campaigns" className="flex flex-col gap-2">
+          {shown.map((campaign) => (
+            <CampaignRow
+              key={campaign.id}
+              campaign={campaign}
+              organizationId={organizationId}
+              timeZone={timeZone}
+              previewUrl={previewFor(campaign)}
+            />
+          ))}
+        </ul>
+      )}
+
+      {filtersActive && shown.length > 0 ? (
+        <Button variant="link" size="sm" className="w-fit px-0" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function PortfolioHeader({ organizationId }: Readonly<{ organizationId: string }>) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-col gap-1">
+        <p className="text-sm text-muted-foreground">
+          Your marketing work, from approved idea to results.
+        </p>
+        <Link
+          href={`/organizations/${organizationId}/growth-intelligence`}
+          className="flex w-fit items-center gap-1 text-sm font-medium underline-offset-4 hover:underline"
+        >
+          Review campaign recommendations
+          <ArrowRight className="size-3.5" aria-hidden="true" />
+        </Link>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <Button asChild>
           <Link href={`/organizations/${organizationId}/campaigns/new`}>
             <Plus data-icon="inline-start" aria-hidden="true" />
-            New campaign brief
+            Request a campaign
           </Link>
         </Button>
         <Button variant="outline" asChild>
-          <Link href={`/organizations/${organizationId}/opportunities`}>
-            <FileText data-icon="inline-start" aria-hidden="true" />
-            Start from an opportunity
+          <Link href={`/organizations/${organizationId}/assets`}>
+            <Images data-icon="inline-start" aria-hidden="true" />
+            Asset Library
           </Link>
         </Button>
       </div>
-
-      {campaigns.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Sparkles />
-            </EmptyMedia>
-            <EmptyTitle>No campaigns yet</EmptyTitle>
-            <EmptyDescription>
-              Start from a Decision Engine opportunity, or write a brief yourself. Both arrive here
-              as a proposal to review before anything is published.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-sm font-medium">
-                {/*
-                  A filtered count never replaces the total. Saying "3
-                  campaigns" while nine are hidden behind a search box is how
-                  somebody concludes work has gone missing.
-                */}
-                {filtering
-                  ? `Showing ${shown.length} of ${campaigns.length} campaigns`
-                  : `${campaigns.length} ${campaigns.length === 1 ? "campaign" : "campaigns"}`}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {waiting === 0
-                  ? "None are waiting on you."
-                  : `${waiting} ${waiting === 1 ? "is" : "are"} waiting on somebody.`}
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search campaigns"
-                aria-label="Search campaigns"
-                className="h-9 w-full sm:w-56"
-              />
-              <div className="flex rounded-md border p-0.5" role="group" aria-label="Layout">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={layout === "gallery" ? "secondary" : "ghost"}
-                  aria-pressed={layout === "gallery"}
-                  onClick={() => setLayout("gallery")}
-                >
-                  <LayoutGrid data-icon="inline-start" aria-hidden="true" />
-                  Gallery
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={layout === "list" ? "secondary" : "ghost"}
-                  aria-pressed={layout === "list"}
-                  onClick={() => setLayout("list")}
-                >
-                  <List data-icon="inline-start" aria-hidden="true" />
-                  List
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {shown.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Sparkles />
-                </EmptyMedia>
-                <EmptyTitle>Nothing matches that search</EmptyTitle>
-                <EmptyDescription>
-                  {campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"} exist here;
-                  none of them match &ldquo;{query.trim()}&rdquo;. Clear the search to see them
-                  again.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : layout === "gallery" ? (
-            <ul aria-label="Campaigns" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {shown.map((campaign) => (
-                <CampaignCard
-                  key={campaign.id}
-                  campaign={campaign}
-                  organizationId={organizationId}
-                  timeZone={timeZone}
-                  previewUrl={previewFor(campaign)}
-                />
-              ))}
-            </ul>
-          ) : (
-            <ul aria-label="Campaigns" className="flex flex-col gap-2">
-              {shown.map((campaign) => (
-                <CampaignRow
-                  key={campaign.id}
-                  campaign={campaign}
-                  organizationId={organizationId}
-                  timeZone={timeZone}
-                  previewUrl={previewFor(campaign)}
-                />
-              ))}
-            </ul>
-          )}
-        </>
-      )}
     </div>
   );
 }

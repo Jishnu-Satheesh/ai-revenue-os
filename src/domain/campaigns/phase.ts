@@ -9,9 +9,15 @@ import type { CampaignState } from "@/domain/campaigns/state-machine";
  * looking at the word "approved" cannot tell which of those they are in, and
  * the difference is the difference between waiting and being blocked.
  *
- * So the phase is derived from the saved records of the two gates — the
- * proposal/version approval that authorizes preparation, and the launch
- * approval that authorizes publication — rather than from the state column.
+ * So the phase is derived from the saved records of the two gates — the version
+ * approval that authorizes preparation, and the launch approval that authorizes
+ * publication — rather than from the state column.
+ *
+ * The names are the ones the visual contract uses, because they are the words
+ * the client sees: Proposal, Creating, Review, Scheduled / Live, Results &
+ * learning. Both gates live inside Review: reviewing each finished output and
+ * authorizing the set to publish are two acts of the same stage, and the next
+ * action is what tells them apart.
  *
  * The rule that matters most here: a signal that could not be read is reported
  * as undetermined, never as zero. "No deliverables have been approved" and "we
@@ -21,12 +27,11 @@ import type { CampaignState } from "@/domain/campaigns/state-machine";
  */
 
 export const CAMPAIGN_PHASES = [
-  "drafting",
-  "awaiting_review",
-  "preparing_creative",
-  "awaiting_publication",
-  "publishing",
-  "settled",
+  "proposal",
+  "creating",
+  "review",
+  "scheduled_live",
+  "results",
   "stopped",
 ] as const;
 
@@ -78,6 +83,9 @@ export type PhaseFact = {
   undetermined?: boolean;
 };
 
+/** Which tab of the detail workspace an action lives on. */
+export type CampaignDetailTab = "overview" | "creative" | "publishing" | "results" | "activity";
+
 /**
  * The one thing worth doing next, and who may do it.
  *
@@ -92,8 +100,7 @@ export type PhaseNextAction = {
   detail: string;
   /** The capability required. Checked again server-side; this is for honesty. */
   permission: "campaign.edit" | "campaign.approve" | "campaign.publish" | "campaign.create";
-  /** Which tab of the detail workspace the action lives on. */
-  tab: "overview" | "creative" | "publishing" | "results" | "activity";
+  tab: CampaignDetailTab;
 };
 
 export type CampaignPhaseVerdict = {
@@ -109,21 +116,26 @@ export type CampaignPhaseVerdict = {
 };
 
 const PHASE_LABEL: Readonly<Record<CampaignPhase, string>> = {
-  drafting: "Drafting",
-  awaiting_review: "Awaiting review",
-  preparing_creative: "Preparing creative",
-  awaiting_publication: "Awaiting publication",
-  publishing: "Publishing",
-  settled: "Settled",
+  proposal: "Proposal",
+  creating: "Creating",
+  review: "Review",
+  scheduled_live: "Scheduled / Live",
+  results: "Results & learning",
+  stopped: "Stopped",
+};
+
+/** The short label a portfolio card shows. "Results & learning" is too long there. */
+const PHASE_BADGE: Readonly<Record<CampaignPhase, string>> = {
+  proposal: "Needs review",
+  creating: "Preparing",
+  review: "Needs review",
+  scheduled_live: "Live",
+  results: "Completed",
   stopped: "Stopped",
 };
 
 /** States that mean this campaign is not going anywhere without intervention. */
-const STOPPED_STATES: ReadonlySet<CampaignState> = new Set([
-  "cancelled",
-  "failed",
-  "blocked",
-]);
+const STOPPED_STATES: ReadonlySet<CampaignState> = new Set(["cancelled", "failed", "blocked"]);
 
 /**
  * Whether an approval currently authorizes anything.
@@ -161,6 +173,24 @@ function tally(deliverables: DeliverableTally | null): readonly PhaseFact[] {
   ];
 }
 
+/** Why an approval authorizes nothing, in words an operator can act on. */
+function approvalFact(status: PhaseApprovalStatus): string {
+  switch (status) {
+    case "none":
+      return "Not approved";
+    case "live":
+      return "Live";
+    case "expired":
+      return "Expired";
+    case "superseded":
+      return "Superseded by a newer version";
+    case "digest_mismatch":
+      return "Does not match this version";
+    case "revoked":
+      return "Revoked";
+  }
+}
+
 /**
  * The phase, its facts and the next move, from saved records only.
  *
@@ -177,14 +207,11 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
   // whether its approval is still live says nothing about what it achieved.
   if (input.settledAt !== null) {
     return {
-      phase: "settled",
-      label: PHASE_LABEL.settled,
+      phase: "results",
+      label: PHASE_LABEL.results,
       summary: "This campaign ran and its result has been measured.",
       undetermined,
-      facts: [
-        { label: "Settled", value: input.settledAt },
-        ...tally(input.deliverables),
-      ],
+      facts: [{ label: "Settled", value: input.settledAt }, ...tally(input.deliverables)],
       nextAction: null,
     };
   }
@@ -207,8 +234,8 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
 
   if (!input.hasVersion) {
     return {
-      phase: "drafting",
-      label: PHASE_LABEL.drafting,
+      phase: "proposal",
+      label: PHASE_LABEL.proposal,
       summary: "No proposal has been generated yet, so there is nothing to review.",
       undetermined,
       facts: [{ label: "Proposal", value: "Not generated" }],
@@ -224,8 +251,8 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
 
   if (!authorizes(input.approvalStatus)) {
     return {
-      phase: "awaiting_review",
-      label: PHASE_LABEL.awaiting_review,
+      phase: "proposal",
+      label: PHASE_LABEL.proposal,
       summary:
         input.approvalStatus === "none"
           ? "A proposal is ready and nothing authorizes it yet."
@@ -234,7 +261,7 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
       facts: [{ label: "Approval", value: approvalFact(input.approvalStatus) }],
       nextAction: {
         key: "approve_version",
-        label: "Review and approve this version",
+        label: "Review the proposal",
         detail:
           "Authorizes creative to be prepared inside this version's limits. It does not publish anything.",
         permission: "campaign.approve",
@@ -250,8 +277,8 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
 
   if (deliverables === null || deliverables.produced < deliverables.planned) {
     return {
-      phase: "preparing_creative",
-      label: PHASE_LABEL.preparing_creative,
+      phase: "creating",
+      label: PHASE_LABEL.creating,
       summary:
         deliverables === null
           ? "Creative is authorized. How much of it exists could not be read."
@@ -264,26 +291,29 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
 
   if (deliverables.approved < deliverables.produced) {
     return {
-      phase: "preparing_creative",
-      label: PHASE_LABEL.preparing_creative,
+      phase: "review",
+      label: PHASE_LABEL.review,
       summary: "Every planned output exists. Some have not been reviewed yet.",
       undetermined,
       facts: tally(deliverables),
       nextAction: {
         key: "review_outputs",
-        label: "Review the finished outputs",
+        label:
+          deliverables.produced - deliverables.approved === 1
+            ? "Review 1 creative"
+            : `Review ${deliverables.produced - deliverables.approved} creatives`,
         detail:
           "Each output is approved on its own exact artwork and words. A later re-render needs reviewing again.",
         permission: "campaign.approve",
-        tab: "publishing",
+        tab: "creative",
       },
     };
   }
 
   if (input.launchAuthorized === true) {
     return {
-      phase: "publishing",
-      label: PHASE_LABEL.publishing,
+      phase: "scheduled_live",
+      label: PHASE_LABEL.scheduled_live,
       summary: "These exact outputs are authorized to publish on the agreed terms.",
       undetermined,
       facts: [...tally(deliverables), { label: "Publication", value: "Authorized" }],
@@ -292,8 +322,8 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
   }
 
   return {
-    phase: "awaiting_publication",
-    label: PHASE_LABEL.awaiting_publication,
+    phase: "review",
+    label: PHASE_LABEL.review,
     summary:
       input.launchAuthorized === null
         ? "Every output is reviewed. Whether publication is authorized could not be read."
@@ -319,55 +349,6 @@ export function campaignPhase(input: CampaignPhaseInput): CampaignPhaseVerdict {
   };
 }
 
-/** Why an approval authorizes nothing, in words an operator can act on. */
-function approvalFact(status: PhaseApprovalStatus): string {
-  switch (status) {
-    case "none":
-      return "Not approved";
-    case "live":
-      return "Live";
-    case "expired":
-      return "Expired";
-    case "superseded":
-      return "Superseded by a newer version";
-    case "digest_mismatch":
-      return "Does not match this version";
-    case "revoked":
-      return "Revoked";
-  }
-}
-
-/**
- * The phases, in order, for a strip that shows where this one sits.
- *
- * `stopped` and `settled` are ends rather than steps, so the strip renders the
- * path up to the current phase and marks the ending separately. Showing
- * "Publishing" as a future step for a cancelled campaign would promise
- * something that is not going to happen.
- */
-export const PHASE_SEQUENCE: readonly CampaignPhase[] = [
-  "drafting",
-  "awaiting_review",
-  "preparing_creative",
-  "awaiting_publication",
-  "publishing",
-];
-
-export function phaseLabel(phase: CampaignPhase): string {
-  return PHASE_LABEL[phase];
-}
-
-/**
- * Where this phase sits in the sequence, or `null` for an ending.
- *
- * `null` is not "position zero". A settled campaign is not at the start of
- * anything, and rendering it that way would undo every step it actually took.
- */
-export function phasePosition(phase: CampaignPhase): number | null {
-  const index = PHASE_SEQUENCE.indexOf(phase);
-  return index === -1 ? null : index;
-}
-
 /**
  * The phase as far as a list can honestly tell.
  *
@@ -389,8 +370,8 @@ export function campaignListPhase(input: {
 }): CampaignPhaseVerdict {
   if (input.settledAt !== null) {
     return {
-      phase: "settled",
-      label: PHASE_LABEL.settled,
+      phase: "results",
+      label: PHASE_LABEL.results,
       summary: "Ran and measured.",
       undetermined: [],
       facts: [],
@@ -412,8 +393,8 @@ export function campaignListPhase(input: {
 
   if (!input.hasVersion) {
     return {
-      phase: "drafting",
-      label: PHASE_LABEL.drafting,
+      phase: "proposal",
+      label: PHASE_LABEL.proposal,
       summary: "No proposal yet.",
       undetermined: [],
       facts: [],
@@ -429,8 +410,8 @@ export function campaignListPhase(input: {
 
   if (!authorizes(input.approvalStatus)) {
     return {
-      phase: "awaiting_review",
-      label: PHASE_LABEL.awaiting_review,
+      phase: "proposal",
+      label: PHASE_LABEL.proposal,
       summary:
         input.approvalStatus === "none"
           ? "Waiting for review."
@@ -439,7 +420,7 @@ export function campaignListPhase(input: {
       facts: [],
       nextAction: {
         key: "approve_version",
-        label: "Review this version",
+        label: "Review proposal",
         detail: "Authorizes creative to be prepared. It does not publish anything.",
         permission: "campaign.approve",
         tab: "creative",
@@ -450,8 +431,8 @@ export function campaignListPhase(input: {
   // Deliberately as far as this goes. Whether the outputs exist, have been
   // reviewed, or may publish is a question only the detail page has asked.
   return {
-    phase: "preparing_creative",
-    label: PHASE_LABEL.preparing_creative,
+    phase: "creating",
+    label: PHASE_LABEL.creating,
     summary: "Creative is authorized and being prepared.",
     undetermined: [],
     facts: [],
@@ -468,4 +449,78 @@ export function campaignListPhase(input: {
  */
 export function needsAttention(verdict: CampaignPhaseVerdict): boolean {
   return verdict.nextAction !== null;
+}
+
+/**
+ * The phases, in order, for the strip the visual contract specifies.
+ *
+ * `stopped` is an end rather than a step, so a stopped campaign gets no
+ * position: drawing "Scheduled / Live" as an upcoming step for a cancelled
+ * campaign would promise something that is not going to happen.
+ */
+export const PHASE_SEQUENCE: readonly CampaignPhase[] = [
+  "proposal",
+  "creating",
+  "review",
+  "scheduled_live",
+  "results",
+];
+
+export function phaseLabel(phase: CampaignPhase): string {
+  return PHASE_LABEL[phase];
+}
+
+/** The short form for a portfolio card's status pill. */
+export function phaseBadge(phase: CampaignPhase): string {
+  return PHASE_BADGE[phase];
+}
+
+/**
+ * Where this phase sits in the sequence, or `null` for an ending.
+ *
+ * `null` is not "position zero". A stopped campaign is not at the start of
+ * anything, and rendering it that way would undo every step it actually took.
+ */
+export function phasePosition(phase: CampaignPhase): number | null {
+  const index = PHASE_SEQUENCE.indexOf(phase);
+  return index === -1 ? null : index;
+}
+
+/**
+ * The status groupings the portfolio filter offers.
+ *
+ * Display groupings over real phases, never a new lifecycle. "Completed" here
+ * means a settled outcome exists, not an archive somebody moved a campaign
+ * into — introducing an archive through a visual filter is exactly what the
+ * visual contract forbids.
+ */
+export const PORTFOLIO_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "needs_review", label: "Needs review" },
+  { key: "preparing", label: "Preparing" },
+  { key: "scheduled", label: "Scheduled" },
+  { key: "live", label: "Live" },
+  { key: "completed", label: "Completed" },
+] as const;
+
+export type PortfolioFilter = (typeof PORTFOLIO_FILTERS)[number]["key"];
+
+/** Whether a phase belongs to a filter grouping. */
+export function matchesFilter(phase: CampaignPhase, filter: PortfolioFilter): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "needs_review":
+      return phase === "proposal" || phase === "review";
+    case "preparing":
+      return phase === "creating";
+    // Nothing dispatches yet, so "Scheduled" and "Live" both read from the one
+    // phase that means authorized-to-publish. They separate when the dispatch
+    // records exist to separate them, not before.
+    case "scheduled":
+    case "live":
+      return phase === "scheduled_live";
+    case "completed":
+      return phase === "results";
+  }
 }

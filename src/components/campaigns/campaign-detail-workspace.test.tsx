@@ -2,12 +2,16 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/organizations/org/campaigns/campaign",
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import type { AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
 import { CampaignDetailWorkspace } from "@/components/campaigns/campaign-detail-workspace";
-import type { PublishingDeliverable } from "@/components/campaigns/campaign-publishing";
+import type { ReviewableDeliverable } from "@/components/campaigns/campaign-creative-review";
 import { campaignPhase, type CampaignPhaseInput } from "@/domain/campaigns/phase";
 import { manifestIds, validManifest } from "@/domain/campaigns/test-manifest";
 import { toStudioView, type StudioView } from "@/modules/campaigns/application/studio-view";
@@ -94,7 +98,7 @@ function phaseFor(overrides: Partial<CampaignPhaseInput> = {}) {
   });
 }
 
-function deliverable(overrides: Partial<PublishingDeliverable> = {}): PublishingDeliverable {
+function deliverable(overrides: Partial<ReviewableDeliverable> = {}): ReviewableDeliverable {
   return {
     id: "c1000000-0000-4000-8000-000000000001",
     channel: "instagram",
@@ -132,6 +136,8 @@ function renderWorkspace(
       allocationEvents={[]}
       outcome={null}
       learningProposal={null}
+      launchAuthorized={false}
+      lastUpdatedLabel="15 Aug, 13:30"
       canReviewOutputs
       canPublish={false}
       canDecideLearning
@@ -167,7 +173,7 @@ describe("the five questions get five places to be asked", () => {
   it("opens on the overview, which states where this stands", () => {
     renderWorkspace();
 
-    expect(screen.getByText("Objective")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /why this campaign/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /overview/i })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -176,23 +182,35 @@ describe("the five questions get five places to be asked", () => {
 });
 
 describe("the strip separates the two gates", () => {
-  it("says creative is authorized but publication is not yet", () => {
+  it("names the phase in the words the client sees, not the database's", () => {
     renderWorkspace({ phase: phaseFor({ launchAuthorized: false }) });
 
-    expect(screen.getByRole("heading", { name: /awaiting publication/i })).toBeInTheDocument();
+    // The visual contract's five stages: Proposal, Creating, Review,
+    // Scheduled / Live, Results & learning.
+    expect(screen.getByText(/Phase:/)).toBeInTheDocument();
+    expect(screen.getAllByText("Review").length).toBeGreaterThan(0);
+    expect(screen.getByText("Scheduled / Live")).toBeInTheDocument();
+  });
+
+  it("marks exactly one stage as the current step", () => {
+    const { container } = renderWorkspace({ phase: phaseFor({ launchAuthorized: false }) });
+
+    const current = container.querySelectorAll('[aria-current="step"]');
+    expect(current).toHaveLength(1);
+    expect(current[0]).toHaveTextContent("Review");
   });
 
   it("names the capability a viewer is missing rather than hiding the next step", () => {
     // Somebody who cannot publish still needs to know what the campaign waits on.
     renderWorkspace({ canPublish: false, phase: phaseFor({ launchAuthorized: false }) });
 
-    expect(screen.getByText(/campaign\.publish/)).toBeInTheDocument();
+    expect(screen.getAllByText(/campaign\.publish/).length).toBeGreaterThan(0);
   });
 
   it("does not warn about missing capability when the viewer holds it", () => {
     renderWorkspace({ canPublish: true, phase: phaseFor({ launchAuthorized: false }) });
 
-    expect(screen.queryByText(/your role does not hold/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/which your role does not hold/i)).not.toBeInTheDocument();
   });
 
   it("says a count could not be read rather than showing it as zero", () => {
@@ -263,49 +281,53 @@ describe("diagnostics move out of the way without leaving", () => {
   });
 });
 
-describe("the publishing tab is honest about what it knows", () => {
+describe("reviewing finished outputs lives on Creative, not Publishing", () => {
   it("distinguishes a failed read from an empty list", () => {
-    renderTab("publishing", { deliverablesReadFailed: true });
+    renderTab("creative", { deliverablesReadFailed: true });
 
     expect(screen.getByText(/not the same as there being none/i)).toBeInTheDocument();
   });
 
   it("says there are no outputs yet when the list is genuinely empty", () => {
-    renderTab("publishing", { deliverables: [], deliverablesReadFailed: false });
+    renderTab("creative", { deliverables: [], deliverablesReadFailed: false });
 
     expect(screen.getByText(/no finished outputs yet/i)).toBeInTheDocument();
   });
 
   it("shows a planned output that was never produced rather than hiding it", () => {
-    renderTab("publishing", { deliverables: [deliverable({ currentVersion: null })] });
+    renderTab("creative", { deliverables: [deliverable({ currentVersion: null })] });
 
     expect(screen.getByText(/not produced yet/i)).toBeInTheDocument();
   });
 
   it("offers no review controls to somebody without the capability", () => {
-    renderTab("publishing", { deliverables: [deliverable()], canReviewOutputs: false });
+    renderTab("creative", { deliverables: [deliverable()], canReviewOutputs: false });
 
     expect(screen.queryByRole("button", { name: /approve this output/i })).not.toBeInTheDocument();
   });
 
   it("says why an output cannot be published in words, not a code", () => {
-    renderTab("publishing", { deliverables: [deliverable()] });
+    renderTab("creative", { deliverables: [deliverable()] });
 
     expect(screen.getByText(/nobody has reviewed this yet/i)).toBeInTheDocument();
   });
 
   it("refuses to record a rejection until it says why", () => {
-    renderTab("publishing", { deliverables: [deliverable()] });
+    renderTab("creative", { deliverables: [deliverable()] });
     fireEvent.click(screen.getByRole("button", { name: /^reject$/i }));
 
     expect(screen.getByRole("button", { name: /record rejection/i })).toBeDisabled();
     expect(screen.getByText(/pick at least one reason/i)).toBeInTheDocument();
   });
 
-  it("states that reviewing does not confer the right to publish", () => {
-    renderTab("publishing", { deliverables: [deliverable()], canReviewOutputs: true, canPublish: false });
+  it("states on Publishing that reviewing does not confer the right to publish", () => {
+    renderTab("publishing", {
+      deliverables: [deliverable()],
+      canReviewOutputs: true,
+      canPublish: false,
+    });
 
-    expect(screen.getByText(/reviewing outputs above does not confer it/i)).toBeInTheDocument();
+    expect(screen.getByText(/reviewing outputs does not confer it/i)).toBeInTheDocument();
   });
 });
 

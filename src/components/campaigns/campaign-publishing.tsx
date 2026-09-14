@@ -1,357 +1,236 @@
-"use client";
+import Link from "next/link";
+import { AlertTriangle, PlugZap } from "lucide-react";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react";
-
-import { idempotencyKey, reviewDeliverable } from "@/components/campaigns/campaign-actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import type { Money, StudioChannelReadiness, StudioView } from "@/modules/campaigns/application/studio-view";
 
 /**
- * The second gate, as a screen.
+ * Where each approved output is going, when, and on whose account.
  *
- * The first approval said creative could be prepared inside fixed limits. This
- * is where each finished output is judged on its own exact artwork and words,
- * and only then can publication be authorized.
+ * One row per action the approved version carries. This is deliberately the
+ * *planned* set rather than a set of provider receipts: nothing dispatches yet,
+ * and inventing a "Queued" or "Submitting" state for work no worker has taken
+ * would be a claim about a provider we have not spoken to.
  *
- * Two things about this screen are load-bearing:
- *
- * The content hash travels with every verdict. A review approves those exact
- * bytes, so if a re-render lands between this screen being drawn and a button
- * being pressed, the server refuses. Without that, an operator's approval could
- * silently attach to artwork they never saw.
- *
- * A rejection must say why. A rejection with no reason is not a review — the
- * person who has to fix it cannot act on it — so the control stays disabled
- * until there is a reason, rather than sending one the server would refuse.
+ * So every row's state is derived from two things that are actually known —
+ * whether publication has been authorized at all, and whether the channel is
+ * ready to accept it. When dispatch records exist, they replace the derived
+ * state; until then the honest answer is "not dispatched", and the reason.
  */
 
-export type PublishingDeliverable = {
-  id: string;
-  channel: string;
-  placement: string;
-  language: string;
-  format: string;
-  ordinal: number;
-  state: string;
-  currentVersion: {
-    id: string;
-    version: number;
-    contentHash: string;
-    createdAt: string;
-  } | null;
-  eligibility: { publishable: boolean; reasonCode?: string };
-};
+function formatMoney(money: Money | null): string {
+  // An organic action carries no ceiling. Rendering it as "0.00" would read as
+  // a budget of nothing, which is a different claim from having no budget.
+  if (!money) return "—";
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: money.currency,
+  }).format(money.amountMinor / 100);
+}
 
-/** Why an output cannot be published, in words rather than codes. */
-const NOT_PUBLISHABLE: Readonly<Record<string, string>> = {
-  never_reviewed: "Nobody has reviewed this yet.",
-  rejected: "This was rejected. It needs a new version before it can go out.",
-  superseded_by_newer_version: "A newer version of this output has replaced it.",
-  reviewed_different_content: "This changed after it was approved, so the approval no longer fits.",
-};
-
-const REJECTION_REASONS = [
-  { code: "text_incorrect", label: "Wrong or misspelled text" },
-  { code: "brand_incorrect", label: "Off-brand" },
-  { code: "image_incorrect", label: "Wrong or poor image" },
-  { code: "claim_unsupported", label: "Makes a claim we cannot support" },
-  { code: "layout_broken", label: "Layout is broken" },
-] as const;
-
-function formatWhen(iso: string, timeZone: string): string {
+function formatSchedule(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "short",
+    year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     timeZone,
   }).format(new Date(iso));
 }
 
-function DeliverableRow({
-  deliverable,
-  organizationId,
-  campaignId,
-  timeZone,
-  canReview,
-}: Readonly<{
-  deliverable: PublishingDeliverable;
-  organizationId: string;
-  campaignId: string;
-  timeZone: string;
-  canReview: boolean;
-}>) {
-  const router = useRouter();
-  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [rejecting, setRejecting] = useState(false);
-  const [reasons, setReasons] = useState<readonly string[]>([]);
-  const [note, setNote] = useState("");
+type RowState = {
+  label: string;
+  variant: "secondary" | "outline" | "destructive";
+  note: string | null;
+};
 
-  const version = deliverable.currentVersion;
-  const name = `${deliverable.format} · ${deliverable.language} · ${deliverable.channel}`;
-
-  async function submit(decision: "approved" | "rejected") {
-    if (!version) return;
-    setBusy(decision === "approved" ? "approve" : "reject");
-    setError(null);
-
-    const result = await reviewDeliverable({
-      organizationId,
-      campaignId,
-      deliverableVersionId: version.id,
-      // The bytes this screen is actually showing. The server checks it again.
-      contentHash: version.contentHash,
-      decision,
-      reasonCodes: decision === "rejected" ? reasons : [],
-      note: note.trim() === "" ? null : note.trim(),
-      idempotencyKey: idempotencyKey(),
-    });
-
-    setBusy(null);
-
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-
-    if (result.data.outcome === "content_changed") {
-      setError(
-        "This output changed after the page was loaded, so the review was not recorded. Reload and look at what is there now.",
-      );
-      return;
-    }
-
-    if (result.data.outcome === "superseded") {
-      setError("A newer version has replaced this one. Reload to review the current output.");
-      return;
-    }
-
-    toast.success(decision === "approved" ? "Approved" : "Rejected", {
-      description: `${name} — recorded against this exact version.`,
-    });
-    setRejecting(false);
-    router.refresh();
+/**
+ * What can honestly be said about one action right now.
+ *
+ * `readiness` being null means the platform could not determine it, which is
+ * not the same as everything being fine and must never render as if it were.
+ */
+function rowState(input: {
+  readiness: StudioChannelReadiness | null | undefined;
+  readinessUnknown: boolean;
+  launchAuthorized: boolean | null;
+}): RowState {
+  if (input.readinessUnknown) {
+    return {
+      label: "Unknown",
+      variant: "outline",
+      note: "Channel readiness could not be determined. This is not a confirmation that it is fine.",
+    };
   }
 
-  return (
-    <li className="flex flex-col gap-3 rounded-lg border p-3">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-sm font-medium">{name}</span>
-          <span className="text-xs text-muted-foreground">
-            {deliverable.placement}
-            {version ? ` · version ${version.version}` : ""}
-            {version ? ` · produced ${formatWhen(version.createdAt, timeZone)}` : ""}
-          </span>
-        </div>
-        {deliverable.eligibility.publishable ? (
-          <Badge className="gap-1">
-            <CheckCircle2 className="size-3" aria-hidden="true" />
-            Publishable
-          </Badge>
-        ) : (
-          <Badge variant="outline">Not publishable</Badge>
-        )}
-      </div>
+  if (input.readiness?.verdict === "blocked") {
+    return {
+      label: "Blocked",
+      variant: "destructive",
+      note: input.readiness.blockers[0]?.reason ?? "This channel cannot accept the action yet.",
+    };
+  }
 
-      {version === null ? (
-        // Planned but never produced. Shown rather than hidden, so an
-        // incomplete campaign looks incomplete.
-        <Alert>
-          <AlertTriangle />
-          <AlertTitle>Not produced yet</AlertTitle>
-          <AlertDescription>
-            This output was planned but has not been rendered. There is nothing to review until it
-            exists.
-          </AlertDescription>
-        </Alert>
-      ) : deliverable.eligibility.publishable ? null : (
-        <p className="text-xs text-muted-foreground">
-          {NOT_PUBLISHABLE[deliverable.eligibility.reasonCode ?? ""] ??
-            "This cannot be published yet."}
-        </p>
-      )}
+  if (input.launchAuthorized === null) {
+    return {
+      label: "Unknown",
+      variant: "outline",
+      note: "Whether publication is authorized could not be read.",
+    };
+  }
 
-      {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>Not recorded</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
+  if (!input.launchAuthorized) {
+    return {
+      label: "Not authorized",
+      variant: "secondary",
+      note: "Reviewed outputs still need a publication authorization before anything is sent.",
+    };
+  }
 
-      {version === null || !canReview ? null : rejecting ? (
-        <div className="flex flex-col gap-2">
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-xs font-medium">Why is this being rejected?</legend>
-            <div className="flex flex-wrap gap-2">
-              {REJECTION_REASONS.map((reason) => (
-                <label
-                  key={reason.code}
-                  className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
-                >
-                  <input
-                    type="checkbox"
-                    checked={reasons.includes(reason.code)}
-                    onChange={(event) =>
-                      setReasons((current) =>
-                        event.target.checked
-                          ? [...current, reason.code]
-                          : current.filter((code) => code !== reason.code),
-                      )
-                    }
-                  />
-                  {reason.label}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={`note-${deliverable.id}`} className="text-xs">
-              Anything else the person fixing this should know
-            </Label>
-            <Textarea
-              id={`note-${deliverable.id}`}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              rows={2}
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="destructive"
-              // A rejection with no reason is not a review. Refused here rather
-              // than sent and refused by the server.
-              disabled={reasons.length === 0 || busy !== null}
-              onClick={() => submit("rejected")}
-            >
-              {busy === "reject" ? <Spinner data-icon="inline-start" /> : null}
-              Record rejection
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setRejecting(false)}>
-              Cancel
-            </Button>
-            {reasons.length === 0 ? (
-              <span className="self-center text-xs text-muted-foreground">
-                Pick at least one reason.
-              </span>
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" disabled={busy !== null} onClick={() => submit("approved")}>
-            {busy === "approve" ? <Spinner data-icon="inline-start" /> : null}
-            Approve this output
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setRejecting(true)}>
-            Reject
-          </Button>
-        </div>
-      )}
-    </li>
-  );
+  return {
+    label: "Not dispatched",
+    variant: "secondary",
+    note: "Authorized. No worker has sent this yet.",
+  };
 }
 
 export function CampaignPublishing({
-  deliverables,
+  view,
   organizationId,
-  campaignId,
   timeZone,
-  canReview,
+  launchAuthorized,
   canPublish,
-  readFailed = false,
+  allOutputsReviewed,
 }: Readonly<{
-  /** `null` is never passed here; an unreadable list is reported by `readFailed`. */
-  deliverables: readonly PublishingDeliverable[];
+  view: StudioView;
   organizationId: string;
-  campaignId: string;
   timeZone: string;
-  /** Whether this viewer may record a verdict. `campaign.approve`. */
-  canReview: boolean;
-  /** Whether this viewer may authorize publication. `campaign.publish`. */
+  /** `null` when it could not be read — never rendered as "not authorized". */
+  launchAuthorized: boolean | null;
+  /** `campaign.publish`. Reviewing outputs does not confer this. */
   canPublish: boolean;
-  /** True when the list could not be read, which is not the same as empty. */
-  readFailed?: boolean;
+  /** Whether every produced output carries its own standing approval. */
+  allOutputsReviewed: boolean;
 }>) {
-  const produced = deliverables.filter((entry) => entry.currentVersion !== null);
-  const publishable = produced.filter((entry) => entry.eligibility.publishable);
-  const allReviewed = produced.length > 0 && publishable.length === produced.length;
+  const readinessUnknown = view.readiness === null;
+  const readinessByChannel = new Map(
+    (view.readiness ?? []).map((entry) => [entry.channel, entry]),
+  );
+  const directionsById = new Map(view.directions.map((entry) => [entry.id, entry]));
 
-  if (readFailed) {
-    return (
-      <Alert variant="destructive">
-        <AlertTriangle />
-        <AlertTitle>The finished outputs could not be read</AlertTitle>
-        <AlertDescription>
-          This is not the same as there being none. Nothing here should be treated as a complete
-          picture — reload, and if it keeps failing, do not authorize a publication from this screen.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (deliverables.length === 0) {
-    return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ShieldAlert />
-          </EmptyMedia>
-          <EmptyTitle>No finished outputs yet</EmptyTitle>
-          <EmptyDescription>
-            Creative produced under this approval appears here for review. Each one is judged on its
-            own exact artwork and words before anything can be published.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
+  const blocked = (view.readiness ?? []).filter((entry) => entry.verdict === "blocked");
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">Finished outputs</h2>
-        <p className="text-sm text-muted-foreground">
-          {publishable.length} of {produced.length} produced{" "}
-          {produced.length === 1 ? "output is" : "outputs are"} cleared to publish.
-          {deliverables.length > produced.length
-            ? ` ${deliverables.length - produced.length} planned ${
-                deliverables.length - produced.length === 1 ? "output has" : "outputs have"
-              } not been produced.`
-            : ""}
-        </p>
-      </div>
+      {readinessUnknown ? (
+        <Alert>
+          <AlertTriangle />
+          <AlertTitle>Channel readiness could not be determined</AlertTitle>
+          <AlertDescription>
+            The states below are incomplete. Treat every row as unverified rather than as ready.
+          </AlertDescription>
+        </Alert>
+      ) : blocked.length === 0 ? null : (
+        <Alert variant="destructive">
+          <PlugZap />
+          <AlertTitle>
+            {blocked.length === 1
+              ? `${blocked[0]!.channel} cannot publish yet`
+              : `${blocked.length} channels cannot publish yet`}
+          </AlertTitle>
+          <AlertDescription className="flex flex-col gap-2">
+            <span>
+              {blocked[0]!.blockers[0]?.recovery ??
+                "These placements cannot submit until the channel is connected for this organization."}
+            </span>
+            <Button asChild size="sm" variant="outline" className="w-fit">
+              <Link href={`/organizations/${organizationId}/integrations`}>
+                Open Integration Hub
+              </Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
-      <ul className="flex flex-col gap-3">
-        {deliverables.map((deliverable) => (
-          <DeliverableRow
-            key={deliverable.id}
-            deliverable={deliverable}
-            organizationId={organizationId}
-            campaignId={campaignId}
-            timeZone={timeZone}
-            canReview={canReview}
-          />
-        ))}
-      </ul>
+      {/* Tables are the one thing allowed to be wider than the page, inside
+          their own scroller, so a phone can read a six-column row. */}
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[48rem] text-sm">
+          <caption className="sr-only">
+            Every action this approved version would publish, with its destination, schedule and
+            current state.
+          </caption>
+          <thead className="border-b bg-muted/40">
+            <tr className="text-left">
+              <th scope="col" className="px-3 py-2 font-medium">
+                Output / action
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Destination
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Type
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Schedule ({timeZone})
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Budget
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                State
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {view.actions.map((action) => {
+              const readiness = readinessByChannel.get(action.channel);
+              const state = rowState({ readiness, readinessUnknown, launchAuthorized });
+              const direction = directionsById.get(action.directionId);
+
+              return (
+                <tr key={action.id} className="border-b last:border-b-0 align-top">
+                  <td className="px-3 py-3">
+                    <span className="flex flex-col gap-0.5">
+                      <span className="font-medium">{direction?.name ?? "Unnamed direction"}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {action.channel} · {action.placement}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="px-3 py-3">
+                    {/* An unconnected channel says so, rather than showing a
+                        blank that reads as "fine". */}
+                    {readinessUnknown
+                      ? "Unknown"
+                      : (readiness?.accountLabel ?? "No account connected")}
+                  </td>
+                  <td className="px-3 py-3">{action.spendCeiling ? "Paid" : "Organic"}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {formatSchedule(action.scheduledFor, timeZone)}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {formatMoney(action.spendCeiling)}
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className="flex flex-col gap-1">
+                      <Badge variant={state.variant} className="w-fit">
+                        {state.label}
+                      </Badge>
+                      {state.note ? (
+                        <span className="text-xs text-muted-foreground">{state.note}</span>
+                      ) : null}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
       <section className="flex flex-col gap-2 rounded-lg border border-dashed p-4">
         <h3 className="text-base font-semibold">Authorize publication</h3>
@@ -361,10 +240,9 @@ export function CampaignPublishing({
           authorization rather than an edit to this one.
         </p>
 
-        {allReviewed ? null : (
+        {allOutputsReviewed ? null : (
           <p className="text-sm text-muted-foreground">
-            Every produced output has to be reviewed first. {publishable.length} of {produced.length}{" "}
-            {publishable.length === 1 ? "is" : "are"} cleared so far.
+            Every produced output has to be reviewed on the Creative tab first.
           </p>
         )}
 
@@ -372,16 +250,16 @@ export function CampaignPublishing({
           <p className="text-sm text-muted-foreground">
             Authorizing publication needs the{" "}
             <span className="font-medium text-foreground">campaign.publish</span> capability, which
-            your role does not hold. Reviewing outputs above does not confer it.
+            your role does not hold. Reviewing outputs does not confer it.
           </p>
         )}
 
         {/*
-          No control here yet. The terms a publication is bound to — the
-          connected account, the schedule, the spend — are assembled by the
-          dispatch planner in Task 13, and offering a button that cannot name
-          them would authorize a set of terms nobody chose. The route and its
-          binding exist; what is missing is the screen that composes the terms.
+          No control here yet. The terms a publication binds to — the connected
+          account, the exact schedule, the spend — are assembled by the dispatch
+          planner in Task 13, and offering a button that cannot name them would
+          authorize a set of terms nobody chose. The route and its binding exist;
+          what is missing is the screen that composes the terms.
         */}
         <p className="text-xs text-muted-foreground">
           The composer for those terms is not built yet, so publication cannot be authorized from

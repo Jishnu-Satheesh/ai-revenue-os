@@ -39,6 +39,17 @@ function item(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
   };
 }
 
+/**
+ * The campaign cards only.
+ *
+ * The "Needs your attention" strip is also a list, so an unscoped listitem
+ * query would match its rows too — and those rows are deliberately a capped
+ * preview, not the campaign set.
+ */
+function cardsOnly(): HTMLElement[] {
+  return within(screen.getByRole("list", { name: "Campaigns" })).getAllByRole("listitem");
+}
+
 function renderPortfolio(
   campaigns: readonly CampaignListItem[],
   previewUrls: Readonly<Record<string, string>> = {},
@@ -57,13 +68,17 @@ describe("the portfolio offers both entry points as equals", () => {
   it("links to a manual brief and to the opportunity list", () => {
     renderPortfolio([item()]);
 
-    expect(screen.getByRole("link", { name: /new campaign brief/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /request a campaign/i })).toHaveAttribute(
       "href",
       `/organizations/${ORGANIZATION_ID}/campaigns/new`,
     );
-    expect(screen.getByRole("link", { name: /start from an opportunity/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /asset library/i })).toHaveAttribute(
       "href",
-      `/organizations/${ORGANIZATION_ID}/opportunities`,
+      `/organizations/${ORGANIZATION_ID}/assets`,
+    );
+    expect(screen.getByRole("link", { name: /review campaign recommendations/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION_ID}/growth-intelligence`,
     );
   });
 
@@ -77,13 +92,36 @@ describe("the portfolio offers both entry points as equals", () => {
 });
 
 describe("the portfolio states only what the campaign has produced", () => {
-  it("shows the objective, channels and ceiling once a version exists", () => {
+  it("shows the objective and the fact that matters at this phase", () => {
     renderPortfolio([item()]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/raise incremental gross profit/i)).toBeInTheDocument();
-    expect(card.getByText("instagram · meta_ads")).toBeInTheDocument();
-    expect(card.getByText(/AED\s?450\.00/)).toBeInTheDocument();
+    // A proposal's number is its proposed budget, labelled as proposed.
+    expect(card.getByText(/proposed budget AED\s?450\.00/i)).toBeInTheDocument();
+  });
+
+  it("never shows a proposed budget as though it were spend", () => {
+    renderPortfolio([
+      item({
+        phase: campaignListPhase({
+          state: "completed",
+          hasVersion: true,
+          approvalStatus: "live",
+          settledAt: "2026-09-01T00:00:00.000Z",
+        }),
+      }),
+    ]);
+
+    expect(screen.queryByText(/proposed budget/i)).not.toBeInTheDocument();
+  });
+
+  it("shows channels and ceiling in the list view, where the columns are", () => {
+    renderPortfolio([item()]);
+    fireEvent.click(screen.getByRole("button", { name: /^list$/i }));
+
+    expect(screen.getByText(/instagram · meta_ads/)).toBeInTheDocument();
+    expect(screen.getByText(/AED\s?450\.00/)).toBeInTheDocument();
   });
 
   it("says a proposal is still being generated rather than showing blank facts", () => {
@@ -98,7 +136,7 @@ describe("the portfolio states only what the campaign has produced", () => {
         spendCeiling: null,
       }),
     ]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/waiting for the first proposal/i)).toBeInTheDocument();
     expect(card.queryByText(/spend ceiling/i)).not.toBeInTheDocument();
@@ -107,22 +145,31 @@ describe("the portfolio states only what the campaign has produced", () => {
 
   it("distinguishes no paid spend from a ceiling of zero", () => {
     renderPortfolio([item({ spendCeiling: null })]);
+    fireEvent.click(screen.getByRole("button", { name: /^list$/i }));
 
-    expect(screen.getByText("No paid spend")).toBeInTheDocument();
+    expect(screen.getByText(/No paid spend/)).toBeInTheDocument();
     expect(screen.queryByText(/0\.00/)).not.toBeInTheDocument();
   });
 
-  it("labels every campaign state in words rather than raw database values", () => {
+  it("labels the stage in plain words, never raw database values", () => {
     renderPortfolio([
       item({ id: "a", state: "partially_completed" }),
-      item({ id: "b", state: "needs_data" }),
-      item({ id: "c", state: "failed" }),
+      item({
+        id: "b",
+        state: "failed",
+        phase: campaignListPhase({
+          state: "failed",
+          hasVersion: true,
+          approvalStatus: "live",
+          settledAt: null,
+        }),
+      }),
     ]);
 
-    expect(screen.getByText("Partially completed")).toBeInTheDocument();
-    expect(screen.getByText("Needs data")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
-    expect(screen.queryByText(/partially_completed|needs_data/)).not.toBeInTheDocument();
+    // The badge names the stage a client understands, and the closed phase map
+    // is what makes raw database text unable to reach the screen at all.
+    expect(screen.queryByText(/partially_completed|needs_data|ready_for_review/)).not.toBeInTheDocument();
+    expect(screen.getByText("Stopped")).toBeInTheDocument();
   });
 
   it("renders the update time in the organization's timezone, not the server's", () => {
@@ -139,7 +186,7 @@ describe("an empty portfolio explains itself", () => {
 
     expect(screen.getByText(/no campaigns yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Campaigns" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /new campaign brief/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /request a campaign/i })).toBeInTheDocument();
   });
 });
 
@@ -158,7 +205,7 @@ describe("a campaign with no proposal cannot be opened", () => {
 
   it("offers no link at all, rather than a link that 404s", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     // Neither the title nor the review control may navigate. The detail route
     // has no version to render, and `disabled` does not stop an anchor.
@@ -169,12 +216,14 @@ describe("a campaign with no proposal cannot be opened", () => {
   it("keeps the title readable even though it is no longer a link", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
 
-    expect(screen.getByText("Weekday evening demand lift")).toBeInTheDocument();
+    // Scoped to the card: this campaign also appears in the attention strip,
+    // which is a separate preview of the same work.
+    expect(within(cardsOnly()[0]!).getByText("Weekday evening demand lift")).toBeInTheDocument();
   });
 
   it("shows a spinner only while a worker is actually running", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/building the first proposal/i)).toBeInTheDocument();
     expect(card.queryByText(/did not finish/i)).not.toBeInTheDocument();
@@ -192,7 +241,7 @@ describe("a campaign with no proposal cannot be opened", () => {
         blocker: null,
       }),
     ]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/generation did not finish/i)).toBeInTheDocument();
     expect(card.getByText(/stopped responding/i)).toBeInTheDocument();
@@ -208,7 +257,7 @@ describe("a campaign with no proposal cannot be opened", () => {
         blocker: null,
       }),
     ]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/generation failed/i)).toBeInTheDocument();
     expect(card.getByText(/brand_voice/)).toBeInTheDocument();
@@ -226,14 +275,14 @@ describe("a campaign with no proposal cannot be opened", () => {
         blocker: null,
       }),
     ]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.getByRole("button", { name: /generate again/i })).toBeEnabled();
   });
 
   it("does not offer a restart while a worker still holds the run", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.queryByRole("button", { name: /generate again/i })).not.toBeInTheDocument();
     expect(card.getByRole("button", { name: /open/i })).toBeDisabled();
@@ -241,7 +290,7 @@ describe("a campaign with no proposal cannot be opened", () => {
 
   it("says nothing about generation once a proposal exists", () => {
     renderPortfolio([item()]);
-    const card = within(screen.getByRole("listitem"));
+    const card = within(cardsOnly()[0]!);
 
     expect(card.queryByRole("status")).not.toBeInTheDocument();
     expect(card.getAllByRole("link").length).toBeGreaterThan(0);
@@ -281,7 +330,7 @@ describe("a filter never rewrites the total", () => {
       target: { value: "nothing here" },
     });
 
-    expect(screen.getByText(/nothing matches that search/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing matches these filters/i)).toBeInTheDocument();
     expect(screen.getByText(/12 campaigns exist here/i)).toBeInTheDocument();
   });
 });
@@ -340,7 +389,8 @@ describe("the artwork leads, and says when it cannot", () => {
   it("distinguishes artwork that does not exist yet from artwork that failed to load", () => {
     // Both are an empty rectangle otherwise, and they mean different things.
     renderPortfolio([item({ awaitingFirstVersion: true, bundleVersionId: null })]);
-    expect(screen.getByText(/no artwork yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no preview available/i)).toBeInTheDocument();
+    expect(screen.getByText(/creative generation begins after approval/i)).toBeInTheDocument();
 
     cleanup();
 
@@ -367,6 +417,99 @@ describe("the same campaigns, two ways of looking", () => {
     renderPortfolio([item(), item({ id: "c1000000-0000-4000-8000-000000000002" })]);
     fireEvent.click(screen.getByRole("button", { name: /^list$/i }));
 
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(cardsOnly()).toHaveLength(2);
+  });
+});
+
+describe("the attention strip counts more than it shows", () => {
+  function waitingSet(count: number): CampaignListItem[] {
+    return Array.from({ length: count }, (_, index) =>
+      item({
+        id: `a100000${index}-0000-4000-8000-00000000000${index % 10}`,
+        title: `Campaign ${index}`,
+      }),
+    );
+  }
+
+  it("shows at most three previews while naming the real total", () => {
+    // The count query and the preview query are separate on purpose: three rows
+    // must never be read as "there are three things to do".
+    renderPortfolio(waitingSet(7));
+    const strip = within(screen.getByRole("region", { name: /needs your attention/i }));
+
+    expect(strip.getAllByRole("listitem")).toHaveLength(3);
+    expect(strip.getByText("7")).toBeInTheDocument();
+    expect(strip.getByRole("button", { name: /view all 7/i })).toBeInTheDocument();
+  });
+
+  it("offers no 'view all' when everything waiting is already shown", () => {
+    renderPortfolio(waitingSet(2));
+    const strip = within(screen.getByRole("region", { name: /needs your attention/i }));
+
+    expect(strip.queryByRole("button", { name: /view all/i })).not.toBeInTheDocument();
+  });
+
+  it("names the specific action, not a generic 'needs attention'", () => {
+    renderPortfolio([item()]);
+    const strip = within(screen.getByRole("region", { name: /needs your attention/i }));
+
+    expect(strip.getByText("Review proposal")).toBeInTheDocument();
+  });
+
+  it("disappears entirely when nothing is waiting", () => {
+    renderPortfolio([
+      item({
+        phase: campaignListPhase({
+          state: "completed",
+          hasVersion: true,
+          approvalStatus: "live",
+          settledAt: "2026-09-01T00:00:00.000Z",
+        }),
+      }),
+    ]);
+
+    expect(screen.queryByRole("region", { name: /needs your attention/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps its count over every campaign, not over the filtered set", () => {
+    renderPortfolio(waitingSet(5));
+    fireEvent.change(screen.getByRole("searchbox", { name: /search campaigns/i }), {
+      target: { value: "Campaign 1" },
+    });
+
+    const strip = within(screen.getByRole("region", { name: /needs your attention/i }));
+    expect(strip.getByText("5")).toBeInTheDocument();
+  });
+});
+
+describe("status filters are groupings, not a new lifecycle", () => {
+  it("filters to the campaigns waiting on a review", () => {
+    renderPortfolio([
+      item({ id: "a1000000-0000-4000-8000-000000000001" }),
+      item({
+        id: "a1000000-0000-4000-8000-000000000002",
+        phase: campaignListPhase({
+          state: "approved",
+          hasVersion: true,
+          approvalStatus: "live",
+          settledAt: null,
+        }),
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Preparing" }));
+
+    expect(cardsOnly()).toHaveLength(1);
+    expect(screen.getByText("Showing 1 of 2 campaigns")).toBeInTheDocument();
+  });
+
+  it("offers a way back when a filter hides everything", () => {
+    renderPortfolio([item()]);
+    fireEvent.click(screen.getByRole("button", { name: "Completed" }));
+
+    expect(screen.getByText(/nothing matches these filters/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+
+    expect(cardsOnly()).toHaveLength(1);
   });
 });
