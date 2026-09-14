@@ -78,6 +78,26 @@ function buildPermissions(
   };
 }
 
+/**
+ * A goal's target as one line.
+ *
+ * The currency is named once. A money-valued goal carries its currency code in
+ * both `unit` and `currency` — both correctly, they are the same fact — and
+ * printing each in turn produced "60,000 AED AED".
+ */
+export function formatGoalTarget(goal: {
+  targetValue: number;
+  unit: string;
+  currency: string | null;
+}): string {
+  const amount = new Intl.NumberFormat("en-US").format(goal.targetValue);
+  const suffix =
+    goal.currency && goal.currency.toUpperCase() !== goal.unit.toUpperCase()
+      ? ` ${goal.currency}`
+      : "";
+  return `${amount} ${goal.unit}${suffix}`;
+}
+
 function buildGoals(snapshot: DigitalTwinSnapshot): {
   goals: readonly HomeGoal[];
   focusGoalId: string | null;
@@ -87,9 +107,12 @@ function buildGoals(snapshot: DigitalTwinSnapshot): {
     return left.id.localeCompare(right.id);
   });
   const branchNames = new Map(snapshot.branches.map((branch) => [branch.id, branch.name]));
-  const formatter = new Intl.NumberFormat("en-US");
   const goals: HomeGoal[] = sorted.map((goal) => {
-    const target = `${formatter.format(goal.target_value)} ${goal.unit}${goal.currency ? ` ${goal.currency}` : ""}`;
+    const target = formatGoalTarget({
+      targetValue: goal.target_value,
+      unit: goal.unit,
+      currency: goal.currency,
+    });
     const scopeLabel =
       goal.scope_kind === "organization"
         ? "Organization"

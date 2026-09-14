@@ -4,7 +4,13 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Images, LayoutGrid, List, Loader2, Plus } from "lucide-react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import {
+  MissingDetailsDialog,
+  type MissingDetailsMetricOption,
+} from "@/components/campaigns/missing-details-dialog";
+import { missingDetailLabel } from "@/domain/campaigns/readiness";
 import { Button } from "@/components/ui/button";
 import { GenerateAgainButton } from "@/components/campaigns/generate-again-button";
 import { Input } from "@/components/ui/input";
@@ -52,7 +58,19 @@ import type {
 /** At most three previews. The count beside them is the real total. */
 const ATTENTION_PREVIEW_LIMIT = 3;
 
-function GenerationNotice({ generation }: Readonly<{ generation: CampaignGeneration }>) {
+function GenerationNotice({
+  generation,
+  organizationId,
+  campaignId,
+  metricOptions,
+  currency,
+}: Readonly<{
+  generation: CampaignGeneration;
+  organizationId: string;
+  campaignId: string;
+  metricOptions: readonly MissingDetailsMetricOption[];
+  currency: string | null;
+}>) {
   if (generation.status === "settled") return null;
 
   if (generation.status === "generating") {
@@ -68,21 +86,39 @@ function GenerationNotice({ generation }: Readonly<{ generation: CampaignGenerat
   }
 
   return (
-    <div
-      className="flex items-start gap-2 rounded-md border border-dashed p-2 text-xs"
-      role="status"
-    >
-      <AlertTriangle
-        className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-        aria-hidden="true"
-      />
-      <span className="flex flex-col gap-1">
-        <span className="font-medium">
-          {generation.status === "failed" ? "Generation failed" : "Generation did not finish"}
-        </span>
-        <span className="text-muted-foreground">{generation.detail}</span>
-      </span>
-    </div>
+    // The design system's own error treatment, rather than muted grey inside a
+    // dashed border. A failure that looks like a footnote gets read as one.
+    <Alert variant="destructive">
+      <AlertTriangle aria-hidden="true" />
+      <AlertTitle>
+        {generation.status === "failed" ? "Generation failed" : "Generation did not finish"}
+      </AlertTitle>
+      <AlertDescription className="flex flex-col items-start gap-2">
+        <span>{generation.detail}</span>
+
+        {generation.missingDetails.length > 0 ? (
+          <>
+            {/* Each gap named on its own, in words. A comma-separated run of
+                `brand_voice, primary_metric` asks the reader to parse an
+                identifier before they can act on it. */}
+            <span className="flex flex-wrap gap-1">
+              {generation.missingDetails.map((key) => (
+                <Badge key={key} variant="outline" className="border-destructive/40">
+                  {missingDetailLabel(key)}
+                </Badge>
+              ))}
+            </span>
+            <MissingDetailsDialog
+              organizationId={organizationId}
+              campaignId={campaignId}
+              missingDetails={generation.missingDetails}
+              metricOptions={metricOptions}
+              currency={currency}
+            />
+          </>
+        ) : null}
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -175,11 +211,16 @@ function CampaignCard({
   organizationId,
   timeZone,
   previewUrl,
+  metricOptions,
+  currency,
 }: Readonly<{
   campaign: CampaignListItem;
   organizationId: string;
   timeZone: string;
   previewUrl: string | null;
+  /** The measures a repaired goal may name. Empty hides nothing; the dialog says so. */
+  metricOptions: readonly MissingDetailsMetricOption[];
+  currency: string | null;
 }>) {
   const href = `/organizations/${organizationId}/campaigns/${campaign.id}`;
   const fact = phaseFact(campaign);
@@ -225,7 +266,13 @@ function CampaignCard({
           {fact ? <p className="text-sm font-medium">{fact}</p> : null}
           <p className="text-xs text-muted-foreground">{campaign.phase.summary}</p>
 
-          <GenerationNotice generation={campaign.generation} />
+          <GenerationNotice
+            generation={campaign.generation}
+            organizationId={organizationId}
+            campaignId={campaign.id}
+            metricOptions={metricOptions}
+            currency={currency}
+          />
 
           <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t pt-3">
             <span className="text-xs text-muted-foreground">
@@ -365,12 +412,18 @@ export function CampaignPortfolio({
   campaigns,
   timeZone,
   previewUrls = {},
+  metricOptions = [],
+  currency = null,
 }: Readonly<{
   organizationId: string;
   campaigns: readonly CampaignListItem[];
   timeZone: string;
   /** Signed preview links keyed by bundle version id. Empty when unavailable. */
   previewUrls?: Readonly<Record<string, string>>;
+  /** Registered measures, for repairing a campaign missing its primary metric. */
+  metricOptions?: readonly MissingDetailsMetricOption[];
+  /** The organization's base currency, for a money-valued goal. */
+  currency?: string | null;
 }>) {
   const [layout, setLayout] = useState<"gallery" | "list">("gallery");
   const [query, setQuery] = useState("");
@@ -563,6 +616,8 @@ export function CampaignPortfolio({
               organizationId={organizationId}
               timeZone={timeZone}
               previewUrl={previewFor(campaign)}
+              metricOptions={metricOptions}
+              currency={currency}
             />
           ))}
         </ul>

@@ -601,8 +601,53 @@ export function evaluateCampaignReadiness(input: {
  */
 export const CAMPAIGN_BOOTSTRAP_FAILURE_PREFIX = "bootstrap:";
 
+/**
+ * The evidence keys, in words.
+ *
+ * Failure codes are written for engineers and stored that way. An operator
+ * shown `brand_voice, primary_metric, baseline_source` has to translate three
+ * identifiers before they can act, and two of them do not obviously correspond
+ * to anything they have ever been asked for.
+ *
+ * Deliberately a plain string map rather than a total map over the evidence
+ * keys: this function parses codes off stored rows, which may have been written
+ * by an older or newer build than this one.
+ */
+const MISSING_DETAIL_LABELS: Record<string, string> = {
+  organization_profile: "Business profile",
+  brand_voice: "Brand voice",
+  brand_constraints: "Brand constraints",
+  objective: "Campaign objective",
+  audience: "Audience",
+  currency: "Currency",
+  primary_metric: "Primary metric",
+  baseline_source: "Baseline source",
+  no_declared_subject: "Declared subject",
+};
+
+/**
+ * A stored key as a label. An unrecognised one is spaced and capitalised rather
+ * than dropped: a gap this build cannot name is still a gap the operator has,
+ * and silently omitting it would show them a failure with nothing in it.
+ */
+export function missingDetailLabel(key: string): string {
+  const known = MISSING_DETAIL_LABELS[key];
+  if (known) return known;
+  const spaced = key.replace(/_/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export type CampaignGenerationFailureDescription = {
   blocker: CampaignReadinessBlocker;
+  /**
+   * The evidence keys this run was missing, as stored.
+   *
+   * Empty for every failure that is not about missing evidence. The repair
+   * dialog chooses which fields to offer from this list; recovering them by
+   * parsing `clientCopy` would be a second account of the same failure, free to
+   * drift from the first.
+   */
+  missingDetails: readonly string[];
   /** Plain wording for the client. Never a code, a stack or a provider payload. */
   clientCopy: string;
   /** What the person should do next, in their own terms. */
@@ -628,6 +673,7 @@ export function describeCampaignGenerationFailure(
 ): CampaignGenerationFailureDescription {
   if (!failureCode) {
     return {
+      missingDetails: [],
       blocker: campaignReadinessBlocker({
         code: "generation_failed",
         phase: "creative_preparation",
@@ -645,9 +691,12 @@ export function describeCampaignGenerationFailure(
     const missing = failureCode.slice("needs_data:".length).split(",").filter(Boolean);
     const detail =
       missing.length > 0
-        ? `Some details are missing before this campaign can be built: ${missing.join(", ")}.`
+        ? `Some details are missing before this campaign can be built: ${missing
+            .map(missingDetailLabel)
+            .join(", ")}.`
         : "Some details are missing before this campaign can be built.";
     return {
+      missingDetails: missing,
       blocker: campaignReadinessBlocker({
         code: missing.includes("no_declared_subject")
           ? "no_declared_subject"
@@ -669,6 +718,7 @@ export function describeCampaignGenerationFailure(
     const reason = failureCode.slice(CAMPAIGN_BOOTSTRAP_FAILURE_PREFIX.length);
     if (reason === "provider_contract_expired") {
       return {
+        missingDetails: [],
         blocker: campaignReadinessBlocker({
           code: "provider_contract_expired",
           phase: "creative_preparation",
@@ -684,6 +734,7 @@ export function describeCampaignGenerationFailure(
       };
     }
     return {
+      missingDetails: [],
       blocker: campaignReadinessBlocker({
         code: "generation_bootstrap_failed",
         phase: "creative_preparation",
@@ -742,6 +793,7 @@ export function describeCampaignGenerationFailure(
   const match = known[failureCode];
   if (match) {
     return {
+      missingDetails: [],
       blocker: campaignReadinessBlocker({
         code: match.code,
         phase: "creative_preparation",
@@ -758,6 +810,7 @@ export function describeCampaignGenerationFailure(
   // An unrecognised code is not described to a client. Echoing it would leak
   // an internal identifier and tell them nothing they can act on.
   return {
+    missingDetails: [],
     blocker: campaignReadinessBlocker({
       code: "generation_failed",
       phase: "creative_preparation",

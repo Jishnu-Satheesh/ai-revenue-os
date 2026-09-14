@@ -224,6 +224,45 @@ describe("a stored failure code becomes something a client can act on", () => {
     expect(describeCampaignGenerationFailure("bootstrap:worker_start_failed").retryable).toBe(true);
   });
 
+  it("names the missing details in words a client can read", () => {
+    const described = describeCampaignGenerationFailure(
+      "needs_data:brand_voice,primary_metric,baseline_source",
+    );
+
+    // The stored codes are written for engineers. Showing `brand_voice` to an
+    // operator asks them to translate before they can act.
+    expect(described.clientCopy).toContain("Brand voice");
+    expect(described.clientCopy).toContain("Primary metric");
+    expect(described.clientCopy).toContain("Baseline source");
+    expect(described.clientCopy).not.toContain("brand_voice");
+    expect(described.clientCopy).not.toContain("primary_metric");
+  });
+
+  it("carries the missing keys as data, not only inside a sentence", () => {
+    const described = describeCampaignGenerationFailure(
+      "needs_data:brand_voice,primary_metric",
+    );
+
+    // The repair dialog decides which fields to show from this. Parsing them
+    // back out of the prose would be a second, silently diverging account of
+    // the same failure.
+    expect(described.missingDetails).toEqual(["brand_voice", "primary_metric"]);
+  });
+
+  it("humanises a key it has never seen rather than dropping it", () => {
+    const described = describeCampaignGenerationFailure("needs_data:some_future_key");
+
+    // A gap this build does not recognise is still a gap the operator has.
+    // Dropping it would show them a failure with nothing named in it.
+    expect(described.clientCopy).toContain("Some future key");
+    expect(described.missingDetails).toEqual(["some_future_key"]);
+  });
+
+  it("reports no missing details for a failure that is not about evidence", () => {
+    expect(describeCampaignGenerationFailure("generation_run_stalled").missingDetails).toEqual([]);
+    expect(describeCampaignGenerationFailure(null).missingDetails).toEqual([]);
+  });
+
   it("says nothing at all rather than guessing when no code was recorded", () => {
     const described = describeCampaignGenerationFailure(null);
 

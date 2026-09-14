@@ -70,6 +70,14 @@ export type CampaignGeneration = {
   retryable: boolean;
   /** The typed blocker behind a failed or stalled run, for the repair route. */
   blocker: CampaignReadinessBlocker | null;
+  /**
+   * The evidence keys this run was missing, as stored. Empty for every failure
+   * that is not about missing evidence.
+   *
+   * Carried so the screen can offer to collect exactly what is absent instead
+   * of sending the operator to onboarding to find it themselves.
+   */
+  missingDetails: readonly string[];
 };
 
 /**
@@ -122,7 +130,14 @@ export function toGeneration(
   now: string,
 ): CampaignGeneration {
   if (hasVersion) {
-    return { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null };
+    return {
+      status: "settled",
+      detail: null,
+      nextAction: null,
+      retryable: false,
+      blocker: null,
+      missingDetails: [],
+    };
   }
 
   if (!run) {
@@ -132,6 +147,7 @@ export function toGeneration(
       nextAction: "Start building this campaign.",
       retryable: true,
       blocker: null,
+      missingDetails: [],
     };
   }
 
@@ -143,6 +159,7 @@ export function toGeneration(
       nextAction: described.nextAction,
       retryable: described.retryable,
       blocker: described.blocker,
+      missingDetails: described.missingDetails,
     };
   }
 
@@ -156,6 +173,7 @@ export function toGeneration(
         nextAction: null,
         retryable: false,
         blocker: null,
+        missingDetails: [],
       };
     }
 
@@ -176,6 +194,7 @@ export function toGeneration(
           nextAction: null,
           retryable: false,
           blocker: null,
+          missingDetails: [],
         };
       }
       const described = describeCampaignGenerationFailure("generation_run_stalled");
@@ -185,6 +204,7 @@ export function toGeneration(
         nextAction: described.nextAction,
         retryable: described.retryable,
         blocker: described.blocker,
+        missingDetails: described.missingDetails,
       };
     }
 
@@ -194,6 +214,7 @@ export function toGeneration(
       nextAction: "Start it again.",
       retryable: true,
       blocker: null,
+      missingDetails: [],
     };
   }
 
@@ -205,6 +226,7 @@ export function toGeneration(
     nextAction: "Start it again.",
     retryable: true,
     blocker: null,
+    missingDetails: [],
   };
 }
 

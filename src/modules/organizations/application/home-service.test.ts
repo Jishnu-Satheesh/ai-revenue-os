@@ -11,7 +11,10 @@ import type {
 } from "@/modules/campaigns/application/home-preview-types";
 import type { DigitalTwinSnapshot } from "@/modules/organizations/infrastructure/repository";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import { buildOrganizationHomeView } from "@/modules/organizations/application/home-service";
+import {
+  buildOrganizationHomeView,
+  formatGoalTarget,
+} from "@/modules/organizations/application/home-service";
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const BRANCH_1 = "22222222-2222-4222-8222-222222222221";
@@ -57,7 +60,7 @@ function listItem(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     updatedAt: "2026-09-10T10:00:00.000Z",
     awaitingFirstVersion: false,
     openable: true,
-    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null },
+    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] },
     version: 2,
     objective: "Drive iftar orders",
     channels: ["direct"],
@@ -401,7 +404,7 @@ describe("permissions", () => {
   const draftSrc = () =>
     sources({
       campaigns: ready([
-        campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
+        campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
       ]),
       posters: ready([]),
       references: ready([]),
@@ -555,14 +558,14 @@ describe("attention ranking", () => {
               title: "Stalled old",
               state: "draft",
               updatedAt: "2026-09-01T10:00:00.000Z",
-              generation: { status: "stalled", detail: "Generation stopped responding.", nextAction: "Start it again.", retryable: true, blocker: null },
+              generation: { status: "stalled", detail: "Generation stopped responding.", nextAction: "Start it again.", retryable: true, blocker: null, missingDetails: [] },
             }),
             campaignRecord({
               id: CAMPAIGN_2,
               title: "Fresh review",
               state: "ready_for_review",
               updatedAt: "2026-09-10T10:00:00.000Z",
-              generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null },
+              generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] },
             }),
           ]),
           posters: ready([]),
@@ -580,8 +583,8 @@ describe("attention ranking", () => {
         snap: attentionSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, title: "Blocked", state: "blocked", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
-            campaignRecord({ id: CAMPAIGN_2, title: "Review", state: "ready_for_review", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
+            campaignRecord({ id: CAMPAIGN_1, title: "Blocked", state: "blocked", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
+            campaignRecord({ id: CAMPAIGN_2, title: "Review", state: "ready_for_review", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -601,7 +604,7 @@ describe("attention ranking", () => {
               id: CAMPAIGN_1,
               title: "Both",
               state: "blocked",
-              generation: { status: "failed", detail: "Generation failed.", nextAction: "Start it again.", retryable: true, blocker: null },
+              generation: { status: "failed", detail: "Generation failed.", nextAction: "Start it again.", retryable: true, blocker: null, missingDetails: [] },
             }),
           ]),
           posters: ready([]),
@@ -678,7 +681,7 @@ describe("campaign CTAs", () => {
         snap: ctaSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
+            campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -693,7 +696,7 @@ describe("campaign CTAs", () => {
         snap: ctaSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, state: "scheduled", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null } }),
+            campaignRecord({ id: CAMPAIGN_1, state: "scheduled", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -1000,5 +1003,28 @@ describe("activity labels", () => {
     const adminView = buildOrganizationHomeView(viewInput("admin", { snap, src: sources() }));
     const adminRow = adminView.activity.find((item) => item.label === "Organization created");
     expect(adminRow?.href).not.toBeNull();
+  });
+});
+
+describe("a money goal's target", () => {
+  it("says the currency once, not twice", () => {
+    // A goal whose unit *is* its currency — which is every money-valued metric
+    // — rendered as "60,000 AED AED". The unit and the currency columns are
+    // both right; saying both out loud is not.
+    expect(
+      formatGoalTarget({ targetValue: 60_000, unit: "AED", currency: "AED" }),
+    ).toBe("60,000 AED");
+  });
+
+  it("still names a currency that differs from the unit", () => {
+    expect(
+      formatGoalTarget({ targetValue: 500, unit: "orders", currency: "AED" }),
+    ).toBe("500 orders AED");
+  });
+
+  it("leaves a goal with no currency alone", () => {
+    expect(formatGoalTarget({ targetValue: 500, unit: "count", currency: null })).toBe(
+      "500 count",
+    );
   });
 });

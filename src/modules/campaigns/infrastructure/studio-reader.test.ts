@@ -135,7 +135,9 @@ describe("reading the portfolio", () => {
     const [row] = await readCampaignList(read, ORGANIZATION_ID, () => "2026-08-17T11:00:00.000Z");
 
     expect(row?.generation.status).toBe("failed");
-    expect(row?.generation.detail).toContain("brand_voice");
+    expect(row?.generation.detail).toContain("Brand voice");
+    // And the keys travel as data, so the card can offer to collect them.
+    expect(row?.generation.missingDetails).toEqual(["brand_voice", "objective"]);
   });
 
   it("does not read a generation run for a campaign that already has a version", async () => {

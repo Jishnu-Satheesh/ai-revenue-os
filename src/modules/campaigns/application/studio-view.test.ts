@@ -382,6 +382,39 @@ describe("what a campaign with no proposal yet is told about its generation", ()
     expect(generation.blocker?.code).toBe("generation_run_stalled");
   });
 
+  it("carries the missing evidence keys through to the screen", () => {
+    const generation = toGeneration(
+      run({
+        status: "failed",
+        failureCode: "needs_data:brand_voice,primary_metric,baseline_source",
+      }),
+      false,
+      NOW_ISO,
+    );
+
+    expect(generation.status).toBe("failed");
+    // The repair dialog builds its fields from these. Without them the screen
+    // could only offer a link away to onboarding and hope.
+    expect(generation.missingDetails).toEqual([
+      "brand_voice",
+      "primary_metric",
+      "baseline_source",
+    ]);
+    // And the sentence beside them stays readable rather than echoing codes.
+    expect(generation.detail).toContain("Brand voice");
+    expect(generation.detail).not.toContain("brand_voice");
+  });
+
+  it("leaves the missing list empty for a failure that is not about evidence", () => {
+    const generation = toGeneration(
+      run({ updatedAt: "2026-09-12T15:53:38.115Z" }),
+      false,
+      NOW_ISO,
+    );
+
+    expect(generation.missingDetails).toEqual([]);
+  });
+
   it("refuses to offer a restart for a blocker a restart cannot clear", () => {
     const generation = toGeneration(
       run({ status: "failed", failureCode: "bootstrap:provider_contract_expired" }),
@@ -408,7 +441,7 @@ describe("what a campaign with no proposal yet is told about its generation", ()
       NOW_ISO,
     );
 
-    expect(generation.detail).toContain("brand_voice");
+    expect(generation.detail).toContain("Brand voice");
     expect(generation.nextAction).toMatch(/add the missing details/i);
     expect(generation.retryable).toBe(true);
   });

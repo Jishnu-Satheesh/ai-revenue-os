@@ -11,6 +11,7 @@ import {
   readListPreviewUrls,
   type ListAssetPathReader,
 } from "@/modules/campaigns/infrastructure/asset-preview";
+import { listMetricTargets } from "@/modules/metrics/infrastructure/repository";
 
 type PageProps = { params: Promise<{ organizationId: string }> };
 
@@ -39,6 +40,15 @@ export default async function CampaignsPage({ params }: PageProps) {
     },
   );
 
+  // The measures a campaign missing its primary metric may be repaired with:
+  // shared vocabulary plus this organization's own. Read here rather than
+  // fetched by the dialog, so opening it costs nothing. A read failure costs
+  // the dropdown and nothing else — the page still renders.
+  const metricOptions = await listMetricTargets(
+    context.supabase as never,
+    context.organizationId,
+  ).catch(() => []);
+
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -57,6 +67,12 @@ export default async function CampaignsPage({ params }: PageProps) {
         campaigns={campaigns}
         timeZone={organization.default_timezone}
         previewUrls={previewUrls}
+        metricOptions={metricOptions.map((option) => ({
+          key: option.key,
+          label: option.label,
+          valueKind: option.valueKind,
+        }))}
+        currency={organization.base_currency}
       />
     </div>
   );

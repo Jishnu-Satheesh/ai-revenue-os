@@ -23,7 +23,7 @@ function item(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     updatedAt: "2026-08-15T09:30:00.000Z",
     awaitingFirstVersion: false,
     openable: true,
-    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null },
+    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] },
     version: 2,
     objective: "Raise incremental gross profit on weekday evenings",
     channels: ["instagram", "meta_ads"],
@@ -129,7 +129,7 @@ describe("the portfolio states only what the campaign has produced", () => {
       item({
         awaitingFirstVersion: true,
         openable: false,
-        generation: { status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null },
+        generation: { status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null, missingDetails: [] },
         version: null,
         objective: null,
         channels: [],
@@ -204,7 +204,7 @@ describe("a campaign with no proposal is still reachable", () => {
   }
 
   it("links to the detail route, which explains why nothing is there", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null, missingDetails: [] })]);
     const card = within(cardsOnly()[0]!);
     const href = `/organizations/${ORGANIZATION_ID}/campaigns/c1000000-0000-4000-8000-000000000001`;
 
@@ -219,7 +219,7 @@ describe("a campaign with no proposal is still reachable", () => {
   });
 
   it("keeps the title readable", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null, missingDetails: [] })]);
 
     // Scoped to the card: this campaign also appears in the attention strip,
     // which is a separate preview of the same work.
@@ -227,7 +227,7 @@ describe("a campaign with no proposal is still reachable", () => {
   });
 
   it("shows a spinner only while a worker is actually running", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null, missingDetails: [] })]);
     const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/building the first proposal/i)).toBeInTheDocument();
@@ -244,6 +244,7 @@ describe("a campaign with no proposal is still reachable", () => {
         nextAction: "Start it again.",
         retryable: true,
         blocker: null,
+        missingDetails: [],
       }),
     ]);
     const card = within(cardsOnly()[0]!);
@@ -256,16 +257,75 @@ describe("a campaign with no proposal is still reachable", () => {
     renderPortfolio([
       pending({
         status: "failed",
-        detail: "Generation needs more information first: brand_voice, objective.",
-        nextAction: "Start it again.",
+        detail: "Some details are missing before this campaign can be built: Brand voice, Primary metric.",
+        nextAction: "Add the missing details, then start it again.",
         retryable: true,
         blocker: null,
+        missingDetails: ["brand_voice", "primary_metric"],
       }),
     ]);
     const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/generation failed/i)).toBeInTheDocument();
-    expect(card.getByText(/brand_voice/)).toBeInTheDocument();
+    // Each gap is named in words. The stored codes are for engineers; an
+    // operator shown `brand_voice` has to translate before they can act.
+    expect(card.getByText("Brand voice")).toBeInTheDocument();
+    expect(card.getByText("Primary metric")).toBeInTheDocument();
+    expect(card.queryByText(/brand_voice/)).not.toBeInTheDocument();
+  });
+
+  it("shows a failure in the destructive colour, not as quiet grey text", () => {
+    renderPortfolio([
+      pending({
+        status: "failed",
+        detail: "Some details are missing before this campaign can be built: Brand voice.",
+        nextAction: "Add the missing details, then start it again.",
+        retryable: true,
+        blocker: null,
+        missingDetails: ["brand_voice"],
+      }),
+    ]);
+    const card = within(cardsOnly()[0]!);
+
+    // A failure rendered in muted grey beside a dashed border reads as a note.
+    // This is the design system's own error treatment, so the card cannot
+    // drift from every other error surface in the product.
+    const alert = card.getByRole("alert");
+    expect(alert.className).toContain("text-destructive");
+  });
+
+  it("offers to collect the missing details without leaving the campaign", () => {
+    renderPortfolio([
+      pending({
+        status: "failed",
+        detail: "Some details are missing before this campaign can be built: Brand voice.",
+        nextAction: "Add the missing details, then start it again.",
+        retryable: true,
+        blocker: null,
+        missingDetails: ["brand_voice"],
+      }),
+    ]);
+    const card = within(cardsOnly()[0]!);
+
+    // Sending someone to onboarding to hunt for one field is how the original
+    // report ended with the same failure twice.
+    expect(card.getByRole("button", { name: /add the missing details/i })).toBeEnabled();
+  });
+
+  it("offers no repair for a failure that names no missing details", () => {
+    renderPortfolio([
+      pending({
+        status: "stalled",
+        detail: "Generation stopped responding and did not finish. It can be started again.",
+        nextAction: "Start it again.",
+        retryable: true,
+        blocker: null,
+        missingDetails: [],
+      }),
+    ]);
+    const card = within(cardsOnly()[0]!);
+
+    expect(card.queryByRole("button", { name: /add the missing details/i })).not.toBeInTheDocument();
   });
 
   it("offers the restart it promises when generation stopped", () => {
@@ -278,6 +338,7 @@ describe("a campaign with no proposal is still reachable", () => {
         nextAction: "Start it again.",
         retryable: true,
         blocker: null,
+        missingDetails: [],
       }),
     ]);
     const card = within(cardsOnly()[0]!);
@@ -286,7 +347,7 @@ describe("a campaign with no proposal is still reachable", () => {
   });
 
   it("does not offer a restart while a worker still holds the run", () => {
-    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null })]);
+    renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null, missingDetails: [] })]);
     const card = within(cardsOnly()[0]!);
 
     // No restart while a worker still holds the run — starting a second one
