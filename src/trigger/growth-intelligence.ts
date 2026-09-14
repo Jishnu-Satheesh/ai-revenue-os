@@ -65,6 +65,21 @@ import {
   type SynthesisMarketClaim,
 } from "@/modules/growth-intelligence/application/synthesis-service";
 import {
+  createMonitoringResearchBriefBuilder,
+  createMonitoringSynthesisContextBuilder,
+} from "@/modules/growth-intelligence/application/market-monitoring-context";
+import {
+  MONITORING_UPDATE_TASK_MAX_DURATION_S,
+  type MonitoringResearcher,
+  type MonitoringUpdateStore,
+} from "@/modules/growth-intelligence/application/market-monitoring-update";
+import { createAuthenticatedResearchProjectRepository } from "@/modules/growth-intelligence/infrastructure/research-project-repository";
+import {
+  createPinReadMonitoringUpdateStore,
+  marketMonitoringUpdatePayloadSchema,
+  runMarketMonitoringUpdate,
+} from "@/workflows/growth-intelligence/run-market-monitoring-update";
+import {
   consolidateMarketEvidence,
   consolidationPayloadSchema,
 } from "@/workflows/growth-intelligence/consolidate-market-evidence";
@@ -250,7 +265,7 @@ const TERMINAL_CLAIM_EVENT_TYPES = new Set([
 const RESEARCH_ADAPTER_TIMEOUT_MS = 20_000;
 const RESEARCH_RUN_BUDGET_MICROS_USD = RESEARCH_BUDGET_LIMITS.maxPipelineReservationMicrosUsd;
 
-function buildResearchScope(
+export function buildResearchScope(
   document: MarketProfileDocumentV1 | MarketProfileDocumentV2,
 ): ResearchRequest {
   const city = document.geographies.find((geography) => geography.layer === "city");
@@ -379,6 +394,31 @@ function createResearchDependencies(signal: AbortSignal) {
       readCurrent: (input: { organizationId: string; branchId?: string | null }) =>
         readApprovedProfile(supabase, input.organizationId, input.branchId ?? null),
     },
+    // G23: the research brief builder is always wired. Snapshot loading is
+    // not staged and model qualification is off, so production briefs stay
+    // evidence-only (unavailable, no refs) while the threading is proven.
+    researchBrief: createMonitoringResearchBriefBuilder({
+      readProfile: async (input) => {
+        const profile = await readApprovedProfile(
+          supabase,
+          input.organizationId,
+          input.branchId,
+        );
+        if (!profile) return null;
+        return {
+          profileVersionId: profile.versionId,
+          sourcePolicyDigest: profile.sourcePolicyDigest,
+          scope: buildResearchScope(profile.document).scope,
+        };
+      },
+      loadSnapshot: async () => null,
+      qualified: false,
+      planSlots: (scope) =>
+        buildResearchQuerySlots({
+          scope,
+          maxResultsPerQuery: RESEARCH_BUDGET_LIMITS.maxResultsPerQuery,
+        }),
+    }),
     evidence: createMarketEvidenceRepository(supabase as unknown as MarketEvidencePersistence),
     adapter,
     extraction: {
@@ -781,6 +821,17 @@ function createSynthesisDependencies(signal: AbortSignal) {
     },
     synthesize: (synthesisInput: Parameters<typeof service.synthesize>[0]) =>
       service.synthesize(synthesisInput),
+    // G24: the synthesis context builder wires only when snapshot loading is
+    // configured. The pack schema has no null representation for manifest and
+    // digest, so an unwired factory keeps legacy pack-less behavior instead
+    // of fabricating lineage.
+    ...(process.env.MONITORING_CONTEXT_SNAPSHOTS_ENABLED === "true"
+      ? {
+          synthesisContext: createMonitoringSynthesisContextBuilder({
+            loadSnapshot: async () => null,
+          }),
+        }
+      : {}),
   };
 }
 
@@ -789,7 +840,8 @@ tasks.onCancel(async ({ task: taskId, payload }) => {
     taskId !== "growth-intelligence.run-market-research" &&
     taskId !== "growth-intelligence.consolidate-market-evidence" &&
     taskId !== "growth-intelligence.dispatch-due" &&
-    taskId !== "growth-intelligence.run-synthesis"
+    taskId !== "growth-intelligence.run-synthesis" &&
+    taskId !== "growth-intelligence.run-market-monitoring-update"
   ) {
     return;
   }
@@ -818,6 +870,15 @@ tasks.onCancel(async ({ task: taskId, payload }) => {
       organizationId: parsed.organizationId,
       correlationId: parsed.correlationId,
       requestId: parsed.requestId,
+    });
+    return;
+  }
+  if (taskId === "growth-intelligence.run-market-monitoring-update") {
+    const parsed = marketMonitoringUpdatePayloadSchema.parse(payload);
+    logger.info("growth_intelligence.run_cancelled", {
+      organizationId: parsed.organizationId,
+      correlationId: parsed.correlationId,
+      updateId: parsed.updateId,
     });
     return;
   }
@@ -888,6 +949,155 @@ export const runSynthesisTask = schemaTask({
       organizationId: parsed.organizationId,
       correlationId: parsed.correlationId,
       requestId: parsed.requestId,
+      outcome: result.outcome,
+    });
+
+    return result;
+  },
+});
+
+/**
+ * Fail-closed project-scope research (Slice 3). The provider gate stays
+ * closed: without a qualified adapter no paid call is made, and even a
+ * qualified adapter has no project-scope executor staged yet, so both paths
+ * fail with safe codes, retain the prior report, and spend nothing.
+ */
+function createFailClosedMonitoringResearch(): MonitoringResearcher {
+  return async () => {
+    const adapter = getQualifiedMarketResearchAdapter();
+    if (!adapter.availability.available) {
+      return {
+        status: "failed",
+        code: "ADAPTER_UNAVAILABLE",
+        retrievalCoverage: [],
+        usages: [],
+      };
+    }
+    return {
+      status: "failed",
+      code: "RESEARCH_EXECUTION_UNAVAILABLE",
+      retrievalCoverage: [],
+      usages: [],
+    };
+  };
+}
+
+/**
+ * Narrow tenant-validating worker reads for update convergence. Every query
+ * pins the organization id; writes go through the fenced RPCs, which
+ * re-verify tenant bindings server-side.
+ */
+function createMonitoringUpdateStore(supabase: WorkerClient): MonitoringUpdateStore {
+  return createPinReadMonitoringUpdateStore(
+    {
+      listRevisionPins: async (input) => {
+        const { data, error } = await supabase
+          .from("growth_intelligence_brief_revisions")
+          .select("id, revision_number, pinned_to_update_id")
+          .eq("organization_id", input.organizationId)
+          .eq("project_id", input.projectId)
+          .order("revision_number", { ascending: false })
+          .limit(50);
+        if (error) throw new Error("Monitoring update pins could not be loaded.");
+        return (data ?? []).map((row) => ({
+          revisionId: row.id,
+          revisionNumber: row.revision_number,
+          pinnedToUpdateId: row.pinned_to_update_id,
+        }));
+      },
+      listReportRevisions: async (input) => {
+        const { data, error } = await supabase
+          .from("growth_intelligence_reports")
+          .select("brief_revision_id, report_version_id")
+          .eq("organization_id", input.organizationId)
+          .eq("project_id", input.projectId)
+          .limit(50);
+        if (error) throw new Error("Monitoring report revisions could not be loaded.");
+        return (data ?? []).map((row) => ({
+          briefRevisionId: row.brief_revision_id,
+          reportVersionId: row.report_version_id,
+        }));
+      },
+      findPinByUpdateId: async (input) => {
+        const { data, error } = await supabase
+          .from("growth_intelligence_brief_revisions")
+          .select("project_id, id, revision_number")
+          .eq("organization_id", input.organizationId)
+          .eq("pinned_to_update_id", input.updateId)
+          .order("revision_number", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw new Error("Monitoring update pin could not be loaded.");
+        if (!data) return null;
+        return {
+          projectId: data.project_id,
+          revisionId: data.id,
+          revisionNumber: data.revision_number,
+        };
+      },
+      listTerminalUpdates: async () => {
+        // No durable cancelled/failed update rows exist yet: completed work
+        // is observed through report rows and run-local terminal records.
+        // The Slice 7 lifecycle RPCs will populate this read; returning []
+        // keeps refresh-after-cancel correct for every known-terminal pin
+        // while cross-run failure memory lands with the migration.
+        return [];
+      },
+    },
+    () => new Date(),
+  );
+}
+
+/**
+ * Start-dispatch nudge caller (G47). Triggered right after a monitoring
+ * update starts; a lost nudge never fails the start because the cadence
+ * sweep re-collects undispatched actives. Payload is identifiers plus the
+ * pinned brief the worker needs — never evidence or private context.
+ */
+export async function triggerMarketMonitoringUpdate(input: {
+  organizationId: string;
+  projectId: string;
+  updateId: string;
+  briefRevisionId: string;
+  brief: Parameters<MonitoringUpdateStore["bindRevision"]>[0]["brief"];
+  actorId: string;
+  correlationId: string;
+}): Promise<void> {
+  await tasks.trigger("growth-intelligence.run-market-monitoring-update", {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    updateId: input.updateId,
+    briefRevisionId: input.briefRevisionId,
+    brief: input.brief,
+    actorId: input.actorId,
+    correlationId: input.correlationId,
+  });
+}
+
+export const runMarketMonitoringUpdateTask = schemaTask({
+  id: "growth-intelligence.run-market-monitoring-update",
+  schema: marketMonitoringUpdatePayloadSchema,
+  queue: growthIntelligenceQueue,
+  retry,
+  maxDuration: MONITORING_UPDATE_TASK_MAX_DURATION_S,
+  run: async (payload, { signal }) => {
+    const parsed = marketMonitoringUpdatePayloadSchema.parse(payload);
+    const supabase = createGrowthIntelligenceWorkerServiceClient();
+    const projects = createAuthenticatedResearchProjectRepository(supabase);
+    const result = await runMarketMonitoringUpdate(parsed, {
+      updates: createMonitoringUpdateStore(supabase),
+      research: createFailClosedMonitoringResearch(),
+      reports: {
+        persist: (input) => projects.persistReportVersion(input),
+      },
+      events: createEventPublisher(),
+      signal,
+    });
+
+    logger.info("growth_intelligence.monitoring_update_finished", {
+      organizationId: parsed.organizationId,
+      correlationId: parsed.correlationId,
+      updateId: parsed.updateId,
       outcome: result.outcome,
     });
 

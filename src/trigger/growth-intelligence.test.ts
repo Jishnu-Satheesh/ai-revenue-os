@@ -4,21 +4,23 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("Growth Intelligence Trigger registration", () => {
-  it("registers four bounded schema tasks without activating a dispatcher", async () => {
+  it("registers five bounded schema tasks without activating a dispatcher", async () => {
     const source = await readFile(
       resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
       "utf8",
     );
 
-    expect(source.match(/schemaTask\(\{/g)).toHaveLength(4);
+    expect(source.match(/schemaTask\(\{/g)).toHaveLength(5);
     expect(source).toContain('id: "growth-intelligence.run-market-research"');
     expect(source).toContain('id: "growth-intelligence.consolidate-market-evidence"');
     expect(source).toContain('id: "growth-intelligence.dispatch-due"');
     expect(source).toContain('id: "growth-intelligence.run-synthesis"');
+    expect(source).toContain('id: "growth-intelligence.run-market-monitoring-update"');
     expect(source).toContain('name: "growth-intelligence"');
     expect(source).toContain("concurrencyLimit: 1");
     expect(source).toContain("maxAttempts: 3");
     expect(source.match(/maxDuration: 300/g)).toHaveLength(4);
+    expect(source).toContain("maxDuration: MONITORING_UPDATE_TASK_MAX_DURATION_S");
     expect(source).not.toContain("schedules.task");
     expect(source).not.toContain("triggerAndWait");
   });
@@ -41,6 +43,9 @@ describe("Growth Intelligence Trigger registration", () => {
     );
     expect(source).toMatch(
       /const parsed = synthesisPayloadSchema\.parse\(payload\);\s+const dependencies = createSynthesisDependencies\(signal\);/,
+    );
+    expect(source).toMatch(
+      /const parsed = marketMonitoringUpdatePayloadSchema\.parse\(payload\);\s+const supabase = createGrowthIntelligenceWorkerServiceClient\(\);/,
     );
     const dispatchDueBlock = source.slice(source.indexOf('id: "growth-intelligence.dispatch-due"'));
     expect(dispatchDueBlock.indexOf("dispatchDuePayloadSchema.parse(payload)")).toBeLessThan(
@@ -68,6 +73,7 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain('logger.info("growth_intelligence.consolidation_finished"');
     expect(source).toContain('logger.info("growth_intelligence.dispatch_finished"');
     expect(source).toContain('logger.info("growth_intelligence.synthesis_finished"');
+    expect(source).toContain('logger.info("growth_intelligence.monitoring_update_finished"');
     expect(source).not.toContain("logger.info(payload");
     expect(source).not.toMatch(/logger\.(?:info|warn|error)\([^)]*evidence[\s\S]*/);
     expect(source).not.toMatch(/logger\.(?:info|warn|error)\([^)]*paraphrase[\s\S]*/);
@@ -207,5 +213,63 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain("maxResultsPerQuery: RESEARCH_BUDGET_LIMITS.maxResultsPerQuery");
     expect(source).toContain("maxRedirects: 0");
     expect(source).toContain("maxPipelineReservationMicrosUsd");
+  });
+
+  it("injects the monitoring brief builder into the research factory", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("createMonitoringResearchBriefBuilder");
+    expect(source).toContain("researchBrief:");
+    expect(source).toContain("loadSnapshot: async () => null");
+    expect(source).toContain("qualified: false");
+  });
+
+  it("gates the synthesis context builder on configured snapshot loading", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("createMonitoringSynthesisContextBuilder");
+    expect(source).toContain("MONITORING_CONTEXT_SNAPSHOTS_ENABLED");
+  });
+
+  it("keeps monitoring research fail-closed behind the qualified-provider gate", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("createFailClosedMonitoringResearch");
+    expect(source).toContain("getQualifiedMarketResearchAdapter()");
+    expect(source).toContain("ADAPTER_UNAVAILABLE");
+    expect(source).toContain("RESEARCH_EXECUTION_UNAVAILABLE");
+  });
+
+  it("nudges the monitoring update task with identifiers only", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("triggerMarketMonitoringUpdate");
+    expect(source).toContain(
+      'tasks.trigger("growth-intelligence.run-market-monitoring-update"',
+    );
+    expect(source).toContain("briefRevisionId: input.briefRevisionId");
+  });
+
+  it("cancels the monitoring update run by identifiers", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain('taskId !== "growth-intelligence.run-market-monitoring-update"');
+    expect(source).toContain("marketMonitoringUpdatePayloadSchema.parse(payload)");
+    expect(source).toContain("updateId: parsed.updateId");
   });
 });
