@@ -2,7 +2,7 @@
 
 ## Status
 
-**Draft — 2026-09-15.** Tier 3. Not approved.
+**Approved — 2026-09-15.** Tier 3. Approved by the user; implementation plan to follow.
 
 Scope decided with the user on 2026-09-15: the canonical logo and structured guidelines first; the
 imagery library and approved/rejected intake follow in a separate spec. Three product decisions were
@@ -325,10 +325,20 @@ have ended that property for the one store whose purpose is to hold it.
 Structured fields are better on their own merits regardless: a PDF cannot constrain a generation,
 and a palette in a document is a colour nobody can check against.
 
-### 18.4 Open question
+### 18.4 A rule that is also a restricted term is stored once
 
-**Where a rule that is also a restricted term should live.** "Never say 'best in Dubai'" is both a
-don't and a term. Storing it twice risks the two drifting; storing it once means one of the two
-checks does not see it. Current intent: store it as a restricted term only, and have the Brand
-Guidelines tab show restricted terms inside the don'ts list so an operator sees one list. To be
-confirmed before implementation.
+**Resolved 2026-09-15 by the spec's approval, in favour of the intent stated when it was raised.**
+It was put to the user as the spec's one open question and the spec was approved without amending
+it; it is recorded here as a decision rather than left looking unanswered.
+
+"Never say 'best in Dubai'" is both a don't and a term. Storing it in both lists risks the two
+drifting apart under later editing, and an operator would have to remember to change both. Storing
+it once means only one of the two checks sees it.
+
+It is stored once, as a restricted term, because that is the check that can actually enforce it: a
+restricted term is matched literally, while a rule is prose in a prompt. The Brand Guidelines tab
+renders restricted terms inside the don'ts list, so an operator reads one list even though the
+record holds two fields.
+
+Cheap to revisit: nothing else depends on the choice, and moving to duplicate storage later would be
+a migration of one array.
