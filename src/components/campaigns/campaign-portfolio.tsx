@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowRight, Images, LayoutGrid, List, Loader2, Plus } fr
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { CampaignCoverFigure } from "@/components/campaigns/campaign-cover-figure";
 import {
   MissingDetailsDialog,
   type MissingDetailsMetricOption,
@@ -177,31 +178,35 @@ function phaseFact(campaign: CampaignListItem): string | null {
  * A campaign with no preview gets a labelled placeholder rather than a grey
  * box: "no artwork yet" and "artwork we could not load" both look like an empty
  * rectangle, and the operator has to be able to tell which happened.
+ *
+ * Rendering delegates to the shared cover figure (cover fit, no chip, this
+ * card's existing fallback markup); the sizing parent stays here, so the
+ * painted card is unchanged.
  */
 function Artwork({
   previewUrl,
   awaitingFirstVersion,
   className,
 }: Readonly<{ previewUrl: string | null; awaitingFirstVersion: boolean; className: string }>) {
-  if (previewUrl) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={previewUrl} alt="" className={`${className} object-cover`} />
-    );
-  }
-
   return (
-    <span
-      className={`${className} flex flex-col items-center justify-center gap-1 bg-muted px-3 text-center`}
-    >
-      <span className="text-xs text-muted-foreground">
-        {awaitingFirstVersion ? "No preview available" : "Preview unavailable"}
-      </span>
-      {awaitingFirstVersion ? (
-        <span className="text-[10px] text-muted-foreground">
-          Creative generation begins after approval
-        </span>
-      ) : null}
+    <span className={className}>
+      <CampaignCoverFigure
+        src={previewUrl}
+        alt=""
+        fit="cover"
+        fallback={
+          <span className="flex h-full w-full flex-col items-center justify-center gap-1 bg-muted px-3 text-center">
+            <span className="text-xs text-muted-foreground">
+              {awaitingFirstVersion ? "No preview available" : "Preview unavailable"}
+            </span>
+            {awaitingFirstVersion ? (
+              <span className="text-[10px] text-muted-foreground">
+                Creative generation begins after approval
+              </span>
+            ) : null}
+          </span>
+        }
+      />
     </span>
   );
 }

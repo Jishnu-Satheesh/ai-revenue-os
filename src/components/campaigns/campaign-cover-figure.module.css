@@ -1,0 +1,29 @@
+/* Source label as a small chip overlaid bottom-left on the artwork, kept
+   narrow with an ellipsis so it never covers the poster's own text. Values
+   match the organization-home campaign card chip exactly; the @container rule
+   below resolves against the rendering page's container, whichever stylesheet
+   owns the container itself. */
+.chip {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  padding: 3px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 559px) {
+  .chip {
+    left: 6px;
+    bottom: 6px;
+    max-width: calc(100% - 12px);
+    font-size: 8px;
+  }
+}

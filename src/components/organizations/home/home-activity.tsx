@@ -1,22 +1,8 @@
 import Link from "next/link";
 
+import { formatInstant } from "@/components/organizations/home/home-dates";
 import type { HomeActivityItem } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
-
-function formatInstant(value: string, timeZone: string): string {
-  const formatted = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone,
-  }).format(new Date(value));
-  // en-GB abbreviates September as "Sept"; the reference writes "Sep". The
-  // org timezone name always trails the time, separated exactly as shown.
-  return `${formatted.replace("Sept", "Sep").replace(",", " ·")}, ${timeZone}`;
-}
 
 /**
  * Recent activity: up to five source-backed rows, each a semantic label with

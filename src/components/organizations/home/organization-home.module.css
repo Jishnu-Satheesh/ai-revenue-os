@@ -196,24 +196,6 @@
   color: var(--muted-foreground);
 }
 
-/* Source label as a small chip overlaid bottom-left on the artwork, kept
-   narrow with an ellipsis so it never covers the poster's own text. */
-.coverChip {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
-  max-width: calc(100% - 16px);
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--card);
-  padding: 3px 6px;
-  font-size: 9px;
-  font-weight: 700;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 /* Foot row: a 1px neutral divider, then the short date left and the inline
    text CTA right. */
 .campaignFoot {
@@ -742,13 +724,6 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
-  }
-
-  .coverChip {
-    left: 6px;
-    bottom: 6px;
-    max-width: calc(100% - 12px);
-    font-size: 8px;
   }
 }
 

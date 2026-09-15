@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";import { Card, CardContent } from "@/components/ui/card";
+import { formatInstant } from "@/components/organizations/home/home-dates";
 import {
   Dialog,
   DialogContent,
@@ -31,21 +32,6 @@ const DESTINATION_ICONS = {
   memory: BrainCircuit,
   integrations: Cable,
 } as const;
-
-function formatInstant(value: string, timeZone: string): string {
-  const formatted = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone,
-  }).format(new Date(value));
-  // en-GB abbreviates September as "Sept"; the reference writes "Sep". The
-  // org timezone name always trails the time, separated exactly as shown.
-  return `${formatted.replace("Sept", "Sep").replace(",", " ·")}, ${timeZone}`;
-}
 
 /**
  * Read-only locations dialog shared with the header context row. Lists saved

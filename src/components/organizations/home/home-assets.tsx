@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Images } from "lucide-react";
 
 import { HomePreviewImage } from "@/components/organizations/home/home-preview-image";
+import { formatInstant } from "@/components/organizations/home/home-dates";
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,21 +22,6 @@ import type {
   HomeSection,
 } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
-
-function formatInstant(value: string, timeZone: string): string {
-  const formatted = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-    timeZone,
-  }).format(new Date(value));
-  // en-GB abbreviates September as "Sept"; the reference writes "Sep". The
-  // org timezone name always trails the time, separated exactly as shown.
-  return `${formatted.replace("Sept", "Sep").replace(",", " ·")}, ${timeZone}`;
-}
 
 /**
  * Creative shelf: up to four thumbnail buttons, each named by title, source

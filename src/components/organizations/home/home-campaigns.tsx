@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ArrowRight, Megaphone, Plus } from "lucide-react";
 
+import { CampaignCoverFigure } from "@/components/campaigns/campaign-cover-figure";
 import { HomePreviewImage } from "@/components/organizations/home/home-preview-image";
+import { formatShortDate } from "@/components/organizations/home/home-dates";
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,17 +15,6 @@ import type {
   HomeSection,
 } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
-
-function formatShortDate(value: string, timeZone: string): string {
-  const formatted = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    timeZone,
-  }).format(new Date(value));
-  // en-GB abbreviates September as "Sept"; the reference writes "Sep".
-  // The day is still resolved in the organization timezone.
-  return formatted.replace("Sept", "Sep");
-}
 
 function stateTone(state: HomeCampaign["state"]): "success" | "warning" {
   // Reference tags (prototype campaign cards): amber "Ready for review",
@@ -49,8 +40,59 @@ function readableState(state: HomeCampaign["state"]): string {
 }
 
 /**
+ * The compact third row's reason line: the stalled generation detail verbatim
+ * when the run left one (safe code-derived wording, already rendered on the
+ * portfolio), else the saved objective, else no line at all. Nothing invented.
+ */
+function compactReason(homeCampaign: HomeCampaign): string | null {
+  return homeCampaign.generation.detail ?? homeCampaign.objective;
+}
+
+/**
+ * The optional third compact row: title plus the stalled reason (generation
+ * detail verbatim, else objective, else nothing), the same state tag as the
+ * large cards, and the derived action as an inline text-link. Labels and href
+ * render verbatim; the row never duplicates a record shown above it.
+ */
+function CompactThirdRow({
+  homeCampaign,
+}: Readonly<{ homeCampaign: HomeCampaign }>) {
+  const reason = compactReason(homeCampaign);
+
+  return (
+    <div className={styles.compactList} aria-label="Third campaign">
+      <div className={styles.compactRow}>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span dir="auto" className={styles.compactName}>
+            {homeCampaign.title}
+          </span>
+          {reason !== null ? (
+            <span dir="auto" className={styles.meta}>
+              {reason}
+            </span>
+          ) : null}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <StatusBadge
+            label={readableState(homeCampaign.state)}
+            tone={stateTone(homeCampaign.state)}
+          />
+          <Button asChild variant="link" size="sm">
+            <Link href={homeCampaign.href}>
+              {homeCampaign.actionLabel}
+              <ArrowRight aria-hidden="true" data-icon="inline-end" />
+            </Link>
+          </Button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Campaigns: the first two records as large cover cards plus an optional
- * third compact row, all from the derived CTA/href verbatim. A no-version
+ * third compact row (title, stalled reason, state tag, text-link CTA), all
+ * from the derived CTA/href verbatim. A no-version
  * record links to the portfolio (never a detail link or spinner). Each card
  * carries the cover label as a chip overlaid on the artwork, a soft-tint
  * state tag, and a divider foot row with a short date plus an inline text
@@ -131,13 +173,18 @@ export function HomeCampaigns({
               <Card key={homeCampaign.id} className={styles.campaignCard}>
                 {homeCampaign.cover !== null ? (
                   <div className={styles.cover}>
-                    <HomePreviewImage
-                      image={homeCampaign.cover}
-                      frameClassName={styles.coverFallback}
+                    <CampaignCoverFigure
+                      src={homeCampaign.cover.url}
+                      alt={homeCampaign.cover.alt}
+                      fit="contain"
+                      chip={homeCampaign.coverLabel}
+                      fallback={
+                        <HomePreviewImage
+                          image={null}
+                          frameClassName={styles.coverFallback}
+                        />
+                      }
                     />
-                    {homeCampaign.coverLabel !== null ? (
-                      <span className={styles.coverChip}>{homeCampaign.coverLabel}</span>
-                    ) : null}
                   </div>
                 ) : null}
                 <CardContent className="flex flex-col gap-1.5 pt-4">
@@ -172,19 +219,7 @@ export function HomeCampaigns({
             ))}
           </div>
           {section.data.length > 2 && section.data[2] !== undefined ? (
-            <div className={styles.compactList} aria-label="Third campaign">
-              <div className={styles.compactRow}>
-                <span dir="auto" className={styles.compactName}>
-                  {section.data[2].title}
-                </span>
-                <Button asChild variant="ghost" size="sm">
-                  <Link href={section.data[2].href}>
-                    {section.data[2].actionLabel}
-                    <ArrowRight aria-hidden="true" data-icon="inline-end" />
-                  </Link>
-                </Button>
-              </div>
-            </div>
+            <CompactThirdRow homeCampaign={section.data[2]} />
           ) : null}
         </>
       )}

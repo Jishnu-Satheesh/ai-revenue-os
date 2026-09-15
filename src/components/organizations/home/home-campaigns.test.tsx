@@ -261,6 +261,127 @@ describe("HomeCampaigns layouts", () => {
   });
 });
 
+describe("HomeCampaigns compact third row", () => {
+  const stalledDetail =
+    "Generation stopped responding and did not finish. It can be started again.";
+
+  function three(third: HomeCampaign): HomeSection<readonly HomeCampaign[]> {
+    return ready([
+      campaign(),
+      campaign({
+        id: CAMPAIGN_2,
+        title: "Second Push",
+        actionLabel: "View campaign",
+        href: `/organizations/${ORG_ID}/campaigns/${CAMPAIGN_2}`,
+      }),
+      third,
+    ]);
+  }
+
+  function thirdRow(): HTMLElement {
+    return screen.getByLabelText("Third campaign");
+  }
+
+  it("shows the stalled generation detail verbatim as the reason", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={three(
+          campaign({
+            id: CAMPAIGN_3,
+            title: "Third Push",
+            state: "failed",
+            generation: {
+              status: "stalled",
+              detail: stalledDetail,
+              nextAction: "Start it again.",
+              retryable: true,
+              blocker: null,
+              missingDetails: [],
+            },
+            actionLabel: "View in Campaigns",
+            href: `/organizations/${ORG_ID}/campaigns`,
+          }),
+        )}
+        canCreateCampaign
+      />,
+    );
+    expect(within(thirdRow()).getByText(stalledDetail)).toBeInTheDocument();
+  });
+
+  it("falls back to the objective when no generation detail exists", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={three(
+          campaign({
+            id: CAMPAIGN_3,
+            title: "Third Push",
+            objective: "Third objective line",
+          }),
+        )}
+        canCreateCampaign
+      />,
+    );
+    expect(within(thirdRow()).getByText("Third objective line")).toBeInTheDocument();
+  });
+
+  it("omits the reason line when neither detail nor objective exists", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={three(
+          campaign({ id: CAMPAIGN_3, title: "Third Push", objective: null }),
+        )}
+        canCreateCampaign
+      />,
+    );
+    const row = thirdRow();
+    expect(within(row).getByText("Third Push")).toBeInTheDocument();
+    // Title, tag and CTA only: no reason copy of any kind.
+    expect(row.textContent).not.toMatch(/Drive iftar orders/);
+  });
+
+  it("tags the third row with the existing state wording and tone", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={three(
+          campaign({ id: CAMPAIGN_3, title: "Third Push", state: "blocked" }),
+        )}
+        canCreateCampaign
+      />,
+    );
+    expect(within(thirdRow()).getByText("Blocked").className).toContain("bg-warning/18");
+  });
+
+  it("renders the compact CTA as an inline text-link with verbatim label and href", () => {
+    render(
+      <HomeCampaigns
+        organizationId={ORG_ID}
+        timeZone={TIME_ZONE}
+        section={three(
+          campaign({
+            id: CAMPAIGN_3,
+            title: "Third Push",
+            actionLabel: "View in Campaigns",
+            href: `/organizations/${ORG_ID}/campaigns`,
+          }),
+        )}
+        canCreateCampaign
+      />,
+    );
+    const cta = within(thirdRow()).getByRole("link", { name: /view in campaigns/i });
+    expect(cta).toHaveAttribute("href", `/organizations/${ORG_ID}/campaigns`);
+    expect(cta.className).toContain("text-primary");
+    expect(within(thirdRow()).queryByRole("button")).toBeNull();
+  });
+});
+
 describe("HomeCampaigns states", () => {
   it("keeps empty and failed visually distinct, with a working retry on failure", () => {
     const { rerender } = render(
