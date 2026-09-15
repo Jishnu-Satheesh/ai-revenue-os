@@ -81,6 +81,8 @@ function generationContext() {
     hardConstraints: ["Never imply a health claim."],
     softConventions: [],
     restrictedTerms: [],
+    palette: null,
+    canonicalLogoVersionId: null,
     brandAssetVersionIds: [],
     syntheticAssetsAllowed: true,
     primaryMetricKey: "contribution.incremental_gross_profit",

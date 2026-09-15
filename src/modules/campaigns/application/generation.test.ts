@@ -97,6 +97,84 @@ function alignedManifest() {
   };
 }
 
+describe("the brand palette in the generation context", () => {
+  it("carries the palette and renders it for the model", () => {
+    const context = contextFor({ palette: { primary: "#c8102e", secondary: "#f2e8d5" } });
+
+    expect(context.palette).toEqual({ primary: "#c8102e", secondary: "#f2e8d5" });
+    const prompt = renderGenerationPrompt(context);
+    expect(prompt).toContain("#c8102e");
+    expect(prompt).toContain("#f2e8d5");
+  });
+
+  it("says a brand has no palette rather than inventing one", () => {
+    const context = contextFor();
+
+    // Spec 026 section 9: absence is named, never defaulted. No brand colour
+    // is invented and no stock palette is substituted.
+    expect(context.palette).toBeNull();
+    expect(renderGenerationPrompt(context)).toMatch(/<brand_palette>\s*none/);
+  });
+
+  it("never tells the model the palette is enforced", () => {
+    const context = contextFor({ palette: { primary: "#c8102e" } });
+
+    // Spec 026 section 7: exact where the platform draws, advisory where a
+    // model draws. Claiming enforcement in the prompt would make the review
+    // surface trust a guarantee nothing provides.
+    const prompt = renderGenerationPrompt(context);
+    expect(prompt).not.toMatch(/palette[^<]*\b(guaranteed|enforced|exact)\b/i);
+  });
+
+  it("is still ready for a brand that has set no palette", () => {
+    // A palette is not required evidence. Adding it to REQUIRED_EVIDENCE_KEYS
+    // would report every existing campaign as newly incomplete.
+    expect(
+      buildGenerationContext({
+        organizationId: ORGANIZATION_ID,
+        campaignId: CAMPAIGN_ID,
+        sourceSnapshotId: SNAPSHOT_ID,
+        generationProfile: "brand_guided",
+        snapshot: completeSnapshot(),
+        brandAssetVersionIds: [],
+        syntheticAssetsAllowed: false,
+        now: new Date("2026-08-16T09:00:00.000Z"),
+      }).outcome,
+    ).toBe("ready");
+  });
+});
+
+describe("the canonical logo in the generation context", () => {
+  it("names the organization's actual mark", () => {
+    const context = contextFor({
+      canonicalLogoVersionId: "a0000000-0000-4000-8000-000000000009",
+    });
+
+    // The reference resolver already admits any usable brand_mark asset, so an
+    // organization with three old logos had one chosen for it.
+    expect(context.canonicalLogoVersionId).toBe("a0000000-0000-4000-8000-000000000009");
+  });
+
+  it("carries no logo rather than guessing one", () => {
+    expect(contextFor().canonicalLogoVersionId).toBeNull();
+  });
+
+  it("is still ready for a brand that has set no logo", () => {
+    expect(
+      buildGenerationContext({
+        organizationId: ORGANIZATION_ID,
+        campaignId: CAMPAIGN_ID,
+        sourceSnapshotId: SNAPSHOT_ID,
+        generationProfile: "brand_guided",
+        snapshot: completeSnapshot(),
+        brandAssetVersionIds: [],
+        syntheticAssetsAllowed: false,
+        now: new Date("2026-08-16T09:00:00.000Z"),
+      }).outcome,
+    ).toBe("ready");
+  });
+});
+
 describe("generation readiness", () => {
   it("is ready when the snapshot carries everything generation needs", () => {
     expect(
