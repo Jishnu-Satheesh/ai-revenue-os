@@ -73,6 +73,7 @@ export const organizationPermissions = [
   "asset.read",
   "asset.manage",
   "asset.review",
+  "brand.manage",
   "subject.manage",
   "economics.read",
   "economics.write",
@@ -141,6 +142,7 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "asset.read": "Read the organization asset library and subject profiles.",
   "asset.manage": "Upload, classify, tag, and archive organization reference assets.",
   "asset.review": "Approve or reject reference and generated creative assets.",
+  "brand.manage": "Set the organization logo and its brand guidelines.",
   "subject.manage": "Create, edit, confirm, and archive organization subject profiles.",
   "economics.read": "Read channel economics and contribution margin.",
   "economics.write": "Record cost components and economic inputs.",
@@ -258,6 +260,15 @@ const adminPermissions = [
    */
   "campaign.proposal_approve",
   "campaign.publish",
+  /**
+   * Setting the organization's mark and the rules generation must respect.
+   *
+   * Above the operator line: brand rules constrain what may be published in a
+   * client's name, and an operator who could rewrite a hard constraint could
+   * lift the refusal that constraint exists to cause. Mirrors
+   * `20260915120000_brand_identity.sql`, which grants it to owner and admin.
+   */
+  "brand.manage",
   "policy.update",
   "budget.modify",
 ] as const satisfies readonly OrganizationPermission[];

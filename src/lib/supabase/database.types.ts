@@ -2201,6 +2201,39 @@ export type Database = {
         Relationships: [];
       };
       /** Confirmed descriptions are the declared-subject fallback when no photo exists. */
+      organization_brand_guidelines: {
+        Row: {
+          organization_id: string;
+          palette: Record<string, string>;
+          rules: { text: string; strength: "hard" | "soft" }[];
+          restricted_terms: string[];
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_brand_guidelines"]["Row"],
+          "created_at" | "updated_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["organization_brand_guidelines"]["Insert"]>;
+        Relationships: [];
+      };
+      organization_brand_logos: {
+        Row: {
+          organization_id: string;
+          variant: "primary" | "dark";
+          brand_asset_version_id: string;
+          set_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_brand_logos"]["Row"],
+          "created_at" | "updated_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["organization_brand_logos"]["Insert"]>;
+        Relationships: [];
+      };
       organization_subject_profiles: {
         Row: {
           id: string;
