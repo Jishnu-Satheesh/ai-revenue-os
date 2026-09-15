@@ -69,6 +69,7 @@ export const organizationPermissions = [
   "campaign.approve",
   "campaign.proposal_approve",
   "campaign.publish",
+  "campaign.research_request",
   "poster.render",
   "asset.read",
   "asset.manage",
@@ -138,6 +139,8 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "campaign.approve": "Approve an exact campaign version for execution.",
   "campaign.proposal_approve": "Approve a campaign proposal for creative preparation only.",
   "campaign.publish": "Publish an approved campaign to a provider.",
+  "campaign.research_request":
+    "Request campaign research against the research allowance.",
   "poster.render": "Render an approved campaign version as a poster.",
   "asset.read": "Read the organization asset library and subject profiles.",
   "asset.manage": "Upload, classify, tag, and archive organization reference assets.",
@@ -269,6 +272,13 @@ const adminPermissions = [
    * `20260915120000_brand_identity.sql`, which grants it to owner and admin.
    */
   "brand.manage",
+  /**
+   * Spending the research allowance. Seeded to owner and admin by
+   * `20260913150000_campaign_research_proposals.sql`, and undeclared here
+   * until now — the drift test has failed on it since that migration landed,
+   * which is how a permanently red check hides the next real drift.
+   */
+  "campaign.research_request",
   "policy.update",
   "budget.modify",
 ] as const satisfies readonly OrganizationPermission[];
