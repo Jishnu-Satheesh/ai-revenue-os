@@ -19,6 +19,7 @@ function policy(): ResearchPolicy {
     evidenceMaxAgeDays: 30,
     cooldownSeconds: 0,
     maxPendingProposals: 5,
+    maxAttempts: 2,
     perRunAllowance: { amountMinor: 5000, currency: "AED" },
     windowAllowance: { amountMinor: 20000, currency: "AED" },
     windowDays: 30,

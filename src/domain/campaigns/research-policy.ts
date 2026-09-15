@@ -45,6 +45,15 @@ export const researchPolicySchema = z.strictObject({
   /** Seconds between admitted runs. Zero means no cooldown, stated openly. */
   cooldownSeconds: z.number().int().nonnegative().max(31_536_000),
   maxPendingProposals: z.number().int().positive().max(100),
+  /**
+   * How many times a run may be attempted before it is given up on.
+   *
+   * Recovery only: this governs what happens when a worker dies holding a
+   * claim, and never widens who may spend or how much. Required like every
+   * other threshold here, because a policy that does not say must be refused
+   * rather than assigned a number nobody chose (D06).
+   */
+  maxAttempts: z.number().int().positive().max(10),
   /** The most one run may reserve. An upper bound, not a target. */
   perRunAllowance: researchMoneySchema,
   /** The most all runs may reserve inside one window. */

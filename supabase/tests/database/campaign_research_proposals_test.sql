@@ -156,20 +156,20 @@ insert into public.organization_memberships (organization_id, user_id, role) val
 insert into public.campaign_research_policies (
   id, organization_id, version, enabled, schedule_timezone,
   evidence_qualification_rule_version, evidence_max_age_days,
-  cooldown_seconds, max_pending_proposals,
+  cooldown_seconds, max_pending_proposals, max_attempts,
   per_run_allowance_minor, window_allowance_minor, allowance_currency, window_days, created_by
 ) values
   ('d9400000-0000-4000-8000-000000000201'::uuid,
    'd9400000-0000-4000-8000-000000000101'::uuid, 1, true, 'Asia/Dubai',
-   'evidence-qualification@2', 30, 3600, 5, 5000, 20000, 'AED', 30,
+   'evidence-qualification@2', 30, 3600, 5, 3, 5000, 20000, 'AED', 30,
    'd9400000-0000-4000-8000-000000000001'::uuid),
   ('d9400000-0000-4000-8000-000000000202'::uuid,
    'd9400000-0000-4000-8000-000000000102'::uuid, 1, true, 'Asia/Dubai',
-   'evidence-qualification@2', 30, 0, 1, 5000, 6000, 'AED', 30,
+   'evidence-qualification@2', 30, 0, 1, 3, 5000, 6000, 'AED', 30,
    'd9400000-0000-4000-8000-000000000002'::uuid),
   ('d9400000-0000-4000-8000-000000000203'::uuid,
    'd9400000-0000-4000-8000-000000000103'::uuid, 1, true, 'Asia/Dubai',
-   'evidence-qualification@2', 30, 0, 10, 5000, 6000, 'AED', 30,
+   'evidence-qualification@2', 30, 0, 10, 3, 5000, 6000, 'AED', 30,
    'd9400000-0000-4000-8000-000000000004'::uuid);
 
 insert into public.campaign_research_policy_current (organization_id, policy_id, set_by) values
@@ -593,12 +593,12 @@ reset role;
 insert into public.campaign_research_policies (
   id, organization_id, version, enabled, schedule_timezone,
   evidence_qualification_rule_version, evidence_max_age_days,
-  cooldown_seconds, max_pending_proposals,
+  cooldown_seconds, max_pending_proposals, max_attempts,
   per_run_allowance_minor, window_allowance_minor, allowance_currency, window_days, created_by
 ) values (
   'd9400000-0000-4000-8000-000000000204'::uuid,
   'd9400000-0000-4000-8000-000000000101'::uuid, 2, true, 'Asia/Dubai',
-  'evidence-qualification@3', 30, 3600, 5, 5000, 20000, 'AED', 30,
+  'evidence-qualification@3', 30, 3600, 5, 3, 5000, 20000, 'AED', 30,
   'd9400000-0000-4000-8000-000000000001'::uuid
 );
 

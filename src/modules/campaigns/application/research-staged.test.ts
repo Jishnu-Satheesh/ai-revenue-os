@@ -105,6 +105,9 @@ describe("staged research request", () => {
           policyVersion: 3,
           budgetMinor: 1000,
         }),
+        assertClaimLive: async () => {},
+        listLeaseExpiries: async () => [],
+        reclaimLeases: async () => ({ reclaimed: 0, abandoned: 0 }),
         load: async () => ({
           status: "claimed",
           triggerKind: "manual_request",

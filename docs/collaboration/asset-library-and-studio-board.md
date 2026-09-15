@@ -7332,3 +7332,67 @@ the research migrations seed `campaign.research_request` and
 <!-- 2026-09-15 Brand Identity (Spec 026) IMPLEMENTED, Tasks 1-10 COMMITTED, two migrations PUSHED by the user and FIRST-CALL VERIFIED. Plan: docs/superpowers/plans/2026-09-15-brand-identity.md. Commits: Task 1-2 domain types, 6471358 (migration/permission/RLS), 1c4e234 (validator EXECUTE fix), 7d37ec8 (service+repository), d9b2b14 (HTTP), 63b0a8d (into generation), b49e73c (onboarding capture), 722a182 (Brand Guidelines tab), 3f58ac9 (the mark in the switcher). TWO REAL DEFECTS FOUND BY VERIFYING, NOT READING. (1) organization_brand_guidelines could never be written by anyone: `revoke all on function private.brand_palette_valid from public` also removed EXECUTE from `authenticated`, and a CHECK constraint evaluates as the CALLING user. The Asset Library's own tables survive that pattern only because they are written through security-definer RPCs; these tables are written directly under RLS. Forward fix 20260915143000 grants EXECUTE and adds private.brand_restricted_terms_valid. If you copy an asset-library validator pattern onto a directly-written table, check the grant. (2) A verification script reported "unmarked rule refused: yes" when the refusal was actually that permission error, not the validator — a passing check that was measuring the wrong thing. Staging first-call for the replaced load_campaign_creation_facts covered all five canonical-logo branches inside a rolled-back transaction: usable+unreviewed named; latest-review-rejected excluded; approved-after-rejection named again; unusable excluded; dark-only not named. hardConstraints/softConventions/restrictedTerms/palette confirmed flowing from the new table; brandVoice unchanged. DELIBERATE DEVIATION FROM THE PLAN: Task 9 said replace the Waypoints glyph in the sidebar header — that header links to "/" and reads "AI Revenue OS", so a client logo there would brand the platform as theirs. The mark went on the OrganizationSwitcher instead, which is the element that identifies the active organization. INVARIANT THAT MUST NOT DRIFT: resolveDisplayLogo (src/modules/brand/application/display-logo.ts) and the canonicalLogoVersionId subquery in 20260915150000 implement the same displayability test — in the library, unarchived, latest review not a rejection. A mark the platform refuses to draw must never be one it hands the image model. Also fixed in passing: the Brand Guidelines TabsTrigger rendered but was absent from TABS, so selecting it silently fell back to Creative History; brand rules were rendered twice (grouped view + editor) with no way to tell which was in force, now one editable list with BrandRulesField/TagListField gaining showList; organization-switcher.test.tsx had afterEach(cleanup) INSIDE the first describe, so any later block asserted against the previous test's DOM. NOTE FOR ONBOARDING: onboarding.manage is an operator permission and brand.manage is not, so an operator can fill the brand assets section and be refused the guidelines write; promoteBrandGuidelines reports that refusal by name (42501) rather than swallowing it, and the section's own answers are already saved before promotion runs. Claiming src/domain/brand/, src/modules/brand/, src/app/api/organizations/[organizationId]/brand/, src/components/assets/brand-guidelines-panel.*, src/components/onboarding/fields/palette-field.tsx + brand-rules-field.*, tag-list-field.tsx (showList), src/components/layout/organization-switcher.*, adrs/0059, migrations 20260915120000/143000/150000 + brand_identity pgTAP. Imagery reorganisation + approved/rejected-at-upload still deferred to a separate spec. -->
 
 <!-- 2026-09-15 Brand asset upload could not complete, and the type was hidden: FIXED, migration PUSHED by the user and verified. Reported as "I cannot upload a logo". Root cause: a brand asset upload is TWO writes to one object key — the browser transfers the chosen file, then the server writes back the copy it decoded, re-encoded and hashed (the step that strips EXIF and guarantees stored bytes are ones this server produced). The `brand-assets` bucket had SELECT + INSERT policies from 20260825090000 and NO UPDATE policy, and Supabase Storage issues an UPDATE against storage.objects when an object already exists at the key — which on the second write it always does. Transfer succeeded, replacement refused, version stayed is_usable=false, dialog reported storage_failed truthfully. Diagnosed from staging BEFORE changing code: object present at 71,234 bytes with created_at = updated_at (never overwritten) beside a version row still is_usable=false. Fix 20260915160000_brand_asset_object_replace.sql copies the INSERT predicate verbatim (cardinality = 3, tenant-folder regex, owner/admin/operator) into USING and WITH CHECK — a looser UPDATE would let a member replace bytes they could not have placed, i.e. swap a reviewed image at a path that already passed review. Companion pgTAP asserts INSERT and UPDATE both exist and that UPDATE is not looser. THE SAME GAP EXISTS PER BUCKET: creative-assets was found by the Asset Library work and closed by 20260913110000; brand-assets never got the sibling. If you add a bucket whose server re-encodes an uploaded object in place, it needs an UPDATE policy or every upload fails after appearing to succeed. Post-fix verification: 71,234 bytes in → 45,928 stored, replaced=true, is_usable, 690x690, hashed; set as primary + dark; brand.logo_set audited with variant only; renders in the OrganizationSwitcher; load_campaign_creation_facts returns it as canonicalLogoVersionId. NOTE FOR ANYONE READING AN EMPTY STATE: "No approved logos in your Brand Kit yet" was not an empty library, it was an upload nobody could finish — I had earlier attributed it to the dev org simply having none. Second fault, same report: the upload dialog suppressed its Type control whenever the tab pinned a role (Brand Kit and Brand Guidelines both pinned `logo`), so uploads there WERE filed as logos with nothing saying so and ownership as the only visible question; `logo` also had no entry in the label map and would have rendered as "Other". Type is now always shown over the whole vocabulary, defaulted from the tab rather than decided by it, and the dialog title no longer names a type the operator can change. Claiming supabase/migrations/20260915160000 + its pgTAP suite, src/components/assets/asset-workspace.tsx (+ tests). -->
+
+## 2026-09-15 — Task 6 follow-ups closed: dead research claims, and a second fence on the worker's reads
+
+Three follow-ups were left open when Task 6 landed. One was already done; the
+other two are fixed here. Migration `20260915170000_campaign_research_lease_reclaim.sql`
+is **NOT PUSHED** — the user runs `pnpm db:migrations:push`.
+
+**A latent bug worth understanding, because the shape recurs.** The research
+lifecycle shipped five operations — request, claim, complete, fail, cancel —
+and no way back from a claim whose worker died. `claim` takes only `queued`
+rows; `complete` and `fail` both require `lease_expires_at > now()`. So a run
+left in `claimed` with a lapsed lease could never be picked up, never finish,
+and never be given up on.
+
+That is not just an orphan row. Such a run counts toward
+`max_pending_proposals` forever, and because `ended_at` stays null its
+`budget_minor` counts toward the rolling window allowance forever too. Enough
+dead workers and an organization can never request research again, with no
+recovery short of hand-written SQL. **If you add a leased work table, write the
+transition out of the lease at the same time as the transition into it.**
+
+Verified latent, not live: `campaign_research_runs`, `campaign_research_policies`
+and `campaign_research_policy_current` are all empty on staging, and nothing in
+TypeScript writes a policy yet. That is also why `max_attempts` could be added
+`not null` with **no default** — how many times to retry is a numeric operating
+limit, so it is policy configuration (D06), and the Task 16 settings surface has
+to collect it alongside the allowances. The reclaim reads the cap from the
+policy version that *admitted* the run, never the current one, matching the rule
+the spend checks already follow.
+
+**Rehearsed before pushing, and the rehearsal is repeatable.** The migration and
+both pgTAP suites were applied inside a transaction against real staging and
+rolled back, via the `postgres` driver (`DATABASE_URL` from `.env.local`,
+scripts must live inside the project dir for ESM resolution). New suite 35/35,
+existing `campaign_research_proposals_test.sql` 68/68 with the new required
+column. Rollback confirmed afterwards by re-querying: column absent, functions
+absent, staging untouched.
+
+**Second fence on the worker's reads.** Business context, pinned memory and
+qualified Growth evidence are all read on the service client with RLS bypassed;
+tenancy holds because every query repeats the organization id. The worker now
+also has to prove a live claim through `assert_campaign_research_claim`
+immediately before those reads, awaited alone rather than inside the
+`Promise.all`, so a worker that lost its claim sees nothing rather than being
+stopped after it has already read. The preparation path holds no claim and
+passes none, so the guard does not apply there.
+
+**Already done, contrary to the old note:** "model-assisted drafting is stubbed
+behind the planner's validated contract" is stale. The drafter is wired to a
+real Gemini call (`createGeminiRepairCall` → `generatePlan`) in
+`src/trigger/campaigns.ts`.
+
+- Claiming `supabase/migrations/20260915170000_*` + `supabase/tests/database/campaign_research_lease_reclaim_test.sql`,
+  `campaign_research_proposals_test.sql` (fixtures only), `src/domain/campaigns/research-policy.ts` (+ test),
+  `src/modules/campaigns/application/research-lease-sweep.ts` (+ test), `research-service.ts` (+ tests),
+  `research-policy-service.test.ts` (fixture), `src/modules/campaigns/infrastructure/research-run-repository.ts`,
+  `research-context-reader.ts` (+ test), `src/trigger/campaigns.ts` (+ test), Spec 025.
+- Gates: campaigns modules + domain + trigger 1405/1405; tsc exit 0; eslint clean on touched files
+  except one **pre-existing** baseline error in `research-service.ts:14`
+  (`RESEARCH_PLANNER_PROMPT_VERSION` imported from an adapter) which is on a line this change did not
+  touch and was left alone.
+- No `database.types.ts` edit: all five research tables are in `UNTYPED_TABLES` by design, because no
+  role holds a grant on them and every read and write goes through a security-definer function.
+- Worker deploy and `git push` remain the user's steps.

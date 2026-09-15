@@ -144,6 +144,9 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       const context = await dependencies.contexts.read({
         organizationId,
         runId,
+        // Carried so the reader can prove the claim before it reads anything
+        // on the service client, which bypasses RLS.
+        claim: { runId, claimToken: claim.claimToken },
         query: loaded.researchQuestion,
         evidenceMaxAgeDays: input.evidenceMaxAgeDays,
         profileVersionId: input.profileVersionId,

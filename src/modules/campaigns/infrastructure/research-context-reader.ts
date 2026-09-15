@@ -48,6 +48,23 @@ export type ResearchContextDependencies = {
   subjectPack: SubjectPackPort;
   evidence: CampaignEvidenceReader;
   nowIso: () => string;
+  /**
+   * Proves the run still holds its claim, before anything below is read.
+   *
+   * Every read here runs on the worker's service client, which bypasses RLS —
+   * tenancy holds because each query repeats the organization id. This is the
+   * second fence, and it is checked first: a worker that has lost its claim
+   * must see no business data, no pinned memory and no Growth evidence, rather
+   * than being stopped after it has already read them.
+   *
+   * Only the worker path holds a claim. Preparation runs before one exists,
+   * so it passes none and this is never called.
+   */
+  assertClaimLive?: (input: {
+    organizationId: string;
+    runId: string;
+    claimToken: string;
+  }) => Promise<void>;
 };
 
 export type PinnedResearchMemory = {
@@ -80,7 +97,23 @@ export function createResearchContextReader(
        * assemble something the admission never approved.
        */
       pinned?: PinnedResearchMemory;
+      /**
+       * The worker's live claim on this run. Present only on the worker path;
+       * preparation has no claim to offer.
+       */
+      claim?: { runId: string; claimToken: string };
     }): Promise<ResearchContext> {
+      // Deliberately awaited alone, before the reads below. Putting it inside
+      // the Promise.all would start every service-client read in the same tick
+      // as the check meant to gate them.
+      if (input.claim && dependencies.assertClaimLive) {
+        await dependencies.assertClaimLive({
+          organizationId: input.organizationId,
+          runId: input.claim.runId,
+          claimToken: input.claim.claimToken,
+        });
+      }
+
       const [source, pack, evidence] = await Promise.all([
         dependencies.readSource({ organizationId: input.organizationId }),
         input.pinned

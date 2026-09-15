@@ -61,6 +61,40 @@ export type ResearchRunStore = {
     runId: string;
     actualCostMinor?: number;
   }): Promise<void>;
+  /**
+   * Proves the run still holds its claim, and returns nothing else.
+   *
+   * The worker reads business context, pinned memory and Growth evidence on
+   * the service client, which bypasses RLS — tenancy holds there because every
+   * query repeats the organization id. This is the second fence: a worker that
+   * lost its claim must not keep reading on the strength of a connection it
+   * still happens to hold. Throws a not_found failure when the claim is gone,
+   * which the service turns into a lost claim.
+   */
+  assertClaimLive(input: {
+    organizationId: string;
+    runId: string;
+    claimToken: string;
+  }): Promise<void>;
+  /**
+   * The organizations holding at least one claim whose lease has lapsed.
+   *
+   * Read first so the sweep acts tenant by tenant. A run is judged dead by
+   * its lease alone: there is no heartbeat to miss, so a worker cannot keep a
+   * claim alive by asserting it is still working.
+   */
+  listLeaseExpiries(): Promise<readonly string[]>;
+  /**
+   * Returns one organization's lapsed claims to the queue, or gives up on the
+   * ones that have used the attempts their admitting policy allows.
+   *
+   * This is the only way out of a dead claim. Without it such a run holds its
+   * pending slot and its reserved budget for good, because `claim` takes only
+   * queued rows and both `complete` and `fail` require a live lease.
+   */
+  reclaimLeases(input: {
+    organizationId: string;
+  }): Promise<{ reclaimed: number; abandoned: number }>;
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -177,6 +211,35 @@ export function createResearchRunStore(client: ResearchPersistence): ResearchRun
         },
       });
       if (error) throw researchFailure(error);
+    },
+
+    async assertClaimLive(input): Promise<void> {
+      const { error } = await client.rpc("assert_campaign_research_claim", {
+        target_organization_id: input.organizationId,
+        input_claim: { run_id: input.runId, claim_token: input.claimToken },
+      });
+      if (error) throw researchFailure(error);
+    },
+
+    async listLeaseExpiries(): Promise<readonly string[]> {
+      const { data, error } = await client.rpc(
+        "list_campaign_research_lease_expiries",
+        {},
+      );
+      if (error) throw researchFailure(error);
+      // Anything that is not a list of ids is a contract the sweep does not
+      // recognise, and sweeping nothing is the safe reading of it.
+      return Array.isArray(data) ? data.filter((id): id is string => typeof id === "string") : [];
+    },
+
+    async reclaimLeases(input): Promise<{ reclaimed: number; abandoned: number }> {
+      const { data, error } = await client.rpc("reclaim_campaign_research_runs", {
+        target_organization_id: input.organizationId,
+      });
+      if (error) throw researchFailure(error);
+
+      const row = record(data);
+      return { reclaimed: Number(row.reclaimed ?? 0), abandoned: Number(row.abandoned ?? 0) };
     },
   };
 }

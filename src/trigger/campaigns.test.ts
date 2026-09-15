@@ -114,3 +114,31 @@ describe("Campaign generation Trigger registration", () => {
     }
   });
 });
+
+describe("Campaign research lease sweep registration", () => {
+  it("registers the sweep as a cron task that recovers dead claims", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
+
+    // A dead worker used to strand its run for good: `claim` takes only queued
+    // rows, and both `complete` and `fail` demand a live lease. Nothing
+    // recovered such a run until this task existed, so its registration is
+    // what makes the reclaim reachable at all.
+    expect(source).toContain('id: "campaign.research-lease-sweep"');
+    expect(source.match(/schedules\.task\(/g)).toHaveLength(1);
+
+    // The research lease is 900 seconds, so a five-minute cadence recovers a
+    // dead run within a few minutes of its lease lapsing rather than leaving
+    // its pending slot and reserved budget held until someone notices.
+    expect(source).toMatch(/schedules\.task\(\{[\s\S]*?cron: "\*\/5 \* \* \* \*"/);
+  });
+
+  it("reports a partial sweep as partial rather than as a clean run", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
+
+    // `failed` carries the tenants whose reclaim threw. Logging only the
+    // totals would make a sweep that recovered nothing look identical to one
+    // with nothing to recover.
+    expect(source).toContain("campaign.research_lease_sweep_finished");
+    expect(source).toMatch(/failed: result\.failed/);
+  });
+});

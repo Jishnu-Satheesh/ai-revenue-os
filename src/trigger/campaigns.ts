@@ -1,4 +1,4 @@
-import { AbortTaskRunError, logger, queue, schemaTask, tasks } from "@trigger.dev/sdk";
+import { AbortTaskRunError, logger, queue, schedules, schemaTask, tasks } from "@trigger.dev/sdk";
 
 import { createModelRouter } from "@/ai/model-router";
 import { env } from "@/lib/env";
@@ -43,6 +43,7 @@ import { createMeasurementRepository } from "@/modules/campaigns/infrastructure/
 import { createLearningRepository } from "@/modules/campaigns/infrastructure/learning-repository";
 import { createGeminiLearningDrafter } from "@/modules/campaigns/infrastructure/learning-drafter";
 import { createCampaignMetricIngest } from "@/modules/campaigns/infrastructure/metric-ingest";
+import { sweepResearchLeases } from "@/modules/campaigns/application/research-lease-sweep";
 import { evaluateCampaign } from "@/modules/campaigns/application/allocation-service";
 import { settleCampaign } from "@/modules/campaigns/application/measurement-service";
 import { proposeLearning } from "@/modules/campaigns/application/learning-service";
@@ -1099,10 +1100,13 @@ export const researchCampaignProposalTask = schemaTask({
           evidence: createCampaignEvidenceReader(
             // Worker-side read over the service client: every query repeats
             // the organization id, so tenancy holds by explicit predicate
-            // even though RLS is bypassed. A claim-bound Growth evidence
-            // read is the hardening follow-up.
+            // even though RLS is bypassed. `assertClaimLive` below is the
+            // second fence — this read, and the two beside it, happen only
+            // while the run still holds its claim.
             createAuthenticatedGrowthIntelligenceReadRepository(supabase),
           ),
+          assertClaimLive: (claim) =>
+            createResearchRunStore({ rpc }).assertClaimLive(claim),
           nowIso: () => new Date().toISOString(),
         }),
         planner: createResearchPlanner({
@@ -1161,6 +1165,57 @@ export const researchCampaignProposalTask = schemaTask({
         ? { proposalId: result.proposalId, outcome: result.outcome }
         : {}),
       ...(result.status === "failed" ? { failureCode: result.failureCode } : {}),
+    });
+
+    return result;
+  },
+});
+
+
+/**
+ * Every five minutes: recover research runs whose worker died.
+ *
+ * A run is claimed with a fifteen-minute lease. If the worker holding it dies,
+ * nothing else in the lifecycle can move that row — `claim` takes only queued
+ * rows, and `complete` and `fail` both require a live lease. Such a run kept
+ * its pending slot and its reserved budget for good, so enough dead workers
+ * could leave an organization unable to request research at all.
+ *
+ * The database decides each run's fate against the policy that admitted it:
+ * back to the queue, or given up on by name once its attempts are used. This
+ * task only decides how often to ask.
+ *
+ * `schedules.task` rather than `schemaTask`: the cron payload is fixed by
+ * Trigger.dev, so there is no caller-supplied payload to validate.
+ */
+export const researchLeaseSweepTask = schedules.task({
+  id: "campaign.research-lease-sweep",
+  cron: "*/5 * * * *",
+  retry,
+  maxDuration: 300,
+  run: async () => {
+    const supabase = createCampaignWorkerServiceClient();
+    const rpc = (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<{ data: unknown; error: { code?: string; message?: string } | null }> =>
+      (
+        supabase.rpc as unknown as (
+          fn: string,
+          fnArgs: Record<string, unknown>,
+        ) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>
+      )(name, args);
+
+    const result = await sweepResearchLeases({ store: createResearchRunStore({ rpc }) });
+
+    // Identifiers and counts only. `failed` is logged because a sweep that
+    // could not reach a tenant must not read the same as one that found
+    // nothing to do there.
+    logger.info("campaign.research_lease_sweep_finished", {
+      organizationsSwept: result.organizationsSwept,
+      reclaimed: result.reclaimed,
+      abandoned: result.abandoned,
+      failed: result.failed,
     });
 
     return result;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   admitResearchRequest,
+  researchPolicySchema,
   type ResearchPolicy,
 } from "@/domain/campaigns/research-policy";
 
@@ -18,6 +19,7 @@ function policy(overrides: Partial<ResearchPolicy> = {}): ResearchPolicy {
     evidenceMaxAgeDays: 30,
     cooldownSeconds: 3600,
     maxPendingProposals: 2,
+    maxAttempts: 2,
     perRunAllowance: { amountMinor: 5000, currency: "AED" },
     windowAllowance: { amountMinor: 20000, currency: "AED" },
     windowDays: 30,
@@ -127,5 +129,33 @@ describe("research policy admission", () => {
       policyVersion: 3,
       reservedBudget: { amountMinor: 4999, currency: "AED" },
     });
+  });
+});
+
+describe("research policy attempt cap", () => {
+  it("refuses a policy that does not say how many attempts a run may have", () => {
+    // A missing cap is not "unlimited" and not a default. It is an
+    // organization that has not been asked yet, and admitting under it would
+    // be inventing an operating limit (D06).
+    const { maxAttempts: _omitted, ...withoutCap } = policy();
+    expect(researchPolicySchema.safeParse(withoutCap).success).toBe(false);
+  });
+
+  it("refuses a cap of zero, which would admit a run nothing may ever attempt", () => {
+    expect(researchPolicySchema.safeParse({ ...policy(), maxAttempts: 0 }).success).toBe(false);
+  });
+
+  it("accepts a stated cap", () => {
+    const parsed = researchPolicySchema.safeParse(policy({ maxAttempts: 5 }));
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.maxAttempts).toBe(5);
+  });
+
+  it("does not let the attempt cap change who may spend", () => {
+    // The cap governs recovery from a dead worker, never admission. A run
+    // admitted under a cap of 1 is admitted exactly as one under a cap of 10.
+    expect(admitted({ policy: policy({ maxAttempts: 1 }) })).toEqual(
+      admitted({ policy: policy({ maxAttempts: 10 }) }),
+    );
   });
 });

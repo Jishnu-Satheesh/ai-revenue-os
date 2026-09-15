@@ -332,9 +332,20 @@ immutable-history guards and bounded indexes. All changes are additive and forwa
   actual bounded usage, timestamps, safe outcome and failure code.
   `campaign_research_policies` with an immutable policy version, enabled state, schedule and
   timezone, evidence qualification rule version, configured thresholds, cooldown, maximum pending
-  proposals, per-run allowance and per-window allowance with currency, creator and timestamps, plus a
-  controlled current-policy pointer. Research allowance is distinct from media spend and from
-  creative preparation allowance. Post-approval creative work reuses `campaign_generation_runs` with
+  proposals, maximum attempts, per-run allowance and per-window allowance with currency, creator and
+  timestamps, plus a controlled current-policy pointer. Research allowance is distinct from media
+  spend and from creative preparation allowance.
+- **Recovering a dead claim (C03).** A run is claimed with a lease, and the lease alone decides
+  whether its worker is alive; there is no heartbeat to miss. `reclaim_campaign_research_runs`
+  returns one organization's lapsed claims to the queue, or fails them with `lease_expired` once
+  they have used the attempts their *admitting* policy allowed, and
+  `list_campaign_research_lease_expiries` names the tenants to sweep. Both are service-role only and
+  run from the `campaign.research-lease-sweep` cron task. This transition is not optional
+  housekeeping: without it a claim whose worker died can never be claimed again (claiming takes only
+  queued rows) and can never finish (completing and failing both require a live lease), so it holds
+  its pending slot and its reserved window allowance permanently. `max_attempts` is required
+  configuration with no default, because how many times to retry is a numeric operating limit
+  (D06). Post-approval creative work reuses `campaign_generation_runs` with
   added proposal and context binding; no competing generation queue is created.
 - **Deliverables (C04).** `campaign_deliverables`, `campaign_deliverable_versions`,
   `campaign_deliverable_reviews`. Columns cover organization and campaign identity, composite tenant
@@ -411,8 +422,15 @@ immutable-history guards and bounded indexes. All changes are additive and forwa
 - **Workers:** `campaign.research-proposal` composed in `src/workflows/campaigns/research-proposal.ts`
   and registered in `src/trigger/campaigns.ts`, with a payload of organization, proposal, run and
   correlation ids only. PostgreSQL owns claim, lease, retry and completion; Trigger owns execution.
-  Trigger runs to the cloud project; never a local worker.
-- **Events** are past-tense and identifier-only: `campaign.proposal_requested`,
+  Trigger runs to the cloud project; never a local worker. `campaign.research-lease-sweep` runs on
+  cron beside it and recovers runs whose worker died. The worker reads business context, pinned
+  memory and qualified Growth evidence on the service client, so tenancy holds by explicit
+  organization predicate rather than by RLS; `assert_campaign_research_claim` is the second fence,
+  proving a live claim before any of those reads happen and failing closed if it cannot.
+- **Events** are past-tense and identifier-only, and include
+  `campaign.research_lease_reclaimed` and `campaign.research_lease_abandoned`, kept distinct so an
+  operator never has to infer whether another worker may still try:
+  `campaign.proposal_requested`,
   `campaign.proposal_prepared`, `campaign.proposal_approved`, `campaign.proposal_changes_requested`,
   `campaign.creative_reviewed`, `campaign.launch_approved`, `campaign.investigation_completed`.
   Schemas and durable capture or outbox intent are registered in the same transaction as the state
