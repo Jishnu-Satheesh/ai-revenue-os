@@ -4,6 +4,7 @@ import {
   type OrganizationRecommendationLaneRecord,
   type OrganizationRecommendationRecord,
 } from "@/modules/analysis/application/read-model";
+import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
 import type {
   ResearchActivityEvent,
   ResearchItemProvenance,
@@ -25,7 +26,8 @@ export type GrowthIntelligenceSection =
   | "recommendations"
   | "insights"
   | "data_gaps"
-  | "timeline";
+  | "timeline"
+  | "campaign_proposals";
 
 export type ChannelRecommendationDecision = "acknowledged" | "dismissed" | "planned";
 
@@ -269,6 +271,15 @@ export type GrowthIntelligenceViewInput = {
   researchProvenance?: Readonly<Record<string, ResearchItemProvenance>>;
   /** Named research lifecycle events merged into the timeline. */
   researchActivity?: readonly ResearchActivityEvent[];
+  /**
+   * Campaign proposals, already projected by the campaigns module.
+   *
+   * Passed in rather than derived: a proposal is a campaigns-module record with
+   * its own approval gate, and this builder is a projection, not a second place
+   * that decides what a proposal means. Omitted means the caller composed no
+   * proposal reader, which reads exactly as "none" — the pre-proposal view.
+   */
+  campaignProposals?: readonly CampaignProposalCardView[];
 };
 
 export type GrowthIntelligenceView = {
@@ -281,6 +292,13 @@ export type GrowthIntelligenceView = {
   insights: InsightCard[];
   dataGaps: DataGapCard[];
   timeline: TimelineEvent[];
+  /**
+   * Campaign-ready opportunities, kept in their own lane. Deliberately not
+   * folded into `priorityActions`: a proposal is answered at its own approval
+   * gate with its own permission, and mixing it into the recommendation counts
+   * would make one number mean two different kinds of act.
+   */
+  campaignProposals: CampaignProposalCardView[];
   counts: {
     opportunities: number;
     recommendations: number;
@@ -568,6 +586,7 @@ const ALL_SECTIONS: readonly GrowthIntelligenceSection[] = [
   "insights",
   "data_gaps",
   "timeline",
+  "campaign_proposals",
 ];
 
 /**
@@ -775,6 +794,7 @@ export function buildGrowthIntelligenceView(
     insights,
     dataGaps,
     timeline: wantTimeline ? timelineEvents.slice(0, 50) : [],
+    campaignProposals: sections.has("campaign_proposals") ? [...(input.campaignProposals ?? [])] : [],
     counts: {
       opportunities: sections.has("opportunities") ? opportunities.length : 0,
       recommendations: recommendations.length,

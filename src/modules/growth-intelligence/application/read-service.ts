@@ -1,6 +1,11 @@
 import { DomainError } from "@/lib/errors";
 import type { DecisionReadPort } from "@/modules/decisions/application/ports";
 import {
+  toProposalLane,
+  type CampaignProposalCardView,
+} from "@/modules/campaigns/application/proposal-read-model";
+import type { CampaignProposalReader } from "@/modules/campaigns/infrastructure/proposal-read-repository";
+import {
   buildGrowthIntelligenceView,
   type ChannelRecommendationRow,
   type DraftRequestState,
@@ -46,6 +51,17 @@ export type GrowthIntelligenceReadDependencies = {
    */
   research?: GrowthIntelligenceResearchReader;
   onResearchError?: (error: unknown) => void;
+  /**
+   * Campaign proposals, read through the campaigns module's own reader.
+   *
+   * Optional for the same reason research is: when absent the composed view is
+   * exactly the pre-proposal read, with no campaign lane at all. Composition
+   * roots that cannot establish `campaign.read` for the caller pass nothing,
+   * which is how a surface without that permission shows no proposals rather
+   * than an empty section implying there are none.
+   */
+  proposals?: CampaignProposalReader;
+  onProposalError?: (error: unknown) => void;
   now?: () => Date;
 };
 
@@ -107,7 +123,7 @@ export function currentLocalMonth(timeZone: string, now: Date): string {
 export function createGrowthIntelligenceReadService(
   dependencies: GrowthIntelligenceReadDependencies,
 ) {
-  const { workspace, opportunities, research } = dependencies;
+  const { workspace, opportunities, research, proposals } = dependencies;
   const clock = dependencies.now ?? (() => new Date());
 
   return {
@@ -163,6 +179,23 @@ export function createGrowthIntelligenceReadService(
           researchActivity = undefined;
         }
       }
+      // A proposal lane that cannot be read is reported and left out. It must
+      // never take the workspace down with it: the recommendations, timeline
+      // and gaps beside it are unaffected by whether proposals could be read,
+      // and an operator locked out of their whole workspace by one failing
+      // lane has lost more than they gained.
+      let campaignProposals: readonly CampaignProposalCardView[] | undefined;
+      if (proposals) {
+        try {
+          campaignProposals = toProposalLane(
+            await proposals.listProposals({ organizationId: input.organizationId }),
+          );
+        } catch (error) {
+          dependencies.onProposalError?.(error);
+          campaignProposals = undefined;
+        }
+      }
+
       return buildGrowthIntelligenceView({
         organizationId: input.organizationId,
         actorId: input.actorId,
@@ -176,6 +209,7 @@ export function createGrowthIntelligenceReadService(
         sections: input.sections,
         researchProvenance,
         researchActivity,
+        campaignProposals,
       });
     },
   };

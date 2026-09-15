@@ -42,6 +42,11 @@ import {
 import { requestChannelAnalysis } from "@/modules/analysis/application/dispatch";
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import type { ChannelBandRecord } from "@/modules/analysis/application/ports";
+import { assertCampaignsEnabled } from "@/modules/campaigns/application/feature-access";
+import {
+  createCampaignProposalReader,
+  type ProposalReadPersistence,
+} from "@/modules/campaigns/infrastructure/proposal-read-repository";
 import { createChannelService } from "@/modules/channels/application/service";
 import { createAuthenticatedChannelRepository } from "@/modules/channels/infrastructure/repository";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
@@ -175,6 +180,23 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
     allowBoundedQuotes: currentVersion?.document.sourcePolicy.allowBoundedQuotes ?? false,
   });
 
+  // Campaign proposals are composed in only where the caller could actually be
+  // shown one: the campaigns feature has to be on for this organization, and
+  // the member has to hold `campaign.read`. Passing no reader is how the lane
+  // stays absent rather than appearing empty, which would claim there are no
+  // proposals when the truth is that this surface may not look.
+  let proposalReader: ReturnType<typeof createCampaignProposalReader> | undefined;
+  try {
+    assertCampaignsEnabled(context.organizationId);
+    if (hasOrganizationPermission(role, "campaign.read")) {
+      proposalReader = createCampaignProposalReader(
+        context.supabase as unknown as ProposalReadPersistence,
+      );
+    }
+  } catch {
+    proposalReader = undefined;
+  }
+
   const readService = createGrowthIntelligenceReadService({
     workspace: reads,
     opportunities: createDecisionRepository(context.supabase as unknown as DecisionPersistence),
@@ -183,6 +205,13 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
       logger.warn("growth_intelligence.research_provenance_degraded", {
         organizationId: context.organizationId,
         errorCode: toPublicError(researchError).code,
+      });
+    },
+    proposals: proposalReader,
+    onProposalError: (proposalError) => {
+      logger.warn("growth_intelligence.campaign_proposals_degraded", {
+        organizationId: context.organizationId,
+        errorCode: toPublicError(proposalError).code,
       });
     },
   });

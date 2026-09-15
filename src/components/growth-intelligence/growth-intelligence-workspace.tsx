@@ -6,6 +6,7 @@ import { ArrowRight, Clock3, RefreshCw, Settings2 } from "lucide-react";
 
 import { formatWindow } from "@/components/analysis/format";
 import { WindowRangePicker } from "@/components/analysis/window-range-picker";
+import { CampaignProposalSection } from "@/components/campaigns/campaign-proposal-card";
 import { BusinessPerformanceCard } from "@/components/growth-intelligence/business-performance-card";
 import { DataGaps } from "@/components/growth-intelligence/data-gaps";
 import { InsightsList } from "@/components/growth-intelligence/insights-list";
@@ -579,6 +580,19 @@ export function GrowthIntelligenceWorkspace({
               hideHeading
             />
           </section>
+
+          {/* Only when there is one. A proposal waiting on a decision that
+              nobody happens to open the Recommendations tab for is the same
+              failure this section was built to fix, one level up — but an empty
+              section here would add a permanent heading to every overview for
+              the sake of a case that is usually absent. */}
+          {view.campaignProposals.length > 0 ? (
+            <CampaignProposalSection
+              proposals={view.campaignProposals}
+              organizationId={organizationId}
+              timeZone={view.timeZone}
+            />
+          ) : null}
         </TabsContent>
 
         <TabsContent value="recommendations" className="flex flex-col gap-8">
@@ -599,6 +613,16 @@ export function GrowthIntelligenceWorkspace({
             canManage={canManage}
             channelNames={channelNames}
             branchNames={branchNames}
+          />
+
+          {/* After ordinary recommendations, never mixed into them. A
+              recommendation is advice someone acts on themselves; a proposal is
+              a request to authorize preparing a whole campaign, answered at its
+              own gate with its own permission. */}
+          <CampaignProposalSection
+            proposals={view.campaignProposals}
+            organizationId={organizationId}
+            timeZone={view.timeZone}
           />
         </TabsContent>
 

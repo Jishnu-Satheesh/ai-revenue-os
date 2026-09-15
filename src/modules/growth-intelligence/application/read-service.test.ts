@@ -368,3 +368,114 @@ describe("research degradation", () => {
     );
   });
 });
+
+describe("the campaign proposal lane", () => {
+  const PROPOSAL = "40000000-0000-4000-8000-000000000004";
+  const VERSION = "50000000-0000-4000-8000-000000000005";
+
+  function bundle(state = "ready_for_review") {
+    return {
+      proposal: {
+        id: PROPOSAL,
+        sourceKind: "business_signal",
+        sourceId: null,
+        state,
+        currentVersionId: null,
+        linkedCampaignId: null,
+        snoozedUntil: null,
+        createdAt: "2026-09-03T08:00:00.000Z",
+        updatedAt: "2026-09-04T08:00:00.000Z",
+      },
+      version: null,
+      decisions: [],
+    };
+  }
+
+  it("carries no lane at all when no proposal reader is composed", async () => {
+    const read = service();
+
+    // Not an empty section: a surface that may not read proposals must not
+    // imply there are none. Before this slice, every surface was in this state.
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(view.campaignProposals).toEqual([]);
+  });
+
+  it("projects proposals into their own lane", async () => {
+    const listProposals = vi.fn().mockResolvedValue([bundle()]);
+    const read = service({
+      proposals: { listProposals, readProposal: vi.fn().mockResolvedValue(null) },
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(listProposals).toHaveBeenCalledWith({ organizationId });
+    expect(view.campaignProposals).toHaveLength(1);
+    expect(view.campaignProposals[0]?.proposalId).toBe(PROPOSAL);
+    // Never folded into the recommendation counts: one number must not mean
+    // two different kinds of act.
+    expect(view.counts.recommendations).toBe(0);
+  });
+
+  it("keeps the rest of the workspace when the proposal read fails", async () => {
+    const onProposalError = vi.fn();
+    const read = service({
+      proposals: {
+        listProposals: vi.fn().mockRejectedValue(new Error("permission denied")),
+        readProposal: vi.fn().mockResolvedValue(null),
+      },
+      onProposalError,
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    // An operator locked out of their whole workspace by one failing lane has
+    // lost more than they gained. The failure is reported, never hidden.
+    expect(onProposalError).toHaveBeenCalledTimes(1);
+    expect(view.campaignProposals).toEqual([]);
+    expect(view.activityMonth).toBe("2026-09");
+  });
+
+  it("does not read proposals for a section the caller did not ask for", async () => {
+    const listProposals = vi.fn().mockResolvedValue([bundle()]);
+    const read = service({
+      proposals: { listProposals, readProposal: vi.fn().mockResolvedValue(null) },
+    });
+
+    const view = await read.getWorkspace({
+      organizationId,
+      actorId,
+      sections: ["recommendations"],
+    });
+
+    expect(view.campaignProposals).toEqual([]);
+  });
+
+  it("names the version id it would decide against once one exists", async () => {
+    const withVersion = {
+      ...bundle(),
+      proposal: { ...bundle().proposal, currentVersionId: VERSION },
+      version: {
+        id: VERSION,
+        proposalId: PROPOSAL,
+        version: 1,
+        document: { not: "a proposal document" },
+        digest: "a".repeat(64),
+        createdAt: "2026-09-04T07:00:00.000Z",
+      },
+    };
+    const read = service({
+      proposals: {
+        listProposals: vi.fn().mockResolvedValue([withVersion]),
+        readProposal: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    // An unreadable stored document reaches the lane as unreadable rather than
+    // taking the workspace down or rendering in part.
+    expect(view.campaignProposals[0]?.content.kind).toBe("unreadable");
+    expect(view.campaignProposals[0]?.decidable).toBe(false);
+  });
+});

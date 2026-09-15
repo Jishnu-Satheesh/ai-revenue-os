@@ -138,13 +138,14 @@ until that decision is taken.
 
 - Impacted files: `src/components/growth-intelligence/growth-intelligence-workspace.tsx`, `priority-actions.tsx`, `campaign-draft-action.tsx`, `campaign-preparation-card.tsx`, `your-actions-tab.tsx`; new `campaign-proposal-card.tsx`, `campaign-proposal-review.tsx`; Growth read-model/service; `new-campaign-brief.tsx` and its route/callers.
 - Contracts: C02/C09; visual sections 3/4; preserve ordinary recommendation triage and their source IDs. Do not rename Planned to Approved.
-- [ ] Restore the separately named campaign section after ordinary recommendations, with real proposal rows and honest no-proposal/research/needs-input/failure states.
-- [ ] Render full proposal review and exact preparation-approval terms; Request changes, Snooze and Dismiss retain input/outcome. Viewer sees evidence but no mutation controls.
+- [x] Restore the separately named campaign section after ordinary recommendations, with real proposal rows and honest no-proposal/research/needs-input/failure states.
+- [x] Render full proposal review and exact preparation-approval terms; Request changes, Snooze and Dismiss retain input/outcome. Viewer sees evidence but no mutation controls.
 - [ ] Link a saved approval to real Campaign preparation in Your actions; preserve route/tab context, error/retry, latest update and the actual ready creative-review link.
 - [ ] Change manual request to the same proposal-first journey. Keep typed caller/response compatibility deliberate; do not show “Generation queued” before the new approval transaction exists.
 - [ ] Reconcile the dormant `createGrowthIntelligenceOpportunitySource` with actual SQL/worker admission. Reuse its useful semantics, but do not remove legacy execution gates or generate fictitious numeric impact to populate a list.
 - [ ] Browser proof: request/research → full proposal → approval → one Campaign → creative preparation, with reload/back, double submit, stale approval and cross-tenant denial.
 - Rollback: stop new proposal actions and retain readable saved preparation; ordinary Growth recommendations and Channel Audit stay intact.
+- Status 2026-09-16: the two read boxes above are done and the decision path is wired to the existing decisions route. The seam is documented at `docs/collaboration/campaign-and-growth-intelligence-seam.md`. Needed no migration — the proposal tables already carry member `select` policies from `20260913120000`. Deliberately still open: Your actions still shows the older `draftRequest` preparation rather than proposal-linked preparation; the manual request is still opportunity-first; `createGrowthIntelligenceOpportunitySource` stays dormant; and the browser proof of the populated states is blocked because staging holds **zero** proposals and both `campaign_proposal_versions` and `campaign_proposal_decisions` carry immutability triggers, so a hand-made fixture row could never be removed. That proof arrives with the first real research run, which needs the research policy switched on.
 
 ## Task 8 — Produce tracked finished deliverables from the approved proposal
 

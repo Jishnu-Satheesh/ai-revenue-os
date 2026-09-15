@@ -30,6 +30,7 @@ function view(overrides: Partial<GrowthIntelligenceView> = {}): GrowthIntelligen
     insights: [],
     dataGaps: [],
     timeline: [],
+    campaignProposals: [],
     counts: { opportunities: 0, recommendations: 0, insights: 0, dataGaps: 0 },
     ...overrides,
   };
