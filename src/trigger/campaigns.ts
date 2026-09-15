@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { AbortTaskRunError, logger, queue, schedules, schemaTask, tasks } from "@trigger.dev/sdk";
 
 import { createModelRouter } from "@/ai/model-router";
@@ -48,6 +50,11 @@ import { evaluateCampaign } from "@/modules/campaigns/application/allocation-ser
 import { settleCampaign } from "@/modules/campaigns/application/measurement-service";
 import { proposeLearning } from "@/modules/campaigns/application/learning-service";
 import { createToolGateway } from "@/modules/tool-gateway/application/service";
+import { createMetaOrganicResolver } from "@/modules/campaigns/infrastructure/meta-adapter-resolver";
+import { createMetaPublishConnectionReader } from "@/modules/campaigns/infrastructure/execution-readers";
+import { createVaultCredentialStore } from "@/modules/integrations/infrastructure/vault-credential-store";
+import { createMetaGraphClient } from "@/modules/integrations/providers/meta/client";
+import { getMetaCampaignProviderContract } from "@/modules/integrations/providers/meta/contract";
 import { createToolGatewayStore } from "@/modules/tool-gateway/infrastructure/repository";
 import {
   compositeMaskedEdit,
@@ -767,6 +774,29 @@ export const dispatchDueCampaignActionsTask = schemaTask({
     // gateway's contract carries authority and not request bodies.
     const requests = new Map();
 
+    // Organic only. Paid tool keys stay unresolved until a connection is
+    // qualified for them and Task 14's confirmed pause exists, so an ads
+    // dispatch keeps refusing by name.
+    const organic = createMetaOrganicResolver({
+      readContract: () => getMetaCampaignProviderContract(),
+      connections: createMetaPublishConnectionReader(supabase as never),
+      credentials: createVaultCredentialStore(supabase),
+      requests,
+      correlationId: randomUUID(),
+      createClient: ({ contract, credential }) =>
+        createMetaGraphClient({ contract, credential }),
+    });
+
+    if (organic.status === "contract_unusable") {
+      // Said out loud once per sweep. Without this the per-action detail reads
+      // "no adapter is installed", which is true but hides that the cause is a
+      // lapsed provider review rather than a missing connection.
+      logger.warn("campaign.dispatch_provider_contract_unusable", {
+        provider: "meta",
+        reason: organic.reason,
+      });
+    }
+
     const result = await dispatchDueActions(
       payload,
       {
@@ -774,9 +804,7 @@ export const dispatchDueCampaignActionsTask = schemaTask({
         planner: createDispatchPlanner(supabase as never, requests),
         gateway: createToolGateway({
           store: createToolGatewayStore(supabase as never),
-          // No provider is connected in this deployment, so no adapter is
-          // installed. The gateway refuses by name rather than pretending.
-          adapters: [],
+          adapters: organic.resolver,
         }),
         exposures: createExposureRecorder(supabase as never),
         isCancelled: () => signal.aborted,

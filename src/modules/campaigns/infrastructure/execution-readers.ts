@@ -45,6 +45,7 @@ export type CampaignExecutionPersistence = {
       | "campaign_outcomes"
       | "campaign_approvals"
       | "integration_capability_grants"
+      | "integration_connections"
       | "organizations",
   ): { select(columns: string): Filter & PromiseLike<Result> };
   rpc(
@@ -240,6 +241,60 @@ export function createMetricsGrantReader(persistence: CampaignExecutionPersisten
       if (error) return false;
 
       return (data ?? []).some((row) => row.availability === "available");
+    },
+  };
+}
+
+/**
+ * The Meta connection an organization may publish through, if any.
+ *
+ * Two questions, both of which have to be yes. The capability grant says this
+ * organization is allowed to publish; the connection row says there is still a
+ * live account and a credential to publish with. A grant on a revoked
+ * connection is permission to use something that is gone.
+ *
+ * Every absence answers null rather than raising, because this runs inside a
+ * sweep across tenants: one organization's missing connection must cost that
+ * organization's action and nobody else's.
+ */
+export function createMetaPublishConnectionReader(persistence: CampaignExecutionPersistence) {
+  return {
+    async read(input: {
+      organizationId: string;
+      capabilityKey: string;
+    }): Promise<{ connectionId: string; credentialHandle: { reference: string } } | null> {
+      const grants = await persistence
+        .from("integration_capability_grants")
+        .select("connection_id, capability_key, availability")
+        .eq("organization_id", input.organizationId)
+        .eq("capability_key", input.capabilityKey);
+      // A read that failed is not a grant, for the same reason the metrics
+      // grant reader refuses: calling a provider on the strength of a dropped
+      // connection is worse than not calling it.
+      if (grants.error) return null;
+
+      const granted = (grants.data ?? []).find((row) => row.availability === "available");
+      if (!granted || typeof granted.connection_id !== "string") return null;
+
+      const connections = await persistence
+        .from("integration_connections")
+        .select("id, status, credential_reference")
+        .eq("organization_id", input.organizationId)
+        .eq("id", granted.connection_id);
+      if (connections.error) return null;
+
+      const connection = (connections.data ?? []).find((row) => row.status === "active");
+      if (!connection) return null;
+
+      const reference = connection.credential_reference;
+      // Nothing to publish with. Reported as no connection rather than as a
+      // failure, because there is nothing here to retry.
+      if (typeof reference !== "string" || reference.length === 0) return null;
+
+      return {
+        connectionId: granted.connection_id,
+        credentialHandle: { reference },
+      };
     },
   };
 }

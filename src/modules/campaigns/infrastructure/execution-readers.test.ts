@@ -4,6 +4,7 @@ import {
   createCampaignCycleReader,
   createDueActionReader,
   createExposureRecorder,
+  createMetaPublishConnectionReader,
   createMetricsGrantReader,
   createMetricSubjectReader,
   type CampaignExecutionPersistence,
@@ -362,5 +363,136 @@ describe("createUnavailableInsightsReader", () => {
       failureCode: "meta.connection_absent",
       retryable: false,
     });
+  });
+});
+
+describe("createMetaPublishConnectionReader", () => {
+  const CAPABILITY = "meta.instagram.publish";
+
+  function grant(overrides: Row = {}): Row {
+    return {
+      connection_id: "a0000000-0000-4000-8000-000000000001",
+      capability_key: CAPABILITY,
+      availability: "available",
+      ...overrides,
+    };
+  }
+
+  function connection(overrides: Row = {}): Row {
+    return {
+      id: "a0000000-0000-4000-8000-000000000001",
+      status: "active",
+      credential_reference: "b0000000-0000-4000-8000-000000000001",
+      ...overrides,
+    };
+  }
+
+  it("returns the connection behind an available grant", async () => {
+    const { client } = persistence({
+      tables: {
+        integration_capability_grants: [grant()],
+        integration_connections: [connection()],
+      },
+    });
+
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toEqual({
+      connectionId: "a0000000-0000-4000-8000-000000000001",
+      credentialHandle: { reference: "b0000000-0000-4000-8000-000000000001" },
+    });
+  });
+
+  it("does not publish on a blocked grant", async () => {
+    const { client } = persistence({
+      tables: {
+        integration_capability_grants: [grant({ availability: "blocked" })],
+        integration_connections: [connection()],
+      },
+    });
+
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toBeNull();
+  });
+
+  /**
+   * A connection can be granted and still not be usable. Publishing through a
+   * revoked or disconnected one would send a call nobody can answer for.
+   */
+  it("does not publish through a connection that is not active", async () => {
+    for (const status of ["revoked", "disconnected", "pending"]) {
+      const { client } = persistence({
+        tables: {
+          integration_capability_grants: [grant()],
+          integration_connections: [connection({ status })],
+        },
+      });
+
+      expect(
+        await createMetaPublishConnectionReader(client).read({
+          organizationId: ORGANIZATION_ID,
+          capabilityKey: CAPABILITY,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("returns nothing when the connection holds no credential reference", async () => {
+    const { client } = persistence({
+      tables: {
+        integration_capability_grants: [grant()],
+        integration_connections: [connection({ credential_reference: null })],
+      },
+    });
+
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses when the grant cannot be read at all", async () => {
+    const { client } = persistence({ tableError: "connection lost" });
+
+    // Same rule as the metrics grant: a failed read is not permission.
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toBeNull();
+  });
+
+  it("scopes both reads to the organization it was asked about", async () => {
+    const { client, filters } = persistence({
+      tables: {
+        integration_capability_grants: [grant()],
+        integration_connections: [connection()],
+      },
+    });
+
+    await createMetaPublishConnectionReader(client).read({
+      organizationId: ORGANIZATION_ID,
+      capabilityKey: CAPABILITY,
+    });
+
+    // The worker runs as the service role, so the organization predicate is
+    // the only thing keeping one tenant's publish off another's account.
+    for (const table of ["integration_capability_grants", "integration_connections"]) {
+      expect(filters).toContainEqual({
+        table,
+        column: "organization_id",
+        value: ORGANIZATION_ID,
+      });
+    }
   });
 });

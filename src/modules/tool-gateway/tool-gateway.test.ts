@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createToolGateway } from "@/modules/tool-gateway/application/service";
+import { createToolGateway, staticAdapters } from "@/modules/tool-gateway/application/service";
 import type {
   AdapterOutcome,
   ExecuteActionInput,
@@ -26,7 +26,10 @@ const invoke = vi.fn();
 const adapter: ToolAdapter = { toolKey: "meta.publish_image", invoke };
 
 function gateway(adapters: readonly ToolAdapter[] = [adapter]) {
-  return createToolGateway({ store: { claim, recordInvocation, complete, fail }, adapters });
+  return createToolGateway({
+    store: { claim, recordInvocation, complete, fail },
+    adapters: staticAdapters(adapters),
+  });
 }
 
 const INPUT: ExecuteActionInput = {
@@ -312,5 +315,92 @@ describe("the store's RPC binding", () => {
         leaseSeconds: 300,
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("Tool Gateway, choosing an adapter per organization", () => {
+  const OTHER_ORGANIZATION_ID = "22222222-2222-4222-8222-222222222222";
+
+  it("gives each organization its own adapter", async () => {
+    const mine = vi.fn().mockResolvedValue(SUCCESS);
+    const theirs = vi.fn().mockResolvedValue(SUCCESS);
+
+    const resolver = {
+      supportedToolKeys: () => ["meta.publish_image"] as const,
+      resolve: async ({ organizationId }: { organizationId: string }) =>
+        ({
+          toolKey: "meta.publish_image",
+          invoke: organizationId === ORGANIZATION_ID ? mine : theirs,
+        }) as ToolAdapter,
+    };
+
+    const subject = createToolGateway({
+      store: { claim, recordInvocation, complete, fail },
+      adapters: resolver,
+    });
+
+    await subject.execute(INPUT, new AbortController().signal);
+
+    // The credential behind an adapter belongs to one tenant. Resolving the
+    // wrong one would publish to somebody else's account.
+    expect(mine).toHaveBeenCalledTimes(1);
+    expect(theirs).not.toHaveBeenCalled();
+  });
+
+  it("refuses an organization with no connection without claiming the action", async () => {
+    const subject = createToolGateway({
+      store: { claim, recordInvocation, complete, fail },
+      adapters: {
+        supportedToolKeys: () => ["meta.publish_image"],
+        resolve: async () => null,
+      },
+    });
+
+    await expect(subject.execute(INPUT, new AbortController().signal)).rejects.toThrow(
+      /meta\.publish_image/,
+    );
+
+    // Nothing was claimed, so no attempt was burned and no lease was left on
+    // work this organization cannot do.
+    expect(claim).not.toHaveBeenCalled();
+    expect(recordInvocation).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a tool this deployment cannot perform at all", async () => {
+    const resolve = vi.fn();
+    const subject = createToolGateway({
+      store: { claim, recordInvocation, complete, fail },
+      adapters: { supportedToolKeys: () => [], resolve },
+    });
+
+    await expect(subject.execute(INPUT, new AbortController().signal)).rejects.toThrow(
+      /No adapter is installed/,
+    );
+
+    // An unsupported tool key is answered from the deployment's own list, so an
+    // ads dispatch costs no credential read while paid stays switched off.
+    expect(resolve).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("reports the tools this deployment can perform", () => {
+    expect(gateway().registeredToolKeys()).toEqual(["meta.publish_image"]);
+  });
+
+  it("does not resolve an adapter for an organization until the tool is supported", async () => {
+    const resolve = vi.fn().mockResolvedValue(adapter);
+    const subject = createToolGateway({
+      store: { claim, recordInvocation, complete, fail },
+      adapters: { supportedToolKeys: () => ["meta.publish_image"], resolve },
+    });
+    invoke.mockResolvedValue(SUCCESS);
+
+    await subject.execute(INPUT, new AbortController().signal);
+
+    expect(resolve).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      toolKey: "meta.publish_image",
+    });
+    expect(OTHER_ORGANIZATION_ID).not.toBe(ORGANIZATION_ID);
   });
 });
