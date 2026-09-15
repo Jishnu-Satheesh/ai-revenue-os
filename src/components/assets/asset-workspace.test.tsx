@@ -432,3 +432,52 @@ describe("AssetWorkspace, classifying an upload", () => {
     expect(await screen.findByRole("option", { name: "Logo" })).toBeInTheDocument();
   });
 });
+
+describe("AssetWorkspace, who owns an uploaded reference", () => {
+  it("treats a logo as the organization's own work", async () => {
+    // A brand's own mark is the one reference that is almost never somebody
+    // else's. Making an owner correct the default every time invites them to
+    // stop reading it.
+    mockEmptyCreativeHistory();
+    mocks.searchParams = new URLSearchParams("tab=brand");
+    renderWorkspace({ canManageAssets: true });
+
+    fireEvent.click(await screen.findByRole("button", { name: /upload assets/i }));
+    chooseUploadFile();
+
+    expect(await screen.findByLabelText("This is our own work")).toBeChecked();
+  });
+
+  it("keeps the cautious default for everything else", async () => {
+    // Claiming ownership is what unlocks copying, so a product photograph
+    // still has to be claimed deliberately.
+    mockEmptyCreativeHistory();
+    mocks.searchParams = new URLSearchParams("tab=products");
+    renderWorkspace({ canManageAssets: true });
+
+    fireEvent.click(await screen.findByRole("button", { name: /upload assets/i }));
+    chooseUploadFile();
+
+    expect(await screen.findByLabelText("A reference we admire")).toBeChecked();
+  });
+
+  it("follows the type until the operator answers ownership themselves", async () => {
+    mockEmptyCreativeHistory();
+    mocks.searchParams = new URLSearchParams("tab=products");
+    renderWorkspace({ canManageAssets: true });
+
+    fireEvent.click(await screen.findByRole("button", { name: /upload assets/i }));
+    chooseUploadFile();
+
+    fireEvent.click(await screen.findByLabelText("Type"));
+    fireEvent.click(await screen.findByRole("option", { name: "Logo" }));
+    expect(await screen.findByLabelText("This is our own work")).toBeChecked();
+
+    // Said out loud, it stays said: switching type afterwards must not
+    // re-answer a question about who made the file on somebody's behalf.
+    fireEvent.click(screen.getByLabelText("A reference we admire"));
+    fireEvent.click(screen.getByLabelText("Type"));
+    fireEvent.click(await screen.findByRole("option", { name: "Product" }));
+    expect(screen.getByLabelText("A reference we admire")).toBeChecked();
+  });
+});

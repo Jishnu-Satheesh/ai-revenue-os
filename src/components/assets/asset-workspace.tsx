@@ -333,6 +333,19 @@ const ASSET_ROLE_LABELS: Readonly<Record<BrandAssetUploadFields["assetRole"], st
 
 const UPLOADABLE_ASSET_ROLES = ["logo", "product", "venue", "team", "other"] as const;
 
+/**
+ * Who a given kind of reference usually belongs to.
+ *
+ * `third_party` everywhere else, because claiming ownership is what unlocks
+ * copying and that claim has to be made deliberately. A logo is the exception
+ * that proves it: an organization's own mark is almost never somebody else's,
+ * and making an owner correct the same field on every upload is how people
+ * learn to stop reading it.
+ */
+function defaultOwnershipFor(role: BrandAssetUploadFields["assetRole"]): AssetOwnership {
+  return role === "logo" ? "owned" : "third_party";
+}
+
 function BrandAssetUploadDialog({
   organizationId,
   canManage,
@@ -411,7 +424,7 @@ function BrandAssetUploadDialog({
       defaultFields={(file) => ({
         label: fileBaseName(file),
         assetRole: defaultAssetRole,
-        ownership: "third_party",
+        ownership: defaultOwnershipFor(defaultAssetRole),
       })}
       run={run}
       onSettled={onSettled}
@@ -436,9 +449,19 @@ function BrandAssetUploadDialog({
             </Label>
             <Select
               value={fields.assetRole}
-              onValueChange={(value) =>
-                onChange({ ...fields, assetRole: value as BrandAssetUploadFields["assetRole"] })
-              }
+              onValueChange={(value) => {
+                const assetRole = value as BrandAssetUploadFields["assetRole"];
+                // Ownership follows the type only while it is still the
+                // answer the type gave it. Once the operator has said who
+                // made this, changing the type must not quietly re-answer it
+                // for them — that claim is what unlocks copying.
+                const untouched = fields.ownership === defaultOwnershipFor(fields.assetRole);
+                onChange({
+                  ...fields,
+                  assetRole,
+                  ownership: untouched ? defaultOwnershipFor(assetRole) : fields.ownership,
+                });
+              }}
               disabled={disabled}
             >
               <SelectTrigger id={fieldId("type")}>
