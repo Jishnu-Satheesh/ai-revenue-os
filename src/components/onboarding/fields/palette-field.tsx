@@ -17,9 +17,24 @@ import { Input } from "@/components/ui/input";
  */
 
 const SLOTS = [
-  { key: "primary", label: "Primary", hint: "The colour the brand is recognised by." },
-  { key: "secondary", label: "Secondary", hint: "Supporting colour, if there is one." },
-  { key: "tertiary", label: "Tertiary", hint: "Accent colour, if there is one." },
+  {
+    key: "primary",
+    label: "Primary",
+    hint: "The colour the brand is recognised by.",
+    example: "#c8102e",
+  },
+  {
+    key: "secondary",
+    label: "Secondary",
+    hint: "Supporting colour, if there is one.",
+    example: "#1d3557",
+  },
+  {
+    key: "tertiary",
+    label: "Tertiary",
+    hint: "Accent colour, if there is one.",
+    example: "#f4a300",
+  },
 ] as const;
 
 /** A partly-typed hex is normal while editing; it is just not a colour yet. */
@@ -68,24 +83,34 @@ export function PaletteField({
             <input
               type="color"
               aria-label={`${slot.label} colour picker`}
-              // A picker cannot show "unset", so an empty slot shows black
-              // while the text beside it stays empty. The text is the record.
-              value={isComplete(current) ? current : "#000000"}
+              // A picker has no way to show "unset". Three black swatches read
+              // as a brand whose colours are black, so an empty slot is drawn
+              // faded with a dashed edge and the text beside it stays empty.
+              // The text is the record; this is only how it is picked.
+              value={isComplete(current) ? current : "#ffffff"}
               onChange={(event) => set(slot.key, event.target.value)}
               onBlur={onBlur}
-              className="size-9 shrink-0 cursor-pointer rounded-md border border-input bg-background p-1"
+              className={[
+                "size-9 shrink-0 cursor-pointer rounded-md bg-background p-1",
+                isComplete(current)
+                  ? "border border-input"
+                  : "border border-dashed border-input opacity-60",
+              ].join(" ")}
             />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <Input
                 aria-label={slot.label}
                 value={current}
-                placeholder="#c8102e"
+                placeholder={slot.example}
                 spellCheck={false}
                 aria-invalid={current.trim().length > 0 && !isComplete(current)}
                 onChange={(event) => set(slot.key, event.target.value)}
                 onBlur={onBlur}
               />
-              <span className="text-xs text-muted-foreground">{slot.hint}</span>
+              <span className="text-xs text-muted-foreground">
+                {slot.hint}
+                {current.trim() ? null : " Not set."}
+              </span>
             </div>
           </div>
         );

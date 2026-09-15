@@ -702,11 +702,19 @@ export function AssetWorkspace({
       </div>
 
       <Tabs value={tab} onValueChange={(value) => setParams({ tab: value === "history" ? null : value })}>
-        <TabsList>
-          <TabsTrigger value="history">Creative History</TabsTrigger>
-          <TabsTrigger value="products">Products &amp; Subjects</TabsTrigger>
-          <TabsTrigger value="brand">Brand Kit</TabsTrigger>
-          <TabsTrigger value="brand-guidelines">Brand Guidelines</TabsTrigger>
+        <TabsList className="max-w-full overflow-x-auto">
+          <TabsTrigger value="history" className="shrink-0">
+            Creative History
+          </TabsTrigger>
+          <TabsTrigger value="products" className="shrink-0">
+            Products &amp; Subjects
+          </TabsTrigger>
+          <TabsTrigger value="brand" className="shrink-0">
+            Brand Kit
+          </TabsTrigger>
+          <TabsTrigger value="brand-guidelines" className="shrink-0">
+            Brand Guidelines
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="history" className="flex flex-col gap-4 lg:flex-row">

@@ -475,7 +475,7 @@ export function BrandGuidelinesPanel({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label id="brand-terms-label" className="text-sm">
+                <Label htmlFor="brand-terms" className="text-sm">
                   Add a word never to use
                 </Label>
                 <TagListField

@@ -286,13 +286,6 @@ export function SectionForm({
               ))}
             </FieldGroup>
             {children}
-            {error ? (
-              <Alert variant="destructive">
-                <CircleAlert />
-                <AlertTitle>Save failed</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            ) : null}
           </div>
         </div>
       </ScrollArea>
@@ -306,6 +299,17 @@ export function SectionForm({
           ).filter((requirement) => !requirement.satisfied);
           return (
             <div className="flex shrink-0 flex-col gap-3 border-t border-border bg-card px-(--card-spacing) py-4">
+              {/* Beside the button that was pressed, not at the top of a form
+                  somebody has already scrolled past. A save that fails while
+                  the only notice of it sits off-screen reads as a save that
+                  worked. */}
+              {error ? (
+                <Alert variant="destructive">
+                  <CircleAlert />
+                  <AlertTitle>Save failed</AlertTitle>
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
               {missing.length > 0 ? (
                 <p className="flex items-start gap-2 text-xs text-muted-foreground">
                   <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
