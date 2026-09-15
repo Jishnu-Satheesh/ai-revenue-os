@@ -2,6 +2,7 @@ import {
   researchPolicySchema,
   type ResearchAdmissionRefusal,
   type ResearchPolicy,
+  type ResearchPolicyInput,
 } from "@/domain/campaigns/research-policy";
 
 /**
@@ -118,6 +119,18 @@ export type ResearchPolicyRepository = {
     idempotencyKey: string;
     knownPolicyVersion: number | null;
   }): Promise<{ runId: string; outcome: "saved" | "replayed" }>;
+  /**
+   * Records a new policy version and makes it the current one.
+   *
+   * There is no update: every run records the version that admitted it, so
+   * editing a policy in place would retroactively rewrite what earlier spending
+   * was allowed to be. The version number comes back from the database, which
+   * mints it under a lock.
+   */
+  savePolicy(input: {
+    organizationId: string;
+    policy: ResearchPolicyInput;
+  }): Promise<{ policyId: string; version: number; enabled: boolean }>;
 };
 
 export function createResearchPolicyRepository(
@@ -144,6 +157,34 @@ export function createResearchPolicyRepository(
         windowSpentMinor: requiredNumber(row.window_spent_minor),
         lastAdmittedAt:
           row.last_admitted_at === null ? null : String(row.last_admitted_at),
+      };
+    },
+
+    async savePolicy(input) {
+      const { policy } = input;
+      const { data, error } = await client.rpc("save_campaign_research_policy", {
+        target_organization_id: input.organizationId,
+        input_policy: {
+          enabled: policy.enabled,
+          schedule_timezone: policy.timezone,
+          evidence_qualification_rule_version: policy.evidenceQualificationRuleVersion,
+          evidence_max_age_days: policy.evidenceMaxAgeDays,
+          cooldown_seconds: policy.cooldownSeconds,
+          max_pending_proposals: policy.maxPendingProposals,
+          max_attempts: policy.maxAttempts,
+          per_run_allowance_minor: policy.perRunAllowance.amountMinor,
+          window_allowance_minor: policy.windowAllowance.amountMinor,
+          allowance_currency: policy.perRunAllowance.currency,
+          window_days: policy.windowDays,
+        },
+      });
+      if (error) throw researchFailure(error);
+
+      const row = record(data);
+      return {
+        policyId: requiredString(row.policy_id, "policy_id"),
+        version: requiredNumber(row.version),
+        enabled: row.enabled === true,
       };
     },
 

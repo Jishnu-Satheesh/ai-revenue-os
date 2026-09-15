@@ -6,6 +6,7 @@ import type { ResearchPolicy } from "@/domain/campaigns/research-policy";
 
 const ORGANIZATION_ID = "fb430000-0000-4000-8000-000000000201";
 const RUN_ID = "fb430000-0000-4000-8000-000000000202";
+const POLICY_ID = "fb430000-0000-4000-8000-000000000203";
 const NOW = new Date("2026-09-13T12:00:00.000Z");
 
 function policy(): ResearchPolicy {
@@ -35,6 +36,7 @@ function repository(overrides: Partial<ResearchPolicyRepository> = {}): Research
       lastAdmittedAt: null,
     }),
     requestRun: async () => ({ runId: RUN_ID, outcome: "saved" as const }),
+    savePolicy: async () => ({ policyId: POLICY_ID, version: 4, enabled: true }),
     ...overrides,
   };
 }

@@ -104,10 +104,16 @@ describe("Sidebar", () => {
     const children = screen
       .getAllByTestId("workspace-child-entry")
       .map((entry) => entry.textContent?.trim());
-    expect(children).toEqual(["Overview", "Asset Library"]);
+    expect(children).toEqual(["Overview", "Asset Library", "Research settings"]);
     expect(screen.getByRole("link", { name: "Asset Library" })).toHaveAttribute(
       "href",
       `/organizations/${organizationId}/assets`,
+    );
+    // The money fence on research sits beside the work it governs, because the
+    // question it answers is asked from here.
+    expect(screen.getByRole("link", { name: "Research settings" })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/campaign-research`,
     );
   });
 

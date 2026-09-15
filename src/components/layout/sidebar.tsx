@@ -87,6 +87,13 @@ const workspaceEntries: readonly WorkspaceEntry[] = [
       // "Asset Library", matching that page's own heading. A nav label that
       // disagrees with the title it opens is a small, constant friction.
       { label: "Asset Library", path: (id) => `/organizations/${id}/assets` },
+      // Where the money fence on research is set. Beside the work it governs
+      // rather than in a general settings page, because the question it answers
+      // — "why can't I request a campaign?" — is asked from here.
+      {
+        label: "Research settings",
+        path: (id) => `/organizations/${id}/campaign-research`,
+      },
     ],
   },
   { label: "Business Memory", icon: BrainCircuit, path: (id) => `/organizations/${id}/memory` },

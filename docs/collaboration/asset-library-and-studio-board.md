@@ -1,5 +1,17 @@
 # Coordination board — Asset Library, then Campaign Studio
 
+<!-- 2026-09-15 Live preview browser check (uncommitted, user-authorized spend only): dev server up on :3000, unauthenticated GI redirects to /login (307), unauthenticated POST to live-preview returns 401 AUTHENTICATION_ERROR with zero provider spend. Full click-through blocked at passwordless email login — no session, no E2E creds, inbox link cannot be completed from here. Static gates stay green (typecheck, eslint, 32 focused vitest). Tree left uncommitted per user. Dev server left running for a user-driven click; logs at /tmp/opencode/next-dev.log. -->
+
+<!-- 2026-09-15 Live-only Brave preview resumed post-interrupt (Tier 3 small, approved): Tasks 1-2 already committed (live-preview.ts + route.ts + tests, 19 green). Added Task 3 panel market-watch-live-preview.tsx + test (7 green, explicit click only, no auto-fetch, discard on close) and Task 4 page mount in growth-intelligence/page.tsx + narrow Spec 022 ss 4.2/8.2 exception (stores nothing, creates no evidence, manage-only). No migration, no RLS, no worker, no stored watch change. Campaign dirt preserved; no stash/push. -->
+
+<!-- 2026-09-15 Market Monitoring Slice 8 FIRST LIVE RUN (user-clicked, fail-closed as designed): project "Summery dining deals" (53c6d412) + brief rev 1 + update df53c6e8 persisted in canary org; prod run run_06gaapa2ftrs2ubjviqfchoo01 executed on prod worker 20260915.1 (39 tasks incl. GI) in 4s at $0.00, output research_failed/ADAPTER_UNAVAILABLE, retryable, all 7 coverage dimensions unavailable, no report persisted, finished event emitted. AFTER diff: 1/1/0/0/0/1/0 across projects/revisions/reports/items/acceptances/updates/reviews. Qualification still ["qualification_missing"]. Brave SearchPrepaid facts (plan/features/capacity) do NOT qualify: brave.com FAQ requires a plan that explicitly grants storage rights — marketing copy is not permission. Still needed: agreement version/date/expiry, 6-use confirmation, pricing version + rate, model bounds, controlled canary. FLAG: .env.local holds a tr_prod key, so local clicks trigger PROD runs — any paid canary from dev spends prod budget; confirm env routing before authorizing spend. No code touched; Campaign dirt preserved; no stash/push. -->
+
+<!-- 2026-09-15 New-research dialog footer-overlap fix (Tier 1, uncommitted): shared DialogHeader/Footer primitives inject sticky top-[-16px] / sticky bottom-0 -mx-4 -mb-4 built for the old p-4 scrolling-content pattern (legacy market-monitoring-dialog still uses it — primitive untouched). The Slice 4 flex-col + separate-scroll-body dialogs (new-research-dialog, report-reader) inherited that baggage: footer painted 235px above flow at 852px wide in an 820px card (measured), header poked past the rounded top. Fix is feature-local overrides only: content +overflow-hidden, header/footer +static, footer +mx-0 mb-0. Verified in Chromium at 1470px + 1280px incl. tall step-2 with internal body scroll (footer.bottom==dialog.bottom, 0 overlap, 4×14px corners): typecheck/eslint clean, 58/58 component tests green. Scratch repro route removed. -->
+
+<!-- 2026-09-15 Market Monitoring Slice 8 live-wave part 2 (worker live, click pending): local `trigger dev` worker 20260915.1 attached to dev AFTER one indexing-timeout retry — 40 tasks incl. all 6 growth-intelligence tasks (run-market-monitoring-update, monitoring-sweep, run-market-research, run-synthesis, consolidate, dispatch-due). Cloud `trigger deploy` deliberately unused (targets prod/staging only; branch must not ship there). Live RPC check: qualification blockers ["qualification_missing"], available=false — fail-closed confirmed. BEFORE snapshot canary org 2dda45b8: 0 rows in all 7 report tables (any new row is the user's run). No qualification row staged (needs user's Brave account facts — never invented). No code touched; Campaign dirt preserved; no stash/push. Worker left running for the user's click; stop with kill on the run:trigger pid. -->
+
+<!-- 2026-09-15 Market Monitoring Slice 8 live-wave attempt part 1 (static + boundaries, Tier 1 verification, no code touched): typecheck clean; eslint 0 errors in GI slice (24 errors all pre-existing/outside-slice and untouched — superdesign harness require()s, dev-loader preview, analysis-progress, memory fixture, Campaign WIP restricted-imports); vitest 807 (domain/modules/workflows/trigger) + 302 (components + drift 106/106) green; lifecycle pgTAP + scope-release green on staging; dry-run clean. Playwright growth-intelligence.spec: 8 passed (one cold-compile 30s navigation timeout, green on warm retry in 2.0s), 12 seeded skips by design (no E2E creds, no staged qualification/budget approval). BLOCKED live legs: deployed dev worker still 20260825.3 with 0 GI tasks (needs redeploy authorization); provider fail-closed (agreement/pricing/qualification versions empty); authenticated start impossible (no E2E_* vars — needs user creds or a user-driven start). Dev server stopped. Campaign dirt preserved; no stash/push. -->
+
 <!-- 2026-09-15 Market Monitoring Slice 7 resume (verify + commit + stage): shell back after 2026-09-14 bwrap outage. Static gates green on the uncommitted delta — typecheck clean, eslint 0 errors (1 pre-existing warning at trigger:787), focused vitest 115/115 across the 6 touched suites, drift test 104/104. database.types.ts diff confirmed narrow (4 tables + 4 worker RPCs, Slice 7 only). pgTAP suite has plan(83) + finish() per the I-01/I-02 fix. STAGING HELD: dry-run would also push committed Campaign 20260914183000, whose entry reserves push to the user — re-confirming push scope before applying. Committing Slice 7 paths only; unrelated dirt untouched; no stash/push yet. -->
 
 <!-- 2026-09-15 Market Monitoring Slice 7 STAGED + VERIFIED: fix migration 20260915032105 applied (Scope guard UPDATE-only), lifecycle suite 83/83 + release suite 7/7 green on staging (three extra harness-only fixes: temp-pin grant, bigint cast, DML probes as authenticated — runner owns tables). All 8 new RPCs executed on staging (first-call rule met). Advisors: 1 pre-existing WARN on private.organization_role_rank, nothing on new functions. Commits a52916b + 0bffe14 + 09fe0df, all path-limited. Campaign 20260914183000 still pending for its owner. Slice 8 live wave still needs browser/Trigger MCPs + provider qualification. -->
@@ -7524,3 +7536,72 @@ likely misreading of that screen.
   and chart are covered by 8 component tests but **have not been seen in a browser**, because no
   observation can exist until the migration is pushed and a real Meta account publishes something.
   Whoever pushes should look at it with real data before calling the visual work done.
+
+## 2026-09-16 — Research can be switched on at all (Task 16, settings half)
+
+**The gap this closes.** Task 6 built the entire research machine — admission,
+allowances, cooldown, the claim lifecycle, the planner, the worker — against
+`campaign_research_policies`, which **nothing could write**.
+`set_campaign_research_policy_current` only moves a pointer at a policy that
+must already exist, and no function ever created one. No grant, no insert path,
+no caller. So research could never run for anybody, and every part of Task 6
+above it was unreachable.
+
+**If you find this shape again, look for it deliberately:** a governed table
+with a reader, a pointer-mover and a lifecycle, but no creator. The tests all
+pass because they insert fixtures directly.
+
+`20260915190000_save_campaign_research_policy.sql` is the missing writer. It
+creates a new immutable version and moves the pointer **in one statement**,
+because a version nothing points at authorizes no spending and a pointer at a
+half-written version authorizes spending nobody described. Same permission as
+admitting a run (`campaign.research_request`, so owner and admin): whoever may
+spend the allowance is whoever may set it.
+
+**A real bug the staging rehearsal caught before the push.** The first draft
+used `select coalesce(max(version),0)+1 ... for update`, which Postgres rejects
+— `FOR UPDATE is not allowed with aggregate functions`. Replaced with a
+per-organization `pg_advisory_xact_lock`, which is also the right tool: on the
+very first save there is no row to lock. The unique
+`(organization_id, version)` index remains the backstop.
+
+**Nothing is defaulted.** The form opens blank for an organization with no
+policy and refuses to save while any figure is missing. `max_attempts` and the
+rest are numeric operating limits (D06), and pre-filling plausible numbers is
+how a budget nobody chose ends up in force. `evidenceQualificationRuleVersion`
+is the one field NOT asked for — it names the platform's own logic, so it is now
+`EVIDENCE_QUALIFICATION_RULE_VERSION` in the domain. **Bump that constant
+whenever the qualification rules change**, or two runs judged by different rules
+will claim to have been judged by the same ones.
+
+**Verified live, end to end.** All three of 20260915170000 / 180000 / 190000 are
+applied on staging (pushed by the user). PUT → GET → render round-trips on the
+dev org: money converts both ways (5000 fils ⇄ "50.00"), the cooldown is asked
+in minutes and stored in seconds (60 ⇄ 3600), the switch reflects `enabled`, and
+the ledger's pending count and reserved amount render. No console errors; no
+horizontal overflow at 390px.
+
+**One side effect to know about:** verifying the endpoint created **policy
+version 1 for the dev org** with probe figures I chose (AED 50 per run, AED 200
+per window, cooldown 60 min, 5 pending, 3 attempts, 30-day evidence age),
+`enabled = false`. Nothing can spend while it is disabled, and versions are
+immutable by design — the first real save becomes version 2 and supersedes it.
+I should have used a throwaway organization rather than firing a write at the
+dev org's live configuration.
+
+- Claiming `supabase/migrations/20260915190000_*` + its pgTAP suite (17/17
+  rehearsed), `src/domain/campaigns/research-policy.*` (input schema + rule
+  constant), `src/modules/campaigns/infrastructure/research-policy-repository.ts`
+  (`savePolicy`), `research-policy-service.test.ts` (fixture),
+  `src/app/api/organizations/[organizationId]/campaign-research/settings/route.ts` (new),
+  `src/app/(platform)/organizations/[organizationId]/campaign-research/page.tsx` (new),
+  `src/components/campaigns/research-settings-form.*` and
+  `research-settings-panel.tsx` (new), `src/components/layout/sidebar.*` (nav entry).
+- Gates: 1996/1996 across components, layout, domain, modules and app; 46/46 on the
+  focused suites after the final polish; tsc exit 0; eslint clean on touched files
+  except one **pre-existing** unused-param warning in
+  `research-policy-repository.ts:94` (`requiredString`'s `field`, present in HEAD).
+- **Still dark: Task 7.** Nothing in the product reads or decides a proposal —
+  no component calls `/campaign-proposals`, and Growth Intelligence has no
+  awareness of proposals at all (it still uses the older `draftRequest` path).
+  Research can now run and produce one; seeing and approving it is the next slice.

@@ -15,6 +15,18 @@ import { z } from "zod";
 
 export const RESEARCH_POLICY_SCHEMA_VERSION = 1;
 
+/**
+ * The evidence qualification rules this build actually applies.
+ *
+ * Recorded on every policy so a run can be read back against the rules that
+ * were in force when it was admitted. It names the platform's own logic, not
+ * anything an organization chooses, so it is set here rather than asked for.
+ *
+ * **Bump this whenever the qualification rules change** — otherwise two runs
+ * judged by different rules claim to have been judged by the same ones.
+ */
+export const EVIDENCE_QUALIFICATION_RULE_VERSION = "evidence-qualification@2";
+
 const uuidSchema = z.string().uuid();
 
 export const researchTriggerKindSchema = z.enum([
@@ -61,6 +73,40 @@ export const researchPolicySchema = z.strictObject({
   windowDays: z.number().int().positive().max(365),
 });
 export type ResearchPolicy = z.infer<typeof researchPolicySchema>;
+
+/**
+ * What someone may set when they configure research.
+ *
+ * Deliberately the policy minus the three fields nobody chooses: the schema
+ * version, the organization, and the version number, which the database mints
+ * so that two people saving at once cannot claim the same one.
+ *
+ * Every remaining field is required. There is no partial save and no default
+ * anywhere: an organization that has not said what it will spend has not
+ * authorized spending, and filling a blank in on its behalf would be inventing
+ * an operating limit (D06).
+ */
+export const researchPolicyInputSchema = researchPolicySchema
+  .omit({ schemaVersion: true, organizationId: true, version: true })
+  .superRefine((policy, context) => {
+    if (policy.perRunAllowance.currency !== policy.windowAllowance.currency) {
+      context.addIssue({
+        code: "custom",
+        message: "Both allowances must be in the same currency.",
+        path: ["windowAllowance", "currency"],
+      });
+    }
+    // A window that allows less than a single run would admit nothing while
+    // reading as a budget. The table refuses it too; this says why, earlier.
+    if (policy.windowAllowance.amountMinor < policy.perRunAllowance.amountMinor) {
+      context.addIssue({
+        code: "custom",
+        message: "The window allowance cannot be smaller than one run's allowance.",
+        path: ["windowAllowance", "amountMinor"],
+      });
+    }
+  });
+export type ResearchPolicyInput = z.infer<typeof researchPolicyInputSchema>;
 
 export const researchAdmissionRefusalSchema = z.enum([
   "needs_setup",

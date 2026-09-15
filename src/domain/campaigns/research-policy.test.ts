@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   admitResearchRequest,
+  researchPolicyInputSchema,
   researchPolicySchema,
   type ResearchPolicy,
 } from "@/domain/campaigns/research-policy";
@@ -157,5 +158,68 @@ describe("research policy attempt cap", () => {
     expect(admitted({ policy: policy({ maxAttempts: 1 }) })).toEqual(
       admitted({ policy: policy({ maxAttempts: 10 }) }),
     );
+  });
+});
+
+describe("what someone may set when configuring research", () => {
+  function input(overrides: Record<string, unknown> = {}) {
+    const { schemaVersion: _v, organizationId: _o, version: _n, ...rest } = policy();
+    return { ...rest, ...overrides };
+  }
+
+  it("accepts a complete policy", () => {
+    expect(researchPolicyInputSchema.safeParse(input()).success).toBe(true);
+  });
+
+  it("does not let the caller choose its own version number", () => {
+    // The database mints it, so two people saving at once cannot claim the
+    // same one and no caller can rewrite what earlier spending was allowed to
+    // be by re-using a version.
+    expect(researchPolicyInputSchema.safeParse({ ...input(), version: 9 }).success).toBe(false);
+  });
+
+  it("refuses a policy with any threshold left out", () => {
+    for (const field of [
+      "maxAttempts",
+      "maxPendingProposals",
+      "cooldownSeconds",
+      "evidenceMaxAgeDays",
+      "windowDays",
+      "perRunAllowance",
+    ]) {
+      const partial = input();
+      delete (partial as Record<string, unknown>)[field];
+      // Filling a blank in on the organization's behalf would be inventing an
+      // operating limit (D06).
+      expect(researchPolicyInputSchema.safeParse(partial).success).toBe(false);
+    }
+  });
+
+  it("refuses a window allowance smaller than a single run", () => {
+    const result = researchPolicyInputSchema.safeParse(
+      input({
+        perRunAllowance: { amountMinor: 9000, currency: "AED" },
+        windowAllowance: { amountMinor: 1000, currency: "AED" },
+      }),
+    );
+    // It would read as a budget while admitting nothing.
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses two allowances in different currencies", () => {
+    const result = researchPolicyInputSchema.safeParse(
+      input({
+        perRunAllowance: { amountMinor: 5000, currency: "AED" },
+        windowAllowance: { amountMinor: 20000, currency: "USD" },
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("allows research to be configured while switched off", () => {
+    // Setting a budget and turning it on are different decisions, and someone
+    // should be able to make the first without the second.
+    const result = researchPolicyInputSchema.safeParse(input({ enabled: false }));
+    expect(result.success).toBe(true);
   });
 });
