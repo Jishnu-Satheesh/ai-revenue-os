@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   brandContextFromBrandAssets,
+  guidelinesFromBrandAssets,
   mergeBrandContext,
 } from "@/domain/onboarding/canonical-promotion";
 import { toCostRateRows } from "@/domain/onboarding/cost-rates";
@@ -59,17 +60,6 @@ function raise(message: string, cause?: unknown): never {
 }
 
 /**
- * Writes the costs an operator typed as effective-dated rates.
- *
- * The section stores what was said; this is what makes it count, because a rate
- * here is what the channel economics ledger prices every margin against. The
- * shaping lives in `toCostRateRows`; this is the I/O around it.
- *
- * Saving again on the same date updates the rate rather than colliding.
- * Correcting a typo is not a commission tier change, and only a new date opens
- * a new effective period.
- */
-/**
  * Writes one section's answers into the canonical business profile, keeping
  * every other section's.
  *
@@ -85,6 +75,7 @@ function raise(message: string, cause?: unknown): never {
  * migration for a race this flow does not have. The read runs under the
  * caller's own session, so RLS decides whether this profile is theirs to see.
  */
+
 async function promoteBusinessProfile(
   supabase: OnboardingClient,
   input: {
@@ -116,6 +107,66 @@ async function promoteBusinessProfile(
   if (error) raise("Business profile could not be promoted.", error);
 }
 
+/**
+ * Writes the colours and rules the brand assets section collected.
+ *
+ * Its own table rather than more keys in `brand_context`, because these
+ * constrain what may be published in a client's name and "who changed this, and
+ * when" has to be answerable — the table carries an audit trigger and
+ * `brand_context` does not.
+ *
+ * Two behaviours here are deliberate:
+ *
+ * **Nothing is written when nothing was supplied.** `guidelinesFromBrandAssets`
+ * returns null for an empty section, and an upsert of empty lists would replace
+ * rules somebody set in the Asset Library with nothing, lifting constraints
+ * nobody asked to lift.
+ *
+ * **A refusal is reported, not swallowed.** Onboarding is open to an operator,
+ * but `brand.manage` sits above the operator line, so an operator filling in
+ * this section cannot write these rules. Their answers are already stored — the
+ * section state is written before this runs — so the honest outcome is to say
+ * which part did not take effect and who can complete it. Reporting "saved"
+ * would leave somebody believing generation was constrained when it was not.
+ */
+async function promoteBrandGuidelines(
+  supabase: OnboardingClient,
+  input: { organizationId: string; userId: string; payload: Record<string, unknown> },
+): Promise<void> {
+  const guidelines = guidelinesFromBrandAssets(input.payload);
+  if (!guidelines) return;
+
+  const { error } = await supabase.from("organization_brand_guidelines").upsert({
+    organization_id: input.organizationId,
+    palette: guidelines.palette,
+    rules: guidelines.rules,
+    restricted_terms: guidelines.restrictedTerms,
+    updated_by: input.userId,
+  });
+  if (!error) return;
+
+  // 42501 is the database refusing the write, which here means the person
+  // filling in onboarding does not hold `brand.manage`.
+  if ((error as { code?: string }).code === "42501") {
+    raise(
+      "Your answers were saved, but brand colours and rules can only be put in force by an admin or owner. Ask one to confirm them in Asset Library → Brand Guidelines.",
+      error,
+    );
+  }
+  raise("Brand colours and rules could not be saved.", error);
+}
+
+/**
+ * Writes the costs an operator typed as effective-dated rates.
+ *
+ * The section stores what was said; this is what makes it count, because a rate
+ * here is what the channel economics ledger prices every margin against. The
+ * shaping lives in `toCostRateRows`; this is the I/O around it.
+ *
+ * Saving again on the same date updates the rate rather than colliding.
+ * Correcting a typo is not a commission tier change, and only a new date opens
+ * a new effective period.
+ */
 async function promoteCostRates(
   supabase: OnboardingClient,
   input: { organizationId: string; payload: Record<string, unknown> },
@@ -379,6 +430,7 @@ export function createOnboardingRepository(supabase: OnboardingClient): Onboardi
             brandContext,
           });
         }
+        await promoteBrandGuidelines(supabase, input);
         return;
       }
 

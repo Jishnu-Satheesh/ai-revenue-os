@@ -16,8 +16,9 @@ const userId = "22222222-2222-4222-8222-222222222222";
 
 type ProfileRow = Record<string, unknown> | null;
 
-function stubClient(existingProfile: ProfileRow) {
+function stubClient(existingProfile: ProfileRow, guidelinesError: { code?: string } | null = null) {
   const upserts: Record<string, unknown>[] = [];
+  const guidelineUpserts: Record<string, unknown>[] = [];
   const organizationUpdates: Record<string, unknown>[] = [];
 
   const client = {
@@ -43,15 +44,24 @@ function stubClient(existingProfile: ProfileRow) {
           },
         };
       }
+      if (table === "organization_brand_guidelines") {
+        return {
+          upsert: async (row: Record<string, unknown>) => {
+            if (guidelinesError) return { error: guidelinesError };
+            guidelineUpserts.push(row);
+            return { error: null };
+          },
+        };
+      }
       throw new Error(`Unexpected table: ${table}`);
     },
   };
 
-  return { client, upserts, organizationUpdates };
+  return { client, upserts, guidelineUpserts, organizationUpdates };
 }
 
-function repositoryFor(existingProfile: ProfileRow) {
-  const stub = stubClient(existingProfile);
+function repositoryFor(existingProfile: ProfileRow, guidelinesError: { code?: string } | null = null) {
+  const stub = stubClient(existingProfile, guidelinesError);
   return {
     ...stub,
     repository: createOnboardingRepository(
@@ -150,5 +160,75 @@ describe("persistCanonicalSection", () => {
 
     expect(upserts).toHaveLength(0);
     expect(organizationUpdates).toHaveLength(0);
+  });
+});
+
+describe("persistCanonicalSection, brand guidelines", () => {
+  it("puts the colours and rules into force alongside the voice", async () => {
+    const { repository, upserts, guidelineUpserts } = repositoryFor(null);
+
+    await repository.persistCanonicalSection?.({
+      organizationId,
+      userId,
+      sectionKey: "brand_assets",
+      payload: {
+        brandVoice: ["warm"],
+        palette: { primary: "#c8102e" },
+        brandRules: [
+          { text: "Never imply a medical benefit", strength: "hard" },
+          { text: "We usually lead with the food", strength: "soft" },
+        ],
+        restrictedTerms: ["best in dubai"],
+      },
+    });
+
+    // Voice and rules land in different places on purpose: voice describes how
+    // a brand sounds, rules constrain what may be published in its name, and
+    // only the constraining half carries an audit trail.
+    expect(upserts[0]?.brand_context).toEqual({ voice: "Warm" });
+    expect(guidelineUpserts).toEqual([
+      {
+        organization_id: organizationId,
+        palette: { primary: "#c8102e" },
+        rules: [
+          { text: "Never imply a medical benefit", strength: "hard" },
+          { text: "We usually lead with the food", strength: "soft" },
+        ],
+        restricted_terms: ["best in dubai"],
+        updated_by: userId,
+      },
+    ]);
+  });
+
+  it("writes no guidelines row when the section supplied none", async () => {
+    const { repository, guidelineUpserts } = repositoryFor(null);
+
+    await repository.persistCanonicalSection?.({
+      organizationId,
+      userId,
+      sectionKey: "brand_assets",
+      payload: { brandVoice: ["warm"] },
+    });
+
+    // An upsert of empty lists would replace rules set in the Asset Library
+    // with nothing, lifting constraints nobody asked to lift.
+    expect(guidelineUpserts).toEqual([]);
+  });
+
+  it("says who can put the rules in force when the writer may not", async () => {
+    // `onboarding.manage` is an operator permission; `brand.manage` is not. An
+    // operator can therefore fill this section and not be allowed to store its
+    // rules. Reporting success would leave somebody believing generation was
+    // constrained when it was not.
+    const { repository } = repositoryFor(null, { code: "42501" });
+
+    await expect(
+      repository.persistCanonicalSection?.({
+        organizationId,
+        userId,
+        sectionKey: "brand_assets",
+        payload: { brandRules: [{ text: "Never show alcohol", strength: "hard" }] },
+      }),
+    ).rejects.toThrow(/admin or owner/i);
   });
 });

@@ -1,3 +1,4 @@
+import { brandGuidelinesSchema, type BrandGuidelines } from "@/domain/brand/guidelines";
 import { brandVoiceOptions } from "@/domain/onboarding/vocabularies";
 
 /**
@@ -74,4 +75,40 @@ export function mergeBrandContext(
       ? (existing as Record<string, unknown>)
       : {};
   return patch ? { ...base, ...patch } : { ...base };
+}
+
+/**
+ * The brand guidelines a completed brand assets section puts in force.
+ *
+ * Same discipline as the voice above, for the same reason: `hardConstraints`,
+ * `softConventions` and `restrictedTerms` have been read by
+ * `load_campaign_creation_facts`, rendered into the image prompt and checked by
+ * the content policy since generation was written, and nothing ever wrote them.
+ * This is one of the two producers.
+ *
+ * Returns null in two cases, and both matter:
+ *
+ * - **Nothing was supplied.** Writing `{}` / `[]` / `[]` would replace rules an
+ *   operator set in the Asset Library tab with empty lists, removing
+ *   constraints nobody asked to remove.
+ * - **What was supplied does not parse.** The whole record is refused rather
+ *   than promoting the valid half. A partial promotion reports a successful
+ *   save for answers that were in fact discarded, and the one answer most
+ *   likely to be malformed — a rule with no strength — is exactly the one whose
+ *   loss changes what the platform will publish.
+ */
+export function guidelinesFromBrandAssets(
+  payload: Record<string, unknown>,
+): BrandGuidelines | null {
+  const parsed = brandGuidelinesSchema.safeParse({
+    palette: payload.palette ?? {},
+    rules: payload.brandRules ?? [],
+    restrictedTerms: payload.restrictedTerms ?? [],
+  });
+  if (!parsed.success) return null;
+
+  const { palette, rules, restrictedTerms } = parsed.data;
+  const supplied =
+    Object.keys(palette).length > 0 || rules.length > 0 || restrictedTerms.length > 0;
+  return supplied ? parsed.data : null;
 }

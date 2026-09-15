@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   brandContextFromBrandAssets,
+  guidelinesFromBrandAssets,
   mergeBrandContext,
 } from "@/domain/onboarding/canonical-promotion";
 
@@ -59,5 +60,53 @@ describe("mergeBrandContext", () => {
 
   it("returns the existing context untouched when there is nothing to add", () => {
     expect(mergeBrandContext({ voice: "Warm" }, null)).toEqual({ voice: "Warm" });
+  });
+});
+
+describe("guidelinesFromBrandAssets", () => {
+  it("promotes palette, rules and terms together", () => {
+    expect(
+      guidelinesFromBrandAssets({
+        palette: { primary: "#C8102E" },
+        brandRules: [{ text: "Never show alcohol", strength: "hard" }],
+        restrictedTerms: ["best in Dubai"],
+      }),
+    ).toEqual({
+      palette: { primary: "#c8102e" },
+      rules: [{ text: "Never show alcohol", strength: "hard" }],
+      restrictedTerms: ["best in Dubai"],
+    });
+  });
+
+  it("drops a rule with no strength rather than guessing one", () => {
+    // Spec §5. A rule stored as soft when it was meant as absolute is worse
+    // than a rule that was not stored: the operator believes the platform is
+    // refusing work it will in fact happily publish.
+    expect(guidelinesFromBrandAssets({ brandRules: [{ text: "Never show alcohol" }] })).toBeNull();
+  });
+
+  it("promotes nothing when the section supplies nothing", () => {
+    // A blank write would replace rules another surface set with an empty list,
+    // quietly removing constraints nobody asked to remove.
+    expect(guidelinesFromBrandAssets({})).toBeNull();
+    expect(
+      guidelinesFromBrandAssets({ palette: {}, brandRules: [], restrictedTerms: [] }),
+    ).toBeNull();
+  });
+
+  it("promotes a palette on its own, before any rule is written", () => {
+    // Onboarding is filled in pieces. Requiring all three would mean a brand
+    // that has only chosen its colours gets none of them stored.
+    expect(guidelinesFromBrandAssets({ palette: { primary: "#c8102e" } })).toEqual({
+      palette: { primary: "#c8102e" },
+      rules: [],
+      restrictedTerms: [],
+    });
+  });
+
+  it("promotes nothing when a colour is not a colour", () => {
+    // Refusing the whole record is deliberate: promoting the valid half would
+    // report a successful save for answers that were silently discarded.
+    expect(guidelinesFromBrandAssets({ palette: { primary: "crimson" } })).toBeNull();
   });
 });
