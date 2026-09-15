@@ -38,6 +38,7 @@ import {
   GET,
   POST,
 } from "@/app/api/organizations/[organizationId]/growth-intelligence/monitoring/projects/route";
+import { DomainError } from "@/lib/errors";
 import { isSameMonitoringScope } from "@/modules/growth-intelligence/application/monitoring-scope";
 import { briefRevisionSchema, type BriefRevision } from "@/domain/growth-intelligence/brief";
 
@@ -355,6 +356,82 @@ describe("monitoring projects POST", () => {
       expect.objectContaining({ organizationId: ORGANIZATION, projectId: PROJECT }),
     );
     expect(mocks.publish).toHaveBeenCalled();
+    const body = (await response.json()) as { start: Record<string, unknown> };
+    expect(body.start).toMatchObject({ outcome: "started", projectId: PROJECT });
+  });
+
+  it("creates through the keyed path with the client's key and the derived scope fingerprint", async () => {
+    const repository = repositoryFake();
+    mocks.createProjects.mockImplementation(() => repository);
+    contextWith({ branches: [], reports: [], revisions: [] });
+
+    const response = await POST(
+      new Request("https://example.test/monitoring/projects", {
+        method: "POST",
+        headers: { "x-correlation-id": CORRELATION },
+        body: JSON.stringify(startBody()),
+      }),
+      { params: Promise.resolve({ organizationId: ORGANIZATION }) },
+    );
+
+    expect(response.status).toBe(201);
+    // Both the route-level twin check and the orchestration create travel
+    // the keyed path: a redelivery replays instead of forking paid work.
+    expect(repository.createProject).toHaveBeenCalledTimes(2);
+    expect(repository.createProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: ORGANIZATION,
+        idempotencyKey: "start-key-000000000001",
+        scopeFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      }),
+    );
+  });
+
+  it("reports a reused key with different details as a conflict instead of forking paid work", async () => {
+    const repository = repositoryFake({
+      createProject: vi.fn(async () => {
+        throw new DomainError(
+          "DOMAIN_ERROR",
+          "This research project was already saved with different details; reload and try again.",
+        );
+      }),
+    });
+    mocks.createProjects.mockImplementation(() => repository);
+    contextWith({ branches: [], reports: [], revisions: [] });
+
+    const response = await POST(
+      new Request("https://example.test/monitoring/projects", {
+        method: "POST",
+        headers: { "x-correlation-id": CORRELATION },
+        body: JSON.stringify(startBody()),
+      }),
+      { params: Promise.resolve({ organizationId: ORGANIZATION }) },
+    );
+
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("DOMAIN_ERROR");
+    expect(body.error.message).toMatch(/different details/);
+    expect(mocks.triggerUpdate).not.toHaveBeenCalled();
+  });
+
+  it("completes the start when the keyed create converges on the kept project", async () => {
+    const repository = repositoryFake({
+      createProject: vi.fn(async () => ({ projectId: PROJECT, lifecycle: "active", replayed: true })),
+    });
+    mocks.createProjects.mockImplementation(() => repository);
+    contextWith({ branches: [], reports: [], revisions: [] });
+
+    const response = await POST(
+      new Request("https://example.test/monitoring/projects", {
+        method: "POST",
+        headers: { "x-correlation-id": CORRELATION },
+        body: JSON.stringify(startBody()),
+      }),
+      { params: Promise.resolve({ organizationId: ORGANIZATION }) },
+    );
+
+    expect(response.status).toBe(201);
     const body = (await response.json()) as { start: Record<string, unknown> };
     expect(body.start).toMatchObject({ outcome: "started", projectId: PROJECT });
   });

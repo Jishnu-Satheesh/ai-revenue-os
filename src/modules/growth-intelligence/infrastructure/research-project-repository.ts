@@ -599,16 +599,21 @@ export function createAuthenticatedResearchProjectRepository(
         lifecycle: stringField(outcome, "lifecycle"),
         replayed: booleanField(outcome, "replayed"),
       };
-      await publishResearchEvent(options, {
-        organizationId: parsed.data.organizationId,
-        actorId: parsed.data.actorId,
-        eventName: "market_research.project_created",
-        payload: marketResearchProjectCreatedPayloadSchema.parse({
-          projectId: created.projectId,
-          branchId: parsed.data.branchId,
-          mode: parsed.data.mode,
-        }),
-      });
+      // M-01: replays (same key, or scope convergence onto the kept project)
+      // emit nothing — the first write already announced this project, and a
+      // redelivery must not announce it again.
+      if (!created.replayed) {
+        await publishResearchEvent(options, {
+          organizationId: parsed.data.organizationId,
+          actorId: parsed.data.actorId,
+          eventName: "market_research.project_created",
+          payload: marketResearchProjectCreatedPayloadSchema.parse({
+            projectId: created.projectId,
+            branchId: parsed.data.branchId,
+            mode: parsed.data.mode,
+          }),
+        });
+      }
       return created;
     },
 
@@ -637,16 +642,18 @@ export function createAuthenticatedResearchProjectRepository(
         revisionNumber: revisionNumber as number,
         replayed: booleanField(row, "replayed"),
       };
-      await publishResearchEvent(options, {
-        organizationId: parsed.data.organizationId,
-        actorId: parsed.data.actorId,
-        eventName: "market_research.brief_revision_saved",
-        payload: marketResearchBriefRevisionSavedPayloadSchema.parse({
-          projectId: parsed.data.projectId,
-          revisionId: saved.revisionId,
-          revisionNumber: saved.revisionNumber,
-        }),
-      });
+      if (!saved.replayed) {
+        await publishResearchEvent(options, {
+          organizationId: parsed.data.organizationId,
+          actorId: parsed.data.actorId,
+          eventName: "market_research.brief_revision_saved",
+          payload: marketResearchBriefRevisionSavedPayloadSchema.parse({
+            projectId: parsed.data.projectId,
+            revisionId: saved.revisionId,
+            revisionNumber: saved.revisionNumber,
+          }),
+        });
+      }
       return saved;
     },
 
@@ -678,17 +685,19 @@ export function createAuthenticatedResearchProjectRepository(
         draftItemCount: typeof draftItemCount === "number" ? draftItemCount : null,
         replayed: booleanField(row, "replayed"),
       };
-      await publishResearchEvent(options, {
-        organizationId: parsed.data.organizationId,
-        actorId: parsed.data.actorId,
-        eventName: "market_research.report_ready",
-        payload: marketResearchReportReadyPayloadSchema.parse({
-          projectId: parsed.data.projectId,
-          reportVersionId: persisted.reportVersionId,
-          briefRevisionId: parsed.data.briefRevisionId,
-          draftItemCount: persisted.draftItemCount ?? 0,
-        }),
-      });
+      if (!persisted.replayed) {
+        await publishResearchEvent(options, {
+          organizationId: parsed.data.organizationId,
+          actorId: parsed.data.actorId,
+          eventName: "market_research.report_ready",
+          payload: marketResearchReportReadyPayloadSchema.parse({
+            projectId: parsed.data.projectId,
+            reportVersionId: persisted.reportVersionId,
+            briefRevisionId: parsed.data.briefRevisionId,
+            draftItemCount: persisted.draftItemCount ?? 0,
+          }),
+        });
+      }
       return persisted;
     },
 

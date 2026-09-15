@@ -107,6 +107,43 @@ describe("startMonitoringUpdate", () => {
     expect(record?.brief?.pinnedToUpdateId).toBe(result.updateId);
   });
 
+  it("creates the project through the keyed path with the retry key and scope fingerprint", async () => {
+    const { deps } = harness();
+    const seen: Array<Parameters<typeof deps.projects.createProject>[0]> = [];
+    const inner = deps.projects.createProject.bind(deps.projects);
+    deps.projects.createProject = async (input) => {
+      seen.push(input);
+      return inner(input);
+    };
+
+    const input = startInputFixture();
+    const result = await startMonitoringUpdate(input, deps);
+
+    expect(result.outcome).toBe("started");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      organizationId: FIXTURE_IDS.organizationId,
+      branchId: FIXTURE_IDS.branchId,
+      title: input.title,
+      question: input.question,
+      mode: "one-time",
+      actorId: FIXTURE_IDS.actorId,
+      idempotencyKey: "start-key-1",
+      scopeFingerprint: fingerprintMonitoringScope({
+        organizationId: FIXTURE_IDS.organizationId,
+        branchId: FIXTURE_IDS.branchId,
+        title: input.title,
+        question: input.question,
+        mode: "one-time",
+        researchArea: input.researchArea,
+        competitors: input.competitors,
+        investigationAreas: input.investigationAreas,
+        businessContextSnapshotId: FIXTURE_IDS.snapshotId,
+        frequency: "once",
+      }),
+    });
+  });
+
   it("opens progress instead of duplicating paid work on identical scope", async () => {
     const { deps } = harness();
     const first = await startMonitoringUpdate(startInputFixture(), deps);

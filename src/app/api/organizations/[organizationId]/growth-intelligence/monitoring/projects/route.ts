@@ -19,7 +19,10 @@ import {
   marketProfileCorrelationState,
 } from "@/modules/growth-intelligence/application/api-schemas";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
-import { startMonitoringUpdate } from "@/modules/growth-intelligence/application/market-monitoring-update";
+import {
+  fingerprintMonitoringScope,
+  startMonitoringUpdate,
+} from "@/modules/growth-intelligence/application/market-monitoring-update";
 import {
   createEphemeralMonitoringUpdateStore,
   isSameMonitoringScope,
@@ -340,7 +343,12 @@ export async function POST(
     );
 
     // Twin reuse narrows the duplicate-project race before creating: an
-    // identically-scoped live project is joined, never recreated.
+    // identically-scoped live project is joined, never recreated. The keyed
+    // create below closes what the read-then-create cannot: the client's
+    // per-press key replays a redelivered start, a reused key with another
+    // body conflicts honestly through the existing DOMAIN_ERROR mapping,
+    // and an identical scope under another key converges on the kept
+    // project instead of forking paid work.
     const siblings = await projects.listActiveProjects({
       organizationId,
       branchId: body.branchId,
@@ -350,6 +358,19 @@ export async function POST(
       (project) =>
         project.title === title && project.question === body.question && project.mode === body.mode,
     );
+    const scopeFingerprint = fingerprintMonitoringScope({
+      organizationId,
+      branchId: body.branchId,
+      title,
+      question: body.question,
+      mode: body.mode,
+      ...(body.schedule ? { schedule: body.schedule } : {}),
+      researchArea: body.researchArea,
+      competitors: body.competitors,
+      investigationAreas: body.investigationAreas,
+      businessContextSnapshotId,
+      frequency,
+    });
     const projectId = twin
       ? twin.projectId
       : (
@@ -361,6 +382,8 @@ export async function POST(
             mode: body.mode,
             ...(body.schedule ? { schedule: body.schedule } : {}),
             actorId: context.user.id,
+            idempotencyKey: body.idempotencyKey,
+            scopeFingerprint,
           })
         ).projectId;
 

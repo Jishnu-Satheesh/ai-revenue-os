@@ -739,6 +739,94 @@ describe("owning-flow event emissions (Slice 7)", () => {
 
     expect(rpcCalls).toHaveLength(1);
   });
+
+  it("publishes nothing when a keyed create replays the kept project (M-01)", async () => {
+    const { client } = persistence({
+      "rpc:create_research_project_keyed": [
+        { data: { projectId, lifecycle: "active", replayed: true }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+    const { events, published } = fakeEvents();
+
+    const outcome = await repository.createProject(
+      {
+        organizationId,
+        branchId,
+        title: "Marina Friday dinner",
+        question: "What do Marina families want for Friday dinner?",
+        mode: "one-time",
+        actorId,
+        idempotencyKey: "project-key-replay",
+        scopeFingerprint: SCOPE_FINGERPRINT,
+      },
+      { events, correlationId: "c0000000-0000-4000-8000-00000000000c" },
+    );
+
+    expect(outcome.replayed).toBe(true);
+    expect(published).toEqual([]);
+  });
+
+  it("publishes nothing when a brief save replays the kept revision (M-01)", async () => {
+    const { client } = persistence({
+      "rpc:save_brief_revision": [
+        { data: { revisionId, projectId, revisionNumber: 1, replayed: true }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+    const { events, published } = fakeEvents();
+
+    const saved = await repository.saveBriefRevision(
+      {
+        organizationId,
+        projectId,
+        revisionNumber: 1,
+        document: briefDocument(),
+        pinnedToUpdateId: null,
+        actorId,
+      },
+      { events, correlationId: "c0000000-0000-4000-8000-00000000000c" },
+    );
+
+    expect(saved.replayed).toBe(true);
+    expect(published).toEqual([]);
+  });
+
+  it("publishes nothing when a report persist replays the kept version (M-01)", async () => {
+    const { client } = persistence({
+      "rpc:persist_report_version": [
+        {
+          data: {
+            reportId,
+            reportVersionId,
+            reviewState: "pending_review",
+            draftItemCount: 2,
+            replayed: true,
+          },
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+    const { events, published } = fakeEvents();
+
+    const persisted = await repository.persistReportVersion(
+      {
+        organizationId,
+        projectId,
+        branchId,
+        briefRevisionId: revisionId,
+        reportVersionId,
+        evidenceDigest: "digest-one",
+        content: reportContent(),
+        actorId,
+      },
+      { events, correlationId: "c0000000-0000-4000-8000-00000000000c" },
+    );
+
+    expect(persisted.replayed).toBe(true);
+    expect(published).toEqual([]);
+  });
 });
 
 describe("markReportReviewed", () => {

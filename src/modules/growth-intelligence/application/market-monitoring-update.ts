@@ -444,6 +444,14 @@ export type MonitoringProjectWriter = {
     mode: "one-time" | "recurring";
     schedule?: z.infer<typeof researchProjectScheduleSchema>;
     actorId: string;
+    /**
+     * I-04 route adoption: when present, creation goes through the keyed
+     * RPC, so redelivered starts replay the kept project, same key with
+     * another body conflicts, and identical scopes converge instead of
+     * forking paid work. Absent preserves the unkeyed operation exactly.
+     */
+    idempotencyKey?: string;
+    scopeFingerprint?: string;
   }): Promise<{ projectId: string; lifecycle: string; replayed: boolean }>;
   saveBriefRevision(input: {
     organizationId: string;
@@ -566,9 +574,12 @@ export async function startMonitoringUpdate(
     frequency,
   });
 
-  // Reuse an identically-scoped live project before creating: creation has
-  // no idempotency key, so the read-then-create narrows (never fully closes)
-  // the duplicate-project race. Residual races converge at the revision save.
+  // Keyed creation closes the duplicate-project race the read-then-create
+  // below can only narrow: the same key with the same body replays the kept
+  // project, the same key with another body conflicts honestly, and an
+  // identical scope under another key converges instead of forking paid work.
+  // Twin reuse still runs first so a joined live project never mints a key
+  // row for work that already exists.
   const siblings = await dependencies.projects.listActiveProjects({
     organizationId: parsed.organizationId,
     branchId: parsed.branchId,
@@ -590,6 +601,8 @@ export async function startMonitoringUpdate(
         mode: parsed.mode,
         ...(parsed.schedule ? { schedule: parsed.schedule } : {}),
         actorId: parsed.actorId,
+        idempotencyKey: parsed.idempotencyKey,
+        scopeFingerprint,
       });
   const projectId = created.projectId;
 
