@@ -397,3 +397,38 @@ describe("AssetWorkspace, Brand Guidelines tab", () => {
     expect(screen.queryByRole("button", { name: /save brand rules/i })).not.toBeInTheDocument();
   });
 });
+
+describe("AssetWorkspace, classifying an upload", () => {
+  it("always says what type is being filed, including on Brand Kit", async () => {
+    // The Type control used to be suppressed whenever the tab pinned a role.
+    // Brand Kit pinned it to `logo`, so the upload WAS a logo and the dialog
+    // said so nowhere — the only visible choice was ownership, which is a
+    // Products & Subjects question.
+    mockEmptyCreativeHistory();
+    mocks.searchParams = new URLSearchParams("tab=brand");
+    renderWorkspace({ canManageAssets: true });
+
+    fireEvent.click(await screen.findByRole("button", { name: /upload assets/i }));
+    chooseUploadFile();
+
+    const type = await screen.findByLabelText("Type");
+    expect(type).toHaveTextContent("Logo");
+  });
+
+  it("offers Logo from any tab, so a mark can be added where it was asked for", async () => {
+    // Brand Guidelines sends people to Brand Kit for a logo. They must be able
+    // to file one as a logo without knowing which tab pins which role.
+    mockEmptyCreativeHistory();
+    mocks.searchParams = new URLSearchParams("tab=products");
+    renderWorkspace({ canManageAssets: true });
+
+    fireEvent.click(await screen.findByRole("button", { name: /upload assets/i }));
+    chooseUploadFile();
+
+    const type = await screen.findByLabelText("Type");
+    // Products & Subjects still defaults to Product; Logo is reachable.
+    expect(type).toHaveTextContent("Product");
+    fireEvent.click(type);
+    expect(await screen.findByRole("option", { name: "Logo" })).toBeInTheDocument();
+  });
+});

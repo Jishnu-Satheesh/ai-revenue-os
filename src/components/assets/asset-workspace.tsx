@@ -315,17 +315,39 @@ type BrandAssetUploadFields = {
   reservation?: BrandAssetReservation;
 };
 
+/**
+ * What an uploaded reference is, in the operator's words.
+ *
+ * `logo` is the one that changes behaviour rather than only filing: it is
+ * classified `brand_mark`, which is what makes it selectable as the
+ * organization's logo. It had no label here at all, so had it ever been
+ * offered it would have read "Other".
+ */
+const ASSET_ROLE_LABELS: Readonly<Record<BrandAssetUploadFields["assetRole"], string>> = {
+  logo: "Logo",
+  product: "Product",
+  venue: "Venue",
+  team: "Team",
+  other: "Other",
+};
+
+const UPLOADABLE_ASSET_ROLES = ["logo", "product", "venue", "team", "other"] as const;
+
 function BrandAssetUploadDialog({
   organizationId,
   canManage,
-  fixedAssetRole,
-  allowedRoles,
+  defaultAssetRole,
   onSettled,
 }: Readonly<{
   organizationId: string;
   canManage: boolean;
-  fixedAssetRole?: BrandAssetUploadFields["assetRole"];
-  allowedRoles: readonly BrandAssetUploadFields["assetRole"][];
+  /**
+   * What the open tab suggests, never what it imposes. The type used to be
+   * pinned by the tab and the control hidden, so on Brand Kit the only visible
+   * question was ownership — a Products & Subjects question — while the upload
+   * was silently filed as a logo.
+   */
+  defaultAssetRole: BrandAssetUploadFields["assetRole"];
   onSettled: () => void;
 }>) {
   async function run(input: {
@@ -388,7 +410,7 @@ function BrandAssetUploadDialog({
       maxBytes={15 * 1024 * 1024}
       defaultFields={(file) => ({
         label: fileBaseName(file),
-        assetRole: fixedAssetRole ?? allowedRoles[0] ?? "product",
+        assetRole: defaultAssetRole,
         ownership: "third_party",
       })}
       run={run}
@@ -408,27 +430,34 @@ function BrandAssetUploadDialog({
               onChange={(event) => onChange({ ...fields, label: event.target.value })}
             />
           </div>
-          {fixedAssetRole ? null : (
-            <div className="flex flex-col gap-1">
-              <Label htmlFor={fieldId("type")} className="text-xs">Type</Label>
-              <Select
-                value={fields.assetRole}
-                onValueChange={(value) => onChange({ ...fields, assetRole: value as BrandAssetUploadFields["assetRole"] })}
-                disabled={disabled}
-              >
-                <SelectTrigger id={fieldId("type")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {allowedRoles.map((role) => (
-                    <SelectItem key={role} value={role}>
-                      {role === "product" ? "Product" : role === "venue" ? "Venue" : role === "team" ? "Team" : "Other"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={fieldId("type")} className="text-xs">
+              Type
+            </Label>
+            <Select
+              value={fields.assetRole}
+              onValueChange={(value) =>
+                onChange({ ...fields, assetRole: value as BrandAssetUploadFields["assetRole"] })
+              }
+              disabled={disabled}
+            >
+              <SelectTrigger id={fieldId("type")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {UPLOADABLE_ASSET_ROLES.map((role) => (
+                  <SelectItem key={role} value={role}>
+                    {ASSET_ROLE_LABELS[role]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {fields.assetRole === "logo" ? (
+              <p className="text-xs text-muted-foreground">
+                Filed as your brand mark, so it can be set as your logo once reviewed.
+              </p>
+            ) : null}
+          </div>
           <div className="col-span-full flex flex-col gap-1.5">
             <RadioGroup
               value={fields.ownership}
@@ -573,9 +602,9 @@ export function AssetWorkspace({
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const tab: Tab = TABS.includes(searchParams.get("tab") as Tab) ? (searchParams.get("tab") as Tab) : "history";
-  // Brand Guidelines needs the same logo uploader as Brand Kit: somebody
-  // choosing their mark and finding none there has to be able to add one
-  // without leaving the tab. The product-and-venue uploader would be wrong.
+  // What the upload dialog should offer first. Brand Guidelines sends people
+  // to Brand Kit for a mark, so both tabs start on Logo — but the type stays
+  // the operator's choice, not the tab's decision.
   const logoUpload = tab === "brand" || tab === "brand-guidelines";
   const folderSelection: CreativeFolderSelection = folderSelectionFromValue(searchParams.get("folder") ?? "all");
   const verdict: Verdict = VERDICTS.includes(searchParams.get("verdict") as Verdict)
@@ -665,11 +694,7 @@ export function AssetWorkspace({
             <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>
-                  {tab === "history"
-                    ? "Upload designs"
-                    : logoUpload
-                      ? "Upload brand assets"
-                      : "Upload a photo"}
+                  {tab === "history" ? "Upload designs" : "Upload an image"}
                 </DialogTitle>
               </DialogHeader>
               {tab === "history" ? (
@@ -680,19 +705,11 @@ export function AssetWorkspace({
                   defaultFolderId={folderSelection.kind === "folder" ? folderSelection.folderId : null}
                   onSettled={() => void invalidateCreativeHistoryQueries(queryClient, organizationId)}
                 />
-              ) : logoUpload ? (
-                <BrandAssetUploadDialog
-                  organizationId={organizationId}
-                  canManage={canManageAssets}
-                  fixedAssetRole="logo"
-                  allowedRoles={["logo"]}
-                  onSettled={() => router.refresh()}
-                />
               ) : (
                 <BrandAssetUploadDialog
                   organizationId={organizationId}
                   canManage={canManageAssets}
-                  allowedRoles={["product", "venue", "team", "other"]}
+                  defaultAssetRole={logoUpload ? "logo" : "product"}
                   onSettled={() => router.refresh()}
                 />
               )}
