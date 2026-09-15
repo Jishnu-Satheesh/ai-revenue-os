@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowRight,
   BrainCircuit,
   Cable,
   MapPin,
@@ -204,8 +205,9 @@ export function HomeGoals({
 
 /**
  * Authorized destinations only: hidden gates reflow the grid and leave no
- * placeholder cells. Every entry is a real navigation link with the icon,
- * title and description it was composed with — no counts, dots or claims.
+ * placeholder cells. Every entry is a real navigation link rendered as a
+ * borderless cell — icon on top, title with an onward arrow, gray
+ * description — no cards, counts, dots or claims.
  */
 export function HomeDestinations({
   destinations,
@@ -226,7 +228,10 @@ export function HomeDestinations({
                 <Icon className="size-4" />
               </span>
               <span className={styles.destText}>
-                <span className={styles.destLabel}>{destination.label}</span>
+                <span className={styles.destLabel}>
+                  {destination.label}
+                  <ArrowRight aria-hidden="true" className={styles.destArrow} />
+                </span>
                 <span className={styles.destDescription}>{destination.description}</span>
               </span>
             </Link>

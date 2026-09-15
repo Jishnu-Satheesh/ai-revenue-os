@@ -320,6 +320,181 @@ describe("OrganizationHome composition", () => {
   });
 });
 
+describe("OrganizationHome destinations parity (D1)", () => {
+  it("renders borderless cells with the icon above the title, arrow and description", () => {
+    render(<OrganizationHome view={view()} />);
+    const region = screen.getByRole("region", { name: "Around your business" });
+    const links = within(region).getAllByRole("link");
+    expect(links).toHaveLength(2);
+    const channels = within(region).getByRole("link", { name: /channels/i });
+    expect(
+      within(channels).getByText("See channel performance and explore your reports."),
+    ).toBeInTheDocument();
+    // Icon-above treatment: the decorative icon precedes the title in DOM order,
+    // and the title carries an onward arrow icon (a second svg).
+    const icon = channels.querySelector("svg");
+    expect(icon).not.toBeNull();
+    const title = within(channels).getByText("Channels");
+    expect(
+      (icon as Element).compareDocumentPosition(title) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(channels.querySelectorAll("svg")).toHaveLength(2);
+  });
+
+  it("reflows gated destinations with no placeholder cells", () => {
+    const orgId = ORG_ID;
+    render(
+      <OrganizationHome
+        view={view({
+          destinations: [
+            {
+              key: "channels",
+              label: "Channels",
+              description: "See channel performance and explore your reports.",
+              href: `/organizations/${orgId}/channels`,
+            },
+            {
+              key: "growth",
+              label: "Growth Intelligence",
+              description: "Explore findings, recommendations and your actions.",
+              href: `/organizations/${orgId}/growth-intelligence`,
+            },
+            {
+              key: "memory",
+              label: "Business Memory",
+              description: "Keep your business knowledge and decisions together.",
+              href: `/organizations/${orgId}/memory`,
+            },
+          ],
+        })}
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Around your business" });
+    // Odd count, one gate hidden: exactly the authorized links, every one named.
+    const links = within(region).getAllByRole("link");
+    expect(links).toHaveLength(3);
+    for (const link of links) {
+      expect(link.getAttribute("href")).toBeTruthy();
+      expect(link.textContent?.trim()).not.toBe("");
+    }
+  });
+
+  it("omits the destinations section when nothing is authorized", () => {
+    render(<OrganizationHome view={view({ destinations: [] })} />);
+    expect(
+      screen.queryByRole("region", { name: "Around your business" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("OrganizationHome activity parity (D2)", () => {
+  it("caps rows at five with a per-kind icon, label before bold title, and zoned date", () => {
+    const items = [
+      activity({
+        id: "campaign:c1",
+        label: "Campaign updated",
+        title: "Ramadan Push",
+        occurredAt: "2026-09-10T10:00:00.000Z",
+        kind: "campaign",
+      }),
+      activity({
+        id: "poster:p1",
+        label: "Poster rendered",
+        title: "Iftar spread",
+        occurredAt: "2026-09-09T10:00:00.000Z",
+        kind: "asset",
+      }),
+      activity({
+        id: "audit:g1",
+        label: "Goal added",
+        title: "Grow orders",
+        occurredAt: "2026-09-08T10:00:00.000Z",
+        kind: "organization",
+      }),
+      activity({
+        id: "campaign:c2",
+        label: "Campaign updated",
+        title: "Second push",
+        occurredAt: "2026-09-07T10:00:00.000Z",
+        kind: "campaign",
+      }),
+      activity({
+        id: "poster:p2",
+        label: "Reference added",
+        title: "Brand mark",
+        occurredAt: "2026-09-06T10:00:00.000Z",
+        kind: "asset",
+      }),
+      activity({
+        id: "audit:g2",
+        label: "Location added",
+        title: "Deira",
+        occurredAt: "2026-09-05T10:00:00.000Z",
+        kind: "organization",
+      }),
+    ];
+    render(<OrganizationHome view={view({ activity: items })} />);
+    const region = screen.getByRole("region", { name: "Recent activity" });
+    const rows = within(region).getAllByRole("listitem");
+    expect(rows).toHaveLength(5);
+    expect(within(region).queryByText("Deira")).not.toBeInTheDocument();
+    // Per-kind icon mapping: campaign Megaphone, asset Images, goal/org Target.
+    expect(rows[0].querySelector("svg.lucide-megaphone")).not.toBeNull();
+    expect(rows[1].querySelector("svg.lucide-images")).not.toBeNull();
+    expect(rows[2].querySelector("svg.lucide-target")).not.toBeNull();
+    for (const row of rows) {
+      const icon = row.querySelector("svg");
+      expect(icon).not.toBeNull();
+      // Icon-left treatment: the decorative icon precedes the label text.
+      const label = within(row).getByText(/Campaign updated|Poster rendered|Goal added|Reference added/);
+      expect(
+        (icon as Element).compareDocumentPosition(label) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    // Emphasis order: small gray label first, bold title second.
+    const firstLabel = within(rows[0]).getByText("Campaign updated");
+    const firstTitle = within(rows[0]).getByText("Ramadan Push");
+    expect(
+      firstLabel.compareDocumentPosition(firstTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      within(region).getByText("10 Sep 2026 · 14:00, Asia/Dubai"),
+    ).toBeInTheDocument();
+  });
+
+  it("links a row only when the view carries an href", () => {
+    render(
+      <OrganizationHome
+        view={view({
+          activity: [
+            activity({
+              id: "audit:g1",
+              label: "Goal added",
+              title: "Grow orders",
+              href: null,
+              kind: "organization",
+            }),
+            activity({
+              id: "campaign:c1",
+              label: "Campaign updated",
+              title: "Ramadan Push",
+              kind: "campaign",
+            }),
+          ],
+        })}
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Recent activity" });
+    expect(
+      within(region).getByRole("link", { name: "Ramadan Push" }),
+    ).toBeInTheDocument();
+    expect(within(region).queryByRole("link", { name: "Grow orders" })).toBeNull();
+    expect(within(region).getByText("Grow orders")).toBeInTheDocument();
+  });
+});
+
 describe("OrganizationHome attention wording", () => {
   it("counts what is shown and states partial checks explicitly", () => {
     render(

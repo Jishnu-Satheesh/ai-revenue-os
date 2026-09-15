@@ -389,57 +389,64 @@
 
 /* ------------------------------------------------------------ destinations */
 
+/* Around-your-business: borderless cells (icon on top, title + arrow, gray
+   description) under a 1px neutral section rule — prototype .workspace and
+   .workspace-item. No cards, counts, dots or claims. */
+.destinations {
+  border-top: 1px solid var(--border);
+  padding-top: 25px;
+}
+
 .destGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 16px;
 }
 
 .destLink {
   display: flex;
   min-height: 44px;
   min-width: 0;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  padding: 14px;
+  padding: 15px 0;
   text-decoration: none;
   color: inherit;
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
 }
 
 .destLink:hover {
-  box-shadow: var(--shadow-sm);
   text-decoration: none;
 }
 
 .destIcon {
   display: flex;
-  width: 32px;
-  height: 32px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  background: var(--muted);
-  color: var(--foreground);
+  color: var(--primary);
 }
 
 .destText {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
+  gap: 7px;
+  margin-top: 10px;
 }
 
 .destLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   overflow-wrap: break-word;
   font-size: 14px;
   font-weight: 600;
+}
+
+.destArrow {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .destDescription {
@@ -450,6 +457,58 @@
 }
 
 /* ---------------------------------------------------------------- activity */
+
+/* Recent activity: the section sits under a 1px neutral rule (prototype
+   .activity); rows are borderless icon-left cells — small gray label, bold
+   title, gray date (prototype .activity-item). The .feed* classes serve only
+   this feed: the shared .activityList/.activityRow/.activityLabel/
+   .activityTitle rules below stay exactly as the locations/goals dialogs in
+   home-context.tsx use them. */
+.activity {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.feedList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feedRow {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.feedIcon {
+  display: flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+
+.feedText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.feedLabel {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.feedTitle {
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+}
 
 .activityList {
   display: flex;
@@ -679,6 +738,12 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 0 24px;
+  }
+
+  .feedList {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
   }
 
   .cardTitle {
