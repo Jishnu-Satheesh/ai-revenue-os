@@ -25,6 +25,11 @@ describe("starting generation again", () => {
     const decision = decideGenerationRetry({
       latestRun: run(),
       requestedSourceSnapshotId: SNAPSHOT,
+      // Injected rather than read from the checked-in contract. This test is
+      // about what happens while a blocker still stands, and it used to lean on
+      // the Meta contract happening to be expired; the 2026-09-15
+      // re-verification made that incidental fact false.
+      blockerStillStands: () => true,
     });
 
     if (decision.outcome !== "refused") throw new Error("expected a refusal");
@@ -97,17 +102,19 @@ describe("starting generation again", () => {
   });
 
   it("asks the question against the real contract by default", () => {
-    // Today's checked-in contract is past its review date, so the blocker
-    // stands and the refusal holds -- proving the default probe is wired and
-    // not a constant. R5: the date is not touched to make this pass.
+    // Asked against the real checked-in contract on both sides of its review
+    // window, which is what proves the default probe is wired and not a
+    // constant. The dates move whenever the contract is re-verified; they are
+    // never chosen to make an assertion pass.
     const repair = { kind: "reverify_provider_contract", providerKey: "meta_campaign" } as const;
 
-    expect(providerContractBlockerStillStands(repair, new Date("2026-09-13T00:00:00.000Z"))).toBe(
+    // Past the review date the blocker stands and the refusal holds.
+    expect(providerContractBlockerStillStands(repair, new Date("2026-10-16T00:00:00.000Z"))).toBe(
       true,
     );
     // Inside the review window the same question answers the other way, which
     // is what makes a reverified contract release the retry.
-    expect(providerContractBlockerStillStands(repair, new Date("2026-08-12T00:00:00.000Z"))).toBe(
+    expect(providerContractBlockerStillStands(repair, new Date("2026-09-16T00:00:00.000Z"))).toBe(
       false,
     );
   });

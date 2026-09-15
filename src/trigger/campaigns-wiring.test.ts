@@ -261,7 +261,7 @@ describe("an internal draft is not held to unverifiable publishing limits", () =
   it("carries whatever a current contract proves through to the draft", () => {
     // Before the review date the same reader returns whatever the contract
     // actually proves, so the draft contract is not a permanent empty map.
-    const beforeExpiry = new Date("2026-08-12T00:00:00.000Z");
+    const beforeExpiry = new Date("2026-09-16T00:00:00.000Z");
     expect(() => verifiedChannelLimits(beforeExpiry)).not.toThrow();
     expect(internalDraftContentContract(beforeExpiry).limitsByChannel).toEqual(
       verifiedChannelLimits(beforeExpiry),
@@ -272,7 +272,7 @@ describe("an internal draft is not held to unverifiable publishing limits", () =
     // The failure this covers: a contract inside its review date but with no
     // usable placement used to answer `verified` with an empty blocker list,
     // so a caller asking about Instagram was told everything was fine.
-    const evidence = verifiedChannelLimitsEvidence(new Date("2026-08-12T00:00:00.000Z"));
+    const evidence = verifiedChannelLimitsEvidence(new Date("2026-09-16T00:00:00.000Z"));
 
     expect(evidence.outcome).toBe("unverified");
     const blocked = evidence.blockers.filter(
@@ -280,12 +280,15 @@ describe("an internal draft is not held to unverifiable publishing limits", () =
     );
     expect(blocked.length).toBeGreaterThan(0);
     // Named one by one, so the client can say which post cannot be published.
-    expect(blocked.map((blocker) => blocker.actionKey)).toContain("instagram.feed_image");
+    // Instagram feed images were the example until the 2026-09-15 re-verification
+    // proved their limits; stories are still unproven because the pages
+    // consulted do not document them.
+    expect(blocked.map((blocker) => blocker.actionKey)).toContain("instagram.image_story");
     for (const blocker of blocked) expect(blocker.phase).toBe("launch");
   });
 
   it("says so when asked about a placement the contract has never heard of", () => {
-    const evidence = verifiedChannelLimitsEvidence(new Date("2026-08-12T00:00:00.000Z"), {
+    const evidence = verifiedChannelLimitsEvidence(new Date("2026-09-16T00:00:00.000Z"), {
       requestedPlacementKeys: ["tiktok.feed_video"],
     });
 

@@ -7396,3 +7396,70 @@ real Gemini call (`createGeminiRepairCall` → `generatePlan`) in
 - No `database.types.ts` edit: all five research tables are in `UNTYPED_TABLES` by design, because no
   role holds a grant on them and every read and write goes through a security-definer function.
 - Worker deploy and `git push` remain the user's steps.
+
+## 2026-09-15 — Task 13 (organic) and the Meta contract that had quietly expired
+
+**The finding that mattered most.** `getMetaCampaignProviderContract()` had been
+throwing since **2026-09-10**. The checked-in contract's review window lapsed and
+nothing said so, which switched off every Meta path in the platform. It surfaced
+only because organic dispatch was wired on 2026-09-15 and the new resolver
+reported `contract_unusable`.
+
+Every test in `contract.test.ts` pins its own date, so all of them kept passing
+over an expired record. There is now one test that asks the real clock, and it
+fails when the review is due. **If you add a dated gate, test it against the
+clock as well as against fixtures.**
+
+**Re-verified from official sources, not by moving dates.** All seven sources
+fetched and read on 2026-09-15; what each one says is quoted in
+`docs/verification/campaigns/2026-09-15-meta-contract-reverification.md`.
+Window is now 2026-09-15 → 2026-10-15, same 30-day cadence as before.
+`apiVersion` stays v24.0 (released 2025-10-08, supported to 2028-02-18, and it
+is what `FacebookAdsApi.VERSION` actually sends).
+
+`instagram.feed_image` moved blocked → verified with the limits Meta documents
+(2200 characters, 30 hashtags, 8 MB read conservatively as 8,000,000 bytes).
+Everything else stays blocked **on purpose**: stories limits are not documented
+on the pages consulted, Facebook and ads were not in this pass, and every
+account prerequisite plus `actions: []` needs controlled-account evidence that
+cannot exist without an account.
+
+Reading a public document proves what the API allows. It cannot prove an
+organization's account is eligible, so **nothing can publish**: that still needs
+a live connection with an available `meta.instagram.publish` grant.
+
+**Adapter resolution is now per organization.** The gateway took a fixed list
+keyed by tool name while the dispatch sweep spans every tenant and a Meta token
+belongs to one. `adapters: []` could never have been filled in safely — one
+shared adapter would publish everybody's work to whichever tenant's token it
+held. `ToolAdapterResolver` splits the two questions: `supportedToolKeys` is
+about the deployment and touches no database, `resolve` is about one
+organization. Both are checked before the claim, because `store.fail` needs an
+invocation id and there is none for a call never made.
+
+**Organic metric collection is NOT done, and is a product decision, not more
+code.** Meta deprecated `impressions` for media created after 2024-07-02, so
+every post we publish is on the deprecated side. `reach` (unique users) and
+`views` (total plays) both exist and neither means `delivery.impressions`.
+Mapping one onto that key would put a different measurement behind a name people
+trust. Recorded as `meta.instagram_organic_impressions_unavailable`. Note also
+that `delivery.clicks` and `delivery.spend` do not exist for organic posts and
+must be recorded **absent**, never zero.
+
+- Claiming `src/modules/tool-gateway/application/service.ts` (+ test),
+  `src/modules/campaigns/infrastructure/meta-adapter-resolver.*` (new),
+  `execution-readers.*` (new `createMetaPublishConnectionReader`),
+  `src/modules/integrations/providers/meta/contract.*`, `client.test.ts` and
+  `insights-reader.test.ts` (dates only), `src/trigger/campaigns.ts` +
+  `campaigns-wiring.test.ts`, `generation-retry.test.ts`, `operator-edit.test.ts`,
+  and the verification doc above.
+- Behaviour change worth knowing: operators can now add hashtags to an Instagram
+  caption. Every hashtag used to be refused because no contract proved a limit,
+  and an unprovable limit is never replaced by a plausible one. `operator-edit`
+  now allows up to the documented 30 and still refuses the thirty-first.
+- Gates: 1959/1959 across integrations, campaigns, tool-gateway, domain,
+  workflows and trigger; plus 186/186 across the domain dependents. tsc exit 0.
+  eslint clean on touched files (one pre-existing `_input` warning in
+  `campaigns-wiring.test.ts` on an untouched line).
+- No migration. No live Meta call was made and none can be until a controlled
+  account exists.

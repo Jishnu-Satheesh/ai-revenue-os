@@ -511,6 +511,10 @@ const META_INSTAGRAM_PUBLISHING_SOURCE =
   "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/content-publishing/";
 const META_PAGE_POSTS_SOURCE = "https://developers.facebook.com/docs/pages-api/posts/";
 const META_MARKETING_SOURCE = "https://developers.facebook.com/docs/marketing-api/get-started/";
+const META_INSTAGRAM_MEDIA_REFERENCE_SOURCE =
+  "https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media/";
+const META_INSTAGRAM_MEDIA_INSIGHTS_SOURCE =
+  "https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights";
 
 const metaCampaignProviderContract = {
   schemaVersion: 1,
@@ -528,12 +532,14 @@ const metaCampaignProviderContract = {
   // an older live version rather than a deprecated one. The review date below is
   // this contract's own, and is far shorter than the version's sunset.
   apiVersion: "v24.0",
-  verifiedAt: "2026-08-11T00:00:00.000Z",
-  expiresAt: "2026-09-10T00:00:00.000Z",
+  verifiedAt: "2026-09-15T00:00:00.000Z",
+  expiresAt: "2026-10-15T00:00:00.000Z",
   officialSourceUrls: [
     META_VERSIONING_SOURCE,
     META_VERSION_SCHEDULE_SOURCE,
     META_INSTAGRAM_PUBLISHING_SOURCE,
+    META_INSTAGRAM_MEDIA_REFERENCE_SOURCE,
+    META_INSTAGRAM_MEDIA_INSIGHTS_SOURCE,
     META_PAGE_POSTS_SOURCE,
     META_MARKETING_SOURCE,
   ],
@@ -542,29 +548,56 @@ const metaCampaignProviderContract = {
       id: "meta.official.graph_versioning",
       kind: "official_source",
       sourceUrl: META_VERSIONING_SOURCE,
-      checkedAt: "2026-08-10T00:00:00.000Z",
-      detail: "The official versioning guide identifies Graph API v26.0 as current.",
+      checkedAt: "2026-09-15T00:00:00.000Z",
+      detail: "The official versioning guide states the latest Graph API version is v26.0.",
+    },
+    {
+      id: "meta.official.graph_version_schedule",
+      kind: "official_source",
+      sourceUrl: META_VERSION_SCHEDULE_SOURCE,
+      checkedAt: "2026-09-15T00:00:00.000Z",
+      detail:
+        "The official version table lists v24.0 as released 2025-10-08 with expiration 2028-02-18, so the pinned version is an older live one rather than a deprecated one.",
     },
     {
       id: "meta.official.instagram_publishing",
       kind: "official_source",
       sourceUrl: META_INSTAGRAM_PUBLISHING_SOURCE,
-      checkedAt: "2026-08-10T00:00:00.000Z",
-      detail: "The official guide documents Instagram publishing prerequisites and flow.",
+      checkedAt: "2026-09-15T00:00:00.000Z",
+      detail:
+        "The official guide documents the container-then-publish flow, states JPEG is the only supported image format, and limits an account to 100 API-published posts in a rolling 24 hours.",
+    },
+    {
+      id: "meta.official.instagram_media_reference",
+      kind: "official_source",
+      sourceUrl: META_INSTAGRAM_MEDIA_REFERENCE_SOURCE,
+      checkedAt: "2026-09-15T00:00:00.000Z",
+      detail:
+        "The POST /{ig-user-id}/media reference states a caption maximum of 2200 characters, 30 hashtags and 20 @ tags, and an image maximum of 8 MB in JPEG with a 4:5 to 1.91:1 aspect ratio and 320-1440 pixel width.",
+    },
+    {
+      id: "meta.official.instagram_media_insights",
+      kind: "official_source",
+      sourceUrl: META_INSTAGRAM_MEDIA_INSIGHTS_SOURCE,
+      checkedAt: "2026-09-15T00:00:00.000Z",
+      detail:
+        "The media insights reference states impressions is deprecated for media created after 2024-07-02, and documents reach as unique viewers and views as total plays. No documented metric carries the registry's impressions meaning for newly published media.",
     },
     {
       id: "meta.official.page_posts",
       kind: "official_source",
       sourceUrl: META_PAGE_POSTS_SOURCE,
-      checkedAt: "2026-08-10T00:00:00.000Z",
-      detail: "The official guide documents Page post and photo publishing prerequisites.",
+      checkedAt: "2026-09-15T00:00:00.000Z",
+      detail:
+        "The official guide requires a Page access token with pages_manage_engagement, pages_manage_posts, pages_read_engagement and pages_read_user_engagement, and the CREATE_CONTENT, MANAGE and MODERATE Page tasks.",
     },
     {
       id: "meta.official.marketing_get_started",
       kind: "official_source",
       sourceUrl: META_MARKETING_SOURCE,
-      checkedAt: "2026-08-10T00:00:00.000Z",
-      detail: "The official guide documents active ad-account and billing prerequisites.",
+      checkedAt: "2026-09-15T00:00:00.000Z",
+      detail:
+        "The official guide requires a registered developer app and an active ad account with billing configured; it does not enumerate scopes on this page.",
     },
   ],
   accountPrerequisites: [
@@ -606,9 +639,17 @@ const metaCampaignProviderContract = {
   placements: [
     {
       key: "instagram.feed_image",
-      verificationStatus: "blocked",
-      evidenceIds: ["meta.official.instagram_publishing"],
-      limits: { maxPayloadBytes: null, maxCopyCharacters: null, maxHashtags: null },
+      verificationStatus: "verified",
+      evidenceIds: [
+        "meta.official.instagram_publishing",
+        "meta.official.instagram_media_reference",
+      ],
+      // Straight from the POST /{ig-user-id}/media reference. `maxPayloadBytes`
+      // takes the conservative reading of "8 MB maximum": 8,000,000 rather than
+      // 8,388,608, so anything this platform accepts is certainly inside
+      // whichever of the two Meta means. Erring the other way would let a file
+      // through here and have Meta refuse it after a container already existed.
+      limits: { maxPayloadBytes: 8_000_000, maxCopyCharacters: 2200, maxHashtags: 30 },
     },
     {
       key: "instagram.image_story",
@@ -653,11 +694,18 @@ const metaCampaignProviderContract = {
       sourceUrl: META_INSTAGRAM_PUBLISHING_SOURCE,
     },
     {
-      code: "meta.instagram_feed_image_blocked",
+      code: "meta.instagram_feed_image_account_unverified",
       actionKey: "instagram.feed_image",
       detail:
-        "The official publishing API exists, but controlled-account eligibility and complete live content-limit evidence are unverified.",
-      sourceUrl: META_INSTAGRAM_PUBLISHING_SOURCE,
+        "Content limits are now proven from the official media reference, so drafts can be checked before publishing. Controlled-account eligibility and app review remain unproven, and no post may be published without them.",
+      sourceUrl: META_INSTAGRAM_MEDIA_REFERENCE_SOURCE,
+    },
+    {
+      code: "meta.instagram_organic_impressions_unavailable",
+      actionKey: "instagram.feed_image",
+      detail:
+        "Media insights deprecated impressions for media created after 2024-07-02, and neither reach nor views carries the registry's impressions meaning. Organic delivery figures stay uncollected rather than being mapped to a different measure.",
+      sourceUrl: META_INSTAGRAM_MEDIA_INSIGHTS_SOURCE,
     },
     {
       code: "meta.instagram_image_story_blocked",

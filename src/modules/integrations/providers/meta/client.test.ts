@@ -6,7 +6,9 @@ vi.mock("server-only", () => ({}));
 import { createMetaGraphClient } from "@/modules/integrations/providers/meta/client";
 import { getMetaCampaignProviderContract } from "@/modules/integrations/providers/meta/contract";
 
-const CONTRACT = getMetaCampaignProviderContract(new Date("2026-08-18T00:00:00.000Z"));
+// Inside the checked-in contract's review window. Moves whenever the contract
+// is re-verified; these tests only need a parseable contract, not a date.
+const CONTRACT = getMetaCampaignProviderContract(new Date("2026-09-15T12:00:00.000Z"));
 const schema = z.object({ id: z.string() });
 
 function credential(value = "token-abc") {

@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { createMetaOrganicResolver } from "@/modules/campaigns/infrastructure/meta-adapter-resolver";
 import type { PlannedPublish } from "@/modules/campaigns/infrastructure/dispatch-planner";
+import { getMetaCampaignProviderContract } from "@/modules/integrations/providers/meta/contract";
 
 const ORGANIZATION_ID = "fb450000-0000-4000-8000-000000000101";
 const OTHER_ORGANIZATION_ID = "fb450000-0000-4000-8000-000000000102";
@@ -189,5 +190,24 @@ describe("Meta organic adapter resolver", () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(/request/i);
+  });
+});
+
+describe("Meta organic adapter resolver, against the contract actually checked in", () => {
+  it("is ready with the real contract, so dispatch is not switched off deployment-wide", () => {
+    const { status, reason } = createMetaOrganicResolver({
+      readContract: () => getMetaCampaignProviderContract(),
+      connections: { read: async () => null },
+      credentials: { resolve: async () => sensitive("token") },
+      requests: new Map(),
+      correlationId: "fb450000-0000-4000-8000-000000000501",
+      createClient: () => ({}) as never,
+    });
+
+    // The contract lapsed once and took the whole organic path down with it,
+    // reported only as "no adapter is installed". This keeps the real wiring
+    // honest rather than proving the stub works.
+    expect(reason).toBeUndefined();
+    expect(status).toBe("ready");
   });
 });
