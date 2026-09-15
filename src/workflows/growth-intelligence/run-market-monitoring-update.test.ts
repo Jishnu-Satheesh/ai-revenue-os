@@ -15,15 +15,18 @@ import {
   succeededResearchFixture,
 } from "@/modules/growth-intelligence/application/market-monitoring-fixtures";
 import {
+  MONITORING_UPDATE_LEASE_SECONDS,
   MONITORING_UPDATE_RESEARCH_DEADLINE_MS,
   startMonitoringUpdate,
   type MonitoringResearcher,
 } from "@/modules/growth-intelligence/application/market-monitoring-update";
 import { createFakeDispatch, createFakeProjects } from "@/modules/growth-intelligence/application/market-monitoring-fixtures";
 import {
+  compareMonitoringScope,
   createPinReadMonitoringUpdateStore,
   marketMonitoringUpdatePayloadSchema,
   runMarketMonitoringUpdate,
+  type MonitoringUpdateLifecycleHooks,
 } from "@/workflows/growth-intelligence/run-market-monitoring-update";
 
 const FIXED_NOW = new Date("2026-09-14T06:00:00.000Z");
@@ -690,6 +693,299 @@ describe("worker over pin-read store (production get-miss derivation)", () => {
         projectId: PIN_PROJECT_ID,
       }),
     ).resolves.toBeNull();
+  });
+});
+
+describe("Slice 7 lifecycle durability", () => {
+  function fakeLifecycle(order: string[]) {
+    const opens: Array<Parameters<MonitoringUpdateLifecycleHooks["open"]>[0]> = [];
+    const settles: Array<Parameters<MonitoringUpdateLifecycleHooks["settle"]>[0]> = [];
+    const hooks: MonitoringUpdateLifecycleHooks = {
+      open: async (input) => {
+        opens.push(input);
+        order.push("open");
+        return { stage: "queued", attempts: 1, replayed: false };
+      },
+      settle: async (input) => {
+        settles.push(input);
+        order.push(`settle:${input.stage}`);
+        return { replayed: false };
+      },
+    };
+    return { opens, settles, hooks };
+  }
+
+  it("opens with the G45 lease before research and settles the exact terminal after", async () => {
+    const { db, events, updates, payload } = await startedUpdate();
+    const order: string[] = [];
+    const { opens, settles, hooks } = fakeLifecycle(order);
+    const persister = createFakePersister(db);
+
+    const result = await runMarketMonitoringUpdate(payload, {
+      updates,
+      research: createFakeResearcher(succeededResearchFixture(), {
+        capture: [],
+      }),
+      reports: persister,
+      events,
+      lifecycle: hooks,
+      now: () => FIXED_NOW,
+      newReportIds: stableIds,
+    });
+
+    expect(result).toMatchObject({ outcome: "ready", scopeDrift: false });
+    expect(opens).toHaveLength(1);
+    expect(opens[0]).toMatchObject({
+      organizationId: FIXTURE_IDS.organizationId,
+      projectId: payload.projectId,
+      updateId: payload.updateId,
+      leaseSeconds: MONITORING_UPDATE_LEASE_SECONDS,
+    });
+    expect(MONITORING_UPDATE_LEASE_SECONDS).toBe(600);
+    expect(settles).toHaveLength(1);
+    expect(settles[0]).toMatchObject({
+      stage: "ready",
+      reasonCode: null,
+      retryable: false,
+    });
+    expect(order).toEqual(["open", "settle:ready"]);
+  });
+
+  it("backfills every requested dimension as unavailable on research failure", async () => {
+    const { db, events, updates, payload } = await startedUpdate();
+    const order: string[] = [];
+    const { settles, hooks } = fakeLifecycle(order);
+
+    const result = await runMarketMonitoringUpdate(payload, {
+      updates,
+      research: createFakeResearcher({
+        status: "failed",
+        code: "ADAPTER_UNAVAILABLE",
+        retrievalCoverage: [],
+        usages: [],
+      }),
+      reports: createFakePersister(db),
+      events,
+      lifecycle: hooks,
+      now: () => FIXED_NOW,
+      newReportIds: stableIds,
+    });
+
+    expect(result).toMatchObject({ outcome: "research_failed", reportVersionId: null });
+    const coverage = settles[0]?.coverage ?? [];
+    expect(coverage).toHaveLength(3);
+    for (const entry of coverage) {
+      expect(entry.status).toBe("unavailable");
+    }
+    expect(new Set(coverage.map((entry) => entry.dimensionKey))).toEqual(
+      new Set(["area:demand", "area:reviews", "competitor:stitch-house"]),
+    );
+    expect(settles[0]).toMatchObject({
+      reasonCode: "ADAPTER_UNAVAILABLE",
+      retryable: true,
+    });
+    const record = await updates.get({
+      organizationId: FIXTURE_IDS.organizationId,
+      updateId: payload.updateId,
+    });
+    expect(record?.coverage).toHaveLength(3);
+  });
+
+  it("settles cancelled durably with the worker reason", async () => {
+    const { db, events, updates, payload } = await startedUpdate();
+    const order: string[] = [];
+    const { settles, hooks } = fakeLifecycle(order);
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runMarketMonitoringUpdate(payload, {
+      updates,
+      research: createFakeResearcher(succeededResearchFixture()),
+      reports: createFakePersister(db),
+      events,
+      lifecycle: hooks,
+      now: () => FIXED_NOW,
+      newReportIds: stableIds,
+      signal: controller.signal,
+    });
+
+    expect(result).toMatchObject({ outcome: "cancelled" });
+    expect(settles).toHaveLength(1);
+    expect(settles[0]).toMatchObject({
+      stage: "cancelled",
+      reasonCode: "WORKER_CANCELLED",
+      retryable: false,
+      coverage: null,
+    });
+  });
+
+  it("flags scope drift when the incoming brief differs from the bound record", async () => {
+    const { db, events, updates, payload } = await startedUpdate();
+    const deps = {
+      updates,
+      research: createFakeResearcher(succeededResearchFixture()),
+      reports: createFakePersister(db),
+      events,
+      now: () => FIXED_NOW,
+      newReportIds: stableIds,
+    };
+
+    const same = await runMarketMonitoringUpdate(payload, deps);
+    expect(same).toMatchObject({ outcome: "ready", scopeDrift: false });
+
+    const { db: db2, events: events2, updates: updates2, payload: payload2 } =
+      await startedUpdate();
+    const drifted = await runMarketMonitoringUpdate(
+      { ...payload2, brief: { ...payload2.brief, question: "What changed for lunch?" } },
+      { ...deps, updates: updates2, events: events2, reports: createFakePersister(db2) },
+    );
+    expect(drifted).toMatchObject({ outcome: "ready", scopeDrift: true });
+  });
+
+  it("compares scopes field by field with order-insensitive lists", () => {
+    const active = {
+      question: "How does demand change?",
+      researchArea: "Deira",
+      competitors: [{ name: "Stitch House" }],
+      investigationAreas: ["reviews", "demand"],
+      businessContextSnapshotId: FIXTURE_IDS.snapshotId,
+      frequency: "once",
+    };
+    expect(compareMonitoringScope({ active: null, incoming: active })).toEqual({
+      drifted: false,
+      changedFields: [],
+    });
+    expect(compareMonitoringScope({ active, incoming: { ...active } })).toEqual({
+      drifted: false,
+      changedFields: [],
+    });
+    expect(
+      compareMonitoringScope({
+        active,
+        incoming: { ...active, investigationAreas: ["demand", "reviews"] },
+      }).drifted,
+    ).toBe(false);
+    const drifted = compareMonitoringScope({
+      active,
+      incoming: {
+        ...active,
+        question: "What changed?",
+        competitors: [{ name: "New Rival" }],
+      },
+    });
+    expect(drifted.drifted).toBe(true);
+    expect(drifted.changedFields).toEqual(["question", "competitors"]);
+  });
+
+  it("replays the exact lifecycle stage for reported pins, replacing conservative-ready", async () => {
+    const pinReads = {
+      listRevisionPins: async () => [
+        {
+          revisionId: "71000000-0000-4000-8000-000000000001",
+          revisionNumber: 1,
+          pinnedToUpdateId: "91000000-0000-4000-8000-000000000001",
+        },
+      ],
+      listReportRevisions: async () => [
+        {
+          briefRevisionId: "71000000-0000-4000-8000-000000000001",
+          reportVersionId: stableIds().reportVersionId,
+        },
+      ],
+      findPinByUpdateId: async () => ({
+        projectId: "81000000-0000-4000-8000-000000000001",
+        revisionId: "71000000-0000-4000-8000-000000000001",
+        revisionNumber: 1,
+      }),
+      listTerminalUpdates: async () => [
+        {
+          updateId: "91000000-0000-4000-8000-000000000001",
+          stage: "partial" as const,
+        },
+      ],
+    };
+    const store = createPinReadMonitoringUpdateStore(pinReads, () => FIXED_NOW);
+    const researchCalls: Array<Parameters<MonitoringResearcher>[0]> = [];
+    const result = await runMarketMonitoringUpdate(
+      marketMonitoringUpdatePayloadSchema.parse({
+        organizationId: FIXTURE_IDS.organizationId,
+        projectId: "81000000-0000-4000-8000-000000000001",
+        updateId: "91000000-0000-4000-8000-000000000001",
+        briefRevisionId: "71000000-0000-4000-8000-000000000001",
+        brief: briefFixture({
+          organizationId: FIXTURE_IDS.organizationId,
+          projectId: "81000000-0000-4000-8000-000000000001",
+          pinnedToUpdateId: "91000000-0000-4000-8000-000000000001",
+        }),
+        actorId: FIXTURE_IDS.actorId,
+        correlationId: FIXTURE_IDS.correlationId,
+      }),
+      {
+        updates: store,
+        research: createFakeResearcher(succeededResearchFixture(), { capture: researchCalls }),
+        reports: createFakePersister(createFixtureDb()),
+        events: createFakeEvents(),
+        now: () => FIXED_NOW,
+        newReportIds: stableIds,
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: "replayed", stage: "partial" });
+    expect(researchCalls).toHaveLength(0);
+  });
+
+  it("keeps the conservative-ready replay only for reports without a lifecycle row", async () => {
+    const store = createPinReadMonitoringUpdateStore(
+      {
+        listRevisionPins: async () => [
+          {
+            revisionId: "71000000-0000-4000-8000-000000000001",
+            revisionNumber: 1,
+            pinnedToUpdateId: "91000000-0000-4000-8000-000000000001",
+          },
+        ],
+        listReportRevisions: async () => [
+          {
+            briefRevisionId: "71000000-0000-4000-8000-000000000001",
+            reportVersionId: stableIds().reportVersionId,
+          },
+        ],
+        findPinByUpdateId: async () => ({
+          projectId: "81000000-0000-4000-8000-000000000001",
+          revisionId: "71000000-0000-4000-8000-000000000001",
+          revisionNumber: 1,
+        }),
+        listTerminalUpdates: async () => [],
+      },
+      () => FIXED_NOW,
+    );
+    const researchCalls: Array<Parameters<MonitoringResearcher>[0]> = [];
+    const result = await runMarketMonitoringUpdate(
+      marketMonitoringUpdatePayloadSchema.parse({
+        organizationId: FIXTURE_IDS.organizationId,
+        projectId: "81000000-0000-4000-8000-000000000001",
+        updateId: "91000000-0000-4000-8000-000000000001",
+        briefRevisionId: "71000000-0000-4000-8000-000000000001",
+        brief: briefFixture({
+          organizationId: FIXTURE_IDS.organizationId,
+          projectId: "81000000-0000-4000-8000-000000000001",
+          pinnedToUpdateId: "91000000-0000-4000-8000-000000000001",
+        }),
+        actorId: FIXTURE_IDS.actorId,
+        correlationId: FIXTURE_IDS.correlationId,
+      }),
+      {
+        updates: store,
+        research: createFakeResearcher(succeededResearchFixture(), { capture: researchCalls }),
+        reports: createFakePersister(createFixtureDb()),
+        events: createFakeEvents(),
+        now: () => FIXED_NOW,
+        newReportIds: stableIds,
+      },
+    );
+
+    expect(result).toMatchObject({ outcome: "replayed", stage: "ready" });
+    expect(researchCalls).toHaveLength(0);
   });
 });
 

@@ -1,7 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { logger, queue, schemaTask, tasks } from "@trigger.dev/sdk";
+import { logger, queue, schedules, schemaTask, tasks } from "@trigger.dev/sdk";
+import { z } from "zod";
 
 import { createEventPublisher } from "@/domain/events/publisher";
+import { briefRevisionSchema } from "@/domain/growth-intelligence/brief";
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { RESEARCH_BUDGET_LIMITS } from "@/domain/growth-intelligence/research-pipeline";
 import {
@@ -72,12 +76,14 @@ import {
   MONITORING_UPDATE_TASK_MAX_DURATION_S,
   type MonitoringResearcher,
   type MonitoringUpdateStore,
+  type MonitoringUpdateTerminalStage,
 } from "@/modules/growth-intelligence/application/market-monitoring-update";
 import { createAuthenticatedResearchProjectRepository } from "@/modules/growth-intelligence/infrastructure/research-project-repository";
 import {
   createPinReadMonitoringUpdateStore,
   marketMonitoringUpdatePayloadSchema,
   runMarketMonitoringUpdate,
+  type MonitoringUpdateLifecycleHooks,
 } from "@/workflows/growth-intelligence/run-market-monitoring-update";
 import {
   consolidateMarketEvidence,
@@ -87,6 +93,11 @@ import {
   dispatchDuePayloadSchema,
   dispatchDueWork,
 } from "@/workflows/growth-intelligence/dispatch-due-work";
+import {
+  enqueueDueMonitoringUpdates,
+  orderDueMonitoringProjectsFairly,
+  type DueMonitoringProject,
+} from "@/workflows/growth-intelligence/market-monitoring-dispatch";
 import {
   marketResearchPayloadSchema,
   runMarketResearch,
@@ -841,7 +852,8 @@ tasks.onCancel(async ({ task: taskId, payload }) => {
     taskId !== "growth-intelligence.consolidate-market-evidence" &&
     taskId !== "growth-intelligence.dispatch-due" &&
     taskId !== "growth-intelligence.run-synthesis" &&
-    taskId !== "growth-intelligence.run-market-monitoring-update"
+    taskId !== "growth-intelligence.run-market-monitoring-update" &&
+    taskId !== "growth-intelligence.monitoring-sweep"
   ) {
     return;
   }
@@ -873,6 +885,10 @@ tasks.onCancel(async ({ task: taskId, payload }) => {
     });
     return;
   }
+  if (taskId === "growth-intelligence.monitoring-sweep") {
+    logger.info("growth_intelligence.monitoring_sweep_cancelled", {});
+    return;
+  }
   if (taskId === "growth-intelligence.run-market-monitoring-update") {
     const parsed = marketMonitoringUpdatePayloadSchema.parse(payload);
     logger.info("growth_intelligence.run_cancelled", {
@@ -880,6 +896,21 @@ tasks.onCancel(async ({ task: taskId, payload }) => {
       correlationId: parsed.correlationId,
       updateId: parsed.updateId,
     });
+    // Durable cancel without the run's lease token: the privileged cancel
+    // RPC settles only non-terminal rows, so a cross-run refresh starts
+    // fresh and a late cancel never rewrites a settled update. Best
+    // effort: the lease still fences rivals until it expires.
+    try {
+      const supabase = createGrowthIntelligenceWorkerServiceClient();
+      await supabase.rpc("cancel_monitoring_update", {
+        p_organization_id: parsed.organizationId,
+        p_actor_id: parsed.actorId,
+        p_update_id: parsed.updateId,
+        p_reason_code: "WORKER_CANCELLED",
+      });
+    } catch {
+      return;
+    }
     return;
   }
   const parsed = marketResearchPayloadSchema.parse(payload);
@@ -1035,19 +1066,205 @@ function createMonitoringUpdateStore(supabase: WorkerClient): MonitoringUpdateSt
           revisionNumber: data.revision_number,
         };
       },
-      listTerminalUpdates: async () => {
-        // No durable cancelled/failed update rows exist yet: completed work
-        // is observed through report rows and run-local terminal records.
-        // The Slice 7 lifecycle RPCs will populate this read; returning []
-        // keeps refresh-after-cancel correct for every known-terminal pin
-        // while cross-run failure memory lands with the migration.
-        return [];
+      listTerminalUpdates: async (input) => {
+        // Durable lifecycle rows settle every terminal exactly (ready,
+        // partial, cancelled, failed), so cross-run refresh-after-cancel
+        // starts fresh and reported pins replay their true stage instead
+        // of the conservative-ready approximation.
+        const { data, error } = await supabase
+          .from("growth_intelligence_monitoring_updates")
+          .select("update_id, stage")
+          .eq("organization_id", input.organizationId)
+          .eq("project_id", input.projectId)
+          .in("stage", [
+            "ready",
+            "partial",
+            "empty",
+            "no_findings",
+            "research_failed",
+            "synthesis_failed",
+            "cancelled",
+          ])
+          .limit(50);
+        if (error) throw new Error("Monitoring lifecycle terminals could not be loaded.");
+        return (data ?? [])
+          .filter((row) =>
+            (
+              [
+                "ready",
+                "partial",
+                "empty",
+                "no_findings",
+                "research_failed",
+                "synthesis_failed",
+                "cancelled",
+              ] as readonly string[]
+            ).includes(row.stage),
+          )
+          .map((row) => ({
+            updateId: row.update_id,
+            stage: row.stage as MonitoringUpdateTerminalStage,
+          }));
       },
     },
     () => new Date(),
   );
 }
 
+/**
+ * Durable lifecycle hooks for the monitoring update worker (Slice 7). Open
+ * reserves the lifecycle row with the G45 lease before paid work; settle
+ * writes the exact terminal stage after the run-local store marks it. Both
+ * are short fenced transactions — research and composition always run
+ * outside any lock — and the lease token fences rival runs off the update.
+ */
+function createMonitoringLifecycleHooks(supabase: WorkerClient): MonitoringUpdateLifecycleHooks {
+  return {
+    async open(input) {
+      const { data, error } = await supabase.rpc("open_monitoring_update", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_project_id: input.projectId,
+        p_update_id: input.updateId,
+        p_brief_revision_id: input.briefRevisionId,
+        p_lease_token: input.leaseToken,
+        p_lease_seconds: input.leaseSeconds,
+      });
+      if (error) throw new Error("Monitoring update open failed.");
+      const record = (data ?? {}) as Record<string, unknown>;
+      return {
+        stage: typeof record.stage === "string" ? record.stage : "queued",
+        attempts: typeof record.attempts === "number" ? record.attempts : 1,
+        replayed: record.replayed === true,
+      };
+    },
+    async settle(input) {
+      const { data, error } = await supabase.rpc("settle_monitoring_update", {
+        p_organization_id: input.organizationId,
+        p_actor_id: input.actorId,
+        p_update_id: input.updateId,
+        p_stage: input.stage,
+        p_reason_code: input.reasonCode,
+        p_retryable: input.retryable,
+        p_coverage: input.coverage ? JSON.parse(JSON.stringify(input.coverage)) : null,
+        p_known_cost_micros_usd: input.knownCostMicrosUsd,
+        p_unknown_cost_count: input.unknownCostCount,
+        p_lease_token: input.leaseToken,
+      });
+      if (error) throw new Error("Monitoring update settle failed.");
+      const record = (data ?? {}) as Record<string, unknown>;
+      return { replayed: record.replayed === true };
+    },
+  };
+}
+
+/**
+ * Sweep bounds: at most 25 starts per pass, at most 5 per organization.
+ * The in-memory fairness order is the same function the sweep caller
+ * applies, so SQL order and sweep order agree on who runs first.
+ */
+export const MONITORING_SWEEP_LIMIT = 25;
+export const MONITORING_SWEEP_MAX_PER_ORGANIZATION = 5;
+
+/**
+ * Due recurring monitoring projects with per-org fairness. Active
+ * recurring projects scan oldest-first; latest brief revisions arrive in
+ * one batched read per organization; scope-unparseable projects degrade to
+ * scope-blind (the sweep skips them honestly) and actor-less projects are
+ * excluded with a count, never fabricated.
+ */
+export async function listDueMonitoringProjects(
+  supabase: WorkerClient,
+  input: { limit: number },
+): Promise<DueMonitoringProject[]> {
+  const { data: rows, error } = await supabase
+    .from("growth_intelligence_research_projects")
+    .select(
+      "id, organization_id, branch_id, title, question, mode, schedule, lifecycle, created_by",
+    )
+    .eq("lifecycle", "active")
+    .eq("mode", "recurring")
+    .not("schedule", "is", null)
+    .order("organization_id", { ascending: true })
+    .order("updated_at", { ascending: true })
+    .limit(Math.min(input.limit * MONITORING_SWEEP_MAX_PER_ORGANIZATION, 200));
+  if (error) throw new Error("Due monitoring projects could not be listed.");
+
+  const byOrganization = new Map<string, typeof rows>();
+  for (const row of rows ?? []) {
+    const list = byOrganization.get(row.organization_id) ?? [];
+    list.push(row);
+    byOrganization.set(row.organization_id, list);
+  }
+
+  const revisionsByProject = new Map<string, unknown>();
+  for (const [organizationId, orgRows] of byOrganization) {
+    const { data: revisions, error: revisionsError } = await supabase
+      .from("growth_intelligence_brief_revisions")
+      .select("project_id, document, revision_number")
+      .eq("organization_id", organizationId)
+      .in(
+        "project_id",
+        orgRows.map((row) => row.id),
+      )
+      .order("revision_number", { ascending: false });
+    if (revisionsError) throw new Error("Due monitoring briefs could not be loaded.");
+    for (const revision of revisions ?? []) {
+      if (!revisionsByProject.has(revision.project_id)) {
+        revisionsByProject.set(revision.project_id, revision.document);
+      }
+    }
+  }
+
+  const scheduleSchema = z
+    .object({
+      cadence: z.enum(["daily", "weekly", "monthly"]),
+      localTime: z.string(),
+      timeZone: z.string(),
+      endDate: z.string().optional(),
+    })
+    .strict();
+
+  let actorUnknown = 0;
+  const candidates: DueMonitoringProject[] = [];
+  for (const row of rows ?? []) {
+    if (!row.created_by) {
+      actorUnknown += 1;
+      continue;
+    }
+    const brief = briefRevisionSchema.safeParse(revisionsByProject.get(row.id));
+    const schedule = scheduleSchema.safeParse(row.schedule);
+    candidates.push({
+      organizationId: row.organization_id,
+      projectId: row.id,
+      branchId: row.branch_id,
+      title: row.title,
+      question: row.question,
+      mode: "recurring",
+      ...(schedule.success ? { schedule: schedule.data } : {}),
+      lifecycle: "active",
+      briefInputs: brief.success
+        ? {
+            researchArea: brief.data.researchArea,
+            competitors: brief.data.competitors,
+            investigationAreas: [...brief.data.investigationAreas],
+            businessContextSnapshotId: brief.data.businessContextSnapshotId,
+          }
+        : null,
+      actorId: row.created_by,
+    });
+  }
+  if (actorUnknown > 0) {
+    logger.info("growth_intelligence.monitoring_sweep_actor_unknown", {
+      projects: actorUnknown,
+    });
+  }
+  return orderDueMonitoringProjectsFairly({
+    due: candidates,
+    limit: input.limit,
+    maxPerOrganization: MONITORING_SWEEP_MAX_PER_ORGANIZATION,
+  });
+}
 /**
  * Start-dispatch nudge caller (G47). Triggered right after a monitoring
  * update starts; a lost nudge never fails the start because the cadence
@@ -1091,6 +1308,7 @@ export const runMarketMonitoringUpdateTask = schemaTask({
         persist: (input) => projects.persistReportVersion(input),
       },
       events: createEventPublisher(),
+      lifecycle: createMonitoringLifecycleHooks(supabase),
       signal,
     });
 
@@ -1099,6 +1317,48 @@ export const runMarketMonitoringUpdateTask = schemaTask({
       correlationId: parsed.correlationId,
       updateId: parsed.updateId,
       outcome: result.outcome,
+    });
+
+    return result;
+  },
+});
+
+/**
+ * Every five minutes: sweep due recurring monitoring starts and recover
+ * lost nudges. `schedules.task` rather than `schemaTask`: the cron payload
+ * is fixed by Trigger.dev, so there is no caller-supplied payload to
+ * validate. Starts interleave fairly across organizations (at most five
+ * per org per pass); the sweep joins through the converging start path, so
+ * a repeat pass never duplicates paid work, and undispatched actives are
+ * re-nudged idempotently.
+ */
+export const monitoringSweepTask = schedules.task({
+  id: "growth-intelligence.monitoring-sweep",
+  cron: "*/5 * * * *",
+  retry,
+  maxDuration: 300,
+  run: async () => {
+    const supabase = createGrowthIntelligenceWorkerServiceClient();
+    const projects = createAuthenticatedResearchProjectRepository(supabase);
+    const result = await enqueueDueMonitoringUpdates(
+      { correlationId: randomUUID(), limit: MONITORING_SWEEP_LIMIT },
+      {
+        listDue: (input) => listDueMonitoringProjects(supabase, input),
+        projects,
+        updates: createMonitoringUpdateStore(supabase),
+        dispatch: {
+          nudge: (input) => triggerMarketMonitoringUpdate(input),
+        },
+        events: createEventPublisher(),
+        maxPerOrganization: MONITORING_SWEEP_MAX_PER_ORGANIZATION,
+      },
+    );
+
+    logger.info("growth_intelligence.monitoring_sweep_finished", {
+      started: result.started,
+      openedProgress: result.openedProgress,
+      renudged: result.renudged,
+      skipped: result.skipped,
     });
 
     return result;

@@ -14,8 +14,10 @@ import {
 import {
   buildMonitoringCoverageChecklist,
   composeMonitoringReport,
+  MONITORING_UPDATE_LEASE_SECONDS,
   MONITORING_UPDATE_RESEARCH_DEADLINE_MS,
   summarizeMonitoringCost,
+  type MonitoringCoverageEntry,
   type MonitoringReportPersister,
   type MonitoringResearcher,
   type MonitoringUpdateRecord,
@@ -60,18 +62,115 @@ export type RunMonitoringUpdateDependencies = {
   research: MonitoringResearcher;
   reports: MonitoringReportPersister;
   events: EventPublisher;
+  /**
+   * Durable lifecycle hooks (Slice 7). Absent in unit tests and in
+   * pre-lifecycle production: the run-local store still marks terminals,
+   * but nothing crosses the run boundary. Present in the Trigger wiring,
+   * where open/settle call the fenced lifecycle RPCs with the G45 lease.
+   */
+  lifecycle?: MonitoringUpdateLifecycleHooks;
   now?: () => Date;
   newReportIds?: () => { reportId: string; reportVersionId: string };
   signal?: AbortSignal;
 };
+
+/**
+ * Durable update-lifecycle seam. Open reserves (or heartbeats) the
+ * lifecycle row before paid work; settle writes the exact terminal stage
+ * after the run-local store marks it. Both are short transactions: research
+ * and composition always run outside any lock, and the lease token fences
+ * rival runs off the same update.
+ */
+export type MonitoringUpdateLifecycleHooks = {
+  open(input: {
+    organizationId: string;
+    actorId: string;
+    projectId: string;
+    updateId: string;
+    briefRevisionId: string | null;
+    leaseToken: string;
+    leaseSeconds: number;
+  }): Promise<{ stage: string; attempts: number; replayed: boolean }>;
+  settle(input: {
+    organizationId: string;
+    actorId: string;
+    updateId: string;
+    stage: MonitoringUpdateTerminalStage;
+    reasonCode: string | null;
+    retryable: boolean;
+    coverage: MonitoringCoverageEntry[] | null;
+    knownCostMicrosUsd: number;
+    unknownCostCount: number;
+    leaseToken: string;
+  }): Promise<{ replayed: boolean }>;
+};
+
+/**
+ * Scope-drift snapshot: the comparable subset of a brief. The worker holds
+ * the payload brief and the store's bound brief; the sweep holds the
+ * candidate scope and the active record's brief. Both compare through here
+ * so Slice 4's notice reads one shared verdict.
+ */
+export type MonitoringScopeSnapshot = {
+  question: string;
+  researchArea: string;
+  competitors: ReadonlyArray<{ name: string }>;
+  investigationAreas: ReadonlyArray<string>;
+  businessContextSnapshotId: string;
+  frequency: string;
+};
+
+export type MonitoringScopeDrift = {
+  drifted: boolean;
+  changedFields: string[];
+};
+
+/**
+ * Incoming scope versus the active record's scope. Null active means
+ * nothing to drift from (a fresh start), never drift. Competitor and area
+ * lists compare order-insensitively; names compare exactly.
+ */
+export function compareMonitoringScope(input: {
+  active: MonitoringScopeSnapshot | null;
+  incoming: MonitoringScopeSnapshot;
+}): MonitoringScopeDrift {
+  if (!input.active) return { drifted: false, changedFields: [] };
+  const changedFields: string[] = [];
+  if (input.active.question !== input.incoming.question) changedFields.push("question");
+  if (input.active.researchArea !== input.incoming.researchArea) {
+    changedFields.push("researchArea");
+  }
+  const activeCompetitors = [...input.active.competitors.map((entry) => entry.name)].sort();
+  const incomingCompetitors = [...input.incoming.competitors.map((entry) => entry.name)].sort();
+  if (activeCompetitors.join("\n") !== incomingCompetitors.join("\n")) {
+    changedFields.push("competitors");
+  }
+  if (
+    [...input.active.investigationAreas].sort().join("\n") !==
+    [...input.incoming.investigationAreas].sort().join("\n")
+  ) {
+    changedFields.push("investigationAreas");
+  }
+  if (input.active.businessContextSnapshotId !== input.incoming.businessContextSnapshotId) {
+    changedFields.push("businessContextSnapshotId");
+  }
+  if (input.active.frequency !== input.incoming.frequency) changedFields.push("frequency");
+  return { drifted: changedFields.length > 0, changedFields };
+}
 
 export type RunMonitoringUpdateResult =
   | {
       outcome: MonitoringUpdateTerminalStage;
       updateId: string;
       reportVersionId: string | null;
+      scopeDrift: boolean;
     }
-  | { outcome: "replayed"; updateId: string; stage: MonitoringUpdateRecord["status"] };
+  | {
+      outcome: "replayed";
+      updateId: string;
+      stage: MonitoringUpdateRecord["status"];
+      scopeDrift: boolean;
+    };
 
 export type MonitoringUpdatePinReads = {
   listRevisionPins(input: {
@@ -98,10 +197,11 @@ export type MonitoringUpdatePinReads = {
     revisionNumber: number;
   } | null>;
   /**
-   * Durably-known terminal updates (cancelled/failed) for pin derivation.
-   * Completed-with-report is observed through report rows, never this list.
-   * Production returns [] until the Slice 7 lifecycle RPCs land; the store
-   * still buries run-local terminal records and every listed id.
+   * Durably-known terminal updates for pin derivation. The production
+   * wiring reads the monitoring lifecycle table, so every settled stage
+   * (ready, partial, cancelled, failed) replays exactly; completed work
+   * without a lifecycle row is still observed through report rows. Fakes
+   * may omit it, in which case only run-local terminals bury pins.
    */
   listTerminalUpdates?(input: {
     organizationId: string;
@@ -115,11 +215,10 @@ export type MonitoringUpdatePinReads = {
  * Cross-run convergence comes from brief-revision pins. A pinned revision is
  * active only while it is neither completed-with-report (a report row pins
  * its revision) nor terminally settled (run-local terminal record or a
- * durably-listed cancelled/failed update): terminal pins stay buried so a
- * refresh after cancel starts fresh instead of rejoining the dead update as
- * queued. In-flight and cross-run terminal-failure states stay run-local
- * until lifecycle RPCs land (Slice 7): the task result and identifier-only
- * events carry them across the boundary instead.
+ * durably-listed lifecycle stage): terminal pins stay buried so a refresh
+ * after cancel starts fresh instead of rejoining the dead update as
+ * queued. Reported pins with a lifecycle row replay their exact settled
+ * stage; reported pins without one replay conservatively as ready.
  */
 export function createPinReadMonitoringUpdateStore(
   reads: MonitoringUpdatePinReads,
@@ -253,20 +352,9 @@ export function createPinReadMonitoringUpdateStore(
       }) ?? Promise.resolve([]),
     ]);
     const report = reports.find((row) => row.briefRevisionId === pin.revisionId);
-    if (report) {
-      // Terminal success is replayed, never re-run: the exact ready/partial
-      // distinction awaits Slice 7 lifecycle rows, so a pin-derived replay
-      // conservatively reports ready while preserving the persisted report.
-      return materializeTerminal({
-        organizationId: input.organizationId,
-        projectId: pin.projectId,
-        updateId: input.updateId,
-        revisionId: pin.revisionId,
-        revisionNumber: pin.revisionNumber,
-        stage: "ready",
-        reportVersionId: report.reportVersionId,
-      });
-    }
+    // Durable lifecycle rows settle every terminal exactly (ready, partial,
+    // cancelled, failed): the exact stage wins over the report-row
+    // approximation below, so a reported pin replays its true outcome.
     const terminal = terminals.find((row) => row.updateId === input.updateId);
     if (terminal) {
       return materializeTerminal({
@@ -276,6 +364,21 @@ export function createPinReadMonitoringUpdateStore(
         revisionId: pin.revisionId,
         revisionNumber: pin.revisionNumber,
         stage: terminal.stage,
+        ...(report ? { reportVersionId: report.reportVersionId } : {}),
+      });
+    }
+    if (report) {
+      // Pre-lifecycle reports carry no settled stage: replay conservatively
+      // as ready while preserving the persisted report. Any lifecycle row
+      // above replaces this approximation with the exact stage.
+      return materializeTerminal({
+        organizationId: input.organizationId,
+        projectId: pin.projectId,
+        updateId: input.updateId,
+        revisionId: pin.revisionId,
+        revisionNumber: pin.revisionNumber,
+        stage: "ready",
+        reportVersionId: report.reportVersionId,
       });
     }
     return materializeActive({
@@ -514,8 +617,65 @@ export async function runMarketMonitoringUpdate(
   }
 
   if (isTerminalPipelineStage(record.status)) {
-    return { outcome: "replayed", updateId: payload.updateId, stage: record.status };
+    return {
+      outcome: "replayed",
+      updateId: payload.updateId,
+      stage: record.status,
+      scopeDrift:
+        record.brief != null
+          ? compareMonitoringScope({ active: record.brief, incoming: payload.brief }).drifted
+          : false,
+    };
   }
+
+  // Incoming scope versus the bound record: a refresh that changed its
+  // settings joins the running update (Slice 4 opens progress), and this
+  // flag tells Slice 4's notice the saved settings were not applied.
+  const scopeDrift =
+    record.brief != null
+      ? compareMonitoringScope({ active: record.brief, incoming: payload.brief }).drifted
+      : false;
+
+  // Durable reservation before paid work: the G45 lease (600s, longest in
+  // the deadline nest) fences rival runs off this update. Hooks are absent
+  // in unit tests; the Trigger wiring supplies the fenced RPCs.
+  const leaseToken = crypto.randomUUID();
+  if (dependencies.lifecycle) {
+    await dependencies.lifecycle.open({
+      organizationId: payload.organizationId,
+      actorId: payload.actorId,
+      projectId: payload.projectId,
+      updateId: payload.updateId,
+      briefRevisionId: record.briefRevisionId || null,
+      leaseToken,
+      leaseSeconds: MONITORING_UPDATE_LEASE_SECONDS,
+    });
+  }
+
+  const settleLifecycle = (input: {
+    stage: MonitoringUpdateTerminalStage;
+    reasonCode: string | null;
+    retryable: boolean;
+    coverage: MonitoringCoverageEntry[] | null;
+    knownCostMicrosUsd: number;
+    unknownCostCount: number;
+  }): Promise<void> => {
+    if (!dependencies.lifecycle) return Promise.resolve();
+    return dependencies.lifecycle
+      .settle({
+        organizationId: payload.organizationId,
+        actorId: payload.actorId,
+        updateId: payload.updateId,
+        stage: input.stage,
+        reasonCode: input.reasonCode,
+        retryable: input.retryable,
+        coverage: input.coverage,
+        knownCostMicrosUsd: input.knownCostMicrosUsd,
+        unknownCostCount: input.unknownCostCount,
+        leaseToken,
+      })
+      .then(() => undefined);
+  };
 
   const markTerminal = (
     stage: MonitoringUpdateTerminalStage,
@@ -531,7 +691,15 @@ export async function runMarketMonitoringUpdate(
 
   if (dependencies.signal?.aborted) {
     await markTerminal("cancelled");
-    return { outcome: "cancelled", updateId: payload.updateId, reportVersionId: null };
+    await settleLifecycle({
+      stage: "cancelled",
+      reasonCode: "WORKER_CANCELLED",
+      retryable: false,
+      coverage: null,
+      knownCostMicrosUsd: 0,
+      unknownCostCount: 0,
+    });
+    return { outcome: "cancelled", updateId: payload.updateId, reportVersionId: null, scopeDrift };
   }
 
   const failResearch = async (
@@ -539,16 +707,39 @@ export async function runMarketMonitoringUpdate(
     usages: Parameters<typeof summarizeMonitoringCost>[0],
   ): Promise<RunMonitoringUpdateResult> => {
     const cost = summarizeMonitoringCost(usages);
+    // Honest failure coverage: every requested dimension settles as
+    // unavailable (never an empty list), derived from the same query plan
+    // research would have run. The entry kind is structural; the checklist
+    // resolves support by slot key, so every dimension reads unavailable.
+    const backfilled = buildMonitoringCoverageChecklist({
+      brief: payload.brief,
+      retrievalCoverage: queryPlan.map((query) => ({
+        slotKey: query.slotKey,
+        kind: (query.kind === "competitor" ? "competitor" : "local_market") as
+          | "competitor"
+          | "local_market",
+        outcome: "failed" as const,
+      })),
+      supportedSlotKeys: new Set<string>(),
+    });
     await dependencies.updates.completeResearchAndAttachSynthesis({
       organizationId: payload.organizationId,
       updateId: payload.updateId,
-      coverage: [],
+      coverage: backfilled,
       knownCostMicrosUsd: cost.knownMicrosUsd,
       unknownCostCount: cost.unknownCount,
       synthesis: { failedCode: code },
       nowIso: now().toISOString(),
     });
     await markTerminal("research_failed");
+    await settleLifecycle({
+      stage: "research_failed",
+      reasonCode: code,
+      retryable: true,
+      coverage: backfilled,
+      knownCostMicrosUsd: cost.knownMicrosUsd,
+      unknownCostCount: cost.unknownCount,
+    });
     await publishEvent(dependencies.events, {
       organizationId: payload.organizationId,
       eventName: "market_research.failed",
@@ -563,17 +754,20 @@ export async function runMarketMonitoringUpdate(
         reportVersionId: null,
       },
     });
-    return { outcome: "research_failed", updateId: payload.updateId, reportVersionId: null };
+    return { outcome: "research_failed", updateId: payload.updateId, reportVersionId: null, scopeDrift };
   };
 
   // briefIdentity stays null until snapshot infrastructure lands (G23):
-  // the queries above already carry approved public brief fields only.
+  // the queries below already carry approved public brief fields only.
+  // The plan is built once: research runs it, and the failure path
+  // backfills unavailable coverage from this same deterministic plan.
+  const queryPlan = buildMonitoringQueryPlan(payload.brief);
   const research = await dependencies.research({
     organizationId: payload.organizationId,
     projectId: payload.projectId,
     updateId: payload.updateId,
     briefRevisionId: payload.briefRevisionId,
-    queries: buildMonitoringQueryPlan(payload.brief),
+    queries: queryPlan,
     briefIdentity: null,
     deadlineMs: MONITORING_UPDATE_RESEARCH_DEADLINE_MS,
     signal: dependencies.signal,
@@ -581,7 +775,15 @@ export async function runMarketMonitoringUpdate(
 
   if (research.status === "cancelled" || dependencies.signal?.aborted) {
     await markTerminal("cancelled");
-    return { outcome: "cancelled", updateId: payload.updateId, reportVersionId: null };
+    await settleLifecycle({
+      stage: "cancelled",
+      reasonCode: "WORKER_CANCELLED",
+      retryable: false,
+      coverage: null,
+      knownCostMicrosUsd: 0,
+      unknownCostCount: 0,
+    });
+    return { outcome: "cancelled", updateId: payload.updateId, reportVersionId: null, scopeDrift };
   }
   if (research.status === "failed") {
     return failResearch(research.code, research.usages);
@@ -619,6 +821,14 @@ export async function runMarketMonitoringUpdate(
     // Healthy but empty: no report satisfies the Slice 1 minimum, so the
     // prior successful report stands and the update lands in no_findings.
     await markTerminal("no_findings");
+    await settleLifecycle({
+      stage: "no_findings",
+      reasonCode: null,
+      retryable: false,
+      coverage,
+      knownCostMicrosUsd: cost.knownMicrosUsd,
+      unknownCostCount: cost.unknownCount,
+    });
     await publishEvent(dependencies.events, {
       organizationId: payload.organizationId,
       eventName: "market_research.completed",
@@ -633,7 +843,7 @@ export async function runMarketMonitoringUpdate(
         sourceCount: research.sources.length,
       },
     });
-    return { outcome: "no_findings", updateId: payload.updateId, reportVersionId: null };
+    return { outcome: "no_findings", updateId: payload.updateId, reportVersionId: null, scopeDrift };
   }
 
   let composed: ReturnType<typeof composeMonitoringReport>;
@@ -654,6 +864,14 @@ export async function runMarketMonitoringUpdate(
     // The fenced settle above already holds coverage, cost and the child;
     // composition failure lands the update terminal without touching reports.
     await markTerminal("synthesis_failed");
+    await settleLifecycle({
+      stage: "synthesis_failed",
+      reasonCode: "REPORT_COMPOSITION_INVALID",
+      retryable: true,
+      coverage,
+      knownCostMicrosUsd: cost.knownMicrosUsd,
+      unknownCostCount: cost.unknownCount,
+    });
     await publishEvent(dependencies.events, {
       organizationId: payload.organizationId,
       eventName: "market_research.failed",
@@ -668,7 +886,7 @@ export async function runMarketMonitoringUpdate(
         reportVersionId: null,
       },
     });
-    return { outcome: "synthesis_failed", updateId: payload.updateId, reportVersionId: null };
+    return { outcome: "synthesis_failed", updateId: payload.updateId, reportVersionId: null, scopeDrift };
   }
 
   // Transient persist throws propagate for Trigger redelivery; the update
@@ -690,6 +908,14 @@ export async function runMarketMonitoringUpdate(
     ? "ready"
     : "partial";
   await markTerminal(stage, persisted.reportVersionId);
+  await settleLifecycle({
+    stage,
+    reasonCode: null,
+    retryable: false,
+    coverage,
+    knownCostMicrosUsd: cost.knownMicrosUsd,
+    unknownCostCount: cost.unknownCount,
+  });
   const eventName =
     stage === "ready" ? "market_research.completed" : "market_research.partially_completed";
   await publishEvent(dependencies.events, {
@@ -718,5 +944,5 @@ export async function runMarketMonitoringUpdate(
       reportVersionId: persisted.reportVersionId,
     },
   });
-  return { outcome: stage, updateId: payload.updateId, reportVersionId: persisted.reportVersionId };
+  return { outcome: stage, updateId: payload.updateId, reportVersionId: persisted.reportVersionId, scopeDrift };
 }

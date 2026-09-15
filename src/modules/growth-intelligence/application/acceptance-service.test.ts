@@ -96,6 +96,10 @@ function fakes(view: AssembledReportView) {
   // replay converges on the kept row.
   const kept = new Map<string, { destination: string }>();
   const writerCalls: { itemKey: string; kind: string }[] = [];
+  const reviewCalls: { reportVersionId: string }[] = [];
+  // Mimics mark_report_reviewed: one reviewer row per version, replays
+  // return the kept row.
+  const reviews = new Map<string, { reviewedBy: string; reviewedAt: string }>();
   const writer: AcceptanceWriter = {
     acceptDraftItem: async (input) => {
       writerCalls.push({ itemKey: input.itemKey, kind: input.kind });
@@ -114,6 +118,21 @@ function fakes(view: AssembledReportView) {
       kept.set(key, { destination });
       return { acceptanceKey: key, destination, outcome: "accepted", grantsExecutionApproval: false };
     },
+    markReportReviewed: async (input) => {
+      reviewCalls.push({ reportVersionId: input.reportVersionId });
+      const keptReview = reviews.get(input.reportVersionId);
+      if (keptReview) {
+        return {
+          reportVersionId: input.reportVersionId,
+          reviewedBy: keptReview.reviewedBy,
+          reviewedAt: keptReview.reviewedAt,
+          replayed: true,
+        };
+      }
+      const review = { reviewedBy: input.actorId, reviewedAt: "2026-09-14T10:00:00.000Z" };
+      reviews.set(input.reportVersionId, review);
+      return { reportVersionId: input.reportVersionId, ...review, replayed: false };
+    },
   };
   const published: DomainEvent<Record<string, unknown>>[] = [];
   const events = {
@@ -121,7 +140,7 @@ function fakes(view: AssembledReportView) {
       published.push(event as DomainEvent<Record<string, unknown>>);
     },
   };
-  return { loaderCalls, writerCalls, published, loader, writer, events };
+  return { loaderCalls, writerCalls, reviewCalls, published, loader, writer, events };
 }
 
 function serviceWith(view: AssembledReportView) {
@@ -331,6 +350,12 @@ describe("acceptSelectedItems", () => {
         outcome: "accepted",
         grantsExecutionApproval: true,
       }),
+      markReportReviewed: async (input) => ({
+        reportVersionId: input.reportVersionId,
+        reviewedBy: input.actorId,
+        reviewedAt: "2026-09-14T10:00:00.000Z",
+        replayed: false,
+      }),
     };
     const service = createMarketMonitoringAcceptanceService({
       loader: state.loader,
@@ -365,7 +390,9 @@ describe("acceptSelectedItems", () => {
 
 describe("markReportReviewed (F3 item-less reports)", () => {
   it("records an explicit review with reviewer identity and no feed writes", async () => {
-    const { service, writerCalls, published } = serviceWith(viewFixture({ draftAdvice: [] }));
+    const { service, writerCalls, reviewCalls, published } = serviceWith(
+      viewFixture({ draftAdvice: [] }),
+    );
 
     const result = await service.markReportReviewed({
       organizationId: ORGANIZATION,
@@ -382,6 +409,7 @@ describe("markReportReviewed (F3 item-less reports)", () => {
       itemCount: 0,
     });
     expect(writerCalls).toEqual([]);
+    expect(reviewCalls).toEqual([{ reportVersionId: REPORT_VERSION }]);
     expect(published).toHaveLength(1);
     expect(published[0]).toMatchObject({
       eventName: "market_research.report_reviewed",
@@ -394,6 +422,29 @@ describe("markReportReviewed (F3 item-less reports)", () => {
         itemCount: 0,
       },
     });
+  });
+
+  it("replays the kept review without appending a second event", async () => {
+    const { service, reviewCalls, published } = serviceWith(viewFixture({ draftAdvice: [] }));
+    const input = {
+      organizationId: ORGANIZATION,
+      reportVersionId: REPORT_VERSION,
+      actorId: ACTOR,
+      correlationId: CORRELATION,
+    };
+
+    const first = await service.markReportReviewed(input);
+    const replayed = await service.markReportReviewed(input);
+
+    expect(first.reviewedBy).toBe(ACTOR);
+    expect(replayed).toMatchObject({
+      reportVersionId: REPORT_VERSION,
+      reviewedBy: first.reviewedBy,
+      reviewedAt: first.reviewedAt,
+      itemCount: 0,
+    });
+    expect(reviewCalls).toHaveLength(2);
+    expect(published).toHaveLength(1);
   });
 
   it("never marks a report that still carries draft items", async () => {

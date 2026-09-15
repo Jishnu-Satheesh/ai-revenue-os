@@ -194,6 +194,23 @@ function supabaseFake(db: Db, organizationId: string) {
     },
     async rpc(name: string, args: Record<string, unknown>) {
       db.rpcCalls.push({ name, args });
+      // Slice 7 durable review emulation: one reviewer row per version,
+      // replayed on repeat (replay converges in the RPC; the repository and
+      // pgTAP suites prove the kept-row path).
+      if (name === "mark_report_reviewed") {
+        if (args["p_organization_id"] !== organizationId) {
+          return { data: null, error: { message: "report_review_forbidden" } };
+        }
+        return {
+          data: {
+            reportVersionId: args["p_report_version_id"],
+            reviewedBy: args["p_actor_id"],
+            reviewedAt: "2026-09-14T10:00:00.000Z",
+            replayed: false,
+          },
+          error: null,
+        };
+      }
       if (name !== "accept_draft_item") {
         return { data: null, error: { message: "unknown_rpc" } };
       }
@@ -499,7 +516,18 @@ describe("monitoring report accept POST", () => {
       reviewedBy: USER,
       itemCount: 0,
     });
-    expect(db.rpcCalls).toEqual([]);
+    // Slice 7 durable review: the single governed write is the review RPC;
+    // no feed, draft or spend artifact travels with it.
+    expect(db.rpcCalls).toEqual([
+      {
+        name: "mark_report_reviewed",
+        args: {
+          p_organization_id: ORGANIZATION,
+          p_actor_id: USER,
+          p_report_version_id: REPORT_VERSION,
+        },
+      },
+    ]);
   });
 
   it("never marks a report that still carries draft items", async () => {

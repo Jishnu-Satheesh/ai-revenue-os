@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+import type { EventPublisher } from "@/domain/events/types";
 import { createAuthenticatedResearchProjectRepository } from "@/modules/growth-intelligence/infrastructure/research-project-repository";
 
 const organizationId = "10000000-0000-4000-8000-000000000001";
@@ -343,6 +344,7 @@ describe("acceptDraftItem", () => {
       acceptanceKey: `${reportVersionId}:fix-queues`,
       destination: "Recommendations",
       outcome: "accepted",
+      grantsExecutionApproval: false,
     });
     expect(rpcCalls).toEqual([
       {
@@ -517,5 +519,355 @@ describe("bounded reads", () => {
     const call = calls.find((entry) => entry.table === "growth_intelligence_reports");
     expect(call?.filters).toContainEqual(["organization_id", organizationId]);
     expect(call?.filters).toContainEqual(["report_version_id", reportVersionId]);
+  });
+});
+
+function fakeEvents() {
+  const published: Array<{
+    eventName: string;
+    actorId?: string;
+    correlationId: string;
+    payload: Record<string, unknown>;
+  }> = [];
+  const events: EventPublisher = {
+    publish: async (event) => {
+      published.push({
+        eventName: event.eventName,
+        actorId: event.actorId,
+        correlationId: event.correlationId,
+        payload: (event.payload ?? {}) as Record<string, unknown>,
+      });
+    },
+  };
+  return { events, published };
+}
+
+const SCOPE_FINGERPRINT = "a".repeat(64);
+
+describe("keyed project create (Slice 7)", () => {
+  it("routes a keyed create through the keyed RPC with scope fingerprint", async () => {
+    const { client, rpcCalls } = persistence({
+      "rpc:create_research_project_keyed": [
+        { data: { projectId, lifecycle: "active", replayed: false }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const outcome = await repository.createProject({
+      organizationId,
+      branchId,
+      title: "Marina Friday dinner",
+      question: "What do Marina families want for Friday dinner?",
+      mode: "one-time",
+      actorId,
+      idempotencyKey: "project-key-1",
+      scopeFingerprint: SCOPE_FINGERPRINT,
+    });
+
+    expect(outcome).toEqual({ projectId, lifecycle: "active", replayed: false });
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0]).toEqual({
+      name: "create_research_project_keyed",
+      args: {
+        p_organization_id: organizationId,
+        p_actor_id: actorId,
+        p_branch_id: branchId,
+        p_title: "Marina Friday dinner",
+        p_question: "What do Marina families want for Friday dinner?",
+        p_mode: "one-time",
+        p_schedule: null,
+        p_idempotency_key: "project-key-1",
+        p_scope_fingerprint: SCOPE_FINGERPRINT,
+      },
+    });
+  });
+
+  it("keeps the unkeyed RPC when no idempotency key travels", async () => {
+    const { client, rpcCalls } = persistence({
+      "rpc:create_research_project": [
+        { data: { projectId, lifecycle: "active", replayed: false }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    await repository.createProject({
+      organizationId,
+      branchId,
+      title: "Marina Friday dinner",
+      question: "What do Marina families want for Friday dinner?",
+      mode: "one-time",
+      actorId,
+    });
+
+    expect(rpcCalls[0]?.name).toBe("create_research_project");
+  });
+
+  it("refuses a malformed scope fingerprint before any tenant call", async () => {
+    const { client, rpcCalls } = persistence({});
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    await expect(
+      repository.createProject({
+        organizationId,
+        branchId,
+        title: "Marina Friday dinner",
+        question: "What do Marina families want for Friday dinner?",
+        mode: "one-time",
+        actorId,
+        idempotencyKey: "project-key-2",
+        scopeFingerprint: "not-a-fingerprint",
+      }),
+    ).rejects.toThrow();
+    expect(rpcCalls).toEqual([]);
+  });
+});
+
+describe("owning-flow event emissions (Slice 7)", () => {
+  it("emits an identifier-only project_created on create", async () => {
+    const { client } = persistence({
+      "rpc:create_research_project": [
+        { data: { projectId, lifecycle: "active", replayed: false }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+    const { events, published } = fakeEvents();
+
+    await repository.createProject(
+      {
+        organizationId,
+        branchId,
+        title: "Marina Friday dinner",
+        question: "What do Marina families want for Friday dinner?",
+        mode: "one-time",
+        actorId,
+      },
+      { events, correlationId: "c0000000-0000-4000-8000-00000000000c" },
+    );
+
+    expect(published).toHaveLength(1);
+    expect(published[0]?.eventName).toBe("market_research.project_created");
+    expect(published[0]?.payload).toEqual({ projectId, branchId, mode: "one-time" });
+    expect(published[0]?.actorId).toBe(actorId);
+    expect(JSON.stringify(published[0]?.payload)).not.toContain("Marina Friday dinner");
+  });
+
+  it("emits an identifier-only brief_revision_saved on save", async () => {
+    const { client } = persistence({
+      "rpc:save_brief_revision": [
+        { data: { revisionId, projectId, revisionNumber: 1, replayed: false }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+    const { events, published } = fakeEvents();
+
+    await repository.saveBriefRevision(
+      {
+        organizationId,
+        projectId,
+        revisionNumber: 1,
+        document: briefDocument(),
+        pinnedToUpdateId: null,
+        actorId,
+      },
+      { events, correlationId: "c0000000-0000-4000-8000-00000000000c" },
+    );
+
+    expect(published).toHaveLength(1);
+    expect(published[0]?.eventName).toBe("market_research.brief_revision_saved");
+    expect(published[0]?.payload).toEqual({ projectId, revisionId, revisionNumber: 1 });
+  });
+
+  it("emits an identifier-only report_ready on persist", async () => {
+    const { client } = persistence({
+      "rpc:persist_report_version": [
+        {
+          data: {
+            reportId,
+            reportVersionId,
+            reviewState: "pending_review",
+            draftItemCount: 2,
+            replayed: false,
+          },
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+    const { events, published } = fakeEvents();
+
+    await repository.persistReportVersion(
+      {
+        organizationId,
+        projectId,
+        branchId,
+        briefRevisionId: revisionId,
+        reportVersionId,
+        evidenceDigest: "digest-one",
+        content: reportContent(),
+        actorId,
+      },
+      { events, correlationId: "c0000000-0000-4000-8000-00000000000c" },
+    );
+
+    expect(published).toHaveLength(1);
+    expect(published[0]?.eventName).toBe("market_research.report_ready");
+    expect(published[0]?.payload).toEqual({
+      projectId,
+      reportVersionId,
+      briefRevisionId: revisionId,
+      draftItemCount: 2,
+    });
+    expect(JSON.stringify(published[0]?.payload)).not.toContain("Marina families");
+  });
+
+  it("publishes nothing when no event sink travels", async () => {
+    const { client, rpcCalls } = persistence({
+      "rpc:create_research_project": [
+        { data: { projectId, lifecycle: "active", replayed: false }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    await repository.createProject({
+      organizationId,
+      branchId,
+      title: "Marina Friday dinner",
+      question: "What do Marina families want for Friday dinner?",
+      mode: "one-time",
+      actorId,
+    });
+
+    expect(rpcCalls).toHaveLength(1);
+  });
+});
+
+describe("markReportReviewed", () => {
+  it("wires the governed review RPC and maps the kept row", async () => {
+    const { client, rpcCalls } = persistence({
+      "rpc:mark_report_reviewed": [
+        {
+          data: {
+            reportVersionId,
+            reviewedBy: actorId,
+            reviewedAt: "2026-09-14T10:00:00.000Z",
+            replayed: false,
+          },
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const outcome = await repository.markReportReviewed({
+      organizationId,
+      reportVersionId,
+      actorId,
+    });
+
+    expect(outcome).toEqual({
+      reportVersionId,
+      reviewedBy: actorId,
+      reviewedAt: "2026-09-14T10:00:00.000Z",
+      replayed: false,
+    });
+    expect(rpcCalls[0]).toEqual({
+      name: "mark_report_reviewed",
+      args: {
+        p_organization_id: organizationId,
+        p_actor_id: actorId,
+        p_report_version_id: reportVersionId,
+      },
+    });
+  });
+
+  it("maps a with-items refusal to a safe domain error", async () => {
+    const { client } = persistence({
+      "rpc:mark_report_reviewed": [
+        { data: null, error: { message: "report_review_has_items" } },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    await expect(
+      repository.markReportReviewed({ organizationId, reportVersionId, actorId }),
+    ).rejects.toThrow(/could not be saved/);
+  });
+});
+
+describe("readMonitoringUpdate", () => {
+  const updateId = "90000000-0000-4000-8000-000000000009";
+
+  function lifecycleRow(overrides: Record<string, unknown> = {}) {
+    return {
+      update_id: updateId,
+      organization_id: organizationId,
+      project_id: projectId,
+      brief_revision_id: revisionId,
+      stage: "research_failed",
+      reason_code: "ADAPTER_UNAVAILABLE",
+      retryable: true,
+      coverage: [
+        {
+          dimensionKind: "investigation_area",
+          dimensionKey: "area:demand",
+          label: "demand",
+          status: "unavailable",
+        },
+      ],
+      known_cost_micros_usd: 1200,
+      unknown_cost_count: 1,
+      attempts: 2,
+      updated_at: "2026-09-14T06:05:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("reads a failed update as failed with reason and retry control", async () => {
+    const { client, calls } = persistence({
+      growth_intelligence_monitoring_updates: [{ data: lifecycleRow(), error: null }],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const update = await repository.readMonitoringUpdate({ organizationId, updateId });
+
+    expect(update).toMatchObject({
+      updateId,
+      projectId,
+      stage: "research_failed",
+      reasonCode: "ADAPTER_UNAVAILABLE",
+      retryable: true,
+      knownCostMicrosUsd: 1200,
+      attempts: 2,
+    });
+    const call = calls.find(
+      (entry) => entry.table === "growth_intelligence_monitoring_updates",
+    );
+    expect(call?.filters).toContainEqual(["organization_id", organizationId]);
+    expect(call?.filters).toContainEqual(["update_id", updateId]);
+  });
+
+  it("reads a running update at its real stage", async () => {
+    const { client } = persistence({
+      growth_intelligence_monitoring_updates: [
+        { data: lifecycleRow({ stage: "researching", reason_code: null }), error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const update = await repository.readMonitoringUpdate({ organizationId, updateId });
+
+    expect(update?.stage).toBe("researching");
+    expect(update?.reasonCode).toBeNull();
+  });
+
+  it("returns null when RLS hides the update from a foreign tenant", async () => {
+    const { client } = persistence({
+      growth_intelligence_monitoring_updates: [{ data: null, error: null }],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    await expect(
+      repository.readMonitoringUpdate({ organizationId, updateId }),
+    ).resolves.toBeNull();
   });
 });

@@ -224,4 +224,150 @@ describe("enqueueDueMonitoringUpdates", () => {
     }
   });
 
+  it("interleaves starts fairly across organizations with a per-org cap", async () => {
+    const { projects, updates, dispatch, events } = harness();
+    const otherOrg = FIXTURE_IDS.otherOrganizationId;
+    const result = await enqueueDueMonitoringUpdates(
+      { correlationId: FIXTURE_IDS.correlationId, limit: 10 },
+      {
+        listDue: async () => [
+          dueProject({
+            projectId: "81000000-0000-4000-8000-000000000001",
+            title: "First org question one",
+            question: "First org question one?",
+          }),
+          dueProject({
+            projectId: "81000000-0000-4000-8000-000000000002",
+            title: "First org question two",
+            question: "First org question two?",
+          }),
+          dueProject({
+            projectId: "82000000-0000-4000-8000-000000000001",
+            organizationId: otherOrg,
+            title: "Second org question one",
+            question: "Second org question one?",
+          }),
+        ],
+        projects,
+        updates,
+        dispatch,
+        events,
+        maxPerOrganization: 1,
+        now: () => FIXED_NOW,
+        newCorrelationId: () => "c1000000-0000-4000-8000-000000000001",
+      },
+    );
+
+    expect(result).toMatchObject({ started: 2, skipped: 0 });
+    expect(result.projects.map((row) => row.projectId)).toEqual([
+      "81000000-0000-4000-8000-000000000001",
+      "82000000-0000-4000-8000-000000000001",
+    ]);
+  });
+
+  it("round-robins a large tenant instead of running it back to back", async () => {
+    const { projects, updates, dispatch, events } = harness();
+    const otherOrg = FIXTURE_IDS.otherOrganizationId;
+    const result = await enqueueDueMonitoringUpdates(
+      { correlationId: FIXTURE_IDS.correlationId, limit: 10 },
+      {
+        listDue: async () => [
+          dueProject({
+            projectId: "81000000-0000-4000-8000-000000000001",
+            title: "First org question one",
+            question: "First org question one?",
+          }),
+          dueProject({
+            projectId: "81000000-0000-4000-8000-000000000002",
+            title: "First org question two",
+            question: "First org question two?",
+          }),
+          dueProject({
+            projectId: "82000000-0000-4000-8000-000000000001",
+            organizationId: otherOrg,
+            title: "Second org question one",
+            question: "Second org question one?",
+          }),
+        ],
+        projects,
+        updates,
+        dispatch,
+        events,
+        maxPerOrganization: 2,
+        now: () => FIXED_NOW,
+        newCorrelationId: () => "c1000000-0000-4000-8000-000000000001",
+      },
+    );
+
+    expect(result.projects.map((row) => row.projectId)).toEqual([
+      "81000000-0000-4000-8000-000000000001",
+      "82000000-0000-4000-8000-000000000001",
+      "81000000-0000-4000-8000-000000000002",
+    ]);
+  });
+
+  it("marks fresh starts undisputed and joined starts drifted for the notice", async () => {
+    const { projects, updates, dispatch, events } = harness();
+    const started = await startMonitoringUpdate(
+      {
+        organizationId: FIXTURE_IDS.organizationId,
+        branchId: FIXTURE_IDS.branchId,
+        title: "Ramadan evening demand",
+        question: "How does demand for late-night tailoring change during Ramadan?",
+        mode: "recurring",
+        schedule: { cadence: "weekly", localTime: "07:00", timeZone: "Asia/Dubai" },
+        ...briefInputs(),
+        actorId: FIXTURE_IDS.actorId,
+        idempotencyKey: "drift-key-1",
+        correlationId: FIXTURE_IDS.correlationId,
+      },
+      { projects, updates, dispatch, events, now: () => FIXED_NOW },
+    );
+    if (started.outcome !== "started") throw new Error("fixture start failed");
+    const deps = {
+      projects,
+      updates,
+      dispatch,
+      events,
+      now: () => FIXED_NOW,
+      newCorrelationId: () => "c1000000-0000-4000-8000-000000000001",
+    };
+
+    const fresh = await enqueueDueMonitoringUpdates(
+      { correlationId: FIXTURE_IDS.correlationId, limit: 25 },
+      {
+        ...deps,
+        listDue: async () => [
+          dueProject({
+            projectId: "82000000-0000-4000-8000-000000000001",
+            organizationId: FIXTURE_IDS.otherOrganizationId,
+            title: "Second org question one",
+            question: "Second org question one?",
+          }),
+        ],
+      },
+    );
+    expect(fresh.projects[0]).toMatchObject({ outcome: "started", scopeDrifted: false });
+
+    // Same project scope identity (title/question/mode) but changed research
+    // settings: the sweep joins the running update and flags the drift the
+    // dialog notice must acknowledge.
+    const joined = await enqueueDueMonitoringUpdates(
+      { correlationId: FIXTURE_IDS.correlationId, limit: 25 },
+      {
+        ...deps,
+        listDue: async () => [
+          dueProject({
+            projectId: started.projectId,
+            briefInputs: { ...briefInputs(), researchArea: "Marina" },
+          }),
+        ],
+      },
+    );
+    expect(joined.projects[0]).toMatchObject({
+      outcome: "opened_progress",
+      scopeDrifted: true,
+    });
+  });
+
 });

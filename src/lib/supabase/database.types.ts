@@ -171,6 +171,69 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      growth_intelligence_monitoring_active_scopes: {
+        Row: {
+          id: string;
+          organization_id: string;
+          scope_fingerprint: string;
+          project_id: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_monitoring_updates: {
+        Row: {
+          update_id: string;
+          organization_id: string;
+          project_id: string;
+          brief_revision_id: string | null;
+          stage:
+            | "queued"
+            | "researching"
+            | "preparing_insights"
+            | "ready"
+            | "partial"
+            | "empty"
+            | "no_findings"
+            | "research_failed"
+            | "synthesis_failed"
+            | "cancelled";
+          reason_code: string | null;
+          retryable: boolean;
+          coverage: Record<string, unknown> | null;
+          known_cost_micros_usd: number;
+          unknown_cost_count: number;
+          cost_ledger_ref: string | null;
+          lease_token: string | null;
+          lease_expires_at: string | null;
+          attempts: number;
+          extracts_erased_at: string | null;
+          erasure_reason_code: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_project_create_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          project_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       growth_intelligence_reports: {
         Row: {
           id: string;
@@ -184,6 +247,18 @@ export type Database = {
           review_state: "pending_review" | "accepted";
           created_by: string | null;
           created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_report_reviews: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_version_id: string;
+          reviewed_by: string | null;
+          reviewed_at: string;
         };
         Insert: never;
         Update: never;
@@ -2435,6 +2510,52 @@ export type Database = {
           p_request_id: string;
           p_claim_token: string;
           p_lease_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
+      open_monitoring_update: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_project_id: string;
+          p_update_id: string;
+          p_brief_revision_id: string | null;
+          p_lease_token: string;
+          p_lease_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
+      advance_monitoring_update_stage: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_update_id: string;
+          p_stage: string;
+          p_lease_token: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      settle_monitoring_update: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_update_id: string;
+          p_stage: string;
+          p_reason_code: string | null;
+          p_retryable: boolean;
+          p_coverage: unknown;
+          p_known_cost_micros_usd: number;
+          p_unknown_cost_count: number;
+          p_lease_token: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      cancel_monitoring_update: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_update_id: string;
+          p_reason_code: string;
         };
         Returns: Record<string, unknown>;
       };

@@ -12,6 +12,7 @@ import {
   type MonitoringUpdateStore,
   type StartMonitoringUpdateInput,
 } from "@/modules/growth-intelligence/application/market-monitoring-update";
+import { compareMonitoringScope } from "@/workflows/growth-intelligence/run-market-monitoring-update";
 
 /**
  * Market Monitoring dispatch: the start nudge and the cadence enqueuer (G47).
@@ -62,12 +63,23 @@ export type EnqueueDueMonitoringUpdatesDependencies = {
   updates: MonitoringUpdateStore;
   dispatch: MonitoringDispatcher;
   events: EventPublisher;
+  /**
+   * Per-organization start cap per sweep. The Trigger schedule wraps this
+   * caller with its own SQL-side cap; this in-memory cap keeps fakes and
+   * small deployments fair the same way.
+   */
+  maxPerOrganization?: number;
   now?: () => Date;
   newCorrelationId?: () => string;
 };
 
 export type DueMonitoringProjectOutcome =
-  | { projectId: string; outcome: "started" | "opened_progress"; updateId: string }
+  | {
+      projectId: string;
+      outcome: "started" | "opened_progress";
+      updateId: string;
+      scopeDrifted: boolean;
+    }
   | { projectId: string; outcome: "skipped"; reason: string }
   | { projectId: string; outcome: "failed"; reason: string };
 
@@ -81,11 +93,53 @@ export type EnqueueDueMonitoringUpdatesResult = {
 };
 
 /**
+ * Default per-organization start cap per sweep: one tenant's backlog can
+ * neither starve the sweep nor swallow the whole limit.
+ */
+export const MONITORING_SWEEP_DEFAULT_MAX_PER_ORGANIZATION = 5;
+
+/**
+ * Per-org fairness order: round-robin across organizations in first-seen
+ * order, at most maxPerOrganization starts per org, bounded by the sweep
+ * limit. Deterministic for a given lister order, so tests and the schedule
+ * agree on who runs first.
+ */
+export function orderDueMonitoringProjectsFairly(input: {
+  due: readonly DueMonitoringProject[];
+  limit: number;
+  maxPerOrganization: number;
+}): DueMonitoringProject[] {
+  const queues = new Map<string, DueMonitoringProject[]>();
+  for (const candidate of input.due) {
+    const queue = queues.get(candidate.organizationId) ?? [];
+    queue.push(candidate);
+    queues.set(candidate.organizationId, queue);
+  }
+  const ordered: DueMonitoringProject[] = [];
+  const taken = new Map<string, number>();
+  let progressed = true;
+  while (ordered.length < input.limit && progressed) {
+    progressed = false;
+    for (const [organizationId, queue] of queues) {
+      if (ordered.length >= input.limit) break;
+      if ((taken.get(organizationId) ?? 0) >= input.maxPerOrganization) continue;
+      const next = queue.shift();
+      if (!next) continue;
+      ordered.push(next);
+      taken.set(organizationId, (taken.get(organizationId) ?? 0) + 1);
+      progressed = true;
+    }
+  }
+  return ordered;
+}
+
+/**
  * Cadence sweep for recurring monitoring. Due-ness timing belongs to the
  * injected lister; this caller re-verifies lifecycle eligibility (active,
  * recurring, within end date) and starts through the converging path, so a
- * repeat sweep joins rather than duplicates. Full local-time due arithmetic
- * lands with Slice 7 scheduling.
+ * repeat sweep joins rather than duplicates. Starts are interleaved fairly
+ * across organizations, and a joined start whose incoming scope differs
+ * from the active record carries scopeDrifted for Slice 4's notice.
  */
 export async function enqueueDueMonitoringUpdates(
   input: unknown,
@@ -95,6 +149,8 @@ export async function enqueueDueMonitoringUpdates(
   const now = dependencies.now ?? (() => new Date());
   const newCorrelationId =
     dependencies.newCorrelationId ?? (() => crypto.randomUUID());
+  const maxPerOrganization =
+    dependencies.maxPerOrganization ?? MONITORING_SWEEP_DEFAULT_MAX_PER_ORGANIZATION;
   const due = await dependencies.listDue({ limit: payload.limit });
 
   const projects: DueMonitoringProjectOutcome[] = [];
@@ -102,7 +158,12 @@ export async function enqueueDueMonitoringUpdates(
   let openedProgress = 0;
   let skipped = 0;
 
-  for (const candidate of due.slice(0, payload.limit)) {
+  const ordered = orderDueMonitoringProjectsFairly({
+    due,
+    limit: payload.limit,
+    maxPerOrganization,
+  });
+  for (const candidate of ordered) {
     const parsedProject = researchProjectSchema.safeParse({
       projectId: candidate.projectId,
       organizationId: candidate.organizationId,
@@ -138,6 +199,31 @@ export async function enqueueDueMonitoringUpdates(
       projects.push({ projectId: candidate.projectId, outcome: "skipped", reason: "scope_unavailable" });
       continue;
     }
+    // Scope-drift comparison for Slice 4's notice: the incoming candidate
+    // scope against the active record's bound brief. A read failure degrades
+    // to not-drifted rather than failing the start.
+    let scopeDrifted = false;
+    try {
+      const active = await dependencies.updates.findActive({
+        organizationId: candidate.organizationId,
+        projectId: candidate.projectId,
+      });
+      if (active?.brief) {
+        scopeDrifted = compareMonitoringScope({
+          active: active.brief,
+          incoming: {
+            question: candidate.question,
+            researchArea: candidate.briefInputs.researchArea,
+            competitors: candidate.briefInputs.competitors,
+            investigationAreas: candidate.briefInputs.investigationAreas,
+            businessContextSnapshotId: candidate.briefInputs.businessContextSnapshotId,
+            frequency: candidate.schedule?.cadence ?? "weekly",
+          },
+        }).drifted;
+      }
+    } catch {
+      scopeDrifted = false;
+    }
     try {
       const result = await startMonitoringUpdate(
         {
@@ -165,13 +251,19 @@ export async function enqueueDueMonitoringUpdates(
       );
       if (result.outcome === "started") {
         started += 1;
-        projects.push({ projectId: candidate.projectId, outcome: "started", updateId: result.updateId });
+        projects.push({
+          projectId: candidate.projectId,
+          outcome: "started",
+          updateId: result.updateId,
+          scopeDrifted,
+        });
       } else {
         openedProgress += 1;
         projects.push({
           projectId: candidate.projectId,
           outcome: "opened_progress",
           updateId: result.updateId,
+          scopeDrifted,
         });
       }
     } catch {

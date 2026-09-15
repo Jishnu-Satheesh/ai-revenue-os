@@ -19,9 +19,9 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain('name: "growth-intelligence"');
     expect(source).toContain("concurrencyLimit: 1");
     expect(source).toContain("maxAttempts: 3");
-    expect(source.match(/maxDuration: 300/g)).toHaveLength(4);
+    expect(source.match(/maxDuration: 300/g)).toHaveLength(5);
     expect(source).toContain("maxDuration: MONITORING_UPDATE_TASK_MAX_DURATION_S");
-    expect(source).not.toContain("schedules.task");
+    expect(source.match(/schedules\.task\(/g)).toHaveLength(1);
     expect(source).not.toContain("triggerAndWait");
   });
 
@@ -271,5 +271,39 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain('taskId !== "growth-intelligence.run-market-monitoring-update"');
     expect(source).toContain("marketMonitoringUpdatePayloadSchema.parse(payload)");
     expect(source).toContain("updateId: parsed.updateId");
+  });
+
+  it("schedules the monitoring sweep every five minutes with per-org fairness", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain('id: "growth-intelligence.monitoring-sweep"');
+    expect(source).toContain('cron: "*/5 * * * *"');
+    expect(source).toContain("MONITORING_SWEEP_LIMIT");
+    expect(source).toContain("MONITORING_SWEEP_MAX_PER_ORGANIZATION");
+    expect(source).toContain("enqueueDueMonitoringUpdates");
+    expect(source).toContain("orderDueMonitoringProjectsFairly");
+    expect(source).toContain("listDueMonitoringProjects");
+    expect(source).toContain("maxPerOrganization: MONITORING_SWEEP_MAX_PER_ORGANIZATION");
+    expect(source).toContain('logger.info("growth_intelligence.monitoring_sweep_finished"');
+    expect(source).toContain('taskId !== "growth-intelligence.monitoring-sweep"');
+    expect(source).not.toContain("percent");
+  });
+
+  it("settles durable lifecycle rows around the update run with the G45 lease", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("createMonitoringLifecycleHooks");
+    expect(source).toContain("lifecycle: createMonitoringLifecycleHooks(supabase)");
+    expect(source).toContain("open_monitoring_update");
+    expect(source).toContain("settle_monitoring_update");
+    expect(source).toContain('from("growth_intelligence_monitoring_updates")');
+    expect(source).toContain("cancel_monitoring_update");
+    expect(source).toContain("WORKER_CANCELLED");
   });
 });

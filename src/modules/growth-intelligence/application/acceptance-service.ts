@@ -167,6 +167,21 @@ export type AcceptanceWriter = {
     outcome: string;
     grantsExecutionApproval: boolean;
   }>;
+  /**
+   * Durable item-less review through the fenced mark_report_reviewed RPC.
+   * Idempotent per report version: replays return the kept reviewer row,
+   * and the service publishes no second event for a replay.
+   */
+  markReportReviewed(input: {
+    organizationId: string;
+    reportVersionId: string;
+    actorId: string;
+  }): Promise<{
+    reportVersionId: string;
+    reviewedBy: string;
+    reviewedAt: string;
+    replayed: boolean;
+  }>;
 };
 
 export type AcceptanceServiceDependencies = {
@@ -387,12 +402,12 @@ export function createMarketMonitoringAcceptanceService(
     },
 
     /**
-     * F3 decision: reports with zero draft items get an explicit reviewed
-     * path — reviewer identity plus an audit event, no feed writes. The
-     * durable `review_state` column stays `pending_review` (there is no
-     * migration in this slice, and flipping to `accepted` without items
-     * would claim a review that accepted nothing); explicitness comes from
-     * this recorded review, never from auto-accepting nothing.
+     * F3 decision, durable (Slice 7): reports with zero draft items get an
+     * explicit reviewed path — the fenced mark_report_reviewed RPC records
+     * one reviewer row per report version, and this method emits the audit
+     * event only for the first review. Replays return the kept reviewer
+     * identity without appending another event. No feed writes by
+     * construction (the writer holds no feed path).
      */
     async markReportReviewed(input: MarkReportReviewedInput): Promise<MarkReportReviewedResult> {
       const parsed = markReportReviewedInputSchema.parse(input);
@@ -407,7 +422,22 @@ export function createMarketMonitoringAcceptanceService(
           "This report carries draft items; review each one instead of marking the report.",
         );
       }
-      const reviewedAt = now().toISOString();
+      const written = await dependencies.writer.markReportReviewed({
+        organizationId: parsed.organizationId,
+        reportVersionId: parsed.reportVersionId,
+        actorId: parsed.actorId,
+      });
+      if (written.replayed) {
+        return {
+          reportVersionId: parsed.reportVersionId,
+          projectId: view.identity.projectId,
+          briefRevisionId: view.identity.briefRevisionId,
+          reviewedBy: written.reviewedBy,
+          reviewedAt: written.reviewedAt,
+          itemCount: 0,
+        };
+      }
+      const reviewedAt = written.reviewedAt;
       const payload = marketResearchReportReviewedPayloadSchema.parse({
         projectId: view.identity.projectId,
         reportVersionId: parsed.reportVersionId,
@@ -427,7 +457,7 @@ export function createMarketMonitoringAcceptanceService(
         reportVersionId: parsed.reportVersionId,
         projectId: view.identity.projectId,
         briefRevisionId: view.identity.briefRevisionId,
-        reviewedBy: parsed.actorId,
+        reviewedBy: written.reviewedBy,
         reviewedAt,
         itemCount: 0,
       };
