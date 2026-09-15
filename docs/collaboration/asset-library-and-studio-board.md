@@ -7286,9 +7286,30 @@ floors at 500px) are NOT yet exercised in a browser; the chrome-devtools MCP
 dropped mid-pass. Anyone continuing should finish that before calling the
 visual work done.
 
+> **RESOLVED 2026-09-15.** That pass is finished; no defects found. All three
+> tabs exercised at 1440px and at a true 390x844 device viewport (DPR 3,
+> mobile+touch, via `emulate` — `resize_page` genuinely cannot reach it). No
+> horizontal page scroll anywhere; the Publishing table's 768px `min-w-[48rem]`
+> is correctly contained by its own `overflow-x-auto` wrapper; the tab strip
+> scrolls and Activity is reachable; deep links select their tab; console clean.
+> Evidence and the one deliberate non-change (the header `Authorize publication`
+> button is a `nextAction` pointer, and Task 13 should make it act) are in
+> `docs/verification/campaigns/2026-09-15-detail-tabs-phone-completion.md`.
+> Note for the record: the 2026-09-14 verification doc had already opened all
+> five tabs by click and deep link, so this entry was more pessimistic than the
+> evidence it summarised. What was genuinely missing was phone-width proof and
+> any capture of Results and Activity.
+
 **Not ours, still open:** `permissions.drift.test.ts` fails 4 assertions because
 the research migrations seed `campaign.research_request` and
 `src/domain/access/permissions.ts` does not declare it.
+
+> **RESOLVED 2026-09-15 in `6b2a9c0`.** `campaign.research_request` is now
+> declared in `src/domain/access/permissions.ts` at all three sites, and
+> `permissions.drift.test.ts` passes 13/13. Nothing in TypeScript reads the
+> permission yet, so there is no behaviour change — it was declared because a
+> permanently red drift check hides the next real drift, which is the whole
+> point of that test.
 
 <!-- 2026-09-13 Market Monitoring Slice 2 (persistence + tenant boundaries, implementer): DRAFTED, NOT PUSHED. New forward migration supabase/migrations/20260913202720_growth_intelligence_research_projects_reports.sql (5 org-scoped tables with composite tenant FKs, forced RLS, SELECT-only grants to authenticated/service_role, 3 pure-JSON validators mirroring Slice 1 Zod key-for-key, 4 fenced RPCs) + pgTAP suite supabase/tests/database/growth_intelligence_research_projects_reports_test.sql (103 assertions, two-account isolation) + narrow src/lib/supabase/database.types.ts typing (5 tables, drift test green) + new src/modules/growth-intelligence/infrastructure/research-project-repository.ts + test (17 vitest green, typecheck green). Dry-run lists ONLY the new file as pending; staging untouched (no push/test per brief hard stop — needs reviewer SQL approval + coordinator authorization). Unrelated Campaign/creative-history dirty work preserved; nothing committed, stashed, or pushed. Report: .superpowers/sdd/market-monitoring-report-experience/slice-2-report.md. -->
 
