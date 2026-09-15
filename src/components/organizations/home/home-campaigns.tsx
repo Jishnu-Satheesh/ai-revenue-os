@@ -178,6 +178,8 @@ export function HomeCampaigns({
                       alt={homeCampaign.cover.alt}
                       fit="contain"
                       chip={homeCampaign.coverLabel}
+                      width={homeCampaign.cover.width}
+                      height={homeCampaign.cover.height}
                       fallback={
                         <HomePreviewImage
                           image={null}

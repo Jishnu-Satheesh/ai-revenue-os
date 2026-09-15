@@ -179,9 +179,10 @@ function phaseFact(campaign: CampaignListItem): string | null {
  * box: "no artwork yet" and "artwork we could not load" both look like an empty
  * rectangle, and the operator has to be able to tell which happened.
  *
- * Rendering delegates to the shared cover figure (cover fit, no chip, this
- * card's existing fallback markup); the sizing parent stays here, so the
- * painted card is unchanged.
+ * Rendering delegates to the shared cover figure, but this card keeps its
+ * exact prior output: eager load, no error flip, and this card's own img and
+ * fallback classes. The primitive's newer behaviour (lazy, error fallback)
+ * stays behind props this caller does not opt into.
  */
 function Artwork({
   previewUrl,
@@ -189,25 +190,28 @@ function Artwork({
   className,
 }: Readonly<{ previewUrl: string | null; awaitingFirstVersion: boolean; className: string }>) {
   return (
-    <span className={className}>
-      <CampaignCoverFigure
-        src={previewUrl}
-        alt=""
-        fit="cover"
-        fallback={
-          <span className="flex h-full w-full flex-col items-center justify-center gap-1 bg-muted px-3 text-center">
-            <span className="text-xs text-muted-foreground">
-              {awaitingFirstVersion ? "No preview available" : "Preview unavailable"}
-            </span>
-            {awaitingFirstVersion ? (
-              <span className="text-[10px] text-muted-foreground">
-                Creative generation begins after approval
-              </span>
-            ) : null}
+    <CampaignCoverFigure
+      src={previewUrl}
+      alt=""
+      fit="cover"
+      imgClassName={`${className} object-cover`}
+      loading="eager"
+      errorFallback={false}
+      fallback={
+        <span
+          className={`${className} flex flex-col items-center justify-center gap-1 bg-muted px-3 text-center`}
+        >
+          <span className="text-xs text-muted-foreground">
+            {awaitingFirstVersion ? "No preview available" : "Preview unavailable"}
           </span>
-        }
-      />
-    </span>
+          {awaitingFirstVersion ? (
+            <span className="text-[10px] text-muted-foreground">
+              Creative generation begins after approval
+            </span>
+          ) : null}
+        </span>
+      }
+    />
   );
 }
 

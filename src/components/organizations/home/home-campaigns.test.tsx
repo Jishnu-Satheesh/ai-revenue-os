@@ -326,6 +326,8 @@ describe("HomeCampaigns compact third row", () => {
       />,
     );
     expect(within(thirdRow()).getByText("Third objective line")).toBeInTheDocument();
+    // The reason renders in its own supporting-copy node, not the title.
+    expect(thirdRow().querySelector(`.${styles.meta}`)).not.toBeNull();
   });
 
   it("omits the reason line when neither detail nor objective exists", () => {
@@ -341,7 +343,8 @@ describe("HomeCampaigns compact third row", () => {
     );
     const row = thirdRow();
     expect(within(row).getByText("Third Push")).toBeInTheDocument();
-    // Title, tag and CTA only: no reason copy of any kind.
+    // No reason element at all: title, tag and CTA only.
+    expect(row.querySelector(`.${styles.meta}`)).toBeNull();
     expect(row.textContent).not.toMatch(/Drive iftar orders/);
   });
 
