@@ -88,12 +88,56 @@ investigating the code.
   logo copy states the model is **not guaranteed to reproduce it** — acceptance
   criterion 10, also asserted in `brand-guidelines-panel.test.tsx`.
 
-## Not exercised
+## The logo path, closed
 
-The dev organization has **no usable logo-role brand asset**, so both logo
-variants render their "No logo set" state and the picker correctly reports
-"No approved logos in your Brand Kit yet." The logo display path, the broken
-and rejected states, and the mark in the organization switcher are covered by
-unit tests and by the staging first-call check — which exercised all five
-`canonicalLogoVersionId` branches inside a rolled-back transaction — but not
-yet by a real upload in a browser. That needs a logo uploaded to Brand Kit.
+Initially unverified: the dev organization had no usable logo-role asset, and
+the reason turned out to be a defect rather than an empty library — see below.
+After the fix it was exercised in the browser and confirmed against staging.
+
+- Uploaded a real JPEG through **Upload assets** on Brand Guidelines, typed as
+  **Logo**, owned by the organization.
+- The stored object is **not the uploaded file**: 71,234 bytes in, 45,928 bytes
+  stored, `created_at <> updated_at`. That is the server's own re-encode
+  replacing the transfer — the write that was being refused, and the step that
+  strips EXIF.
+- The version became `is_usable`, `image/jpeg`, 690×690, content-hashed.
+- Set as the `primary` mark (and `dark`), audited as `brand.logo_set` carrying
+  the variant name only — no path, no bytes.
+- It renders in the organization switcher, and
+  `load_campaign_creation_facts` now returns it as
+  `canonicalLogoVersionId`, so generation conditions on the organization's
+  real mark rather than on whichever logo-role asset the resolver happened to
+  admit.
+
+### The defect this uncovered
+
+Brand asset upload is two writes to one object key: the browser transfers the
+chosen file, then the server writes back the copy it validated. The
+`brand-assets` bucket had SELECT and INSERT policies and **no UPDATE**, and
+Supabase Storage issues an UPDATE when an object already exists at the key —
+which, on the second write, it always does. The transfer succeeded, the
+replacement was refused, the version stayed unusable, and the dialog reported
+honestly that the checked image could not be stored.
+
+Diagnosed from staging before any code changed: the object present at 71,234
+bytes with `created_at = updated_at`, never overwritten, beside a version row
+still `is_usable = false`. Closed by
+`20260915160000_brand_asset_object_replace.sql`, which copies the INSERT
+policy's predicate rather than reinventing it — a looser UPDATE would let
+somebody replace bytes they could not have placed. The identical gap had been
+found for `creative-assets` and closed by `20260913110000`; the brand bucket
+never got the sibling.
+
+**"No approved logos in your Brand Kit yet" was not an empty library.** It was
+an upload nobody could finish. An empty state that is indistinguishable from a
+broken path is worth suspecting.
+
+### And the classification it hid
+
+The upload dialog suppressed its **Type** control whenever the open tab pinned
+a role, which Brand Kit and Brand Guidelines both did — to `logo`. So the
+upload *was* being filed as a logo while nothing on screen said so, leaving
+ownership as the only visible question, which belongs to Products & Subjects.
+`logo` also had no label in that control, so had it ever rendered it would have
+read "Other". The type is now always shown, over the whole vocabulary,
+defaulted from the tab rather than decided by it.
