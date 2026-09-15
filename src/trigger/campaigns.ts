@@ -51,7 +51,11 @@ import { settleCampaign } from "@/modules/campaigns/application/measurement-serv
 import { proposeLearning } from "@/modules/campaigns/application/learning-service";
 import { createToolGateway } from "@/modules/tool-gateway/application/service";
 import { createMetaOrganicResolver } from "@/modules/campaigns/infrastructure/meta-adapter-resolver";
-import { createMetaPublishConnectionReader } from "@/modules/campaigns/infrastructure/execution-readers";
+import {
+  createMetaPublishConnectionReader,
+  META_METRICS_CAPABILITY,
+} from "@/modules/campaigns/infrastructure/execution-readers";
+import { createMetaMediaInsightsReader } from "@/modules/integrations/providers/meta/media-insights-reader";
 import { createVaultCredentialStore } from "@/modules/integrations/infrastructure/vault-credential-store";
 import { createMetaGraphClient } from "@/modules/integrations/providers/meta/client";
 import { getMetaCampaignProviderContract } from "@/modules/integrations/providers/meta/contract";
@@ -838,12 +842,63 @@ export const collectCampaignMetricsTask = schemaTask({
   run: async (payload, { signal }) => {
     const supabase = createCampaignWorkerServiceClient();
 
+    const connections = createMetaPublishConnectionReader(supabase as never);
+    const credentials = createVaultCredentialStore(supabase);
+    const correlationId = randomUUID();
+
+    let contract: ReturnType<typeof getMetaCampaignProviderContract> | null = null;
+    try {
+      contract = getMetaCampaignProviderContract();
+    } catch (error) {
+      // Said out loud once per sweep. Reading results is harmless, but doing it
+      // against a record nobody has checked recently is how a provider's
+      // renamed field becomes a silently wrong number.
+      logger.warn("campaign.metrics_provider_contract_unusable", {
+        provider: "meta",
+        reason: error instanceof Error ? error.message : "unusable",
+      });
+    }
+
     const result = await collectCampaignMetrics(
       payload,
       {
         subjects: createMetricSubjectReader(supabase as never),
         grants: createMetricsGrantReader(supabase as never),
-        reader: createUnavailableInsightsReader(),
+        // Resolved per organization, because this sweep spans every tenant
+        // while a Meta credential belongs to exactly one.
+        readersFor: async (organizationId: string) => {
+          if (!contract) return null;
+
+          const connection = await connections.read({
+            organizationId,
+            capabilityKey: META_METRICS_CAPABILITY,
+          });
+          if (!connection) return null;
+
+          let credential;
+          try {
+            credential = await credentials.resolve({
+              organizationId,
+              providerKey: "meta",
+              handle: connection.credentialHandle,
+              correlationId,
+            });
+          } catch {
+            // A revoked or missing secret is a disconnected organization, not a
+            // crash that abandons every other tenant in the sweep.
+            return null;
+          }
+
+          const client = createMetaGraphClient({ contract, credential });
+          return {
+            media: createMetaMediaInsightsReader(client),
+            // Paid delivery is not dispatched by this release, so nothing can
+            // have produced a paid subject to read. The unavailable reader
+            // keeps that honest: if one somehow appears it is refused by name
+            // rather than answered from the wrong endpoint.
+            ads: createUnavailableInsightsReader(),
+          };
+        },
         ingest: createCampaignMetricIngest(supabase as never),
         isCancelled: () => signal.aborted,
       },

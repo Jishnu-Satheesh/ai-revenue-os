@@ -29,6 +29,8 @@ type Row = Record<string, unknown>;
 
 type Filter = {
   eq(column: string, value: string): Filter & PromiseLike<Result>;
+  /** Batched lookup, so one sweep does not read one row at a time. */
+  in(column: string, values: readonly string[]): Filter & PromiseLike<Result>;
   is(column: string, value: null): Filter & PromiseLike<Result>;
   lte(column: string, value: string): Filter & PromiseLike<Result>;
   limit(count: number): Filter & PromiseLike<Result>;
@@ -42,6 +44,8 @@ export type CampaignExecutionPersistence = {
   from(
     table:
       | "campaign_exposures"
+      | "campaign_action_runs"
+      | "campaign_channel_actions"
       | "campaign_outcomes"
       | "campaign_approvals"
       | "integration_capability_grants"
@@ -307,6 +311,81 @@ const exposureSubjectSchema = z.object({
   published_at: z.string(),
 });
 
+const actionRunSchema = z.object({
+  id: z.string().uuid(),
+  organization_id: z.string().uuid(),
+  bundle_version_id: z.string().uuid(),
+  action_key: z.string().uuid(),
+});
+
+const channelActionSchema = z.object({
+  organization_id: z.string().uuid(),
+  bundle_version_id: z.string().uuid(),
+  action_key: z.string().uuid(),
+  channel: z.string().min(1),
+  spend_ceiling_minor: z.number().nullable(),
+});
+
+/**
+ * Whether each exposure was an ad or an organic post.
+ *
+ * The spend ceiling is the discriminator, because it is the only thing in the
+ * action that says money was ever allowed to move. A paid action carries one;
+ * an organic post cannot spend and has none.
+ *
+ * Worth knowing while reading this: `campaign_channel_actions.channel` only
+ * admits `instagram` and `facebook`, so no paid action shape exists in the
+ * schema yet and every row today resolves organic. The branch is written for
+ * what the column means rather than for what happens to be in it.
+ */
+async function readActionDelivery(
+  persistence: CampaignExecutionPersistence,
+  actionRunIds: readonly string[],
+): Promise<Map<string, { channel: string; delivery: "organic" | "paid" }>> {
+  const resolved = new Map<string, { channel: string; delivery: "organic" | "paid" }>();
+  if (actionRunIds.length === 0) return resolved;
+
+  const runsResult = await persistence
+    .from("campaign_action_runs")
+    .select("id, organization_id, bundle_version_id, action_key")
+    .in("id", [...new Set(actionRunIds)]);
+  if (runsResult.error) return resolved;
+
+  const runs = (runsResult.data ?? [])
+    .map((row) => actionRunSchema.safeParse(row))
+    .flatMap((parsed) => (parsed.success ? [parsed.data] : []));
+  if (runs.length === 0) return resolved;
+
+  // One read per bundle version rather than per run: a version's actions are
+  // read together, and two runs of the same version cannot then disagree.
+  const actions = new Map<string, { channel: string; spendCeilingMinor: number | null }>();
+  const versionsResult = await persistence
+    .from("campaign_channel_actions")
+    .select("organization_id, bundle_version_id, action_key, channel, spend_ceiling_minor")
+    .in("bundle_version_id", [...new Set(runs.map((run) => run.bundle_version_id))]);
+  if (versionsResult.error) return resolved;
+
+  for (const row of versionsResult.data ?? []) {
+    const parsed = channelActionSchema.safeParse(row);
+    if (!parsed.success) continue;
+    actions.set(`${parsed.data.bundle_version_id}:${parsed.data.action_key}`, {
+      channel: parsed.data.channel,
+      spendCeilingMinor: parsed.data.spend_ceiling_minor,
+    });
+  }
+
+  for (const run of runs) {
+    const action = actions.get(`${run.bundle_version_id}:${run.action_key}`);
+    if (!action) continue;
+    resolved.set(run.id, {
+      channel: action.channel,
+      delivery: action.spendCeilingMinor === null ? "organic" : "paid",
+    });
+  }
+
+  return resolved;
+}
+
 /** `YYYY-MM-DD`, which is the grain the collection window is expressed in. */
 function isoDate(value: string | Date): string {
   return new Date(value).toISOString().slice(0, 10);
@@ -334,7 +413,9 @@ export function createMetricSubjectReader(
       const at = now();
       const { data, error } = await persistence
         .from("campaign_exposures")
-        .select("organization_id, campaign_id, action_run_id, external_reference, published_at")
+        .select(
+          "organization_id, campaign_id, action_run_id, external_reference, published_at",
+        )
         .lte("metrics_eligible_at", at.toISOString())
         .limit(limit);
       if (error) throw new Error("Campaign exposures could not be read.");
@@ -365,20 +446,36 @@ export function createMetricSubjectReader(
         }
       }
 
+      // How each exposure was delivered, resolved through the action it ran.
+      // The exposure itself records only the provider's identifier, and that
+      // string looks the same whether it names an ad or a post — asking the
+      // wrong endpoint with it returns nothing, which would read as a measured
+      // nothing.
+      const actions = await readActionDelivery(
+        persistence,
+        rows.map((row) => row.action_run_id),
+      );
+
       return rows.flatMap((row) => {
         const organization = organizations.get(row.organization_id);
         // An organization whose currency or timezone cannot be read is skipped
         // rather than defaulted. A guessed currency would turn a spend figure
         // into a different number in the ledger.
         if (!organization) return [];
+
+        const action = actions.get(row.action_run_id);
+        // An exposure whose action cannot be read is skipped rather than
+        // guessed at. Defaulting to either endpoint would query the wrong one
+        // for half the rows it got wrong.
+        if (!action) return [];
+
         return [
           {
             organizationId: row.organization_id,
             campaignId: row.campaign_id,
             subject: { kind: "campaign_action" as const, actionRunId: row.action_run_id },
-            // The exposure does not record which channel published it, and
-            // inventing one would attribute a figure to a channel nobody chose.
-            channel: null,
+            channel: action.channel,
+            delivery: action.delivery,
             currency: organization.currency,
             timezone: organization.timezone,
             providerReference: row.external_reference,

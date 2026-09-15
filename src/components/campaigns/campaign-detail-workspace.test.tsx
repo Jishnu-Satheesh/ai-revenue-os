@@ -125,6 +125,7 @@ function renderWorkspace(
     <CampaignDetailWorkspace
       view={studioView(approvalFor())}
       phase={phaseFor()}
+      postPerformance={[]}
       organizationId={ORGANIZATION_ID}
       organizationName="Al Noor Kitchen"
       timeZone="Asia/Dubai"

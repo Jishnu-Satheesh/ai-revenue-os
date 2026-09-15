@@ -7463,3 +7463,64 @@ must be recorded **absent**, never zero.
   `campaigns-wiring.test.ts` on an untouched line).
 - No migration. No live Meta call was made and none can be until a controlled
   account exists.
+
+## 2026-09-15 — Organic results: report what Meta reports, with charts and tables
+
+**The decision, taken by the user.** Use whatever Meta actually reports rather
+than holding out for the keys the platform planned. The paid vocabulary —
+impressions, clicks, spend — does not survive contact with an organic post:
+Meta deprecated `impressions` for media created after 2024-07-02 (every post we
+publish), and clicks and spend do not exist for something nobody paid for.
+
+**What made this registrable at all.** `20260819110000` deliberately left reach
+out of shared vocabulary, saying unique-people counts "cannot be summed across
+days, and the registry's aggregation vocabulary has no way to say 'do not
+combine this'". Media insights fixes its period at `lifetime` and will not
+accept another, so these are running totals, not daily figures — and `last` says
+exactly the right thing. Each collection supersedes the previous reading.
+**If you meet this objection again, check whether the figure is a counter or a
+rate before concluding the vocabulary cannot express it.**
+
+Nine keys registered in `20260915180000` (**NOT PUSHED**). `likes`/`comments`
+rather than `total_likes`/`total_comments`, because Meta's reference says the
+totals include promoted and boosted engagement — an organic post must not report
+a number inflated by advertising nobody bought. `views` is a reel metric and is
+absent; so is any key for `impressions`.
+
+**A wrong-endpoint bug caught before it shipped.** `collect-metrics` called
+`readAdInsights({ adId: subject.providerReference })` for every subject, but an
+organic exposure's provider reference is a **media id**. That would have queried
+the ads edge with a post id, returned nothing, and recorded it as a measured
+nothing. Subjects now carry `delivery`, resolved through
+`campaign_action_runs` → `campaign_channel_actions`; the spend ceiling is the
+discriminator, because it is the only column that says money was ever allowed to
+move. No migration was needed for that routing.
+
+**Readers now resolve per organization**, the same way the Tool Gateway resolves
+an adapter, and for the same reason: the sweep spans every tenant while a Meta
+credential belongs to one. A single shared reader would read one account and
+file its answers against everybody's posts.
+
+**UI.** `PostPerformance` renders a table per post (latest, change since first
+reading, last read) plus a line chart of the readings. The chart is
+`aria-hidden` and the table carries the meaning, matching the channels pattern.
+A gap renders "Not reported", never 0, and the line breaks rather than joining
+across it. One reading is refused as a trend. The heading says the figures are
+lifetime running totals, because reading one as a daily figure is the most
+likely misreading of that screen.
+
+- Claiming `supabase/migrations/20260915180000_*` + its pgTAP suite,
+  `src/modules/integrations/providers/meta/media-insights-reader.*` (new),
+  `src/workflows/campaigns/collect-metrics.*`,
+  `src/modules/campaigns/infrastructure/execution-readers.*` (delivery resolution, `in()` on the
+  narrow Filter port), `post-performance-reader.*` (new),
+  `src/components/campaigns/post-performance.*` (new), `campaign-results.tsx`,
+  `campaign-detail-workspace.*`, the campaign detail page, `src/trigger/campaigns.ts`, Spec 025.
+- Gates: 1650/1650 across components, modules, workflows, integrations, trigger and tool-gateway;
+  pgTAP 8/8 rehearsed against staging inside a rolled-back transaction; tsc exit 0; eslint clean on
+  touched files. One **pre-existing** purity error in the campaign detail page (`Date.now()` at what
+  is now line 154, present in HEAD at line 150) left alone.
+- **Browser: the empty state only.** Verified at 390px with a clean console. The populated table
+  and chart are covered by 8 component tests but **have not been seen in a browser**, because no
+  observation can exist until the migration is pushed and a real Meta account publishes something.
+  Whoever pushes should look at it with real data before calling the visual work done.

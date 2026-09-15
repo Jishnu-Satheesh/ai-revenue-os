@@ -9,6 +9,10 @@ import {
 } from "@/components/campaigns/learning-review";
 import { OutcomeProof, type OutcomeProofData } from "@/components/campaigns/outcome-proof";
 import {
+  PostPerformance,
+  type PostPerformanceSeries,
+} from "@/components/campaigns/post-performance";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -35,6 +39,7 @@ export function CampaignResults({
   timeZone,
   onDecideLearning,
   measurement,
+  postPerformance,
 }: Readonly<{
   outcome: OutcomeProofData | null;
   learningProposal: LearningProposalData | null;
@@ -49,9 +54,30 @@ export function CampaignResults({
     outcomeWindowDays: number;
     minimumEvidenceTier: string;
   } | null;
+  /**
+   * What the provider is reporting about each published post.
+   *
+   * Deliberately separate from the settled outcome above. These are the
+   * provider's own diagnostics and are never evidence of incremental gross
+   * profit (ADR 0019); the verdict is, and conflating them would let a busy
+   * post read as a profitable one.
+   *
+   * `null` means the figures could not be read, which is not the same as none
+   * having been collected.
+   */
+  postPerformance: readonly PostPerformanceSeries[] | null;
 }>) {
   return (
     <div className="flex flex-col gap-6">
+      {postPerformance === null ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          The figures Instagram reports could not be read just now. Nothing here says a post did
+          badly — it says we could not ask.
+        </p>
+      ) : (
+        <PostPerformance series={postPerformance} timeZone={timeZone} />
+      )}
+
       <section className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold">Result</h2>

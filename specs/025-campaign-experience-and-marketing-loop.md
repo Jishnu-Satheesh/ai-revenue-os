@@ -347,6 +347,18 @@ immutable-history guards and bounded indexes. All changes are additive and forwa
   configuration with no default, because how many times to retry is a numeric operating limit
   (D06). Post-approval creative work reuses `campaign_generation_runs` with
   added proposal and context binding; no competing generation queue is created.
+- **Organic results (C07).** An organic post is measured with what Instagram reports about it,
+  under Instagram's own names, not with the paid delivery vocabulary. `impressions` is deprecated
+  for media created after 2024-07-02 — every post this platform publishes — and neither `reach`
+  (unique people) nor `views` (plays) carries its meaning, so nothing is mapped onto it. The
+  registered keys are `instagram.post_reach`, `_likes`, `_comments`, `_saved`, `_shares`,
+  `_total_interactions`, `_profile_visits`, `_profile_activity` and `_reposts`. `likes` and
+  `comments` are used rather than `total_likes`/`total_comments`, which Meta documents as including
+  promoted and boosted engagement. Every key aggregates as `last`: the media insights endpoint fixes
+  its period at `lifetime`, so each collection supersedes the previous reading and nothing is ever
+  summed. `delivery.clicks` and `delivery.spend` do not exist for an organic post and are recorded
+  **absent**, never zero. These are diagnostics under ADR 0019 and are never evidence of incremental
+  gross profit.
 - **Deliverables (C04).** `campaign_deliverables`, `campaign_deliverable_versions`,
   `campaign_deliverable_reviews`. Columns cover organization and campaign identity, composite tenant
   links to the exact bundle version, direction, optional creative variant, poster render or explicit

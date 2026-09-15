@@ -23,6 +23,10 @@ import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { toGeneration } from "@/modules/campaigns/application/studio-view";
 import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
+import {
+  readCampaignPostPerformance,
+  type PostPerformancePersistence,
+} from "@/modules/campaigns/infrastructure/post-performance-reader";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 import { readStudioView } from "@/modules/campaigns/infrastructure/studio-reader";
 import { createCampaignVariantStore } from "@/modules/campaigns/infrastructure/variant-repository";
@@ -149,6 +153,22 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
     timeZone: organization.default_timezone,
   }).format(new Date(view.versions.find((entry) => entry.isCurrent)?.createdAt ?? Date.now()));
 
+  // Read on the caller's own session, so row level security decides what this
+  // member sees. A failed read becomes null rather than an empty list: "we
+  // could not ask" and "nothing was reported" must not look the same.
+  const postPerformance = await readCampaignPostPerformance(
+    context.supabase as unknown as PostPerformancePersistence,
+    { organizationId: context.organizationId, campaignId: resolved.campaignId },
+  )
+    .then((series) =>
+      series.map((entry) => ({
+        actionRunId: entry.actionRunId,
+        postLabel: postLabelFor(entry.channel, entry.placement),
+        points: entry.points,
+      })),
+    )
+    .catch(() => null);
+
   const phase = campaignPhase({
     state: view.state,
     hasVersion: true,
@@ -166,6 +186,7 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
       <CampaignDetailWorkspace
         view={view}
         phase={phase}
+        postPerformance={postPerformance}
         organizationId={context.organizationId}
         organizationName={organization.name}
         timeZone={organization.default_timezone}
@@ -557,3 +578,18 @@ function tallyOf(deliverables: readonly ReviewableDeliverable[]): DeliverableTal
   };
 }
 
+/**
+ * What to call a published post on screen.
+ *
+ * Channel and placement rather than the creative's title, because these
+ * readings belong to the action that actually went out. An action whose row
+ * cannot be read is named as unknown rather than given a plausible label.
+ */
+function postLabelFor(channel: string | null, placement: string | null): string {
+  if (channel === null || placement === null) return "A published post";
+  return `${sentence(channel)} · ${placement.replace(/_/g, " ")}`;
+}
+
+function sentence(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}

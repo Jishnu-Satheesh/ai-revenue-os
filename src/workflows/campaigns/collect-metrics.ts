@@ -7,6 +7,10 @@ import type {
   CampaignMetricSubject,
 } from "@/modules/campaigns/infrastructure/metric-ingest";
 import {
+  ORGANIC_POST_METRIC_KEYS,
+  type MetaMediaInsightsReader,
+} from "@/modules/integrations/providers/meta/media-insights-reader";
+import {
   DELIVERY_METRIC_KEYS,
   type MetaInsightsReader,
 } from "@/modules/integrations/providers/meta/insights-reader";
@@ -44,6 +48,15 @@ export type MetricCollectionSubject = {
   campaignId: string;
   subject: CampaignMetricSubject;
   channel: string | null;
+  /**
+   * How this went out, which decides what can be asked about it.
+   *
+   * An ad reports delivery per day against money spent; an organic post reports
+   * engagement as a lifetime running total and has no money in it. They are
+   * different endpoints keyed by different identifiers, so a subject that could
+   * not say which it was would have to be guessed at.
+   */
+  delivery: "organic" | "paid";
   /** The account currency, for converting a decimal spend into minor units. */
   currency: string;
   /** The timezone day boundaries are computed in. */
@@ -63,6 +76,19 @@ export type MetricsGrantReader = {
   canRead(organizationId: string): Promise<boolean>;
 };
 
+/**
+ * The two endpoints a campaign's results can come from.
+ *
+ * Kept together because they answer for the same organization with the same
+ * credential, and apart because they are genuinely different questions: `ads`
+ * reports delivery per day against money spent, `media` reports engagement as a
+ * lifetime running total with no money in it.
+ */
+export type CampaignMetricReaders = {
+  ads: MetaInsightsReader;
+  media: MetaMediaInsightsReader;
+};
+
 export type CollectOutcome =
   | { result: "collected"; points: number }
   | { result: "blocked"; reasonCode: "meta.metrics_capability_blocked" }
@@ -72,7 +98,15 @@ export type CollectOutcome =
 export type CollectMetricsDependencies = {
   subjects: MetricSubjectReader;
   grants: MetricsGrantReader;
-  reader: MetaInsightsReader;
+  /**
+   * This organization's readers, or null when it has no usable connection.
+   *
+   * Resolved per organization for the same reason the Tool Gateway resolves an
+   * adapter per organization: this sweep spans every tenant while a provider
+   * credential belongs to exactly one. A single shared reader would read one
+   * tenant's account and file the answers against everybody's posts.
+   */
+  readersFor(organizationId: string): Promise<CampaignMetricReaders | null>;
   ingest: CampaignMetricIngest;
   isCancelled: () => boolean;
   now?: () => Date;
@@ -106,17 +140,44 @@ export async function collectCampaignMetrics(
       continue;
     }
 
-    const read = await dependencies.reader.readAdInsights(
-      {
-        adId: subject.providerReference,
-        since: subject.since,
-        until: subject.until,
-        currency: subject.currency,
-        timezone: subject.timezone,
-        metricKeys: DELIVERY_METRIC_KEYS,
-      },
-      signal,
-    );
+    const readers = await dependencies.readersFor(subject.organizationId);
+    if (!readers) {
+      // The grant usually catches this first. This is the narrower case where
+      // permission exists but the connection behind it does not resolve, and it
+      // is still a blocked outcome rather than a failure: nothing went wrong.
+      outcomes.push({
+        subject,
+        outcome: { result: "blocked", reasonCode: "meta.metrics_capability_blocked" },
+      });
+      continue;
+    }
+
+    const read =
+      subject.delivery === "organic"
+        ? await readers.media.readMediaInsights(
+            {
+              // An organic exposure's provider reference is the post's own
+              // media id. The ads edge would not recognise it.
+              mediaId: subject.providerReference,
+              // A lifetime total has no window of its own, so the reading is
+              // filed under the day it was taken.
+              observedOn: subject.until,
+              timezone: subject.timezone,
+              metricKeys: ORGANIC_POST_METRIC_KEYS,
+            },
+            signal,
+          )
+        : await readers.ads.readAdInsights(
+            {
+              adId: subject.providerReference,
+              since: subject.since,
+              until: subject.until,
+              currency: subject.currency,
+              timezone: subject.timezone,
+              metricKeys: DELIVERY_METRIC_KEYS,
+            },
+            signal,
+          );
 
     if (read.outcome === "unknown") {
       outcomes.push({ subject, outcome: { result: "unknown" } });

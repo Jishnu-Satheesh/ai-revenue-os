@@ -35,6 +35,10 @@ function persistence(options: {
           filters.push({ table, column, value });
           return chain;
         },
+        in(column: string, value: readonly string[]) {
+          filters.push({ table, column, value });
+          return chain;
+        },
         is(column: string, value: null) {
           filters.push({ table, column, value });
           return chain;
@@ -298,10 +302,31 @@ describe("createMetricSubjectReader", () => {
 
   const organization = { base_currency: "AED", default_timezone: "Asia/Dubai" };
 
+  const BUNDLE_VERSION = "e0000000-0000-4000-8000-0000000000b1";
+  const ACTION_KEY = "e0000000-0000-4000-8000-0000000000a1";
+
+  const actionRun = {
+    id: exposure.action_run_id,
+    organization_id: ORGANIZATION_ID,
+    bundle_version_id: BUNDLE_VERSION,
+    action_key: ACTION_KEY,
+  };
+
+  /** No spend ceiling: nothing could ever have been paid for this. */
+  const organicAction = {
+    organization_id: ORGANIZATION_ID,
+    bundle_version_id: BUNDLE_VERSION,
+    action_key: ACTION_KEY,
+    channel: "instagram",
+    spend_ceiling_minor: null,
+  };
+
   it("offers a published action as a metric subject, with the day window it covers", async () => {
     const { reader } = subjectReader({
       campaign_exposures: [exposure],
       organizations: [organization],
+      campaign_action_runs: [actionRun],
+      campaign_channel_actions: [organicAction],
     });
 
     expect(await reader.listDue(50)).toEqual([
@@ -309,7 +334,8 @@ describe("createMetricSubjectReader", () => {
         organizationId: ORGANIZATION_ID,
         campaignId: CAMPAIGN_A,
         subject: { kind: "campaign_action", actionRunId: exposure.action_run_id },
-        channel: null,
+        channel: "instagram",
+        delivery: "organic",
         currency: "AED",
         timezone: "Asia/Dubai",
         providerReference: "post-1",
@@ -317,6 +343,34 @@ describe("createMetricSubjectReader", () => {
         until: "2026-09-06",
       },
     ]);
+  });
+
+  it("calls an action with a spend ceiling paid", async () => {
+    const { reader } = subjectReader({
+      campaign_exposures: [exposure],
+      organizations: [organization],
+      campaign_action_runs: [actionRun],
+      campaign_channel_actions: [{ ...organicAction, spend_ceiling_minor: 50_000 }],
+    });
+
+    // The ceiling is the only thing in the action that says money was ever
+    // allowed to move, which is what separates an ad from a post.
+    const [subject] = await reader.listDue(50);
+    expect(subject?.delivery).toBe("paid");
+  });
+
+  it("skips an exposure whose action cannot be read at all", async () => {
+    const { reader } = subjectReader({
+      campaign_exposures: [exposure],
+      organizations: [organization],
+      campaign_action_runs: [],
+      campaign_channel_actions: [],
+    });
+
+    // Defaulting to either endpoint would query the wrong one for every row it
+    // guessed wrong, and an empty answer from the wrong endpoint is
+    // indistinguishable from a real zero.
+    expect(await reader.listDue(50)).toEqual([]);
   });
 
   /**

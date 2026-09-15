@@ -23,6 +23,7 @@ import type {
   LearningProposalData,
 } from "@/components/campaigns/learning-review";
 import type { OutcomeProofData } from "@/components/campaigns/outcome-proof";
+import type { PostPerformanceSeries } from "@/components/campaigns/post-performance";
 import type { VariantCard } from "@/components/campaigns/variant-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,7 @@ export function CampaignDetailWorkspace({
   allocationEvents,
   outcome,
   learningProposal,
+  postPerformance,
   canReviewOutputs,
   canPublish,
   canDecideLearning,
@@ -123,6 +125,11 @@ export function CampaignDetailWorkspace({
   allocationEvents: readonly AllocationLedgerEvent[];
   outcome: OutcomeProofData | null;
   learningProposal: LearningProposalData | null;
+  /**
+   * The provider's own figures per published post, or null when they could not
+   * be read. Null is a different statement from an empty list.
+   */
+  postPerformance: readonly PostPerformanceSeries[] | null;
   /** `campaign.approve`: may record a verdict on one finished output. */
   canReviewOutputs: boolean;
   /** `campaign.publish`: may authorize a publication. Deliberately separate. */
@@ -417,6 +424,7 @@ export function CampaignDetailWorkspace({
             canDecideLearning={canDecideLearning}
             timeZone={timeZone}
             onDecideLearning={decideLearning}
+            postPerformance={postPerformance}
             measurement={{
               primaryMetricKey: view.measurement.primaryMetricKey,
               outcomeWindowDays: view.measurement.outcomeWindowDays,
