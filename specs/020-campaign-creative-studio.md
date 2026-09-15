@@ -142,6 +142,11 @@ specification does not weaken it.
 
 - A deterministic compositor: plate plus text and logo layers to a final poster, in the exact pixel
   dimensions each placement requires.
+  The **logo layer is not implemented**, and `logoSlot` stays null on every seeded template.
+  [ADR 0059](../adrs/0059-the-brand-logo-is-conditioned-not-composited.md) records the decision to
+  supply the organization's mark to the image model as a `brand_mark` conditioning reference
+  instead of compositing the file: a generated logo is therefore an approximation, is checked at
+  review, and is never described as exact. A later decision to composite would supersede that ADR.
 - Vendored fonts covering Latin, Malayalam and Arabic, pinned by version and content hash.
 - Correct shaping and bidirectional layout, including RTL Arabic and Malayalam conjuncts.
 - A glyph-coverage check that refuses before rendering rather than after.

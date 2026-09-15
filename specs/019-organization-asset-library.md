@@ -179,6 +179,9 @@ there was no offer to place on a poster in the first place.
 ### 5.1 In scope
 
 - A single Asset Library page with Creative History, Products & Subjects, and Brand Kit tabs.
+- A Brand Guidelines tab, added by [Spec 026](026-brand-identity.md): the organization's canonical
+  logo and its structured brand rules. It selects from Brand Kit rather than uploading, so no new
+  intake path exists and the images-only guarantee this library rests on is untouched.
 - Creative History folders (one optional nested level), immutable design versions, design-level
   reviews, confirmed metadata, rights and qualified performance evidence.
 - An append-only human verdict record over Creative History versions, carrying mandatory reason
