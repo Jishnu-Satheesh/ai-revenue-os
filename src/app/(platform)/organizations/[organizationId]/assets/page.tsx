@@ -98,6 +98,7 @@ export default async function AssetsPage({ params }: PageProps) {
         canManageSubjects={hasOrganizationPermission(role, "subject.manage")}
         canManageAssets={hasOrganizationPermission(role, "asset.manage")}
         canReviewAssets={hasOrganizationPermission(role, "asset.review")}
+        canManageBrand={hasOrganizationPermission(role, "brand.manage")}
       />
     </div>
   );

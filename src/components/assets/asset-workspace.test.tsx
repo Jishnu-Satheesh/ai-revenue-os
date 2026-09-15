@@ -159,6 +159,7 @@ function chooseUploadFile() {
 function renderWorkspace(overrides: {
   canManageAssets?: boolean;
   canReviewAssets?: boolean;
+  canManageBrand?: boolean;
   references?: readonly LibraryReference[];
   subjects?: readonly SubjectRow[];
 } = {}) {
@@ -174,6 +175,7 @@ function renderWorkspace(overrides: {
         canManageSubjects={overrides.canManageAssets ?? false}
         canManageAssets={overrides.canManageAssets ?? false}
         canReviewAssets={overrides.canReviewAssets ?? false}
+        canManageBrand={overrides.canManageBrand ?? false}
       />
     </QueryClientProvider>,
   );
@@ -376,5 +378,22 @@ describe("Creative History upload: bytes transferred is not the same as usable",
     });
     expect(reserveCalls).toHaveLength(1);
     expect(mocks.storageUpload).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("AssetWorkspace, Brand Guidelines tab", () => {
+  it("offers the tab to a member who cannot manage the brand, without edit controls", async () => {
+    mockEmptyCreativeHistory();
+    mocks.searchParams = new URLSearchParams("tab=brand-guidelines");
+    renderWorkspace({ canManageAssets: true, canManageBrand: false });
+
+    // Reading the rules in force is a membership question; changing them is
+    // not. Hiding the tab entirely would leave an operator unable to see what
+    // generation is being held to.
+    expect(await screen.findByRole("tab", { name: /brand guidelines/i })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/not guaranteed to reproduce it/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: /save brand rules/i })).not.toBeInTheDocument();
   });
 });

@@ -33,6 +33,7 @@ import {
 } from "@/components/assets/asset-upload";
 import { AssetLibraryGrid, type LibraryReference } from "@/components/assets/asset-library-grid";
 import { AssetReviewForm, type AssetReviewSubmission } from "@/components/assets/asset-review-form";
+import { BrandGuidelinesPanel } from "@/components/assets/brand-guidelines-panel";
 import {
   creativeHistoryRefusalLabel,
   creativeHistoryRightsChoice,
@@ -95,8 +96,8 @@ import { ImageOff } from "lucide-react";
  * defense in depth against exactly the failure mode the prototype hit.
  */
 
-type Tab = "history" | "products" | "brand";
-const TABS: readonly Tab[] = ["history", "products", "brand"];
+type Tab = "history" | "products" | "brand" | "brand-guidelines";
+const TABS: readonly Tab[] = ["history", "products", "brand", "brand-guidelines"];
 type Verdict = "all" | "approved" | "rejected" | "unreviewed";
 const VERDICTS: readonly Verdict[] = ["all", "approved", "rejected", "unreviewed"];
 const CREATIVE_TYPES = ["poster", "flyer", "social_post", "story", "carousel", "banner"] as const;
@@ -548,6 +549,8 @@ type AssetWorkspaceProps = {
   canManageSubjects: boolean;
   canManageAssets: boolean;
   canReviewAssets: boolean;
+  /** `brand.manage`, which sits above the operator line. */
+  canManageBrand: boolean;
 };
 
 export function AssetWorkspace({
@@ -559,6 +562,7 @@ export function AssetWorkspace({
   canManageSubjects,
   canManageAssets,
   canReviewAssets,
+  canManageBrand,
 }: AssetWorkspaceProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -569,6 +573,10 @@ export function AssetWorkspace({
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const tab: Tab = TABS.includes(searchParams.get("tab") as Tab) ? (searchParams.get("tab") as Tab) : "history";
+  // Brand Guidelines needs the same logo uploader as Brand Kit: somebody
+  // choosing their mark and finding none there has to be able to add one
+  // without leaving the tab. The product-and-venue uploader would be wrong.
+  const logoUpload = tab === "brand" || tab === "brand-guidelines";
   const folderSelection: CreativeFolderSelection = folderSelectionFromValue(searchParams.get("folder") ?? "all");
   const verdict: Verdict = VERDICTS.includes(searchParams.get("verdict") as Verdict)
     ? (searchParams.get("verdict") as Verdict)
@@ -657,7 +665,11 @@ export function AssetWorkspace({
             <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>
-                  {tab === "history" ? "Upload designs" : tab === "brand" ? "Upload brand assets" : "Upload a photo"}
+                  {tab === "history"
+                    ? "Upload designs"
+                    : logoUpload
+                      ? "Upload brand assets"
+                      : "Upload a photo"}
                 </DialogTitle>
               </DialogHeader>
               {tab === "history" ? (
@@ -668,7 +680,7 @@ export function AssetWorkspace({
                   defaultFolderId={folderSelection.kind === "folder" ? folderSelection.folderId : null}
                   onSettled={() => void invalidateCreativeHistoryQueries(queryClient, organizationId)}
                 />
-              ) : tab === "brand" ? (
+              ) : logoUpload ? (
                 <BrandAssetUploadDialog
                   organizationId={organizationId}
                   canManage={canManageAssets}
@@ -694,6 +706,7 @@ export function AssetWorkspace({
           <TabsTrigger value="history">Creative History</TabsTrigger>
           <TabsTrigger value="products">Products &amp; Subjects</TabsTrigger>
           <TabsTrigger value="brand">Brand Kit</TabsTrigger>
+          <TabsTrigger value="brand-guidelines">Brand Guidelines</TabsTrigger>
         </TabsList>
 
         <TabsContent value="history" className="flex flex-col gap-4 lg:flex-row">
@@ -870,6 +883,14 @@ export function AssetWorkspace({
                   )
                 : undefined
             }
+          />
+        </TabsContent>
+
+        <TabsContent value="brand-guidelines">
+          <BrandGuidelinesPanel
+            organizationId={organizationId}
+            canManage={canManageBrand}
+            references={references}
           />
         </TabsContent>
       </Tabs>

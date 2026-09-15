@@ -54,11 +54,19 @@ export function BrandRulesField({
   value,
   onChange,
   onBlur,
+  showList = true,
 }: {
   id: string;
   value: unknown;
   onChange: (value: BrandRule[]) => void;
   onBlur?: () => void;
+  /**
+   * False where the caller already renders the rules itself. The Brand
+   * Guidelines tab groups them by strength with the restricted terms, and a
+   * second copy underneath would leave an operator unsure which list is the
+   * one actually in force.
+   */
+  showList?: boolean;
 }) {
   const rules = readRules(value);
   const [text, setText] = useState("");
@@ -142,7 +150,7 @@ export function BrandRulesField({
         </div>
       </div>
 
-      {rules.length > 0 ? (
+      {showList && rules.length > 0 ? (
         <ul className="flex flex-col gap-1.5">
           {rules.map((rule, index) => (
             <li
