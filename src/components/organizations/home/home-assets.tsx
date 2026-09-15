@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Images } from "lucide-react";
 
+import { AssetThumbFigure } from "@/components/assets/asset-thumb-figure";
 import { HomePreviewImage } from "@/components/organizations/home/home-preview-image";
 import { formatInstant } from "@/components/organizations/home/home-dates";
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
@@ -147,9 +148,17 @@ export function HomeAssets({
                 className={styles.thumb}
               >
                 <span className={styles.thumbImage}>
-                  <HomePreviewImage
-                    image={item.image}
-                    frameClassName={styles.coverFallback}
+                  <AssetThumbFigure
+                    src={item.image?.url ?? null}
+                    alt={item.image?.alt ?? item.label}
+                    width={item.image?.width}
+                    height={item.image?.height}
+                    fallback={
+                      <HomePreviewImage
+                        image={null}
+                        frameClassName={styles.coverFallback}
+                      />
+                    }
                   />
                 </span>
                 <span className={styles.thumbMeta}>

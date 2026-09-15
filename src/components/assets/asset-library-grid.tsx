@@ -1,6 +1,7 @@
 import { ImageOff } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
+import { AssetThumbFigure } from "@/components/assets/asset-thumb-figure";
 import {
   conditioningRoleLabel,
   ownershipChoice,
@@ -96,27 +97,22 @@ function VerdictBadge({ reference }: { reference: LibraryReference }) {
  * which reads as a damaged asset rather than a preview that expired.
  */
 function ReferencePreview({ reference }: { reference: LibraryReference }) {
-  const [failed, setFailed] = useState(false);
-  const showImage = reference.previewUrl !== null && !failed;
-
   return (
     <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md bg-muted/50">
-      {showImage ? (
-        /* eslint-disable-next-line @next/next/no-img-element -- a session-signed
-           private URL, not a static asset the image optimizer can fetch. */
-        <img
-          src={reference.previewUrl ?? ""}
-          alt={reference.label}
-          loading="lazy"
-          className="size-full object-contain"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <span className="flex flex-col items-center gap-1.5 p-3 text-center text-xs text-muted-foreground">
-          <ImageOff className="size-5" aria-hidden="true" />
-          Preview unavailable
-        </span>
-      )}
+      <AssetThumbFigure
+        src={reference.previewUrl}
+        alt={reference.label}
+        imgClassName="size-full object-contain"
+        // The grid never re-mints a URL in place: keep the prior sticky flag
+        // so this renders the exact prior DOM through the shared figure.
+        forgetFailureOnSrcChange={false}
+        fallback={
+          <span className="flex flex-col items-center gap-1.5 p-3 text-center text-xs text-muted-foreground">
+            <ImageOff className="size-5" aria-hidden="true" />
+            Preview unavailable
+          </span>
+        }
+      />
     </div>
   );
 }

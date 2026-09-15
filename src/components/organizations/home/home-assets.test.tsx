@@ -175,6 +175,45 @@ describe("HomeAssets keyboard and dialog", () => {
   });
 });
 
+describe("HomeAssets gallery thumb shell (C1 parity pin)", () => {
+  it("renders title, source kind and review state below the image with a growing tile", () => {
+    renderGallery([asset()]);
+
+    const thumbnail = screen.getByRole("button", {
+      name: /ramadan push · ramadan-hero · iftar spread/i,
+    });
+    const image = screen.getByRole("img", { name: "Ramadan poster render" });
+    expect(image).toHaveAttribute("src", "https://signed.example/poster-1");
+    expect(image).toHaveAttribute("loading", "lazy");
+
+    // The image lives in the fixed-height overflow-hidden band; the meta must
+    // NOT be inside that node (that was the clipping trap) but after it, so
+    // the tile grows instead of clipping. Sizing itself is a CSS rule
+    // citation, not a jsdom observable: .thumbImage is the only fixed height
+    // (140px base, 143px at >=960), .thumb carries min-height only.
+    const band = image.parentElement;
+    expect(band).not.toBeNull();
+    const label = screen.getByText("Ramadan Push · ramadan-hero · iftar spread");
+    expect(band?.contains(label)).toBe(false);
+    expect(thumbnail.contains(label)).toBe(true);
+    expect((band?.compareDocumentPosition(label) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(thumbnail.textContent ?? "").toContain("Finished poster render");
+    expect(thumbnail.textContent ?? "").toContain("Review not recorded");
+  });
+
+  it("shows the shared fallback without losing labels when the thumbnail image fails", () => {
+    renderGallery([asset()]);
+
+    fireEvent.error(screen.getByRole("img", { name: "Ramadan poster render" }));
+
+    expect(screen.queryByRole("img", { name: "Ramadan poster render" })).toBeNull();
+    expect(screen.getByText("Preview unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /ramadan push · ramadan-hero · iftar spread/i }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("HomeAssets states", () => {
   it("warns on partial loads while keeping survivors", () => {
     renderGallery([asset()], true);
