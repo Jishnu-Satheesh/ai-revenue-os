@@ -23,6 +23,7 @@ const mocks = {
 };
 
 import { OrganizationHome } from "@/components/organizations/home/organization-home";
+import styles from "@/components/organizations/home/organization-home.module.css";
 import type {
   HomeActivityItem,
   HomeAsset,
@@ -619,5 +620,95 @@ describe("OrganizationHome header", () => {
     render(<OrganizationHome view={view({ logo: null })} />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Al Noor Kitchen");
     expect(screen.queryByRole("img", { name: /logo/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("OrganizationHome polish (FIX E)", () => {
+  it("treats the attention count as a warning-tone pill with exact N shown text", () => {
+    render(<OrganizationHome view={view()} />);
+    const pill = screen.getByText("1 shown");
+    expect(pill.className).toContain("bg-warning/18");
+  });
+
+  it("closes the composition with the home footer line", () => {
+    const { container } = render(<OrganizationHome view={view()} />);
+    const footer = container.querySelector("footer");
+    expect(footer?.textContent).toBe(
+      "Organization home · the place to return to your work.",
+    );
+  });
+
+  it("captions the destinations and activity headers with the reference copy", () => {
+    render(<OrganizationHome view={view()} />);
+    expect(screen.getByText("Explore your workspace")).toBeInTheDocument();
+    expect(
+      screen.getByText("Campaign, asset and organization updates"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows View goals with an onward arrow for a single saved goal", async () => {
+    const user = userEvent.setup();
+    render(<OrganizationHome view={view()} />);
+    const trigger = screen.getByRole("button", { name: /view goals/i });
+    expect(trigger.querySelector("svg.lucide-arrow-right")).not.toBeNull();
+    // One goal is not "plus more": the overflow line stays multi-goal only.
+    expect(screen.queryByText(/plus .* more/i)).not.toBeInTheDocument();
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Grow orders")).toBeInTheDocument();
+  });
+
+  it("keeps a single branch goal reachable when no org focus is set", async () => {
+    const user = userEvent.setup();
+    render(
+      <OrganizationHome
+        view={view({
+          goals: [
+            goal({
+              id: "33333333-3333-4333-8333-333333333332",
+              name: "Deira sprint",
+              target: "200 orders",
+              scopeLabel: "Deira",
+            }),
+          ],
+          focusGoalId: null,
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /view goals/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Deira sprint")).toBeInTheDocument();
+  });
+
+  it("shows no View goals trigger when no goals are on file", () => {
+    render(<OrganizationHome view={view({ goals: [], focusGoalId: null })} />);
+    expect(
+      screen.queryByRole("button", { name: /view goals/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("insets only the asset dialog, leaving locations/goals dialogs on shared padding", async () => {
+    const user = userEvent.setup();
+    const assetClass = styles.assetDialogContent;
+    expect(assetClass).toBeTruthy();
+    render(<OrganizationHome view={view()} />);
+    await user.click(
+      screen.getByRole("button", { name: /ramadan push · ramadan-hero/i }),
+    );
+    expect((await screen.findByRole("dialog")).className.split(" ")).toContain(
+      assetClass,
+    );
+    cleanup();
+    render(<OrganizationHome view={view()} />);
+    await user.click(screen.getByRole("button", { name: /2 active locations/i }));
+    expect((await screen.findByRole("dialog")).className.split(" ")).not.toContain(
+      assetClass,
+    );
+    cleanup();
+    render(<OrganizationHome view={view()} />);
+    await user.click(screen.getByRole("button", { name: /view goals/i }));
+    expect((await screen.findByRole("dialog")).className.split(" ")).not.toContain(
+      assetClass,
+    );
   });
 });

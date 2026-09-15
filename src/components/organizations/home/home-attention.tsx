@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type { HomeAttentionItem } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
 
@@ -24,9 +25,7 @@ export function HomeAttention({
         <div className={styles.sectionHead}>
           <h2 className={styles.railTitle}>For your attention</h2>
           {shown.length > 0 ? (
-            <span className={styles.caption}>
-              {shown.length} shown
-            </span>
+            <StatusBadge label={`${shown.length} shown`} tone="warning" />
           ) : null}
         </div>
 

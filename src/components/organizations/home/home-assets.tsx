@@ -176,10 +176,10 @@ export function HomeAssets({
       )}
 
       <Dialog open={dialogOpen} onOpenChange={handleOpenChange}>
-        <DialogContent className={styles.dialogContent}>
+        <DialogContent className={`${styles.dialogContent} ${styles.assetDialogContent}`}>
           {selected !== null ? (
             <>
-              <DialogHeader>
+              <DialogHeader className={styles.assetDialogHeader}>
                 <DialogTitle dir="auto">{selected.label}</DialogTitle>
                 <DialogDescription>
                   {selected.sourceLabel} · {selected.reviewLabel}

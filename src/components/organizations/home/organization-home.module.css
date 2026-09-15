@@ -546,6 +546,22 @@
   border-radius: 4px;
 }
 
+/* ------------------------------------------------------------------ footer */
+
+/* Composition footer: the prototype's first-half line only (its fixture
+   second half stays excluded per the parity ledger). Neutral muted caption
+   styling; sits after the .body grid, before the route's management surface.
+   The margin+padding stack on the body's 30px gap the same way the FIX D
+   section rules do — accepted, both values cited. */
+.footer {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
 /* ----------------------------------------------------------------- buttons */
 
 .homeButton {
@@ -563,6 +579,21 @@
 
 .dialogContent {
   max-width: 780px;
+}
+
+/* Asset dialog only: shadcn DialogContent ships p-4 (16px), which stacks with
+   .dialogGrid's own 24px to ~40px against the V09 24px inset. Zeroing the
+   outer padding here (plus the header/grid gap) lands the grid's 24px as the
+   true inset. Dedicated classes so the locations/goals dialogs — which render
+   header+list directly in DialogContent and depend on its padding — paint
+   exactly as before. */
+.assetDialogContent {
+  padding: 0;
+  gap: 0;
+}
+
+.assetDialogHeader {
+  padding: 20px 24px 0;
 }
 
 .dialogGrid {
@@ -602,6 +633,10 @@
 }
 
 @media (max-width: 639px) {
+  .assetDialogHeader {
+    padding: 16px 18px 0;
+  }
+
   .dialogGrid {
     grid-template-columns: 1fr;
     padding: 18px;

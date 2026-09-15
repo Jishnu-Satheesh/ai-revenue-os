@@ -114,9 +114,10 @@ export function HomeGoals({
     <section id="home-goals" aria-label="Your focus" className={styles.goals}>
       <div className={styles.sectionHead}>
         <h2 className={styles.railTitle}>Your focus</h2>
-        {goals.length > 1 ? (
+        {goals.length >= 1 ? (
           <Button type="button" variant="link" size="sm" onClick={() => setOpen(true)}>
             View goals
+            <ArrowRight aria-hidden="true" data-icon="inline-end" />
           </Button>
         ) : null}
       </div>
@@ -155,6 +156,8 @@ export function HomeGoals({
                 ? ` · By ${formatInstant(focus.deadline, timeZone)}`
                 : ""}
             </p>
+            {/* The header trigger opens from one goal up; this overflow
+                line only makes sense once a second goal exists. */}
             {goals.length > 1 ? (
               <p className={styles.meta}>
                 Plus {goals.length - 1} more —{" "}
@@ -218,6 +221,7 @@ export function HomeDestinations({
     <section id="home-destinations" aria-label="Around your business" className={styles.destinations}>
       <div className={styles.sectionHead}>
         <h2 className={styles.sectionTitle}>Around your business</h2>
+        <span className={styles.caption}>Explore your workspace</span>
       </div>
       <div className={styles.destGrid}>
         {destinations.map((destination) => {

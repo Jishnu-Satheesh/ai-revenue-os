@@ -44,6 +44,9 @@ export function OrganizationHome({ view }: Readonly<{ view: OrganizationHomeView
         <HomeDestinations destinations={view.destinations} />
         <HomeActivity items={view.activity} timeZone={view.timeZone} />
       </div>
+      <footer className={styles.footer}>
+        Organization home · the place to return to your work.
+      </footer>
     </div>
   );
 }

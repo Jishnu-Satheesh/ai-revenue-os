@@ -37,6 +37,7 @@ export function HomeActivity({
     <section id="home-activity" aria-label="Recent activity" className={styles.activity}>
       <div className={styles.sectionHead}>
         <h2 className={styles.sectionTitle}>Recent activity</h2>
+        <span className={styles.caption}>Campaign, asset and organization updates</span>
       </div>
       {rows.length === 0 ? (
         <p className={styles.emptyNote}>No recent activity to show.</p>
