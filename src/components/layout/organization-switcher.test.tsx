@@ -38,13 +38,14 @@ function respondWith(organizations: unknown) {
   );
 }
 
+afterEach(() => cleanup());
+
 describe("OrganizationSwitcher", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.push.mockReset();
     mocks.pathname = `/organizations/${currentId}/memory`;
   });
-  afterEach(() => cleanup());
 
   it("switches to the target organization's Overview", async () => {
     respondWith([
@@ -88,5 +89,63 @@ describe("OrganizationSwitcher", () => {
     openMenu(await screen.findByRole("button", { name: /Select organization/ }));
     expect(await screen.findByText(/organizations could not be loaded/i)).toBeInTheDocument();
     expect(screen.queryByText(/500/)).not.toBeInTheDocument();
+  });
+});
+
+describe("OrganizationSwitcher, the organization's own mark", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mocks.pathname = `/organizations/${currentId}/memory`;
+  });
+
+  function respondWithLogo(logo: { url: string; label: string } | null) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).endsWith("/brand")) {
+        return new Response(
+          JSON.stringify({ guidelines: { palette: {}, rules: [], restrictedTerms: [] }, logos: [], displayLogo: logo }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          organizations: [{ id: currentId, name: "Al Noor Kitchen", slug: "al-noor" }],
+        }),
+        { status: 200 },
+      );
+    });
+  }
+
+  it("shows the organization's own mark when one is set", async () => {
+    respondWithLogo({ url: "https://signed.example/logo.png", label: "Al Noor wordmark" });
+    renderSwitcher();
+
+    const mark = await screen.findByRole("img", { name: "Al Noor wordmark" });
+    expect(mark).toHaveAttribute("src", "https://signed.example/logo.png");
+  });
+
+  it("shows the platform's own glyph when no logo is set", async () => {
+    // Never a placeholder that looks like a brand nobody supplied.
+    respondWithLogo(null);
+    renderSwitcher();
+
+    await screen.findByText("Al Noor Kitchen");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the glyph rather than breaking the sidebar when the logo cannot be read", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).endsWith("/brand")) return new Response("{}", { status: 500 });
+      return new Response(
+        JSON.stringify({
+          organizations: [{ id: currentId, name: "Al Noor Kitchen", slug: "al-noor" }],
+        }),
+        { status: 200 },
+      );
+    });
+    renderSwitcher();
+
+    // A signing failure costs the logo and nothing else.
+    await screen.findByText("Al Noor Kitchen");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 });

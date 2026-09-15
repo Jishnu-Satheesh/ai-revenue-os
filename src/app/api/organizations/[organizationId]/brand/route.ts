@@ -17,6 +17,14 @@ import {
   createBrandIdentityAdapter,
   type BrandIdentityPersistence,
 } from "@/modules/brand/infrastructure/brand-identity-repository";
+import { resolveDisplayLogo } from "@/modules/brand/application/display-logo";
+import { createAssetLibraryService } from "@/modules/campaigns/application/asset-library-service";
+import {
+  createAssetLibraryRepository,
+  signBrandAssetPreviews,
+  type AssetLibraryPersistence,
+  type BrandAssetPreviewSigner,
+} from "@/modules/campaigns/infrastructure/asset-library-repository";
 
 /**
  * An organization's brand identity: its mark and the rules generation respects.
@@ -38,6 +46,46 @@ const brandManagerRoles = (
   Object.keys(organizationRolePermissions) as OrganizationRole[]
 ).filter((role) => hasOrganizationPermission(role, "brand.manage"));
 
+
+/**
+ * The signed, displayable mark — or null, for any of the several honest
+ * reasons there are not to show one.
+ *
+ * A failure here is swallowed deliberately and only here: the brand identity
+ * still loads, and the caller falls back to the platform's own glyph. Losing
+ * the whole panel because a preview would not sign would be a worse answer
+ * than losing the picture.
+ */
+async function readDisplayLogo(
+  context: Awaited<ReturnType<typeof getOrganizationContext>>,
+  logos: readonly { variant: "primary" | "dark"; brandAssetVersionId: string }[],
+) {
+  if (logos.length === 0) return null;
+  try {
+    const library = createAssetLibraryService({
+      store: createAssetLibraryRepository(context.supabase as unknown as AssetLibraryPersistence),
+    });
+    const references = await library.list({
+      organizationId: context.organizationId,
+      includeArchived: false,
+    });
+    const chosen = new Set(logos.map((logo) => logo.brandAssetVersionId));
+    const versions = references.filter((reference) =>
+      chosen.has(reference.brandAssetVersionId),
+    );
+    if (versions.length === 0) return null;
+
+    const signedUrls = await signBrandAssetPreviews(
+      context.supabase as unknown as BrandAssetPreviewSigner,
+      versions.map((version) => version.storagePath),
+      { organizationId: context.organizationId },
+    );
+    return resolveDisplayLogo({ logos, versions, signedUrls });
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ organizationId: string }> },
@@ -51,7 +99,14 @@ export async function GET(
         userId: context.user.id,
       }),
     );
-    return NextResponse.json(identity, { status: 200 });
+
+    // `displayLogo` is the mark the platform may actually draw, resolved
+    // against the library's own view of what is validated and unrejected. The
+    // sidebar takes this and nothing else: it has no way to tell a usable
+    // version from one a reviewer refused, and must not have to.
+    const displayLogo = await readDisplayLogo(context, identity.logos);
+
+    return NextResponse.json({ ...identity, displayLogo }, { status: 200 });
   } catch (error) {
     return apiErrorResponse(error);
   }
