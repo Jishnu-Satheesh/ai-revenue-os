@@ -400,6 +400,11 @@ select (public.create_research_project_keyed(
   'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 ) ->> 'projectId')::uuid as project_id;
 
+-- Temp tables are owned by the creating role: later service_role and
+-- session-user sections read this pin, so grant session-local reads.
+-- Harmless beyond this transaction (temp tables die with the session).
+grant select on pg_temp.ml_keyed to public;
+
 select extensions.ok(
   (select pg_catalog.count(*)::integer from pg_temp.ml_keyed) = 1,
   'a keyed one-time project creates'
@@ -887,7 +892,7 @@ select extensions.is(
   (select known_cost_micros_usd from public.growth_intelligence_monitoring_updates
    where organization_id = 'e7000000-0000-4000-8000-000000000201'::uuid
      and update_id = 'e7000000-0000-4000-8000-000000000601'::uuid),
-  1200,
+   1200::bigint,
   'erasure keeps the ledger totals it audited'
 );
 
@@ -947,8 +952,14 @@ reset role;
 
 -- Direct-DML refusal ----------------------------------------------------------------------
 
--- The guard triggers sit below the table grants, so these probes run as the
--- table owner: no session role holds a write grant by design.
+-- The guard triggers sit below the table grants, so these probes run as a
+-- signed-in role with no write grant (SELECT-only for authenticated): the
+-- runner session itself owns the tables and would sail past every grant
+-- check, proving nothing. (First staging run caught this: all six probes
+-- saw writes succeed or hit neighbor constraints instead of 42501.)
+
+set local role authenticated;
+set local request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000002';
 
 select extensions.throws_ok(
   $$ insert into public.growth_intelligence_monitoring_updates (
@@ -1010,6 +1021,8 @@ select extensions.throws_ok(
   '42501', null,
   'sessions without a write grant cannot forge reviews'
 );
+
+reset role;
 
 select * from extensions.finish();
 
