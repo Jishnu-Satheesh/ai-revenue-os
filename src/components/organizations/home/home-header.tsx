@@ -10,14 +10,12 @@ import styles from "@/components/organizations/home/organization-home.module.css
 
 /**
  * Saved-status wording for the context row. The active and onboarding states
- * carry prototype-attested sentence copy; archived follows the same saved
- * pattern, and anything else renders the saved value verbatim rather than an
- * invented label.
+ * carry prototype-attested sentence copy; anything else renders the saved
+ * value verbatim rather than an invented label.
  */
 function statusLabel(status: string): string {
   if (status === "active") return "Active organization";
   if (status === "draft_onboarding") return "Organization setup";
-  if (status === "archived") return "Archived organization";
   return status;
 }
 
