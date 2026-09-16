@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, Megaphone, Plus } from "lucide-react";
 
+import { resolveCampaignStateChip } from "@/components/campaigns/campaign-state-chip";
 import {
-  resolveCampaignStateChip,
   SharedCampaignCard,
   SharedCompactCampaignRow,
 } from "@/components/campaigns/shared-campaign-card";

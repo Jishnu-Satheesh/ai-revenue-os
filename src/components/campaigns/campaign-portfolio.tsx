@@ -5,8 +5,8 @@ import Link from "next/link";
 import { ArrowRight, Images, LayoutGrid, List, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { resolveCampaignStateChip } from "@/components/campaigns/campaign-state-chip";
 import {
-  resolveCampaignStateChip,
   SharedCampaignCard,
   SharedCompactCampaignRow,
 } from "@/components/campaigns/shared-campaign-card";
