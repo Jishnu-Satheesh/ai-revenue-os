@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Hourglass } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -31,6 +31,7 @@ import { Separator } from "@/components/ui/separator";
 import type {
   RevenueScenario,
   RevenueScenarioReady,
+  RevenueScenarioUnquantified,
   RevenueHorizonPoint,
 } from "@/domain/organizations/revenue-scenario";
 import {
@@ -113,6 +114,49 @@ function ActionLink({ href, title }: { href: string | null; title: string }) {
     <Link href={href} className={styles.inlineLink}>
       {title} <ArrowRight aria-hidden="true" />
     </Link>
+  );
+}
+
+/**
+ * An unquantified rail row: alive like the quantified rows but honest about
+ * having no number. The header is a real button with aria-expanded; tapping
+ * toggles the exact server reason inline with an instant show/hide (no
+ * animation, so still under prefers-reduced-motion by construction). The
+ * title keeps its ActionLink behavior, and the figure line is always the
+ * muted dashed "Estimate pending" placeholder — never a number.
+ */
+function UnquantifiedRow({ action }: { action: RevenueScenarioUnquantified }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <li className={styles.revenueUnquantifiedRow}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+        className={styles.revenueUnquantifiedHeader}
+      >
+        <Hourglass aria-hidden="true" className={styles.revenueUnquantifiedIcon} />
+        <span className={styles.revenueUnquantifiedBody}>
+          {action.href ? (
+            <span
+              className={styles.revenueUnquantifiedTitle}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <ActionLink href={action.href} title={action.title} />
+            </span>
+          ) : (
+            <ActionLink href={action.href} title={action.title} />
+          )}
+          <span className={styles.revenueUnquantifiedMeta}>
+            <StatusBadge label={action.status} tone="neutral" />
+          </span>
+          <span className={`${styles.revenueFigureSub} ${styles.revenueUnquantifiedPending}`}>
+            Estimate pending
+          </span>
+        </span>
+      </button>
+      {expanded ? <p className={styles.revenueUnquantifiedReason}>{action.reason}</p> : null}
+    </li>
   );
 }
 
@@ -470,12 +514,7 @@ export function HomeRevenue({
                 <h3 className={styles.revenueSideTitle}>Not yet quantified</h3>
                 <ul className={styles.revenueActionList}>
                   {unquantified.slice(0, 3).map((action) => (
-                    <li key={action.actionId}>
-                      <ActionLink href={action.href} title={action.title} />
-                      <p className={styles.revenueActionMeta}>
-                        <StatusBadge label={action.status} tone="neutral" /> {action.reason}
-                      </p>
-                    </li>
+                    <UnquantifiedRow key={action.actionId} action={action} />
                   ))}
                 </ul>
                 <Button onClick={proposeEstimates} disabled={pending} variant="secondary">

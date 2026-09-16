@@ -246,6 +246,39 @@ describe("HomeRevenue", () => {
     );
   });
 
+  it("keeps unquantified reasons collapsed with an Estimate pending placeholder", () => {
+    render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
+
+    expect(screen.queryByText(/no cited monetary basis/)).toBeNull();
+    const toggle = screen.getByRole("button", { name: /Unpriced idea/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByText("Estimate pending")).toBeTruthy();
+  });
+
+  it("reveals the exact server reason on tap and collapses on second tap", () => {
+    render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
+
+    const toggle = screen.getByRole("button", { name: /Unpriced idea/ });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      screen.getByText(
+        "Not yet quantified: no cited monetary basis with a supported response range yet.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/no cited monetary basis/)).toBeNull();
+  });
+
+  it("renders plain title text for unquantified rows without href", () => {
+    render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
+
+    const title = screen.getByText("Unpriced idea");
+    expect(title.tagName).toBe("SPAN");
+    expect(title.closest("a")).toBeNull();
+  });
+
   it("keeps View more visible when no recommended actions are on file", () => {
     const empty: OrganizationHomeView["revenue"] = {
       status: "ready",

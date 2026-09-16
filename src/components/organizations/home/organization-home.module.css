@@ -1072,6 +1072,86 @@
   gap: 6px;
 }
 
+/* Not-yet-quantified rail rows: card-like as the campaign cards, but honest
+   about having no number. Hover mirrors .campaignCard:hover (primary-tinted
+   border + light shadow). Expand/collapse is an instant show/hide with no
+   transition or animation, so still under prefers-reduced-motion by
+   construction. All classes stay scoped to the revenue rail. */
+.revenueUnquantifiedRow {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.revenueUnquantifiedRow:hover {
+  border-color: #b6c8b8;
+  box-shadow: 0 5px 16px #1c40240a;
+}
+
+.revenueUnquantifiedHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  text-align: start;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.revenueUnquantifiedHeader:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.revenueUnquantifiedIcon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+
+.revenueUnquantifiedBody {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.revenueUnquantifiedTitle {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.revenueUnquantifiedMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.revenueUnquantifiedPending {
+  display: inline-block;
+  width: fit-content;
+  border: 1px dashed var(--muted-foreground);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.revenueUnquantifiedReason {
+  margin: 0;
+  padding: 0 12px 10px 38px;
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
 .revenueNotes {
   margin: 16px 0 0;
   padding: 0;
