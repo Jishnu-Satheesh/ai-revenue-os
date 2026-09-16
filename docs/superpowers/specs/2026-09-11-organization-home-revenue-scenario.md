@@ -195,16 +195,18 @@ separately only where supported. Profit is never summed into the revenue headlin
   "Costs are not yet included" footnote,
   `src/modules/analysis/application/channels-overview.ts:749`).
 
-## 14. Co-decision recommendations (awaiting user approval, not fait accompli)
+## 14. Co-decision recommendations (user-selected 2026-09-15, still Proposed)
 
-- (a) Scenario membership: the recommended feasible action set, with each
-  action's actual status shown. Alternative: only actions marked Planned.
-  Recommended because Planned-only would hide feasible actions the operator
-  has not yet marked, while showing actual status avoids implying Planned
-  means executed. User has not yet selected this.
-- (b) Horizon: next 30 days by default, reconciled with source grain and
-  freshness per §3–§4. The final horizon, baseline method, and sparse-history
-  fallback are not yet approved.
+- (a) Scenario membership: the recommended feasible action set spanning AI
+  recommendations, campaign proposals, and growth insights, with each action's
+  actual status shown. Actions without a cited monetary basis stay visible as
+  "not yet quantified" (§9) — they are never zeroed and never block the
+  quantified rows. Planned-only was rejected: it would hide feasible actions
+  the operator has not yet marked.
+- (b) Horizon: next month (≈30 days), reconciled with source grain and
+  freshness per §3–§4 before any figure ships. Where sources support only
+  period totals, the chart shows period points/bars at that grain — daily
+  observations and smooth curves are never fabricated to fill the month.
 
 ## 16. Amendment (Proposed 2026-09-15): AI-assisted rough-estimate mode
 
@@ -236,8 +238,16 @@ deterministic code surveys it.
 - Failure mode: model failure or schema-invalid output → the §5
   hold-current-level scenario plus an explicit "AI path unavailable" note.
   Never a fake number, never quiet confidence.
+- Scoring mechanism (the solid part): a deterministic function over listed
+  inputs — all-channel reported history (performance-card trend buckets),
+  observed loss findings (detector amounts, past loss caps recovery), and the
+  §14(a) action set. Same inputs always give the same chart; every unit of
+  uplift traces to a listed parameter. The chart reads time-by-time at the
+  supported grain: solid history → marked last-observation boundary → two
+  labelled next-month paths (current course vs acting on the recommendations
+  and proposals). Staleness renders as an explicit gap.
 - Status: Proposed. No code follows until the user approves this amendment
-  together with the §14 co-decisions.
+  together with the §14 selections above.
 
 ## 15. Non-goals
 

@@ -18,8 +18,10 @@ fractions as explicit low/high assumption ranges bound to cited inputs, under
 strict output-schema validation; deterministic arithmetic still produces every
 displayed figure, and model failure degrades to the hold-current-level
 scenario with an explicit note. The model originates no final figure, no
-calibrated confidence, and no share. Companion spec §16 carries the full
-contract.
+calibrated confidence, and no share. The score is a deterministic function
+over listed inputs (channel history, observed losses, the approved action
+set) for a next-month conditional chart — same inputs, same chart.
+Companion spec §16 carries the full contract.
 
 Why:
 
