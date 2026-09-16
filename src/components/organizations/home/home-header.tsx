@@ -99,10 +99,7 @@ export function HomeHeader({ view }: Readonly<{ view: OrganizationHomeView }>) {
 
       <div className={styles.contextRow} aria-label="Organization context">
         <span className={styles.contextItem}>
-          <span
-            aria-hidden="true"
-            className="inline-block size-[5px] rounded-full bg-primary"
-          />
+          <span aria-hidden="true" className="inline-block size-[5px] rounded-full bg-primary" />
           {statusLabel(view.status)}
         </span>
         <LocationsControl

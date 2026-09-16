@@ -79,10 +79,10 @@ const PHASE_CARD_LABEL: Readonly<Record<string, string>> = {
  * portfolio review phases resolve to "Ready for review" in amber, drafts and
  * everything settled stay green.
  */
-export function resolveCampaignStateChip(input: {
-  state?: string | null;
-  phase?: string | null;
-}): { label: string; tone: "success" | "warning" } {
+export function resolveCampaignStateChip(input: { state?: string | null; phase?: string | null }): {
+  label: string;
+  tone: "success" | "warning";
+} {
   const state = input.state ?? null;
   const phase = input.phase ?? null;
 
@@ -95,8 +95,7 @@ export function resolveCampaignStateChip(input: {
   if (phase !== null) {
     const label = PHASE_CARD_LABEL[phase];
     if (label !== undefined) {
-      const tone =
-        state !== null && NEEDS_LOOK_STATES.has(state) ? "warning" : "success";
+      const tone = state !== null && NEEDS_LOOK_STATES.has(state) ? "warning" : "success";
       return { label, tone };
     }
   }
@@ -156,11 +155,7 @@ export type SharedCampaignCardProps = {
  * green text-link with a right arrow the foot uses everywhere else — never
  * the old bare outline button.
  */
-function RestartLink({
-  organizationId,
-  campaignId,
-  label,
-}: SharedCardRestart) {
+function RestartLink({ organizationId, campaignId, label }: SharedCardRestart) {
   const router = useRouter();
   const [starting, setStarting] = useState(false);
 
@@ -214,10 +209,8 @@ export function SharedCampaignCard({
 }: Readonly<SharedCampaignCardProps>) {
   const chip = previewUrl !== null ? (coverChip ?? "Finished render") : null;
   const generatingDetail = generation.status === "generating" ? generation.detail : null;
-  const failed =
-    generation.status === "failed" || generation.status === "stalled";
-  const showRepair =
-    failed && repair !== null && repair.missingDetails.length > 0;
+  const failed = generation.status === "failed" || generation.status === "stalled";
+  const showRepair = failed && repair !== null && repair.missingDetails.length > 0;
   const showRestart =
     restart !== null && generation.status !== "generating" && primaryAction === null;
 
@@ -286,8 +279,7 @@ export function SharedCampaignCard({
         <div className="mt-auto pt-3.5">
           <div className="flex items-center justify-between gap-2 border-t pt-3">
             <p className="text-[11px] leading-[1.5] text-muted-foreground">
-              Updated{" "}
-              <time dateTime={updatedAt}>{formatShortDate(updatedAt, timeZone)}</time>
+              Updated <time dateTime={updatedAt}>{formatShortDate(updatedAt, timeZone)}</time>
             </p>
             {primaryAction !== null ? (
               <Button asChild variant="link" size="sm">

@@ -153,7 +153,8 @@ function CampaignRow({
           {campaign.objective ?? "Waiting for the first proposal to be generated."}
         </span>
         <span className="truncate text-xs text-muted-foreground">
-          {campaign.channels.join(" · ") || "No channels yet"} · {formatMoney(campaign.spendCeiling)}
+          {campaign.channels.join(" · ") || "No channels yet"} ·{" "}
+          {formatMoney(campaign.spendCeiling)}
         </span>
       </div>
       <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
@@ -186,7 +187,10 @@ function AttentionStrip({
   const previews = waiting.slice(0, ATTENTION_PREVIEW_LIMIT);
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border bg-card p-4" aria-label="Needs your attention">
+    <section
+      className="flex flex-col gap-3 rounded-lg border bg-card p-4"
+      aria-label="Needs your attention"
+    >
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Needs your attention</h2>
         <Badge variant="secondary" className="rounded-full">
@@ -413,8 +417,8 @@ export function CampaignPortfolio({
             </EmptyMedia>
             <EmptyTitle>Nothing matches these filters</EmptyTitle>
             <EmptyDescription>
-              {campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"} exist here; none
-              of them match what you have selected.
+              {campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"} exist here;
+              none of them match what you have selected.
             </EmptyDescription>
           </EmptyHeader>
           <Button variant="outline" size="sm" onClick={clearFilters}>

@@ -9,11 +9,14 @@ import {
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import type {
-  HomeCampaign,
-  HomeSection,
-} from "@/modules/organizations/application/home-types";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import type { HomeCampaign, HomeSection } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
 
 /**
@@ -70,8 +73,8 @@ export function HomeCampaigns({
           <Megaphone aria-hidden="true" />
           <AlertTitle>Campaigns could not be loaded</AlertTitle>
           <AlertDescription>
-            What could be read elsewhere on this page is still current. Retry refreshes the
-            whole page from the server.
+            What could be read elsewhere on this page is still current. Retry refreshes the whole
+            page from the server.
           </AlertDescription>
           <div className="mt-3">
             <HomeRefreshButton label="Retry" />
