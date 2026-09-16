@@ -20,6 +20,21 @@ function statusLabel(status: string): string {
 }
 
 /**
+ * Initials fallback for the avatar box when no logo qualified. First letter
+ * of each name word, capped at two (Juniper Kitchen -> JK). Single-word and
+ * non-Latin names degrade to whatever leading characters exist.
+ */
+function avatarInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .map((word) => Array.from(word)[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+/**
  * Identity block: the small-caps eyebrow plus the one `h1` (the saved
  * organization name), the eligible logo or a name-only layout, the saved
  * description or nothing invented, the context row (status, locations,
@@ -33,11 +48,20 @@ export function HomeHeader({ view }: Readonly<{ view: OrganizationHomeView }>) {
     <header className={styles.header}>
       <div className={styles.titleRow}>
         <div className={styles.identity}>
-          {view.logo !== null ? (
-            <span className={styles.logoFrame}>
+          <span
+            role="img"
+            aria-label={`${view.name} avatar`}
+            aria-hidden={false}
+            className={styles.logoFrame}
+          >
+            {view.logo !== null ? (
               <HomePreviewImage image={view.logo} frameClassName={styles.coverFallback} />
-            </span>
-          ) : null}
+            ) : (
+              <span aria-hidden="true" className={styles.avatarInitials}>
+                {avatarInitials(view.name)}
+              </span>
+            )}
+          </span>
           <div className="min-w-0">
             <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-muted-foreground">
               Your organization

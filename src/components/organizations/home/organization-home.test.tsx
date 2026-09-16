@@ -607,10 +607,13 @@ describe("OrganizationHome header", () => {
     expect(within(dialog).getByText("Online")).toBeInTheDocument();
   });
 
-  it("renders name-only identity when no logo qualified", () => {
+  it("renders the avatar box with initials when no logo qualified", () => {
     render(<OrganizationHome view={view({ logo: null })} />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Al Noor Kitchen");
     expect(screen.queryByRole("img", { name: /logo/i })).not.toBeInTheDocument();
+    const avatar = screen.getByRole("img", { name: "Al Noor Kitchen avatar" });
+    expect(avatar).toHaveAttribute("aria-hidden", "false");
+    expect(avatar.textContent).toBe("AN");
   });
 });
 

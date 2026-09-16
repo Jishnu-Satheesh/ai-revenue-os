@@ -61,6 +61,24 @@
   display: none;
 }
 
+/* Null-logo avatar: initials fallback styled like the prototype's small bold
+   wordmark text (JUNIPER KITCHEN box). A dedicated class — .fallbackLabel
+   stays hidden inside .logoFrame for failed logo images. */
+.avatarInitials {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  line-height: 1.4;
+  text-transform: uppercase;
+  color: var(--foreground);
+}
+
 .title {
   min-width: 0;
   overflow-wrap: break-word;
