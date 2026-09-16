@@ -308,6 +308,11 @@
   box-shadow: var(--shadow-sm);
 }
 
+.thumb:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+}
+
 .thumbImage {
   display: block;
   position: relative;

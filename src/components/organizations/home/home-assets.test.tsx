@@ -227,6 +227,19 @@ describe("HomeAssets thumb band CSS guard", () => {
     );
     expect(css).toMatch(/\.thumbImage\s*\{[^}]*display\s*:\s*block\b/);
   });
+
+  it("rings a keyboard-focused thumb with the branded primary outline", () => {
+    // Prototype parity: keyboard focus on a library thumbnail shows a 3px
+    // solid primary ring with offset (not the faint browser default). Pin the
+    // source rule (whitespace-tolerant — property order may move).
+    const css = readFileSync(
+      join(process.cwd(), "src/components/organizations/home/organization-home.module.css"),
+      "utf8",
+    );
+    expect(css).toMatch(
+      /\.thumb:focus-visible\s*\{[^}]*outline\s*:\s*3px\s+solid\s+var\(--primary\)[^}]*outline-offset\s*:\s*[34]px/,
+    );
+  });
 });
 
 describe("HomeAssets states", () => {
