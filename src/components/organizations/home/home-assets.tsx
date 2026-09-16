@@ -157,7 +157,11 @@ export function HomeAssets({
                     width={item.image?.width}
                     height={item.image?.height}
                     fallback={
-                      <HomePreviewImage image={null} frameClassName={styles.coverFallback} />
+                      <div className={styles.coverFallback} role="presentation">
+                        <Images aria-hidden="true" className="size-5" />
+                        <span className={styles.fallbackLabel}>Preview unavailable</span>
+                        <span>Your work is still available.</span>
+                      </div>
                     }
                   />
                 </span>
@@ -215,7 +219,9 @@ export function HomeAssets({
                   <p className={styles.meta}>Review: {selected.reviewLabel}</p>
                   <Button asChild className={styles.dialogSourceButton}>
                     <Link href={selected.sourceHref}>
-                      Open source
+                      {selected.sourceHref === libraryHref
+                        ? "Open Asset Library"
+                        : "Open source campaign"}
                       <ArrowRight aria-hidden="true" data-icon="inline-end" />
                     </Link>
                   </Button>

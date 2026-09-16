@@ -350,3 +350,56 @@ describe("HomeAssets review status tags", () => {
     expect(badge.compareDocumentPosition(savedFor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
+
+describe("HomeAssets library parity (Task C)", () => {
+  it("shows the reassurance subline under Preview unavailable in the null-image tile", () => {
+    renderGallery([asset({ image: null })]);
+
+    expect(screen.getByText("Preview unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Your work is still available.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /ramadan push · ramadan-hero · iftar spread/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("labels the dialog CTA Open source campaign for a campaign sourceHref", async () => {
+    const user = userEvent.setup();
+    renderGallery([asset()]);
+    await user.click(
+      screen.getByRole("button", { name: /ramadan push · ramadan-hero · iftar spread/i }),
+    );
+    const source = await screen.findByRole("link", { name: "Open source campaign" });
+    expect(source).toHaveAttribute(
+      "href",
+      `/organizations/${ORG_ID}/campaigns/44444444-4444-4444-8444-444444444441?version=66666666-6666-4666-8666-666666666661`,
+    );
+  });
+
+  it("labels the dialog CTA Open Asset Library for the asset-library sourceHref", async () => {
+    const user = userEvent.setup();
+    renderGallery([
+      asset({
+        id: "reference:55555555-5555-4555-8555-555555555553",
+        sourceKind: "brand_reference",
+        label: "Library saved logo",
+        sourceHref: `/organizations/${ORG_ID}/assets`,
+      }),
+    ]);
+    await user.click(screen.getByRole("button", { name: /library saved logo/i }));
+    const source = await screen.findByRole("link", { name: "Open Asset Library" });
+    expect(source).toHaveAttribute("href", `/organizations/${ORG_ID}/assets`);
+  });
+
+  it("defaults the dialog CTA to Open source campaign for an unknown sourceHref", async () => {
+    const user = userEvent.setup();
+    renderGallery([
+      asset({
+        label: "Odd destination work",
+        sourceHref: `/organizations/${ORG_ID}/somewhere-else`,
+      }),
+    ]);
+    await user.click(screen.getByRole("button", { name: /odd destination work/i }));
+    const source = await screen.findByRole("link", { name: "Open source campaign" });
+    expect(source).toHaveAttribute("href", `/organizations/${ORG_ID}/somewhere-else`);
+  });
+});
