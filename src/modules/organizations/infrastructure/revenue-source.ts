@@ -10,7 +10,7 @@ import type { GrowthIntelligenceWorkspaceRepository } from "@/modules/growth-int
 import type { HomeRevenueSource } from "@/modules/organizations/application/home-types";
 import {
   mapRevenueInputs,
-  selectRevenueWindows,
+  MAX_REVENUE_WINDOW_READS,
 } from "@/modules/organizations/infrastructure/revenue-inputs";
 
 /**
@@ -164,7 +164,10 @@ export async function readRevenueSource(input: ReadRevenueSourceInput): Promise<
   }
   if (!ok || keys === null) return { status: "failed" };
 
-  const windows = selectRevenueWindows(keys);
+  // Newest keys first at whatever grain analyses actually ran: the mapper
+  // keeps only windows with reported figures and picks a comparable,
+  // non-overlapping series from them.
+  const windows = keys.slice(0, MAX_REVENUE_WINDOW_READS);
   const bandSettled = await Promise.allSettled(
     windows.map((window) =>
       reads.analysis.loadChannelBandsForWindow({

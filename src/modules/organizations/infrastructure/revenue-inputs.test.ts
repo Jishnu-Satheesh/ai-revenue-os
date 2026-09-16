@@ -70,8 +70,8 @@ describe("mapRevenueInputs", () => {
     if (result.status !== "ready") return;
     expect(result.input.grain).toBe("week");
     expect(result.input.history).toHaveLength(2);
-    expect(result.input.history[0]).toMatchObject({ label: "2026-08-04", minorUnits: 800_00 });
-    expect(result.input.history[1]).toMatchObject({ label: "2026-08-11", minorUnits: 700_00 });
+    expect(result.input.history[0]).toMatchObject({ label: "4–10 Aug", minorUnits: 800_00 });
+    expect(result.input.history[1]).toMatchObject({ label: "11–17 Aug", minorUnits: 700_00 });
     expect(result.input.lastObservationDate).toBe("2026-08-17");
     expect(result.input.cutoffNote).toBe("Reports through 2026-08-17.");
     expect(result.input.coverageNote).toMatch(/2 reporting channels/);
@@ -175,29 +175,108 @@ describe("mapRevenueInputs", () => {
     expect(result.input.history[0]?.minorUnits).toBe(100_00);
   });
 
-  it("keeps one grain and at most eight windows", () => {
-    const windows = Array.from({ length: 10 }, (_, index) => {
-      const day = String(30 - index * 7).padStart(2, "0");
-      return weekWindow(`2026-05-${day}`, `2026-06-${day}`);
-    });
-    const bands = windows.map((window, index) =>
-      index === 9
-        ? [band("chan-a", [finding({ valueNumerator: 1_00 })])]
-        : [band("chan-a", [finding({ valueNumerator: 10_00 })])],
-    );
-    const mixed = mapRevenueInputs({
+  it("picks maximum coverage without overlap, preferring more windows on ties", () => {
+    const result = mapRevenueInputs({
       organizationId: ORG_ID,
-      windows: [{ windowStart: "2026-08-01", windowEnd: "2026-08-31", grain: "month" }, ...windows],
-      bands: [[band("chan-a", [finding({ valueNumerator: 999_00 })])], ...bands],
+      windows: [
+        weekWindow("2026-01-01", "2026-02-28"),
+        weekWindow("2026-02-01", "2026-02-28"),
+        weekWindow("2026-01-01", "2026-01-31"),
+      ],
+      bands: [
+        [band("chan-a", [finding({ valueNumerator: 150_00 })])],
+        [band("chan-a", [finding({ valueNumerator: 200_00 })])],
+        [band("chan-a", [finding({ valueNumerator: 100_00 })])],
+      ],
+      recommendations: [],
+      insights: [],
+      proposals: [],
+      today: "2026-03-05",
+    });
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    // Jan–Feb (59 days) ties Jan + Feb (59 days): two windows win.
+    expect(result.input.history).toHaveLength(2);
+    expect(result.input.history[0]).toMatchObject({ label: "2026-01", minorUnits: 100_00 });
+    expect(result.input.history[1]).toMatchObject({ label: "2026-02", minorUnits: 200_00 });
+    expect(result.input.grain).toBe("month");
+  });
+
+  it("lets grains mix and reads the shape, never the analysis grain", () => {
+    const result = mapRevenueInputs({
+      organizationId: ORG_ID,
+      windows: [weekWindow("2026-09-01", "2026-09-07"), weekWindow("2026-08-01", "2026-08-31")],
+      bands: [
+        [band("chan-a", [finding({ valueNumerator: 70_00 })])],
+        [band("chan-a", [finding({ valueNumerator: 300_00 })])],
+      ],
       recommendations: [],
       insights: [],
       proposals: [],
       today: "2026-09-02",
     });
-    expect(mixed.status).toBe("ready");
-    if (mixed.status !== "ready") return;
-    expect(mixed.input.grain).toBe("month");
-    expect(mixed.input.history).toHaveLength(1);
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.input.grain).toBe("period");
+    expect(result.input.history).toHaveLength(2);
+    expect(result.input.coverageNote).toMatch(/period buckets/);
+  });
+
+  it("keeps overlong windows out of history but keeps their losses citable", () => {
+    const result = mapRevenueInputs({
+      organizationId: ORG_ID,
+      windows: [weekWindow("2025-08-23", "2026-08-22"), weekWindow("2026-01-01", "2026-01-31")],
+      bands: [
+        [
+          band("chan-a", [
+            finding({ valueNumerator: 9999_00 }),
+            finding({
+              id: LOSS_ID,
+              code: "ORDER_CANCELLATION_LOSS",
+              valueKind: "count",
+              valueNumerator: 12,
+              currency: "AED",
+              monetaryImpactMinorUnits: 200_00,
+            }),
+          ]),
+        ],
+        [band("chan-a", [finding({ valueNumerator: 100_00 })])],
+      ],
+      recommendations: [],
+      insights: [],
+      proposals: [],
+      today: "2026-09-02",
+    });
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.input.history).toHaveLength(1);
+    expect(result.input.history[0]).toMatchObject({ label: "2026-01" });
+    expect(result.input.losses).toHaveLength(1);
+    expect(result.input.losses[0]?.findingId).toBe(LOSS_ID);
+  });
+
+  it("caps the plotted series at eight windows", () => {
+    const iso = (base: string, offsetDays: number) => {
+      const instant = new Date(`${base}T00:00:00.000Z`).getTime() + offsetDays * 86_400_000;
+      return new Date(instant).toISOString().slice(0, 10);
+    };
+    const windows = Array.from({ length: 10 }, (_, index) => {
+      const start = iso("2026-01-05", index * 7);
+      return weekWindow(start, iso(start, 6));
+    });
+    const bands = windows.map(() => [band("chan-a", [finding({ valueNumerator: 10_00 })])]);
+    const result = mapRevenueInputs({
+      organizationId: ORG_ID,
+      windows,
+      bands,
+      recommendations: [],
+      insights: [],
+      proposals: [],
+      today: "2026-09-02",
+    });
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.input.history).toHaveLength(8);
     expect(REVENUE_HISTORY_WINDOWS).toBe(8);
   });
 

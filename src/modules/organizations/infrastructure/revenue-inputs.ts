@@ -1,4 +1,6 @@
 import type { ChannelBandRecord, ChannelFindingRecord } from "@/modules/analysis/application/ports";
+import { compactRange, pickTrendWindows } from "@/modules/analysis/application/channels-overview";
+import { localDaysBetween } from "@/domain/analysis/calendar";
 import {
   revenueScenarioInputSchema,
   type RevenueScenarioAction,
@@ -30,6 +32,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const DATE_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 
 export const REVENUE_HISTORY_WINDOWS = 8;
+/** Band reads per load: newest keys first, the mapper picks from them. */
+export const MAX_REVENUE_WINDOW_READS = 12;
+/**
+ * Windows longer than about a quarter never join the history series: a
+ * year-long total beside a month bucket would read as a trend nobody
+ * measured. Their loss findings still count as cited inputs below.
+ */
+export const MAX_HISTORY_WINDOW_DAYS = 93;
 const MAX_LOSSES = 24;
 const MAX_ACTIONS = 50;
 
@@ -38,19 +48,6 @@ export type RevenueAnalysedWindow = {
   windowEnd: string;
   grain: string;
 };
-
-/**
- * Newest-first analysed windows, narrowed to the newest window's grain and
- * capped. Mixed grains are never merged into one series: a week bucket and
- * a month bucket side by side would state a trend nobody measured.
- */
-export function selectRevenueWindows(
-  keys: readonly RevenueAnalysedWindow[],
-): RevenueAnalysedWindow[] {
-  const newestGrain = keys[0]?.grain;
-  if (!newestGrain) return [];
-  return keys.filter((key) => key.grain === newestGrain).slice(0, REVENUE_HISTORY_WINDOWS);
-}
 
 export type RevenueRecommendationRow = {
   id: string;
@@ -74,7 +71,7 @@ export type RevenueProposalRow = {
 
 export type MapRevenueInputsInput = {
   organizationId: string;
-  /** Newest first; the mapper keeps the newest windows at one grain. */
+  /** Newest first, any grain; the mapper picks a comparable series. */
   windows: readonly RevenueAnalysedWindow[];
   /** Aligned with `windows`; null marks that window's band read failed. */
   bands: readonly (readonly ChannelBandRecord[] | null)[];
@@ -105,14 +102,47 @@ function cleanStatus(value: string | null): string {
   return trimmed.length > 80 ? trimmed.slice(0, 80) : trimmed;
 }
 
-function scenarioGrain(grain: string): RevenueScenarioInput["grain"] {
-  if (grain === "day" || grain === "week" || grain === "month") return grain;
-  return "period";
+function minStart(dates: readonly string[]): string {
+  return dates.length > 0 ? ([...dates].sort()[0] ?? "") : "";
 }
 
-function windowLabel(window: RevenueAnalysedWindow): string {
-  if (window.grain === "month") return window.windowStart.slice(0, 7);
-  return window.windowStart;
+function maxEnd(dates: readonly string[]): string {
+  const sorted = [...dates].sort();
+  return sorted.length > 0 ? (sorted[sorted.length - 1] ?? "") : "";
+}
+
+function windowDays(window: RevenueAnalysedWindow): number | null {
+  if (!DATE_PATTERN.test(window.windowStart) || !DATE_PATTERN.test(window.windowEnd)) return null;
+  if (window.windowEnd < window.windowStart) return null;
+  return localDaysBetween(window.windowStart, window.windowEnd) + 1;
+}
+
+function isWholeCalendarMonth(window: RevenueAnalysedWindow): boolean {
+  if (!DATE_PATTERN.test(window.windowStart) || !DATE_PATTERN.test(window.windowEnd)) {
+    return false;
+  }
+  if (!window.windowStart.endsWith("-01")) return false;
+  const [year, month] = window.windowStart.split("-").map(Number) as [number, number];
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return (
+    window.windowEnd === `${window.windowStart.slice(0, 7)}-${String(lastDay).padStart(2, "0")}`
+  );
+}
+
+function windowLabel(window: RevenueAnalysedWindow, days: number): string {
+  if (isWholeCalendarMonth(window)) return window.windowStart.slice(0, 7);
+  if (days <= 0) return window.windowStart;
+  return compactRange(window.windowStart, window.windowEnd);
+}
+
+function seriesGrain(
+  days: readonly number[],
+  monthShaped: readonly boolean[],
+): RevenueScenarioInput["grain"] {
+  if (days.length > 0 && days.every((length) => length === 1)) return "day";
+  if (days.length > 0 && days.every((length) => length === 7)) return "week";
+  if (monthShaped.length > 0 && monthShaped.every((shaped) => shaped)) return "month";
+  return "period";
 }
 
 function grossFigure(
@@ -160,32 +190,47 @@ export function mapRevenueInputs(input: MapRevenueInputsInput): MapRevenueInputs
     return { status: "failed", code: "HOME_READ_FAILED" };
   }
 
-  const newestGrain = input.windows[0]?.grain ?? "period";
-  const selected = input.windows
-    .map((window, index) => ({ window, bands: input.bands[index] ?? null }))
-    .filter((entry) => entry.window.grain === newestGrain)
-    .slice(0, REVENUE_HISTORY_WINDOWS);
-  if (selected.some((entry) => entry.bands === null)) {
+  const entries = input.windows.map((window, index) => ({
+    window,
+    bands: input.bands[index] ?? null,
+  }));
+  if (entries.some((entry) => entry.bands === null)) {
     return { status: "failed", code: "HOME_READ_FAILED" };
   }
 
-  // Oldest first, so the chart reads time-by-time and the last-observation
-  // boundary lands on the final point.
-  const ordered = [...selected].reverse();
-
-  const history: RevenueScenarioInput["history"] = [];
+  type CandidateBucket = {
+    window: RevenueAnalysedWindow;
+    days: number;
+    monthShaped: boolean;
+    minorUnits: number;
+    currency: string;
+    channels: readonly string[];
+  };
+  const candidates: CandidateBucket[] = [];
   const losses: RevenueScenarioInput["losses"] = [];
-  const channels = new Set<string>();
-  for (const entry of ordered) {
+  // Losses ride every settled window, newest first: each loss is an
+  // individually cited input, so bucket comparability never gates them.
+  // History buckets are picked from the same reads below.
+  for (const entry of entries) {
+    for (const band of entry.bands ?? []) {
+      for (const loss of lossFigures(band.findings)) {
+        if (losses.length >= MAX_LOSSES) break;
+        if (losses.some((existing) => existing.findingId === loss.findingId)) continue;
+        losses.push(loss);
+      }
+    }
+    const days = windowDays(entry.window);
+    if (days === null || days > MAX_HISTORY_WINDOW_DAYS) continue;
     let bucketMinorUnits = 0;
     let bucketCurrency: string | null = null;
     let bucketMixed = false;
     let bucketEmpty = true;
+    const bucketChannels = new Set<string>();
     for (const band of entry.bands ?? []) {
       const gross = grossFigure(band.findings);
       if (!gross) continue;
       bucketEmpty = false;
-      channels.add(band.channelId);
+      bucketChannels.add(band.channelId);
       if (bucketCurrency === null) {
         bucketCurrency = gross.currency.toUpperCase();
       } else if (bucketCurrency !== gross.currency.toUpperCase()) {
@@ -194,22 +239,55 @@ export function mapRevenueInputs(input: MapRevenueInputsInput): MapRevenueInputs
       bucketMinorUnits += gross.minorUnits;
     }
     // A bucket with no reported gross is omitted, never zero-filled: sparse
-    // history shows fewer points, not a fabricated dip.
-    if (!bucketEmpty && !bucketMixed && bucketCurrency !== null) {
-      history.push({
-        label: windowLabel(entry.window),
-        minorUnits: bucketMinorUnits,
-        currency: bucketCurrency,
-      });
-    }
-    for (const band of entry.bands ?? []) {
-      for (const loss of lossFigures(band.findings)) {
-        if (losses.length >= MAX_LOSSES) break;
-        if (losses.some((existing) => existing.findingId === loss.findingId)) continue;
-        losses.push(loss);
-      }
-    }
+    // history shows fewer points, not a fabricated dip. A mixed-currency
+    // bucket is omitted for the same reason a mixed scenario is refused.
+    if (bucketEmpty || bucketMixed || bucketCurrency === null) continue;
+    candidates.push({
+      window: entry.window,
+      days,
+      monthShaped: isWholeCalendarMonth(entry.window),
+      minorUnits: bucketMinorUnits,
+      currency: bucketCurrency,
+      channels: [...bucketChannels],
+    });
   }
+
+  // Maximum coverage without overlap, ties preferring more windows — the same
+  // discipline as the performance card's third trend tier. A lone surviving
+  // bucket still anchors a baseline; nothing is interpolated between points.
+  const pickedKeys = pickTrendWindows(
+    candidates.map((candidate) => ({
+      from: candidate.window.windowStart,
+      to: candidate.window.windowEnd,
+    })),
+    {
+      from: minStart(candidates.map((candidate) => candidate.window.windowStart)),
+      to: maxEnd(candidates.map((candidate) => candidate.window.windowEnd)),
+    },
+    REVENUE_HISTORY_WINDOWS,
+  );
+  const pickedSet = new Set(pickedKeys.map((key) => `${key.from}|${key.to}`));
+  let picked = candidates.filter((candidate) =>
+    pickedSet.has(`${candidate.window.windowStart}|${candidate.window.windowEnd}`),
+  );
+  if (picked.length === 0 && candidates.length > 0) {
+    picked = [...candidates]
+      .sort(
+        (left, right) =>
+          right.days - left.days || (right.window.windowEnd < left.window.windowEnd ? -1 : 1),
+      )
+      .slice(0, 1);
+  }
+  // Oldest first, so the chart reads time-by-time and the last-observation
+  // boundary lands on the final point.
+  picked.sort((left, right) => (left.window.windowStart < right.window.windowStart ? -1 : 1));
+
+  const history: RevenueScenarioInput["history"] = picked.map((candidate) => ({
+    label: windowLabel(candidate.window, candidate.days),
+    minorUnits: candidate.minorUnits,
+    currency: candidate.currency,
+  }));
+  const channels = new Set(picked.flatMap((candidate) => candidate.channels));
 
   const lossByFindingId = new Map(losses.map((loss) => [loss.findingId, loss]));
   const growthUrl = `/organizations/${input.organizationId}/growth-intelligence`;
@@ -266,14 +344,22 @@ export function mapRevenueInputs(input: MapRevenueInputsInput): MapRevenueInputs
     });
   }
 
-  const lastObservationDate = ordered[ordered.length - 1]?.window.windowEnd ?? input.today;
+  const lastObservationDate = picked[picked.length - 1]?.window.windowEnd ?? input.today;
+  const grain = seriesGrain(
+    picked.map((candidate) => candidate.days),
+    picked.map((candidate) => candidate.monthShaped),
+  );
   const grainLabel =
-    newestGrain === "day" || newestGrain === "week" || newestGrain === "month"
-      ? `${newestGrain}ly`
-      : "period";
+    grain === "day"
+      ? "daily"
+      : grain === "week"
+        ? "weekly"
+        : grain === "month"
+          ? "monthly"
+          : "period";
   const parsed = revenueScenarioInputSchema.safeParse({
     organizationId: input.organizationId,
-    grain: scenarioGrain(newestGrain),
+    grain,
     history,
     losses,
     actions,
