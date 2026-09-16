@@ -186,6 +186,66 @@ describe("HomeRevenue", () => {
     );
   });
 
+  it("caps the not-yet-quantified list at 3 rows", () => {
+    const section: OrganizationHomeView["revenue"] = {
+      status: "ready",
+      fetchedAt: "2026-08-20T00:00:00.000Z",
+      data: buildRevenueScenario(
+        scenarioInput({
+          actions: [
+            {
+              id: "rec-1",
+              title: "Recover avoidable cancellations",
+              kind: "recommendation",
+              status: "Planned",
+              href: `/organizations/${ORG_ID}/growth-intelligence`,
+              citedFindingId: FINDING_A,
+              citedBasisMinorUnits: 200_00,
+              citedCurrency: "AED",
+              assumptionLow: 0.1,
+              assumptionHigh: 0.3,
+            },
+            ...["First gap", "Second gap", "Third gap", "Fourth gap", "Fifth gap"].map(
+              (title, index) => ({
+                id: `ins-${index + 1}`,
+                title,
+                kind: "insight" as const,
+                status: "Acknowledged",
+                href: null,
+                citedFindingId: null,
+                citedBasisMinorUnits: null,
+                citedCurrency: null,
+                assumptionLow: null,
+                assumptionHigh: null,
+              }),
+            ),
+          ],
+        }),
+      ),
+    };
+    if (section.status !== "ready" || section.data.state !== "ready") {
+      throw new Error("fixture must be ready");
+    }
+    expect(section.data.shares).toHaveLength(1);
+    expect(section.data.unquantified).toHaveLength(5);
+
+    render(<HomeRevenue organizationId={ORG_ID} section={section} />);
+
+    const heading = screen.getByRole("heading", { name: "Not yet quantified" });
+    const list = heading.nextElementSibling;
+    expect(list?.tagName).toBe("UL");
+    expect(list?.querySelectorAll(":scope > li")).toHaveLength(3);
+    const text = list?.textContent ?? "";
+    for (const title of ["First gap", "Second gap", "Third gap"]) {
+      expect(text).toContain(title);
+    }
+    expect(text).not.toContain("Fourth gap");
+    expect(text).not.toContain("Fifth gap");
+    expect(screen.getByRole("link", { name: /View more/ }).getAttribute("href")).toBe(
+      RECOMMENDATIONS_HREF,
+    );
+  });
+
   it("keeps View more visible when no recommended actions are on file", () => {
     const empty: OrganizationHomeView["revenue"] = {
       status: "ready",

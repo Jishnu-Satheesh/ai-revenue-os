@@ -469,7 +469,7 @@ export function HomeRevenue({
               <>
                 <h3 className={styles.revenueSideTitle}>Not yet quantified</h3>
                 <ul className={styles.revenueActionList}>
-                  {unquantified.map((action) => (
+                  {unquantified.slice(0, 3).map((action) => (
                     <li key={action.actionId}>
                       <ActionLink href={action.href} title={action.title} />
                       <p className={styles.revenueActionMeta}>
