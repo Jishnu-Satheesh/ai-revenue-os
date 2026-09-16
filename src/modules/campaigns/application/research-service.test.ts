@@ -14,6 +14,15 @@ const DIGEST = "c".repeat(64);
 const CLAIM = "fb430000-0000-4000-8000-000000000205";
 const NOW = new Date("2026-09-13T12:00:00.000Z");
 
+// Explicit deriver result shape for the vi.fn generics below: it keeps
+// mock.calls tuples typed (instead of []) so the first-call reads compile,
+// while the zero-arg impls stay assignable to the service's deriver port.
+type TestDeriveResult = {
+  question: string;
+  provenance: { sourceIds: string[]; modelId: string; derivedAt: string };
+  gaps: string[];
+};
+
 function readyPlan() {
   return {
     outcome: "ready" as const,
@@ -522,5 +531,242 @@ describe("research service", () => {
       runId: RUN_ID,
       failureCode: "context_consume_failed",
     });
+  });
+
+  function nullLoad() {
+    return async () => ({
+      status: "claimed",
+      triggerKind: "manual_request",
+      policyVersion: 3,
+      budgetMinor: 1000,
+      researchQuestion: null,
+      currentPolicyVersion: 3,
+      manifestId: null,
+      digest: null,
+      entries: [],
+    });
+  }
+
+  it("reads real org source + picks behind the claim fence for NULL questions", async () => {
+    const order: string[] = [];
+    const derive = vi.fn<
+      (input: {
+        source: { objectives: readonly string[] };
+        picks?: readonly { id: string; title: string; body: string }[];
+        tier?: string;
+      }) => Promise<TestDeriveResult>
+    >(async () => ({
+      question: "How do we lift weekday lunch?",
+      provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+      gaps: [],
+    }));
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          assertClaimLive: async () => {
+            order.push("assert");
+          },
+          load: nullLoad(),
+        },
+        readSourceForDerivation: async () => {
+          order.push("source");
+          return {
+            organizationProfile: "Family restaurant in Deira.",
+            objectives: ["Lift weekday lunch revenue"],
+            capacityNotes: ["40 seats"],
+            operationalBlockers: [],
+            hardConstraints: ["No discounts over 10%"],
+          };
+        },
+        readRecommendationPicks: async () => {
+          order.push("picks");
+          return [
+            {
+              id: "dismissed-1",
+              title: "dismissed",
+              body: "dismissed body",
+              decision: "dismissed",
+              helpful: null,
+              updatedAt: "2026-12-31T00:00:00.000Z",
+            },
+            {
+              id: "planned-1",
+              title: "planned pick",
+              body: "planned body",
+              decision: "planned",
+              helpful: null,
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ];
+        },
+        questionDeriver: { derive },
+      }),
+    );
+    const result = await service.run(runInput());
+    expect(result.status).toBe("completed");
+    // Fence first, then business data: no reads after a lost claim.
+    expect(order).toEqual(["assert", "source", "picks"]);
+    const deriveInput = derive.mock.calls[0]?.[0] as {
+      source: { objectives: readonly string[] };
+      picks: readonly { id: string; title: string; body: string }[];
+      tier: string;
+    };
+    // Full source cited in derive input: the goal text travels, not the fallback.
+    expect(deriveInput.source.objectives).toContain("Lift weekday lunch revenue");
+    // Dismissed excluded even though newest; planned survives with data-only shape.
+    expect(deriveInput.picks).toEqual([{ id: "planned-1", title: "planned pick", body: "planned body" }]);
+    expect(deriveInput.tier).toBe("gi_interacted");
+  });
+
+  it("passes tier goals for a thin profile with goals only", async () => {
+    const derive = vi.fn<(input: { tier?: string }) => Promise<TestDeriveResult>>(async () => ({
+      question: "How do we grow catering?",
+      provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+      gaps: [],
+    }));
+    const service = createResearchService(
+      dependencies({
+        runs: { ...dependencies().runs, load: nullLoad() },
+        readSourceForDerivation: async () => ({
+          organizationProfile: "   ",
+          objectives: ["Grow catering"],
+          capacityNotes: [],
+          operationalBlockers: [],
+          hardConstraints: [],
+        }),
+        readRecommendationPicks: async () => [],
+        questionDeriver: { derive },
+      }),
+    );
+    await service.run(runInput());
+    const deriveInput = derive.mock.calls[0]?.[0] as { tier: string };
+    expect(deriveInput.tier).toBe("goals");
+  });
+
+  it("falls back to the unprofiled source when readers are absent", async () => {
+    const derive = vi.fn<
+      (input: {
+        source: { organizationProfile: string; objectives: readonly string[] };
+        picks?: readonly unknown[];
+      }) => Promise<TestDeriveResult>
+    >(async () => ({
+      question: "How do we lift weekday lunch?",
+      provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+      gaps: [],
+    }));
+    const service = createResearchService(
+      dependencies({
+        runs: { ...dependencies().runs, load: nullLoad() },
+        questionDeriver: { derive },
+      }),
+    );
+    const result = await service.run(runInput());
+    expect(result.status).toBe("completed");
+    const deriveInput = derive.mock.calls[0]?.[0] as {
+      source: { organizationProfile: string; objectives: readonly string[] };
+      picks: readonly unknown[];
+    };
+    expect(deriveInput.source.organizationProfile).toBe("Unprofiled organization.");
+    expect(deriveInput.source.objectives).toEqual([]);
+    expect(deriveInput.picks).toEqual([]);
+  });
+
+  it("proves the claim before reading derivation data", async () => {
+    const order: string[] = [];
+    const assertClaimLive = vi.fn(async () => {
+      order.push("assert");
+    });
+    const service = createResearchService(
+      dependencies({
+        runs: { ...dependencies().runs, assertClaimLive, load: nullLoad() },
+        readSourceForDerivation: async () => {
+          order.push("source");
+          return {
+            organizationProfile: "Profile.",
+            objectives: [],
+            capacityNotes: [],
+            operationalBlockers: [],
+            hardConstraints: [],
+          };
+        },
+        readRecommendationPicks: async () => {
+          order.push("picks");
+          return [];
+        },
+        questionDeriver: {
+          derive: async () => ({
+            question: "How do we lift weekday lunch?",
+            provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+            gaps: [],
+          }),
+        },
+      }),
+    );
+    await service.run(runInput());
+    expect(assertClaimLive).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      runId: RUN_ID,
+      claimToken: CLAIM,
+    });
+    expect(order).toEqual(["assert", "source", "picks"]);
+  });
+
+  it("throws claim-lost when a derivation pre-read loses the claim", async () => {
+    const service = createResearchService(
+      dependencies({
+        runs: { ...dependencies().runs, load: nullLoad() },
+        readSourceForDerivation: async () => {
+          throw { kind: "not_found" };
+        },
+        readRecommendationPicks: async () => [],
+        questionDeriver: {
+          derive: async () => {
+            throw new Error("must not derive after a lost claim");
+          },
+        },
+      }),
+    );
+    await expect(service.run(runInput())).rejects.toBeInstanceOf(ResearchClaimLost);
+  });
+
+  it("derives blind when a derivation pre-read fails generically", async () => {
+    const derive = vi.fn<
+      (input: {
+        source: { organizationProfile: string };
+        picks?: readonly unknown[];
+      }) => Promise<TestDeriveResult>
+    >(async () => ({
+      question: "How do we lift weekday lunch?",
+      provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+      gaps: [],
+    }));
+    const service = createResearchService(
+      dependencies({
+        runs: { ...dependencies().runs, load: nullLoad() },
+        readSourceForDerivation: async () => {
+          throw new Error("source store down");
+        },
+        readRecommendationPicks: async () => [
+          {
+            id: "p1",
+            title: "t",
+            body: "b",
+            decision: null,
+            helpful: null,
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        questionDeriver: { derive },
+      }),
+    );
+    const result = await service.run(runInput());
+    expect(result.status).toBe("completed");
+    const deriveInput = derive.mock.calls[0]?.[0] as {
+      source: { organizationProfile: string };
+      picks: readonly unknown[];
+    };
+    expect(deriveInput.source.organizationProfile).toBe("Unprofiled organization.");
+    expect(deriveInput.picks).toEqual([]);
   });
 });

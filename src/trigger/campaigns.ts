@@ -1173,6 +1173,115 @@ export const researchCampaignProposalTask = schemaTask({
     const nowIso = () => new Date().toISOString();
     const questionDeriver = createQuestionDeriver({ drafter: questionDrafter, nowIso });
 
+    // Shared Digital Twin source read: the contexts path below and the
+    // question-derivation path read the same owned data, so both stay
+    // identical by construction. Extracted, not duplicated — no behavior
+    // change to the contexts path.
+    const readSourceForDerivation = async ({ organizationId }: { organizationId: string }) => {
+      const state = await readCurrentState(createSupabaseCurrentStateQuery(structural), {
+        organizationId,
+        branchId: null,
+      });
+      const profile = [state.profile?.business_model, state.profile?.value_proposition]
+        .filter((part): part is string => typeof part === "string" && part.length > 0)
+        .join(" — ");
+      return {
+        organizationProfile: profile.length > 0 ? profile : "Unprofiled organization.",
+        objectives: state.goals.map(
+          (goal) => `${goal.name}: ${goal.metric} ${goal.target_value}${goal.unit}`,
+        ),
+        capacityNotes: state.facts
+          .filter((fact) => fact.fact.status === "verified")
+          .map((fact) => `${fact.fact.fact_key}: ${JSON.stringify(fact.fact.value)}`),
+        // No capacity source exists yet that can name a blocker; the
+        // branch stays wired so the first one plugs in here.
+        operationalBlockers: [] as string[],
+        hardConstraints: state.constraints
+          .filter((constraint) => constraint.severity === "hard" && constraint.is_active)
+          .map((constraint) => `${constraint.name}: ${JSON.stringify(constraint.value)}`),
+      };
+    };
+
+    // Raw GI recommendation picks for question derivation (cap 20, newest
+    // first). Excludes nothing here — ordering (Agent A) and the service
+    // (Agent C) drop dismissed/snoozed, so a human "no" is never resurrected
+    // as a new question. Titles/bodies travel to the deriver only, never to
+    // logs. Every query repeats the organization id, so tenancy holds by
+    // explicit predicate even though the service client bypasses RLS; the
+    // service runs these readers only while the run holds its claim
+    // (assertClaimLive gates the contexts path beside them). A GI read
+    // failure degrades to no picks — the ladder falls through to org
+    // details, then goals — rather than failing the run.
+    const readRecommendationPicks = async ({ organizationId }: { organizationId: string }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as unknown as { from(table: string): any };
+      const listed = await db
+        .from("channel_recommendations")
+        .select("id,headline,detail,created_at")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      const rows = (listed.data ?? []) as Array<{
+        id: string;
+        headline: string;
+        detail: string;
+        created_at: string;
+      }>;
+      if (rows.length === 0) return [];
+      const ids = rows.map((row) => row.id);
+      const [decided, voted] = await Promise.all([
+        db
+          .from("channel_recommendation_decisions")
+          .select("recommendation_id,decision,created_at")
+          .eq("organization_id", organizationId)
+          .in("recommendation_id", ids)
+          .order("created_at", { ascending: false }),
+        db
+          .from("channel_recommendation_feedback")
+          .select("recommendation_id,helpful,updated_at")
+          .eq("organization_id", organizationId)
+          .in("recommendation_id", ids)
+          .order("updated_at", { ascending: false }),
+      ]);
+      const latestDecision = new Map<string, string>();
+      for (const row of (decided.data ?? []) as Array<{
+        recommendation_id: string;
+        decision: string;
+      }>) {
+        if (!latestDecision.has(row.recommendation_id)) {
+          latestDecision.set(row.recommendation_id, row.decision);
+        }
+      }
+      const helpfulByRec = new Map<string, boolean>();
+      for (const row of (voted.data ?? []) as Array<{
+        recommendation_id: string;
+        helpful: boolean;
+      }>) {
+        // Org-wide endorsement signal (no viewing actor on the worker): any
+        // helpful=true vote marks the pick endorsed; a false vote only counts
+        // when nothing endorsed it. Ordering treats helpful=false with no
+        // decision as untouched.
+        if (row.helpful === true) helpfulByRec.set(row.recommendation_id, true);
+        else if (row.helpful === false && !helpfulByRec.has(row.recommendation_id)) {
+          helpfulByRec.set(row.recommendation_id, false);
+        }
+      }
+      const validDecisions = new Set(["acknowledged", "dismissed", "planned", "snoozed"]);
+      return rows.map((row) => {
+        const decision = latestDecision.get(row.id) ?? null;
+        return {
+          id: row.id,
+          title: row.headline,
+          body: row.detail,
+          decision: (
+            decision !== null && validDecisions.has(decision) ? decision : null
+          ) as "acknowledged" | "dismissed" | "planned" | "snoozed" | null,
+          helpful: (helpfulByRec.get(row.id) ?? null) as boolean | null,
+          updatedAt: row.created_at,
+        };
+      });
+    };
+
     const result = await researchProposal(
       {
         organizationId: parsed.organizationId,
@@ -1185,30 +1294,7 @@ export const researchCampaignProposalTask = schemaTask({
       {
         runs: createResearchRunStore({ rpc }),
         contexts: createResearchContextReader({
-          readSource: async ({ organizationId }) => {
-            const state = await readCurrentState(
-              createSupabaseCurrentStateQuery(structural),
-              { organizationId, branchId: null },
-            );
-            const profile = [state.profile?.business_model, state.profile?.value_proposition]
-              .filter((part): part is string => typeof part === "string" && part.length > 0)
-              .join(" — ");
-            return {
-              organizationProfile: profile.length > 0 ? profile : "Unprofiled organization.",
-              objectives: state.goals.map(
-                (goal) => `${goal.name}: ${goal.metric} ${goal.target_value}${goal.unit}`,
-              ),
-              capacityNotes: state.facts
-                .filter((fact) => fact.fact.status === "verified")
-                .map((fact) => `${fact.fact.fact_key}: ${JSON.stringify(fact.fact.value)}`),
-              // No capacity source exists yet that can name a blocker; the
-              // branch stays wired so the first one plugs in here.
-              operationalBlockers: [],
-              hardConstraints: state.constraints
-                .filter((constraint) => constraint.severity === "hard" && constraint.is_active)
-                .map((constraint) => `${constraint.name}: ${JSON.stringify(constraint.value)}`),
-            };
-          },
+          readSource: readSourceForDerivation,
           subjectPack: {
             // Unreachable by construction: the service always passes the
             // admitted pin on the worker path, so preparation never runs
@@ -1289,18 +1375,34 @@ export const researchCampaignProposalTask = schemaTask({
         // stands before anything public or money-moving. No allowance rule
         // changes here.
         derivationCostMinor: 0,
+        // Question context ladder (ADR 0062): business memory entries with
+        // bodies > endorsed GI picks (planned > acknowledged > helpful-true)
+        // > untouched GI picks > org details (profile, facts, constraints) >
+        // goals last. Dismissed/snoozed picks are never resurrected — not
+        // even newest or helpful-marked — and the tier travels in provenance.
+        // Metered, not gated (ADR 0061): derivation inference is logged cost,
+        // never an allowance gate; no allowance logic changes here.
         // The service derives only when the admitted run carries no staged
         // question, and saves the derived question with provenance before
         // planning. A staged question still governs; NULL without derivation
         // still fails as `question_missing`.
         questionDeriver,
+        // Structural until Agent C's NULL-branch names land in
+        // research-service.ts: exactly those names
+        // (readSourceForDerivation, readRecommendationPicks), spread so this
+        // compiles before and after they are declared. Titles/bodies never
+        // reach logs — `derived` below stays the only derivation signal.
+        ...({
+          readSourceForDerivation,
+          readRecommendationPicks,
+        } as unknown as Record<string, unknown>),
       },
       signal,
     );
 
     // Safe fields only: identifiers, status, measured cost, and whether a
-    // deriver was supplied (never the question itself). The staged question
-    // and every evidence byte stay out of the log.
+    // deriver was supplied (never the question itself). The staged question,
+    // every evidence byte, and every GI pick title/body stay out of the log.
     logger.info("campaign.research_finished", {
       organizationId: parsed.organizationId,
       runId: parsed.runId,

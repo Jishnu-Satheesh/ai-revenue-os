@@ -7,8 +7,10 @@ import type {
   ProposalVersionResult,
 } from "@/modules/campaigns/application/proposal-service";
 import type {
+  PinnedResearchMemory,
   ResearchContext,
   ResearchContextReader,
+  ResearchSourceData,
 } from "@/modules/campaigns/infrastructure/research-context-reader";
 import type { ResearchPlanner } from "@/modules/campaigns/infrastructure/research-planner";
 import { RESEARCH_PLANNER_PROMPT_VERSION } from "@/modules/campaigns/infrastructure/research-planner";
@@ -68,10 +70,14 @@ export type ResearchQuestionDeriver = {
   derive(input: {
     organizationId: string;
     triggerKind: string;
-    source: unknown;
-    memory: unknown;
+    source: ResearchSourceData;
+    memory: PinnedResearchMemory;
     evidenceStatus: string;
     correlationId: string;
+    /** Ordered GI picks for scope (Agent B optional input). */
+    picks?: readonly { id: string; title: string; body: string }[];
+    /** Context tier for scope (Agent B optional input). */
+    tier?: string;
   }): Promise<{
     question: string;
     provenance: { sourceIds: readonly string[]; modelId: string; derivedAt: string };
@@ -92,6 +98,25 @@ export type ResearchServiceDependencies = {
   questionDeriver?: ResearchQuestionDeriver;
   /** Metered (not blocking) model spend for the derivation call. Defaults to 0 when unknown. */
   derivationCostMinor?: number;
+  /** Reads owned source data for derivation. Optional so old fakes keep compiling. */
+  readSourceForDerivation?: (input: { organizationId: string }) => Promise<{
+    organizationProfile: string;
+    objectives: readonly string[];
+    capacityNotes: readonly string[];
+    operationalBlockers: readonly string[];
+    hardConstraints: readonly string[];
+  }>;
+  /** Reads GI recommendation picks for derivation. Optional so old fakes keep compiling. */
+  readRecommendationPicks?: (input: { organizationId: string }) => Promise<
+    readonly {
+      id: string;
+      title: string;
+      body: string;
+      decision: string | null;
+      helpful: boolean | null;
+      updatedAt: string;
+    }[]
+  >;
 };
 
 const CLAIM_LEASE_SECONDS = 900;
@@ -168,21 +193,122 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       let effectiveQuestion = loaded.researchQuestion;
       let derivationCostMinor = 0;
       if (effectiveQuestion === null) {
+        // swarm-contract: mirror of question-context-tiers (Agent A not yet
+        // landed — prefer the import when present). Inline copy MUST match:
+        // rank planned>acknowledged>helpful-true>untouched, exclude
+        // dismissed/snoozed, cap 6, ties newest-first.
+        type MirrorPick = {
+          id: string;
+          title: string;
+          body: string;
+          decision: string | null;
+          helpful: boolean | null;
+          updatedAt: string;
+        };
+        const mirrorRank = (pick: MirrorPick): number => {
+          if (pick.decision === "planned") return 0;
+          if (pick.decision === "acknowledged") return 1;
+          if ((pick.decision === null || pick.decision === undefined) && pick.helpful === true)
+            return 2;
+          if (pick.decision === "dismissed" || pick.decision === "snoozed") return -1;
+          return 3;
+        };
+        const orderPicks = (picks: readonly MirrorPick[]): MirrorPick[] =>
+          [...picks]
+            .filter((pick) => mirrorRank(pick) >= 0)
+            .sort((a, b) => {
+              const rankDelta = mirrorRank(a) - mirrorRank(b);
+              if (rankDelta !== 0) return rankDelta;
+              if (a.updatedAt === b.updatedAt) return 0;
+              return a.updatedAt < b.updatedAt ? 1 : -1;
+            })
+            .slice(0, 6);
+        const selectTierMirror = (input: {
+          memory: readonly { id: string; title: string | null; body: string | null }[];
+          orderedPicks: readonly MirrorPick[];
+          orgDetailCount: number;
+          goalCount: number;
+        }): { tier: string } => {
+          const hasMemory = input.memory.some(
+            (entry) => typeof entry.body === "string" && entry.body.trim().length > 0,
+          );
+          if (hasMemory) return { tier: "business_memory" };
+          const hasInteracted = input.orderedPicks.some(
+            (pick) =>
+              pick.decision === "planned" ||
+              pick.decision === "acknowledged" ||
+              ((pick.decision === null || pick.decision === undefined) && pick.helpful === true),
+          );
+          if (hasInteracted) return { tier: "gi_interacted" };
+          const hasUntouched = input.orderedPicks.some(
+            (pick) =>
+              (pick.decision === null || pick.decision === undefined) && pick.helpful !== true,
+          );
+          if (hasUntouched) return { tier: "gi_untouched" };
+          if (input.orgDetailCount > 0) return { tier: "org_details" };
+          if (input.goalCount > 0) return { tier: "goals" };
+          return { tier: "none" };
+        };
+        const isClaimLostError = (error: unknown): boolean =>
+          typeof error === "object" &&
+          error !== null &&
+          (error as { kind?: unknown }).kind === "not_found";
         // The full source read happens in contexts.read, which needs the
         // query first — so derivation works from the pinned manifest entries
         // and the trigger kind only, with an unprofiled fallback where the
-        // deriver needs a full source shape.
+        // deriver needs a full source shape. When the optional readers are
+        // wired, the NULL path reads real org data + GI picks behind the
+        // claim fence before deriving, instead of the hardcoded fallback.
+        const fallbackSource: ResearchSourceData = {
+          organizationProfile: "Unprofiled organization.",
+          objectives: [],
+          capacityNotes: [],
+          operationalBlockers: [],
+          hardConstraints: [],
+        };
+        let derivationSource: ResearchSourceData = fallbackSource;
+        let picksRaw: readonly MirrorPick[] = [];
+        try {
+          const assertLive = (
+            dependencies.runs as {
+              assertClaimLive?: (input: {
+                organizationId: string;
+                runId: string;
+                claimToken: string;
+              }) => Promise<void>;
+            }
+          ).assertClaimLive;
+          if (typeof assertLive === "function") {
+            await assertLive({ organizationId, runId, claimToken: claim.claimToken });
+          }
+          if (dependencies.readSourceForDerivation) {
+            derivationSource = await dependencies.readSourceForDerivation({ organizationId });
+          }
+          if (dependencies.readRecommendationPicks) {
+            picksRaw = await dependencies.readRecommendationPicks({ organizationId });
+          }
+        } catch (error) {
+          if (isClaimLostError(error)) throw new ResearchClaimLost(runId);
+          derivationSource = fallbackSource;
+          picksRaw = [];
+        }
+        const ordered = orderPicks(picksRaw);
+        const orgDetailCount =
+          (derivationSource.organizationProfile.trim().length > 0 ? 1 : 0) +
+          derivationSource.capacityNotes.length +
+          derivationSource.hardConstraints.length;
+        const goalCount = derivationSource.objectives.length;
+        const tierScope = selectTierMirror({
+          memory: loaded.entries,
+          orderedPicks: ordered,
+          orgDetailCount,
+          goalCount,
+        });
         const derived = dependencies.questionDeriver
           ? await dependencies.questionDeriver.derive({
               organizationId,
               triggerKind: loaded.triggerKind,
-              source: {
-                organizationProfile: "Unprofiled organization.",
-                objectives: [],
-                capacityNotes: [],
-                operationalBlockers: [],
-                hardConstraints: [],
-              },
+              source: derivationSource,
               memory: {
                 manifestId: loaded.manifestId ?? "",
                 digest: loaded.digest ?? "",
@@ -191,6 +317,12 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
               },
               evidenceStatus: "unknown",
               correlationId: runId,
+              picks: ordered.slice(0, 6).map((pick) => ({
+                id: pick.id,
+                title: pick.title,
+                body: pick.body,
+              })),
+              tier: tierScope.tier,
             })
           : {
               question: "What campaign should we run next?",

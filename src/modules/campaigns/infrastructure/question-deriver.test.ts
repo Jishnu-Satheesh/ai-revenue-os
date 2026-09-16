@@ -168,4 +168,142 @@ describe("question-deriver", () => {
 
     expect(result.gaps).toContain("no_memory_entries");
   });
+
+  it("renders recommendation picks after business memory with decision labels", () => {
+    const prompt = renderQuestionDerivationPrompt(
+      baseInput({
+        picks: [
+          { id: "rec-1", title: "Lunch combo", body: "Bundle soup and sandwich.", decision: "endorsed" },
+          { id: "rec-2", title: "Early-bird offer", body: "Discount before noon.", decision: "undecided" },
+        ],
+      }),
+    );
+
+    expect(prompt).toContain("<recommendation_picks>");
+    expect(prompt).toContain("rec-1");
+    expect(prompt).toContain("Lunch combo");
+    expect(prompt).toContain("Bundle soup and sandwich.");
+    expect(prompt).toContain("endorsed");
+    expect(prompt.indexOf("<recommendation_picks>")).toBeGreaterThan(
+      prompt.indexOf("<business_memory"),
+    );
+  });
+
+  it("caps recommendation picks at six and slices each field to 400 chars", () => {
+    const longTitle = `t${"x".repeat(500)}`;
+    const longBody = `b${"y".repeat(500)}`;
+    const picks = Array.from({ length: 7 }, (_, index) => ({
+      id: `rec-${index}`,
+      title: index === 0 ? longTitle : `Title ${index}`,
+      body: index === 0 ? longBody : `Body ${index}`,
+      decision: "endorsed",
+    }));
+    const prompt = renderQuestionDerivationPrompt(baseInput({ picks }));
+
+    expect(prompt).not.toContain("rec-6");
+    expect(prompt).toContain("rec-5");
+    expect(prompt).not.toContain(longTitle);
+    expect(prompt).not.toContain(longBody);
+    expect(prompt).toContain(longTitle.slice(0, 400));
+    expect(prompt).toContain(longBody.slice(0, 400));
+  });
+
+  it("excludes dismissed and snoozed recommendations by rule", () => {
+    const prompt = renderQuestionDerivationPrompt(
+      baseInput({
+        picks: [{ id: "rec-1", title: "Lunch combo", body: "Bundle soup.", decision: "endorsed" }],
+      }),
+    );
+
+    expect(prompt).toContain(
+      "Dismissed and snoozed recommendations never appear here and must not be resurrected.",
+    );
+  });
+
+  it("grounds the question in the highest non-empty tier", () => {
+    const prompt = renderQuestionDerivationPrompt(baseInput());
+
+    expect(prompt).toContain(
+      "Ground the question in the highest non-empty tier: business memory, then endorsed recommendations, then untouched recommendations, then organization details, then goals.",
+    );
+  });
+
+  it("passes the caller tier through on success, fallback, and blocker paths", async () => {
+    const validDrafter = stubDrafter({
+      question: "What lunch offer fills weekday seats within our constraints?",
+      sourceIds: ["mem-1"],
+      gaps: [],
+    });
+    const valid = await createQuestionDeriver({
+      drafter: validDrafter,
+      nowIso: () => NOW_ISO,
+    }).derive({ ...baseInput(), tier: "business_memory", correlationId: "corr-tier" });
+    expect(valid.provenance.tier).toBe("business_memory");
+
+    const defaultTier = await createQuestionDeriver({
+      drafter: stubDrafter({
+        question: "What lunch offer fills weekday seats within our constraints?",
+        sourceIds: [],
+        gaps: [],
+      }),
+      nowIso: () => NOW_ISO,
+    }).derive({ ...baseInput(), correlationId: "corr-tier-default" });
+    expect(defaultTier.provenance.tier).toBe("none");
+
+    const fallback = await createQuestionDeriver({
+      drafter: stubDrafter({ nope: true }, "test-model-x"),
+      nowIso: () => NOW_ISO,
+    }).derive({ ...baseInput(), tier: "goals", correlationId: "corr-tier-fallback" });
+    expect(fallback.question).toBe(FALLBACK_QUESTION);
+    expect(fallback.provenance.tier).toBe("goals");
+
+    const blockerDeriver = createQuestionDeriver({
+      drafter: stubDrafter({
+        question: "What lunch offer fills weekday seats within our constraints?",
+        sourceIds: [],
+        gaps: [],
+      }),
+      nowIso: () => NOW_ISO,
+    });
+    const blocker = await blockerDeriver.derive({
+      ...baseInput({
+        source: {
+          organizationProfile: "Neighborhood bistro serving weekday lunch.",
+          objectives: ["Fill weekday lunch covers"],
+          capacityNotes: ["40 seats at lunch"],
+          operationalBlockers: ["Kitchen cannot cover lunch service."],
+          hardConstraints: ["No discounts over 10%"],
+        },
+      }),
+      tier: "org_details",
+      correlationId: "corr-tier-blocker",
+    });
+    expect(blocker.provenance.tier).toBe("org_details");
+  });
+
+  it("scopes from goals when the profile is empty and objectives exist", () => {
+    const prompt = renderQuestionDerivationPrompt(
+      baseInput({
+        source: {
+          organizationProfile: "   ",
+          objectives: ["Fill weekday lunch covers", "Grow catering orders"],
+          capacityNotes: [],
+          operationalBlockers: [],
+          hardConstraints: [],
+        },
+      }),
+    );
+
+    expect(prompt).toContain("<goals_fallback>");
+    expect(prompt).toContain(
+      "No usable profile or memory: scope the question from these goals.",
+    );
+    expect(prompt).toContain("Fill weekday lunch covers");
+  });
+
+  it("omits the goals fallback when the profile is rich", () => {
+    const prompt = renderQuestionDerivationPrompt(baseInput());
+
+    expect(prompt).not.toContain("goals_fallback");
+  });
 });
