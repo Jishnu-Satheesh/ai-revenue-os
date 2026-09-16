@@ -1,9 +1,12 @@
-# Organization home: revenue scenario (Proposed — needs user approval)
+# Organization home: revenue scenario (Approved for building 2026-09-16 — ADR 0060)
 
-Status: Proposed. This is a method proposal only. No calculation code, migration,
-worker, model call, or shipped number follows from it until the user approves
-this spec and its companion ADR draft
-(`docs/superpowers/plans/2026-09-11-organization-home-revenue-adr-draft.md`).
+Status: Approved. The calculation contract below is authorized for
+implementation under the GROWTH execution plan (approved 2026-09-16); the
+implementation lives in `src/domain/organizations/revenue-scenario.ts` and the
+home revenue slice, recorded in ADR 0060. The method proposal history (and its
+companion ADR draft,
+`docs/superpowers/plans/2026-09-11-organization-home-revenue-adr-draft.md`)
+is retained below for the record.
 
 Parent investigation (binding): `docs/superpowers/specs/2026-09-11-organization-home-growth-feasibility.md`.
 Design reference for the lower home sections: `docs/superpowers/specs/2026-09-11-organization-home-design.md`.
@@ -195,7 +198,7 @@ separately only where supported. Profit is never summed into the revenue headlin
   "Costs are not yet included" footnote,
   `src/modules/analysis/application/channels-overview.ts:749`).
 
-## 14. Co-decision recommendations (user-selected 2026-09-15, still Proposed)
+## 14. Co-decision recommendations (selected 2026-09-15, approved for building 2026-09-16)
 
 - (a) Scenario membership: the recommended feasible action set spanning AI
   recommendations, campaign proposals, and growth insights, with each action's
@@ -246,14 +249,19 @@ deterministic code surveys it.
   supported grain: solid history → marked last-observation boundary → two
   labelled next-month paths (current course vs acting on the recommendations
   and proposals). Staleness renders as an explicit gap.
-- Status: Proposed. No code follows until the user approves this amendment
-  together with the §14 selections above.
+- Status: Approved for building 2026-09-16 (ADR 0060) together with the §14
+  selections above. Implementation: `src/domain/organizations/revenue-scenario.ts`
+  (`buildRevenueScenario` + `applyProposedRanges`), inputs in
+  `src/modules/organizations/infrastructure/revenue-inputs.ts`, reads in
+  `revenue-source.ts`, section in `home-revenue.tsx`, stateless proposal route
+  under `src/app/api/organizations/[organizationId]/revenue/proposals/`.
 
 ## 15. Non-goals
 
-No production types, no `src/` code, no SQL, no migration, no worker, no new
-dependency, no fixture numbers, no invented response rates/amounts/confidence/
-shares, no mapping of money-split potential/earned to forecast, no summing of
-`value.ts` ranking quantities into the headline, no calling
-campaign-draft-impact validation an estimator origin, no labelling a goal as
-projected revenue.
+The contract proposes no production types beyond the scenario input/output,
+no SQL, no migration, no worker, no new dependency, no fixture numbers, no
+invented response rates/amounts/confidence/shares, no mapping of money-split
+potential/earned to forecast, no summing of `value.ts` ranking quantities into
+the headline, no calling campaign-draft-impact validation an estimator origin,
+no labelling a goal as projected revenue. Scenario persistence and versioning
+(§10) remain a later slice.

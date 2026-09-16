@@ -1,5 +1,6 @@
 import { HomeHeader } from "@/components/organizations/home/home-header";
 import { HomeCampaigns } from "@/components/organizations/home/home-campaigns";
+import { HomeRevenue } from "@/components/organizations/home/home-revenue";
 import { HomeAssets } from "@/components/organizations/home/home-assets";
 import { HomeAttention } from "@/components/organizations/home/home-attention";
 import { HomeDestinations, HomeGoals } from "@/components/organizations/home/home-context";
@@ -21,6 +22,7 @@ export function OrganizationHome({ view }: Readonly<{ view: OrganizationHomeView
     <div className={styles.home}>
       <HomeHeader view={view} />
       <div className={styles.body}>
+        <HomeRevenue organizationId={view.organizationId} section={view.revenue} />
         <HomeCampaigns
           organizationId={view.organizationId}
           timeZone={view.timeZone}

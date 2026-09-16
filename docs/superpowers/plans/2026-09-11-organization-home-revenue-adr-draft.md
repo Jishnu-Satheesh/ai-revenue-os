@@ -1,8 +1,9 @@
-# ADR draft — transparent action scenario for the organization-home revenue section (NOT in adrs/ — number assigned on approval)
+# ADR draft — transparent action scenario for the organization-home revenue section (ACCEPTED as ADR 0060 on 2026-09-16)
 
-Status: draft. This file is a proposal. It becomes a numbered ADR in `adrs/`
-only after the user approves it together with its companion spec
+Status: accepted. This proposal became `adrs/0060-transparent-action-scenario-for-home-revenue.md`
+on 2026-09-16 together with its companion spec
 (`docs/superpowers/specs/2026-09-11-organization-home-revenue-scenario.md`).
+The text below is retained as the proposal record.
 
 ## Decision (proposed)
 

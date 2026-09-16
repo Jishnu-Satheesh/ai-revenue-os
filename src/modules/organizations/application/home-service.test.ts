@@ -60,7 +60,14 @@ function listItem(overrides: Partial<CampaignListItem> = {}): CampaignListItem {
     updatedAt: "2026-09-10T10:00:00.000Z",
     awaitingFirstVersion: false,
     openable: true,
-    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] },
+    generation: {
+      status: "settled",
+      detail: null,
+      nextAction: null,
+      retryable: false,
+      blocker: null,
+      missingDetails: [],
+    },
     version: 2,
     objective: "Drive iftar orders",
     channels: ["direct"],
@@ -182,7 +189,9 @@ function sources(overrides: Partial<CampaignHomeReads> = {}): CampaignHomeReads 
   };
 }
 
-function gates(overrides: Partial<{ campaigns: boolean; growth: boolean; integrations: boolean }> = {}) {
+function gates(
+  overrides: Partial<{ campaigns: boolean; growth: boolean; integrations: boolean }> = {},
+) {
   return { campaigns: true, growth: true, integrations: true, ...overrides };
 }
 
@@ -225,7 +234,9 @@ describe("Org A composition", () => {
         created_at: "2026-08-02T08:00:00.000Z",
         updated_at: "2026-08-02T08:00:00.000Z",
       },
-      goals: [goalRow(GOAL_ORG, { name: "Grow orders", target_value: 500, unit: "count", priority: 2 })],
+      goals: [
+        goalRow(GOAL_ORG, { name: "Grow orders", target_value: 500, unit: "count", priority: 2 }),
+      ],
     });
     const src = sources({
       campaigns: ready([
@@ -335,7 +346,9 @@ describe("source failures", () => {
         src: sources({
           campaigns: ready([]),
           posters: failed(),
-          references: ready([assetRecord({ id: "reference:55555555-5555-4555-8555-555555555553" })]),
+          references: ready([
+            assetRecord({ id: "reference:55555555-5555-4555-8555-555555555553" }),
+          ]),
         }),
       }),
     );
@@ -404,14 +417,27 @@ describe("permissions", () => {
   const draftSrc = () =>
     sources({
       campaigns: ready([
-        campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
+        campaignRecord({
+          id: CAMPAIGN_1,
+          state: "draft",
+          generation: {
+            status: "settled",
+            detail: null,
+            nextAction: null,
+            retryable: false,
+            blocker: null,
+            missingDetails: [],
+          },
+        }),
       ]),
       posters: ready([]),
       references: ready([]),
     });
 
   it("viewer gets read destinations only and no create/edit/review authority", () => {
-    const view = buildOrganizationHomeView(viewInput("viewer", { snap: permSnap(), src: draftSrc() }));
+    const view = buildOrganizationHomeView(
+      viewInput("viewer", { snap: permSnap(), src: draftSrc() }),
+    );
     expect(view.permissions.canCreateCampaign).toBe(false);
     expect(view.permissions.canEditCampaign).toBe(false);
     expect(view.permissions.canReviewCampaign).toBe(false);
@@ -426,7 +452,9 @@ describe("permissions", () => {
   });
 
   it("operator gets creation and edit navigation but no approval wording", () => {
-    const view = buildOrganizationHomeView(viewInput("operator", { snap: permSnap(), src: draftSrc() }));
+    const view = buildOrganizationHomeView(
+      viewInput("operator", { snap: permSnap(), src: draftSrc() }),
+    );
     expect(view.permissions.canCreateCampaign).toBe(true);
     expect(view.permissions.canEditCampaign).toBe(true);
     expect(view.permissions.canReviewCampaign).toBe(false);
@@ -438,7 +466,9 @@ describe("permissions", () => {
       posters: ready([]),
       references: ready([]),
     });
-    const reviewView = buildOrganizationHomeView(viewInput("operator", { snap: permSnap(), src: reviewSrc }));
+    const reviewView = buildOrganizationHomeView(
+      viewInput("operator", { snap: permSnap(), src: reviewSrc }),
+    );
     if (reviewView.campaigns.status === "ready") {
       expect(reviewView.campaigns.data[0]?.actionLabel).toBe("View campaign");
     }
@@ -453,7 +483,9 @@ describe("permissions", () => {
         references: ready([]),
       });
     for (const role of ["owner", "admin"] as const) {
-      const view = buildOrganizationHomeView(viewInput(role, { snap: permSnap(), src: reviewSrc() }));
+      const view = buildOrganizationHomeView(
+        viewInput(role, { snap: permSnap(), src: reviewSrc() }),
+      );
       expect(view.permissions.canReviewCampaign).toBe(true);
       if (view.campaigns.status === "ready") {
         expect(view.campaigns.data[0]?.actionLabel).toBe("Review campaign");
@@ -558,14 +590,28 @@ describe("attention ranking", () => {
               title: "Stalled old",
               state: "draft",
               updatedAt: "2026-09-01T10:00:00.000Z",
-              generation: { status: "stalled", detail: "Generation stopped responding.", nextAction: "Start it again.", retryable: true, blocker: null, missingDetails: [] },
+              generation: {
+                status: "stalled",
+                detail: "Generation stopped responding.",
+                nextAction: "Start it again.",
+                retryable: true,
+                blocker: null,
+                missingDetails: [],
+              },
             }),
             campaignRecord({
               id: CAMPAIGN_2,
               title: "Fresh review",
               state: "ready_for_review",
               updatedAt: "2026-09-10T10:00:00.000Z",
-              generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] },
+              generation: {
+                status: "settled",
+                detail: null,
+                nextAction: null,
+                retryable: false,
+                blocker: null,
+                missingDetails: [],
+              },
             }),
           ]),
           posters: ready([]),
@@ -583,8 +629,32 @@ describe("attention ranking", () => {
         snap: attentionSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, title: "Blocked", state: "blocked", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
-            campaignRecord({ id: CAMPAIGN_2, title: "Review", state: "ready_for_review", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
+            campaignRecord({
+              id: CAMPAIGN_1,
+              title: "Blocked",
+              state: "blocked",
+              generation: {
+                status: "settled",
+                detail: null,
+                nextAction: null,
+                retryable: false,
+                blocker: null,
+                missingDetails: [],
+              },
+            }),
+            campaignRecord({
+              id: CAMPAIGN_2,
+              title: "Review",
+              state: "ready_for_review",
+              generation: {
+                status: "settled",
+                detail: null,
+                nextAction: null,
+                retryable: false,
+                blocker: null,
+                missingDetails: [],
+              },
+            }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -604,7 +674,14 @@ describe("attention ranking", () => {
               id: CAMPAIGN_1,
               title: "Both",
               state: "blocked",
-              generation: { status: "failed", detail: "Generation failed.", nextAction: "Start it again.", retryable: true, blocker: null, missingDetails: [] },
+              generation: {
+                status: "failed",
+                detail: "Generation failed.",
+                nextAction: "Start it again.",
+                retryable: true,
+                blocker: null,
+                missingDetails: [],
+              },
             }),
           ]),
           posters: ready([]),
@@ -681,7 +758,18 @@ describe("campaign CTAs", () => {
         snap: ctaSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, state: "draft", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
+            campaignRecord({
+              id: CAMPAIGN_1,
+              state: "draft",
+              generation: {
+                status: "settled",
+                detail: null,
+                nextAction: null,
+                retryable: false,
+                blocker: null,
+                missingDetails: [],
+              },
+            }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -696,7 +784,18 @@ describe("campaign CTAs", () => {
         snap: ctaSnap(),
         src: sources({
           campaigns: ready([
-            campaignRecord({ id: CAMPAIGN_1, state: "scheduled", generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] } }),
+            campaignRecord({
+              id: CAMPAIGN_1,
+              state: "scheduled",
+              generation: {
+                status: "settled",
+                detail: null,
+                nextAction: null,
+                retryable: false,
+                blocker: null,
+                missingDetails: [],
+              },
+            }),
           ]),
           posters: ready([]),
           references: ready([]),
@@ -754,11 +853,15 @@ describe("goals", () => {
 
   it("missing org goal yields a neutral prompt for managers only", () => {
     const emptySnap = snapshot({ goals: [] });
-    const managerView = buildOrganizationHomeView(viewInput("admin", { snap: emptySnap, src: sources() }));
+    const managerView = buildOrganizationHomeView(
+      viewInput("admin", { snap: emptySnap, src: sources() }),
+    );
     expect(managerView.focusGoalId).toBeNull();
     expect(managerView.attention.some((item) => item.sourceLabel === "Organization")).toBe(true);
 
-    const viewerView = buildOrganizationHomeView(viewInput("viewer", { snap: emptySnap, src: sources() }));
+    const viewerView = buildOrganizationHomeView(
+      viewInput("viewer", { snap: emptySnap, src: sources() }),
+    );
     expect(viewerView.attention.some((item) => item.sourceLabel === "Organization")).toBe(false);
   });
 });
@@ -793,7 +896,10 @@ describe("activity", () => {
           entity_type: "goal",
           entity_id: GOAL_ORG,
           correlation_id: "corr-1",
-          payload: { secret: "payload-sentinel-goal", nested: { token: "payload-sentinel-nested" } },
+          payload: {
+            secret: "payload-sentinel-goal",
+            nested: { token: "payload-sentinel-nested" },
+          },
           occurred_at: "2026-09-05T10:00:00.000Z",
         },
         {
@@ -826,7 +932,11 @@ describe("activity", () => {
     });
     const src = sources({
       campaigns: ready([
-        campaignRecord({ id: sharedUuid, title: "Shared campaign", updatedAt: "2026-09-10T10:00:00.000Z" }),
+        campaignRecord({
+          id: sharedUuid,
+          title: "Shared campaign",
+          updatedAt: "2026-09-10T10:00:00.000Z",
+        }),
         campaignRecord({ id: CAMPAIGN_2, title: "Second", updatedAt: "2026-09-09T10:00:00.000Z" }),
         campaignRecord({ id: CAMPAIGN_3, title: "Third", updatedAt: "2026-09-08T10:00:00.000Z" }),
       ]),
@@ -855,7 +965,9 @@ describe("activity", () => {
     expect(ids).toContain(`poster:${sharedUuid}`);
     expect(ids).toContain(`reference:${sharedUuid}`);
     // Stable sort: same timestamp orders by key ascending.
-    const sharedRows = view.activity.filter((item) => item.occurredAt === "2026-09-10T10:00:00.000Z");
+    const sharedRows = view.activity.filter(
+      (item) => item.occurredAt === "2026-09-10T10:00:00.000Z",
+    );
     const sharedKeys = sharedRows.map((item) => item.id);
     expect([...sharedKeys].sort()).toEqual(sharedKeys);
     // Campaign rows use the update label, never publish wording.
@@ -868,115 +980,117 @@ describe("activity", () => {
     expect(serialized.toLowerCase()).not.toContain("published");
   });
 
-describe("destinations copy", () => {
-  it("uses the reference descriptions verbatim with the Integration Hub label", () => {
-    const view = buildOrganizationHomeView(viewInput("admin", { snap: snapshot(), src: sources() }));
-    expect(view.destinations.map((d) => [d.label, d.description])).toEqual([
-      ["Channels", "See channel performance and explore your reports."],
-      ["Growth Intelligence", "Explore findings, recommendations and your actions."],
-      ["Business Memory", "Keep your business knowledge and decisions together."],
-      ["Integration Hub", "Manage sources and bring in your latest reports."],
-    ]);
-    for (const destination of view.destinations) {
-      expect(destination.href).toContain(ORG_ID);
-    }
-  });
-});
-
-describe("activity labels", () => {
-  it("renders poster timestamps as Poster rendered alongside Reference added", () => {
-    const view = buildOrganizationHomeView(
-      viewInput("admin", {
-        snap: snapshot(),
-        src: sources({
-          campaigns: ready([]),
-          posters: ready([assetRecord()]),
-          references: ready([
-            assetRecord({
-              id: "reference:55555555-5555-4555-8555-555555555553",
-              sourceKind: "brand_reference",
-              sourceLabel: "Brand reference",
-              recordedAt: "2026-09-08T10:00:00.000Z",
-              sourceHref: `/organizations/${ORG_ID}/assets`,
-            }),
-          ]),
-        }),
-      }),
-    );
-    const labels = new Map(view.activity.map((item) => [item.id, item.label]));
-    expect(labels.get("poster:55555555-5555-4555-8555-555555555551")).toBe("Poster rendered");
-    expect(labels.get("reference:55555555-5555-4555-8555-555555555553")).toBe("Reference added");
-  });
-
-  it("maps every allowlisted organization event to its exact design label", () => {
-    const snap = snapshot({
-      branches: [branchRow(BRANCH_1, { name: "Deira" })],
-      goals: [goalRow(GOAL_ORG, { name: "Grow orders" })],
-      auditEvents: [
-        {
-          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab1",
-          organization_id: ORG_ID,
-          account_id: null,
-          event_name: "organization.created",
-          actor_type: "system",
-          actor_id: null,
-          entity_type: "organization",
-          entity_id: ORG_ID,
-          correlation_id: "corr-b1",
-          payload: {},
-          occurred_at: "2026-09-04T10:00:00.000Z",
-        },
-        {
-          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab2",
-          organization_id: ORG_ID,
-          account_id: null,
-          event_name: "branch.created",
-          actor_type: "user",
-          actor_id: null,
-          entity_type: "branch",
-          entity_id: BRANCH_1,
-          correlation_id: "corr-b2",
-          payload: {},
-          occurred_at: "2026-09-03T10:00:00.000Z",
-        },
-        {
-          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab3",
-          organization_id: ORG_ID,
-          account_id: null,
-          event_name: "business_profile.updated",
-          actor_type: "user",
-          actor_id: null,
-          entity_type: "business_profile",
-          entity_id: null,
-          correlation_id: "corr-b3",
-          payload: {},
-          occurred_at: "2026-09-02T10:00:00.000Z",
-        },
-        {
-          id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab4",
-          organization_id: ORG_ID,
-          account_id: null,
-          event_name: "goal.created",
-          actor_type: "user",
-          actor_id: null,
-          entity_type: "goal",
-          entity_id: GOAL_ORG,
-          correlation_id: "corr-b4",
-          payload: {},
-          occurred_at: "2026-09-01T10:00:00.000Z",
-        },
-      ],
+  describe("destinations copy", () => {
+    it("uses the reference descriptions verbatim with the Integration Hub label", () => {
+      const view = buildOrganizationHomeView(
+        viewInput("admin", { snap: snapshot(), src: sources() }),
+      );
+      expect(view.destinations.map((d) => [d.label, d.description])).toEqual([
+        ["Channels", "See channel performance and explore your reports."],
+        ["Growth Intelligence", "Explore findings, recommendations and your actions."],
+        ["Business Memory", "Keep your business knowledge and decisions together."],
+        ["Integration Hub", "Manage sources and bring in your latest reports."],
+      ]);
+      for (const destination of view.destinations) {
+        expect(destination.href).toContain(ORG_ID);
+      }
     });
-    const view = buildOrganizationHomeView(viewInput("admin", { snap, src: sources() }));
-    const labels = new Map(view.activity.map((item) => [item.id, item.label]));
-    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab1")).toBe("Organization created");
-    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab2")).toBe("Location added");
-    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab3")).toBe(
-      "Business profile updated",
-    );
-    expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab4")).toBe("Goal added");
   });
-});
+
+  describe("activity labels", () => {
+    it("renders poster timestamps as Poster rendered alongside Reference added", () => {
+      const view = buildOrganizationHomeView(
+        viewInput("admin", {
+          snap: snapshot(),
+          src: sources({
+            campaigns: ready([]),
+            posters: ready([assetRecord()]),
+            references: ready([
+              assetRecord({
+                id: "reference:55555555-5555-4555-8555-555555555553",
+                sourceKind: "brand_reference",
+                sourceLabel: "Brand reference",
+                recordedAt: "2026-09-08T10:00:00.000Z",
+                sourceHref: `/organizations/${ORG_ID}/assets`,
+              }),
+            ]),
+          }),
+        }),
+      );
+      const labels = new Map(view.activity.map((item) => [item.id, item.label]));
+      expect(labels.get("poster:55555555-5555-4555-8555-555555555551")).toBe("Poster rendered");
+      expect(labels.get("reference:55555555-5555-4555-8555-555555555553")).toBe("Reference added");
+    });
+
+    it("maps every allowlisted organization event to its exact design label", () => {
+      const snap = snapshot({
+        branches: [branchRow(BRANCH_1, { name: "Deira" })],
+        goals: [goalRow(GOAL_ORG, { name: "Grow orders" })],
+        auditEvents: [
+          {
+            id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab1",
+            organization_id: ORG_ID,
+            account_id: null,
+            event_name: "organization.created",
+            actor_type: "system",
+            actor_id: null,
+            entity_type: "organization",
+            entity_id: ORG_ID,
+            correlation_id: "corr-b1",
+            payload: {},
+            occurred_at: "2026-09-04T10:00:00.000Z",
+          },
+          {
+            id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab2",
+            organization_id: ORG_ID,
+            account_id: null,
+            event_name: "branch.created",
+            actor_type: "user",
+            actor_id: null,
+            entity_type: "branch",
+            entity_id: BRANCH_1,
+            correlation_id: "corr-b2",
+            payload: {},
+            occurred_at: "2026-09-03T10:00:00.000Z",
+          },
+          {
+            id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab3",
+            organization_id: ORG_ID,
+            account_id: null,
+            event_name: "business_profile.updated",
+            actor_type: "user",
+            actor_id: null,
+            entity_type: "business_profile",
+            entity_id: null,
+            correlation_id: "corr-b3",
+            payload: {},
+            occurred_at: "2026-09-02T10:00:00.000Z",
+          },
+          {
+            id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab4",
+            organization_id: ORG_ID,
+            account_id: null,
+            event_name: "goal.created",
+            actor_type: "user",
+            actor_id: null,
+            entity_type: "goal",
+            entity_id: GOAL_ORG,
+            correlation_id: "corr-b4",
+            payload: {},
+            occurred_at: "2026-09-01T10:00:00.000Z",
+          },
+        ],
+      });
+      const view = buildOrganizationHomeView(viewInput("admin", { snap, src: sources() }));
+      const labels = new Map(view.activity.map((item) => [item.id, item.label]));
+      expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab1")).toBe("Organization created");
+      expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab2")).toBe("Location added");
+      expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab3")).toBe(
+        "Business profile updated",
+      );
+      expect(labels.get("audit:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab4")).toBe("Goal added");
+    });
+  });
   it("viewers get null hrefs for organization events", () => {
     const snap = snapshot({
       auditEvents: [
@@ -1011,20 +1125,77 @@ describe("a money goal's target", () => {
     // A goal whose unit *is* its currency — which is every money-valued metric
     // — rendered as "60,000 AED AED". The unit and the currency columns are
     // both right; saying both out loud is not.
-    expect(
-      formatGoalTarget({ targetValue: 60_000, unit: "AED", currency: "AED" }),
-    ).toBe("60,000 AED");
+    expect(formatGoalTarget({ targetValue: 60_000, unit: "AED", currency: "AED" })).toBe(
+      "60,000 AED",
+    );
   });
 
   it("still names a currency that differs from the unit", () => {
-    expect(
-      formatGoalTarget({ targetValue: 500, unit: "orders", currency: "AED" }),
-    ).toBe("500 orders AED");
+    expect(formatGoalTarget({ targetValue: 500, unit: "orders", currency: "AED" })).toBe(
+      "500 orders AED",
+    );
   });
 
   it("leaves a goal with no currency alone", () => {
-    expect(formatGoalTarget({ targetValue: 500, unit: "count", currency: null })).toBe(
-      "500 count",
-    );
+    expect(formatGoalTarget({ targetValue: 500, unit: "count", currency: null })).toBe("500 count");
+  });
+});
+
+describe("revenue section", () => {
+  const FINDING_A = "22222222-2222-4222-8222-222222222221";
+  function revenueInput(overrides: Record<string, unknown> = {}) {
+    return {
+      organizationId: ORG_ID,
+      grain: "week" as const,
+      history: [
+        { label: "2026-08-04", minorUnits: 800_00, currency: "AED" },
+        { label: "2026-08-11", minorUnits: 700_00, currency: "AED" },
+      ],
+      losses: [{ findingId: FINDING_A, minorUnits: 200_00, currency: "AED" }],
+      actions: [],
+      lastObservationDate: "2026-08-17",
+      today: "2026-08-20",
+      cutoffNote: "Reports through 2026-08-17.",
+      coverageNote: "2 reporting channels · weekly buckets.",
+      ...overrides,
+    };
+  }
+
+  it("stays disabled until the loader settles the slice", () => {
+    const view = buildOrganizationHomeView(viewInput());
+    expect(view.revenue).toEqual({ status: "disabled" });
+  });
+
+  it("composes a ready scenario without touching other sections", () => {
+    const view = buildOrganizationHomeView({
+      ...viewInput(),
+      revenue: { status: "ready", input: revenueInput(), fetchedAt: NOW },
+    });
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready") return;
+    expect(view.revenue.data.state).toBe("ready");
+    if (view.revenue.data.state !== "ready") return;
+    expect(view.revenue.data.baselineMinorUnits).toBe(700_00);
+    expect(view.revenue.data.horizonLabel).toBe("Next month (≈30 days)");
+    expect(view.campaigns.status).toBe("ready");
+  });
+
+  it("carries a refused scenario as ready-with-a-reason", () => {
+    const view = buildOrganizationHomeView({
+      ...viewInput(),
+      revenue: { status: "ready", input: revenueInput({ history: [] }), fetchedAt: NOW },
+    });
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready") return;
+    expect(view.revenue.data.state).toBe("refused");
+  });
+
+  it("degrades a failed revenue read alone", () => {
+    const view = buildOrganizationHomeView({
+      ...viewInput(),
+      revenue: { status: "failed" },
+    });
+    expect(view.revenue).toEqual({ status: "failed", code: "HOME_READ_FAILED" });
+    expect(view.campaigns.status).toBe("ready");
   });
 });

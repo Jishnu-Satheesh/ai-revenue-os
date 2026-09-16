@@ -1,5 +1,6 @@
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import type { OrganizationRole } from "@/domain/organizations/types";
+import { buildRevenueScenario } from "@/domain/organizations/revenue-scenario";
 import type {
   AssetHomeRecord,
   CampaignHomeReads,
@@ -13,6 +14,7 @@ import type {
   HomeDestination,
   HomeGoal,
   HomePermissions,
+  HomeRevenueSource,
   OrganizationHomeView,
 } from "@/modules/organizations/application/home-types";
 
@@ -23,10 +25,11 @@ export type BuildOrganizationHomeViewInput = {
   now: string;
   sources: CampaignHomeReads;
   gates: { campaigns: boolean; growth: boolean; integrations: boolean };
+  /** Absent while the revenue slice is still behind its own rollout. */
+  revenue?: HomeRevenueSource;
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUuid(value: string): boolean {
   return UUID_PATTERN.test(value);
@@ -59,8 +62,7 @@ function buildPermissions(
   gates: BuildOrganizationHomeViewInput["gates"],
 ): HomePermissions {
   const overview = getOverviewPermissions(role);
-  const canCreateCampaign =
-    gates.campaigns && hasOrganizationPermission(role, "campaign.create");
+  const canCreateCampaign = gates.campaigns && hasOrganizationPermission(role, "campaign.create");
   const canEditCampaign = gates.campaigns && hasOrganizationPermission(role, "campaign.edit");
   // Review wording is navigation into the approval workflow, not approval
   // itself. Operators hold campaign.approve in the catalogue, but the home
@@ -116,8 +118,7 @@ function buildGoals(snapshot: DigitalTwinSnapshot): {
     const scopeLabel =
       goal.scope_kind === "organization"
         ? "Organization"
-        : (goal.scope_branch_id !== null && branchNames.get(goal.scope_branch_id)) ||
-          "Branch goal";
+        : (goal.scope_branch_id !== null && branchNames.get(goal.scope_branch_id)) || "Branch goal";
     return {
       id: goal.id,
       name: goal.name,
@@ -131,12 +132,27 @@ function buildGoals(snapshot: DigitalTwinSnapshot): {
 }
 
 function toHomeCampaign(
-  record: { item: { id: string; title: string; objective: string | null; state: string; generation: HomeCampaign["generation"]; openable: boolean; updatedAt: string; version: number | null }; cover: HomeCampaign["cover"]; coverLabel: HomeCampaign["coverLabel"] },
+  record: {
+    item: {
+      id: string;
+      title: string;
+      objective: string | null;
+      state: string;
+      generation: HomeCampaign["generation"];
+      openable: boolean;
+      updatedAt: string;
+      version: number | null;
+    };
+    cover: HomeCampaign["cover"];
+    coverLabel: HomeCampaign["coverLabel"];
+  },
   organizationId: string,
   permissions: HomePermissions,
 ): HomeCampaign {
   const openable = record.item.openable;
-  const href = openable ? campaignHref(organizationId, record.item.id) : portfolioHref(organizationId);
+  const href = openable
+    ? campaignHref(organizationId, record.item.id)
+    : portfolioHref(organizationId);
   return {
     id: record.item.id,
     title: record.item.title,
@@ -327,7 +343,8 @@ function buildActivity(input: {
     deduped.push(candidate);
   }
   deduped.sort((left, right) => {
-    if (left.occurredAt !== right.occurredAt) return right.occurredAt.localeCompare(left.occurredAt);
+    if (left.occurredAt !== right.occurredAt)
+      return right.occurredAt.localeCompare(left.occurredAt);
     return left.id.localeCompare(right.id);
   });
   return deduped.slice(0, 5);
@@ -380,7 +397,9 @@ function buildDestinations(input: {
  * Storage, environment, clock, or router access. All hrefs are built from the
  * explicit organization ID plus validated record IDs.
  */
-export function buildOrganizationHomeView(input: BuildOrganizationHomeViewInput): OrganizationHomeView {
+export function buildOrganizationHomeView(
+  input: BuildOrganizationHomeViewInput,
+): OrganizationHomeView {
   const { snapshot, role, organizationId, sources, gates } = input;
   const permissions = buildPermissions(role, gates);
 
@@ -395,7 +414,9 @@ export function buildOrganizationHomeView(input: BuildOrganizationHomeViewInput)
   if (!gates.campaigns) {
     campaigns = { status: "disabled" };
   } else if (sources.campaigns.status === "ready") {
-    homeCampaigns = sources.campaigns.data.map((record) => toHomeCampaign(record, organizationId, permissions));
+    homeCampaigns = sources.campaigns.data.map((record) =>
+      toHomeCampaign(record, organizationId, permissions),
+    );
     campaigns = { status: "ready", data: homeCampaigns, fetchedAt: sources.campaigns.fetchedAt };
   } else if (sources.campaigns.status === "failed") {
     campaigns = { status: "failed", code: "HOME_READ_FAILED" };
@@ -424,7 +445,8 @@ export function buildOrganizationHomeView(input: BuildOrganizationHomeViewInput)
       if (posters.status === "ready") readyAssets.push(...posters.data);
       if (references.status === "ready") readyAssets.push(...references.data);
       const merged = [...readyAssets].sort((left, right) => {
-        if (left.recordedAt !== right.recordedAt) return right.recordedAt.localeCompare(left.recordedAt);
+        if (left.recordedAt !== right.recordedAt)
+          return right.recordedAt.localeCompare(left.recordedAt);
         return left.id.localeCompare(right.id);
       });
       gallery = merged.slice(0, 4);
@@ -449,6 +471,22 @@ export function buildOrganizationHomeView(input: BuildOrganizationHomeViewInput)
   const activity = buildActivity({ snapshot, organizationId, permissions, homeCampaigns, gallery });
   const logo = gates.campaigns ? sources.logo : null;
 
+  // The revenue scenario is a pure calculation over the settled input the
+  // loader mapped: a refused scenario (no history, mixed currencies) still
+  // composes as ready-with-a-reason, while a failed read degrades the
+  // section alone and a disabled source hides it without implying health.
+  const revenueSource = input.revenue;
+  const revenue: OrganizationHomeView["revenue"] =
+    revenueSource === undefined || revenueSource.status === "disabled"
+      ? { status: "disabled" }
+      : revenueSource.status === "failed"
+        ? { status: "failed", code: "HOME_READ_FAILED" }
+        : {
+            status: "ready",
+            data: buildRevenueScenario(revenueSource.input),
+            fetchedAt: revenueSource.fetchedAt,
+          };
+
   return {
     organizationId,
     name: snapshot.organization.name,
@@ -465,6 +503,7 @@ export function buildOrganizationHomeView(input: BuildOrganizationHomeViewInput)
     campaigns,
     assets,
     assetsPartial,
+    revenue,
     attention,
     attentionIncomplete,
     destinations,

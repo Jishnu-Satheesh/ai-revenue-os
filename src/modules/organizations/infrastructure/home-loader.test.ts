@@ -42,8 +42,7 @@ vi.mock("@/modules/integrations/application/feature-access", () => ({
 }));
 
 vi.mock("@/domain/access/permissions", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/domain/access/permissions")>();
+  const actual = await importOriginal<typeof import("@/domain/access/permissions")>();
   return {
     ...actual,
     hasOrganizationPermission: vi.fn(actual.hasOrganizationPermission),
@@ -58,8 +57,7 @@ vi.mock("@/modules/campaigns/infrastructure/repository", () => ({
   createCampaignReadRepository: vi.fn(() => ({
     getCampaign: (...args: unknown[]) => mockGetCampaign(...args),
     getVersion: (...args: unknown[]) => mockGetVersion(...args),
-    latestGenerationRun: (...args: unknown[]) =>
-      mockLatestGenerationRun(...args),
+    latestGenerationRun: (...args: unknown[]) => mockLatestGenerationRun(...args),
   })),
 }));
 
@@ -71,6 +69,33 @@ vi.mock("@/modules/campaigns/infrastructure/home-asset-reader", () => ({
   readHomePosterAssets: vi.fn(async () => []),
   readHomeReferenceAssets: vi.fn(async () => []),
   readHomeLogo: vi.fn(async () => null),
+}));
+
+const mockLoadAnalysedWindowKeys = vi.fn();
+const mockLoadChannelBandsForWindow = vi.fn();
+const mockListChannelRecommendationRecords = vi.fn();
+const mockListWorkspaceItems = vi.fn();
+const mockListProposals = vi.fn();
+
+vi.mock("@/modules/analysis/infrastructure/read-repository", () => ({
+  createAuthenticatedChannelAnalysisRepository: vi.fn(() => ({
+    loadAnalysedWindowKeys: (...args: unknown[]) => mockLoadAnalysedWindowKeys(...args),
+    loadChannelBandsForWindow: (...args: unknown[]) => mockLoadChannelBandsForWindow(...args),
+  })),
+}));
+
+vi.mock("@/modules/growth-intelligence/infrastructure/read-repository", () => ({
+  createAuthenticatedGrowthIntelligenceReadRepository: vi.fn(() => ({
+    listChannelRecommendationRecords: (...args: unknown[]) =>
+      mockListChannelRecommendationRecords(...args),
+    listWorkspaceItems: (...args: unknown[]) => mockListWorkspaceItems(...args),
+  })),
+}));
+
+vi.mock("@/modules/campaigns/infrastructure/proposal-read-repository", () => ({
+  createCampaignProposalReader: vi.fn(() => ({
+    listProposals: (...args: unknown[]) => mockListProposals(...args),
+  })),
 }));
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
@@ -201,7 +226,7 @@ beforeEach(() => {
   mockedPermissions.mockImplementation(
     (role, permission) =>
       (
-        {
+        ({
           "campaign.read": true,
           "asset.read": true,
           "channel.read": true,
@@ -211,13 +236,18 @@ beforeEach(() => {
           "campaign.create": true,
           "campaign.edit": true,
           "campaign.approve": true,
-        } as Record<string, boolean>
+        }) as Record<string, boolean>
       )[permission] ?? false,
   );
   mockedReadCampaigns.mockResolvedValue([]);
   mockedPosters.mockResolvedValue([]);
   mockedReferences.mockResolvedValue([]);
   mockedLogo.mockResolvedValue(null);
+  mockLoadAnalysedWindowKeys.mockResolvedValue([]);
+  mockLoadChannelBandsForWindow.mockResolvedValue([]);
+  mockListChannelRecommendationRecords.mockResolvedValue([]);
+  mockListWorkspaceItems.mockResolvedValue([]);
+  mockListProposals.mockResolvedValue([]);
   mockGetCampaign.mockResolvedValue(null);
   mockGetVersion.mockResolvedValue(null);
   mockLatestGenerationRun.mockResolvedValue(null);
@@ -229,6 +259,7 @@ function loadWith(supabase: unknown, role: "admin" = "admin") {
     supabase: supabase as never,
     organizationId: ORG_ID,
     role,
+    actorId: "99999999-9999-4999-8999-999999999999",
     snapshot: snapshot(),
     correlationId: CORRELATION_ID,
     now: NOW,
@@ -351,9 +382,7 @@ describe("same session client and organization for every read", () => {
         now: NOW,
       });
       expect((call[0] as { database: unknown }).database).toBe(supabase);
-      expect(
-        (call[0] as { storage: { storage: unknown } }).storage.storage,
-      ).toBe(supabase.storage);
+      expect((call[0] as { storage: { storage: unknown } }).storage.storage).toBe(supabase.storage);
     }
     for (const mock of [mockedPosters, mockedReferences, mockedLogo]) {
       expect(mock).toHaveBeenCalledTimes(1);
@@ -407,7 +436,9 @@ describe("failure isolation", () => {
 
   it("posters-only failure stays ready with partial gallery", async () => {
     mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
-    mockedPosters.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."));
+    mockedPosters.mockRejectedValue(
+      new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."),
+    );
     mockedReferences.mockResolvedValue([referenceRecord()] as never);
     const supabase = fakeSupabase();
 
@@ -420,8 +451,12 @@ describe("failure isolation", () => {
 
   it("both gallery sources failing fails assets without failing campaigns", async () => {
     mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
-    mockedPosters.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."));
-    mockedReferences.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."));
+    mockedPosters.mockRejectedValue(
+      new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."),
+    );
+    mockedReferences.mockRejectedValue(
+      new DomainError("DOMAIN_ERROR", "The home gallery could not be loaded."),
+    );
     const supabase = fakeSupabase();
 
     const view = await loadWith(supabase);
@@ -434,7 +469,9 @@ describe("failure isolation", () => {
     mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
     mockedPosters.mockResolvedValue([posterRecord()] as never);
     mockedReferences.mockResolvedValue([referenceRecord()] as never);
-    mockedLogo.mockRejectedValue(new DomainError("DOMAIN_ERROR", "The home logo could not be loaded."));
+    mockedLogo.mockRejectedValue(
+      new DomainError("DOMAIN_ERROR", "The home logo could not be loaded."),
+    );
     const supabase = fakeSupabase();
 
     const view = await loadWith(supabase);
@@ -458,5 +495,194 @@ describe("failure isolation", () => {
     expect(view.assets.status).toBe("ready");
     if (view.assets.status === "ready") expect(view.assets.fetchedAt).toBe(NOW);
     expect(view.logo).not.toBeNull();
+  });
+});
+
+describe("revenue section reads", () => {
+  const LOSS_ID = "22222222-2222-4222-8222-222222222221";
+
+  function grossFinding(channelId: string, minorUnits: number) {
+    return {
+      id: `33333333-3333-4333-8333-3333333333${channelId === "chan-a" ? "31" : "32"}`,
+      analysisRunId: "44444444-4444-4444-8444-444444444441",
+      channelId,
+      branchId: null,
+      detectorKey: "revenue.window",
+      detectorVersion: 1,
+      kind: "observation",
+      code: "WINDOW_GROSS_REVENUE",
+      severity: null,
+      priority: null,
+      metricKey: null,
+      periodStart: "2026-08-04",
+      periodEnd: "2026-08-10",
+      valueKind: "money",
+      valueNumerator: minorUnits,
+      valueDenominator: null,
+      currency: "AED",
+      monetaryImpactMinorUnits: null,
+      expectedPeriodCount: null,
+      observedPeriodCount: null,
+      absentPeriodCount: null,
+      qualityState: "complete",
+      needsDataReason: null,
+      limitations: [],
+      calculationDigest: "digest",
+      createdAt: "2026-08-11T00:00:00.000Z",
+    };
+  }
+
+  function lossFinding() {
+    return {
+      ...grossFinding("chan-a", 12),
+      id: LOSS_ID,
+      code: "ORDER_CANCELLATION_LOSS",
+      valueKind: "count",
+      valueNumerator: 12,
+      monetaryImpactMinorUnits: 200_00,
+    };
+  }
+
+  function settleRevenue() {
+    mockLoadAnalysedWindowKeys.mockResolvedValue([
+      { windowStart: "2026-08-11", windowEnd: "2026-08-17", grain: "week" },
+      { windowStart: "2026-08-04", windowEnd: "2026-08-10", grain: "week" },
+    ]);
+    mockLoadChannelBandsForWindow.mockImplementation(async (input: unknown) => {
+      const window = input as { windowStart: string };
+      if (window.windowStart === "2026-08-11") {
+        return [
+          {
+            channelId: "chan-a",
+            analysisRunId: "44444444-4444-4444-8444-444444444441",
+            findings: [grossFinding("chan-a", 700_00)],
+          },
+        ];
+      }
+      return [
+        {
+          channelId: "chan-a",
+          analysisRunId: "44444444-4444-4444-8444-444444444441",
+          findings: [grossFinding("chan-a", 500_00), lossFinding()],
+        },
+        {
+          channelId: "chan-b",
+          analysisRunId: "44444444-4444-4444-8444-444444444442",
+          findings: [grossFinding("chan-b", 300_00)],
+        },
+      ];
+    });
+    mockListChannelRecommendationRecords.mockResolvedValue([
+      {
+        id: "rec-1",
+        headline: "Recover avoidable cancellations",
+        decision: {
+          decision: "planned",
+          snoozedUntil: null,
+          createdAt: "2026-08-12T00:00:00.000Z",
+        },
+        citationFindingIds: [LOSS_ID],
+      },
+    ] as never);
+    mockListWorkspaceItems.mockResolvedValue([
+      {
+        id: "ins-1",
+        kind: "insight",
+        narrative: "Weekend demand is climbing.",
+        decision: "acknowledged",
+      },
+    ] as never);
+    mockListProposals.mockResolvedValue([
+      {
+        proposal: {
+          id: "66666666-6666-4666-8666-666666666666",
+          sourceKind: "manual_request",
+          sourceId: null,
+          state: "ready_for_review",
+          currentVersionId: null,
+          linkedCampaignId: null,
+          snoozedUntil: null,
+          createdAt: "2026-08-12T00:00:00.000Z",
+          updatedAt: "2026-08-13T00:00:00.000Z",
+        },
+        version: null,
+        decisions: [],
+      },
+    ] as never);
+  }
+
+  it("composes history, losses, and the three action kinds", async () => {
+    settleRevenue();
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockLoadAnalysedWindowKeys).toHaveBeenCalledWith({ organizationId: ORG_ID });
+    expect(mockLoadChannelBandsForWindow).toHaveBeenCalledTimes(2);
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready") return;
+    expect(view.revenue.fetchedAt).toBe(NOW);
+    expect(view.revenue.data.state).toBe("ready");
+    if (view.revenue.data.state !== "ready") return;
+    expect(view.revenue.data.history).toHaveLength(2);
+    expect(view.revenue.data.baselineMinorUnits).toBe(700_00);
+    expect(view.revenue.data.unquantified).toHaveLength(3);
+    const cited = view.revenue.data.unquantified.find((entry) => entry.actionId === "rec:rec-1");
+    expect(cited?.status).toBe("planned");
+    const proposal = view.revenue.data.unquantified.find((entry) => entry.kind === "proposal");
+    expect(proposal?.href).toContain("campaign-proposals");
+  });
+
+  it("a failed band read fails the section but keeps campaigns", async () => {
+    settleRevenue();
+    mockLoadChannelBandsForWindow.mockRejectedValue(new Error("db down"));
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.revenue).toEqual({ status: "failed", code: "HOME_READ_FAILED" });
+    expect(view.campaigns.status).toBe("ready");
+  });
+
+  it("a failed action read fails the section rather than shipping partial actions", async () => {
+    settleRevenue();
+    mockListChannelRecommendationRecords.mockRejectedValue(new Error("db down"));
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.revenue).toEqual({ status: "failed", code: "HOME_READ_FAILED" });
+  });
+
+  it("channel.read denied disables the section and schedules no analysis reads", async () => {
+    mockedPermissions.mockImplementation((role, permission) => permission !== "channel.read");
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.revenue).toEqual({ status: "disabled" });
+    expect(mockLoadAnalysedWindowKeys).not.toHaveBeenCalled();
+    expect(mockListChannelRecommendationRecords).not.toHaveBeenCalled();
+    expect(mockListProposals).not.toHaveBeenCalled();
+  });
+
+  it("growth gate off contributes no recommendations or insights", async () => {
+    settleRevenue();
+    mockedGrowthGate.mockReturnValue(false);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockListChannelRecommendationRecords).not.toHaveBeenCalled();
+    expect(mockListWorkspaceItems).not.toHaveBeenCalled();
+    expect(mockListProposals).toHaveBeenCalled();
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready") return;
+    expect(view.revenue.data.state).toBe("ready");
+    if (view.revenue.data.state !== "ready") return;
+    expect(
+      view.revenue.data.unquantified.filter((entry) => entry.kind === "recommendation"),
+    ).toHaveLength(0);
+    expect(view.revenue.data.unquantified.some((entry) => entry.kind === "proposal")).toBe(true);
   });
 });

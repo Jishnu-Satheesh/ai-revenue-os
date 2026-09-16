@@ -1,6 +1,10 @@
 import type { CampaignState } from "@/domain/campaigns/state-machine";
 import type { CampaignGeneration } from "@/modules/campaigns/application/studio-view";
 import type {
+  RevenueScenario,
+  RevenueScenarioInput,
+} from "@/domain/organizations/revenue-scenario";
+import type {
   AssetHomeRecord as CampaignAssetHomeRecord,
   HomeSourceResult as CampaignHomeSourceResult,
   PrivatePreviewImage as CampaignPrivatePreviewImage,
@@ -69,6 +73,12 @@ export type HomePermissions = {
   canManageCore: boolean;
 };
 
+/** Settled revenue-scenario reads behind the Current vs Projected section. */
+export type HomeRevenueSource =
+  | { status: "ready"; input: RevenueScenarioInput; fetchedAt: string }
+  | { status: "failed" }
+  | { status: "disabled" };
+
 export type OrganizationHomeView = {
   organizationId: string;
   name: string;
@@ -85,6 +95,7 @@ export type OrganizationHomeView = {
   campaigns: HomeSection<readonly HomeCampaign[]>;
   assets: HomeSection<readonly HomeAsset[]>;
   assetsPartial: boolean;
+  revenue: HomeSection<RevenueScenario>;
   attention: readonly HomeAttentionItem[];
   attentionIncomplete: boolean;
   destinations: readonly HomeDestination[];

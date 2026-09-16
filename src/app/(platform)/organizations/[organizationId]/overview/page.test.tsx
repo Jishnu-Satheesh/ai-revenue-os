@@ -206,10 +206,11 @@ describe("OverviewPage (organization home)", () => {
     expect(mocks.loadOrganizationHome.mock.calls[0]?.[0]).toMatchObject({
       supabase,
       role: "owner",
+      actorId: "user-1",
     });
-    expect(
-      (mocks.loadOrganizationHome.mock.calls[0]?.[0] as { supabase: unknown }).supabase,
-    ).toBe(supabase);
+    expect((mocks.loadOrganizationHome.mock.calls[0]?.[0] as { supabase: unknown }).supabase).toBe(
+      supabase,
+    );
     expect(mocks.loadOrganizationHome.mock.calls[0]?.[0]).toMatchObject({
       correlationId: expect.any(String),
       now: expect.any(String),

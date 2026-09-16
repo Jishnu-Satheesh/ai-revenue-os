@@ -48,7 +48,14 @@ function campaign(overrides: Partial<HomeCampaign> = {}): HomeCampaign {
     title: "Ramadan Push",
     objective: "Drive iftar orders",
     state: "ready_for_review",
-    generation: { status: "settled", detail: null, nextAction: null, retryable: false, blocker: null, missingDetails: [] },
+    generation: {
+      status: "settled",
+      detail: null,
+      nextAction: null,
+      retryable: false,
+      blocker: null,
+      missingDetails: [],
+    },
     openable: true,
     updatedAt: "2026-09-10T10:00:00.000Z",
     actionLabel: "Review campaign",
@@ -140,6 +147,7 @@ function view(overrides: Partial<OrganizationHomeView> = {}): OrganizationHomeVi
     campaigns: { status: "ready", data: [campaign()], fetchedAt: NOW },
     assets: { status: "ready", data: [asset()], fetchedAt: NOW },
     assetsPartial: false,
+    revenue: { status: "disabled" },
     attention: [attention()],
     attentionIncomplete: false,
     destinations: [
@@ -164,9 +172,7 @@ function view(overrides: Partial<OrganizationHomeView> = {}): OrganizationHomeVi
 describe("OrganizationHome composition", () => {
   it("renders sections in reading order: identity, campaigns, library, attention, goals, destinations, activity", () => {
     render(<OrganizationHome view={view()} />);
-    const headings = screen
-      .getAllByRole("heading")
-      .map((heading) => heading.textContent ?? "");
+    const headings = screen.getAllByRole("heading").map((heading) => heading.textContent ?? "");
     const order = [
       "Al Noor Kitchen",
       "Your campaigns",
@@ -288,10 +294,7 @@ describe("OrganizationHome composition", () => {
       />,
     );
     expect(screen.getByRole("heading", { level: 1 })).toHaveAttribute("dir", "auto");
-    expect(screen.getByRole("heading", { name: /مطبخ النور حملة/ })).toHaveAttribute(
-      "dir",
-      "auto",
-    );
+    expect(screen.getByRole("heading", { name: /مطبخ النور حملة/ })).toHaveAttribute("dir", "auto");
   });
 
   it("shows the viewer campaign wording with no create or manage affordances", () => {
@@ -313,9 +316,7 @@ describe("OrganizationHome composition", () => {
       />,
     );
     const campaigns = screen.getByRole("region", { name: "Your campaigns" });
-    expect(
-      within(campaigns).getByRole("link", { name: "View campaign" }),
-    ).toBeInTheDocument();
+    expect(within(campaigns).getByRole("link", { name: "View campaign" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /new campaign/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /manage/i })).not.toBeInTheDocument();
   });
@@ -337,8 +338,7 @@ describe("OrganizationHome destinations parity (D1)", () => {
     expect(icon).not.toBeNull();
     const title = within(channels).getByText("Channels");
     expect(
-      (icon as Element).compareDocumentPosition(title) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
+      (icon as Element).compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(channels.querySelectorAll("svg")).toHaveLength(2);
   });
@@ -383,9 +383,7 @@ describe("OrganizationHome destinations parity (D1)", () => {
 
   it("omits the destinations section when nothing is authorized", () => {
     render(<OrganizationHome view={view({ destinations: [] })} />);
-    expect(
-      screen.queryByRole("region", { name: "Around your business" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Around your business" })).not.toBeInTheDocument();
   });
 });
 
@@ -448,10 +446,11 @@ describe("OrganizationHome activity parity (D2)", () => {
       const icon = row.querySelector("svg");
       expect(icon).not.toBeNull();
       // Icon-left treatment: the decorative icon precedes the label text.
-      const label = within(row).getByText(/Campaign updated|Poster rendered|Goal added|Reference added/);
+      const label = within(row).getByText(
+        /Campaign updated|Poster rendered|Goal added|Reference added/,
+      );
       expect(
-        (icon as Element).compareDocumentPosition(label) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
+        (icon as Element).compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
     }
     // Emphasis order: small gray label first, bold title second.
@@ -460,9 +459,7 @@ describe("OrganizationHome activity parity (D2)", () => {
     expect(
       firstLabel.compareDocumentPosition(firstTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(
-      within(region).getByText("10 Sep 2026 · 14:00, Asia/Dubai"),
-    ).toBeInTheDocument();
+    expect(within(region).getByText("10 Sep 2026 · 14:00, Asia/Dubai")).toBeInTheDocument();
   });
 
   it("links a row only when the view carries an href", () => {
@@ -488,9 +485,7 @@ describe("OrganizationHome activity parity (D2)", () => {
       />,
     );
     const region = screen.getByRole("region", { name: "Recent activity" });
-    expect(
-      within(region).getByRole("link", { name: "Ramadan Push" }),
-    ).toBeInTheDocument();
+    expect(within(region).getByRole("link", { name: "Ramadan Push" })).toBeInTheDocument();
     expect(within(region).queryByRole("link", { name: "Grow orders" })).toBeNull();
     expect(within(region).getByText("Grow orders")).toBeInTheDocument();
   });
@@ -536,20 +531,17 @@ describe("OrganizationHome header", () => {
     render(<OrganizationHome view={view()} />);
     expect(screen.getByText("Your organization")).toBeInTheDocument();
     expect(screen.getByText("Active organization")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "2 active locations" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2 active locations" })).toBeInTheDocument();
   });
 
   it("captions the campaigns and library sections with the reference copy", () => {
     render(<OrganizationHome view={view()} />);
     expect(screen.getByText("Recent work, ready to pick up.")).toBeInTheDocument();
-    expect(
-      screen.getByText("A little of what makes your business yours."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Asset Library" }),
-    ).toHaveAttribute("href", `/organizations/${ORG_ID}/assets`);
+    expect(screen.getByText("A little of what makes your business yours.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Asset Library" })).toHaveAttribute(
+      "href",
+      `/organizations/${ORG_ID}/assets`,
+    );
   });
 
   it("names each attention row's source", () => {
@@ -561,17 +553,16 @@ describe("OrganizationHome header", () => {
   it("renders activity timestamps with the org timezone name", () => {
     render(<OrganizationHome view={view()} />);
     const activity = screen.getByRole("region", { name: "Recent activity" });
-    expect(
-      within(activity).getByText("10 Sep 2026 · 14:00, Asia/Dubai"),
-    ).toBeInTheDocument();
+    expect(within(activity).getByText("10 Sep 2026 · 14:00, Asia/Dubai")).toBeInTheDocument();
   });
 
   it("prompts managers with the reference goal copy linked to management", () => {
     render(<OrganizationHome view={view({ goals: [], focusGoalId: null })} />);
     expect(screen.getByText("What are you working towards?")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "your organization details" }),
-    ).toHaveAttribute("href", "#organization-management");
+    expect(screen.getByRole("link", { name: "your organization details" })).toHaveAttribute(
+      "href",
+      "#organization-management",
+    );
   });
 
   it("keeps the viewer goal prompt neutral with no management path", () => {
@@ -633,17 +624,13 @@ describe("OrganizationHome polish (FIX E)", () => {
   it("closes the composition with the home footer line", () => {
     const { container } = render(<OrganizationHome view={view()} />);
     const footer = container.querySelector("footer");
-    expect(footer?.textContent).toBe(
-      "Organization home · the place to return to your work.",
-    );
+    expect(footer?.textContent).toBe("Organization home · the place to return to your work.");
   });
 
   it("captions the destinations and activity headers with the reference copy", () => {
     render(<OrganizationHome view={view()} />);
     expect(screen.getByText("Explore your workspace")).toBeInTheDocument();
-    expect(
-      screen.getByText("Campaign, asset and organization updates"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Campaign, asset and organization updates")).toBeInTheDocument();
   });
 
   it("shows View goals with an onward arrow for a single saved goal", async () => {
@@ -682,9 +669,7 @@ describe("OrganizationHome polish (FIX E)", () => {
 
   it("shows no View goals trigger when no goals are on file", () => {
     render(<OrganizationHome view={view({ goals: [], focusGoalId: null })} />);
-    expect(
-      screen.queryByRole("button", { name: /view goals/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /view goals/i })).not.toBeInTheDocument();
   });
 
   it("insets only the asset dialog, leaving locations/goals dialogs on shared padding", async () => {
@@ -692,23 +677,15 @@ describe("OrganizationHome polish (FIX E)", () => {
     const assetClass = styles.assetDialogContent;
     expect(assetClass).toBeTruthy();
     render(<OrganizationHome view={view()} />);
-    await user.click(
-      screen.getByRole("button", { name: /ramadan push · ramadan-hero/i }),
-    );
-    expect((await screen.findByRole("dialog")).className.split(" ")).toContain(
-      assetClass,
-    );
+    await user.click(screen.getByRole("button", { name: /ramadan push · ramadan-hero/i }));
+    expect((await screen.findByRole("dialog")).className.split(" ")).toContain(assetClass);
     cleanup();
     render(<OrganizationHome view={view()} />);
     await user.click(screen.getByRole("button", { name: /2 active locations/i }));
-    expect((await screen.findByRole("dialog")).className.split(" ")).not.toContain(
-      assetClass,
-    );
+    expect((await screen.findByRole("dialog")).className.split(" ")).not.toContain(assetClass);
     cleanup();
     render(<OrganizationHome view={view()} />);
     await user.click(screen.getByRole("button", { name: /view goals/i }));
-    expect((await screen.findByRole("dialog")).className.split(" ")).not.toContain(
-      assetClass,
-    );
+    expect((await screen.findByRole("dialog")).className.split(" ")).not.toContain(assetClass);
   });
 });

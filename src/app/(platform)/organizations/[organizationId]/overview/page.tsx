@@ -19,6 +19,7 @@ export default async function OverviewPage({ params }: PageProps) {
     supabase: context.supabase,
     organizationId: context.organizationId,
     role: context.membership.role as OrganizationRole,
+    actorId: context.user.id,
     snapshot,
     correlationId,
     now,

@@ -23,6 +23,11 @@ import type { HomePreviewStorage } from "@/modules/campaigns/infrastructure/home
 import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 import { hasGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
+import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/growth-intelligence/infrastructure/read-repository";
+import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
+import { createCampaignProposalReader } from "@/modules/campaigns/infrastructure/proposal-read-repository";
+import type { ProposalReadPersistence } from "@/modules/campaigns/infrastructure/proposal-read-repository";
+import { readRevenueSource } from "@/modules/organizations/infrastructure/revenue-source";
 import { isIntegrationHubEnabled } from "@/modules/integrations/application/feature-access";
 import { buildOrganizationHomeView } from "@/modules/organizations/application/home-service";
 import type { OrganizationHomeView } from "@/modules/organizations/application/home-types";
@@ -53,12 +58,14 @@ export type LoadOrganizationHomeInput = {
   supabase: SupabaseClient<Database>;
   organizationId: string;
   role: OrganizationRole;
+  /** Signed-in actor, for per-viewer recommendation and insight reads. */
+  actorId: string;
   snapshot: DigitalTwinSnapshot;
   correlationId: string;
   now: string;
 };
 
-type HomeSource = "campaigns" | "posters" | "references" | "logo";
+type HomeSource = "campaigns" | "posters" | "references" | "logo" | "revenue";
 
 function logSectionFailure(input: {
   organizationId: string;
@@ -77,7 +84,7 @@ function logSectionFailure(input: {
 export async function loadOrganizationHome(
   input: LoadOrganizationHomeInput,
 ): Promise<OrganizationHomeView> {
-  const { supabase, organizationId, role, snapshot, correlationId, now } = input;
+  const { supabase, organizationId, role, actorId, snapshot, correlationId, now } = input;
 
   const campaignsGate = isCampaignsEnabled(organizationId);
   const growthGate = hasGrowthIntelligenceAccess(organizationId, "market");
@@ -88,11 +95,9 @@ export async function loadOrganizationHome(
     integrations: integrationsGate,
   };
 
-  const canReadCampaigns =
-    campaignsGate && hasOrganizationPermission(role, "campaign.read");
+  const canReadCampaigns = campaignsGate && hasOrganizationPermission(role, "campaign.read");
   const canReadArtwork = hasOrganizationPermission(role, "asset.read");
-  const canReadReferences =
-    campaignsGate && hasOrganizationPermission(role, "asset.read");
+  const canReadReferences = campaignsGate && hasOrganizationPermission(role, "asset.read");
   const canReadLogo = canReadReferences;
   const canReadPosters =
     campaignsGate &&
@@ -103,14 +108,11 @@ export async function loadOrganizationHome(
   // reference: `database` is the passed supabase, and `storage.storage` is the
   // passed supabase.storage. No query or signature happens here; the readers
   // own their ports.
-  const database = supabase as unknown as HomeCampaignPersistence &
-    HomeAssetPersistence;
+  const database = supabase as unknown as HomeCampaignPersistence & HomeAssetPersistence;
   const storage: HomePreviewStorage = {
     storage: supabase.storage as HomePreviewStorage["storage"],
   };
-  const repository = createCampaignReadRepository(
-    supabase as unknown as CampaignPersistence,
-  );
+  const repository = createCampaignReadRepository(supabase as unknown as CampaignPersistence);
   const read = {
     getCampaign: repository.getCampaign.bind(repository),
     getVersion: repository.getVersion.bind(repository),
@@ -127,7 +129,37 @@ export async function loadOrganizationHome(
   const referencesScheduled = canReadReferences;
   const logoScheduled = canReadLogo;
 
+  // Revenue-scenario reads run through the shared revenue source so the
+  // home and the proposal route reason over the same inputs. Bands need
+  // channel.read; each action kind needs its own module gate and permission.
+  const canReadRevenueBands = hasOrganizationPermission(role, "channel.read");
+  const canReadRevenueActions =
+    growthGate && hasOrganizationPermission(role, "growth_intelligence.read");
+  const canReadRevenueProposals = campaignsGate && hasOrganizationPermission(role, "campaign.read");
+
   const startedAt = Date.now();
+  const revenuePromise = readRevenueSource({
+    reads: {
+      analysis: createAuthenticatedChannelAnalysisRepository(supabase),
+      growthReads: createAuthenticatedGrowthIntelligenceReadRepository(supabase),
+      proposalReader: createCampaignProposalReader(supabase as unknown as ProposalReadPersistence),
+    },
+    organizationId,
+    actorId,
+    timeZone: snapshot.organization.default_timezone,
+    now,
+    canBands: canReadRevenueBands,
+    canActions: canReadRevenueActions,
+    canProposals: canReadRevenueProposals,
+    onFailure: () => {
+      logSectionFailure({
+        organizationId,
+        correlationId,
+        source: "revenue",
+        elapsedMs: Date.now() - startedAt,
+      });
+    },
+  });
   const scheduled: { source: HomeSource; run: Promise<unknown> }[] = [];
   if (campaignsScheduled) {
     scheduled.push({
@@ -174,7 +206,10 @@ export async function loadOrganizationHome(
     });
   }
 
-  const settled = await Promise.allSettled(scheduled.map((task) => task.run));
+  const [settled, revenueSource] = await Promise.all([
+    Promise.allSettled(scheduled.map((task) => task.run)),
+    revenuePromise,
+  ]);
   const elapsedMs = Date.now() - startedAt;
 
   for (let index = 0; index < scheduled.length; index += 1) {
@@ -230,6 +265,7 @@ export async function loadOrganizationHome(
     role,
     organizationId,
     now,
+    revenue: revenueSource,
     sources: {
       campaigns: campaignsSource,
       posters: postersSource,
