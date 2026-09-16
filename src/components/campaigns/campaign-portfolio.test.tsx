@@ -92,13 +92,15 @@ describe("the portfolio offers both entry points as equals", () => {
 });
 
 describe("the portfolio states only what the campaign has produced", () => {
-  it("shows the objective and the fact that matters at this phase", () => {
+  it("shows the objective with no invented numbers beside it", () => {
     renderPortfolio([item()]);
     const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/raise incremental gross profit/i)).toBeInTheDocument();
-    // A proposal's number is its proposed budget, labelled as proposed.
-    expect(card.getByText(/proposed budget AED\s?450\.00/i)).toBeInTheDocument();
+    // The card body is title plus description only. The proposed budget and
+    // the phase summary used to render here; both are gone.
+    expect(card.queryByText(/proposed budget/i)).not.toBeInTheDocument();
+    expect(card.queryByText(/waiting for review/i)).not.toBeInTheDocument();
   });
 
   it("never shows a proposed budget as though it were spend", () => {
@@ -166,17 +168,22 @@ describe("the portfolio states only what the campaign has produced", () => {
       }),
     ]);
 
-    // The badge names the stage a client understands, and the closed phase map
-    // is what makes raw database text unable to reach the screen at all.
+    // The shared card never says bare "Needs review": the proposal phase reads
+    // "Ready for review", and a stopped campaign keeps its phase word. (The
+    // status filter grouping above the list keeps its own "Needs review"
+    // label; that filter logic is untouched.)
     expect(screen.queryByText(/partially_completed|needs_data|ready_for_review/)).not.toBeInTheDocument();
-    expect(screen.getByText("Stopped")).toBeInTheDocument();
+    const cards = within(screen.getByRole("list", { name: "Campaigns" }));
+    expect(cards.queryByText("Needs review")).not.toBeInTheDocument();
+    expect(cards.getByText("Ready for review")).toBeInTheDocument();
+    expect(cards.getByText("Stopped")).toBeInTheDocument();
   });
 
   it("renders the update time in the organization's timezone, not the server's", () => {
     renderPortfolio([item({ updatedAt: "2026-08-15T22:30:00.000Z" })]);
 
-    // 22:30 UTC is 02:30 the next day in Asia/Dubai.
-    expect(screen.getByText(/16 Aug, 02:30/)).toBeInTheDocument();
+    // 22:30 UTC is 02:30 the next day in Asia/Dubai, rendered short.
+    expect(screen.getByText("16 Aug")).toBeInTheDocument();
   });
 });
 
@@ -200,22 +207,23 @@ describe("a campaign with no proposal is still reachable", () => {
       objective: null,
       channels: [],
       spendCeiling: null,
+      bundleVersionId: null,
     });
   }
 
-  it("links to the detail route, which explains why nothing is there", () => {
+  it("links the artwork and the action to the detail route, which explains why nothing is there", () => {
     renderPortfolio([pending({ status: "generating", detail: "Building the first proposal.", nextAction: null, retryable: false, blocker: null, missingDetails: [] })]);
     const card = within(cardsOnly()[0]!);
     const href = `/organizations/${ORGANIZATION_ID}/campaigns/c1000000-0000-4000-8000-000000000001`;
 
     // The detail route does not 404 on a version-less campaign. It names
     // whether the campaign is still being built or whether generation stopped,
-    // which is the answer somebody staring at a stalled card came for. The
-    // attention strip already linked here; the card used to disagree.
-    // The artwork and the title are both links to the same place.
-    const links = card.getAllByRole("link", { name: /weekday evening demand lift/i });
-    expect(links.length).toBeGreaterThan(0);
-    for (const link of links) expect(link).toHaveAttribute("href", href);
+    // which is the answer somebody staring at a stalled card came for.
+    expect(card.getByRole("link", { name: /weekday evening demand lift/i })).toHaveAttribute(
+      "href",
+      href,
+    );
+    expect(card.getByRole("link", { name: /^open/i })).toHaveAttribute("href", href);
   });
 
   it("keeps the title readable", () => {
@@ -231,10 +239,10 @@ describe("a campaign with no proposal is still reachable", () => {
     const card = within(cardsOnly()[0]!);
 
     expect(card.getByText(/building the first proposal/i)).toBeInTheDocument();
-    expect(card.queryByText(/did not finish/i)).not.toBeInTheDocument();
+    expect(card.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("says generation stopped instead of spinning forever", () => {
+  it("renders stopped generation as a compact row, never as a large card", () => {
     // A worker killed by a timeout never writes that it failed, so its row
     // stays claimed. Spinning here would wait on something nobody is doing.
     renderPortfolio([
@@ -247,13 +255,20 @@ describe("a campaign with no proposal is still reachable", () => {
         missingDetails: [],
       }),
     ]);
-    const card = within(cardsOnly()[0]!);
+    const row = within(cardsOnly()[0]!);
 
-    expect(card.getByText(/generation did not finish/i)).toBeInTheDocument();
-    expect(card.getByText(/stopped responding/i)).toBeInTheDocument();
+    // The prototype's third-campaign row: the stalled detail verbatim as the
+    // reason, the amber tag, and the View link to the detail page.
+    expect(row.getByText(/stopped responding/i)).toBeInTheDocument();
+    expect(row.getByText("Needs attention")).toBeInTheDocument();
+    expect(row.getByRole("link", { name: /^view/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION_ID}/campaigns/c1000000-0000-4000-8000-000000000001`,
+    );
+    expect(row.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("names what generation still needs when it failed for want of evidence", () => {
+  it("collects missing details on the card without an Alert box or raw codes", () => {
     renderPortfolio([
       pending({
         status: "failed",
@@ -266,49 +281,12 @@ describe("a campaign with no proposal is still reachable", () => {
     ]);
     const card = within(cardsOnly()[0]!);
 
-    expect(card.getByText(/generation failed/i)).toBeInTheDocument();
-    // Each gap is named in words. The stored codes are for engineers; an
-    // operator shown `brand_voice` has to translate before they can act.
-    expect(card.getByText("Brand voice")).toBeInTheDocument();
-    expect(card.getByText("Primary metric")).toBeInTheDocument();
+    // A failure that names its gaps keeps the large card so it can carry the
+    // dialog that collects them — but the destructive Alert box is gone, and
+    // the stored codes never reach the screen.
+    expect(card.queryByRole("alert")).not.toBeInTheDocument();
+    expect(card.queryByText("Generation failed")).not.toBeInTheDocument();
     expect(card.queryByText(/brand_voice/)).not.toBeInTheDocument();
-  });
-
-  it("shows a failure in the destructive colour, not as quiet grey text", () => {
-    renderPortfolio([
-      pending({
-        status: "failed",
-        detail: "Some details are missing before this campaign can be built: Brand voice.",
-        nextAction: "Add the missing details, then start it again.",
-        retryable: true,
-        blocker: null,
-        missingDetails: ["brand_voice"],
-      }),
-    ]);
-    const card = within(cardsOnly()[0]!);
-
-    // A failure rendered in muted grey beside a dashed border reads as a note.
-    // This is the design system's own error treatment, so the card cannot
-    // drift from every other error surface in the product.
-    const alert = card.getByRole("alert");
-    expect(alert.className).toContain("text-destructive");
-  });
-
-  it("offers to collect the missing details without leaving the campaign", () => {
-    renderPortfolio([
-      pending({
-        status: "failed",
-        detail: "Some details are missing before this campaign can be built: Brand voice.",
-        nextAction: "Add the missing details, then start it again.",
-        retryable: true,
-        blocker: null,
-        missingDetails: ["brand_voice"],
-      }),
-    ]);
-    const card = within(cardsOnly()[0]!);
-
-    // Sending someone to onboarding to hunt for one field is how the original
-    // report ended with the same failure twice.
     expect(card.getByRole("button", { name: /add the missing details/i })).toBeEnabled();
   });
 
@@ -323,27 +301,30 @@ describe("a campaign with no proposal is still reachable", () => {
         missingDetails: [],
       }),
     ]);
-    const card = within(cardsOnly()[0]!);
+    const row = within(cardsOnly()[0]!);
 
-    expect(card.queryByRole("button", { name: /add the missing details/i })).not.toBeInTheDocument();
+    expect(row.queryByRole("button", { name: /add the missing details/i })).not.toBeInTheDocument();
   });
 
-  it("offers the restart it promises when generation stopped", () => {
+  it("offers the restart it promises as a green link with an arrow", () => {
     // The notice says the run can be started again. A sentence describing an
     // action nobody can take is worse than saying nothing at all.
     renderPortfolio([
       pending({
-        status: "stalled",
-        detail: "Generation stopped responding and did not finish. It can be started again.",
-        nextAction: "Start it again.",
+        status: "failed",
+        detail: "Some details are missing before this campaign can be built: Brand voice.",
+        nextAction: "Add the missing details, then start it again.",
         retryable: true,
         blocker: null,
-        missingDetails: [],
+        missingDetails: ["brand_voice"],
       }),
     ]);
     const card = within(cardsOnly()[0]!);
 
-    expect(card.getByRole("button", { name: /generate again/i })).toBeEnabled();
+    const restart = card.getByRole("button", { name: /generate again/i });
+    expect(restart).toBeEnabled();
+    expect(restart.className).toContain("text-primary");
+    expect(restart.querySelector("svg")).not.toBeNull();
   });
 
   it("does not offer a restart while a worker still holds the run", () => {
@@ -361,6 +342,7 @@ describe("a campaign with no proposal is still reachable", () => {
     const card = within(cardsOnly()[0]!);
 
     expect(card.queryByRole("status")).not.toBeInTheDocument();
+    expect(card.queryByRole("alert")).not.toBeInTheDocument();
     expect(card.getAllByRole("link").length).toBeGreaterThan(0);
   });
 });
@@ -452,18 +434,33 @@ describe("the artwork leads, and says when it cannot", () => {
       "src",
       "https://example.test/a.png",
     );
+    // The source label overlays the image as a chip, like the prototype.
+    expect(screen.getByText("Finished render")).toBeInTheDocument();
   });
 
-  it("distinguishes artwork that does not exist yet from artwork that failed to load", () => {
+  it("labels a missing preview honestly on the image itself", () => {
     // Both are an empty rectangle otherwise, and they mean different things.
     renderPortfolio([item({ awaitingFirstVersion: true, bundleVersionId: null })]);
-    expect(screen.getByText(/no preview available/i)).toBeInTheDocument();
+    expect(screen.getByText("No preview available")).toBeInTheDocument();
     expect(screen.getByText(/creative generation begins after approval/i)).toBeInTheDocument();
 
     cleanup();
 
     renderPortfolio([item()]);
-    expect(screen.getByText(/preview unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText("No preview available")).toBeInTheDocument();
+  });
+
+  it("carries no Organic/Preview text strip under the artwork", () => {
+    renderPortfolio([item()], {
+      "d1000000-0000-4000-8000-000000000001": "https://example.test/a.png",
+    });
+    const card = within(cardsOnly()[0]!);
+
+    // The old strip named the spend mix and the preview state as plain text.
+    // Both now live on the image as an overlaid chip or not at all.
+    expect(card.queryByText("Organic + Paid")).not.toBeInTheDocument();
+    expect(card.queryByText("Organic", { exact: true })).not.toBeInTheDocument();
+    expect(card.queryByText("Preview", { exact: true })).not.toBeInTheDocument();
   });
 });
 

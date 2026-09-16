@@ -1,43 +1,20 @@
 import Link from "next/link";
 import { ArrowRight, Megaphone, Plus } from "lucide-react";
 
-import { CampaignCoverFigure } from "@/components/campaigns/campaign-cover-figure";
-import { HomePreviewImage } from "@/components/organizations/home/home-preview-image";
-import { formatShortDate } from "@/components/organizations/home/home-dates";
+import {
+  resolveCampaignStateChip,
+  SharedCampaignCard,
+  SharedCompactCampaignRow,
+} from "@/components/campaigns/shared-campaign-card";
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import { StatusBadge } from "@/components/ui/status-badge";
 import type {
   HomeCampaign,
   HomeSection,
 } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
-
-function stateTone(state: HomeCampaign["state"]): "success" | "warning" {
-  // Reference tags (prototype campaign cards): amber "Ready for review",
-  // green "Draft". Amber marks the states that need a look; every other
-  // state — draft, approved, scheduled, in-flight, finished, cancelled —
-  // stays green. Soft tints come from the shared StatusBadge tones.
-  switch (state) {
-    case "ready_for_review":
-    case "needs_data":
-    case "blocked":
-    case "failed":
-      return "warning";
-    default:
-      return "success";
-  }
-}
-
-function readableState(state: HomeCampaign["state"]): string {
-  return state
-    .split("_")
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
-}
 
 /**
  * The compact third row's reason line: the stalled generation detail verbatim
@@ -49,52 +26,11 @@ function compactReason(homeCampaign: HomeCampaign): string | null {
 }
 
 /**
- * The optional third compact row: title plus the stalled reason (generation
- * detail verbatim, else objective, else nothing), the same state tag as the
- * large cards, and the derived action as an inline text-link. Labels and href
- * render verbatim; the row never duplicates a record shown above it.
- */
-function CompactThirdRow({
-  homeCampaign,
-}: Readonly<{ homeCampaign: HomeCampaign }>) {
-  const reason = compactReason(homeCampaign);
-
-  return (
-    <div className={styles.compactList} aria-label="Third campaign">
-      <div className={styles.compactRow}>
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span dir="auto" className={styles.compactName}>
-            {homeCampaign.title}
-          </span>
-          {reason !== null ? (
-            <span dir="auto" className={styles.meta}>
-              {reason}
-            </span>
-          ) : null}
-        </span>
-        <span className="flex shrink-0 items-center gap-2">
-          <StatusBadge
-            label={readableState(homeCampaign.state)}
-            tone={stateTone(homeCampaign.state)}
-          />
-          <Button asChild variant="link" size="sm">
-            <Link href={homeCampaign.href}>
-              {homeCampaign.actionLabel}
-              <ArrowRight aria-hidden="true" data-icon="inline-end" />
-            </Link>
-          </Button>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Campaigns: the first two records as large cover cards plus an optional
- * third compact row (title, stalled reason, state tag, text-link CTA), all
- * from the derived CTA/href verbatim. A no-version
+ * Campaigns: the first two records as the shared campaign cards plus an
+ * optional third compact row (title, stalled reason, "Needs attention" tag,
+ * text-link CTA), all from the derived CTA/href verbatim. A no-version
  * record links to the portfolio (never a detail link or spinner). Each card
- * carries the cover label as a chip overlaid on the artwork, a soft-tint
+ * carries the cover label as a chip overlaid on the artwork, the shared
  * state tag, and a divider foot row with a short date plus an inline text
  * CTA; each record appears once. Gated sources render nothing; failures
  * stay local with a shared Retry.
@@ -169,59 +105,46 @@ export function HomeCampaigns({
       ) : (
         <>
           <div className={styles.campaignGrid}>
-            {section.data.slice(0, 2).map((homeCampaign) => (
-              <Card key={homeCampaign.id} className={styles.campaignCard}>
-                {homeCampaign.cover !== null ? (
-                  <div className={styles.cover}>
-                    <CampaignCoverFigure
-                      src={homeCampaign.cover.url}
-                      alt={homeCampaign.cover.alt}
-                      fit="contain"
-                      chip={homeCampaign.coverLabel}
-                      width={homeCampaign.cover.width}
-                      height={homeCampaign.cover.height}
-                      fallback={
-                        <HomePreviewImage
-                          image={null}
-                          frameClassName={styles.coverFallback}
-                        />
-                      }
-                    />
-                  </div>
-                ) : null}
-                <CardContent className="flex flex-col gap-1.5 pt-4">
-                  <StatusBadge
-                    label={readableState(homeCampaign.state)}
-                    tone={stateTone(homeCampaign.state)}
-                  />
-                  <h3 dir="auto" className={styles.cardTitle}>
-                    {homeCampaign.title}
-                  </h3>
-                  {homeCampaign.objective !== null ? (
-                    <p dir="auto" className={styles.cardText}>
-                      {homeCampaign.objective}
-                    </p>
-                  ) : null}
-                  <div className={styles.campaignFoot}>
-                    <p className={styles.meta}>
-                      Updated{" "}
-                      <time dateTime={homeCampaign.updatedAt}>
-                        {formatShortDate(homeCampaign.updatedAt, timeZone)}
-                      </time>
-                    </p>
-                    <Button asChild variant="link" size="sm">
-                      <Link href={homeCampaign.href}>
-                        {homeCampaign.actionLabel}
-                        <ArrowRight aria-hidden="true" data-icon="inline-end" />
-                      </Link>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {section.data.slice(0, 2).map((homeCampaign) => {
+              const chip = resolveCampaignStateChip({ state: homeCampaign.state });
+              return (
+                <SharedCampaignCard
+                  key={homeCampaign.id}
+                  title={homeCampaign.title}
+                  description={homeCampaign.objective}
+                  href={homeCampaign.href}
+                  updatedAt={homeCampaign.updatedAt}
+                  timeZone={timeZone}
+                  stateLabel={chip.label}
+                  stateTone={chip.tone}
+                  previewUrl={homeCampaign.cover?.url ?? null}
+                  coverAlt={homeCampaign.cover?.alt ?? ""}
+                  coverWidth={homeCampaign.cover?.width}
+                  coverHeight={homeCampaign.cover?.height}
+                  imageFit="contain"
+                  coverChip={homeCampaign.coverLabel}
+                  fallbackHint={null}
+                  generation={homeCampaign.generation}
+                  primaryAction={{
+                    label: homeCampaign.actionLabel,
+                    href: homeCampaign.href,
+                  }}
+                  restart={null}
+                  repair={null}
+                />
+              );
+            })}
           </div>
           {section.data.length > 2 && section.data[2] !== undefined ? (
-            <CompactThirdRow homeCampaign={section.data[2]} />
+            <div className={styles.compactList}>
+              <SharedCompactCampaignRow
+                title={section.data[2].title}
+                reason={compactReason(section.data[2])}
+                href={section.data[2].href}
+                ctaLabel={section.data[2].actionLabel}
+                ariaLabel="Third campaign"
+              />
+            </div>
           ) : null}
         </>
       )}

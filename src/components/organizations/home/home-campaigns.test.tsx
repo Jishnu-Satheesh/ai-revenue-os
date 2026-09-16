@@ -242,7 +242,7 @@ describe("HomeCampaigns layouts", () => {
       />,
     );
     expect(screen.getByText("Draft").className).toContain("bg-success/12");
-    expect(screen.getByText("Ready For Review").className).toContain("bg-warning/18");
+    expect(screen.getByText("Ready for review").className).toContain("bg-warning/18");
   });
 
   it("shows viewer wording with no creation affordance", () => {
@@ -326,8 +326,8 @@ describe("HomeCampaigns compact third row", () => {
       />,
     );
     expect(within(thirdRow()).getByText("Third objective line")).toBeInTheDocument();
-    // The reason renders in its own supporting-copy node, not the title.
-    expect(thirdRow().querySelector(`.${styles.meta}`)).not.toBeNull();
+    // The reason renders as supporting copy beneath the title, never as the title.
+    expect(within(thirdRow()).getByText("Third Push").tagName).not.toBe("P");
   });
 
   it("omits the reason line when neither detail nor objective exists", () => {
@@ -344,11 +344,11 @@ describe("HomeCampaigns compact third row", () => {
     const row = thirdRow();
     expect(within(row).getByText("Third Push")).toBeInTheDocument();
     // No reason element at all: title, tag and CTA only.
-    expect(row.querySelector(`.${styles.meta}`)).toBeNull();
+    expect(within(row).queryByText("Drive iftar orders")).toBeNull();
     expect(row.textContent).not.toMatch(/Drive iftar orders/);
   });
 
-  it("tags the third row with the existing state wording and tone", () => {
+  it("tags the third row with a Needs attention tag in the warning tone", () => {
     render(
       <HomeCampaigns
         organizationId={ORG_ID}
@@ -359,7 +359,7 @@ describe("HomeCampaigns compact third row", () => {
         canCreateCampaign
       />,
     );
-    expect(within(thirdRow()).getByText("Blocked").className).toContain("bg-warning/18");
+    expect(within(thirdRow()).getByText("Needs attention").className).toContain("bg-warning/18");
   });
 
   it("renders the compact CTA as an inline text-link with verbatim label and href", () => {
