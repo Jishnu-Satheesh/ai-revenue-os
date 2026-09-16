@@ -42,6 +42,8 @@ export type ResearchAdmissionInput = {
   requestDigest: string;
   idempotencyKey: string;
   sourceFingerprint: string | null;
+  /** The staged question, stored on the run row — never in a worker payload. */
+  researchQuestion: string | null;
   /** The policy version the caller believed was in force, when it read one. */
   knownPolicyVersion: number | null;
 };
@@ -150,6 +152,7 @@ export async function admitResearchRun(
       request_digest: input.requestDigest,
       idempotency_key: input.idempotencyKey,
       source_fingerprint: input.sourceFingerprint,
+      research_question: input.researchQuestion,
       known_policy_version: input.knownPolicyVersion,
     },
   });
@@ -193,6 +196,18 @@ export type ResearchWorkerDispatch = (input: {
 }) => Promise<boolean>;
 
 /**
+ * What a manual request is asking, in the button's own words.
+ *
+ * A run without a staged question plans from nothing, and the worker fails it
+ * rather than inventing what the requester never asked. A button press has no
+ * typed question, but it is not question-less either: "Ask for a campaign"
+ * documents itself as asking the platform to work out what campaign to run
+ * next. Staging that sentence is transcription, not invention — it claims no
+ * business fact and sets no numeric limit, so D06 is not engaged.
+ */
+export const MANUAL_RESEARCH_QUESTION = "What campaign should we run next?";
+
+/**
  * Admit, then dispatch.
  *
  * A replayed admission still dispatches. The worker's own claim is what stops a
@@ -207,7 +222,17 @@ export async function requestCampaignResearch(
 ): Promise<ResearchRequestOutcome> {
   let admitted: ResearchRunAdmission;
   try {
-    admitted = await admitResearchRun(client, input);
+    admitted = await admitResearchRun(client, {
+      ...input,
+      // A manual press carries no typed question. Stage the standing one
+      // rather than admitting a run the worker can only fail: without it
+      // every "Ask for a campaign" plans from nothing and dies as
+      // question_missing. Anything explicitly asked passes through untouched,
+      // and other trigger kinds keep staging their own questions.
+      researchQuestion:
+        input.researchQuestion ??
+        (input.triggerKind === "manual_request" ? MANUAL_RESEARCH_QUESTION : null),
+    });
   } catch (error) {
     if (isAdmissionRefusal(error)) return { status: "refused", refusal: error };
     throw error;

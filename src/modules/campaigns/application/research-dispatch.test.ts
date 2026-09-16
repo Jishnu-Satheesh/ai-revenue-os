@@ -39,6 +39,7 @@ function input() {
     requestDigest: "a".repeat(64),
     idempotencyKey: "request-key-1",
     sourceFingerprint: null,
+    researchQuestion: null,
     knownPolicyVersion: 3,
     correlationId: CORRELATION,
     evidenceMaxAgeDays: 30,
@@ -88,6 +89,45 @@ describe("asking for a piece of research", () => {
         known_policy_version: 3,
       },
     });
+  });
+
+  it("stages the standing question for a manual request", async () => {
+    const { client, calls } = admitted();
+
+    await requestCampaignResearch(client, dispatches, input());
+
+    // Without this, every "Ask for a campaign" admits a run the worker can
+    // only fail as question_missing: the run plans from nothing.
+    expect(calls[0]?.args).toMatchObject({
+      input_run: { research_question: "What campaign should we run next?" },
+    });
+  });
+
+  it("passes an explicitly asked question through untouched", async () => {
+    const { client, calls } = admitted();
+
+    await requestCampaignResearch(client, dispatches, {
+      ...input(),
+      researchQuestion: "why is weekday lunch declining",
+    });
+
+    expect(calls[0]?.args).toMatchObject({
+      input_run: { research_question: "why is weekday lunch declining" },
+    });
+  });
+
+  it("leaves other trigger kinds to stage their own questions", async () => {
+    const { client, calls } = admitted();
+
+    await requestCampaignResearch(client, dispatches, {
+      ...input(),
+      triggerKind: "scheduled",
+    });
+
+    // The worker's question_missing refusal stays the honest answer for a
+    // scheduled run nobody wrote a question for — this layer must not invent
+    // one on a scheduler's behalf.
+    expect(calls[0]?.args).toMatchObject({ input_run: { research_question: null } });
   });
 
   it("hands the worker the evidence limit the policy set", async () => {

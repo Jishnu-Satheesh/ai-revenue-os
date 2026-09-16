@@ -127,6 +127,10 @@ export async function POST(
         requestDigest,
         idempotencyKey: body.idempotencyKey,
         sourceFingerprint: null,
+        // No typed question comes with a button press. The dispatch stages
+        // the standing manual question rather than admitting a run the
+        // worker could only fail as question_missing.
+        researchQuestion: null,
         // Sent so a policy that changed between the read above and the
         // admission below is refused rather than silently applied.
         knownPolicyVersion: ledger.policy.version,
