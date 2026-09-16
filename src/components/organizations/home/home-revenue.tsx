@@ -17,6 +17,7 @@ import { formatWholeMoney } from "@/components/analysis/format";
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Separator } from "@/components/ui/separator";
 import type {
   RevenueScenario,
   RevenueScenarioReady,
@@ -341,6 +343,14 @@ export function HomeRevenue({
 
   const quantified = scenario.shares;
   const unquantified = scenario.unquantified;
+  // The rail names only the three largest uplifts so it reads like the
+  // prototype's Top 3; the chart math still combines every quantified share.
+  const topQuantified = [...quantified]
+    .sort((left, right) => right.highMinorUnits - left.highMinorUnits)
+    .slice(0, 3);
+  // The Growth Intelligence workspace keeps recommendations behind a hash tab
+  // (see growth-intelligence-workspace.tsx TAB_IDS); deep-link straight there.
+  const recommendationsHref = `/organizations/${organizationId}/growth-intelligence#recommendations`;
 
   function proposeEstimates() {
     setProposeError(null);
@@ -371,143 +381,158 @@ export function HomeRevenue({
 
   return (
     <section id="home-revenue" aria-label="Current vs projected growth" className={styles.revenue}>
-      <div className={styles.sectionHead}>
-        <h2 className={styles.sectionTitle}>Current vs projected growth</h2>
-        <StatusBadge label="Rough estimate" tone="neutral" />
-      </div>
-      <div className={styles.revenueGrid}>
-        <div className={styles.revenueMain}>
-          <div
-            className={styles.revenueHorizonRow}
-            role="group"
-            aria-label="Projection horizon in months"
-          >
-            {REVENUE_HORIZON_MONTHS.map((option) => (
-              <Button
-                key={option}
-                variant={months === option ? "secondary" : "ghost"}
-                size="sm"
-                aria-pressed={months === option}
-                onClick={() => setMonths(option)}
-              >
-                {option}M
-              </Button>
-            ))}
+      <Card className="gap-0 overflow-hidden rounded-2xl py-0">
+        <div className={styles.revenueHead}>
+          <div className={styles.sectionHead}>
+            <h2 className={styles.sectionTitle}>Current vs projected growth</h2>
+            <StatusBadge label="Rough estimate" tone="neutral" />
           </div>
-          <ScenarioFigures scenario={scenario} months={months} />
-          <ScenarioChart scenario={scenario} months={months} />
-          <ul className={styles.revenueLegend} aria-label="Chart key">
-            <li>
-              <span className={styles.revenueSwatchSolid} aria-hidden="true" /> Reported revenue
-            </li>
-            <li>
-              <span className={styles.revenueSwatchDashed} aria-hidden="true" /> Current course
-            </li>
-            <li>
-              <span className={styles.revenueSwatchRange} aria-hidden="true" /> With the included
-              actions (range)
-            </li>
-          </ul>
-          {scenario.stalenessGap && scenario.gapNote ? (
-            <p className={styles.revenueGap}>{scenario.gapNote}</p>
-          ) : null}
-          <p className={styles.revenueLine}>{scenario.cutoffNote}</p>
-          <p className={styles.revenueLine}>{scenario.coverageNote}</p>
         </div>
-        <div className={styles.revenueSide}>
-          {quantified.length > 0 ? (
-            <>
-              <h3 className={styles.revenueSideTitle}>What the upside is made of</h3>
-              <ul className={styles.revenueActionList}>
-              {quantified.map((share) => {
-                const shareLabel =
-                  share.shareLow !== null && share.shareHigh !== null
-                    ? share.shareLow === share.shareHigh
-                      ? `${share.shareHigh}%`
-                      : `${share.shareLow}–${share.shareHigh}%`
-                    : share.shareHigh !== null
-                      ? `${share.shareHigh}%`
-                      : null;
-                return (
-                  <li key={share.actionId}>
-                    <ActionLink href={share.href} title={share.title} />
-                    <p className={styles.revenueActionFigure}>
-                      {`+${formatWholeMoney(share.lowMinorUnits, scenario.currency)} – +${formatWholeMoney(share.highMinorUnits, scenario.currency)}${shareLabel ? ` · ${shareLabel} of estimated upside` : ""}`}
-                    </p>
-                    <p className={styles.revenueActionMeta}>
-                      <StatusBadge label={share.status} tone="neutral" />{" "}
-                      {share.jointGroup ? (
-                        <StatusBadge label="Shared figure" tone="warning" />
-                      ) : null}{" "}
-                      {`Cites ${share.citedFindingId.slice(0, 8)}…`}
-                    </p>
-                  </li>
-                );
-              })}
+        <div className={styles.revenueGrid}>
+          <div className={styles.revenueMain}>
+            <div
+              className={styles.revenueHorizonRow}
+              role="group"
+              aria-label="Projection horizon in months"
+            >
+              {REVENUE_HORIZON_MONTHS.map((option) => (
+                <Button
+                  key={option}
+                  variant={months === option ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={months === option}
+                  onClick={() => setMonths(option)}
+                >
+                  {option}M
+                </Button>
+              ))}
+            </div>
+            <ScenarioFigures scenario={scenario} months={months} />
+            <ScenarioChart scenario={scenario} months={months} />
+            <ul className={styles.revenueLegend} aria-label="Chart key">
+              <li>
+                <span className={styles.revenueSwatchSolid} aria-hidden="true" /> Reported revenue
+              </li>
+              <li>
+                <span className={styles.revenueSwatchDashed} aria-hidden="true" /> Current course
+              </li>
+              <li>
+                <span className={styles.revenueSwatchRange} aria-hidden="true" /> With the included
+                actions (range)
+              </li>
             </ul>
-            </>
-          ) : null}
-          {quantified.length === 0 && unquantified.length === 0 ? (
-            <p className={styles.emptyNote}>No recommended actions are on file yet.</p>
-          ) : null}
-          {unquantified.length > 0 ? (
-            <>
-              <h3 className={styles.revenueSideTitle}>Not yet quantified</h3>
-              <ul className={styles.revenueActionList}>
-                {unquantified.map((action) => (
-                  <li key={action.actionId}>
-                    <ActionLink href={action.href} title={action.title} />
-                    <p className={styles.revenueActionMeta}>
-                      <StatusBadge label={action.status} tone="neutral" /> {action.reason}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-              <Button onClick={proposeEstimates} disabled={pending} variant="secondary">
-                {pending ? "Preparing rough estimates…" : "Propose rough estimates"}
+            {scenario.stalenessGap && scenario.gapNote ? (
+              <p className={styles.revenueGap}>{scenario.gapNote}</p>
+            ) : null}
+            <p className={styles.revenueLine}>{scenario.cutoffNote}</p>
+            <p className={styles.revenueLine}>{scenario.coverageNote}</p>
+          </div>
+          <Separator className="hidden h-full lg:block" orientation="vertical" />
+          <Separator className="lg:hidden" />
+          <div className={styles.revenueSide}>
+            {topQuantified.length > 0 ? (
+              <>
+                <h3 className={styles.revenueSideTitle}>Top 3 AI recommendations</h3>
+                <ul className={styles.revenueActionList}>
+                  {topQuantified.map((share) => {
+                    const shareLabel =
+                      share.shareLow !== null && share.shareHigh !== null
+                        ? share.shareLow === share.shareHigh
+                          ? `${share.shareHigh}%`
+                          : `${share.shareLow}–${share.shareHigh}%`
+                        : share.shareHigh !== null
+                          ? `${share.shareHigh}%`
+                          : null;
+                    return (
+                      <li key={share.actionId}>
+                        <ActionLink href={share.href} title={share.title} />
+                        <p className={styles.revenueActionFigure}>
+                          {`+${formatWholeMoney(share.lowMinorUnits, scenario.currency)} – +${formatWholeMoney(share.highMinorUnits, scenario.currency)}${shareLabel ? ` · ${shareLabel} of estimated upside` : ""}`}
+                        </p>
+                        <p className={styles.revenueActionMeta}>
+                          <StatusBadge label={share.status} tone="neutral" />{" "}
+                          {share.jointGroup ? (
+                            <StatusBadge label="Shared figure" tone="warning" />
+                          ) : null}{" "}
+                          {`Cites ${share.citedFindingId.slice(0, 8)}…`}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : null}
+            {quantified.length === 0 && unquantified.length === 0 ? (
+              <p className={styles.emptyNote}>No recommended actions are on file yet.</p>
+            ) : null}
+            {unquantified.length > 0 ? (
+              <>
+                <h3 className={styles.revenueSideTitle}>Not yet quantified</h3>
+                <ul className={styles.revenueActionList}>
+                  {unquantified.map((action) => (
+                    <li key={action.actionId}>
+                      <ActionLink href={action.href} title={action.title} />
+                      <p className={styles.revenueActionMeta}>
+                        <StatusBadge label={action.status} tone="neutral" /> {action.reason}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                <Button onClick={proposeEstimates} disabled={pending} variant="secondary">
+                  {pending ? "Preparing rough estimates…" : "Propose rough estimates"}
+                </Button>
+                {proposeError ? (
+                  <Alert>
+                    <AlertDescription>{proposeError}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </>
+            ) : null}
+            <div className={styles.revenueViewMoreRow}>
+              <Button variant="link" size="sm" asChild className={styles.revenueViewMore}>
+                <Link href={recommendationsHref}>
+                  View more <ArrowRight aria-hidden="true" />
+                </Link>
               </Button>
-              {proposeError ? (
-                <Alert>
-                  <AlertDescription>{proposeError}</AlertDescription>
-                </Alert>
-              ) : null}
-            </>
-          ) : null}
+            </div>
+          </div>
         </div>
-      </div>
-      <ul className={styles.revenueNotes}>
-        {scenario.notes.map((note) => (
-          <li key={note}>{note}</li>
-        ))}
-        {aiNote ? <li>{aiNote}</li> : null}
-      </ul>
-      <Dialog>
-        <DialogTrigger asChild>
-          <Button variant="ghost">How this outlook is worked out</Button>
-        </DialogTrigger>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>How this outlook is worked out</DialogTitle>
-            <DialogDescription>
-              A hold-current-level scenario plus a combined range over the listed actions.
-            </DialogDescription>
-          </DialogHeader>
+        <div className={styles.revenueFoot}>
           <ul className={styles.revenueNotes}>
-            <li>
-              Baseline method: {scenario.baselineMethod} — the latest reported level carried flat
-              across {scenario.horizonLabel}. A scenario, never a learned forecast.
-            </li>
-            <li>
-              Each unit of upside traces to a listed action and its cited input; joint groups share
-              one figure until a defensible allocation rule is approved.
-            </li>
-            <li>
-              Wide bands, never precise lines. Unquantified actions stay visible beside the scenario
-              and are never counted as zero.
-            </li>
+            {scenario.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+            {aiNote ? <li>{aiNote}</li> : null}
           </ul>
-        </DialogContent>
-      </Dialog>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="ghost">How this outlook is worked out</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>How this outlook is worked out</DialogTitle>
+                <DialogDescription>
+                  A hold-current-level scenario plus a combined range over the listed actions.
+                </DialogDescription>
+              </DialogHeader>
+              <ul className={styles.revenueNotes}>
+                <li>
+                  Baseline method: {scenario.baselineMethod} — the latest reported level carried
+                  flat across {scenario.horizonLabel}. A scenario, never a learned forecast.
+                </li>
+                <li>
+                  Each unit of upside traces to a listed action and its cited input; joint groups
+                  share one figure until a defensible allocation rule is approved.
+                </li>
+                <li>
+                  Wide bands, never precise lines. Unquantified actions stay visible beside the
+                  scenario and are never counted as zero.
+                </li>
+              </ul>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </Card>
     </section>
   );
 }

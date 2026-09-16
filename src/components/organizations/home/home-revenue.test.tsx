@@ -20,6 +20,13 @@ afterEach(() => {
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const FINDING_A = "22222222-2222-4222-8222-222222222221";
+const FINDINGS_4 = [
+  "33333333-3333-4333-8333-333333333331",
+  "33333333-3333-4333-8333-333333333332",
+  "33333333-3333-4333-8333-333333333333",
+  "33333333-3333-4333-8333-333333333334",
+] as const;
+const RECOMMENDATIONS_HREF = `/organizations/${ORG_ID}/growth-intelligence#recommendations`;
 
 function scenarioInput(overrides: Partial<RevenueScenarioInput> = {}): RevenueScenarioInput {
   return {
@@ -105,7 +112,7 @@ describe("HomeRevenue", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows the three figures, the share, and the unquantified row with its status", () => {
+  it("shows the three figures, the top recommendation, and the unquantified row with its status", () => {
     render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
 
     expect(screen.getByRole("heading", { name: "Current vs projected growth" })).toBeTruthy();
@@ -113,11 +120,88 @@ describe("HomeRevenue", () => {
     expect(screen.getByText("Latest reported revenue")).toBeTruthy();
     expect(screen.getByText("Current course · 1 month")).toBeTruthy();
     expect(screen.getByText("With the included actions")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Top 3 AI recommendations" })).toBeTruthy();
     expect(screen.getByText(/33\.3–100% of estimated upside/)).toBeTruthy();
     expect(screen.getByText("Not yet quantified")).toBeTruthy();
     expect(screen.getByText("Acknowledged")).toBeTruthy();
     expect(screen.getByText("Planned")).toBeTruthy();
     expect(screen.getByText(/Reports through 2026-08-17/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /View more/ }).getAttribute("href")).toBe(
+      RECOMMENDATIONS_HREF,
+    );
+  });
+
+  it("ranks quantified shares by uplift money and shows only the top 3", () => {
+    const ranked = [
+      { id: "rec-small", title: "Small win", basis: 100_00 },
+      { id: "rec-large", title: "Large win", basis: 400_00 },
+      { id: "rec-mid", title: "Mid win", basis: 200_00 },
+      { id: "rec-mid-high", title: "Mid-high win", basis: 300_00 },
+    ];
+    const section: OrganizationHomeView["revenue"] = {
+      status: "ready",
+      fetchedAt: "2026-08-20T00:00:00.000Z",
+      data: buildRevenueScenario(
+        scenarioInput({
+          losses: ranked.map((entry, index) => ({
+            findingId: FINDINGS_4[index] as string,
+            minorUnits: entry.basis,
+            currency: "AED",
+          })),
+          actions: ranked.map((entry, index) => ({
+            id: entry.id,
+            title: entry.title,
+            kind: "recommendation" as const,
+            status: "Planned",
+            href: null,
+            citedFindingId: FINDINGS_4[index] as string,
+            citedBasisMinorUnits: entry.basis,
+            citedCurrency: "AED",
+            assumptionLow: 0.5,
+            assumptionHigh: 1,
+          })),
+        }),
+      ),
+    };
+    if (section.status !== "ready" || section.data.state !== "ready") {
+      throw new Error("fixture must be ready");
+    }
+    expect(section.data.shares).toHaveLength(4);
+
+    render(<HomeRevenue organizationId={ORG_ID} section={section} />);
+
+    const heading = screen.getByRole("heading", { name: "Top 3 AI recommendations" });
+    const list = heading.nextElementSibling;
+    expect(list?.tagName).toBe("UL");
+    const text = list?.textContent ?? "";
+    for (const title of ["Large win", "Mid-high win", "Mid win"]) {
+      expect(text).toContain(title);
+    }
+    expect(text).not.toContain("Small win");
+    const order = ["Large win", "Mid-high win", "Mid win"].map((title) => text.indexOf(title));
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+    expect(screen.getByRole("link", { name: /View more/ }).getAttribute("href")).toBe(
+      RECOMMENDATIONS_HREF,
+    );
+  });
+
+  it("keeps View more visible when no recommended actions are on file", () => {
+    const empty: OrganizationHomeView["revenue"] = {
+      status: "ready",
+      fetchedAt: "2026-08-20T00:00:00.000Z",
+      data: buildRevenueScenario(scenarioInput({ losses: [], actions: [] })),
+    };
+    if (empty.status !== "ready" || empty.data.state !== "ready") {
+      throw new Error("fixture must be ready");
+    }
+    render(<HomeRevenue organizationId={ORG_ID} section={empty} />);
+
+    expect(screen.getByText("No recommended actions are on file yet.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Top 3 AI recommendations" })).toBeNull();
+    expect(screen.getByRole("link", { name: /View more/ }).getAttribute("href")).toBe(
+      RECOMMENDATIONS_HREF,
+    );
   });
 
   it("states the refusal reason with no chart", () => {

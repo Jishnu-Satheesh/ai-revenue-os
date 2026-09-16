@@ -898,27 +898,67 @@
   }
 }
 
-/* Current vs projected growth: metrics and chart lead, actions follow on narrow. */
+/* Current vs projected growth: metrics and chart lead, actions follow on narrow.
+   Mirrors the Business Performance card: a tinted header, a 70/30 chart-plus-
+   rail row with a divider, and a muted foot for notes. The section stays full
+   width above campaigns. */
 .revenue {
   min-width: 0;
   grid-column: 1 / -1;
 }
 
+.revenueHead {
+  background-color: color-mix(in srgb, var(--primary) 5%, transparent);
+  padding: 20px 20px 24px;
+}
+
+.revenueHead .sectionHead {
+  margin-bottom: 0;
+}
+
 .revenueGrid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 24px;
-  margin-top: 16px;
+  grid-template-columns: minmax(0, 7fr) auto minmax(0, 3fr);
+  gap: 0;
+  margin-top: 0;
 }
 
 .revenueMain {
   min-width: 0;
+  padding: 20px;
 }
 
 .revenueSide {
   min-width: 0;
-  border-left: 1px solid var(--border);
-  padding-left: 24px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.revenueFoot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  padding: 12px 20px;
+}
+
+.revenueFoot .revenueNotes {
+  margin: 0;
+}
+
+.revenueViewMoreRow {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
+}
+
+.revenueViewMore {
+  color: var(--primary);
+  font-weight: 700;
 }
 
 .revenueChart {
@@ -1039,16 +1079,26 @@
   color: var(--muted-foreground);
 }
 
+@container (min-width: 640px) {
+  .revenueHead {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .revenueMain,
+  .revenueSide {
+    padding: 28px;
+  }
+
+  .revenueFoot {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
+
 @container (max-width: 900px) {
   .revenueGrid {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .revenueSide {
-    border-left: none;
-    padding-left: 0;
-    border-top: 1px solid var(--border);
-    padding-top: 20px;
   }
 
   .revenueFigures {
@@ -1060,7 +1110,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin: 12px 0 4px;
+  margin: 0 0 4px;
 }
 
 /* The racing tip on the current-course line: a soft ring that breathes
