@@ -12,6 +12,15 @@ whose inputs, method, and assumptions are readable on the same surface as the
 figures — rather than on a saved target or on a broad statistical/causal
 forecasting platform.
 
+Amendment (proposed 2026-09-15, AI-assisted rough-estimate mode): where fixed
+per-action estimators are not yet evidenced, a model may propose response
+fractions as explicit low/high assumption ranges bound to cited inputs, under
+strict output-schema validation; deterministic arithmetic still produces every
+displayed figure, and model failure degrades to the hold-current-level
+scenario with an explicit note. The model originates no final figure, no
+calibrated confidence, and no share. Companion spec §16 carries the full
+contract.
+
 Why:
 
 - The requested product question is "what could these actions plausibly add?",
@@ -63,4 +72,5 @@ Why:
 
 No production types, no `src/` code, no SQL, no migration, no worker, no
 dependency, no fixture numbers, no invented rates or shares. Numbers ship only
-through the approved implementation plan that follows this ADR.
+through the approved implementation plan that follows this ADR. Model-proposed
+assumption ranges ship only under the §16 contract above, never as bare figures.

@@ -206,6 +206,39 @@ separately only where supported. Profit is never summed into the revenue headlin
   freshness per §3–§4. The final horizon, baseline method, and sparse-history
   fallback are not yet approved.
 
+## 16. Amendment (Proposed 2026-09-15): AI-assisted rough-estimate mode
+
+Motivation: the user accepts a rough estimate over no estimate, and fixed
+per-action estimators are not yet evidenced. The model paces the field;
+deterministic code surveys it.
+
+- What the model may do: propose response fractions ONLY as explicit low/high
+  assumption ranges, each bound to a cited input from the §§2–5 evidence. Its
+  output is strict schema-validated JSON (Zod at the boundary, low temperature,
+  no tools, no side effects, no finance mutation). A range that cites no input
+  is rejected like a malformed row.
+- What the model may NOT do: emit final revenue figures; invent inputs; state
+  calibrated confidence; present a range as a confidence interval; override
+  the §8 reconciliation. The §6 forbidden-origin list (value.ts ranking
+  quantities, campaign-draft-impact validation, measurement.ts verdicts,
+  money-split potential/earned mapping, fixtures) is unchanged — the model
+  does not get to launder any of them into estimator origins either.
+- This section's §6 sentence "An LLM may explain evidence; it never invents
+  response rates, amounts, confidence, or contribution shares" is replaced by:
+  "An LLM may propose response fractions as explicit labelled assumption
+  ranges bound to cited inputs; it never originates final figures, calibrated
+  confidence, or contribution shares — those come from deterministic
+  arithmetic over §§5–8."
+- Roughness contract: wide bands never precise lines, rounded figures,
+  "rough estimate" labelling with cited inputs and stated assumptions on the
+  same surface (§12). Unquantified stays unquantified (§9); joint-group rules
+  (§7) apply unchanged to AI-proposed fractions.
+- Failure mode: model failure or schema-invalid output → the §5
+  hold-current-level scenario plus an explicit "AI path unavailable" note.
+  Never a fake number, never quiet confidence.
+- Status: Proposed. No code follows until the user approves this amendment
+  together with the §14 co-decisions.
+
 ## 15. Non-goals
 
 No production types, no `src/` code, no SQL, no migration, no worker, no new
