@@ -3,7 +3,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CampaignProposalSection } from "@/components/campaigns/campaign-proposal-card";
-import { proposalDigest, type CampaignProposalDocument } from "@/domain/campaigns/proposal";
+import { type CampaignProposalDocument } from "@/domain/campaigns/proposal";
+import { proposalDigest } from "@/domain/campaigns/proposal-digest";
 import {
   toProposalCard,
   type CampaignProposalCardView,

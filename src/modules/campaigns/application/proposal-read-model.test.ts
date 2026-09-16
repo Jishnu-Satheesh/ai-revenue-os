@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  proposalDigest,
-  type CampaignProposalDocument,
-} from "@/domain/campaigns/proposal";
+import { type CampaignProposalDocument } from "@/domain/campaigns/proposal";
+import { proposalDigest } from "@/domain/campaigns/proposal-digest";
 import {
   laneProposals,
   toProposalCard,

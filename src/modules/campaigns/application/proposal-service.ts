@@ -6,10 +6,10 @@ import {
   campaignProposalDecisionKindSchema,
   campaignProposalSourceKindSchema,
   preparationAuthority,
-  proposalDigest,
   type CampaignProposalDocument,
   type PreparationAuthority,
 } from "@/domain/campaigns/proposal";
+import { proposalDigest } from "@/domain/campaigns/proposal-digest";
 
 /**
  * The service that owns the first approval gate.

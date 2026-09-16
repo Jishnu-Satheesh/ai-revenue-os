@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import { CampaignProposalReview } from "@/components/campaigns/campaign-proposal-review";
-import { proposalDigest, type CampaignProposalDocument } from "@/domain/campaigns/proposal";
+import { type CampaignProposalDocument } from "@/domain/campaigns/proposal";
+import { proposalDigest } from "@/domain/campaigns/proposal-digest";
 import {
   toProposalReview,
   type CampaignProposalReviewView,

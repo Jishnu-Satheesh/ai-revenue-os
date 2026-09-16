@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DomainError } from "@/lib/errors";
 import type { CampaignProposalDocument } from "@/domain/campaigns/proposal";
-import { proposalDigest } from "@/domain/campaigns/proposal";
+import { proposalDigest } from "@/domain/campaigns/proposal-digest";
 import { createProposalRouteHandlers } from "@/modules/campaigns/application/proposal-route-handlers";
 import type { ProposalRouteContext } from "@/modules/campaigns/application/proposal-route-handlers";
 import type { CampaignProposalService } from "@/modules/campaigns/application/proposal-service";

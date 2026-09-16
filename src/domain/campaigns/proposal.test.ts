@@ -5,9 +5,9 @@ import {
   campaignProposalDocumentSchema,
   materialTermsChanged,
   preparationAuthority,
-  proposalDigest,
   type CampaignProposalDocument,
 } from "@/domain/campaigns/proposal";
+import { proposalDigest } from "@/domain/campaigns/proposal-digest";
 
 const ORGANIZATION = "11111111-1111-4111-8111-111111111111";
 const OTHER_ORGANIZATION = "22222222-2222-4222-8222-222222222222";

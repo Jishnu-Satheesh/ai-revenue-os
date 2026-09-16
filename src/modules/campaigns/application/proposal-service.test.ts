@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CampaignProposalDocument } from "@/domain/campaigns/proposal";
-import { proposalDigest } from "@/domain/campaigns/proposal";
+import { proposalDigest } from "@/domain/campaigns/proposal-digest";
 import {
   createCampaignProposalService,
   proposalOutcomeStatus,

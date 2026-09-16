@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { canonicalJson } from "@/domain/campaigns/canonical-json";
@@ -254,20 +253,8 @@ export const campaignProposalDecisionSchema = z.strictObject({
 });
 export type CampaignProposalDecision = z.infer<typeof campaignProposalDecisionSchema>;
 
-/**
- * The value a decision is bound to.
- *
- * Same construction as the bundle digest, over the same canonical JSON, so the
- * two cannot drift. Change any word of the proposal and its digest changes,
- * which means an approval recorded against the old digest no longer matches and
- * can no longer authorize preparation.
- */
 export function canonicalProposalJson(document: CampaignProposalDocument): string {
   return canonicalJson(campaignProposalDocumentSchema.parse(document), "$");
-}
-
-export function proposalDigest(document: CampaignProposalDocument): string {
-  return createHash("sha256").update(canonicalProposalJson(document), "utf8").digest("hex");
 }
 
 /**
