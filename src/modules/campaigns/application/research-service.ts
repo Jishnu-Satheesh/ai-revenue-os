@@ -121,6 +121,23 @@ export type ResearchServiceDependencies = {
 
 const CLAIM_LEASE_SECONDS = 900;
 
+/** DB check constraint on failure_code: free text, 1..120 chars. */
+const PLANNER_FAILURE_MAX_LENGTH = 120;
+
+/**
+ * Failure-code format "<family>:<planner reason>" so the failure event names
+ * the rule that tripped (D07 observability). The planner's reasonCode travels
+ * verbatim (trimmed; anything outside [A-Za-z0-9_:-] becomes "_"), sliced so
+ * the total stays within the 120-char column limit. A missing reason leaves
+ * the bare family code.
+ */
+function plannerFailureCode(family: string, reasonCode: unknown): string {
+  const raw = typeof reasonCode === "string" ? reasonCode.trim() : "";
+  if (raw.length === 0) return family;
+  const sanitized = raw.replace(/[^A-Za-z0-9_:-]/g, "_");
+  return `${family}:${sanitized}`.slice(0, PLANNER_FAILURE_MAX_LENGTH);
+}
+
 export function createResearchService(dependencies: ResearchServiceDependencies) {
   async function failClaimed(input: {
     organizationId: string;
@@ -451,8 +468,12 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       }
 
       if (planned.outcome !== "ready") {
+        // Forbidden carries no planner reasonCode, so it stays bare; every
+        // other non-ready planner outcome names its reason after the colon.
         const failureCode =
-          planned.outcome === "forbidden" ? "proposal_forbidden" : "proposal_inadmissible";
+          planned.outcome === "forbidden"
+            ? "proposal_forbidden"
+            : plannerFailureCode("proposal_inadmissible", planned.reasonCode);
         return failClaimed({ ...base, actualCostMinor: actualCost, failureCode });
       }
 

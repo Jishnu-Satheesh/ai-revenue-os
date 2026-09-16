@@ -214,8 +214,80 @@ describe("research service", () => {
     await expect(service.run(runInput())).resolves.toEqual({
       status: "failed",
       runId: RUN_ID,
-      failureCode: "proposal_inadmissible",
+      failureCode: "proposal_inadmissible:draft_unparseable",
     });
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "proposal_inadmissible:draft_unparseable" }),
+    );
+  });
+
+  it("suffixes the planner needs_input reason onto the failure code", async () => {
+    const fail = vi.fn();
+    const service = createResearchService(
+      dependencies({
+        planner: {
+          plan: async () => ({
+            outcome: "needs_input",
+            reasonCode: "no_reviewable_content",
+            declaredGaps: ["no evidence"],
+            modelCostMinor: null,
+          }),
+        } as never,
+        runs: { ...dependencies().runs, fail },
+      }),
+    );
+    await expect(service.run(runInput())).resolves.toEqual({
+      status: "failed",
+      runId: RUN_ID,
+      failureCode: "proposal_inadmissible:no_reviewable_content",
+    });
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "proposal_inadmissible:no_reviewable_content" }),
+    );
+  });
+
+  it("leaves forbidden bare because the planner gives no reason", async () => {
+    const fail = vi.fn();
+    const service = createResearchService(
+      dependencies({
+        planner: { plan: async () => ({ outcome: "forbidden", modelCostMinor: null }) } as never,
+        runs: { ...dependencies().runs, fail },
+      }),
+    );
+    await expect(service.run(runInput())).resolves.toEqual({
+      status: "failed",
+      runId: RUN_ID,
+      failureCode: "proposal_forbidden",
+    });
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: "proposal_forbidden" }),
+    );
+  });
+
+  it("sanitizes the planner reason and caps the failure code at 120 chars", async () => {
+    const fail = vi.fn();
+    const longReason = `a b/c:d${"e".repeat(200)}`;
+    const service = createResearchService(
+      dependencies({
+        planner: {
+          plan: async () => ({
+            outcome: "needs_input",
+            reasonCode: longReason,
+            declaredGaps: [],
+            modelCostMinor: null,
+          }),
+        } as never,
+        runs: { ...dependencies().runs, fail },
+      }),
+    );
+    const result = await service.run(runInput());
+    expect(result.status).toBe("failed");
+    if (result.status !== "failed") throw new Error("expected failed");
+    expect(result.failureCode).toHaveLength(120);
+    expect(result.failureCode.startsWith("proposal_inadmissible:a_b_c:d")).toBe(true);
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({ failureCode: result.failureCode }),
+    );
   });
 
   it("fails the run when the proposal writer refuses a decided proposal", async () => {
