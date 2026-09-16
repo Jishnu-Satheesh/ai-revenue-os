@@ -343,6 +343,12 @@
   color: var(--muted-foreground);
 }
 
+.thumbTagRow {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
 .warning {
   margin-bottom: 12px;
 }
@@ -646,6 +652,12 @@
   min-width: 0;
   flex-direction: column;
   gap: 8px;
+}
+
+.dialogBadge {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 4px;
 }
 
 .dialogSourceButton {

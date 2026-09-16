@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -271,5 +271,82 @@ describe("HomeAssets states", () => {
       />,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("HomeAssets review status tags", () => {
+  it("shows a success-toned badge with the review label on approved tiles", () => {
+    renderGallery([
+      asset({
+        reviewState: "approved",
+        reviewLabel: "Approved reference",
+        sourceLabel: "Brand reference",
+      }),
+    ]);
+
+    const badge = screen.getByText("Approved reference");
+    expect(badge.className).toMatch(/bg-success/);
+    expect(
+      screen.getByRole("button", {
+        name: /ramadan push · ramadan-hero · iftar spread, brand reference, approved reference/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows success tone for approved and neutral tone for unreviewed tiles", () => {
+    renderGallery([
+      asset({
+        id: "reference:55555555-5555-4555-8555-555555555561",
+        label: "Approved work",
+        sourceLabel: "Brand reference",
+        reviewState: "approved",
+        reviewLabel: "Approved reference",
+      }),
+      asset({
+        id: "poster:55555555-5555-4555-8555-555555555562",
+        label: "Unreviewed work",
+        sourceLabel: "Finished poster render",
+        reviewState: "unreviewed",
+        reviewLabel: "Review not recorded",
+      }),
+    ]);
+
+    // Exact-text match finds the badge: the sub-line reads
+    // "Brand reference · Approved reference" so it cannot exact-match.
+    const approvedBadge = screen.getByText("Approved reference");
+    expect(approvedBadge.className).toMatch(/bg-success/);
+
+    const unreviewedBadge = screen.getByText("Review not recorded");
+    expect(unreviewedBadge.className).toMatch(/bg-muted/);
+
+    // Existing aria names are untouched by the badge markup.
+    expect(
+      screen.getByRole("button", { name: "Approved work, Brand reference, Approved reference" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Unreviewed work, Finished poster render, Review not recorded",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the badge in the dialog above the saved-for line", async () => {
+    const user = userEvent.setup();
+    renderGallery([
+      asset({
+        reviewState: "approved",
+        reviewLabel: "Approved reference",
+        sourceLabel: "Brand reference",
+      }),
+    ]);
+
+    await user.click(
+      screen.getByRole("button", { name: /ramadan push · ramadan-hero · iftar spread/i }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    const badge = within(dialog).getByText("Approved reference");
+    expect(badge.className).toMatch(/bg-success/);
+    const savedFor = screen.getByText(/saved for/i);
+    expect(badge.compareDocumentPosition(savedFor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

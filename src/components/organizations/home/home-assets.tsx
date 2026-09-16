@@ -8,6 +8,7 @@ import { AssetThumbFigure } from "@/components/assets/asset-thumb-figure";
 import { HomePreviewImage } from "@/components/organizations/home/home-preview-image";
 import { formatInstant } from "@/components/organizations/home/home-dates";
 import { HomeRefreshButton } from "@/components/organizations/home/home-refresh-button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,11 +18,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import type {
-  HomeAsset,
-  HomeSection,
-} from "@/modules/organizations/application/home-types";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import type { HomeAsset, HomeSection } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
 
 /**
@@ -122,8 +126,7 @@ export function HomeAssets({
               <Images aria-hidden="true" />
               <AlertTitle>Some recent work could not be loaded</AlertTitle>
               <AlertDescription>
-                What could be read is shown below. Retry refreshes the whole page from the
-                server.
+                What could be read is shown below. Retry refreshes the whole page from the server.
               </AlertDescription>
               <div className="mt-3">
                 <HomeRefreshButton label="Retry" />
@@ -154,10 +157,7 @@ export function HomeAssets({
                     width={item.image?.width}
                     height={item.image?.height}
                     fallback={
-                      <HomePreviewImage
-                        image={null}
-                        frameClassName={styles.coverFallback}
-                      />
+                      <HomePreviewImage image={null} frameClassName={styles.coverFallback} />
                     }
                   />
                 </span>
@@ -167,6 +167,12 @@ export function HomeAssets({
                   </span>
                   <span className={styles.thumbSub}>
                     {item.sourceLabel} · {item.reviewLabel}
+                  </span>
+                  <span className={styles.thumbTagRow}>
+                    <StatusBadge
+                      label={item.reviewLabel}
+                      tone={item.reviewState === "approved" ? "success" : "neutral"}
+                    />
                   </span>
                 </span>
               </button>
@@ -187,12 +193,15 @@ export function HomeAssets({
               </DialogHeader>
               <div className={styles.dialogGrid}>
                 <div className={styles.dialogImage}>
-                  <HomePreviewImage
-                    image={selected.image}
-                    frameClassName={styles.coverFallback}
-                  />
+                  <HomePreviewImage image={selected.image} frameClassName={styles.coverFallback} />
                 </div>
                 <div className={styles.dialogDetails}>
+                  <span className={styles.dialogBadge}>
+                    <StatusBadge
+                      label={selected.reviewLabel}
+                      tone={selected.reviewState === "approved" ? "success" : "neutral"}
+                    />
+                  </span>
                   <p className={styles.cardText}>
                     Saved for <span dir="auto">{organizationName}</span>
                   </p>
