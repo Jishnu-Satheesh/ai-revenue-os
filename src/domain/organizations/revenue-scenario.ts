@@ -167,6 +167,9 @@ export type RevenueScenarioReady = {
   gapNote: string | null;
   cutoffNote: string;
   coverageNote: string;
+  /** Anchor the horizon projections and the staleness gap share. */
+  today: string;
+  lastObservationDate: string;
   roughEstimate: true;
   notes: readonly string[];
 };
@@ -421,6 +424,8 @@ export function buildRevenueScenario(input: RevenueScenarioInput): RevenueScenar
     gapNote,
     cutoffNote: value.cutoffNote,
     coverageNote: value.coverageNote,
+    today: value.today,
+    lastObservationDate: value.lastObservationDate,
     roughEstimate: true,
     notes,
   };
@@ -498,4 +503,71 @@ export function applyProposedRanges(
   }
 
   return { actions: [...nextById.values()], rejected };
+}
+
+/** Selectable projection horizons, in whole months from the scenario date. */
+export const REVENUE_HORIZON_MONTHS = [1, 3, 6, 12] as const;
+export type RevenueHorizonMonths = (typeof REVENUE_HORIZON_MONTHS)[number];
+
+export type RevenueHorizonPoint = {
+  /** 1-based month offset from the scenario date. */
+  monthIndex: number;
+  /** Inclusive local end date of this month step. */
+  endDate: string;
+  /** Short axis label, e.g. "16 Oct". */
+  label: string;
+  currentCourseMinorUnits: number;
+  lowMinorUnits: number;
+  highMinorUnits: number;
+};
+
+/**
+ * Whole months after a local date, clamped to the target month's last day
+ * (31 Jan + 1 month reads 28 Feb, never 3 Mar). Pure calendar arithmetic.
+ */
+export function addLocalMonths(date: string, months: number): string {
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const targetMonthIndex = month - 1 + months;
+  const targetYear = year + Math.floor(targetMonthIndex / 12);
+  const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const targetDay = Math.min(day, lastDay);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${targetYear}-${pad(targetMonth + 1)}-${pad(targetDay)}`;
+}
+
+/**
+ * Extends a monthly scenario across N months. The monthly level carries
+ * flat — current course and the with-actions band accumulate linearly, so a
+ * percentage is never compounded into a growth rate it was never measured
+ * as. Uplift percentages are identical at every horizon by construction.
+ * Throws a RangeError for anything outside 1–12 whole months.
+ */
+export function projectRevenueHorizon(
+  scenario: RevenueScenarioReady,
+  months: number,
+  asOfDate: string,
+): RevenueHorizonPoint[] {
+  if (!Number.isInteger(months) || months < 1 || months > 12) {
+    throw new RangeError("Revenue horizons run 1 to 12 whole months.");
+  }
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(asOfDate)) {
+    throw new RangeError("Revenue horizon anchor dates read YYYY-MM-DD.");
+  }
+  const monthName = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" });
+  const points: RevenueHorizonPoint[] = [];
+  for (let index = 1; index <= months; index += 1) {
+    const endDate = addLocalMonths(asOfDate, index);
+    const day = Number(endDate.slice(8));
+    const label = `${day} ${monthName.format(new Date(`${endDate}T00:00:00.000Z`))}`;
+    points.push({
+      monthIndex: index,
+      endDate,
+      label,
+      currentCourseMinorUnits: scenario.currentCourseMinorUnits * index,
+      lowMinorUnits: scenario.withActionsLowMinorUnits * index,
+      highMinorUnits: scenario.withActionsHighMinorUnits * index,
+    });
+  }
+  return points;
 }

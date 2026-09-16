@@ -2234,6 +2234,24 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["organization_brand_logos"]["Insert"]>;
         Relationships: [];
       };
+      /** Nightly stored answers behind the home growth outlook (ADR 0060). */
+      organization_revenue_snapshots: {
+        Row: {
+          id: string;
+          organization_id: string;
+          snapshot_date: string;
+          scenario_input: Record<string, unknown>;
+          ai_note: string | null;
+          input_digest: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_revenue_snapshots"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: never;
+        Relationships: [];
+      };
       organization_subject_profiles: {
         Row: {
           id: string;

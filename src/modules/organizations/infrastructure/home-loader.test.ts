@@ -98,6 +98,12 @@ vi.mock("@/modules/campaigns/infrastructure/proposal-read-repository", () => ({
   })),
 }));
 
+const mockReadLatestSnapshot = vi.fn();
+
+vi.mock("@/modules/organizations/infrastructure/revenue-snapshot-repository", () => ({
+  readLatestRevenueSnapshot: (...args: unknown[]) => mockReadLatestSnapshot(...args),
+}));
+
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const NOW = "2026-09-11T12:00:00.000Z";
 const CORRELATION_ID = "33333333-3333-4333-8333-333333333333";
@@ -248,6 +254,7 @@ beforeEach(() => {
   mockListChannelRecommendationRecords.mockResolvedValue([]);
   mockListWorkspaceItems.mockResolvedValue([]);
   mockListProposals.mockResolvedValue([]);
+  mockReadLatestSnapshot.mockResolvedValue({ state: "missing" });
   mockGetCampaign.mockResolvedValue(null);
   mockGetVersion.mockResolvedValue(null);
   mockLatestGenerationRun.mockResolvedValue(null);
@@ -576,6 +583,7 @@ describe("revenue section reads", () => {
       {
         id: "rec-1",
         headline: "Recover avoidable cancellations",
+        label: "recommendation",
         decision: {
           decision: "planned",
           snoozedUntil: null,
@@ -633,6 +641,35 @@ describe("revenue section reads", () => {
     expect(proposal?.href).toContain("campaign-proposals");
   });
 
+  it("keeps observations and needs-data rows out of the feasible set", async () => {
+    settleRevenue();
+    mockListChannelRecommendationRecords.mockResolvedValue([
+      {
+        id: "obs-1",
+        headline: "Gross revenue data is unavailable for this time period.",
+        label: "observation",
+        decision: null,
+        citationFindingIds: [],
+      },
+      {
+        id: "nd-1",
+        headline: "Provide matching sales data for the selected date range.",
+        label: "needs_data",
+        decision: null,
+        citationFindingIds: [],
+      },
+    ] as never);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready" || view.revenue.data.state !== "ready") return;
+    const ids = view.revenue.data.unquantified.map((entry) => entry.actionId);
+    expect(ids).not.toContain("rec:obs-1");
+    expect(ids).not.toContain("rec:nd-1");
+  });
+
   it("a failed band read fails the section but keeps campaigns", async () => {
     settleRevenue();
     mockLoadChannelBandsForWindow.mockRejectedValue(new Error("db down"));
@@ -684,5 +721,106 @@ describe("revenue section reads", () => {
       view.revenue.data.unquantified.filter((entry) => entry.kind === "recommendation"),
     ).toHaveLength(0);
     expect(view.revenue.data.unquantified.some((entry) => entry.kind === "proposal")).toBe(true);
+  });
+});
+
+describe("revenue snapshot reads", () => {
+  const SNAP_ORG = ORG_ID;
+  function snapshotInput() {
+    return {
+      organizationId: SNAP_ORG,
+      grain: "month" as const,
+      history: [{ label: "2026-08", minorUnits: 800_00, currency: "AED" }],
+      losses: [],
+      actions: [
+        {
+          id: "proposal:11111111-1111-4111-8111-111111111111",
+          title: "Stored proposal",
+          kind: "proposal" as const,
+          status: "Ready",
+          href: `/organizations/${SNAP_ORG}/campaign-proposals/11111111-1111-4111-8111-111111111111`,
+          citedFindingId: null,
+          citedBasisMinorUnits: null,
+          citedCurrency: null,
+          assumptionLow: null,
+          assumptionHigh: null,
+        },
+      ],
+      lastObservationDate: "2026-08-31",
+      today: "2026-09-16",
+      cutoffNote: "Reports through 2026-08-31.",
+      coverageNote: "1 reporting channel · monthly buckets.",
+    };
+  }
+
+  it("serves the stored snapshot without touching analysis reads", async () => {
+    mockReadLatestSnapshot.mockResolvedValue({
+      state: "ready",
+      snapshotDate: "2026-09-16",
+      input: snapshotInput(),
+      aiNote: "Nightly model-proposed ranges applied as explicit assumptions.",
+      digest: "digest",
+    });
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockLoadAnalysedWindowKeys).not.toHaveBeenCalled();
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready" || view.revenue.data.state !== "ready") return;
+    expect(view.revenue.data.baselineMinorUnits).toBe(800_00);
+    expect(view.revenue.data.notes).toContain(
+      "Nightly model-proposed ranges applied as explicit assumptions.",
+    );
+  });
+
+  it("marks an older snapshot as stale but still serves it", async () => {
+    mockReadLatestSnapshot.mockResolvedValue({
+      state: "ready",
+      snapshotDate: "2026-09-10",
+      input: snapshotInput(),
+      aiNote: null,
+      digest: "digest",
+    });
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready" || view.revenue.data.state !== "ready") return;
+    expect(view.revenue.data.notes).toContain(
+      "Snapshot from 2026-09-10; the nightly refresh has not landed yet.",
+    );
+  });
+
+  it("narrows stored proposals by the viewer's campaign access", async () => {
+    mockReadLatestSnapshot.mockResolvedValue({
+      state: "ready",
+      snapshotDate: "2026-09-16",
+      input: snapshotInput(),
+      aiNote: null,
+      digest: "digest",
+    });
+    mockedCampaignsGate.mockReturnValue(false);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready" || view.revenue.data.state !== "ready") return;
+    expect(view.revenue.data.unquantified).toHaveLength(0);
+  });
+
+  it("falls back to live reads when no snapshot validates", async () => {
+    mockReadLatestSnapshot.mockResolvedValue({ state: "corrupt" });
+    mockLoadAnalysedWindowKeys.mockResolvedValue([]);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockLoadAnalysedWindowKeys).toHaveBeenCalled();
+    expect(view.revenue.status).toBe("ready");
+    if (view.revenue.status !== "ready") return;
+    expect(view.revenue.data.state).toBe("refused");
   });
 });

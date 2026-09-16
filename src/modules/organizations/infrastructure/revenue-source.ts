@@ -40,6 +40,12 @@ export type RevenueSourceReads = {
 export type ReadRevenueSourceInput = {
   reads: RevenueSourceReads;
   organizationId: string;
+  /**
+   * Signed-in viewer for per-actor annotations, or empty for shared reads:
+   * the nightly worker passes empty so preference and feedback lookups match
+   * nothing and rows arrive unfiltered — snapshots are shared across viewers
+   * by design, and viewer hiding stays a presentation concern.
+   */
   actorId: string;
   timeZone: string;
   now: string;
@@ -64,7 +70,7 @@ export async function readRevenueSource(input: ReadRevenueSourceInput): Promise<
   const tasks: { kind: RevenueTaskKind; run: Promise<unknown> }[] = [
     { kind: "keys", run: reads.analysis.loadAnalysedWindowKeys({ organizationId }) },
   ];
-  if (input.canActions && actorId.trim().length > 0) {
+  if (input.canActions) {
     tasks.push({
       kind: "recs",
       run: reads.growthReads.listChannelRecommendationRecords({
@@ -119,15 +125,20 @@ export async function readRevenueSource(input: ReadRevenueSourceInput): Promise<
     }
     if (task.kind === "keys") {
       keys = [...(outcome.value as readonly AnalysedWindowKey[])];
-    } else if (task.kind === "recs") {
-      recommendations = (
-        outcome.value as readonly {
-          id: string;
-          headline: string;
-          decision: { decision: string } | null;
-          citationFindingIds?: readonly string[];
-        }[]
-      ).map((row) => ({
+        } else if (task.kind === "recs") {
+          // Only the recommendation lane joins the feasible set: observations
+          // describe and needs-data rows ask, neither proposes an action.
+          recommendations = (
+            outcome.value as readonly {
+              id: string;
+              headline: string;
+              label: string;
+              decision: { decision: string } | null;
+              citationFindingIds?: readonly string[];
+            }[]
+          )
+            .filter((row) => row.label === "recommendation")
+            .map((row) => ({
         id: row.id,
         headline: row.headline,
         decision: row.decision,
@@ -199,6 +210,6 @@ export async function readRevenueSource(input: ReadRevenueSourceInput): Promise<
     today,
   });
   return mapped.status === "ready"
-    ? { status: "ready", input: mapped.input, fetchedAt: now }
+    ? { status: "ready", input: mapped.input, fetchedAt: now, extraNotes: [] }
     : { status: "failed" };
 }

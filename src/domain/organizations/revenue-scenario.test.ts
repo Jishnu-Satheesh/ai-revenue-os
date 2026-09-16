@@ -5,6 +5,7 @@ import {
   buildRevenueScenario,
   MIXED_CURRENCY_REASON,
   NO_HISTORY_REASON,
+  projectRevenueHorizon,
   revenueAssumptionRangeSchema,
   type RevenueScenarioInput,
 } from "@/domain/organizations/revenue-scenario";
@@ -326,5 +327,53 @@ describe("buildRevenueScenario", () => {
     expect(scenario.combinedHighMinorUnits).toBe(0);
     expect(scenario.unquantified).toHaveLength(1);
     expect(scenario.unquantified[0]?.reason).toMatch(/Not yet quantified/);
+  });
+});
+
+describe("projectRevenueHorizon", () => {
+  function readyScenario() {
+    const scenario = buildRevenueScenario(
+      baseInput({
+        actions: [
+          {
+            id: "rec-1",
+            title: "Recover avoidable cancellations",
+            kind: "recommendation",
+            status: "Planned",
+            href: null,
+            citedFindingId: FINDING_A,
+            citedBasisMinorUnits: 200_00,
+            citedCurrency: "AED",
+            assumptionLow: 0.1,
+            assumptionHigh: 0.3,
+          },
+        ],
+      }),
+    );
+    if (scenario.state !== "ready") throw new Error("fixture must be ready");
+    return scenario;
+  }
+
+  it("accumulates the flat monthly level without compounding", () => {
+    const points = projectRevenueHorizon(readyScenario(), 3, "2026-09-16");
+    expect(points).toHaveLength(3);
+    expect(points[0]).toMatchObject({ monthIndex: 1, endDate: "2026-10-16", label: "16 Oct" });
+    expect(points[2]).toMatchObject({ monthIndex: 3, endDate: "2026-12-16" });
+    expect(points[2]?.currentCourseMinorUnits).toBe(1_200_00 * 3);
+    expect(points[2]?.lowMinorUnits).toBe(1_220_00 * 3);
+    expect(points[2]?.highMinorUnits).toBe(1_260_00 * 3);
+  });
+
+  it("clamps month ends instead of spilling into the next month", () => {
+    const points = projectRevenueHorizon(readyScenario(), 1, "2026-01-31");
+    expect(points[0]?.endDate).toBe("2026-02-28");
+  });
+
+  it("refuses anything outside 1 to 12 whole months", () => {
+    const scenario = readyScenario();
+    expect(() => projectRevenueHorizon(scenario, 0, "2026-09-16")).toThrow(RangeError);
+    expect(() => projectRevenueHorizon(scenario, 13, "2026-09-16")).toThrow(RangeError);
+    expect(() => projectRevenueHorizon(scenario, 1.5, "2026-09-16")).toThrow(RangeError);
+    expect(() => projectRevenueHorizon(scenario, 3, "16-09-2026")).toThrow(RangeError);
   });
 });

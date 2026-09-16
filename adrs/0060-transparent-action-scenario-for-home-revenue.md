@@ -59,3 +59,18 @@ conditional chart — same inputs, same chart.
 - Scenario persistence/versioning (§10 of the spec) is deferred: no table, no
   migration, no worker in this slice. Proposed ranges are applied in memory and
   never stored.
+
+## Addendum 2026-09-16 — nightly snapshots and selectable horizons
+
+Approved together with the extension plan: the `revenue-snapshots` worker
+rebuilds the union input every local midnight (hourly dispatcher fans out only
+orgs inside their midnight hour; per-org builds are idempotent per org-day and
+leave the last good row on failure) into `public.organization_revenue_snapshots`
+(migration `20260916130000`, member-read-only RLS, no client writes, trimmed
+past thirteen months). The home section reads the latest validating row with
+per-viewer permission narrowing at render, falling back to live reads. Horizons
+1/3/6/12 months derive deterministically from the stored monthly figures by
+flat accumulation (`projectRevenueHorizon`) — no compounding, no seasonal
+curve until backtesting exists. Chart: gray current-course line with a
+pulsating tip (static under reduced motion) against the green with-actions
+band, horizon end dates named on figures and axes.

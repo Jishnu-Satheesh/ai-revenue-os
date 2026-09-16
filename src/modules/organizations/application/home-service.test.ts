@@ -1169,7 +1169,7 @@ describe("revenue section", () => {
   it("composes a ready scenario without touching other sections", () => {
     const view = buildOrganizationHomeView({
       ...viewInput(),
-      revenue: { status: "ready", input: revenueInput(), fetchedAt: NOW },
+      revenue: { status: "ready", input: revenueInput(), fetchedAt: NOW, extraNotes: [] },
     });
     expect(view.revenue.status).toBe("ready");
     if (view.revenue.status !== "ready") return;
@@ -1183,7 +1183,12 @@ describe("revenue section", () => {
   it("carries a refused scenario as ready-with-a-reason", () => {
     const view = buildOrganizationHomeView({
       ...viewInput(),
-      revenue: { status: "ready", input: revenueInput({ history: [] }), fetchedAt: NOW },
+      revenue: {
+        status: "ready",
+        input: revenueInput({ history: [] }),
+        fetchedAt: NOW,
+        extraNotes: [],
+      },
     });
     expect(view.revenue.status).toBe("ready");
     if (view.revenue.status !== "ready") return;
@@ -1197,5 +1202,57 @@ describe("revenue section", () => {
     });
     expect(view.revenue).toEqual({ status: "failed", code: "HOME_READ_FAILED" });
     expect(view.campaigns.status).toBe("ready");
+  });
+});
+
+describe("revenue extra notes", () => {
+  it("appends loader annotations to a stated scenario only", () => {
+    const stated = buildOrganizationHomeView({
+      ...viewInput(),
+      revenue: {
+        status: "ready",
+        input: {
+          organizationId: ORG_ID,
+          grain: "week",
+          history: [{ label: "2026-08-04", minorUnits: 800_00, currency: "AED" }],
+          losses: [],
+          actions: [],
+          lastObservationDate: "2026-08-04",
+          today: "2026-08-20",
+          cutoffNote: "Reports through 2026-08-04.",
+          coverageNote: "1 reporting channel.",
+        },
+        fetchedAt: NOW,
+        extraNotes: ["Snapshot from 2026-08-19; the nightly refresh has not landed yet."],
+      },
+    });
+    expect(stated.revenue.status).toBe("ready");
+    if (stated.revenue.status !== "ready" || stated.revenue.data.state !== "ready") return;
+    expect(stated.revenue.data.notes).toContain(
+      "Snapshot from 2026-08-19; the nightly refresh has not landed yet.",
+    );
+
+    const refused = buildOrganizationHomeView({
+      ...viewInput(),
+      revenue: {
+        status: "ready",
+        input: {
+          organizationId: ORG_ID,
+          grain: "week",
+          history: [],
+          losses: [],
+          actions: [],
+          lastObservationDate: "2026-08-20",
+          today: "2026-08-20",
+          cutoffNote: "Reports through 2026-08-20.",
+          coverageNote: "No reporting channels.",
+        },
+        fetchedAt: NOW,
+        extraNotes: ["Snapshot from 2026-08-19."],
+      },
+    });
+    expect(refused.revenue.status).toBe("ready");
+    if (refused.revenue.status !== "ready") return;
+    expect(refused.revenue.data.state).toBe("refused");
   });
 });

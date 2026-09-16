@@ -1037,3 +1037,46 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.revenueHorizonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 12px 0 4px;
+}
+
+/* The racing tip on the current-course line: a soft ring that breathes
+   outward while the static dot holds the exact value. Opacity and scale
+   only — never position — and fully still under reduced motion. */
+.revenuePulse {
+  fill: none;
+  stroke: var(--muted-foreground);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: revenue-ping 2.2s ease-out infinite;
+}
+
+@keyframes revenue-ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+
+  70% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .revenuePulse {
+    animation: none;
+    opacity: 0;
+  }
+}

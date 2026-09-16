@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelBandRecord, ChannelFindingRecord } from "@/modules/analysis/application/ports";
 import {
+  filterRevenueInputForViewer,
   mapRevenueInputs,
   REVENUE_HISTORY_WINDOWS,
 } from "@/modules/organizations/infrastructure/revenue-inputs";
@@ -309,5 +310,80 @@ describe("mapRevenueInputs", () => {
     expect(mapRevenueInputs({ ...base, today: "20-08-2026" }).status).toBe("failed");
     expect(mapRevenueInputs({ ...base, bands: [] }).status).toBe("failed");
     expect(mapRevenueInputs({ ...base, bands: [null] }).status).toBe("failed");
+  });
+});
+
+describe("filterRevenueInputForViewer", () => {
+  function filteredInput() {
+    return {
+      organizationId: ORG_ID,
+      grain: "month" as const,
+      history: [{ label: "2026-08", minorUnits: 800_00, currency: "AED" }],
+      losses: [],
+      actions: [
+        {
+          id: "rec-1",
+          title: "Recommendation",
+          kind: "recommendation" as const,
+          status: "Planned",
+          href: null,
+          citedFindingId: null,
+          citedBasisMinorUnits: null,
+          citedCurrency: null,
+          assumptionLow: null,
+          assumptionHigh: null,
+        },
+        {
+          id: "proposal:1",
+          title: "Proposal",
+          kind: "proposal" as const,
+          status: "Ready",
+          href: null,
+          citedFindingId: null,
+          citedBasisMinorUnits: null,
+          citedCurrency: null,
+          assumptionLow: null,
+          assumptionHigh: null,
+        },
+        {
+          id: "insight:1",
+          title: "Insight",
+          kind: "insight" as const,
+          status: "New",
+          href: null,
+          citedFindingId: null,
+          citedBasisMinorUnits: null,
+          citedCurrency: null,
+          assumptionLow: null,
+          assumptionHigh: null,
+        },
+      ],
+      lastObservationDate: "2026-08-31",
+      today: "2026-09-16",
+      cutoffNote: "Reports through 2026-08-31.",
+      coverageNote: "All reporting channels.",
+    };
+  }
+
+  it("keeps everything when both gates pass", () => {
+    const result = filterRevenueInputForViewer(filteredInput(), {
+      includeProposals: true,
+      includeActions: true,
+    });
+    expect(result.actions).toHaveLength(3);
+  });
+
+  it("drops proposals without campaign access and actions without growth access", () => {
+    const noProposals = filterRevenueInputForViewer(filteredInput(), {
+      includeProposals: false,
+      includeActions: true,
+    });
+    expect(noProposals.actions.map((action) => action.kind)).toEqual(["recommendation", "insight"]);
+    const noActions = filterRevenueInputForViewer(filteredInput(), {
+      includeProposals: true,
+      includeActions: false,
+    });
+    expect(noActions.actions.map((action) => action.kind)).toEqual(["proposal"]);
+    expect(noActions.history).toHaveLength(1);
   });
 });

@@ -84,6 +84,14 @@ export function createMemoryWorkerServiceClient(): SupabaseClient<Database> {
   });
 }
 
+/** Revenue snapshot worker client, constructed only after strict payload parsing. */
+export function createRevenueWorkerServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Revenue snapshot workers");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
+
 /** Decision-cycle worker client, constructed only after strict payload parsing. */
 export function createDecisionWorkerServiceClient(): SupabaseClient<Database> {
   const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Decision workers");

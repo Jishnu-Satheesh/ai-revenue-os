@@ -2,7 +2,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildRevenueChartRows, HomeRevenue } from "@/components/organizations/home/home-revenue";
+import {
+  buildRevenueChartRows,
+  HomeRevenue,
+  PulsingTipDot,
+} from "@/components/organizations/home/home-revenue";
 import {
   buildRevenueScenario,
   type RevenueScenarioInput,
@@ -72,12 +76,24 @@ describe("buildRevenueChartRows", () => {
     if (section.status !== "ready" || section.data.state !== "ready") {
       throw new Error("fixture must be ready");
     }
-    const rows = buildRevenueChartRows(section.data);
+    const { rows } = buildRevenueChartRows(section.data, 1, "2026-08-20");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toMatchObject({ label: "2026-08-04" });
     expect(rows[1]?.current).not.toBeNull();
-    expect(rows[2]?.label).toBe("Next month");
+    expect(rows[2]?.label).toBe("20 Sept");
     expect(rows[2]?.actual).toBeNull();
+  });
+
+  it("accumulates cumulative horizon points with named end dates", () => {
+    const section = readySection();
+    if (section.status !== "ready" || section.data.state !== "ready") {
+      throw new Error("fixture must be ready");
+    }
+    const { rows, points } = buildRevenueChartRows(section.data, 3, "2026-08-20");
+    expect(rows).toHaveLength(5);
+    expect(points.map((point) => point.label)).toEqual(["20 Sept", "20 Oct", "20 Nov"]);
+    expect(rows[4]?.current).toBe((rows[2]?.current ?? 0) * 3);
+    expect(rows[4]?.high).toBe((rows[2]?.high ?? 0) * 3);
   });
 });
 
@@ -95,7 +111,7 @@ describe("HomeRevenue", () => {
     expect(screen.getByRole("heading", { name: "Current vs projected growth" })).toBeTruthy();
     expect(screen.getByText("Rough estimate")).toBeTruthy();
     expect(screen.getByText("Latest reported revenue")).toBeTruthy();
-    expect(screen.getByText("Current course · Next month (≈30 days)")).toBeTruthy();
+    expect(screen.getByText("Current course · 1 month")).toBeTruthy();
     expect(screen.getByText("With the included actions")).toBeTruthy();
     expect(screen.getByText(/33\.3–100% of estimated upside/)).toBeTruthy();
     expect(screen.getByText("Not yet quantified")).toBeTruthy();
@@ -164,6 +180,24 @@ describe("HomeRevenue", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(String(seen[0]?.[0])).toContain(`/api/organizations/${ORG_ID}/revenue/proposals`);
     await waitFor(() => expect(screen.getByText("Model-proposed ranges applied.")).toBeTruthy());
+  });
+
+  it("switches horizons and keeps the pulse tip on the current course", () => {
+    const { container } = render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
+
+    expect(screen.getByText("Current course · 1 month")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "3M" }));
+    expect(screen.getByText("Current course · 3 months")).toBeTruthy();
+    expect(screen.getByText(/Cumulative to 20 Nov/)).toBeTruthy();
+  });
+
+  it("renders the racing tip only on the latest current-course point", () => {
+    const { container, rerender } = render(
+      <PulsingTipDot cx={10} cy={20} index={4} lastIndex={4} />,
+    );
+    expect(container.querySelector('circle[class*="revenuePulse"]')).not.toBeNull();
+    rerender(<PulsingTipDot cx={10} cy={20} index={2} lastIndex={4} />);
+    expect(container.querySelector('circle[class*="revenuePulse"]')).toBeNull();
   });
 
   it("keeps the current course when proposals fail", async () => {

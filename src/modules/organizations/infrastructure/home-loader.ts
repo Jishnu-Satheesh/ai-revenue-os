@@ -27,7 +27,13 @@ import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/g
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { createCampaignProposalReader } from "@/modules/campaigns/infrastructure/proposal-read-repository";
 import type { ProposalReadPersistence } from "@/modules/campaigns/infrastructure/proposal-read-repository";
-import { readRevenueSource } from "@/modules/organizations/infrastructure/revenue-source";
+import { filterRevenueInputForViewer } from "@/modules/organizations/infrastructure/revenue-inputs";
+import { readLatestRevenueSnapshot } from "@/modules/organizations/infrastructure/revenue-snapshot-repository";
+import {
+  readRevenueSource,
+  revenueDayInZone,
+} from "@/modules/organizations/infrastructure/revenue-source";
+import type { HomeRevenueSource } from "@/modules/organizations/application/home-types";
 import { isIntegrationHubEnabled } from "@/modules/integrations/application/feature-access";
 import { buildOrganizationHomeView } from "@/modules/organizations/application/home-service";
 import type { OrganizationHomeView } from "@/modules/organizations/application/home-types";
@@ -138,28 +144,12 @@ export async function loadOrganizationHome(
   const canReadRevenueProposals = campaignsGate && hasOrganizationPermission(role, "campaign.read");
 
   const startedAt = Date.now();
-  const revenuePromise = readRevenueSource({
-    reads: {
-      analysis: createAuthenticatedChannelAnalysisRepository(supabase),
-      growthReads: createAuthenticatedGrowthIntelligenceReadRepository(supabase),
-      proposalReader: createCampaignProposalReader(supabase as unknown as ProposalReadPersistence),
-    },
-    organizationId,
-    actorId,
-    timeZone: snapshot.organization.default_timezone,
-    now,
-    canBands: canReadRevenueBands,
-    canActions: canReadRevenueActions,
-    canProposals: canReadRevenueProposals,
-    onFailure: () => {
-      logSectionFailure({
-        organizationId,
-        correlationId,
-        source: "revenue",
-        elapsedMs: Date.now() - startedAt,
-      });
-    },
-  });
+  // The nightly snapshot answers first when one validates: the page reads
+  // instead of analyzing. A read failure here is not a section failure —
+  // the live path below is the fallback, and only its failure degrades.
+  const snapshotPromise = canReadRevenueBands
+    ? readLatestRevenueSnapshot(supabase, organizationId).catch(() => null)
+    : Promise.resolve(null);
   const scheduled: { source: HomeSource; run: Promise<unknown> }[] = [];
   if (campaignsScheduled) {
     scheduled.push({
@@ -206,11 +196,59 @@ export async function loadOrganizationHome(
     });
   }
 
-  const [settled, revenueSource] = await Promise.all([
+  const [settled, stored] = await Promise.all([
     Promise.allSettled(scheduled.map((task) => task.run)),
-    revenuePromise,
+    snapshotPromise,
   ]);
   const elapsedMs = Date.now() - startedAt;
+
+  // Stored snapshot first, narrowed to this viewer; live reads only when no
+  // snapshot validates. Either way the composer builds the same scenario.
+  let revenueSource: HomeRevenueSource;
+  if (!canReadRevenueBands) {
+    revenueSource = { status: "disabled" };
+  } else if (stored !== null && stored.state === "ready") {
+    const revenueDay = revenueDayInZone(snapshot.organization.default_timezone, now);
+    revenueSource = {
+      status: "ready",
+      input: filterRevenueInputForViewer(stored.input, {
+        includeProposals: canReadRevenueProposals,
+        includeActions: canReadRevenueActions,
+      }),
+      fetchedAt: now,
+      extraNotes: [
+        ...(stored.aiNote ? [stored.aiNote] : []),
+        ...(stored.snapshotDate < revenueDay
+          ? [`Snapshot from ${stored.snapshotDate}; the nightly refresh has not landed yet.`]
+          : []),
+      ],
+    };
+  } else {
+    revenueSource = await readRevenueSource({
+      reads: {
+        analysis: createAuthenticatedChannelAnalysisRepository(supabase),
+        growthReads: createAuthenticatedGrowthIntelligenceReadRepository(supabase),
+        proposalReader: createCampaignProposalReader(
+          supabase as unknown as ProposalReadPersistence,
+        ),
+      },
+      organizationId,
+      actorId,
+      timeZone: snapshot.organization.default_timezone,
+      now,
+      canBands: canReadRevenueBands,
+      canActions: canReadRevenueActions,
+      canProposals: canReadRevenueProposals,
+      onFailure: () => {
+        logSectionFailure({
+          organizationId,
+          correlationId,
+          source: "revenue",
+          elapsedMs: Date.now() - startedAt,
+        });
+      },
+    });
+  }
 
   for (let index = 0; index < scheduled.length; index += 1) {
     const task = scheduled[index] as { source: HomeSource; run: Promise<unknown> };

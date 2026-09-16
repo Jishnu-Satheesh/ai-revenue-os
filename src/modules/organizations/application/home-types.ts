@@ -75,7 +75,7 @@ export type HomePermissions = {
 
 /** Settled revenue-scenario reads behind the Current vs Projected section. */
 export type HomeRevenueSource =
-  | { status: "ready"; input: RevenueScenarioInput; fetchedAt: string }
+  | { status: "ready"; input: RevenueScenarioInput; fetchedAt: string; extraNotes: readonly string[] }
   | { status: "failed" }
   | { status: "disabled" };
 

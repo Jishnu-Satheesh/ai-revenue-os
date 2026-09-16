@@ -86,6 +86,28 @@ export type MapRevenueInputsResult =
   | { status: "ready"; input: RevenueScenarioInput }
   | { status: "failed"; code: "HOME_READ_FAILED" };
 
+/**
+ * Narrows a stored union input to what one viewer may see, before any
+ * figure ships. The nightly snapshot keeps every action kind the rollout
+ * gates allowed; the render drops proposal rows without campaign access and
+ * recommendation/insight rows without growth access. History and losses are
+ * never filtered per viewer — a missing channel permission disables the
+ * whole section upstream instead.
+ */
+export function filterRevenueInputForViewer(
+  input: RevenueScenarioInput,
+  gates: { includeProposals: boolean; includeActions: boolean },
+): RevenueScenarioInput {
+  if (gates.includeProposals && gates.includeActions) return input;
+  return {
+    ...input,
+    actions: input.actions.filter((action) => {
+      if (action.kind === "proposal") return gates.includeProposals;
+      return gates.includeActions;
+    }),
+  };
+}
+
 function isUuid(value: string): boolean {
   return UUID_PATTERN.test(value);
 }

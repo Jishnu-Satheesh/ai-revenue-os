@@ -1,6 +1,9 @@
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import { buildRevenueScenario } from "@/domain/organizations/revenue-scenario";
+import {
+  buildRevenueScenario,
+  type RevenueScenario,
+} from "@/domain/organizations/revenue-scenario";
 import type {
   AssetHomeRecord,
   CampaignHomeReads,
@@ -350,6 +353,17 @@ function buildActivity(input: {
   return deduped.slice(0, 5);
 }
 
+/**
+ * Loader annotations (snapshot age, nightly proposal notes) join the
+ * scenario's own assumption notes. Refusals carry no notes, so annotations
+ * only land on a stated scenario — a refused section never borrows context
+ * to look quantified.
+ */
+function withExtraNotes(scenario: RevenueScenario, extraNotes: readonly string[]): RevenueScenario {
+  if (scenario.state !== "ready" || extraNotes.length === 0) return scenario;
+  return { ...scenario, notes: [...scenario.notes, ...extraNotes] };
+}
+
 function buildDestinations(input: {
   role: OrganizationRole;
   organizationId: string;
@@ -483,7 +497,10 @@ export function buildOrganizationHomeView(
         ? { status: "failed", code: "HOME_READ_FAILED" }
         : {
             status: "ready",
-            data: buildRevenueScenario(revenueSource.input),
+            data: withExtraNotes(
+              buildRevenueScenario(revenueSource.input),
+              revenueSource.extraNotes,
+            ),
             fetchedAt: revenueSource.fetchedAt,
           };
 

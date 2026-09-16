@@ -29,6 +29,11 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import type {
   RevenueScenario,
   RevenueScenarioReady,
+  RevenueHorizonPoint,
+} from "@/domain/organizations/revenue-scenario";
+import {
+  projectRevenueHorizon,
+  REVENUE_HORIZON_MONTHS,
 } from "@/domain/organizations/revenue-scenario";
 import type { OrganizationHomeView } from "@/modules/organizations/application/home-types";
 import styles from "@/components/organizations/home/organization-home.module.css";
@@ -41,8 +46,6 @@ export type RevenueChartRow = {
   high: number | null;
 };
 
-const FUTURE_LABEL = "Next month";
-
 function majorExponent(currency: string): number {
   return (
     new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions()
@@ -51,14 +54,20 @@ function majorExponent(currency: string): number {
 }
 
 /**
- * Chart rows in major units, oldest first with one future point. History
- * stays solid actuals; the two next-month paths start at the last reported
- * point so the boundary is drawn, never smoothed over. Grain is preserved:
- * one row per reported bucket, no interpolated days.
+ * Chart rows in major units: reported buckets as solid actuals, then one
+ * cumulative point per horizon month. The future accumulates the flat
+ * monthly level — current course and the with-actions band grow linearly,
+ * never compounded. Grain is preserved: one row per reported bucket, no
+ * interpolated days.
  */
-export function buildRevenueChartRows(scenario: RevenueScenarioReady): RevenueChartRow[] {
+export function buildRevenueChartRows(
+  scenario: RevenueScenarioReady,
+  months: number,
+  asOfDate: string,
+): { rows: RevenueChartRow[]; points: RevenueHorizonPoint[] } {
   const exponent = majorExponent(scenario.currency);
   const toMajor = (minorUnits: number) => minorUnits / 10 ** exponent;
+  const points = projectRevenueHorizon(scenario, months, asOfDate);
   const rows: RevenueChartRow[] = scenario.history.map((point) => ({
     label: point.label,
     actual: toMajor(point.minorUnits),
@@ -68,24 +77,28 @@ export function buildRevenueChartRows(scenario: RevenueScenarioReady): RevenueCh
   }));
   const last = rows[rows.length - 1];
   if (last) last.current = toMajor(scenario.currentCourseMinorUnits);
-  rows.push({
-    label: FUTURE_LABEL,
-    actual: null,
-    current: toMajor(scenario.currentCourseMinorUnits),
-    low: toMajor(scenario.withActionsLowMinorUnits),
-    high: toMajor(scenario.withActionsHighMinorUnits),
-  });
-  return rows;
+  for (const point of points) {
+    rows.push({
+      label: point.label,
+      actual: null,
+      current: toMajor(point.currentCourseMinorUnits),
+      low: toMajor(point.lowMinorUnits),
+      high: toMajor(point.highMinorUnits),
+    });
+  }
+  return { rows, points };
 }
 
-function chartAriaLabel(scenario: RevenueScenarioReady): string {
+function chartAriaLabel(scenario: RevenueScenarioReady, months: number, endLabel: string): string {
   const parts = scenario.history.map(
     (point) => `${point.label} ${formatWholeMoney(point.minorUnits, scenario.currency)}`,
   );
   return [
     `Reported revenue: ${parts.join(", ") || "none"}.`,
-    `Current course next month: ${formatWholeMoney(scenario.currentCourseMinorUnits, scenario.currency)}.`,
-    `With the included actions: ${formatWholeMoney(scenario.withActionsLowMinorUnits, scenario.currency)} to ${formatWholeMoney(scenario.withActionsHighMinorUnits, scenario.currency)}.`,
+    `Over the next ${months} month${months === 1 ? "" : "s"} to ${endLabel},` +
+      ` cumulatively ${formatWholeMoney(scenario.currentCourseMinorUnits * months, scenario.currency)} on the current course,` +
+      ` ${formatWholeMoney(scenario.withActionsLowMinorUnits * months, scenario.currency)} to` +
+      ` ${formatWholeMoney(scenario.withActionsHighMinorUnits * months, scenario.currency)} with the included actions.`,
     scenario.gapNote ?? "",
   ]
     .filter((part) => part.length > 0)
@@ -101,8 +114,41 @@ function ActionLink({ href, title }: { href: string | null; title: string }) {
   );
 }
 
-function ScenarioChart({ scenario }: { scenario: RevenueScenarioReady }) {
-  const rows = buildRevenueChartRows(scenario);
+/**
+ * The racing tip: a pulsing ring on the current course's latest point, so the
+ * line reads as moving toward the projected band. Opacity-and-scale only, and
+ * fully static under prefers-reduced-motion (see the stylesheet).
+ */
+export function PulsingTipDot({
+  cx,
+  cy,
+  index,
+  lastIndex,
+}: {
+  cx?: number;
+  cy?: number;
+  index?: number;
+  lastIndex: number;
+}) {
+  if (cx === undefined || cy === undefined || index !== lastIndex) return <g />;
+  return (
+    <g aria-hidden="true">
+      <circle cx={cx} cy={cy} r={5} className={styles.revenuePulse} />
+      <circle
+        cx={cx}
+        cy={cy}
+        r={4}
+        fill="var(--muted-foreground)"
+        stroke="var(--card)"
+        strokeWidth={2}
+      />
+    </g>
+  );
+}
+
+function ScenarioChart({ scenario, months }: { scenario: RevenueScenarioReady; months: number }) {
+  const { rows, points } = buildRevenueChartRows(scenario, months, scenario.today);
+  const endLabel = points[points.length - 1]?.label ?? "";
   const group = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 });
   const max = Math.max(
     0,
@@ -111,11 +157,12 @@ function ScenarioChart({ scenario }: { scenario: RevenueScenarioReady }) {
       .filter((value): value is number => value !== null),
   );
   const boundary = scenario.history[scenario.history.length - 1]?.label;
+  const lastIndex = rows.length - 1;
   return (
     <div
       className={styles.revenueChart}
       role="img"
-      aria-label={`${chartAriaLabel(scenario)} ${scenario.coverageNote}.`}
+      aria-label={`${chartAriaLabel(scenario, months, endLabel)} ${scenario.coverageNote}.`}
     >
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -126,7 +173,8 @@ function ScenarioChart({ scenario }: { scenario: RevenueScenarioReady }) {
             axisLine={{ stroke: "var(--border)" }}
             tickMargin={8}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-            tickFormatter={(value: string) => (value.length > 7 ? value.slice(5) : value)}
+            interval="preserveStartEnd"
+            minTickGap={24}
           />
           <YAxis
             tickLine={false}
@@ -161,7 +209,7 @@ function ScenarioChart({ scenario }: { scenario: RevenueScenarioReady }) {
             stroke="var(--muted-foreground)"
             strokeWidth={2}
             strokeDasharray="6 4"
-            dot={false}
+            dot={(dotProps) => <PulsingTipDot {...dotProps} lastIndex={lastIndex} />}
             activeDot={{ r: 4 }}
           />
           <Line
@@ -191,7 +239,7 @@ function ScenarioChart({ scenario }: { scenario: RevenueScenarioReady }) {
   );
 }
 
-function ScenarioFigures({ scenario }: { scenario: RevenueScenarioReady }) {
+function ScenarioFigures({ scenario, months }: { scenario: RevenueScenarioReady; months: number }) {
   const history = scenario.history;
   const latest = history[history.length - 1];
   const previous = history[history.length - 2];
@@ -203,6 +251,8 @@ function ScenarioFigures({ scenario }: { scenario: RevenueScenarioReady }) {
     scenario.upliftLowPercent !== null && scenario.upliftHighPercent !== null
       ? `+${scenario.upliftLowPercent}% to +${scenario.upliftHighPercent}% vs current course`
       : "Uplift percentage not stated — see notes.";
+  const horizonNoun = months === 1 ? "month" : "months";
+  const endLabel = projectRevenueHorizon(scenario, months, scenario.today)[months - 1]?.label ?? "";
   return (
     <dl className={styles.revenueFigures}>
       <div>
@@ -217,15 +267,17 @@ function ScenarioFigures({ scenario }: { scenario: RevenueScenarioReady }) {
         </dd>
       </div>
       <div>
-        <dt>Current course · {scenario.horizonLabel}</dt>
-        <dd>{formatWholeMoney(scenario.currentCourseMinorUnits, scenario.currency)}</dd>
-        <dd className={styles.revenueFigureSub}>Hold-current-level scenario.</dd>
+        <dt>
+          Current course · {months} {horizonNoun}
+        </dt>
+        <dd>{formatWholeMoney(scenario.currentCourseMinorUnits * months, scenario.currency)}</dd>
+        <dd className={styles.revenueFigureSub}>Cumulative to {endLabel}; flat monthly level.</dd>
       </div>
       <div>
         <dt>With the included actions</dt>
         <dd>
-          {formatWholeMoney(scenario.withActionsLowMinorUnits, scenario.currency)} –{" "}
-          {formatWholeMoney(scenario.withActionsHighMinorUnits, scenario.currency)}
+          {formatWholeMoney(scenario.withActionsLowMinorUnits * months, scenario.currency)} –{" "}
+          {formatWholeMoney(scenario.withActionsHighMinorUnits * months, scenario.currency)}
         </dd>
         <dd className={styles.revenueFigureSub}>{uplift}</dd>
       </div>
@@ -249,6 +301,7 @@ export function HomeRevenue({
   const [proposed, setProposed] = useState<RevenueScenario | null>(null);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const [proposeError, setProposeError] = useState<string | null>(null);
+  const [months, setMonths] = useState<number>(1);
   const [pending, startTransition] = useTransition();
 
   if (section.status === "disabled") return null;
@@ -319,13 +372,30 @@ export function HomeRevenue({
   return (
     <section id="home-revenue" aria-label="Current vs projected growth" className={styles.revenue}>
       <div className={styles.sectionHead}>
-        <h2 className={styles.railTitle}>Current vs projected growth</h2>
+        <h2 className={styles.sectionTitle}>Current vs projected growth</h2>
         <StatusBadge label="Rough estimate" tone="neutral" />
       </div>
       <div className={styles.revenueGrid}>
         <div className={styles.revenueMain}>
-          <ScenarioFigures scenario={scenario} />
-          <ScenarioChart scenario={scenario} />
+          <div
+            className={styles.revenueHorizonRow}
+            role="group"
+            aria-label="Projection horizon in months"
+          >
+            {REVENUE_HORIZON_MONTHS.map((option) => (
+              <Button
+                key={option}
+                variant={months === option ? "secondary" : "ghost"}
+                size="sm"
+                aria-pressed={months === option}
+                onClick={() => setMonths(option)}
+              >
+                {option}M
+              </Button>
+            ))}
+          </div>
+          <ScenarioFigures scenario={scenario} months={months} />
+          <ScenarioChart scenario={scenario} months={months} />
           <ul className={styles.revenueLegend} aria-label="Chart key">
             <li>
               <span className={styles.revenueSwatchSolid} aria-hidden="true" /> Reported revenue
@@ -345,12 +415,10 @@ export function HomeRevenue({
           <p className={styles.revenueLine}>{scenario.coverageNote}</p>
         </div>
         <div className={styles.revenueSide}>
-          <h3 className={styles.revenueSideTitle}>What the upside is made of</h3>
-          {quantified.length === 0 && unquantified.length === 0 ? (
-            <p className={styles.emptyNote}>No recommended actions are on file yet.</p>
-          ) : null}
           {quantified.length > 0 ? (
-            <ul className={styles.revenueActionList}>
+            <>
+              <h3 className={styles.revenueSideTitle}>What the upside is made of</h3>
+              <ul className={styles.revenueActionList}>
               {quantified.map((share) => {
                 const shareLabel =
                   share.shareLow !== null && share.shareHigh !== null
@@ -377,6 +445,10 @@ export function HomeRevenue({
                 );
               })}
             </ul>
+            </>
+          ) : null}
+          {quantified.length === 0 && unquantified.length === 0 ? (
+            <p className={styles.emptyNote}>No recommended actions are on file yet.</p>
           ) : null}
           {unquantified.length > 0 ? (
             <>

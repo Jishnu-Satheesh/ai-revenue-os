@@ -50,7 +50,10 @@ separately only where supported. Profit is never summed into the revenue headlin
 
 ## 3. Scope and horizon
 
-- Default horizon: the next 30 days.
+- Default horizon: the next 1 month, rolling from the scenario date (16 Sep
+  sketches to 16 Oct). The viewer may extend the sketch to 3, 6, or 12 months;
+  every horizon accumulates the same flat monthly level, so a percentage is
+  never compounded into a rate it was never measured as.
 - The horizon must be reconciled with source reporting grain and freshness before
   approval: a 30-day scenario is only honest when the underlying reports arrive
   at a grain and cadence that can support it (e.g. daily/weekly provider exports
@@ -163,13 +166,17 @@ separately only where supported. Profit is never summed into the revenue headlin
   approved. A future allocation method (e.g. Shapley values) cannot make
   unsupported underlying effect estimates valid.
 
-## 10. Persistence and versioning (proposal, no migration in this task)
+## 10. Persistence and versioning (shipped 2026-09-16)
 
-- Scenario inputs and method must be persisted and versioned under an approved
-  architecture, so the scenario the user saw can later be compared fairly
-  against revisions and eventual outcomes.
-- This task proposes the contract only. No table, migration, or worker is
-  created here; those belong to the implementation plan written after approval.
+- Every nightly snapshot stores the verified union input plus the worker's
+  note in `public.organization_revenue_snapshots`, keyed one row per
+  organization per local day and trimmed past thirteen months. Horizons
+  derive deterministically at read time, so stored rows stay comparable as
+  the selector grows.
+- The page reads the latest validating row and falls back to live reads when
+  none validates. A row that no longer parses is treated as missing, never
+  repaired; per-viewer permission narrowing happens at render, never in
+  storage.
 
 ## 11. Uncertainty
 
@@ -255,11 +262,16 @@ deterministic code surveys it.
   `src/modules/organizations/infrastructure/revenue-inputs.ts`, reads in
   `revenue-source.ts`, section in `home-revenue.tsx`, stateless proposal route
   under `src/app/api/organizations/[organizationId]/revenue/proposals/`.
+- Nightly mode (approved 2026-09-16): the `revenue-snapshots` worker rebuilds
+  the union input every local midnight, attaches validated ranges where the
+  model offers any, and stores the row; the page reads instead of analyzing.
+  The explicit-click route remains as the on-demand path with identical
+  validation. A failed night leaves the last good row in place — never a hole.
 
 ## 15. Non-goals
 
-The contract proposes no production types beyond the scenario input/output,
-no SQL, no migration, no worker, no new dependency, no fixture numbers, no
+The contract proposes no worker beyond the nightly snapshot builder, no SQL
+beyond the snapshots table and its member-read policies, no new dependency, no fixture numbers, no
 invented response rates/amounts/confidence/shares, no mapping of money-split
 potential/earned to forecast, no summing of `value.ts` ranking quantities into
 the headline, no calling campaign-draft-impact validation an estimator origin,
