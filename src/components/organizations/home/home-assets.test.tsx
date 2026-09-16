@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,10 +16,7 @@ const mocks = {
 };
 
 import { HomeAssets } from "@/components/organizations/home/home-assets";
-import type {
-  HomeAsset,
-  HomeSection,
-} from "@/modules/organizations/application/home-types";
+import type { HomeAsset, HomeSection } from "@/modules/organizations/application/home-types";
 
 afterEach(() => {
   cleanup();
@@ -196,7 +196,9 @@ describe("HomeAssets gallery thumb shell (C1 parity pin)", () => {
     const label = screen.getByText("Ramadan Push · ramadan-hero · iftar spread");
     expect(band?.contains(label)).toBe(false);
     expect(thumbnail.contains(label)).toBe(true);
-    expect((band?.compareDocumentPosition(label) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      (band?.compareDocumentPosition(label) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(thumbnail.textContent ?? "").toContain("Finished poster render");
     expect(thumbnail.textContent ?? "").toContain("Review not recorded");
   });
@@ -214,6 +216,19 @@ describe("HomeAssets gallery thumb shell (C1 parity pin)", () => {
   });
 });
 
+describe("HomeAssets thumb band CSS guard", () => {
+  it("keeps .thumbImage as a block so the fixed height applies", () => {
+    // jsdom cannot do layout: a span stays display:inline and ignores the
+    // fixed height, so .thumb's overflow:hidden clips the tile meta. Pin the
+    // source rule instead (whitespace-tolerant — property order may move).
+    const css = readFileSync(
+      join(process.cwd(), "src/components/organizations/home/organization-home.module.css"),
+      "utf8",
+    );
+    expect(css).toMatch(/\.thumbImage\s*\{[^}]*display\s*:\s*block\b/);
+  });
+});
+
 describe("HomeAssets states", () => {
   it("warns on partial loads while keeping survivors", () => {
     renderGallery([asset()], true);
@@ -226,9 +241,10 @@ describe("HomeAssets states", () => {
   it("keeps empty and failed distinct", () => {
     const { rerender } = renderGallery([]);
     expect(screen.getByText(/no saved work yet/i)).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: /open the asset library/i }),
-    ).toHaveAttribute("href", `/organizations/${ORG_ID}/assets`);
+    expect(screen.getByRole("link", { name: /open the asset library/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORG_ID}/assets`,
+    );
 
     rerender(
       <HomeAssets

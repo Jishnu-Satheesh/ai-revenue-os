@@ -309,6 +309,7 @@
 }
 
 .thumbImage {
+  display: block;
   position: relative;
   height: 140px;
   overflow: hidden;
