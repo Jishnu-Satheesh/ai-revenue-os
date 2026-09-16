@@ -64,6 +64,7 @@ function dependencies(
       complete: async () => {},
       fail: async () => {},
       cancel: async () => {},
+      saveDerivedQuestion: async () => ({ outcome: "saved" as const }),
     },
     contexts: { read: async () => testContext() },
     planner: { plan: async () => readyPlan() as never },
@@ -245,8 +246,9 @@ describe("research service", () => {
     await expect(service.run(runInput())).rejects.toBeInstanceOf(ResearchClaimLost);
   });
 
-  it("fails a run admitted with no staged question instead of inventing one", async () => {
-    const plan = vi.fn();
+  it("derives when missing and continues to planning", async () => {
+    const plan = vi.fn(async () => readyPlan() as never);
+    const read = vi.fn(async () => testContext());
     const service = createResearchService(
       dependencies({
         runs: {
@@ -263,15 +265,219 @@ describe("research service", () => {
             entries: [],
           }),
         },
+        questionDeriver: {
+          derive: async () => ({
+            question: "How do we lift weekday lunch?",
+            provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+            gaps: [],
+          }),
+        },
+        contexts: { read },
         planner: { plan },
       }),
     );
-    await expect(service.run(runInput())).resolves.toEqual({
-      status: "failed",
+    const result = await service.run(runInput());
+    expect(result).toEqual({
+      status: "completed",
       runId: RUN_ID,
-      failureCode: "question_missing",
+      proposalId: PROPOSAL_ID,
+      outcome: "proposal_prepared",
     });
-    expect(plan).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "How do we lift weekday lunch?" }),
+    );
+    expect(plan).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "How do we lift weekday lunch?" }),
+    );
+  });
+
+  it("saves the derived question claim-bound before planning", async () => {
+    const saveDerivedQuestion = vi.fn(async () => ({ outcome: "saved" as const }));
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: null,
+            currentPolicyVersion: 3,
+            manifestId: null,
+            digest: null,
+            entries: [],
+          }),
+          saveDerivedQuestion,
+        },
+        questionDeriver: {
+          derive: async () => ({
+            question: "How do we lift weekday lunch?",
+            provenance: { sourceIds: ["m1"], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+            gaps: ["no evidence yet"],
+          }),
+        },
+      }),
+    );
+    await service.run(runInput());
+    expect(saveDerivedQuestion).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      runId: RUN_ID,
+      claimToken: CLAIM,
+      derivedQuestion: "How do we lift weekday lunch?",
+      derivation: { sourceIds: ["m1"], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+    });
+  });
+
+  it("carries the derivation cost into the measured total", async () => {
+    const complete = vi.fn();
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: null,
+            currentPolicyVersion: 3,
+            manifestId: MANIFEST_ID,
+            digest: DIGEST,
+            entries: [],
+          }),
+          complete,
+        },
+        questionDeriver: {
+          derive: async () => ({
+            question: "How do we lift weekday lunch?",
+            provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+            gaps: [],
+          }),
+        },
+        derivationCostMinor: 7,
+      }),
+    );
+    await service.run(runInput({ externalCostMinor: 100 }));
+    // External spend plus derivation spend plus planner model cost.
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ actualCostMinor: 119 }),
+    );
+  });
+
+  it("continues when the question is already set by a sibling delivery", async () => {
+    const plan = vi.fn(async () => readyPlan() as never);
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: null,
+            currentPolicyVersion: 3,
+            manifestId: null,
+            digest: null,
+            entries: [],
+          }),
+          saveDerivedQuestion: async () => ({ outcome: "already_set" as const }),
+        },
+        questionDeriver: {
+          derive: async () => ({
+            question: "How do we lift weekday lunch?",
+            provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+            gaps: [],
+          }),
+        },
+        planner: { plan },
+      }),
+    );
+    const result = await service.run(runInput());
+    expect(result).toEqual({
+      status: "completed",
+      runId: RUN_ID,
+      proposalId: PROPOSAL_ID,
+      outcome: "proposal_prepared",
+    });
+    expect(plan).toHaveBeenCalled();
+  });
+
+  it("falls back to the standing manual question when no deriver is wired", async () => {
+    const read = vi.fn(async () => testContext());
+    const saveDerivedQuestion = vi.fn(async () => ({ outcome: "saved" as const }));
+    const complete = vi.fn();
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: null,
+            currentPolicyVersion: 3,
+            manifestId: null,
+            digest: null,
+            entries: [],
+          }),
+          saveDerivedQuestion,
+          complete,
+        },
+        contexts: { read },
+      }),
+    );
+    const result = await service.run(runInput({ externalCostMinor: 100 }));
+    expect(result).toEqual({
+      status: "completed",
+      runId: RUN_ID,
+      proposalId: PROPOSAL_ID,
+      outcome: "proposal_prepared",
+    });
+    expect(saveDerivedQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ derivedQuestion: "What campaign should we run next?" }),
+    );
+    expect(read).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "What campaign should we run next?" }),
+    );
+    // The fallback asks nothing of a model, so it adds no derivation cost.
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ actualCostMinor: 112 }),
+    );
+  });
+
+  it("throws claim-lost when the derived save finds the claim gone", async () => {
+    const service = createResearchService(
+      dependencies({
+        runs: {
+          ...dependencies().runs,
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: null,
+            currentPolicyVersion: 3,
+            manifestId: null,
+            digest: null,
+            entries: [],
+          }),
+          saveDerivedQuestion: async () => {
+            throw { kind: "not_found" };
+          },
+        },
+        questionDeriver: {
+          derive: async () => ({
+            question: "How do we lift weekday lunch?",
+            provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+            gaps: [],
+          }),
+        },
+      }),
+    );
+    await expect(service.run(runInput())).rejects.toBeInstanceOf(ResearchClaimLost);
   });
 
   it("hands the admitted pin to context instead of re-deriving it", async () => {

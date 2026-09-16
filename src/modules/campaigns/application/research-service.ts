@@ -58,6 +58,27 @@ function proposalSourceKind(triggerKind: string): CampaignProposalSourceKind {
   return triggerKind === "scheduled" ? "business_signal" : (triggerKind as CampaignProposalSourceKind);
 }
 
+// Structural match for Agent 2's landed
+// src/modules/campaigns/infrastructure/question-deriver.ts
+// (createQuestionDeriver / QuestionDerivationResult). Kept structural rather
+// than imported type-only so application code keeps depending on ports, not
+// adapters. Arrays are readonly on the way in because the trigger layer's
+// loose wrapper types them that way; the service copies what it persists.
+export type ResearchQuestionDeriver = {
+  derive(input: {
+    organizationId: string;
+    triggerKind: string;
+    source: unknown;
+    memory: unknown;
+    evidenceStatus: string;
+    correlationId: string;
+  }): Promise<{
+    question: string;
+    provenance: { sourceIds: readonly string[]; modelId: string; derivedAt: string };
+    gaps: readonly string[];
+  }>;
+};
+
 export type ResearchServiceDependencies = {
   runs: ResearchRunStore;
   contexts: ResearchContextReader;
@@ -67,6 +88,10 @@ export type ResearchServiceDependencies = {
   now: () => Date;
   nowIso: () => string;
   isCancelled: () => boolean;
+  /** Derives the scope question when the run was admitted without one. Optional so existing callers keep compiling. */
+  questionDeriver?: ResearchQuestionDeriver;
+  /** Metered (not blocking) model spend for the derivation call. Defaults to 0 when unknown. */
+  derivationCostMinor?: number;
 };
 
 const CLAIM_LEASE_SECONDS = 900;
@@ -135,10 +160,83 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
         return failClaimed({ ...base, failureCode: "policy_revised" });
       }
 
-      // Runs admitted without a staged question plan from nothing: the
-      // worker never invents what the requester never asked.
-      if (loaded.researchQuestion === null) {
-        return failClaimed({ ...base, failureCode: "question_missing" });
+      // Runs admitted without a staged question derive their scope from
+      // owned data instead of failing. The button press already authorized
+      // spend within the binding policy; the scope comes from the pinned
+      // manifest the admission approved, not from invention; and the human
+      // gates stay downstream (proposal review, launch approval), untouched.
+      let effectiveQuestion = loaded.researchQuestion;
+      let derivationCostMinor = 0;
+      if (effectiveQuestion === null) {
+        // The full source read happens in contexts.read, which needs the
+        // query first — so derivation works from the pinned manifest entries
+        // and the trigger kind only, with an unprofiled fallback where the
+        // deriver needs a full source shape.
+        const derived = dependencies.questionDeriver
+          ? await dependencies.questionDeriver.derive({
+              organizationId,
+              triggerKind: loaded.triggerKind,
+              source: {
+                organizationProfile: "Unprofiled organization.",
+                objectives: [],
+                capacityNotes: [],
+                operationalBlockers: [],
+                hardConstraints: [],
+              },
+              memory: {
+                manifestId: loaded.manifestId ?? "",
+                digest: loaded.digest ?? "",
+                entries: loaded.entries,
+                excludedCount: 0,
+              },
+              evidenceStatus: "unknown",
+              correlationId: runId,
+            })
+          : {
+              question: "What campaign should we run next?",
+              provenance: {
+                sourceIds: [],
+                modelId: "manual-question-fallback",
+                derivedAt: dependencies.nowIso(),
+              },
+            };
+        // The real store always provides this; the optionality is only for
+        // older fakes. Deriving without a claim-bound save would plan from a
+        // scope nobody owns, so a missing writer is a loud wiring bug, never
+        // a silent skip.
+        const saveDerived = dependencies.runs.saveDerivedQuestion;
+        if (!saveDerived) {
+          throw new Error("Research run store cannot persist a derived question");
+        }
+        try {
+          await saveDerived({
+            organizationId,
+            runId,
+            claimToken: claim.claimToken,
+            derivedQuestion: derived.question,
+            derivation: {
+              sourceIds: [...derived.provenance.sourceIds],
+              modelId: derived.provenance.modelId,
+              derivedAt: derived.provenance.derivedAt,
+            },
+          });
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            (error as { kind?: unknown }).kind === "not_found"
+          ) {
+            throw new ResearchClaimLost(runId);
+          }
+          throw error;
+        }
+        effectiveQuestion = derived.question;
+        // Metered, not blocking: the spend is carried into actualCost below.
+        // The fallback asks nothing of a model, so it costs nothing even
+        // when a derivation price is configured.
+        derivationCostMinor = dependencies.questionDeriver
+          ? (dependencies.derivationCostMinor ?? 0)
+          : 0;
       }
 
       const context = await dependencies.contexts.read({
@@ -147,7 +245,7 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
         // Carried so the reader can prove the claim before it reads anything
         // on the service client, which bypasses RLS.
         claim: { runId, claimToken: claim.claimToken },
-        query: loaded.researchQuestion,
+        query: effectiveQuestion,
         evidenceMaxAgeDays: input.evidenceMaxAgeDays,
         profileVersionId: input.profileVersionId,
         now: dependencies.now(),
@@ -169,7 +267,7 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       const planned = await dependencies.planner.plan({
         organizationId,
         runId,
-        query: loaded.researchQuestion,
+        query: effectiveQuestion,
         triggerKind: loaded.triggerKind,
         context,
       });
@@ -177,7 +275,8 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       // external spend is kept, and the unmeasured part adds nothing rather
       // than a guess. Refused drafts carry their measured cost too, so a
       // failure never hides what it spent.
-      const actualCost = input.externalCostMinor + (planned.modelCostMinor ?? 0);
+      const actualCost =
+        input.externalCostMinor + derivationCostMinor + (planned.modelCostMinor ?? 0);
 
       // The admitted pin was used for planning, so it is consumed with the
       // planner's identity. A dangling pin fails the run rather than silently

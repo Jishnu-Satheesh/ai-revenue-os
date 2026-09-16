@@ -90,6 +90,55 @@ describe("research proposal worker", () => {
     });
   });
 
+  it("derives a missing question and runs through to advice", async () => {
+    const saveDerivedQuestion = vi.fn(async () => ({ outcome: "saved" as const }));
+    const result = await researchProposal(
+      payload(),
+      dependencies({
+        runs: {
+          claim: async () => ({
+            runId: RUN_ID,
+            claimToken: CLAIM,
+            policyVersion: 3,
+            budgetMinor: 1000,
+          }),
+          load: async () => ({
+            status: "claimed",
+            triggerKind: "manual_request",
+            policyVersion: 3,
+            budgetMinor: 1000,
+            researchQuestion: null,
+            currentPolicyVersion: 3,
+            manifestId: MANIFEST_ID,
+            digest: DIGEST,
+            entries: [],
+          }),
+          complete: async () => {},
+          fail: async () => {},
+          cancel: async () => {},
+          saveDerivedQuestion,
+        },
+        questionDeriver: {
+          derive: async () => ({
+            question: "How do we lift weekday lunch?",
+            provenance: { sourceIds: [], modelId: "test-deriver@1", derivedAt: NOW.toISOString() },
+            gaps: [],
+          }),
+        },
+      }),
+      liveSignal(),
+    );
+    expect(result).toEqual({
+      status: "completed",
+      runId: RUN_ID,
+      proposalId: null,
+      outcome: "advice_only",
+    });
+    expect(saveDerivedQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ derivedQuestion: "How do we lift weekday lunch?" }),
+    );
+  });
+
   it("stands down with claim_lost when the pin cannot be loaded", async () => {
     const result = await researchProposal(
       payload(),

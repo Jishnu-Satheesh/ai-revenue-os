@@ -77,6 +77,27 @@ export type ResearchRunStore = {
     claimToken: string;
   }): Promise<void>;
   /**
+   * Persists a worker-derived question, claim-bound.
+   *
+   * The worker derives the scope question from owned data (the pinned
+   * manifest) when the run was admitted without one, then claims that scope
+   * by saving it under the lease token. Saving twice is not an error: the
+   * second writer learns the question is already set and carries on with
+   * what is there. A lost claim throws a not_found failure, which the
+   * service turns into a lost claim rather than retrying landed work.
+   *
+   * Optional only so older fakes keep compiling until their owners add the
+   * method; the real store always provides it, and the service refuses to
+   * derive without it rather than planning from an unsaved scope.
+   */
+  saveDerivedQuestion?(input: {
+    organizationId: string;
+    runId: string;
+    claimToken: string;
+    derivedQuestion: string;
+    derivation: { sourceIds: string[]; modelId: string; derivedAt: string };
+  }): Promise<{ outcome: "saved" | "already_set" }>;
+  /**
    * The organizations holding at least one claim whose lease has lapsed.
    *
    * Read first so the sweep acts tenant by tenant. A run is judged dead by
@@ -219,6 +240,27 @@ export function createResearchRunStore(client: ResearchPersistence): ResearchRun
         input_claim: { run_id: input.runId, claim_token: input.claimToken },
       });
       if (error) throw researchFailure(error);
+    },
+
+    async saveDerivedQuestion(input): Promise<{ outcome: "saved" | "already_set" }> {
+      const { data, error } = await client.rpc("save_derived_campaign_research_question", {
+        target_organization_id: input.organizationId,
+        input_save: {
+          run_id: input.runId,
+          claim_token: input.claimToken,
+          derived_question: input.derivedQuestion,
+          derivation: {
+            source_ids: [...input.derivation.sourceIds],
+            model_id: input.derivation.modelId,
+            derived_at: input.derivation.derivedAt,
+          },
+        },
+      });
+      if (error) throw researchFailure(error);
+
+      const row = record(data);
+      if (row.outcome === "already_set") return { outcome: "already_set" };
+      return { outcome: "saved" };
     },
 
     async listLeaseExpiries(): Promise<readonly string[]> {
