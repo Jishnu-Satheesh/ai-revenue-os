@@ -250,24 +250,32 @@ describe("HomeRevenue", () => {
     render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
 
     expect(screen.queryByText(/no cited monetary basis/)).toBeNull();
-    const toggle = screen.getByRole("button", { name: /Unpriced idea/ });
+    const toggle = screen.getByRole("button", { name: "Show details for Unpriced idea" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-controls")).not.toBeNull();
+    const regionId = toggle.getAttribute("aria-controls") as string;
+    expect(document.getElementById(regionId)).toBeNull();
     expect(screen.getByText("Estimate pending")).toBeTruthy();
   });
 
   it("reveals the exact server reason on tap and collapses on second tap", () => {
     render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
 
-    const toggle = screen.getByRole("button", { name: /Unpriced idea/ });
+    const toggle = screen.getByRole("button", { name: "Show details for Unpriced idea" });
     fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const expandedToggle = screen.getByRole("button", { name: "Hide details for Unpriced idea" });
+    expect(expandedToggle.getAttribute("aria-expanded")).toBe("true");
+    const reason = screen.getByText(
+      "Not yet quantified: no cited monetary basis with a supported response range yet.",
+    );
+    expect(reason.getAttribute("id")).toBe(expandedToggle.getAttribute("aria-controls"));
+    expect(reason).toBeTruthy();
+    fireEvent.click(expandedToggle);
     expect(
-      screen.getByText(
-        "Not yet quantified: no cited monetary basis with a supported response range yet.",
-      ),
-    ).toBeTruthy();
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      screen
+        .getByRole("button", { name: "Show details for Unpriced idea" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
     expect(screen.queryByText(/no cited monetary basis/)).toBeNull();
   });
 

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight, Hourglass } from "lucide-react";
+import { ArrowRight, ChevronDown, Hourglass } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -119,34 +119,21 @@ function ActionLink({ href, title }: { href: string | null; title: string }) {
 
 /**
  * An unquantified rail row: alive like the quantified rows but honest about
- * having no number. The header is a real button with aria-expanded; tapping
- * toggles the exact server reason inline with an instant show/hide (no
- * animation, so still under prefers-reduced-motion by construction). The
- * title keeps its ActionLink behavior, and the figure line is always the
- * muted dashed "Estimate pending" placeholder — never a number.
+ * having no number. The header is a plain row (pending icon + ActionLink
+ * title + status + dashed "Estimate pending" placeholder); a separate small
+ * chevron button toggles the exact server reason inline with an instant
+ * show/hide (no animation, so still under prefers-reduced-motion by
+ * construction). Title and toggle are siblings — never nested interactives.
  */
 function UnquantifiedRow({ action }: { action: RevenueScenarioUnquantified }) {
   const [expanded, setExpanded] = useState(false);
+  const regionId = `revenue-unquantified-${action.actionId}`;
   return (
     <li className={styles.revenueUnquantifiedRow}>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((open) => !open)}
-        className={styles.revenueUnquantifiedHeader}
-      >
+      <div className={styles.revenueUnquantifiedHeader}>
         <Hourglass aria-hidden="true" className={styles.revenueUnquantifiedIcon} />
         <span className={styles.revenueUnquantifiedBody}>
-          {action.href ? (
-            <span
-              className={styles.revenueUnquantifiedTitle}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <ActionLink href={action.href} title={action.title} />
-            </span>
-          ) : (
-            <ActionLink href={action.href} title={action.title} />
-          )}
+          <ActionLink href={action.href} title={action.title} />
           <span className={styles.revenueUnquantifiedMeta}>
             <StatusBadge label={action.status} tone="neutral" />
           </span>
@@ -154,8 +141,24 @@ function UnquantifiedRow({ action }: { action: RevenueScenarioUnquantified }) {
             Estimate pending
           </span>
         </span>
-      </button>
-      {expanded ? <p className={styles.revenueUnquantifiedReason}>{action.reason}</p> : null}
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={regionId}
+          aria-label={
+            expanded ? `Hide details for ${action.title}` : `Show details for ${action.title}`
+          }
+          onClick={() => setExpanded((open) => !open)}
+          className={styles.revenueUnquantifiedToggle}
+        >
+          <ChevronDown aria-hidden="true" className={styles.revenueUnquantifiedChevron} />
+        </button>
+      </div>
+      {expanded ? (
+        <p id={regionId} className={styles.revenueUnquantifiedReason}>
+          {action.reason}
+        </p>
+      ) : null}
     </li>
   );
 }

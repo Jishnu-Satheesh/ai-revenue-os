@@ -1074,7 +1074,9 @@
 
 /* Not-yet-quantified rail rows: card-like as the campaign cards, but honest
    about having no number. Hover mirrors .campaignCard:hover (primary-tinted
-   border + light shadow). Expand/collapse is an instant show/hide with no
+   border + light shadow). The header is a plain row; only the small chevron
+   toggle is a button, so the title link and toggle stay siblings (never
+   nested interactives). Expand/collapse is an instant show/hide with no
    transition or animation, so still under prefers-reduced-motion by
    construction. All classes stay scoped to the revenue rail. */
 .revenueUnquantifiedRow {
@@ -1094,18 +1096,38 @@
   gap: 10px;
   width: 100%;
   padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.revenueUnquantifiedToggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
   background: transparent;
   border: 0;
-  border-radius: 12px;
-  text-align: start;
+  border-radius: 8px;
   cursor: pointer;
-  color: inherit;
+  color: var(--muted-foreground);
   font: inherit;
 }
 
-.revenueUnquantifiedHeader:focus-visible {
+.revenueUnquantifiedToggle:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+.revenueUnquantifiedChevron {
+  width: 16px;
+  height: 16px;
+}
+
+.revenueUnquantifiedToggle[aria-expanded="true"] .revenueUnquantifiedChevron {
+  transform: rotate(180deg);
 }
 
 .revenueUnquantifiedIcon {
@@ -1119,13 +1141,9 @@
 .revenueUnquantifiedBody {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 4px;
-}
-
-.revenueUnquantifiedTitle {
-  min-width: 0;
-  overflow-wrap: break-word;
 }
 
 .revenueUnquantifiedMeta {
