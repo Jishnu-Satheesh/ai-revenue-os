@@ -1347,6 +1347,18 @@ export const researchCampaignProposalTask = schemaTask({
                 estimatedCostMinor: generated.usage.estimatedCostMinor,
               };
             },
+            repair: async ({ prompt, failures }) => {
+              const repaired = await generation.repair({
+                body: prompt,
+                outputContract: RESEARCH_DRAFT_OUTPUT_CONTRACT,
+                failures,
+              });
+              return {
+                output: repaired.output,
+                modelId: repaired.modelId,
+                estimatedCostMinor: repaired.usage.estimatedCostMinor,
+              };
+            },
           },
         }),
         proposals: createCampaignProposalService({

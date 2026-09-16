@@ -48,6 +48,16 @@ export type ResearchDrafter = {
     modelId: string;
     estimatedCostMinor: number | null;
   }>;
+  repair?(input: {
+    prompt: string;
+    previousOutput: unknown;
+    failures: readonly string[];
+    correlationId: string;
+  }): Promise<{
+    output: unknown;
+    modelId: string;
+    estimatedCostMinor: number | null;
+  }>;
 };
 
 export type ResearchPlanResult =
@@ -152,14 +162,41 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
         };
       }
 
+      const prompt = renderResearchPlanningPrompt({ query: input.query, context });
       const drafted = await dependencies.drafter.draft({
-        prompt: renderResearchPlanningPrompt({ query: input.query, context }),
+        prompt,
         correlationId: input.runId,
       });
 
-      const parsed = plannerOutputSchema.safeParse(drafted.output);
+      let output: unknown = drafted.output;
+      let modelId = drafted.modelId;
+      let modelCostMinor: number | null = drafted.estimatedCostMinor;
+
+      let parsed = plannerOutputSchema.safeParse(output);
       if (!parsed.success) {
-        return { outcome: "refused", reasonCode: "draft_unparseable", modelCostMinor: drafted.estimatedCostMinor };
+        if (!dependencies.drafter.repair) {
+          return { outcome: "refused", reasonCode: "draft_unparseable", modelCostMinor };
+        }
+        // Exactly one repair per plan: a second repair pays twice for a model
+        // that cannot follow the contract; unparseable twice is a model
+        // failure, not a formatting accident.
+        const failures = parsed.error.issues.slice(0, 3).map((issue) => {
+          const path = issue.path.length === 0 ? "root" : issue.path.join(".");
+          return `${path}: ${issue.message}`.slice(0, 200);
+        });
+        const repaired = await dependencies.drafter.repair({
+          prompt,
+          previousOutput: drafted.output,
+          failures,
+          correlationId: input.runId,
+        });
+        output = repaired.output;
+        modelId = repaired.modelId;
+        modelCostMinor = sumKnownCosts(drafted.estimatedCostMinor, repaired.estimatedCostMinor);
+        parsed = plannerOutputSchema.safeParse(output);
+        if (!parsed.success) {
+          return { outcome: "refused", reasonCode: "draft_unparseable", modelCostMinor };
+        }
       }
       const { alternatives, document, marketClaimKeys } = parsed.data;
 
@@ -168,14 +205,14 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
       // trusted.
       for (const reference of document.evidence) {
         if (reference.organizationId !== input.organizationId) {
-          return { outcome: "forbidden", modelCostMinor: drafted.estimatedCostMinor };
+          return { outcome: "forbidden", modelCostMinor };
         }
         if (reference.kind === "business_memory_context") {
           if (
             reference.contextManifestId !== context.memory.manifestId ||
             context.memory.entries.length === 0
           ) {
-            return { outcome: "refused", reasonCode: "memory_citation_without_entry", modelCostMinor: drafted.estimatedCostMinor };
+            return { outcome: "refused", reasonCode: "memory_citation_without_entry", modelCostMinor };
           }
         }
         if (reference.kind === "market_claim_citation") {
@@ -194,7 +231,7 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
                 citation.observedTo === reference.observedTo,
             )
           ) {
-            return { outcome: "refused", reasonCode: "uncertain_market_citation", modelCostMinor: drafted.estimatedCostMinor };
+            return { outcome: "refused", reasonCode: "uncertain_market_citation", modelCostMinor };
           }
         }
       }
@@ -210,7 +247,7 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
         return {
           outcome: "refused",
           reasonCode: "memory_citation_without_entry",
-          modelCostMinor: drafted.estimatedCostMinor,
+          modelCostMinor,
         };
       }
       if (marketClaimKeys.length > 0) {
@@ -221,7 +258,7 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
           (reference) => reference.kind === "market_claim_citation",
         );
         if (!backed) {
-          return { outcome: "refused", reasonCode: "uncertain_market_citation", modelCostMinor: drafted.estimatedCostMinor };
+          return { outcome: "refused", reasonCode: "uncertain_market_citation", modelCostMinor };
         }
       }
 
@@ -232,14 +269,14 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
         marketClaimKeys,
       });
       if (admission.outcome === "refused") {
-        if (admission.reasonCode === "foreign_evidence") return { outcome: "forbidden", modelCostMinor: drafted.estimatedCostMinor };
+        if (admission.reasonCode === "foreign_evidence") return { outcome: "forbidden", modelCostMinor };
         // A refused draft carries no declared gaps of its own; the reason
         // code tells the operator what is missing.
         return {
           outcome: "needs_input",
           reasonCode: admission.reasonCode,
           declaredGaps: [],
-          modelCostMinor: drafted.estimatedCostMinor,
+          modelCostMinor,
         };
       }
 
@@ -258,11 +295,16 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
           plannerPromptVersion: RESEARCH_PLANNER_PROMPT_VERSION,
         },
         memoryContextManifestId: context.memory.manifestId,
-        modelId: drafted.modelId,
-        modelCostMinor: drafted.estimatedCostMinor,
+        modelId,
+        modelCostMinor,
       };
     },
   };
 }
 
 export type ResearchPlanner = ReturnType<typeof createResearchPlanner>;
+
+function sumKnownCosts(...costs: Array<number | null>): number | null {
+  if (costs.some((cost) => cost === null)) return null;
+  return costs.reduce<number>((total, cost) => total + (cost ?? 0), 0);
+}
