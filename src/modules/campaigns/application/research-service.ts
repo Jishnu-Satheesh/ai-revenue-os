@@ -228,12 +228,18 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
       // The proposal itself is opened and revised through the governed
       // writer only. Research never writes a version any other way, and a
       // decided proposal refuses the write inside the transaction.
+      // The claim travels with the write. The worker has no standing authority
+      // to open a proposal -- it has the authority of this run, for as long as
+      // it still holds the lease, and the database checks that rather than
+      // trusting that a service identity is calling.
+      const draftClaim = { runId, claimToken: claim.claimToken };
       const opened = await dependencies.proposals.request({
         organizationId,
         request: {
           sourceKind: proposalSourceKind(loaded.triggerKind),
           sourceId: null,
           dedupeFingerprint: null,
+          claim: draftClaim,
         },
       });
       if (opened.status !== "saved" && opened.status !== "replayed") {
@@ -247,6 +253,7 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
           document: planned.document,
           sourceRevisionManifest: planned.sourceRevisionManifest,
           marketClaimKeys: [...planned.marketClaimKeys],
+          claim: draftClaim,
         },
       });
       if (revised.status !== "saved") {

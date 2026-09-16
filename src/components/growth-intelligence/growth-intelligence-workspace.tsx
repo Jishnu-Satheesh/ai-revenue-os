@@ -391,6 +391,7 @@ export function GrowthIntelligenceWorkspace({
   canRequestBuild = false,
   branches = [],
   selectedBranchId = null,
+  canRequestResearch = false,
 }: {
   view: GrowthIntelligenceView;
   organizationId: string;
@@ -406,6 +407,8 @@ export function GrowthIntelligenceWorkspace({
   canRequestBuild?: boolean;
   branches?: MonitoringBranchOption[];
   selectedBranchId?: string | null;
+  /** `campaign.research_request`: may spend the research allowance. */
+  canRequestResearch?: boolean;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");
@@ -591,6 +594,7 @@ export function GrowthIntelligenceWorkspace({
               proposals={view.campaignProposals}
               organizationId={organizationId}
               timeZone={view.timeZone}
+              canRequest={canRequestResearch}
             />
           ) : null}
         </TabsContent>
@@ -623,6 +627,7 @@ export function GrowthIntelligenceWorkspace({
             proposals={view.campaignProposals}
             organizationId={organizationId}
             timeZone={view.timeZone}
+            canRequest={canRequestResearch}
           />
         </TabsContent>
 

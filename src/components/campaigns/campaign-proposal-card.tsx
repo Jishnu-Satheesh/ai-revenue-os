@@ -8,6 +8,7 @@ import {
   proposalStateLabel,
   summarizeChannels,
 } from "@/components/campaigns/proposal-copy";
+import { RequestCampaignResearch } from "@/components/campaigns/request-campaign-research";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
@@ -35,10 +36,18 @@ export function CampaignProposalSection({
   proposals,
   organizationId,
   timeZone,
+  canRequest = false,
 }: {
   proposals: readonly CampaignProposalCardView[];
   organizationId: string;
   timeZone: string;
+  /**
+   * `campaign.research_request`. Whoever may spend the research allowance is
+   * whoever may ask for research, which is the same permission that sets the
+   * allowance in the first place. Everyone else reads the section and sees no
+   * control, rather than a button that would be refused.
+   */
+  canRequest?: boolean;
 }) {
   return (
     <section aria-label="Campaign-ready opportunities" className="flex flex-col gap-4">
@@ -54,14 +63,18 @@ export function CampaignProposalSection({
         <Card>
           <CardContent className="flex items-start gap-3 py-6 text-sm text-muted-foreground">
             <FlaskConical aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <p>
-              No campaign is being proposed right now. When research finds something worth doing, it
-              will appear here for you to decide on.
-            </p>
+            <div className="flex flex-col gap-3">
+              <p>
+                No campaign is being proposed right now. When research finds something worth doing,
+                it will appear here for you to decide on.
+              </p>
+              {canRequest ? <RequestCampaignResearch organizationId={organizationId} /> : null}
+            </div>
           </CardContent>
         </Card>
       ) : (
         <div className="flex flex-col gap-4">
+          {canRequest ? <RequestCampaignResearch organizationId={organizationId} /> : null}
           {proposals.map((proposal) => (
             <CampaignProposalCard
               key={proposal.proposalId}

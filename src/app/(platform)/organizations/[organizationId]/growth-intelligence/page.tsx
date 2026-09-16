@@ -674,6 +674,10 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         canRequestBuild={canRequestBuild}
         branches={branches}
         selectedBranchId={branchId}
+        canRequestResearch={
+          proposalReader !== undefined &&
+          hasOrganizationPermission(role, "campaign.research_request")
+        }
       />
       {buildPending && performanceFilters ? (
         <>

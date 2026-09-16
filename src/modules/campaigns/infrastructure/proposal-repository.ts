@@ -101,6 +101,11 @@ export function createProposalRepository(client: ProposalPersistence): ProposalS
           source_kind: input.sourceKind,
           source_id: input.sourceId,
           dedupe_fingerprint: input.dedupeFingerprint,
+          // Only the worker sends these, and only while it holds the claim.
+          // The function re-checks the run is still claimed under this exact
+          // token with an unexpired lease; nothing here is taken on trust.
+          research_run_id: input.claim?.runId ?? null,
+          research_claim_token: input.claim?.claimToken ?? null,
         },
       });
       if (error) throw proposalFailure(error);
@@ -121,6 +126,8 @@ export function createProposalRepository(client: ProposalPersistence): ProposalS
           digest: input.digest,
           source_revision_manifest: input.sourceRevisionManifest,
           state: "ready_for_review",
+          research_run_id: input.claim?.runId ?? null,
+          research_claim_token: input.claim?.claimToken ?? null,
         },
       });
       if (error) throw proposalFailure(error);

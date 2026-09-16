@@ -30,10 +30,26 @@ import {
 const uuidSchema = z.string().uuid();
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/, "A digest must be SHA-256 hex.");
 
+/**
+ * The research claim a worker drafts under.
+ *
+ * Present only on the worker path. It is not a credential the caller chooses:
+ * the database checks that this exact run is still claimed, with this exact
+ * token and an unexpired lease, and refuses otherwise. A member never sends
+ * one, and sending one would not help them — the member arm is chosen by
+ * having a session actor at all, and asks the same permission it always did.
+ */
+export const researchClaimSchema = z.strictObject({
+  runId: uuidSchema,
+  claimToken: uuidSchema,
+});
+export type ResearchClaim = z.infer<typeof researchClaimSchema>;
+
 export const requestProposalSchema = z.strictObject({
   sourceKind: campaignProposalSourceKindSchema,
   sourceId: uuidSchema.nullable().default(null),
   dedupeFingerprint: z.string().trim().min(1).max(200).nullable().default(null),
+  claim: researchClaimSchema.nullable().default(null),
 });
 export type RequestProposalInput = z.input<typeof requestProposalSchema>;
 
@@ -47,6 +63,7 @@ export const completeProposalVersionSchema = z.strictObject({
    * explicit input rather than something guessed from the prose.
    */
   marketClaimKeys: z.array(z.string().trim().min(1).max(160)).max(60).default([]),
+  claim: researchClaimSchema.nullable().default(null),
 });
 export type CompleteProposalVersionInput = z.input<typeof completeProposalVersionSchema>;
 
@@ -100,6 +117,8 @@ export type ProposalStore = {
     sourceKind: string;
     sourceId: string | null;
     dedupeFingerprint: string | null;
+    /** Null on the member path. The worker path is refused without it. */
+    claim: ResearchClaim | null;
   }): Promise<{ proposalId: string; outcome: "saved" | "replayed" }>;
   completeVersion(input: {
     organizationId: string;
@@ -107,6 +126,7 @@ export type ProposalStore = {
     document: CampaignProposalDocument;
     digest: string;
     sourceRevisionManifest: Record<string, unknown>;
+    claim: ResearchClaim | null;
   }): Promise<ProposalVersionResult>;
   decide(input: {
     organizationId: string;
@@ -170,6 +190,7 @@ export function createCampaignProposalService(dependencies: { store: ProposalSto
           sourceKind: parsed.sourceKind,
           sourceId: parsed.sourceId,
           dedupeFingerprint: parsed.dedupeFingerprint,
+          claim: parsed.claim,
         });
         return { status: saved.outcome, value: { proposalId: saved.proposalId } };
       } catch (error) {
@@ -213,6 +234,7 @@ export function createCampaignProposalService(dependencies: { store: ProposalSto
           document: parsed.document,
           digest: proposalDigest(parsed.document),
           sourceRevisionManifest: parsed.sourceRevisionManifest,
+          claim: parsed.claim,
         });
         return { status: "saved", value: saved };
       } catch (error) {

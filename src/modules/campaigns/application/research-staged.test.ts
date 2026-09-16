@@ -101,7 +101,9 @@ describe("staged research request", () => {
       runs: {
         claim: async () => ({
           runId: RUN_ID,
-          claimToken: "claim",
+          // A real claim token is the uuid the database generated, and the
+          // proposal writers now check it, so the fixture carries a real one.
+          claimToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           policyVersion: 3,
           budgetMinor: 1000,
         }),
