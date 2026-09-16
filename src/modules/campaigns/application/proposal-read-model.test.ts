@@ -5,7 +5,9 @@ import {
   type CampaignProposalDocument,
 } from "@/domain/campaigns/proposal";
 import {
+  laneProposals,
   toProposalCard,
+  toProposalCards,
   toProposalLane,
   toProposalReview,
   type ProposalDecisionRow,
@@ -412,5 +414,58 @@ describe("the review of one proposal", () => {
     // Mislabelling what a person decided is the one thing this record exists
     // to prevent.
     expect(review?.decisions).toEqual([]);
+  });
+});
+
+describe("what the lane keeps and what the history keeps", () => {
+  function bundle(state: string, id = PROPOSAL) {
+    return {
+      proposal: proposal({ id, state }),
+      version: version({ proposalId: id }),
+      decisions: [decision({ proposalId: id, decision: "dismissed", reason: "Not this quarter." })],
+    };
+  }
+
+  it("keeps a dismissed proposal in the full projection", () => {
+    // The lane drops it, but what a person turned down is one of the most
+    // useful things in a record of what they decided.
+    const cards = toProposalCards([bundle("dismissed")]);
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.decisions[0]?.decision).toBe("dismissed");
+  });
+
+  it.each(["dismissed", "superseded", "cancelled"] as const)(
+    "drops a %s proposal from the lane only",
+    (state) => {
+      const cards = toProposalCards([bundle(state)]);
+
+      expect(cards).toHaveLength(1);
+      expect(laneProposals(cards)).toEqual([]);
+    },
+  );
+
+  it("carries every decision, not only the newest", () => {
+    const cards = toProposalCards([
+      {
+        proposal: proposal({ state: "changes_requested" }),
+        version: version(),
+        decisions: [
+          decision({ decidedAt: "2026-09-15T09:00:00.000Z" }),
+          decision({
+            id: "88888888-8888-4888-8888-888888888888",
+            decision: "snoozed",
+            snoozedUntil: "2026-09-20T00:00:00.000Z",
+            decidedAt: "2026-09-13T09:00:00.000Z",
+          }),
+        ],
+      },
+    ]);
+
+    expect(cards[0]?.decisions.map((entry) => entry.decision)).toEqual([
+      "changes_requested",
+      "snoozed",
+    ]);
+    expect(cards[0]?.lastDecision?.decidedAt).toBe("2026-09-15T09:00:00.000Z");
   });
 });

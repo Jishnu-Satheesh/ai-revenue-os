@@ -10,6 +10,7 @@ import { YourActionsList } from "@/components/growth-intelligence/your-actions-l
 import { previousMonth } from "@/components/growth-intelligence/query-options";
 import { Badge } from "@/components/ui/badge";
 import type { PerformanceFilterState } from "@/modules/analysis/application/channels-overview";
+import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
 import {
   filterYourActionEvents,
   parseYourActionFilter,
@@ -36,6 +37,7 @@ function monthHref(base: string, month: string | null, decision: YourActionFilte
 export function YourActionsTab({
   events,
   opportunities,
+  proposals = [],
   organizationId,
   timeZone,
   performanceFilters,
@@ -44,6 +46,7 @@ export function YourActionsTab({
 }: {
   events: readonly TimelineEvent[];
   opportunities: readonly OpportunityCard[];
+  proposals?: readonly CampaignProposalCardView[];
   organizationId: string;
   timeZone: string;
   /** Already-loaded performance scope; scope labels fall back honestly when absent. */
@@ -109,6 +112,7 @@ export function YourActionsTab({
       />
       <CampaignPreparationCard
         opportunities={opportunities}
+        proposals={proposals}
         organizationId={organizationId}
         timeZone={timeZone}
       />

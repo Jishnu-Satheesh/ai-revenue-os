@@ -112,6 +112,8 @@ export type CampaignProposalCardView = {
   content: ProposalContent;
   /** True only where the database would also admit a decision. */
   decidable: boolean;
+  /** Newest first. Every decision, because the history is the record. */
+  decisions: readonly ProposalDecisionView[];
   lastDecision: ProposalDecisionView | null;
 };
 
@@ -126,7 +128,6 @@ export type CampaignProposalReviewView = CampaignProposalCardView & {
   declaredGaps: readonly string[];
   /** Set when the proposal may not be put in front of a person at all. */
   refusal: string | null;
-  decisions: readonly ProposalDecisionView[];
 };
 
 /**
@@ -228,19 +229,13 @@ export function toProposalCard(input: {
     // Both halves are required. A decidable state with nothing readable behind
     // it cannot be decided: the database checks the digest, and there is none.
     decidable: DECIDABLE_PROPOSAL_STATES.includes(state) && content.kind === "document",
+    decisions,
     lastDecision: decisions[0] ?? null,
   };
 }
 
-/**
- * The card lane for Growth Intelligence: newest movement first, and nothing
- * that has already left the conversation.
- *
- * Dismissed, superseded and cancelled proposals stay readable at their own
- * address but do not sit in a lane asking to be acted on. An approved proposal
- * does stay, because its card is how a person reaches the campaign it opened.
- */
-export function toProposalLane(
+/** Every proposal a surface can read, newest movement first. */
+export function toProposalCards(
   rows: readonly {
     proposal: ProposalRow;
     version: ProposalVersionRow | null;
@@ -250,10 +245,50 @@ export function toProposalLane(
   return rows
     .map(toProposalCard)
     .filter((card): card is CampaignProposalCardView => card !== null)
-    .filter((card) => !["dismissed", "superseded", "cancelled"].includes(card.state))
     .sort((left, right) =>
       left.updatedAt < right.updatedAt ? 1 : left.updatedAt > right.updatedAt ? -1 : 0,
     );
+}
+
+/**
+ * The states that have left the conversation.
+ *
+ * They stay readable at their own address, and they stay in the history of
+ * what was decided — a dismissal is one of the most useful things a person can
+ * look back on. What they do not do is sit in a lane still asking to be acted
+ * on.
+ */
+const SETTLED_PROPOSAL_STATES: readonly CampaignProposalState[] = [
+  "dismissed",
+  "superseded",
+  "cancelled",
+];
+
+/**
+ * The card lane for Growth Intelligence.
+ *
+ * Separate from `toProposalCards` on purpose: the lane is what still wants
+ * attention, while the timeline needs every proposal including the settled
+ * ones. Filtering at the source would have made a dismissal invisible in the
+ * record of what its reader decided.
+ *
+ * An approved proposal stays in the lane, because its card is how a person
+ * reaches the campaign it opened.
+ */
+export function laneProposals(
+  cards: readonly CampaignProposalCardView[],
+): CampaignProposalCardView[] {
+  return cards.filter((card) => !SETTLED_PROPOSAL_STATES.includes(card.state));
+}
+
+export function toProposalLane(
+  rows: readonly {
+    proposal: ProposalRow;
+    version: ProposalVersionRow | null;
+    decisions: readonly ProposalDecisionRow[];
+  }[],
+): CampaignProposalCardView[] {
+  return laneProposals(toProposalCards(rows));
 }
 
 /**
@@ -286,15 +321,8 @@ export function toProposalReview(input: {
   const card = toProposalCard(input);
   if (card === null) return null;
 
-  const decisions = input.decisions
-    .map((row) =>
-      toDecisionView(row, card.content.kind === "document" ? card.content.digest : null),
-    )
-    .filter((view): view is ProposalDecisionView => view !== null)
-    .sort(newestFirst);
-
   if (card.content.kind !== "document") {
-    return { ...card, authority: null, declaredGaps: [], refusal: null, decisions };
+    return { ...card, authority: null, declaredGaps: [], refusal: null };
   }
 
   const admission = admitProposal({
@@ -311,7 +339,6 @@ export function toProposalReview(input: {
     authority: preparationAuthority(card.content.document),
     declaredGaps: admission.outcome === "admissible" ? admission.declaredGaps : [],
     refusal: admission.outcome === "refused" ? refusalSentence(admission.reasonCode) : null,
-    decisions,
   };
 }
 

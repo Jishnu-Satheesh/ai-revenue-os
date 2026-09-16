@@ -630,6 +630,7 @@ export function GrowthIntelligenceWorkspace({
           <YourActionsTab
             events={acted}
             opportunities={view.priorityActions.opportunities}
+            proposals={view.campaignProposals}
             organizationId={organizationId}
             timeZone={view.timeZone}
             performanceFilters={performanceFilters}

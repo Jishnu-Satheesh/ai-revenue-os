@@ -101,19 +101,85 @@ The three proposal tables already carry member `select` policies and grants from
 `20260913120000`. This whole slice is reads plus a page; it adds no SQL. If you find
 yourself writing a security-definer read function here, check the policies first.
 
-## What is still missing at this seam
+## The loop is still broken upstream — two verified breaks
+
+Reading the surfaces is done. **Producing** something for them to read is not, and the
+two breaks below were confirmed against staging on 2026-09-16, not inferred from code.
+
+### Break 1 — nothing dispatches research
+
+No code anywhere calls `researchCampaignProposalTask.trigger(...)`, and no route calls
+`request_campaign_research_run`. The worker, its payload schema, its queue and its lease
+sweep all exist and nothing ever asks them to run. `request_campaign_research_run` is
+the full admission gate — permission, binding policy, budget, pending cap, window
+allowance, cooldown — and it is granted to both `authenticated` and `service_role`, so
+either a member-facing route or a scheduler could drive it.
+
+### Break 2 — the worker cannot write a proposal even if it were dispatched
+
+`20260913120000` ends with:
+
+```sql
+revoke all on function public.request_campaign_proposal(uuid, jsonb),
+  public.complete_campaign_proposal_version(uuid, jsonb),
+  public.decide_campaign_proposal(uuid, jsonb)
+  from public, anon, authenticated, service_role;
+grant execute on ... to authenticated;   -- service_role is never granted back
+```
+
+The research worker runs as `service_role` (`createCampaignWorkerServiceClient`, wired
+at `src/trigger/campaigns.ts` into `createProposalRepository`). Probed on staging inside
+a rolled-back transaction:
+
+```
+request_campaign_proposal   authenticated  true    service_role  false
+complete_campaign_proposal_version         service_role  false
+decide_campaign_proposal                   service_role  false
+set local role service_role;
+select public.request_campaign_proposal(...)
+  -> 42501  permission denied for function request_campaign_proposal
+```
+
+Both function bodies additionally open with `if (select auth.uid()) is null ... raise
+campaign_research_forbidden`, so a grant alone would not be enough either.
+
+**Read the revoke's own comment before changing it.** It justifies the revoke by saying a
+background worker must never *approve* a proposal — "approval is a person agreeing to
+spend their own money". That reasoning is exactly right for `decide_campaign_proposal`
+and it must stay revoked. It does not describe `request_campaign_proposal` or
+`complete_campaign_proposal_version`, which are *drafting*, and drafting by the worker is
+what the design intends. The revoke is broader than its stated reason.
+
+Fixing this is a Tier 3 change: it moves a boundary between the control and execution
+planes, so it needs an Execution Plan approved before any migration is written. The
+shape to aim for is that the worker's authority comes from **the admitted run it holds a
+live claim on** — a person authorized that spend through the policy — rather than from
+being `service_role`. `assert_campaign_research_claim` already exists for precisely that
+kind of check.
+
+Until both breaks are closed, the Campaign-ready opportunities section is correct and
+permanently empty.
+
+## What else is still missing at this seam
 
 Recorded so the next agent does not mistake these for oversights:
 
 - **Nothing creates a proposal from Growth Intelligence.** The manual "Request a
   campaign" path still uses the older `draftRequest` / governed-draft flow against an
   opportunity (`campaign-draft-action.tsx`), not the proposal flow. Reworking it to
-  proposal-first is a separate slice, deliberately deferred.
-- **`createGrowthIntelligenceOpportunitySource` is dormant.** It was written and never
-  wired. Reconciling it with proposals is part of that same deferred slice.
+  proposal-first waits on the two breaks above — an entry point that produced only
+  failing runs would be worse than none.
+- **`createGrowthIntelligenceOpportunitySource` stays dormant, by design.** Reviewed
+  2026-09-16 and left unwired on purpose: `checkDraftEligibility` ends at
+  `qualifyDraftImpact`, which demands a governed impact range, a declared confidence,
+  the authoring detector's own words for it, stated assumptions and source revisions —
+  and `SynthesizedItemRow` carries no impact fields at all. Wiring it would mean
+  inventing those numbers, which D06 forbids. The reasoning is written at the top of
+  the file. Do not delete it: the gates it composes are the ones a real impact detector
+  would still have to pass.
 - **`POST /campaign-proposals/:proposalId/revisions` has no caller.** "Request changes"
   records the decision and moves the proposal to `changes_requested`; writing the new
-  version is the research worker's job and nothing schedules that yet.
+  version is the research worker's job, and see break 2.
 - **No list endpoint.** Spec 025 names `GET /campaign-proposals` and
   `GET /campaign-proposals/:proposalId`. Both surfaces are server components reading
   through the repository, so no HTTP read exists. Add them only when a client actually
@@ -138,3 +204,18 @@ Recorded so the next agent does not mistake these for oversights:
 | Review page | `src/app/(platform)/organizations/[organizationId]/campaign-proposals/[proposalId]/page.tsx` |
 | Composition into GI | `src/modules/growth-intelligence/application/read-service.ts` |
 | Where the section renders | `src/components/growth-intelligence/growth-intelligence-workspace.tsx` (Recommendations tab, after `PriorityActions`; Overview only when non-empty) |
+| Decided proposals in Your actions | `src/components/growth-intelligence/campaign-preparation-card.tsx`, plus the proposal rows in `your-actions-list.tsx` |
+
+## The lane and the history are different lists
+
+`toProposalCards` projects every proposal; `laneProposals` keeps only the ones still
+wanting attention. The builder applies the lane rule itself and hands the **full** list
+to the timeline, because a dismissal belongs in the record of what a person decided. If
+you move the filter back to the reader, dismissals silently vanish from Your actions.
+
+Timeline vocabulary: a proposal snooze and dismissal reuse the ordinary `snoozed` and
+`dismissed` event types, so they fall under the filters people already reach for.
+Approving and asking for changes get their own types — `planned` is not an approval, and
+this approval is preparation only. Note that `your-actions-list.tsx` ends its label chain
+with a bare `: "Draft failed"`, so a new event type that is not named there is rendered
+as a failure. Name it.

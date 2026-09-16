@@ -1,4 +1,4 @@
-import { CalendarCheck2, Check, Clock3, FilePlus2, X } from "lucide-react";
+import { CalendarCheck2, Check, Clock3, FilePlus2, Megaphone, ThumbsUp, X } from "lucide-react";
 
 import type { TimelineEvent } from "@/modules/growth-intelligence/application/read-model";
 
@@ -18,6 +18,10 @@ const EVENT_META = {
   "research-started": { label: "Research started", Icon: FilePlus2 },
   "research-finished": { label: "Research finished", Icon: Check },
   "research-retried": { label: "Analysis retried", Icon: Clock3 },
+  // Never shortened to "Approved": what was agreed to is preparing creative.
+  "proposal-ready": { label: "Proposal ready to review", Icon: Megaphone },
+  "proposal-approved": { label: "Approved to prepare creative", Icon: ThumbsUp },
+  "changes-requested": { label: "Changes requested", Icon: Clock3 },
 } as const;
 
 function sourceLabel(source: TimelineEvent["source"]): string {
@@ -27,7 +31,9 @@ function sourceLabel(source: TimelineEvent["source"]): string {
       ? "Recommendation"
       : source.kind === "research_pipeline"
         ? "Market research"
-        : "Intelligence item";
+        : source.kind === "campaign_proposal"
+          ? "Campaign proposal"
+          : "Intelligence item";
 }
 
 /**

@@ -1,7 +1,7 @@
 import { DomainError } from "@/lib/errors";
 import type { DecisionReadPort } from "@/modules/decisions/application/ports";
 import {
-  toProposalLane,
+  toProposalCards,
   type CampaignProposalCardView,
 } from "@/modules/campaigns/application/proposal-read-model";
 import type { CampaignProposalReader } from "@/modules/campaigns/infrastructure/proposal-read-repository";
@@ -187,7 +187,9 @@ export function createGrowthIntelligenceReadService(
       let campaignProposals: readonly CampaignProposalCardView[] | undefined;
       if (proposals) {
         try {
-          campaignProposals = toProposalLane(
+          // Every proposal, settled ones included. The builder keeps the lane
+          // to what still wants attention and gives the timeline the rest.
+          campaignProposals = toProposalCards(
             await proposals.listProposals({ organizationId: input.organizationId }),
           );
         } catch (error) {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { CampaignProposalDocument } from "@/domain/campaigns/proposal";
+import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
 import type { OpportunityFeedItem } from "@/modules/decisions/application/ports";
 import {
   buildGrowthIntelligenceView,
@@ -11,6 +13,39 @@ import {
 } from "@/modules/growth-intelligence/application/read-model";
 
 const organizationId = "10000000-0000-4000-8000-000000000001";
+
+const PROPOSAL_DOCUMENT: CampaignProposalDocument = {
+  schemaVersion: 1,
+  title: "Win back weekday lunch",
+  businessProblem: "Weekday lunch covers are down against last quarter.",
+  objective: "acquisition",
+  audience: "People working nearby who do not order lunch here.",
+  offer: { kind: "no_offer" },
+  channels: [{ channelKey: "instagram", delivery: "organic" }],
+  deliverables: [{ format: "feed", language: "en", count: 3 }],
+  timing: { startAt: "2026-09-20T00:00:00.000Z", endAt: null, timezone: "Asia/Dubai" },
+  proposedMediaBudget: null,
+  generationCostCeiling: { amountMinor: 8000, currency: "AED" },
+  successPlan: {
+    primaryMetricKey: "weekday_lunch_covers",
+    baselineSource: "point_of_sale",
+    baselineRevision: 4,
+    baselineFrom: "2026-06-01T00:00:00.000Z",
+    baselineTo: "2026-08-31T00:00:00.000Z",
+    observationWindowDays: 28,
+    reportingDelayDays: 2,
+    settlementDelayDays: 7,
+    measurementMethod: "pre_post_with_baseline",
+    target: null,
+    missingData: [],
+  },
+  pausePolicyRef: "default_pause_policy",
+  evidence: [],
+  memoryContextManifestId: null,
+  assumptions: ["Lunch capacity is not the constraint."],
+  limitations: [],
+  readiness: { canPrepare: true, canLaunch: false, blockers: [] },
+};
 const actorId = "20000000-0000-4000-8000-000000000002";
 
 function opportunity(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem {
@@ -613,5 +648,153 @@ describe("Your actions filters", () => {
       branchId: "62000000-0000-4000-8000-000000000062",
       snoozedUntil: "2026-09-10T00:00:00.000Z",
     });
+  });
+});
+
+describe("campaign proposals in the composed view", () => {
+  const PROPOSAL = "40000000-0000-4000-8000-000000000004";
+
+  function proposalCard(
+    overrides: Partial<CampaignProposalCardView> = {},
+  ): CampaignProposalCardView {
+    return {
+      proposalId: PROPOSAL,
+      state: "ready_for_review",
+      sourceKind: "business_signal",
+      createdAt: "2026-09-02T08:00:00.000Z",
+      updatedAt: "2026-09-04T08:00:00.000Z",
+      snoozedUntil: null,
+      linkedCampaignId: null,
+      content: { kind: "awaiting_research" },
+      decidable: false,
+      decisions: [],
+      lastDecision: null,
+      ...overrides,
+    };
+  }
+
+  function decisionView(
+    overrides: Partial<CampaignProposalCardView["decisions"][number]> = {},
+  ): CampaignProposalCardView["decisions"][number] {
+    return {
+      id: "50000000-0000-4000-8000-000000000005",
+      decision: "approved_for_preparation",
+      reason: null,
+      instructions: null,
+      snoozedUntil: null,
+      decidedAt: "2026-09-03T09:00:00.000Z",
+      appliesToCurrentContent: true,
+      ...overrides,
+    };
+  }
+
+  it("keeps proposals in their own lane, out of the recommendation counts", () => {
+    const view = buildGrowthIntelligenceView(input({ campaignProposals: [proposalCard()] }));
+
+    expect(view.campaignProposals).toHaveLength(1);
+    // One number must not mean two different kinds of act.
+    expect(view.counts.recommendations).toBe(1);
+    expect(view.counts).not.toHaveProperty("campaignProposals");
+  });
+
+  it("drops a settled proposal from the lane but keeps its decision in the history", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({
+            state: "dismissed",
+            decisions: [decisionView({ decision: "dismissed", reason: "Not this quarter." })],
+          }),
+        ],
+      }),
+    );
+
+    // What a person turned down is one of the most useful things in a record
+    // of what they decided.
+    expect(view.campaignProposals).toEqual([]);
+    const dismissal = view.timeline.find(
+      (event) => event.source.kind === "campaign_proposal" && event.type === "dismissed",
+    );
+    expect(dismissal?.reason).toBe("Not this quarter.");
+  });
+
+  it("names an approval as preparation, never as a plan", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({ state: "approved_for_preparation", decisions: [decisionView()] }),
+        ],
+      }),
+    );
+
+    const approval = view.timeline.find((event) => event.source.kind === "campaign_proposal");
+    expect(approval?.type).toBe("proposal-approved");
+    // "planned" already means an operator's intention to act on advice. An
+    // approval here authorized preparing creative; the two are not the same.
+    expect(view.timeline.some((event) => event.type === "planned" && event.source.kind === "campaign_proposal")).toBe(false);
+  });
+
+  it("carries a change request's instructions as the row's reason", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({
+            state: "changes_requested",
+            decisions: [
+              decisionView({
+                decision: "changes_requested",
+                instructions: "Name the offer.",
+                reason: null,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const changes = view.timeline.find((event) => event.type === "changes-requested");
+    expect(changes?.reason).toBe("Name the offer.");
+  });
+
+  it("records when a proposal became readable, separately from when it was opened", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({
+            content: {
+              kind: "document",
+              versionId: "60000000-0000-4000-8000-000000000006",
+              versionNumber: 1,
+              digest: "a".repeat(64),
+              writtenAt: "2026-09-03T07:00:00.000Z",
+              document: PROPOSAL_DOCUMENT,
+            },
+          }),
+        ],
+      }),
+    );
+
+    const events = view.timeline.filter((event) => event.source.kind === "campaign_proposal");
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["generated", "proposal-ready"]),
+    );
+    expect(events.find((event) => event.type === "proposal-ready")?.occurredAt).toBe(
+      "2026-09-03T07:00:00.000Z",
+    );
+  });
+
+  it("reads no proposals at all when the caller composed none", () => {
+    const view = buildGrowthIntelligenceView(input());
+
+    expect(view.campaignProposals).toEqual([]);
+    expect(view.timeline.some((event) => event.source.kind === "campaign_proposal")).toBe(false);
+  });
+
+  it("leaves proposals out of a view that did not ask for them", () => {
+    const view = buildGrowthIntelligenceView(
+      input({ campaignProposals: [proposalCard()], sections: ["recommendations"] }),
+    );
+
+    expect(view.campaignProposals).toEqual([]);
   });
 });

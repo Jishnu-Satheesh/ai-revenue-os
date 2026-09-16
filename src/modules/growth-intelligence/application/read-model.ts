@@ -4,7 +4,10 @@ import {
   type OrganizationRecommendationLaneRecord,
   type OrganizationRecommendationRecord,
 } from "@/modules/analysis/application/read-model";
-import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
+import {
+  laneProposals,
+  type CampaignProposalCardView,
+} from "@/modules/campaigns/application/proposal-read-model";
 import type {
   ResearchActivityEvent,
   ResearchItemProvenance,
@@ -84,7 +87,8 @@ export type CardSource =
   | { kind: "opportunity"; id: string }
   | { kind: "channel_recommendation"; id: string }
   | { kind: "synthesized_item"; id: string }
-  | { kind: "research_pipeline"; id: string };
+  | { kind: "research_pipeline"; id: string }
+  | { kind: "campaign_proposal"; id: string };
 
 export type EvidenceWindow = { start: string; end: string };
 
@@ -196,7 +200,18 @@ export type TimelineEventType =
   | "draft-failed"
   | "research-started"
   | "research-finished"
-  | "research-retried";
+  | "research-retried"
+  /**
+   * Proposal lifecycle. `snoozed` and `dismissed` are deliberately NOT
+   * repeated here: a snoozed proposal is a snooze and a dismissed one is a
+   * dismissal, and reusing those types is what puts them under the filters a
+   * person already reaches for. Approving and asking for changes have no
+   * existing type that would not misdescribe them — "planned" is not an
+   * approval, and an approval here is preparation only.
+   */
+  | "proposal-ready"
+  | "proposal-approved"
+  | "changes-requested";
 
 export type TimelineEvent = {
   type: TimelineEventType;
@@ -278,6 +293,11 @@ export type GrowthIntelligenceViewInput = {
    * its own approval gate, and this builder is a projection, not a second place
    * that decides what a proposal means. Omitted means the caller composed no
    * proposal reader, which reads exactly as "none" — the pre-proposal view.
+   *
+   * This is EVERY proposal, settled ones included. The lane rule is applied
+   * here rather than by the caller, because the timeline needs the dismissed
+   * and superseded ones: what a person turned down is part of what they
+   * decided.
    */
   campaignProposals?: readonly CampaignProposalCardView[];
 };
@@ -580,6 +600,29 @@ function pushTimeline(
   }
 }
 
+/**
+ * A proposal decision as a timeline row.
+ *
+ * Snoozes and dismissals keep the ordinary types, so they fall under the
+ * filters a person already reaches for. The other two get their own, because
+ * no existing type describes them without overstating: an approval here buys
+ * creative preparation and nothing else.
+ */
+function proposalEventType(
+  decision: CampaignProposalCardView["decisions"][number]["decision"],
+): TimelineEventType {
+  switch (decision) {
+    case "approved_for_preparation":
+      return "proposal-approved";
+    case "changes_requested":
+      return "changes-requested";
+    case "snoozed":
+      return "snoozed";
+    case "dismissed":
+      return "dismissed";
+  }
+}
+
 const ALL_SECTIONS: readonly GrowthIntelligenceSection[] = [
   "opportunities",
   "recommendations",
@@ -768,6 +811,44 @@ export function buildGrowthIntelligenceView(
         reason: null,
       });
     }
+    // Proposals, including the settled ones. A dismissal belongs in the record
+    // of what a person decided; hiding it there would leave the history saying
+    // only what was agreed to.
+    for (const proposal of input.campaignProposals ?? []) {
+      const source = { kind: "campaign_proposal", id: proposal.proposalId } as const;
+      const title =
+        proposal.content.kind === "document"
+          ? proposal.content.document.title
+          : "Campaign proposal";
+      timeline.push({
+        type: "generated",
+        source,
+        title,
+        occurredAt: proposal.createdAt,
+        reason: null,
+      });
+      if (proposal.content.kind === "document") {
+        timeline.push({
+          type: "proposal-ready",
+          source,
+          title,
+          occurredAt: proposal.content.writtenAt,
+          reason: null,
+        });
+      }
+      for (const decision of proposal.decisions) {
+        timeline.push({
+          type: proposalEventType(decision.decision),
+          source,
+          title,
+          occurredAt: decision.decidedAt,
+          // The words the decider wrote, carried as written. Instructions
+          // first: on a change request they are the point of the row.
+          reason: decision.instructions ?? decision.reason,
+          snoozedUntil: decision.snoozedUntil,
+        });
+      }
+    }
     timeline.sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
   }
 
@@ -794,7 +875,9 @@ export function buildGrowthIntelligenceView(
     insights,
     dataGaps,
     timeline: wantTimeline ? timelineEvents.slice(0, 50) : [],
-    campaignProposals: sections.has("campaign_proposals") ? [...(input.campaignProposals ?? [])] : [],
+    campaignProposals: sections.has("campaign_proposals")
+      ? laneProposals(input.campaignProposals ?? [])
+      : [],
     counts: {
       opportunities: sections.has("opportunities") ? opportunities.length : 0,
       recommendations: recommendations.length,

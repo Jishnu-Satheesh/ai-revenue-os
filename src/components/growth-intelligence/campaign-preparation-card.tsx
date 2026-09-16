@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Clock3, FilePenLine } from "lucide-react";
+import { Clock3, FilePenLine, Megaphone } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
 import type { OpportunityCard } from "@/modules/growth-intelligence/application/read-model";
 
 function formatDay(value: string, timeZone: string): string {
@@ -32,19 +33,37 @@ function formatTime(value: string, timeZone: string): string {
  */
 export function CampaignPreparationCard({
   opportunities,
+  proposals = [],
   organizationId,
   timeZone,
 }: {
   opportunities: readonly OpportunityCard[];
+  /**
+   * Proposals whose approval authorized preparation. Optional so callers that
+   * predate proposals keep compiling; absent means none were read, which is
+   * not the same as none existing.
+   */
+  proposals?: readonly CampaignProposalCardView[];
   organizationId: string;
   timeZone: string;
 }) {
   const withDraft = opportunities.filter((card) => card.draftRequest !== null);
-  if (withDraft.length === 0) return null;
+  // An approval is the moment preparation was authorized, so this is where a
+  // person looks for what became of it.
+  const approved = proposals.filter((card) => card.state === "approved_for_preparation");
+  if (withDraft.length === 0 && approved.length === 0) return null;
   return (
     <section aria-label="Campaign preparation" className="flex flex-col gap-4">
       <h3 className="text-lg font-bold">Campaign preparation</h3>
       <div className="flex flex-col gap-4">
+        {approved.map((card) => (
+          <ApprovedProposalRow
+            key={card.proposalId}
+            card={card}
+            organizationId={organizationId}
+            timeZone={timeZone}
+          />
+        ))}
         {withDraft.map((card) => {
           const draft = card.draftRequest!;
           const requested = formatDay(draft.requestedAt, timeZone);
@@ -192,5 +211,70 @@ export function CampaignPreparationCard({
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * One approved proposal and what became of it.
+ *
+ * The approval itself is the record; this row says what it authorized and
+ * where the work went. The link is to the campaign the approval opened, which
+ * the database created inside the same transaction — so when there is no link
+ * the honest reading is that it could not be named here, never that the
+ * approval did less than it did.
+ */
+function ApprovedProposalRow({
+  card,
+  organizationId,
+  timeZone,
+}: {
+  card: CampaignProposalCardView;
+  organizationId: string;
+  timeZone: string;
+}) {
+  const title =
+    card.content.kind === "document" ? card.content.document.title : "Campaign proposal";
+  const decidedAt = card.lastDecision?.decidedAt ?? card.updatedAt;
+
+  return (
+    <Card>
+      <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted"
+          >
+            <Megaphone className="size-4 text-muted-foreground" />
+          </span>
+          <div>
+            <p className="text-sm font-bold">{title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Approved {formatDay(decidedAt, timeZone)} at {formatTime(decidedAt, timeZone)}
+            </p>
+          </div>
+        </div>
+        {card.linkedCampaignId === null ? (
+          <Badge variant="secondary">Approved to prepare creative</Badge>
+        ) : (
+          <Link
+            className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+            href={`/organizations/${organizationId}/campaigns/${card.linkedCampaignId}`}
+          >
+            Open the campaign
+          </Link>
+        )}
+        <p className="w-full text-sm text-muted-foreground">
+          {card.linkedCampaignId === null
+            ? "Creative preparation was authorized, but the campaign it opened cannot be linked from here."
+            : "Creative preparation was authorized. Nothing has been published — each finished output is reviewed on its own before it can be."}
+        </p>
+        <Link
+          className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+          href={`/organizations/${organizationId}/campaign-proposals/${card.proposalId}`}
+        >
+          Read what was approved
+        </Link>
+      </CardContent>
+    </Card>
   );
 }

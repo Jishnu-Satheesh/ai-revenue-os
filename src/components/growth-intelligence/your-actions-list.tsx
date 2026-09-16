@@ -1,6 +1,15 @@
 "use client";
 
-import { CalendarCheck2, Check, CheckCheck, Clock3, FilePlus2, X } from "lucide-react";
+import {
+  CalendarCheck2,
+  Check,
+  CheckCheck,
+  Clock3,
+  FilePlus2,
+  Megaphone,
+  ThumbsUp,
+  X,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -12,6 +21,17 @@ const DECISION_META = {
   snoozed: { label: "Snoozed", Icon: Clock3, emphasized: false },
   dismissed: { label: "Dismissed", Icon: X, emphasized: false },
   resolved: { label: "Resolved", Icon: Check, emphasized: false },
+  /**
+   * A proposal decision is a decision, so it reads as one here. The label
+   * never shortens to "Approved": what was agreed to is preparing creative,
+   * and publishing still needs its own approval of each finished output.
+   */
+  "proposal-approved": {
+    label: "Approved to prepare creative",
+    Icon: ThumbsUp,
+    emphasized: true,
+  },
+  "changes-requested": { label: "Changes requested", Icon: Clock3, emphasized: false },
 } as const;
 
 type DecisionType = keyof typeof DECISION_META;
@@ -36,7 +56,14 @@ function scopeLabel(
 ): string | null {
   // Research and draft lifecycle rows already name their subject in the
   // title; inventing a channel scope for them would mislead.
-  if (event.source.kind === "research_pipeline" || event.source.kind === "opportunity") {
+  if (
+    event.source.kind === "research_pipeline" ||
+    event.source.kind === "opportunity" ||
+    // A proposal names its own campaign in the title and spans whatever
+    // channels it proposes. Inventing one channel's scope for it would
+    // describe a narrower thing than the proposal is.
+    event.source.kind === "campaign_proposal"
+  ) {
     return null;
   }
   const channelId = event.channelId ?? null;
@@ -114,9 +141,11 @@ export function YourActionsList({
             ? FilePlus2
             : event.type === "research-finished" || event.type === "draft-created"
               ? Check
-              : event.type === "research-retried" || event.type === "retry"
-                ? Clock3
-                : X;
+              : event.type === "proposal-ready"
+                ? Megaphone
+                : event.type === "research-retried" || event.type === "retry"
+                  ? Clock3
+                  : X;
         const fallbackLabel =
           event.type === "research-started"
             ? "Research started"
@@ -130,7 +159,9 @@ export function YourActionsList({
                     ? "Draft created"
                     : event.type === "retry"
                       ? "Retried"
-                      : "Draft failed";
+                      : event.type === "proposal-ready"
+                        ? "Proposal ready to review"
+                        : "Draft failed";
         return (
           <div
             key={`${event.source.kind}-${event.source.id}-${event.occurredAt}-${index}`}

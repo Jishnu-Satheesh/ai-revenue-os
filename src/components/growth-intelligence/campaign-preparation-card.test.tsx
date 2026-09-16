@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CampaignPreparationCard } from "@/components/growth-intelligence/campaign-preparation-card";
+import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
 import type { OpportunityCard } from "@/modules/growth-intelligence/application/read-model";
 
 const ORGANIZATION = "10000000-0000-4000-8000-000000000001";
@@ -186,5 +187,85 @@ describe("CampaignPreparationCard", () => {
     );
     expect(screen.getByText("Cancelled")).toBeTruthy();
     expect(screen.getByText(/request was cancelled/)).toBeTruthy();
+  });
+});
+
+describe("what became of an approved proposal", () => {
+  // The existing block scopes its own cleanup, so this one needs its own.
+  afterEach(() => cleanup());
+
+  const PROPOSAL = "60000000-0000-4000-8000-000000000006";
+  const CAMPAIGN = "70000000-0000-4000-8000-000000000007";
+
+  function proposalCard(
+    overrides: Partial<CampaignProposalCardView> = {},
+  ): CampaignProposalCardView {
+    return {
+      proposalId: PROPOSAL,
+      state: "approved_for_preparation",
+      sourceKind: "business_signal",
+      createdAt: "2026-03-01T08:00:00.000Z",
+      updatedAt: "2026-03-03T09:00:00.000Z",
+      snoozedUntil: null,
+      linkedCampaignId: CAMPAIGN,
+      content: { kind: "awaiting_research" },
+      decidable: false,
+      decisions: [],
+      lastDecision: null,
+      ...overrides,
+    };
+  }
+
+  function renderWith(proposals: readonly CampaignProposalCardView[]) {
+    render(
+      <CampaignPreparationCard
+        opportunities={[]}
+        proposals={proposals}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+      />,
+    );
+  }
+
+  it("links an approval to the campaign it opened", () => {
+    renderWith([proposalCard()]);
+
+    expect(screen.getByRole("link", { name: /open the campaign/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/campaigns/${CAMPAIGN}`,
+    );
+    expect(screen.getByRole("link", { name: /read what was approved/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/campaign-proposals/${PROPOSAL}`,
+    );
+  });
+
+  it("says publication still needs its own approval", () => {
+    renderWith([proposalCard()]);
+
+    expect(screen.getByText(/nothing has been published/i)).toBeInTheDocument();
+  });
+
+  it("does not claim an approval did less when its campaign cannot be linked", () => {
+    renderWith([proposalCard({ linkedCampaignId: null })]);
+
+    expect(screen.getByText(/cannot be linked from here/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open the campaign/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/approved to prepare creative/i)).toBeInTheDocument();
+  });
+
+  it("shows nothing for a proposal that was not approved", () => {
+    const { container } = render(
+      <CampaignPreparationCard
+        opportunities={[]}
+        proposals={[proposalCard({ state: "ready_for_review", linkedCampaignId: null })]}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+      />,
+    );
+
+    // This section is about work that was authorized. A proposal still waiting
+    // on a decision belongs in the lane, not here.
+    expect(container).toBeEmptyDOMElement();
   });
 });
