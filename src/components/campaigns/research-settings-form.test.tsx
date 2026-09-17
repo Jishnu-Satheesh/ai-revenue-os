@@ -268,6 +268,22 @@ describe("when research asks on its own", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it("saves the limits alone when no cadence is being set", async () => {
+    const onSave = saver();
+    const onSaveSchedule = saver();
+    // A stored policy with no stored cadence: the money section is filled,
+    // the rhythm section is blank. Saving must not invent a rhythm to
+    // satisfy cadence validation — and must not ask for one either.
+    renderForm(SET_POLICY, onSave, null, onSaveSchedule);
+
+    await userEvent.click(screen.getByRole("button", { name: /save as a new version/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSaveSchedule).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(/in force from now/i);
+  });
+
   it("saves the limits first and the cadence second", async () => {
     const onSave = saver();
     const onSaveSchedule = saver();

@@ -205,6 +205,46 @@ export function ResearchSettingsForm({
       return;
     }
 
+    if (windowMinor < perRunMinor) {
+      setError(
+        "The window allowance cannot be smaller than one run's allowance, or nothing would ever be admitted.",
+      );
+      return;
+    }
+
+    const policyPayload = {
+      enabled: fields.enabled,
+      timezone: fields.timezone.trim(),
+      // Names the platform's own rules, not a choice this organization makes.
+      evidenceQualificationRuleVersion: EVIDENCE_QUALIFICATION_RULE_VERSION,
+      evidenceMaxAgeDays,
+      cooldownSeconds: cooldownMinutes * 60,
+      maxPendingProposals: maxPending,
+      maxAttempts,
+      perRunAllowance: { amountMinor: perRunMinor, currency: fields.currency },
+      windowAllowance: { amountMinor: windowMinor, currency: fields.currency },
+      windowDays,
+    };
+
+    // Money and rhythm save separately. A blank cadence section means no
+    // rhythm is being set, so the limits save on their own: gating them on
+    // cadence fields would force an organization with no cadence to invent
+    // one before it may set a budget.
+    const cadenceTouched =
+      fields.scheduleEnabled ||
+      fields.scheduleIntervalDays.trim() !== "" ||
+      fields.qualifyOnMemoryRevision ||
+      fields.qualifyOnCadence;
+    if (!cadenceTouched) {
+      setPending(true);
+      const result = await onSave(policyPayload);
+      setPending(false);
+
+      if (result.ok) setSaved("Saved as a new version. It is in force from now.");
+      else setError(result.message);
+      return;
+    }
+
     if (scheduleUnavailable) {
       setError("The cadence could not be loaded, so nothing was saved. Reload and try again.");
       return;
@@ -222,27 +262,8 @@ export function ResearchSettingsForm({
       return;
     }
 
-    if (windowMinor < perRunMinor) {
-      setError(
-        "The window allowance cannot be smaller than one run's allowance, or nothing would ever be admitted.",
-      );
-      return;
-    }
-
     setPending(true);
-    const result = await onSave({
-      enabled: fields.enabled,
-      timezone: fields.timezone.trim(),
-      // Names the platform's own rules, not a choice this organization makes.
-      evidenceQualificationRuleVersion: EVIDENCE_QUALIFICATION_RULE_VERSION,
-      evidenceMaxAgeDays,
-      cooldownSeconds: cooldownMinutes * 60,
-      maxPendingProposals: maxPending,
-      maxAttempts,
-      perRunAllowance: { amountMinor: perRunMinor, currency: fields.currency },
-      windowAllowance: { amountMinor: windowMinor, currency: fields.currency },
-      windowDays,
-    });
+    const result = await onSave(policyPayload);
     if (!result.ok) {
       setPending(false);
       setError(result.message);
