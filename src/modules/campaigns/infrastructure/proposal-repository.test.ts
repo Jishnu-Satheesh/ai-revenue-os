@@ -248,4 +248,23 @@ describe("the context manifest ownership read", () => {
 
     expect(result).toBeNull();
   });
+
+  it("answers a thrown manifest read the same absent way, never past a committed approval", async () => {
+    const maybeSingle = vi.fn().mockRejectedValue(new Error("boom"));
+    const repository = createProposalRepository({
+      rpc: vi.fn(),
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ maybeSingle }) }),
+        }),
+      }),
+    } as unknown as ProposalPersistence);
+
+    const result = await repository.readContextManifest({
+      organizationId: ORGANIZATION,
+      manifestId: MANIFEST,
+    });
+
+    expect(result).toBeNull();
+  });
 });

@@ -206,24 +206,30 @@ export function createProposalRepository(client: ProposalPersistence): ProposalS
      * Read through the caller's own session under the existing member-select
      * policy, exactly as the memory context route reads it: a manifest from
      * another organization reads as absent, never as a refusal with detail.
-     * Absent, unreadable, and foreign are answered identically with null on
-     * purpose — distinguishing them would confirm another tenant's row exists.
+     * Absent, unreadable, foreign, and thrown-transport are answered
+     * identically with null on purpose — distinguishing them would confirm
+     * another tenant's row exists, and a failed read must degrade to "no pin"
+     * rather than fail a committed approval.
      */
     async readContextManifest(input: {
       organizationId: string;
       manifestId: string;
     }): Promise<{ id: string } | null> {
-      const { data, error } = await client
-        .from("memory_context_manifests")
-        .select("id")
-        .eq("organization_id", input.organizationId)
-        .eq("id", input.manifestId)
-        .maybeSingle();
+      try {
+        const { data, error } = await client
+          .from("memory_context_manifests")
+          .select("id")
+          .eq("organization_id", input.organizationId)
+          .eq("id", input.manifestId)
+          .maybeSingle();
 
-      if (error || !data) return null;
+        if (error || !data) return null;
 
-      const parsed = manifestIdSchema.safeParse(record(data));
-      return parsed.success ? { id: parsed.data.id } : null;
+        const parsed = manifestIdSchema.safeParse(record(data));
+        return parsed.success ? { id: parsed.data.id } : null;
+      } catch {
+        return null;
+      }
     },
 
     /**

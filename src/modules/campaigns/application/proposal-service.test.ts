@@ -509,6 +509,27 @@ describe("deciding a proposal", () => {
     expect(store.pinApprovalSnapshot).not.toHaveBeenCalled();
   });
 
+  it("leaves a recorded approval standing when the manifest read itself throws", async () => {
+    store.readVersionDocument.mockResolvedValue(document({ evidence: [] }));
+    store.readContextManifest.mockRejectedValue(new Error("boom"));
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-18",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    const value = outcome.status === "saved" ? outcome.value : null;
+    expect(value?.linkedCampaignId).toBe(LINKED_CAMPAIGN);
+    expect(store.pinApprovalSnapshot).not.toHaveBeenCalled();
+  });
+
   it("refuses a cross-tenant decide and writes no snapshot for it", async () => {
     store.decide.mockRejectedValue({ kind: "not_found" });
 

@@ -340,11 +340,18 @@ export function createCampaignProposalService(dependencies: { store: ProposalSto
             // pin. A foreign pointer reads as absent and authorizes nothing.
             let pinnable = hasSameTenantEvidenceRefs(document, input.organizationId);
             if (!pinnable && document.memoryContextManifestId !== null) {
-              pinnable =
-                (await dependencies.store.readContextManifest({
-                  organizationId: input.organizationId,
-                  manifestId: document.memoryContextManifestId,
-                })) !== null;
+              try {
+                pinnable =
+                  (await dependencies.store.readContextManifest({
+                    organizationId: input.organizationId,
+                    manifestId: document.memoryContextManifestId,
+                  })) !== null;
+              } catch {
+                // Degraded by default, like the pin: a manifest read that
+                // throws leaves the recorded approval standing with no pin,
+                // never an unavailable for a committed decision. The
+                // repository never throws; this guards non-conforming stores.
+              }
             }
             if (pinnable) {
               try {
