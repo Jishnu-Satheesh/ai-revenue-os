@@ -109,6 +109,12 @@ function drafter(output: unknown): ResearchDrafter {
   };
 }
 
+function preparationAllowance(overrides: Record<string, unknown> = {}) {
+  // Matches document()'s generationCostCeiling by default, so the ready-path
+  // tests exercise an exact purse copy rather than a refusal.
+  return { amountMinor: 2000, currency: "AED", ...overrides };
+}
+
 function planInput(overrides: Record<string, unknown> = {}) {
   return {
     organizationId: ORGANIZATION_ID,
@@ -116,6 +122,7 @@ function planInput(overrides: Record<string, unknown> = {}) {
     query: "weekday lunch decline",
     triggerKind: "manual_request",
     context: context(),
+    preparationAllowance: preparationAllowance(),
     ...overrides,
   };
 }
@@ -125,9 +132,22 @@ describe("research planner", () => {
     const prompt = renderResearchPlanningPrompt({
       query: "weekday lunch decline",
       context: context(),
+      preparationAllowance: preparationAllowance({ amountMinor: 500 }),
     });
     expect(prompt).toContain("Office workers fill the room between 12:00 and 13:30.");
     expect(prompt).toContain(MANIFEST_ID);
+  });
+
+  it("tells the model the exact preparation purse it must copy", () => {
+    const prompt = renderResearchPlanningPrompt({
+      query: "weekday lunch decline",
+      context: context(),
+      preparationAllowance: preparationAllowance({ amountMinor: 500 }),
+    });
+    expect(prompt).toContain("<preparation_allowance");
+    expect(prompt).toContain('amountMinor="500"');
+    expect(prompt).toContain('currency="AED"');
+    expect(prompt).toContain("generationCostCeiling must equal");
   });
 
   it("returns a ready plan with provenance for the version row", async () => {
@@ -403,7 +423,11 @@ describe("research planner", () => {
         hardConstraints: [],
       },
     });
-    const prompt = renderResearchPlanningPrompt({ query: "lunch", context: hostileContext });
+    const prompt = renderResearchPlanningPrompt({
+      query: "lunch",
+      context: hostileContext,
+      preparationAllowance: preparationAllowance(),
+    });
     expect(prompt).toContain(hostile);
     expect(prompt).toContain("<source_data>");
 
@@ -414,5 +438,71 @@ describe("research planner", () => {
       planInput({ context: hostileContext, query: "lunch" }),
     );
     expect(result.outcome).toBe("ready");
+  });
+
+  it("refuses a ceiling above the preparation purse", async () => {
+    const planner = createResearchPlanner({
+      drafter: drafter({
+        alternatives: alternatives(),
+        document: document({ generationCostCeiling: { amountMinor: 2001, currency: "AED" } }),
+        marketClaimKeys: [],
+      }),
+    });
+    await expect(planner.plan(planInput())).resolves.toEqual({
+      outcome: "refused",
+      reasonCode: "generation_ceiling_mismatch",
+      modelCostMinor: 12,
+    });
+  });
+
+  it("refuses a ceiling below the preparation purse", async () => {
+    const planner = createResearchPlanner({
+      drafter: drafter({
+        alternatives: alternatives(),
+        document: document({ generationCostCeiling: { amountMinor: 0, currency: "AED" } }),
+        marketClaimKeys: [],
+      }),
+    });
+    await expect(planner.plan(planInput())).resolves.toEqual({
+      outcome: "refused",
+      reasonCode: "generation_ceiling_mismatch",
+      modelCostMinor: 12,
+    });
+  });
+
+  it("refuses a ceiling in the wrong currency even at the right figure", async () => {
+    const planner = createResearchPlanner({
+      drafter: drafter({
+        alternatives: alternatives(),
+        document: document({ generationCostCeiling: { amountMinor: 2000, currency: "USD" } }),
+        marketClaimKeys: [],
+      }),
+    });
+    await expect(planner.plan(planInput())).resolves.toEqual({
+      outcome: "refused",
+      reasonCode: "generation_ceiling_mismatch",
+      modelCostMinor: 12,
+    });
+  });
+
+  it("refuses a repaired draft whose ceiling still drifts, with summed cost", async () => {
+    const drifted = {
+      alternatives: alternatives(),
+      document: document({ generationCostCeiling: { amountMinor: 9999, currency: "AED" } }),
+      marketClaimKeys: [],
+    };
+    const planner = createResearchPlanner({
+      drafter: {
+        draft: async () => ({ output: { alternatives: [] }, modelId: "research-draft@1", estimatedCostMinor: 12 }),
+        repair: async () => ({ output: drifted, modelId: "research-repair@1", estimatedCostMinor: 7 }),
+      },
+    });
+    // The repair fixed the parse but not the purse: the equality check runs
+    // after every successful parse, including a repaired one.
+    await expect(planner.plan(planInput())).resolves.toEqual({
+      outcome: "refused",
+      reasonCode: "generation_ceiling_mismatch",
+      modelCostMinor: 19,
+    });
   });
 });

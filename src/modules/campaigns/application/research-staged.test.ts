@@ -203,6 +203,9 @@ describe("staged research request", () => {
       organizationId: ORGANIZATION_ID,
       runId: RUN_ID,
       evidenceMaxAgeDays: 30,
+      // Matches the staged draft's generationCostCeiling below: the planner's
+      // exact-copy check passes, so this proves the prompt-to-purse path.
+      preparationAllowance: { amountMinor: 2000, currency: "AED" },
       externalCostMinor: 100,
     });
 

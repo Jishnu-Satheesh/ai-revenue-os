@@ -548,6 +548,28 @@ describe("Campaign research draft output contract", () => {
     }
   });
 
+  it("states the preparation purse rule the planner enforces", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
+    const contract = source.slice(source.indexOf("const RESEARCH_DRAFT_OUTPUT_CONTRACT"));
+
+    // The planner renders a <preparation_allowance> tag carrying the platform
+    // dispatch figure in the policy currency, and refuses any draft whose
+    // generationCostCeiling drifts from it (generation_ceiling_mismatch). The
+    // contract states the copy rule; a prompt without the tag drafts an
+    // honest zero with preparation blocked rather than inventing a purse.
+    const purseLine =
+      contract.split("\n").find((line) => line.includes("generationCostCeiling MUST equal")) ?? "";
+    for (const marker of [
+      "generationCostCeiling MUST equal <preparation_allowance> exactly",
+      "same amountMinor, same currency",
+      "if the tag is absent, set amountMinor 0",
+      "readiness.canPrepare false",
+      "missing preparation budget",
+    ]) {
+      expect(purseLine).toContain(marker);
+    }
+  });
+
   it("states the sourceless honest-empty rule", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
     const contract = source.slice(source.indexOf("const RESEARCH_DRAFT_OUTPUT_CONTRACT"));

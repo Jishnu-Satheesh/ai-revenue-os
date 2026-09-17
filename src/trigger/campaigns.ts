@@ -1120,6 +1120,7 @@ const RESEARCH_DRAFT_OUTPUT_CONTRACT = [
   "Copy ids verbatim, never invent: evidence.organizationId is the <organization_id>; business_memory_context and document.memoryContextManifestId reuse the <memory_context> manifest; (no pinned entries): manifest null, no business_memory_context; market_claim_citation needs a real <claim> id and window, else evidence [].",
   "Risks, evidenceRefs, assumptions, limitations, blockers, missingData: each entry under 40 chars.",
   "When <memory_context> shows no pinned entries and <external_evidence> shows unavailable: output evidence as an empty array, marketClaimKeys as an empty array, memoryContextManifestId as null, and put the reviewable content in assumptions. Citing memory or market evidence that is not shown above fails validation — an honest empty array passes.",
+  "document.generationCostCeiling MUST equal <preparation_allowance> exactly (same amountMinor, same currency); if the tag is absent, set amountMinor 0 AND readiness.canPrepare false with a blocker naming the missing preparation budget.",
   `Offer per kind exactly: ${proposalOfferSchema.options.map((option) => `${option.shape.kind.def.values.join("")} exactly ${Object.keys(option.shape).join(", ")}`).join("; ")}. No other keys on any offer ever.`,
 ].join(" ");
 
@@ -1312,6 +1313,10 @@ export const researchCampaignProposalTask = schemaTask({
         // Resolved from the binding policy by the scheduler or route that
         // enqueued this run — carried explicitly, never defaulted (D06).
         evidenceMaxAgeDays: parsed.evidenceMaxAgeDays,
+        // The preparation purse: the platform dispatch figure in the policy
+        // currency, resolved by the dispatcher. The planner copies it exactly
+        // into document.generationCostCeiling under a deterministic check.
+        preparationAllowance: parsed.preparationAllowance,
         externalCostMinor: 0,
       },
       {

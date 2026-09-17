@@ -97,6 +97,7 @@ function runInput(overrides: Record<string, unknown> = {}) {
     organizationId: ORGANIZATION_ID,
     runId: RUN_ID,
     evidenceMaxAgeDays: 30,
+    preparationAllowance: { amountMinor: 500, currency: "AED" },
     ...overrides,
   };
 }
@@ -559,6 +560,19 @@ describe("research service", () => {
       }),
     );
     await expect(service.run(runInput())).rejects.toBeInstanceOf(ResearchClaimLost);
+  });
+
+  it("hands the preparation purse to the planner for its exact-copy check", async () => {
+    const plan = vi.fn(async () => readyPlan() as never);
+    const service = createResearchService(dependencies({ planner: { plan } }));
+    await service.run(runInput({ preparationAllowance: { amountMinor: 500, currency: "AED" } }));
+    // The service carries the purse; the planner enforces the copy. A number
+    // invented here would become a ceiling generation refuses to honour.
+    expect(plan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparationAllowance: { amountMinor: 500, currency: "AED" },
+      }),
+    );
   });
 
   it("hands the admitted pin to context instead of re-deriving it", async () => {

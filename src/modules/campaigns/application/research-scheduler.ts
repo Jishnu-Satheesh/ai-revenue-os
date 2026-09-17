@@ -208,18 +208,23 @@ async function evaluateOneOrganization(
       return;
     case "admitted":
     case "replayed": {
-      if (evaluated.runId === null || evaluated.evidenceMaxAgeDays === null) {
+      if (
+        evaluated.runId === null ||
+        evaluated.evidenceMaxAgeDays === null ||
+        evaluated.allowanceCurrency === null
+      ) {
         throw new Error(`An admitted evaluation without a run for ${organizationId}.`);
       }
       // A replayed admission still dispatches: the worker's own claim is
       // what stops a second delivery doing the work twice, so re-asking is
-      // safe while not re-asking would strand a run whose first dispatch
-      // was lost. Same rule as the manual path.
+      // safe while not re-asking would strand a run whose first dispatch was
+      // lost. Same rule as the manual path.
       const started = await dependencies.dispatch({
         organizationId,
         runId: evaluated.runId,
         correlationId: dependencies.newCorrelationId(),
         evidenceMaxAgeDays: evaluated.evidenceMaxAgeDays,
+        allowanceCurrency: evaluated.allowanceCurrency,
       });
       if (evaluated.outcome === "admitted") result.admitted += 1;
       else result.replayed += 1;

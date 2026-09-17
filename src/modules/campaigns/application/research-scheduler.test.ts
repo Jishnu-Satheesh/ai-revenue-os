@@ -127,15 +127,17 @@ describe("the hourly research tick", () => {
     // reads the bytes later through its claim.
     expect(seen[0]?.evidenceFingerprint).toBe(`memory:${"d".repeat(64)}`);
     expect(seen[0]?.idempotencyKey).toMatch(/^[0-9a-f]{64}$/);
-    // Identifiers and the one operating limit the worker refuses to default.
-    // The staged question, the manifest bytes and the budget stay out of the
-    // payload — the worker re-reads them from the admitted run.
+    // Identifiers, the one operating limit the worker refuses to default, and
+    // the policy currency the dispatcher pairs with the platform preparation
+    // figure. The staged question, the manifest bytes and the budget stay out
+    // of the payload — the worker re-reads them from the admitted run.
     expect(dispatched).toEqual([
       {
         organizationId: ORG_A,
         runId: RUN,
         correlationId: "22222222-2222-4222-8222-222222222222",
         evidenceMaxAgeDays: 30,
+        allowanceCurrency: "AED",
       },
     ]);
   });
@@ -329,13 +331,30 @@ describe("the hourly research tick", () => {
     expect(dispatched[0]).toMatchObject({ runId: "44444444-4444-4444-8444-444444444444" });
   });
 
+  it("refuses to dispatch an admission without a policy currency", async () => {
+    // An admitted evaluation that names no currency cannot fund a purse: the
+    // payload schema requires one, and the worker refuses to default it. The
+    // tick fails loudly for that tenant rather than dispatching a run the
+    // worker can only reject.
+    const { run, dispatched } = harness({
+      dueOrgs: [ORG_A],
+      evaluate: () => admitted({ allowanceCurrency: null }),
+    });
+
+    const result = await run();
+
+    expect(result).toMatchObject({ admitted: 0, failed: [ORG_A] });
+    expect(dispatched).toEqual([]);
+  });
+
   it("hands the worker the same payload shape the manual Ask path uses", async () => {
     // Manual and scheduled runs share one worker and one dispatch contract
-    // (organizationId, runId, correlationId, evidenceMaxAgeDays): identifiers
-    // plus the one operating limit the worker refuses to default. The budget,
-    // the staged question and the trigger kind all travel on the admitted run
-    // row, never in either payload — so neither caller can widen what its run
-    // was admitted to do.
+    // (organizationId, runId, correlationId, evidenceMaxAgeDays,
+    // allowanceCurrency): identifiers plus the one operating limit the worker
+    // refuses to default, plus the policy currency the dispatcher pairs with
+    // the platform preparation figure. The budget, the staged question and
+    // the trigger kind all travel on the admitted run row, never in either
+    // payload — so neither caller can widen what its run was admitted to do.
     const dispatched: unknown[] = [];
     await runResearchScheduleSweep({
       due: {
@@ -352,7 +371,7 @@ describe("the hourly research tick", () => {
     });
 
     expect(Object.keys(dispatched[0] as Record<string, unknown>).sort()).toEqual(
-      ["correlationId", "evidenceMaxAgeDays", "organizationId", "runId"].sort(),
+      ["allowanceCurrency", "correlationId", "evidenceMaxAgeDays", "organizationId", "runId"].sort(),
     );
   });
 });

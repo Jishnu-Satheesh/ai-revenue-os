@@ -4,20 +4,28 @@ import { tasks } from "@trigger.dev/sdk";
 
 import { logger } from "@/lib/logger";
 import type { ResearchWorkerDispatch } from "@/modules/campaigns/application/research-dispatch";
+import { generationCostCeilingMinor } from "@/modules/campaigns/infrastructure/generation-dispatch";
 import type { researchCampaignProposalTask } from "@/trigger/campaigns";
 
 /**
  * Handing an admitted research run to a worker.
  *
- * Trigger is transport and nothing else. The payload carries identifiers and
- * one operating limit, and everything that matters — the staged question, the
- * trigger kind, the pinned manifest, the budget — is re-read by the worker from
- * the admitted run row through its claim. A payload cannot widen what a run was
- * admitted to do.
+ * Trigger is transport and nothing else. The payload carries identifiers, one
+ * operating limit, and the preparation purse, and everything that matters —
+ * the staged question, the trigger kind, the pinned manifest, the budget — is
+ * re-read by the worker from the admitted run row through its claim. A payload
+ * cannot widen what a run was admitted to do.
  *
  * `evidenceMaxAgeDays` travels because the worker refuses to default it: what
  * counts as evidence too old to use is a numeric operating limit the
  * organization set, not one the platform picks (D06).
+ *
+ * The preparation purse is the platform-configured dispatch figure
+ * (`generationCostCeilingMinor()`) expressed in the admitting policy's own
+ * currency. Without it the planner drafts a ceiling of nothing and every
+ * proposal-born campaign refuses generation with a correct-but-dead 422 — so
+ * the figure is resolved here, once, for both the manual and the scheduled
+ * path, rather than trusted from any caller.
  */
 export const dispatchResearchWorker: ResearchWorkerDispatch = async (input) => {
   // Keyed by the run, so a retried dispatch of the same admitted run does not
@@ -33,6 +41,10 @@ export const dispatchResearchWorker: ResearchWorkerDispatch = async (input) => {
         runId: input.runId,
         correlationId: input.correlationId,
         evidenceMaxAgeDays: input.evidenceMaxAgeDays,
+        preparationAllowance: {
+          amountMinor: generationCostCeilingMinor(),
+          currency: input.allowanceCurrency,
+        },
       },
       { idempotencyKey },
     );

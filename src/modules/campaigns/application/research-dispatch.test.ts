@@ -137,11 +137,14 @@ describe("asking for a piece of research", () => {
     await requestCampaignResearch(client, dispatch, input());
 
     // The worker refuses to default this; so does everything upstream of it.
+    // The policy currency travels beside it so the dispatcher can pair it
+    // with the platform preparation figure — never a number this layer chose.
     expect(dispatch).toHaveBeenCalledWith({
       organizationId: ORGANIZATION,
       runId: RUN,
       correlationId: CORRELATION,
       evidenceMaxAgeDays: 30,
+      allowanceCurrency: "AED",
     });
   });
 

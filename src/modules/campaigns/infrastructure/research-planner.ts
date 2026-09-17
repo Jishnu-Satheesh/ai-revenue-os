@@ -24,6 +24,21 @@ import type { ResearchContext } from "@/modules/campaigns/infrastructure/researc
 
 export const RESEARCH_PLANNER_PROMPT_VERSION = 1;
 
+/**
+ * What preparing the approved creative may spend.
+ *
+ * The platform-configured dispatch figure (`generationCostCeilingMinor()`,
+ * default 500) expressed in the org's policy currency — never a number the
+ * model chose. The planner must copy it exactly into
+ * `document.generationCostCeiling`; a post-parse equality check enforces that,
+ * so a drifted ceiling refuses rather than reaching generation with a purse
+ * the dispatch will not honour.
+ */
+export type PreparationAllowance = {
+  amountMinor: number;
+  currency: string;
+};
+
 export const researchAlternativeSchema = z.strictObject({
   title: z.string().trim().min(1).max(200),
   summary: z.string().trim().min(1).max(2000),
@@ -94,8 +109,9 @@ export type ResearchPlanFailure =
 export function renderResearchPlanningPrompt(input: {
   query: string;
   context: ResearchContext;
+  preparationAllowance: PreparationAllowance;
 }): string {
-  const { context } = input;
+  const { context, preparationAllowance } = input;
   const memoryBlock =
     context.memory.entries.length === 0
       ? "<memory_context>\n(no pinned entries)\n</memory_context>"
@@ -116,8 +132,15 @@ export function renderResearchPlanningPrompt(input: {
           )
           .join("\n")}\n</external_evidence>`
       : `<external_evidence>\n(unavailable: ${context.evidence.status})\n</external_evidence>`;
+  const allowanceBlock =
+    `<preparation_allowance amountMinor="${preparationAllowance.amountMinor}" currency="${preparationAllowance.currency}">\n` +
+    `Preparing the approved creative may spend up to ${preparationAllowance.amountMinor} minor units ` +
+    `in ${preparationAllowance.currency}. The proposal's document.generationCostCeiling must equal ` +
+    `this allowance exactly — the same amountMinor and the same currency.\n` +
+    `</preparation_allowance>`;
   return [
     `<research_query>${input.query}</research_query>`,
+    allowanceBlock,
     `<source_data>`,
     `profile: ${context.source.organizationProfile}`,
     `objectives: ${context.source.objectives.join(" | ") || "(none stated)"}`,
@@ -143,6 +166,7 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
       query: string;
       triggerKind: string;
       context: ResearchContext;
+      preparationAllowance: PreparationAllowance;
     }): Promise<ResearchPlanResult> {
       const { context } = input;
 
@@ -162,7 +186,11 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
         };
       }
 
-      const prompt = renderResearchPlanningPrompt({ query: input.query, context });
+      const prompt = renderResearchPlanningPrompt({
+        query: input.query,
+        context,
+        preparationAllowance: input.preparationAllowance,
+      });
       const drafted = await dependencies.drafter.draft({
         prompt,
         correlationId: input.runId,
@@ -199,6 +227,18 @@ export function createResearchPlanner(dependencies: { drafter: ResearchDrafter }
         }
       }
       const { alternatives, document, marketClaimKeys } = parsed.data;
+
+      // The purse is set by the platform, not the model: the ceiling must
+      // equal the preparation allowance exactly, both fields. Anything else
+      // refuses here rather than reaching generation with a purse the
+      // dispatch will not honour. Checked before the citations because it is
+      // the cheapest deterministic comparison on the draft.
+      if (
+        document.generationCostCeiling.amountMinor !== input.preparationAllowance.amountMinor ||
+        document.generationCostCeiling.currency !== input.preparationAllowance.currency
+      ) {
+        return { outcome: "refused", reasonCode: "generation_ceiling_mismatch", modelCostMinor };
+      }
 
       // Every citation is checked against what was assembled. The checks run
       // cheapest-first, but every failure refuses: a draft is never partially

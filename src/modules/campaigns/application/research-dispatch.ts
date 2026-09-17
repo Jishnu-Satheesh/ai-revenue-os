@@ -193,6 +193,13 @@ export type ResearchWorkerDispatch = (input: {
   runId: string;
   correlationId: string;
   evidenceMaxAgeDays: number;
+  /**
+   * The admitting policy's own currency. The dispatcher pairs it with the
+   * platform-configured preparation figure, so the worker's purse is always
+   * the dispatch figure in the policy currency — never a number any caller
+   * chose.
+   */
+  allowanceCurrency: string;
 }) => Promise<boolean>;
 
 /**
@@ -243,6 +250,7 @@ export async function requestCampaignResearch(
     runId: admitted.runId,
     correlationId: input.correlationId,
     evidenceMaxAgeDays: input.evidenceMaxAgeDays,
+    allowanceCurrency: input.allowanceCurrency,
   });
 
   // The run is admitted either way. Saying "started" when no worker was asked

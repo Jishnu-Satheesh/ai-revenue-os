@@ -59,6 +59,23 @@ export function parseCampaignRevisionPayload(payload: unknown): CampaignRevision
  * lives on the admitted run row and reaches the worker through the
  * claim-bound loader, never through queue storage, dashboards, or logs.
  */
+/**
+ * What preparing the approved creative may spend, carried to the worker.
+ *
+ * The amount is the platform-configured dispatch figure
+ * (`generationCostCeilingMinor()`); the currency is the admitting policy's
+ * own (`campaign_research_policies.allowance_currency` for the run's bound
+ * version). The planner must copy it exactly into
+ * `document.generationCostCeiling` — a post-parse equality check refuses any
+ * drift, so a proposal-born campaign never reaches generation with a purse
+ * the dispatch will not honour.
+ */
+export const preparationAllowanceSchema = z.strictObject({
+  amountMinor: z.number().int().nonnegative().max(10_000_000),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+});
+export type PreparationAllowance = z.infer<typeof preparationAllowanceSchema>;
+
 export const campaignResearchPayloadSchema = z.strictObject({
   organizationId: uuidSchema,
   runId: uuidSchema,
@@ -69,6 +86,7 @@ export const campaignResearchPayloadSchema = z.strictObject({
    * what counts as a numeric operating limit (D06).
    */
   evidenceMaxAgeDays: z.number().int().positive().max(365),
+  preparationAllowance: preparationAllowanceSchema,
 });
 export type CampaignResearchPayload = z.infer<typeof campaignResearchPayloadSchema>;
 

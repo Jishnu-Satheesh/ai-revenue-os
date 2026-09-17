@@ -37,6 +37,16 @@ export const researchRunSchema = z.strictObject({
    * defaulted here, because an evidence age is an operating limit (D06).
    */
   evidenceMaxAgeDays: z.number().int().positive().max(365),
+  /**
+   * What preparing the approved creative may spend: the platform-configured
+   * dispatch figure in the admitting policy's currency, carried from the
+   * trigger payload. Required here for the same reason as the evidence age —
+   * the planner must copy it exactly, and the worker never invents it (D06).
+   */
+  preparationAllowance: z.strictObject({
+    amountMinor: z.number().int().nonnegative().max(10_000_000),
+    currency: z.string().regex(/^[A-Z]{3}$/),
+  }),
   /** Measured external spend so far, in minor units. Never estimated. */
   externalCostMinor: z.number().int().nonnegative().default(0),
 });
@@ -419,6 +429,7 @@ export function createResearchService(dependencies: ResearchServiceDependencies)
         query: effectiveQuestion,
         triggerKind: loaded.triggerKind,
         context,
+        preparationAllowance: input.preparationAllowance,
       });
       // An unpriced model call follows the generation precedent: measured
       // external spend is kept, and the unmeasured part adds nothing rather

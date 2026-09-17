@@ -1,5 +1,7 @@
 # Coordination board — Asset Library, then Campaign Studio
 
+<!-- 2026-09-17 Planner purse fix CLAIM: research-planner.ts (+ test), research-worker-dispatch.ts (new test), research-dispatch.ts (+ test), research-scheduler.ts (+ test), research-service.ts (+ service/staged tests), workflows/campaigns/contracts.ts, workflows/campaigns/research-proposal.test.ts, src/trigger/campaigns.ts (+ contract test), task-5-report.md (this slice's report). No migration, no UI, no policy-field change; peer WIP untouched. -->
+
 <!-- 2026-09-16 Campaign autonomous question swarm CLAIM (Agent D): src/trigger/campaigns.ts (research-task readSourceForDerivation + readRecommendationPicks wiring only) + adrs/0062-question-context-tier-rule.md (new, Proposed) + this board (this line). No commit/stash/push; no service/deriver/ordering/migration changes. -->
 
 <!-- 2026-09-16 Campaign autonomous question swarm CLAIM (Agent 4): src/trigger/campaigns.ts (research-task deriver wiring only) + src/modules/campaigns/application/research-dispatch.test.ts (verify-only, standing-question test exists L94, no change) + adrs/0061-autonomous-research-question-and-metered-tokens.md (new, Proposed) + this board (this line). No commit/stash/push; no migration/service/deriver-impl changes. -->

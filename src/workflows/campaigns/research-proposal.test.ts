@@ -66,7 +66,13 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 function payload(overrides: Record<string, unknown> = {}) {
-  return { organizationId: ORGANIZATION_ID, runId: RUN_ID, evidenceMaxAgeDays: 30, ...overrides };
+  return {
+    organizationId: ORGANIZATION_ID,
+    runId: RUN_ID,
+    evidenceMaxAgeDays: 30,
+    preparationAllowance: { amountMinor: 500, currency: "AED" },
+    ...overrides,
+  };
 }
 
 function liveSignal(): AbortSignal {
