@@ -49,7 +49,7 @@ export const campaignSummarySchema = z.strictObject({
   id: uuidSchema,
   organizationId: uuidSchema,
   title: z.string(),
-  sourceKind: z.enum(["manual_brief", "decision_opportunity"]),
+  sourceKind: z.enum(["manual_brief", "decision_opportunity", "campaign_proposal"]),
   briefId: uuidSchema.nullable(),
   opportunityId: uuidSchema.nullable(),
   state: z.string(),

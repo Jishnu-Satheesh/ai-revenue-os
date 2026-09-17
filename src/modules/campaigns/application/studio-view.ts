@@ -334,6 +334,7 @@ export type StudioChannelReadiness = ChannelReadiness & {
 };
 
 const SOURCE_LABEL: Readonly<Record<CampaignSummary["sourceKind"], string>> = {
+  campaign_proposal: "Campaign proposal",
   decision_opportunity: "Decision Engine opportunity",
   manual_brief: "Manual brief",
 };
