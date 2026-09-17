@@ -137,6 +137,52 @@ describe("authorizing a publication", () => {
     });
   });
 
+  it("refuses a selection whose output has a newer version, so a stale approval cannot launch", async () => {
+    // A later variant invalidates: the reviewed bytes are no longer the live
+    // output, and launching them would publish something already replaced.
+    const state = approvedState();
+    const entry = state.get(VERSION)!;
+    state.set(VERSION, { ...entry, currentVersion: entry.currentVersion + 1 });
+    store.readReviewState.mockResolvedValue(state);
+
+    const outcome = await service().approve({
+      organizationId: ORGANIZATION,
+      request: { manifest: manifest(), idempotencyKey: "stale-digest-11" },
+    });
+
+    expect(outcome).toMatchObject({
+      status: "not_admissible",
+      reasonCode: "selection_superseded",
+      deliverableVersionId: VERSION,
+    });
+    expect(store.approveLaunch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a selection from another tenant, which reads as unreviewed here", async () => {
+    // The review read is scoped to this tenant, so another tenant's output is
+    // simply absent from it. A guessed id from elsewhere can never authorize.
+    const foreign = "99999999-9999-4999-8999-999999999999";
+    store.readReviewState.mockResolvedValue(new Map());
+
+    const outcome = await service().approve({
+      organizationId: ORGANIZATION,
+      request: {
+        manifest: manifest({
+          selections: [{ deliverableId: DELIVERABLE, deliverableVersionId: foreign, contentHash: HASH_A }],
+          actions: [{ ...manifest().actions[0]!, deliverableVersionId: foreign }],
+        }),
+        idempotencyKey: "foreign-output-11",
+      },
+    });
+
+    expect(outcome).toMatchObject({
+      status: "not_admissible",
+      reasonCode: "selection_not_reviewed",
+      deliverableVersionId: foreign,
+    });
+    expect(store.approveLaunch).not.toHaveBeenCalled();
+  });
+
   it("reports a replay as a replay, so a double click does not read as two launches", async () => {
     store.approveLaunch.mockResolvedValue({ launchApprovalId: "launch", outcome: "replayed" });
 

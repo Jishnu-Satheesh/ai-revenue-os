@@ -441,6 +441,8 @@ export function CampaignDetailWorkspace({
             launchAuthorized={launchAuthorized}
             canPublish={canPublish}
             allOutputsReviewed={allOutputsReviewed}
+            deliverables={deliverables}
+            deliverablesReadFailed={deliverablesReadFailed}
           />
         </TabsContent>
 

@@ -57,11 +57,13 @@ const service = {
 };
 
 const context = vi.fn();
+const publish = vi.fn();
 
 function handlers() {
   return createLaunchRouteHandlers({
     context,
     serviceFor: () => service as unknown as CampaignLaunchService,
+    publish,
   });
 }
 
@@ -84,6 +86,8 @@ beforeEach(() => {
   service.digestFor.mockReset();
   service.approve.mockReset();
   context.mockReset();
+  publish.mockReset();
+  publish.mockResolvedValue(undefined);
   context.mockResolvedValue({
     organizationId: ORGANIZATION,
     user: { id: "user" },
@@ -247,5 +251,48 @@ describe("how an outcome reaches the client", () => {
     const response = await handlers().approve(post(approvalBody()), params());
 
     expect(response.status).toBe(503);
+  });
+});
+
+describe("announcing an approval", () => {
+  it("announces a newly saved authority once, with identifiers only", async () => {
+    const response = await handlers().approve(post(approvalBody()), params());
+
+    expect(response.status).toBe(201);
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      userId: "user",
+      eventName: "campaign.launch_approved",
+      payload: { campaignId: CAMPAIGN, bundleVersionId: BUNDLE, launchApprovalId: "approval" },
+    });
+    // Identifiers travel; the manifest, its words and its money stay in the campaign.
+    expect(JSON.stringify(publish.mock.calls)).not.toContain("Lunch is on.");
+  });
+
+  it("does not announce a replay, so a double-click is not a second approval", async () => {
+    service.approve.mockResolvedValue({
+      status: "replayed",
+      launchApprovalId: "approval",
+      launchDigest: launchDigest(manifest()),
+    });
+
+    const response = await handlers().approve(post(approvalBody()), params());
+
+    expect(response.status).toBe(200);
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("does not announce a refusal", async () => {
+    service.approve.mockResolvedValue({
+      status: "not_admissible",
+      reasonCode: "selection_not_reviewed",
+      deliverableVersionId: VERSION,
+    });
+
+    const response = await handlers().approve(post(approvalBody()), params());
+
+    expect(response.status).toBe(422);
+    expect(publish).not.toHaveBeenCalled();
   });
 });

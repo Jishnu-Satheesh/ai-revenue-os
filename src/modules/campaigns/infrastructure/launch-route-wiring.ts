@@ -3,7 +3,7 @@ import {
   organizationRolePermissions,
 } from "@/domain/access/permissions";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import { getOrganizationContext } from "@/lib/api/organization-context";
+import { getOrganizationContext, publishOrganizationEvent } from "@/lib/api/organization-context";
 import {
   createLaunchRouteHandlers,
   type LaunchRouteContext,
@@ -53,4 +53,5 @@ function productionServiceFor(context: LaunchRouteContext) {
 export const launchRouteHandlers = createLaunchRouteHandlers({
   context: productionContext,
   serviceFor: productionServiceFor,
+  publish: (input) => publishOrganizationEvent(input),
 });

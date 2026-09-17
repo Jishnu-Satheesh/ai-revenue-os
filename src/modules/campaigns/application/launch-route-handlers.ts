@@ -34,9 +34,21 @@ export type LaunchRouteContext = {
   membership: { role: OrganizationRole };
 };
 
+export type LaunchEventPublisher = (input: {
+  organizationId: string;
+  userId: string;
+  eventName: "campaign.launch_approved";
+  payload: { campaignId: string; bundleVersionId: string; launchApprovalId: string };
+}) => Promise<void>;
+
 export type LaunchRouteHandlerDependencies = {
   context(params: LaunchRouteParams, permission: LaunchPermission): Promise<LaunchRouteContext>;
   serviceFor(context: LaunchRouteContext): CampaignLaunchService;
+  /**
+   * Announced once per authority, not per click: a double-click replays the
+   * same authority and must not announce a second approval that never happened.
+   */
+  publish(input: Parameters<LaunchEventPublisher>[0]): Promise<void>;
 };
 
 const uuidSchema = z.string().uuid();
@@ -130,12 +142,28 @@ export function createLaunchRouteHandlers(dependencies: LaunchRouteHandlerDepend
           );
         }
 
-        return outcomeResponse(
-          await dependencies.serviceFor(context).approve({
+        const outcome = await dependencies.serviceFor(context).approve({
+          organizationId: context.organizationId,
+          request: { manifest: body.manifest, idempotencyKey: body.idempotencyKey },
+        });
+
+        // Only a newly saved authority is announced. A replay, a refusal, or
+        // any other outcome describes work that did not happen now, and
+        // announcing it would put a second approval on the record that nobody gave.
+        if (outcome.status === "saved") {
+          await dependencies.publish({
             organizationId: context.organizationId,
-            request: { manifest: body.manifest, idempotencyKey: body.idempotencyKey },
-          }),
-        );
+            userId: context.user.id,
+            eventName: "campaign.launch_approved",
+            payload: {
+              campaignId: body.manifest.campaignId,
+              bundleVersionId: body.manifest.bundleVersionId,
+              launchApprovalId: outcome.launchApprovalId,
+            },
+          });
+        }
+
+        return outcomeResponse(outcome);
       } catch (error) {
         return apiErrorResponse(error);
       }

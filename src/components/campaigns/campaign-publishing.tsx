@@ -4,6 +4,7 @@ import { AlertTriangle, PlugZap } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { ReviewableDeliverable } from "@/components/campaigns/campaign-creative-review";
 import type { Money, StudioChannelReadiness, StudioView } from "@/modules/campaigns/application/studio-view";
 
 /**
@@ -28,6 +29,25 @@ function formatMoney(money: Money | null): string {
     style: "currency",
     currency: money.currency,
   }).format(money.amountMinor / 100);
+}
+
+/**
+ * Why one output in the authorization set is blocking it, in words.
+ *
+ * Mirrors the Creative tab's vocabulary for the same states, so the two tabs
+ * cannot disagree about what is holding a publication up.
+ */
+function standingCopy(reasonCode: string | undefined): string {
+  switch (reasonCode) {
+    case "rejected":
+      return "this was rejected and needs a new version before it can go out";
+    case "superseded_by_newer_version":
+      return "a newer version of this output has replaced it";
+    case "reviewed_different_content":
+      return "this changed after it was approved, so the approval no longer fits";
+    default:
+      return "nobody has reviewed this yet";
+  }
 }
 
 function formatSchedule(iso: string, timeZone: string): string {
@@ -104,6 +124,8 @@ export function CampaignPublishing({
   launchAuthorized,
   canPublish,
   allOutputsReviewed,
+  deliverables,
+  deliverablesReadFailed,
 }: Readonly<{
   view: StudioView;
   organizationId: string;
@@ -114,8 +136,17 @@ export function CampaignPublishing({
   canPublish: boolean;
   /** Whether every produced output carries its own standing approval. */
   allOutputsReviewed: boolean;
+  /** The exact outputs an authorization would bind to, with their bytes. */
+  deliverables: readonly ReviewableDeliverable[];
+  /** True when the output list could not be read — not the same as empty. */
+  deliverablesReadFailed: boolean;
 }>) {
   const readinessUnknown = view.readiness === null;
+  // Only produced outputs can be authorized. A planned output with no finished
+  // bytes is not "the same set minus one" — it is not in the set at all.
+  const producedOutputs = deliverables.filter(
+    (deliverable) => deliverable.currentVersion !== null,
+  );
   const readinessByChannel = new Map(
     (view.readiness ?? []).map((entry) => [entry.channel, entry]),
   );
@@ -253,6 +284,61 @@ export function CampaignPublishing({
             your role does not hold. Reviewing outputs does not confer it.
           </p>
         )}
+
+        {/*
+          The exact set an authorization binds to: every produced output, named
+          by its row and its bytes. A batch authorization covers this whole list
+          and nothing else — an output added later, or re-rendered after review,
+          needs its own authorization rather than riding along on this one.
+        */}
+        <div className="flex flex-col gap-2">
+          <h4 className="text-sm font-semibold">The exact set under authorization</h4>
+          {deliverablesReadFailed ? (
+            <p className="text-sm text-muted-foreground">
+              The output list could not be read. That is a failed read, not an empty set — nothing
+              below should be taken as the full list.
+            </p>
+          ) : producedOutputs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No finished outputs yet, so there is nothing to authorize. This is an empty record,
+              not a complete set.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {producedOutputs.map((deliverable) => {
+                const version = deliverable.currentVersion!;
+                return (
+                  <li
+                    key={deliverable.id}
+                    className="flex flex-wrap items-baseline gap-x-2 text-sm"
+                  >
+                    <span className="font-medium">
+                      {deliverable.channel} · {deliverable.placement} · {deliverable.format} ·{" "}
+                      {deliverable.language}
+                    </span>
+                    <span className="text-muted-foreground">version {version.version}</span>
+                    {/* Truncated for reading; the authorization binds the full hash. */}
+                    <code
+                      className="rounded bg-muted px-1 font-mono text-xs"
+                      title={version.contentHash}
+                    >
+                      {version.contentHash.slice(0, 16)}…
+                    </code>
+                    {deliverable.eligibility.publishable ? (
+                      <span className="text-xs text-muted-foreground">
+                        Reviewed — these exact bytes.
+                      </span>
+                    ) : (
+                      <span className="text-xs font-medium text-destructive">
+                        Blocking: {standingCopy(deliverable.eligibility.reasonCode)}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
 
         {/*
           No control here yet. The terms a publication binds to — the connected
