@@ -32,7 +32,10 @@ const uuidSchema = z.string().uuid();
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/, "A hash must be SHA-256 hex.");
 const isoTimestampSchema = z
   .string()
-  .datetime({ offset: false })
+  // Offset required, not forbidden: stored instants round-trip through the API
+  // with an explicit +00:00 suffix, and rejecting the transport format hid
+  // approved reviews the same way once. A naive datetime is still refused.
+  .datetime({ offset: true })
   .describe("UTC instant. Rendered in the organization timezone, never stored in one.");
 
 /**
