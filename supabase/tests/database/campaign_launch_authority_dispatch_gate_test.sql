@@ -100,10 +100,12 @@ insert into public.campaign_creative_directions (
   'evidence_led', 'Second angle', 'The alternative treatment.'
 );
 
--- Three organic actions, all proposal-approved, deliberately split across
+-- Four organic actions, all proposal-approved, deliberately split across
 -- coverage: the first shares its direction and channel with the one reviewed
--- output below, the second uses another direction, the third another channel.
--- A partial authority must schedule the first and nothing else.
+-- output below, the second uses another direction, the third another channel,
+-- the fourth another placement. A partial authority must schedule the first
+-- and nothing else; the fourth hosts the directly placed pre-enforcement row
+-- so it never shares a unique slot with the forged-stamp row.
 insert into public.campaign_channel_actions (
   organization_id, bundle_version_id, action_key, direction_key, channel, placement,
   scheduled_for, requirement
@@ -128,6 +130,13 @@ insert into public.campaign_channel_actions (
     'd7000000-0000-4000-8000-000000000703'::uuid,
     'd7000000-0000-4000-8000-000000000601'::uuid,
     'facebook', 'feed_image', pg_catalog.now() - interval '1 hour', 'optional'
+  ),
+  (
+    'd7000000-0000-4000-8000-000000000101'::uuid,
+    'd7000000-0000-4000-8000-000000000501'::uuid,
+    'd7000000-0000-4000-8000-000000000704'::uuid,
+    'd7000000-0000-4000-8000-000000000602'::uuid,
+    'instagram', 'image_story', pg_catalog.now() - interval '1 hour', 'optional'
   );
 
 insert into public.campaign_visual_attestations (
@@ -157,7 +166,8 @@ insert into public.campaign_approvals (
   array[
     'd7000000-0000-4000-8000-000000000701'::uuid,
     'd7000000-0000-4000-8000-000000000702'::uuid,
-    'd7000000-0000-4000-8000-000000000703'::uuid
+    'd7000000-0000-4000-8000-000000000703'::uuid,
+    'd7000000-0000-4000-8000-000000000704'::uuid
   ]
 );
 
@@ -279,7 +289,7 @@ insert into public.campaign_action_runs (
   'd7000000-0000-4000-8000-000000000101'::uuid,
   'd7000000-0000-4000-8000-000000000301'::uuid,
   'd7000000-0000-4000-8000-000000000501'::uuid,
-  'd7000000-0000-4000-8000-000000000702'::uuid,
+  'd7000000-0000-4000-8000-000000000704'::uuid,
   pg_catalog.now() - interval '1 hour'
 );
 
