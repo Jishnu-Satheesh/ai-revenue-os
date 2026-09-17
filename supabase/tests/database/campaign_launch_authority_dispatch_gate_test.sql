@@ -97,7 +97,7 @@ insert into public.campaign_creative_directions (
   'd7000000-0000-4000-8000-000000000101'::uuid,
   'd7000000-0000-4000-8000-000000000501'::uuid,
   'd7000000-0000-4000-8000-000000000602'::uuid,
-  'control', 'Second angle', 'The alternative treatment.'
+  'evidence_led', 'Second angle', 'The alternative treatment.'
 );
 
 -- Three organic actions, all proposal-approved, deliberately split across
