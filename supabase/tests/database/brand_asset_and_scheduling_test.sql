@@ -7,7 +7,8 @@ select extensions.no_plan();
 insert into auth.users (id)
 values
   ('8b000000-0000-4000-8000-000000000001'::uuid),
-  ('8b000000-0000-4000-8000-000000000002'::uuid);
+  ('8b000000-0000-4000-8000-000000000002'::uuid),
+  ('8b000000-0000-4000-8000-000000000003'::uuid);
 
 -- Inert account fixture: organizations.account_id is NOT NULL, but this
 -- suite grants no account membership, so access still resolves purely from
@@ -37,6 +38,11 @@ values
     '8b000000-0000-4000-8000-000000000101'::uuid,
     '8b000000-0000-4000-8000-000000000001'::uuid,
     'operator'
+  ),
+  (
+    '8b000000-0000-4000-8000-000000000101'::uuid,
+    '8b000000-0000-4000-8000-000000000003'::uuid,
+    'owner'
   ),
   (
     '8b000000-0000-4000-8000-000000000102'::uuid,
@@ -315,6 +321,69 @@ insert into public.campaign_approvals (
   array['8b000000-0000-4000-8000-000000000701'::uuid]
 );
 
+-- Scheduling now also requires publication authority, so this suite authorizes
+-- the reviewed output it schedules. The owner reviews and approves; the
+-- operator below still performs the schedule itself.
+create temporary table schedule_launch_state (key text primary key, value jsonb not null);
+grant select, insert, update on schedule_launch_state to authenticated, service_role;
+
+set local role service_role;
+
+insert into schedule_launch_state (key, value)
+select 'version', public.record_campaign_deliverable_version(
+  '8b000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'campaign_id', '8b000000-0000-4000-8000-000000000301',
+    'channel', 'instagram', 'placement', 'feed', 'language', 'en', 'format', 'feed',
+    'bundle_version_id', '8b000000-0000-4000-8000-000000000501',
+    'direction_key', '8b000000-0000-4000-8000-000000000601',
+    'source_kind', 'final_image',
+    'final_asset_id', '8b000000-0000-4000-8000-000000000a01',
+    'copy', jsonb_build_object('caption', 'Lunch is on.'),
+    'render_inputs', jsonb_build_object('templateVersion', 3),
+    'render_digest', 'digest-one', 'content_hash', repeat('a', 64)
+  )
+);
+
+set local role authenticated;
+set local request.jwt.claim.sub = '8b000000-0000-4000-8000-000000000003';
+
+insert into schedule_launch_state (key, value)
+select 'review', public.review_campaign_deliverable_version(
+  '8b000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'deliverable_version_id',
+      (select value ->> 'deliverable_version_id' from schedule_launch_state where key = 'version'),
+    'content_hash', repeat('a', 64),
+    'decision', 'approved', 'idempotency_key', 'owner-reviews-8b'
+  )
+);
+
+insert into schedule_launch_state (key, value)
+select 'authority', public.approve_campaign_launch(
+  '8b000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'campaign_id', '8b000000-0000-4000-8000-000000000301',
+    'bundle_version_id', '8b000000-0000-4000-8000-000000000501',
+    'manifest', jsonb_build_object('schemaVersion', 1),
+    'launch_digest', repeat('2', 64),
+    'idempotency_key', 'owner-launches-8b',
+    'selections', jsonb_build_array(
+      jsonb_build_object(
+        'deliverable_version_id',
+          (select value ->> 'deliverable_version_id' from schedule_launch_state where key = 'version'),
+        'content_hash', repeat('a', 64)
+      )
+    )
+  )
+);
+
+select extensions.is(
+  (select value ->> 'outcome' from schedule_launch_state where key = 'authority'),
+  'saved',
+  'the reviewed output authorizes publication before scheduling'
+);
+
 set local role authenticated;
 set local request.jwt.claim.sub = '8b000000-0000-4000-8000-000000000001';
 
@@ -340,6 +409,18 @@ select extensions.is(
   ),
   '8b000000-0000-4000-8000-000000000701'::uuid,
   'the unapproved action is left alone'
+);
+
+select extensions.is(
+  (
+    select launch_approval_id
+      = (select (value ->> 'launch_approval_id')::uuid from schedule_launch_state where key = 'authority')
+      and launch_digest = repeat('2', 64)
+    from public.campaign_action_runs
+    where organization_id = '8b000000-0000-4000-8000-000000000101'::uuid
+  ),
+  true,
+  'and the scheduled run is stamped with the authority it was scheduled under'
 );
 
 -- Scheduling twice must not double-book the same action.

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { DomainError, toPublicError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import type { OrganizationPermission } from "@/domain/access/permissions";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { campaignLaunchManifestSchema } from "@/domain/campaigns/launch";
@@ -151,16 +152,30 @@ export function createLaunchRouteHandlers(dependencies: LaunchRouteHandlerDepend
         // any other outcome describes work that did not happen now, and
         // announcing it would put a second approval on the record that nobody gave.
         if (outcome.status === "saved") {
-          await dependencies.publish({
-            organizationId: context.organizationId,
-            userId: context.user.id,
-            eventName: "campaign.launch_approved",
-            payload: {
+          try {
+            await dependencies.publish({
+              organizationId: context.organizationId,
+              userId: context.user.id,
+              eventName: "campaign.launch_approved",
+              payload: {
+                campaignId: body.manifest.campaignId,
+                bundleVersionId: body.manifest.bundleVersionId,
+                launchApprovalId: outcome.launchApprovalId,
+              },
+            });
+          } catch {
+            // The approval stands with or without its announcement: the
+            // authority row is the record, the event is a notification about
+            // it. Failing the request here would report an error over work
+            // that happened, and the retry would replay silently — losing the
+            // event anyway while also lying about the outcome. So the loss is
+            // logged, with the identifiers needed to reconcile it, and the
+            // saved authority is still returned.
+            logger.warn("campaign.launch_approved_announcement_failed", {
+              organizationId: context.organizationId,
               campaignId: body.manifest.campaignId,
-              bundleVersionId: body.manifest.bundleVersionId,
-              launchApprovalId: outcome.launchApprovalId,
-            },
-          });
+            });
+          }
         }
 
         return outcomeResponse(outcome);

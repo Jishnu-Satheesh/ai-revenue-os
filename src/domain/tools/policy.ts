@@ -22,6 +22,8 @@ export type PreflightRefusalCode =
   | "approval_revoked"
   | "attestation_missing"
   | "action_not_approved"
+  | "launch_authority_superseded"
+  | "launch_authority_digest_mismatch"
   | "outside_schedule_window"
   | "campaign_cancelled"
   | "policy_version_changed"
@@ -329,6 +331,10 @@ export function explainRefusal(codes: readonly PreflightRefusalCode[]): string {
     approval_revoked: "the approval was revoked",
     attestation_missing: "the visual-truth attestation is missing",
     action_not_approved: "this action was not part of what was approved",
+    launch_authority_superseded:
+      "the publication authority covering this action was superseded",
+    launch_authority_digest_mismatch:
+      "the authorized publication terms no longer match this action",
     outside_schedule_window: "it is not yet time for this action",
     campaign_cancelled: "the campaign was cancelled",
     policy_version_changed: "policy changed since the approval was given",

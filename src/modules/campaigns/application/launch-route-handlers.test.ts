@@ -295,4 +295,21 @@ describe("announcing an approval", () => {
     expect(response.status).toBe(422);
     expect(publish).not.toHaveBeenCalled();
   });
+
+  it("still returns the saved authority when the announcement fails, and logs the loss", async () => {
+    // The authority row is the record; the event is a notification about it.
+    // Failing the request would report an error over work that happened, and
+    // the retry would replay silently — losing the event anyway while also
+    // lying about the outcome.
+    publish.mockRejectedValue(new Error("event bus unavailable"));
+
+    const response = await handlers().approve(post(approvalBody()), params());
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({
+      outcome: "saved",
+      launchApprovalId: "approval",
+      launchDigest: launchDigest(manifest()),
+    });
+  });
 });

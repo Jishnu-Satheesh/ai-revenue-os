@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { apiErrorResponse, publishOrganizationEvent } from "@/lib/api/organization-context";
+import { DomainError } from "@/lib/errors";
 import { scheduleRequestSchema } from "@/modules/campaigns/application/api-schemas";
 import {
   campaignRouteContext,
@@ -14,7 +15,7 @@ type ScheduleRpc = {
   rpc(
     name: "schedule_campaign_actions",
     args: Record<string, unknown>,
-  ): Promise<{ data: unknown; error: { code?: string } | null }>;
+  ): Promise<{ data: unknown; error: { code?: string; message?: string } | null }>;
 };
 
 /**
@@ -59,6 +60,17 @@ export async function POST(
       },
     );
     if (error || !data) {
+      // Fail closed, visibly: without a live launch authority nothing is
+      // queued, and the operator is told the one act that unblocks it rather
+      // than a generic failure that invites retrying the same call.
+      if (error?.message?.includes("campaign_schedule_requires_launch_authority")) {
+        return apiErrorResponse(
+          new DomainError(
+            "DOMAIN_ERROR",
+            "Publication has not been authorized for these exact outputs yet. Authorize publication first, then schedule again.",
+          ),
+        );
+      }
       return apiErrorResponse(new Error("The campaign could not be scheduled."));
     }
 
