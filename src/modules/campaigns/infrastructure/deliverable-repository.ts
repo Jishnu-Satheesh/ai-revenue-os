@@ -1,5 +1,6 @@
 import { campaignDeliverableReviewSchema } from "@/domain/campaigns/deliverable";
 import type { CampaignDeliverableReview } from "@/domain/campaigns/deliverable";
+import { logger } from "@/lib/logger";
 import type {
   DeliverableFailure,
   DeliverableStore,
@@ -170,7 +171,18 @@ export function createDeliverableRepository(client: DeliverablePersistence): Del
             note: row.note ?? null,
             reviewedAt: row.reviewed_at,
           });
-          if (!parsed.success) continue;
+          if (!parsed.success) {
+            // A stored review that no longer parses is data corruption, not an
+            // unreviewed output: skipping it silently once hid every review
+            // behind a timestamp format. Log with the tenant it belongs to so
+            // the row can be found, and keep the output unreviewed (fail
+            // closed) rather than failing the whole list over one bad row.
+            logger.warn("campaign.deliverable_review_unreadable", {
+              organizationId: input.organizationId,
+              campaignId: input.campaignId,
+            });
+            continue;
+          }
 
           const existing = reviewsByVersion.get(parsed.data.deliverableVersionId);
           if (existing) existing.push(parsed.data);

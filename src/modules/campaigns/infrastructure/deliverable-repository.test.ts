@@ -191,4 +191,34 @@ describe("listing a campaign's outputs", () => {
 
     expect(listed[0]?.reviews).toHaveLength(0);
   });
+
+  it("keeps a review whose timestamp wears the database's offset suffix", async () => {
+    // PostgREST renders timestamptz with an explicit +00:00 suffix. Rejecting
+    // the transport format once hid every review behind "nobody has reviewed".
+    const listed = await createDeliverableRepository(
+      listClient(
+        listTables({
+          campaign_deliverable_reviews: {
+            data: [
+              {
+                id: "55555555-5555-4555-8555-555555555555",
+                organization_id: ORGANIZATION,
+                deliverable_id: DELIVERABLE,
+                deliverable_version_id: VERSION,
+                content_hash: HASH,
+                actor_id: "66666666-6666-4666-8666-666666666666",
+                decision: "approved",
+                reason_codes: [],
+                note: null,
+                reviewed_at: "2026-09-17T15:44:32.634299+00:00",
+              },
+            ],
+            error: null,
+          },
+        }),
+      ),
+    ).listForCampaign({ organizationId: ORGANIZATION, campaignId: CAMPAIGN });
+
+    expect(listed[0]?.reviews).toHaveLength(1);
+  });
 });

@@ -25,7 +25,11 @@ const uuidSchema = z.string().uuid();
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/, "A content hash must be SHA-256 hex.");
 const isoTimestampSchema = z
   .string()
-  .datetime({ offset: false })
+  // Offset required, not forbidden: Postgres renders its UTC instants with an
+  // explicit +00:00 suffix over the API, and rejecting the transport format
+  // silently dropped every review row. A naive datetime (no instant at all)
+  // is still refused.
+  .datetime({ offset: true })
   .describe("UTC instant. Rendered in the organization timezone, never stored in one.");
 
 /**
