@@ -318,6 +318,23 @@ export function preparationAuthority(
 }
 
 /**
+ * Whether the approved version cites any evidence this tenant may generate from.
+ *
+ * An approval mints a campaign, and generation reads only the evidence pinned
+ * in `campaign_source_snapshots` — so an approval that cited nothing pinnable
+ * must leave the campaign honestly unstartable rather than pin an invented
+ * snapshot. A same-tenant source ref or the proposal's own context manifest
+ * counts; another tenant's records never do, whatever they would support.
+ */
+export function hasPinnableProposalEvidence(
+  document: CampaignProposalDocument,
+  organizationId: string,
+): boolean {
+  if (document.memoryContextManifestId !== null) return true;
+  return document.evidence.some((reference) => reference.organizationId === organizationId);
+}
+
+/**
  * Whether this document may be put in front of a person at all (D07).
  *
  * D07 is confirmed product policy: a proposal built only from the client's own

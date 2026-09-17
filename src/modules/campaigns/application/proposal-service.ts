@@ -5,6 +5,7 @@ import {
   campaignProposalDocumentSchema,
   campaignProposalDecisionKindSchema,
   campaignProposalSourceKindSchema,
+  hasPinnableProposalEvidence,
   preparationAuthority,
   type CampaignProposalDocument,
   type PreparationAuthority,
@@ -144,6 +145,24 @@ export type ProposalStore = {
     proposalId: string;
     proposalVersionId: string;
   }): Promise<CampaignProposalDocument | null>;
+  /**
+   * Pins the approval-time evidence snapshot for a proposal-born campaign.
+   *
+   * Approving a proposal mints a campaign with no `campaign_source_snapshots`
+   * row, and generation reads only that pin — so without this, Generate on a
+   * proposal-born campaign honestly refuses forever. The writer is the ADR 0058
+   * `refresh_campaign_source_snapshot` repair: it inserts a new snapshot from
+   * the organization's verified facts and never invents evidence, and it pins
+   * nothing new when the facts are identical to the newest snapshot.
+   *
+   * Never throws: the decision is already committed when this runs, so a pin
+   * that cannot be written is reported as unpinned and the recorded approval
+   * stands. The campaign then keeps the existing honest refusal until repaired.
+   */
+  pinApprovalSnapshot(input: {
+    organizationId: string;
+    campaignId: string;
+  }): Promise<{ sourceSnapshotId: string | null; refreshed: boolean }>;
 };
 
 export type ProposalPersistenceFailure = {
@@ -289,6 +308,24 @@ export function createCampaignProposalService(dependencies: { store: ProposalSto
             proposalVersionId: parsed.proposalVersionId,
           });
           authority = document ? preparationAuthority(document) : null;
+
+          // The campaign this approval minted has no pinned evidence yet, and
+          // generation reads only the pin. Pin only when the approved version
+          // cited pinnable evidence — a version citing nothing leaves the
+          // campaign honestly unstartable with the existing refusal copy.
+          // Replays pin too: a campaign approved before this link existed
+          // heals on its next replayed approval, and the writer itself pins
+          // nothing when the facts are unchanged.
+          if (
+            saved.linkedCampaignId !== null &&
+            document !== null &&
+            hasPinnableProposalEvidence(document, input.organizationId)
+          ) {
+            await dependencies.store.pinApprovalSnapshot({
+              organizationId: input.organizationId,
+              campaignId: saved.linkedCampaignId,
+            });
+          }
         }
 
         return {

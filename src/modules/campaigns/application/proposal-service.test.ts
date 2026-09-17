@@ -13,6 +13,8 @@ const OTHER_ORGANIZATION = "22222222-2222-4222-8222-222222222222";
 const PROPOSAL = "33333333-3333-4333-8333-333333333333";
 const VERSION = "44444444-4444-4444-8444-444444444444";
 const MANIFEST = "55555555-5555-4555-8555-555555555555";
+const LINKED_CAMPAIGN = "77777777-7777-4777-8777-777777777777";
+const SNAPSHOT = "88888888-8888-4888-8888-888888888888";
 
 function document(overrides: Partial<CampaignProposalDocument> = {}): CampaignProposalDocument {
   return {
@@ -65,6 +67,7 @@ const store = {
   completeVersion: vi.fn(),
   decide: vi.fn(),
   readVersionDocument: vi.fn(),
+  pinApprovalSnapshot: vi.fn(),
 } satisfies Record<keyof ProposalStore, ReturnType<typeof vi.fn>>;
 
 function service() {
@@ -82,9 +85,10 @@ beforeEach(() => {
   store.decide.mockResolvedValue({
     decisionId: "66666666-6666-4666-8666-666666666666",
     outcome: "saved",
-    linkedCampaignId: "77777777-7777-4777-8777-777777777777",
+    linkedCampaignId: LINKED_CAMPAIGN,
   });
   store.readVersionDocument.mockResolvedValue(document());
+  store.pinApprovalSnapshot.mockResolvedValue({ sourceSnapshotId: SNAPSHOT, refreshed: true });
 });
 
 describe("opening a proposal", () => {
@@ -322,5 +326,125 @@ describe("deciding a proposal", () => {
 
     const value = outcome.status === "saved" ? outcome.value : null;
     expect(value?.authority?.mayPrepareCreative).toBe(false);
+  });
+
+  it("pins an approval-time snapshot from the evidence the approved version cited", async () => {
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-12",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    expect(store.pinApprovalSnapshot).toHaveBeenCalledTimes(1);
+    expect(store.pinApprovalSnapshot).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      campaignId: LINKED_CAMPAIGN,
+    });
+  });
+
+  it("pins nothing when the approved version cites no evidence, leaving the honest refusal in place", async () => {
+    store.readVersionDocument.mockResolvedValue(
+      document({ evidence: [], memoryContextManifestId: null }),
+    );
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-13",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    expect(store.pinApprovalSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("pins nothing for a rejection, which mints no campaign to pin for", async () => {
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "dismissed",
+        reason: "Not this quarter.",
+        idempotencyKey: "owner-dismisses-12",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    expect(store.pinApprovalSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("pins on a replayed approval too, healing campaigns approved before the link existed", async () => {
+    store.decide.mockResolvedValue({
+      decisionId: "66666666-6666-4666-8666-666666666666",
+      outcome: "replayed",
+      linkedCampaignId: LINKED_CAMPAIGN,
+    });
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-12",
+      },
+    });
+
+    expect(outcome).toMatchObject({ status: "replayed" });
+    expect(store.pinApprovalSnapshot).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      campaignId: LINKED_CAMPAIGN,
+    });
+  });
+
+  it("leaves a recorded approval standing when the pin cannot be written", async () => {
+    store.pinApprovalSnapshot.mockResolvedValue({ sourceSnapshotId: null, refreshed: false });
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-14",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    const value = outcome.status === "saved" ? outcome.value : null;
+    expect(value?.linkedCampaignId).toBe(LINKED_CAMPAIGN);
+  });
+
+  it("refuses a cross-tenant decide and writes no snapshot for it", async () => {
+    store.decide.mockRejectedValue({ kind: "not_found" });
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "foreign-approval-11",
+      },
+    });
+
+    expect(outcome).toEqual({ status: "forbidden" });
+    expect(store.readVersionDocument).not.toHaveBeenCalled();
+    expect(store.pinApprovalSnapshot).not.toHaveBeenCalled();
   });
 });

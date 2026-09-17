@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   admitProposal,
   campaignProposalDocumentSchema,
+  hasPinnableProposalEvidence,
   materialTermsChanged,
   preparationAuthority,
   type CampaignProposalDocument,
@@ -314,5 +315,51 @@ describe("D07 — what may be put in front of a person", () => {
     });
 
     expect(admission.outcome).toBe("admissible");
+  });
+});
+
+describe("the approval-time evidence pin", () => {
+  it("finds pinnable evidence in a same-tenant source ref", () => {
+    expect(hasPinnableProposalEvidence(document(), ORGANIZATION)).toBe(true);
+  });
+
+  it("finds pinnable evidence in the context manifest alone", () => {
+    expect(
+      hasPinnableProposalEvidence(
+        document({ evidence: [], memoryContextManifestId: MANIFEST }),
+        ORGANIZATION,
+      ),
+    ).toBe(true);
+  });
+
+  it("finds nothing pinnable when the version cites nothing at all", () => {
+    expect(
+      hasPinnableProposalEvidence(
+        document({ evidence: [], memoryContextManifestId: null }),
+        ORGANIZATION,
+      ),
+    ).toBe(false);
+  });
+
+  it("never treats another tenant's records as pinnable", () => {
+    expect(
+      hasPinnableProposalEvidence(
+        document({
+          evidence: [
+            {
+              kind: "business_memory_context",
+              organizationId: OTHER_ORGANIZATION,
+              contextManifestId: MANIFEST,
+              sourceRevision: 4,
+              observedFrom: "2026-06-01T00:00:00.000Z",
+              observedTo: "2026-08-31T00:00:00.000Z",
+              supports: "internal_fact",
+            },
+          ],
+          memoryContextManifestId: null,
+        }),
+        ORGANIZATION,
+      ),
+    ).toBe(false);
   });
 });

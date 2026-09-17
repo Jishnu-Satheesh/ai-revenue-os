@@ -1,5 +1,8 @@
+import { z } from "zod";
+
 import type { CampaignProposalDocument } from "@/domain/campaigns/proposal";
 import { campaignProposalDocumentSchema } from "@/domain/campaigns/proposal";
+import { logger } from "@/lib/logger";
 import type {
   ProposalPersistenceFailure,
   ProposalStore,
@@ -91,6 +94,11 @@ export function proposalFailure(error: {
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
+
+const refreshSnapshotResultSchema = z.strictObject({
+  source_snapshot_id: z.string().uuid(),
+  refreshed: z.boolean(),
+});
 
 export function createProposalRepository(client: ProposalPersistence): ProposalStore {
   return {
@@ -184,6 +192,44 @@ export function createProposalRepository(client: ProposalPersistence): ProposalS
       // authority from a shape nothing has validated.
       const parsed = campaignProposalDocumentSchema.safeParse(record(data).document);
       return parsed.success ? parsed.data : null;
+    },
+
+    /**
+     * Pins the approval-time snapshot through the caller's own session.
+     *
+     * The writer is the ADR 0058 repair function, reused exactly as the
+     * evidence-repair path calls it: same RPC, same `campaign.edit` check
+     * inside the transaction, same never-rewrite guarantee. Members hold no
+     * INSERT grant on `campaign_source_snapshots`, so there is no direct
+     * write to reuse — this RPC is the only post-hoc writer.
+     *
+     * Never throws. The approval that minted the campaign is already
+     * committed when this runs; refusing the whole decision because the pin
+     * failed would report a decision as unmade when it was made. A pin that
+     * cannot be written is logged with the tenant and campaign it belongs to
+     * and reported as unpinned, and the campaign keeps the honest refusal
+     * until an operator repairs it.
+     */
+    async pinApprovalSnapshot(input: {
+      organizationId: string;
+      campaignId: string;
+    }): Promise<{ sourceSnapshotId: string | null; refreshed: boolean }> {
+      const { data, error } = await client.rpc("refresh_campaign_source_snapshot", {
+        target_organization_id: input.organizationId,
+        target_campaign_id: input.campaignId,
+      });
+
+      const parsed =
+        error === null ? refreshSnapshotResultSchema.safeParse(data) : { success: false as const };
+      if (error !== null || !parsed.success) {
+        logger.warn("campaign.proposal_snapshot_not_pinned", {
+          organizationId: input.organizationId,
+          campaignId: input.campaignId,
+        });
+        return { sourceSnapshotId: null, refreshed: false };
+      }
+
+      return { sourceSnapshotId: parsed.data.source_snapshot_id, refreshed: parsed.data.refreshed };
     },
   };
 }

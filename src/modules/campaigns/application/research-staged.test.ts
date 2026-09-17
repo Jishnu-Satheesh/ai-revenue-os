@@ -87,6 +87,9 @@ function memoryStore(): ProposalStore & { versions: Map<string, CampaignProposal
     async readVersionDocument(input) {
       return versions.get(input.proposalId) ?? null;
     },
+    async pinApprovalSnapshot() {
+      return { sourceSnapshotId: null as string | null, refreshed: false };
+    },
   };
 }
 

@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { logger } from "@/lib/logger";
 import { proposalFailure, createProposalRepository, type ProposalPersistence } from "@/modules/campaigns/infrastructure/proposal-repository";
 
+vi.mock("@/lib/logger", () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+
 const ORGANIZATION = "11111111-1111-4111-8111-111111111111";
+const CAMPAIGN = "77777777-7777-4777-8777-777777777777";
+const SNAPSHOT = "88888888-8888-4888-8888-888888888888";
 
 describe("reading a database refusal", () => {
   it("maps each named refusal to the outcome a caller can act on", () => {
@@ -82,5 +89,85 @@ describe("the decide call", () => {
         idempotencyKey: "stale-11",
       }),
     ).rejects.toEqual({ kind: "stale_version" });
+  });
+});
+
+describe("the approval-time snapshot pin", () => {
+  it("pins through the repair function under the caller's own session", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { source_snapshot_id: SNAPSHOT, refreshed: true },
+      error: null,
+    });
+    const repository = createProposalRepository({
+      rpc,
+      from: vi.fn(),
+    } as unknown as ProposalPersistence);
+
+    const result = await repository.pinApprovalSnapshot({
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+    });
+
+    expect(rpc).toHaveBeenCalledWith("refresh_campaign_source_snapshot", {
+      target_organization_id: ORGANIZATION,
+      target_campaign_id: CAMPAIGN,
+    });
+    expect(result).toEqual({ sourceSnapshotId: SNAPSHOT, refreshed: true });
+  });
+
+  it("reports an identical-facts pin as unrefreshed rather than a new write", async () => {
+    const repository = createProposalRepository({
+      rpc: vi.fn().mockResolvedValue({
+        data: { source_snapshot_id: SNAPSHOT, refreshed: false },
+        error: null,
+      }),
+      from: vi.fn(),
+    } as unknown as ProposalPersistence);
+
+    const result = await repository.pinApprovalSnapshot({
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+    });
+
+    expect(result).toEqual({ sourceSnapshotId: SNAPSHOT, refreshed: false });
+  });
+
+  it("reports a refused pin as unpinned and logs it, never throwing past a committed approval", async () => {
+    const repository = createProposalRepository({
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: "42501", message: "campaign_snapshot_forbidden" },
+      }),
+      from: vi.fn(),
+    } as unknown as ProposalPersistence);
+
+    const result = await repository.pinApprovalSnapshot({
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+    });
+
+    expect(result).toEqual({ sourceSnapshotId: null, refreshed: false });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "campaign.proposal_snapshot_not_pinned",
+      expect.objectContaining({ organizationId: ORGANIZATION, campaignId: CAMPAIGN }),
+    );
+  });
+
+  it("reports an unreadable pin result the same degraded way", async () => {
+    const repository = createProposalRepository({
+      rpc: vi.fn().mockResolvedValue({ data: { unexpected: true }, error: null }),
+      from: vi.fn(),
+    } as unknown as ProposalPersistence);
+
+    const result = await repository.pinApprovalSnapshot({
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+    });
+
+    expect(result).toEqual({ sourceSnapshotId: null, refreshed: false });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "campaign.proposal_snapshot_not_pinned",
+      expect.objectContaining({ organizationId: ORGANIZATION, campaignId: CAMPAIGN }),
+    );
   });
 });
