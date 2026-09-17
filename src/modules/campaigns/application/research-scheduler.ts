@@ -128,7 +128,10 @@ export async function runResearchScheduleSweep(dependencies: {
       logger.error("campaign.research_schedule_tick_failed", {
         organizationId,
         errorName: error instanceof Error ? error.name : "unknown",
-        errorMessage: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+        errorCode:
+          typeof (error as { code?: unknown } | null)?.code === "string"
+            ? String((error as { code: string }).code).slice(0, 24)
+            : undefined,
       });
       result.failed.push(organizationId);
     }

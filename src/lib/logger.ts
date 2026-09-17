@@ -39,6 +39,16 @@ type LogContext = {
     | "resolved";
   runId?: string;
   /**
+   * A thrown error's constructor name, such as `ZodError`. A code identifier
+   * chosen by the platform, never tenant text — the message itself stays out
+   * because it can quote whatever the tenant sent in.
+   */
+  errorName?: string;
+  /**
+   * A finished output's version row. Opaque UUID, like the other ids here.
+   */
+  deliverableVersionId?: string;
+  /**
    * A poster render, identified by the sha256 over its own inputs. Safe here
    * for the reason the allowlist exists: it names a render without carrying a
    * single character of what was drawn on it.

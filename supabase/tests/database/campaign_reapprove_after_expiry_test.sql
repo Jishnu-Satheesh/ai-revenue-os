@@ -156,6 +156,13 @@ select extensions.is(
 );
 
 select extensions.is(
+  (select revoked_reason from public.campaign_approvals
+   where id = 'f9600000-0000-4000-8000-000000000901'::uuid),
+  'operator_revoked',
+  'and the retirement names its reason, satisfying the paired-null check'
+);
+
+select extensions.is(
   (select count(*)::integer from public.campaign_approvals
    where organization_id = 'f9600000-0000-4000-8000-000000000101'::uuid
      and bundle_version_id = 'f9600000-0000-4000-8000-000000000601'::uuid

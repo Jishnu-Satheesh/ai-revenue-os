@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { logger } from "@/lib/logger";
 import {
   createDeliverableRepository,
   deliverableFailure,
   type DeliverablePersistence,
 } from "@/modules/campaigns/infrastructure/deliverable-repository";
+
+vi.mock("@/lib/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+const loggerWarn = vi.mocked(logger.warn);
 
 const ORGANIZATION = "11111111-1111-4111-8111-111111111111";
 
@@ -190,6 +197,10 @@ describe("listing a campaign's outputs", () => {
     ).listForCampaign({ organizationId: ORGANIZATION, campaignId: CAMPAIGN });
 
     expect(listed[0]?.reviews).toHaveLength(0);
+    expect(loggerWarn).toHaveBeenCalledWith(
+      "campaign.deliverable_review_unreadable",
+      expect.objectContaining({ organizationId: ORGANIZATION }),
+    );
   });
 
   it("keeps a review whose timestamp wears the database's offset suffix", async () => {

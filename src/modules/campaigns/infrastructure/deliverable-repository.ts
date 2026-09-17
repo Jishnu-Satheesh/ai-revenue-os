@@ -180,6 +180,10 @@ export function createDeliverableRepository(client: DeliverablePersistence): Del
             logger.warn("campaign.deliverable_review_unreadable", {
               organizationId: input.organizationId,
               campaignId: input.campaignId,
+              deliverableVersionId:
+                typeof row.deliverable_version_id === "string"
+                  ? row.deliverable_version_id
+                  : undefined,
             });
             continue;
           }
