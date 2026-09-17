@@ -292,6 +292,33 @@ export function CampaignDetailWorkspace({
                 </div>
               </Panel>
 
+              <Panel title="Finished outputs">
+                {deliverablesReadFailed ? (
+                  <p className="text-sm text-muted-foreground">
+                    Finished outputs could not be read. That is a failed read, not an empty list —
+                    nothing here claims nothing is waiting for review.
+                  </p>
+                ) : produced.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No finished outputs yet — nothing has been generated under this approval, so
+                    there is nothing to review. This is an empty record, not a complete set.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      {produced.length} of {deliverables.length} planned outputs produced
+                      {allOutputsReviewed
+                        ? ", each one reviewed."
+                        : " — the Creative tab lists each one with what is still missing."}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      A review binds to one exact finished version and its content hash. A new
+                      version starts unreviewed and inherits nothing.
+                    </p>
+                  </>
+                )}
+              </Panel>
+
               {view.versions.length < 2 ? null : (
                 <Panel title="Versions">
                   <p className="text-sm text-muted-foreground">

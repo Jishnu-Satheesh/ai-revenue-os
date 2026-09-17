@@ -2,10 +2,16 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { apiErrorResponse } from "@/lib/api/organization-context";
+import { apiErrorResponse, publishOrganizationEvent } from "@/lib/api/organization-context";
 import { DomainError } from "@/lib/errors";
+import {
+  createApprovedGenerationCapReader,
+  generationDispatchAllowed,
+  type ProposalCapPersistence,
+} from "@/modules/campaigns/application/generation-cap";
 import { decideGenerationRetry } from "@/modules/campaigns/application/generation-retry";
 import { generateRequestSchema } from "@/modules/campaigns/application/api-schemas";
+import { generationCostCeilingMinor } from "@/modules/campaigns/infrastructure/generation-dispatch";
 import {
   campaignRouteContext,
   parseCampaignId,
@@ -23,6 +29,10 @@ import type { CampaignRunPersistence } from "@/modules/campaigns/infrastructure/
  * The route records durable intent and returns; the worker does the work. A
  * model call inside an HTTP request would tie an expensive, slow operation to a
  * timeout and leave a half-built version behind when it expired.
+ *
+ * Never auto-fires: this only runs on an explicit POST from the Generate
+ * control. Approval authorized the purse; this click spends it, inside the
+ * approved ceiling checked below.
  */
 export async function POST(
   request: Request,
@@ -39,6 +49,27 @@ export async function POST(
     );
     const campaign = await repository.getCampaign(context.organizationId, campaignId);
     if (!campaign) return apiErrorResponse(new Error("This campaign is not available."));
+
+    // The approved purse, checked before anything billable is queued. A
+    // proposal-born campaign spends its proposal's generation ceiling; any
+    // other campaign has no proposal behind it and keeps existing behavior.
+    if (campaign.sourceKind === "campaign_proposal") {
+      const approval = await createApprovedGenerationCapReader(
+        context.supabase as unknown as ProposalCapPersistence,
+      ).readApprovedCeiling({ organizationId: context.organizationId, campaignId });
+      const decision = generationDispatchAllowed({
+        approvedCeilingMinor: approval.ceilingMinor,
+        dispatchCeilingMinor: generationCostCeilingMinor(),
+      });
+      if (!decision.allowed) {
+        throw new DomainError(
+          "DOMAIN_ERROR",
+          decision.reasonCode === "generation_budget_exceeded"
+            ? "Starting generation would allow more preparation spend than the approved proposal permits. Ask an owner to review the proposal first."
+            : "The approved proposal behind this campaign could not be read, so generation cannot start. Reload and try again.",
+        );
+      }
+    }
 
     const snapshotId = await latestSnapshotId(context, campaignId);
 
@@ -69,6 +100,17 @@ export async function POST(
       idempotencyKey: body.idempotencyKey,
       correlationId: randomUUID(),
     });
+
+    // Announced once per run, not per click: a double-click replays the same
+    // run and must not announce a second generation that never started.
+    if (!replayed) {
+      await publishOrganizationEvent({
+        organizationId: context.organizationId,
+        userId: context.user.id,
+        eventName: "campaign.generation_started",
+        payload: { campaignId, runId },
+      });
+    }
 
     return NextResponse.json({ runId, replayed }, { status: replayed ? 200 : 202 });
   } catch (error) {

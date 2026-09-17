@@ -6,6 +6,7 @@ import { type AllocationLedgerEvent } from "@/components/campaigns/allocation-le
 import { type OutcomeProofData } from "@/components/campaigns/outcome-proof";
 import { type LearningProposalData } from "@/components/campaigns/learning-review";
 import { CampaignDetailWorkspace } from "@/components/campaigns/campaign-detail-workspace";
+import { CampaignGenerateButton } from "@/components/campaigns/campaign-generate-button";
 import type { ReviewableDeliverable } from "@/components/campaigns/campaign-creative-review";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -71,6 +72,20 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
     const run = await read.latestGenerationRun(context.organizationId, resolved.campaignId);
     const generation = toGeneration(run, false, new Date().toISOString());
 
+    // The approval-to-generation link: a campaign minted by an approved
+    // proposal starts with no bundle version, and this is the only place that
+    // state renders. The control shows only here — never a second live button
+    // once a run is underway — and never fires on its own.
+    const isProposalBorn = campaign.sourceKind === "campaign_proposal";
+    const canGenerate = hasOrganizationPermission(context.membership.role, "campaign.edit");
+    const showGenerate =
+      isProposalBorn && generation.status !== "generating" && generation.retryable;
+
+    // Finished outputs read through the existing deliverable service, so the
+    // page reports what exists rather than assuming. A failure to read is a
+    // failure, never an empty list.
+    const preVersionDeliverables = await readDeliverables(context, resolved.campaignId);
+
     return (
       <div className="flex min-h-0 flex-col gap-6">
         <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -99,6 +114,47 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
             exists to review yet.
           </AlertDescription>
         </Alert>
+
+        {showGenerate ? (
+          <div className="flex flex-col gap-2 rounded-lg border bg-card p-4">
+            <h2 className="text-base font-semibold">Start creative preparation</h2>
+            <p className="text-sm text-muted-foreground">
+              {isProposalBorn
+                ? "The approved proposal authorized preparation inside its cost ceiling. Starting generation spends from that purse — it never starts on its own."
+                : null}
+            </p>
+            <CampaignGenerateButton
+              organizationId={context.organizationId}
+              campaignId={resolved.campaignId}
+              disabled={!canGenerate}
+              disabledReason={
+                canGenerate
+                  ? undefined
+                  : "This needs the campaign.edit capability, which your role does not hold."
+              }
+            />
+          </div>
+        ) : null}
+
+        <section className="flex flex-col gap-2 rounded-lg border bg-card p-4" aria-label="Finished outputs">
+          <h2 className="text-base font-semibold">Finished outputs</h2>
+          {preVersionDeliverables === null ? (
+            <p className="text-sm text-muted-foreground">
+              Finished outputs could not be read. That is a failed read, not an empty list.
+            </p>
+          ) : preVersionDeliverables.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No finished outputs yet — nothing has been generated, so there is nothing to review.
+              This is an empty record, not a complete set.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {preVersionDeliverables.filter((entry) => entry.currentVersion !== null).length} of{" "}
+              {preVersionDeliverables.length} planned outputs produced. The review screen lists
+              each one with what is still missing.
+            </p>
+          )}
+        </section>
       </div>
     );
   }
