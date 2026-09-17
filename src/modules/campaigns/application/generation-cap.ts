@@ -13,14 +13,18 @@ import { z } from "zod";
  * against and the dispatch ceiling stands on its own.
  */
 
-const ceilingSchema = z.strictObject({
+// Loose objects on purpose: the stored document is a full proposal (title,
+// audience, channels, …) and the ceiling row may carry its own extra fields.
+// A strict schema would reject every real document as "unreadable" and refuse
+// every proposal-born Generate, even inside the purse.
+const ceilingSchema = z.object({
   amountMinor: z.number().int().nonnegative(),
   currency: z.string().length(3),
-});
+}).passthrough();
 
-const proposalDocumentSchema = z.strictObject({
+const proposalDocumentSchema = z.object({
   generationCostCeiling: ceilingSchema,
-});
+}).passthrough();
 
 export function approvedCeilingMinor(document: unknown): number | null {
   const parsed = proposalDocumentSchema.safeParse(document);

@@ -13,6 +13,16 @@ describe("the approved preparation purse", () => {
     ).toBe(8000);
   });
 
+  it("reads the ceiling from a full proposal document with extra keys", () => {
+    expect(
+      approvedCeilingMinor({
+        title: "Weekday lunch",
+        generationCostCeiling: { amountMinor: 8000, currency: "AED" },
+        other: 1,
+      }),
+    ).toBe(8000);
+  });
+
   it("reports unreadable rather than inventing a purse", () => {
     expect(approvedCeilingMinor({})).toBeNull();
     expect(approvedCeilingMinor(null)).toBeNull();

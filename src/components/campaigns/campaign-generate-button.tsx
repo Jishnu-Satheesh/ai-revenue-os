@@ -36,22 +36,30 @@ export function CampaignGenerateButton({
 
   async function start() {
     setStarting(true);
-    const result = await startGeneration({
-      organizationId,
-      campaignId,
-      idempotencyKey: idempotencyKey(),
-    });
-    setStarting(false);
+    try {
+      const result = await startGeneration({
+        organizationId,
+        campaignId,
+        idempotencyKey: idempotencyKey(),
+      });
 
-    if (!result.ok) {
-      toast.error("Could not start generation", { description: result.message });
-      return;
+      if (!result.ok) {
+        toast.error("Could not start generation", { description: result.message });
+        return;
+      }
+
+      toast.success("Generation started", {
+        description:
+          "The proposal creative is being built. This page will show it when it is ready.",
+      });
+      router.refresh();
+    } catch {
+      toast.error("Could not start generation", {
+        description: "The request could not be sent. Check your connection.",
+      });
+    } finally {
+      setStarting(false);
     }
-
-    toast.success("Generation started", {
-      description: "The proposal creative is being built. This page will show it when it is ready.",
-    });
-    router.refresh();
   }
 
   return (

@@ -44,6 +44,20 @@ describe("the Generate control", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("recovers the button when the request itself throws", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("network down");
+    }) as never;
+    const user = userEvent.setup();
+    render(<CampaignGenerateButton organizationId={ORGANIZATION} campaignId={CAMPAIGN} />);
+
+    await user.click(screen.getByRole("button", { name: /generate/i }));
+
+    const button = screen.getByRole("button", { name: /generate/i });
+    expect(button).toBeEnabled();
+    expect(button).toHaveTextContent(/generate/i);
+  });
+
   it("stays disabled without the capability and says what is missing", () => {
     render(
       <CampaignGenerateButton
