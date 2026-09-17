@@ -4,6 +4,7 @@ import {
   admitProposal,
   campaignProposalDocumentSchema,
   hasPinnableProposalEvidence,
+  hasSameTenantEvidenceRefs,
   materialTermsChanged,
   preparationAuthority,
   type CampaignProposalDocument,
@@ -358,6 +359,43 @@ describe("the approval-time evidence pin", () => {
           ],
           memoryContextManifestId: null,
         }),
+        ORGANIZATION,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("the same-tenant refs check", () => {
+  it("holds when any cited ref belongs to this tenant", () => {
+    expect(hasSameTenantEvidenceRefs(document(), ORGANIZATION)).toBe(true);
+  });
+
+  it("fails when every cited ref belongs elsewhere, even with a manifest pointer present", () => {
+    expect(
+      hasSameTenantEvidenceRefs(
+        document({
+          evidence: [
+            {
+              kind: "business_memory_context",
+              organizationId: OTHER_ORGANIZATION,
+              contextManifestId: MANIFEST,
+              sourceRevision: 4,
+              observedFrom: "2026-06-01T00:00:00.000Z",
+              observedTo: "2026-08-31T00:00:00.000Z",
+              supports: "internal_fact",
+            },
+          ],
+          memoryContextManifestId: MANIFEST,
+        }),
+        ORGANIZATION,
+      ),
+    ).toBe(false);
+  });
+
+  it("fails when nothing is cited at all", () => {
+    expect(
+      hasSameTenantEvidenceRefs(
+        document({ evidence: [], memoryContextManifestId: null }),
         ORGANIZATION,
       ),
     ).toBe(false);

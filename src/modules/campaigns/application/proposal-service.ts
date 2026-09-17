@@ -6,6 +6,7 @@ import {
   campaignProposalDecisionKindSchema,
   campaignProposalSourceKindSchema,
   hasPinnableProposalEvidence,
+  hasSameTenantEvidenceRefs,
   preparationAuthority,
   type CampaignProposalDocument,
   type PreparationAuthority,
@@ -145,6 +146,17 @@ export type ProposalStore = {
     proposalId: string;
     proposalVersionId: string;
   }): Promise<CampaignProposalDocument | null>;
+  /**
+   * Whether the named context manifest belongs to this tenant.
+   *
+   * RLS-scoped: a foreign manifest reads as absent, and absent, unreadable
+   * and foreign are answered identically with null — distinguishing them
+   * would confirm another tenant's row exists.
+   */
+  readContextManifest(input: {
+    organizationId: string;
+    manifestId: string;
+  }): Promise<{ id: string } | null>;
   /**
    * Pins the approval-time evidence snapshot for a proposal-born campaign.
    *
@@ -321,10 +333,31 @@ export function createCampaignProposalService(dependencies: { store: ProposalSto
             document !== null &&
             hasPinnableProposalEvidence(document, input.organizationId)
           ) {
-            await dependencies.store.pinApprovalSnapshot({
-              organizationId: input.organizationId,
-              campaignId: saved.linkedCampaignId,
-            });
+            // Same-tenant refs establish tenancy on their own. A manifest
+            // standing alone does not — its pointer carries no tenant, and a
+            // member-supplied document is never re-validated at write time —
+            // so it is verified against this tenant before it authorizes a
+            // pin. A foreign pointer reads as absent and authorizes nothing.
+            let pinnable = hasSameTenantEvidenceRefs(document, input.organizationId);
+            if (!pinnable && document.memoryContextManifestId !== null) {
+              pinnable =
+                (await dependencies.store.readContextManifest({
+                  organizationId: input.organizationId,
+                  manifestId: document.memoryContextManifestId,
+                })) !== null;
+            }
+            if (pinnable) {
+              try {
+                await dependencies.store.pinApprovalSnapshot({
+                  organizationId: input.organizationId,
+                  campaignId: saved.linkedCampaignId,
+                });
+              } catch {
+                // The repository logs and never throws; this catch exists so
+                // a non-conforming store can never flip a committed approval
+                // into a reported failure.
+              }
+            }
           }
         }
 

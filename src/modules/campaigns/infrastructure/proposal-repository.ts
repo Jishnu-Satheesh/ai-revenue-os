@@ -39,6 +39,10 @@ export type ProposalPersistence = {
           ): {
             maybeSingle(): Promise<{ data: unknown; error: { message?: string } | null }>;
           };
+          // Two-column reads (tenant plus id) terminate here. The real client
+          // supports the chain; the shape is declared so no caller widens it
+          // by reaching past this contract.
+          maybeSingle(): Promise<{ data: unknown; error: { message?: string } | null }>;
         };
       };
     };
@@ -99,6 +103,8 @@ const refreshSnapshotResultSchema = z.strictObject({
   source_snapshot_id: z.string().uuid(),
   refreshed: z.boolean(),
 });
+
+const manifestIdSchema = z.strictObject({ id: z.string().uuid() });
 
 export function createProposalRepository(client: ProposalPersistence): ProposalStore {
   return {
@@ -195,6 +201,32 @@ export function createProposalRepository(client: ProposalPersistence): ProposalS
     },
 
     /**
+     * Whether the named context manifest belongs to this tenant.
+     *
+     * Read through the caller's own session under the existing member-select
+     * policy, exactly as the memory context route reads it: a manifest from
+     * another organization reads as absent, never as a refusal with detail.
+     * Absent, unreadable, and foreign are answered identically with null on
+     * purpose — distinguishing them would confirm another tenant's row exists.
+     */
+    async readContextManifest(input: {
+      organizationId: string;
+      manifestId: string;
+    }): Promise<{ id: string } | null> {
+      const { data, error } = await client
+        .from("memory_context_manifests")
+        .select("id")
+        .eq("organization_id", input.organizationId)
+        .eq("id", input.manifestId)
+        .maybeSingle();
+
+      if (error || !data) return null;
+
+      const parsed = manifestIdSchema.safeParse(record(data));
+      return parsed.success ? { id: parsed.data.id } : null;
+    },
+
+    /**
      * Pins the approval-time snapshot through the caller's own session.
      *
      * The writer is the ADR 0058 repair function, reused exactly as the
@@ -203,7 +235,8 @@ export function createProposalRepository(client: ProposalPersistence): ProposalS
      * INSERT grant on `campaign_source_snapshots`, so there is no direct
      * write to reuse — this RPC is the only post-hoc writer.
      *
-     * Never throws. The approval that minted the campaign is already
+     * Never throws — not on refusals, not on unreadable results, and not on
+     * a thrown transport. The approval that minted the campaign is already
      * committed when this runs; refusing the whole decision because the pin
      * failed would report a decision as unmade when it was made. A pin that
      * cannot be written is logged with the tenant and campaign it belongs to
@@ -214,22 +247,37 @@ export function createProposalRepository(client: ProposalPersistence): ProposalS
       organizationId: string;
       campaignId: string;
     }): Promise<{ sourceSnapshotId: string | null; refreshed: boolean }> {
-      const { data, error } = await client.rpc("refresh_campaign_source_snapshot", {
-        target_organization_id: input.organizationId,
-        target_campaign_id: input.campaignId,
-      });
+      try {
+        const { data, error } = await client.rpc("refresh_campaign_source_snapshot", {
+          target_organization_id: input.organizationId,
+          target_campaign_id: input.campaignId,
+        });
 
-      const parsed =
-        error === null ? refreshSnapshotResultSchema.safeParse(data) : { success: false as const };
-      if (error !== null || !parsed.success) {
+        const parsed =
+          error === null
+            ? refreshSnapshotResultSchema.safeParse(data)
+            : { success: false as const };
+        if (error !== null || !parsed.success) {
+          logger.warn("campaign.proposal_snapshot_not_pinned", {
+            organizationId: input.organizationId,
+            campaignId: input.campaignId,
+          });
+          return { sourceSnapshotId: null, refreshed: false };
+        }
+
+        return {
+          sourceSnapshotId: parsed.data.source_snapshot_id,
+          refreshed: parsed.data.refreshed,
+        };
+      } catch {
+        // A thrown transport after a committed approval. Same degraded answer
+        // as a refusal, same log line — the approval stands either way.
         logger.warn("campaign.proposal_snapshot_not_pinned", {
           organizationId: input.organizationId,
           campaignId: input.campaignId,
         });
         return { sourceSnapshotId: null, refreshed: false };
       }
-
-      return { sourceSnapshotId: parsed.data.source_snapshot_id, refreshed: parsed.data.refreshed };
     },
   };
 }

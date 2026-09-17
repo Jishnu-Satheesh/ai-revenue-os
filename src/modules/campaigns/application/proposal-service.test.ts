@@ -67,6 +67,7 @@ const store = {
   completeVersion: vi.fn(),
   decide: vi.fn(),
   readVersionDocument: vi.fn(),
+  readContextManifest: vi.fn(),
   pinApprovalSnapshot: vi.fn(),
 } satisfies Record<keyof ProposalStore, ReturnType<typeof vi.fn>>;
 
@@ -88,6 +89,7 @@ beforeEach(() => {
     linkedCampaignId: LINKED_CAMPAIGN,
   });
   store.readVersionDocument.mockResolvedValue(document());
+  store.readContextManifest.mockResolvedValue({ id: MANIFEST });
   store.pinApprovalSnapshot.mockResolvedValue({ sourceSnapshotId: SNAPSHOT, refreshed: true });
 });
 
@@ -429,6 +431,84 @@ describe("deciding a proposal", () => {
     expect(value?.linkedCampaignId).toBe(LINKED_CAMPAIGN);
   });
 
+  it("leaves a recorded approval standing when the pin transport itself throws", async () => {
+    store.pinApprovalSnapshot.mockRejectedValue(new Error("boom"));
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-15",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    const value = outcome.status === "saved" ? outcome.value : null;
+    expect(value?.linkedCampaignId).toBe(LINKED_CAMPAIGN);
+  });
+
+  it("pins on a manifest standing alone once this tenant owns it", async () => {
+    store.readVersionDocument.mockResolvedValue(document({ evidence: [] }));
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-16",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    expect(store.readContextManifest).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      manifestId: MANIFEST,
+    });
+    expect(store.pinApprovalSnapshot).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      campaignId: LINKED_CAMPAIGN,
+    });
+  });
+
+  it("authorizes no pin from a manifest this tenant does not own", async () => {
+    store.readVersionDocument.mockResolvedValue(
+      document({
+        evidence: [
+          {
+            kind: "business_memory_context",
+            organizationId: OTHER_ORGANIZATION,
+            contextManifestId: MANIFEST,
+            sourceRevision: 4,
+            observedFrom: "2026-06-01T00:00:00.000Z",
+            observedTo: "2026-08-31T00:00:00.000Z",
+            supports: "internal_fact",
+          },
+        ],
+        memoryContextManifestId: MANIFEST,
+      }),
+    );
+    store.readContextManifest.mockResolvedValue(null);
+
+    const outcome = await service().decide({
+      organizationId: ORGANIZATION,
+      request: {
+        proposalId: PROPOSAL,
+        proposalVersionId: VERSION,
+        proposalDigest: proposalDigest(document()),
+        decision: "approved_for_preparation",
+        idempotencyKey: "owner-approves-17",
+      },
+    });
+
+    expect(outcome.status).toBe("saved");
+    expect(store.pinApprovalSnapshot).not.toHaveBeenCalled();
+  });
+
   it("refuses a cross-tenant decide and writes no snapshot for it", async () => {
     store.decide.mockRejectedValue({ kind: "not_found" });
 
@@ -445,6 +525,7 @@ describe("deciding a proposal", () => {
 
     expect(outcome).toEqual({ status: "forbidden" });
     expect(store.readVersionDocument).not.toHaveBeenCalled();
+    expect(store.readContextManifest).not.toHaveBeenCalled();
     expect(store.pinApprovalSnapshot).not.toHaveBeenCalled();
   });
 });

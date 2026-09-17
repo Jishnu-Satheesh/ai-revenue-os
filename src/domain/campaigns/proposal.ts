@@ -318,20 +318,38 @@ export function preparationAuthority(
 }
 
 /**
+ * Whether the version cites source records belonging to this tenant.
+ *
+ * Each evidence ref carries its own tenant, so this is checkable from the
+ * document alone. The context manifest below carries none, which is why it is
+ * a separate question.
+ */
+export function hasSameTenantEvidenceRefs(
+  document: CampaignProposalDocument,
+  organizationId: string,
+): boolean {
+  return document.evidence.some((reference) => reference.organizationId === organizationId);
+}
+
+/**
  * Whether the approved version cites any evidence this tenant may generate from.
  *
- * An approval mints a campaign, and generation reads only the evidence pinned
- * in `campaign_source_snapshots` — so an approval that cited nothing pinnable
- * must leave the campaign honestly unstartable rather than pin an invented
- * snapshot. A same-tenant source ref or the proposal's own context manifest
- * counts; another tenant's records never do, whatever they would support.
+ * A cheap pre-gate over the stored document, not a tenancy proof. Same-tenant
+ * refs establish tenancy on their own; the manifest arm only notes that a
+ * manifest pointer is cited. A member-supplied document is never re-validated
+ * against the tenant at write time, so a manifest standing alone must be
+ * verified tenant-side (an RLS-scoped manifest read, which answers absent for
+ * foreign rows) before it authorizes a pin — otherwise a foreign pointer
+ * would read as pinnable here. An approval that cites nothing pinnable must
+ * leave the campaign honestly unstartable rather than pin an invented
+ * snapshot.
  */
 export function hasPinnableProposalEvidence(
   document: CampaignProposalDocument,
   organizationId: string,
 ): boolean {
   if (document.memoryContextManifestId !== null) return true;
-  return document.evidence.some((reference) => reference.organizationId === organizationId);
+  return hasSameTenantEvidenceRefs(document, organizationId);
 }
 
 /**

@@ -10,6 +10,7 @@ vi.mock("@/lib/logger", () => ({
 const ORGANIZATION = "11111111-1111-4111-8111-111111111111";
 const CAMPAIGN = "77777777-7777-4777-8777-777777777777";
 const SNAPSHOT = "88888888-8888-4888-8888-888888888888";
+const MANIFEST = "55555555-5555-4555-8555-555555555555";
 
 describe("reading a database refusal", () => {
   it("maps each named refusal to the outcome a caller can act on", () => {
@@ -169,5 +170,82 @@ describe("the approval-time snapshot pin", () => {
       "campaign.proposal_snapshot_not_pinned",
       expect.objectContaining({ organizationId: ORGANIZATION, campaignId: CAMPAIGN }),
     );
+  });
+
+  it("reports a thrown pin transport the same degraded way, never past a committed approval", async () => {
+    const repository = createProposalRepository({
+      rpc: vi.fn().mockRejectedValue(new Error("boom")),
+      from: vi.fn(),
+    } as unknown as ProposalPersistence);
+
+    const result = await repository.pinApprovalSnapshot({
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+    });
+
+    expect(result).toEqual({ sourceSnapshotId: null, refreshed: false });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "campaign.proposal_snapshot_not_pinned",
+      expect.objectContaining({ organizationId: ORGANIZATION, campaignId: CAMPAIGN }),
+    );
+  });
+});
+
+describe("the context manifest ownership read", () => {
+  function repositoryWithManifest(result: {
+    data: unknown;
+    error: { message?: string } | null;
+  }) {
+    const maybeSingle = vi.fn().mockResolvedValue(result);
+    const secondEq = vi.fn().mockReturnValue({ maybeSingle });
+    const firstEq = vi.fn().mockReturnValue({ eq: secondEq });
+    const from = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ eq: firstEq }) });
+    const repository = createProposalRepository({
+      rpc: vi.fn(),
+      from,
+    } as unknown as ProposalPersistence);
+    return { repository, from, firstEq, secondEq };
+  }
+
+  it("reads the manifest under this tenant's own session", async () => {
+    const { repository, from, firstEq, secondEq } = repositoryWithManifest({
+      data: { id: MANIFEST },
+      error: null,
+    });
+
+    const result = await repository.readContextManifest({
+      organizationId: ORGANIZATION,
+      manifestId: MANIFEST,
+    });
+
+    expect(from).toHaveBeenCalledWith("memory_context_manifests");
+    expect(firstEq).toHaveBeenCalledWith("organization_id", ORGANIZATION);
+    expect(secondEq).toHaveBeenCalledWith("id", MANIFEST);
+    expect(result).toEqual({ id: MANIFEST });
+  });
+
+  it("answers a foreign manifest as absent, never as a refusal with detail", async () => {
+    const { repository } = repositoryWithManifest({ data: null, error: null });
+
+    const result = await repository.readContextManifest({
+      organizationId: ORGANIZATION,
+      manifestId: MANIFEST,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("answers an unreadable manifest the same absent way", async () => {
+    const { repository } = repositoryWithManifest({
+      data: null,
+      error: { message: "boom" },
+    });
+
+    const result = await repository.readContextManifest({
+      organizationId: ORGANIZATION,
+      manifestId: MANIFEST,
+    });
+
+    expect(result).toBeNull();
   });
 });
