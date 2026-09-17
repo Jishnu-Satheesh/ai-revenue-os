@@ -158,7 +158,16 @@ import {
   createSupabaseCurrentStateQuery,
   readCurrentState,
 } from "@/modules/memory/infrastructure/current-state-reader";
-import { CAMPAIGN_PROPOSAL_SCHEMA_VERSION } from "@/domain/campaigns/proposal";
+import {
+  CAMPAIGN_PROPOSAL_SCHEMA_VERSION,
+  campaignProposalDocumentSchema,
+  proposalChannelSchema,
+  proposalDeliverableSchema,
+  proposalEvidenceReferenceSchema,
+  proposalMoneySchema,
+  proposalOfferSchema,
+  proposalSuccessPlanSchema,
+} from "@/domain/campaigns/proposal";
 
 /**
  * Campaign generation as durable work.
@@ -1098,6 +1107,17 @@ const RESEARCH_DRAFT_OUTPUT_CONTRACT = [
   "A JSON object with alternatives (1-3 items: title, summary, whyViable, risks[], evidenceRefs[]),",
   `document (a campaign proposal document, schemaVersion ${CAMPAIGN_PROPOSAL_SCHEMA_VERSION}),`,
   "and marketClaimKeys (the claims in the prose about the wider market).",
+  `document must be an object with EXACTLY these top-level keys: ${Object.keys(campaignProposalDocumentSchema.shape).join(", ")}. No extra keys, no missing keys.`,
+  `timing keys: ${Object.keys(campaignProposalDocumentSchema.shape.timing.shape).join(", ")}; readiness keys: ${Object.keys(campaignProposalDocumentSchema.shape.readiness.shape).join(", ")}; offer keys: ${[...new Set(proposalOfferSchema.options.flatMap((option) => Object.keys(option.shape)))].join(", ")}; channel keys: ${Object.keys(proposalChannelSchema.shape).join(", ")} (min 1); deliverable keys: ${Object.keys(proposalDeliverableSchema.shape).join(", ")} (min 1); money keys: ${Object.keys(proposalMoneySchema.shape).join(", ")}; successPlan keys: ${Object.keys(proposalSuccessPlanSchema.shape).join(", ")}; evidence keys: ${[...new Set(proposalEvidenceReferenceSchema.options.flatMap((option) => Object.keys(option.shape)))].join(", ")}. Nullable fields may be null but must be present.`,
+  "Scalar rules: short text 1-200 chars, prose longer, timestamps ISO, money {amountMinor int >=0, currency ISO3}, schemaVersion literal number, memoryContextManifestId UUID-or-null, marketClaimKeys string array.",
+  `offer.kind one of: ${proposalOfferSchema.options.flatMap((option) => option.shape.kind.def.values).join(", ")}; evidence[].kind one of: ${proposalEvidenceReferenceSchema.options.flatMap((option) => option.shape.kind.def.values).join(", ")}.`,
+  `delivery one of: ${proposalChannelSchema.shape.delivery.options.join(", ")}; successPlan.target keys: ${Object.keys(proposalSuccessPlanSchema.shape.target.unwrap().shape).join(", ")} (object or null, never a string).`,
+  "null ONLY where the contract names UUID-or-null/nullable (proposedMediaBudget, endAt, memoryContextManifestId); every other key needs a real value — unknown strings get your best text, never null; unknown objects get best-effort objects, never flattened to strings.",
+  `Evidence items share exactly: ${[...new Set(proposalEvidenceReferenceSchema.options.flatMap((option) => Object.keys(option.shape)))].filter((key) => proposalEvidenceReferenceSchema.options.every((option) => Object.keys(option.shape).includes(key))).join(", ")}. sourceRevision number, never string; supports only: ${[...new Set(proposalEvidenceReferenceSchema.options.flatMap((option) => { const supports = option.shape.supports as unknown as { options?: readonly string[]; def: { values?: readonly string[] } }; return supports.options ?? supports.def.values ?? []; }))].join(", ")}. Per kind add only: ${proposalEvidenceReferenceSchema.options.map((option) => `${option.shape.kind.def.values.join("")} adds ${Object.keys(option.shape).filter((key) => !proposalEvidenceReferenceSchema.options.every((other) => Object.keys(other.shape).includes(key))).join(", ")}`).join("; ")}. No other keys on any evidence item ever.`,
+  "Copy ids verbatim, never invent: evidence.organizationId is the <organization_id>; business_memory_context and document.memoryContextManifestId reuse the <memory_context> manifest; (no pinned entries): manifest null, no business_memory_context; market_claim_citation needs a real <claim> id and window, else evidence [].",
+  "Risks, evidenceRefs, assumptions, limitations, blockers, missingData: each entry under 40 chars.",
+  "When <memory_context> shows no pinned entries and <external_evidence> shows unavailable: output evidence as an empty array, marketClaimKeys as an empty array, memoryContextManifestId as null, and put the reviewable content in assumptions. Citing memory or market evidence that is not shown above fails validation — an honest empty array passes.",
+  `Offer per kind exactly: ${proposalOfferSchema.options.map((option) => `${option.shape.kind.def.values.join("")} exactly ${Object.keys(option.shape).join(", ")}`).join("; ")}. No other keys on any offer ever.`,
 ].join(" ");
 
 export const researchCampaignProposalTask = schemaTask({
@@ -1338,7 +1358,7 @@ export const researchCampaignProposalTask = schemaTask({
                   correlationId,
                 },
                 system: RESEARCH_DRAFT_SYSTEM,
-                prompt,
+                prompt: `<organization_id>${parsed.organizationId}</organization_id>\n${prompt}`,
                 outputContract: RESEARCH_DRAFT_OUTPUT_CONTRACT,
               });
               return {
@@ -1349,7 +1369,7 @@ export const researchCampaignProposalTask = schemaTask({
             },
             repair: async ({ prompt, failures }) => {
               const repaired = await generation.repair({
-                body: prompt,
+                body: `<organization_id>${parsed.organizationId}</organization_id>\n${prompt}`,
                 outputContract: RESEARCH_DRAFT_OUTPUT_CONTRACT,
                 failures,
               });
