@@ -82,6 +82,15 @@ const UNTYPED_TABLES = new Set([
   "campaign_research_runs",
   "campaign_research_source_fingerprints",
   "campaign_research_events",
+  // The research cadence and its receipts are written and read only through
+  // the governed schedule RPCs (`read_`/`save_` on a session,
+  // `list_due_organizations`/`evaluate_` on the worker). No role holds any
+  // grant on either table, so a generated row type would invite a direct
+  // read or insert that skips the due check, the qualifying judgement, or
+  // the receipt. Read through the narrow contracts in
+  // `research-schedule-repository.ts` and `research-due-reader.ts`.
+  "campaign_research_schedules",
+  "campaign_research_schedule_receipts",
   // Creative variants are written only through `append_campaign_creative_variant`,
   // which assigns the slot numbers under a lock, and read through the narrow
   // contract in `variant-repository.ts`. A generated row type would invite a

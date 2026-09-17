@@ -135,7 +135,7 @@ describe("Campaign research lease sweep registration", () => {
     // recovered such a run until this task existed, so its registration is
     // what makes the reclaim reachable at all.
     expect(source).toContain('id: "campaign.research-lease-sweep"');
-    expect(source.match(/schedules\.task\(/g)).toHaveLength(1);
+    expect(source.match(/schedules\.task\(/g)).toHaveLength(2);
 
     // The research lease is 900 seconds, so a five-minute cadence recovers a
     // dead run within a few minutes of its lease lapsing rather than leaving
@@ -151,6 +151,40 @@ describe("Campaign research lease sweep registration", () => {
     // with nothing to recover.
     expect(source).toContain("campaign.research_lease_sweep_finished");
     expect(source).toMatch(/failed: result\.failed/);
+  });
+});
+
+describe("Campaign research schedule sweep registration", () => {
+  it("registers the cadence as an hourly cron task that admits through the governed writer", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
+
+    // Nothing ever started a scheduled evaluation, so the allowance either
+    // sat unused or was spent only by button presses. This task is what asks
+    // on an organization's behalf — and it asks through the same governed
+    // writer a manual request uses, never by inventing its own admission.
+    expect(source).toContain('id: "campaign.research-schedule-sweep"');
+    expect(source).toMatch(/schedules\.task\(\{[\s\S]*?cron: "0 \* \* \* \*"/);
+  });
+
+  it("evaluates bounded windows with identifier-only dispatch", async () => {
+    const source = await readFile(resolve(process.cwd(), "src/trigger/campaigns.ts"), "utf8");
+    const sweep = source.slice(source.indexOf("export const researchScheduleSweepTask"));
+
+    // Bounded per tick, oldest first: a missed sweep claims only the current
+    // window per organization rather than flooding catch-up.
+    expect(sweep).toContain("maxOrganizationsPerTick: 25");
+    expect(sweep).toContain("runResearchScheduleSweep");
+    expect(sweep).toContain("createResearchDueReader");
+    // Identifiers and one operating limit, like every other research
+    // payload: the staged question and the manifest bytes travel through the
+    // claim-bound loader, never through queue storage or logs.
+    expect(sweep).toContain("dispatchResearchWorker");
+    expect(sweep).not.toContain("researchQuestion");
+    expect(sweep).toContain("campaign.research_schedule_sweep_finished");
+    // A refused purse must not read the same as a tick that warranted
+    // nothing, and a partial tick never reads as clean.
+    expect(sweep).toMatch(/refused: result\.refused/);
+    expect(sweep).toMatch(/failed: result\.failed/);
   });
 });
 

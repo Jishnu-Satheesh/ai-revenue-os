@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ResearchSettingsForm,
   type ResearchLedgerView,
+  type ResearchScheduleView,
 } from "@/components/campaigns/research-settings-form";
 
 afterEach(cleanup);
@@ -41,13 +42,27 @@ const NO_POLICY: ResearchLedgerView = {
   lastAdmittedAt: null,
 };
 
-function renderForm(ledger: ResearchLedgerView, onSave: Save = saver()) {
+const SET_SCHEDULE: ResearchScheduleView = {
+  enabled: false,
+  intervalDays: 7,
+  qualifyingChangeKinds: ["memory_revision"],
+};
+
+function renderForm(
+  ledger: ResearchLedgerView,
+  onSave: Save = saver(),
+  schedule: ResearchScheduleView | null = SET_SCHEDULE,
+  onSaveSchedule: Save = saver(),
+) {
   render(
     <ResearchSettingsForm
       ledger={ledger}
       timezone="Asia/Dubai"
       organizationCurrency="AED"
+      schedule={schedule}
+      scheduleUnavailable={false}
       onSave={onSave}
+      onSaveSchedule={onSaveSchedule}
     />,
   );
 }
@@ -183,5 +198,109 @@ describe("setting what research may spend", () => {
     await userEvent.click(screen.getByRole("button", { name: /save as a new version/i }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(/in force from now/i);
+  });
+});
+
+describe("when research asks on its own", () => {
+  it("starts the cadence blank when none was set, like the money section", () => {
+    renderForm(NO_POLICY, saver(), null);
+
+    // No row is "not scheduled", never an implied rhythm. The absence is the
+    // point, exactly as with the budget.
+    expect(screen.getByLabelText(/days between scheduled evaluations/i)).toHaveValue("");
+    expect(screen.getByRole("switch", { name: /business memory changed/i })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: /every scheduled window/i })).not.toBeChecked();
+  });
+
+  it("shows the stored rhythm and its switches", () => {
+    renderForm(SET_POLICY, saver(), {
+      enabled: true,
+      intervalDays: 7,
+      qualifyingChangeKinds: ["memory_revision", "scheduled_cadence"],
+    });
+
+    expect(screen.getByLabelText(/days between scheduled evaluations/i)).toHaveValue("7");
+    expect(screen.getByRole("switch", { name: /business memory changed/i })).toBeChecked();
+    expect(screen.getByRole("switch", { name: /every scheduled window/i })).toBeChecked();
+  });
+
+  it("lets the timezone be edited, and sends it with the limits", async () => {
+    const onSave = saver();
+    renderForm(SET_POLICY, onSave);
+
+    await userEvent.clear(screen.getByLabelText(/schedule timezone/i));
+    await userEvent.type(screen.getByLabelText(/schedule timezone/i), "America/New_York");
+    await userEvent.click(screen.getByRole("button", { name: /save as a new version/i }));
+
+    // Evaluations follow midnight in the organization's timezone, so it is a
+    // field rather than a pass-through — and it travels with the policy whose
+    // writer buckets windows by it.
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ timezone: "America/New_York" });
+  });
+
+  it("refuses to save a cadence that names nothing as warranting research", async () => {
+    const onSave = saver();
+    const onSaveSchedule = saver();
+    renderForm(SET_POLICY, onSave, SET_SCHEDULE, onSaveSchedule);
+
+    // The one kind on by default, switched off: nothing qualifies, so no
+    // evaluation could ever warrant research — refusing is the honest answer.
+    await userEvent.click(screen.getByRole("switch", { name: /business memory changed/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save as a new version/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /at least one qualifying change/i,
+    );
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onSaveSchedule).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cadence outside 1 to 30 days", async () => {
+    const onSave = saver();
+    renderForm(SET_POLICY, onSave);
+
+    await userEvent.clear(screen.getByLabelText(/days between scheduled evaluations/i));
+    await userEvent.type(screen.getByLabelText(/days between scheduled evaluations/i), "45");
+    await userEvent.click(screen.getByRole("button", { name: /save as a new version/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/from 1 to 30/i);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("saves the limits first and the cadence second", async () => {
+    const onSave = saver();
+    const onSaveSchedule = saver();
+    renderForm(SET_POLICY, onSave, SET_SCHEDULE, onSaveSchedule);
+
+    await userEvent.click(screen.getByRole("switch", { name: /evaluate on a schedule/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save as a new version/i }));
+
+    await waitFor(() => expect(onSaveSchedule).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    // The rhythm, not the money: enabling it here never enables spending,
+    // which stays bound to the policy's own switch.
+    expect(onSaveSchedule.mock.calls[0]?.[0]).toEqual({
+      enabled: true,
+      intervalDays: 7,
+      qualifyingChangeKinds: ["memory_revision"],
+    });
+  });
+
+  it("says plainly when the limits saved but the cadence did not", async () => {
+    const onSaveSchedule = vi.fn<Save>(async () => ({
+      ok: false as const,
+      message: "You may not configure campaign research.",
+    }));
+    renderForm(SET_POLICY, saver(), SET_SCHEDULE, onSaveSchedule);
+
+    await userEvent.click(screen.getByRole("button", { name: /save as a new version/i }));
+
+    // Half a save reported as half: the version stands, the rhythm did not
+    // move, and neither is claimed otherwise.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /spending limits were saved, but the cadence was not/i,
+    );
+    expect(screen.queryByText(/in force from now/i)).not.toBeInTheDocument();
   });
 });

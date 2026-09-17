@@ -44,8 +44,23 @@ export type ResearchLedgerView = {
   lastAdmittedAt: string | null;
 };
 
+/**
+ * The rhythm research runs on, when the organization wants one.
+ *
+ * Null is "not scheduled", never an implied cadence — the section opens
+ * blank like the money section, and an enabled schedule names what warrants
+ * it. Enabling the rhythm never enables spending, which stays bound to the
+ * policy's own switch above.
+ */
+export type ResearchScheduleView = {
+  enabled: boolean;
+  intervalDays: number;
+  qualifyingChangeKinds: readonly string[];
+};
+
 type Fields = {
   enabled: boolean;
+  timezone: string;
   currency: string;
   perRun: string;
   window: string;
@@ -54,36 +69,64 @@ type Fields = {
   maxPending: string;
   maxAttempts: string;
   evidenceMaxAgeDays: string;
+  scheduleEnabled: boolean;
+  scheduleIntervalDays: string;
+  qualifyOnMemoryRevision: boolean;
+  qualifyOnCadence: boolean;
 };
 
-function initialFields(ledger: ResearchLedgerView, fallbackCurrency: string): Fields {
+function initialFields(
+  ledger: ResearchLedgerView,
+  fallbackCurrency: string,
+  fallbackTimezone: string,
+  schedule: ResearchScheduleView | null,
+): Fields {
   const policy = ledger.policy;
   // An organization with no policy starts blank on purpose. Pre-filling
-  // plausible numbers is how a budget nobody chose ends up in force.
-  if (!policy) {
-    return {
-      enabled: false,
-      currency: fallbackCurrency,
-      perRun: "",
-      window: "",
-      windowDays: "",
-      cooldownMinutes: "",
-      maxPending: "",
-      maxAttempts: "",
-      evidenceMaxAgeDays: "",
-    };
-  }
-  return {
-    enabled: policy.enabled,
-    currency: policy.perRunAllowance.currency,
-    perRun: fromMinorUnits(policy.perRunAllowance.amountMinor, policy.perRunAllowance.currency),
-    window: fromMinorUnits(policy.windowAllowance.amountMinor, policy.windowAllowance.currency),
-    windowDays: String(policy.windowDays),
-    cooldownMinutes: String(Math.round(policy.cooldownSeconds / 60)),
-    maxPending: String(policy.maxPendingProposals),
-    maxAttempts: String(policy.maxAttempts),
-    evidenceMaxAgeDays: String(policy.evidenceMaxAgeDays),
+  // plausible numbers is how a budget nobody chose ends up in force. The
+  // cadence starts blank the same way: no row is "not scheduled", never an
+  // implied rhythm.
+  const base: Fields = {
+    enabled: false,
+    timezone: fallbackTimezone,
+    currency: fallbackCurrency,
+    perRun: "",
+    window: "",
+    windowDays: "",
+    cooldownMinutes: "",
+    maxPending: "",
+    maxAttempts: "",
+    evidenceMaxAgeDays: "",
+    scheduleEnabled: false,
+    scheduleIntervalDays: "",
+    qualifyOnMemoryRevision: false,
+    qualifyOnCadence: false,
   };
+  if (policy) {
+    base.enabled = policy.enabled;
+    base.timezone = policy.timezone;
+    base.currency = policy.perRunAllowance.currency;
+    base.perRun = fromMinorUnits(
+      policy.perRunAllowance.amountMinor,
+      policy.perRunAllowance.currency,
+    );
+    base.window = fromMinorUnits(
+      policy.windowAllowance.amountMinor,
+      policy.windowAllowance.currency,
+    );
+    base.windowDays = String(policy.windowDays);
+    base.cooldownMinutes = String(Math.round(policy.cooldownSeconds / 60));
+    base.maxPending = String(policy.maxPendingProposals);
+    base.maxAttempts = String(policy.maxAttempts);
+    base.evidenceMaxAgeDays = String(policy.evidenceMaxAgeDays);
+  }
+  if (schedule) {
+    base.scheduleEnabled = schedule.enabled;
+    base.scheduleIntervalDays = String(schedule.intervalDays);
+    base.qualifyOnMemoryRevision = schedule.qualifyingChangeKinds.includes("memory_revision");
+    base.qualifyOnCadence = schedule.qualifyingChangeKinds.includes("scheduled_cadence");
+  }
+  return base;
 }
 
 function wholeNumber(value: string): number | null {
@@ -96,15 +139,27 @@ export function ResearchSettingsForm({
   ledger,
   timezone,
   organizationCurrency,
+  schedule,
+  scheduleUnavailable,
   onSave,
+  onSaveSchedule,
 }: Readonly<{
   ledger: ResearchLedgerView;
   timezone: string;
   /** Offered as the starting currency, never as the answer. */
   organizationCurrency: string;
+  /** Null is "not scheduled", never an implied cadence. */
+  schedule: ResearchScheduleView | null;
+  /** The cadence could not be loaded: its section says so and saves nothing. */
+  scheduleUnavailable: boolean;
   onSave: (policy: Record<string, unknown>) => Promise<{ ok: true } | { ok: false; message: string }>;
+  onSaveSchedule: (
+    schedule: Record<string, unknown>,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
 }>) {
-  const [fields, setFields] = useState<Fields>(() => initialFields(ledger, organizationCurrency));
+  const [fields, setFields] = useState<Fields>(() =>
+    initialFields(ledger, organizationCurrency, timezone, schedule),
+  );
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -126,6 +181,11 @@ export function ResearchSettingsForm({
     const maxPending = wholeNumber(fields.maxPending);
     const maxAttempts = wholeNumber(fields.maxAttempts);
     const evidenceMaxAgeDays = wholeNumber(fields.evidenceMaxAgeDays);
+    const scheduleIntervalDays = wholeNumber(fields.scheduleIntervalDays);
+    const qualifyingChangeKinds = [
+      ...(fields.qualifyOnMemoryRevision ? ["memory_revision"] : []),
+      ...(fields.qualifyOnCadence ? ["scheduled_cadence"] : []),
+    ];
 
     if (
       perRunMinor === null ||
@@ -140,6 +200,28 @@ export function ResearchSettingsForm({
       return;
     }
 
+    if (fields.timezone.trim() === "") {
+      setError("The schedule needs a timezone before research can run on a rhythm.");
+      return;
+    }
+
+    if (scheduleUnavailable) {
+      setError("The cadence could not be loaded, so nothing was saved. Reload and try again.");
+      return;
+    }
+
+    if (scheduleIntervalDays === null || scheduleIntervalDays < 1 || scheduleIntervalDays > 30) {
+      setError("The cadence needs how many days between evaluations, from 1 to 30.");
+      return;
+    }
+
+    if (qualifyingChangeKinds.length === 0) {
+      setError(
+        "The cadence needs at least one qualifying change, or no evaluation would ever warrant research.",
+      );
+      return;
+    }
+
     if (windowMinor < perRunMinor) {
       setError(
         "The window allowance cannot be smaller than one run's allowance, or nothing would ever be admitted.",
@@ -150,7 +232,7 @@ export function ResearchSettingsForm({
     setPending(true);
     const result = await onSave({
       enabled: fields.enabled,
-      timezone,
+      timezone: fields.timezone.trim(),
       // Names the platform's own rules, not a choice this organization makes.
       evidenceQualificationRuleVersion: EVIDENCE_QUALIFICATION_RULE_VERSION,
       evidenceMaxAgeDays,
@@ -161,10 +243,23 @@ export function ResearchSettingsForm({
       windowAllowance: { amountMinor: windowMinor, currency: fields.currency },
       windowDays,
     });
+    if (!result.ok) {
+      setPending(false);
+      setError(result.message);
+      return;
+    }
+    const scheduleResult = await onSaveSchedule({
+      enabled: fields.scheduleEnabled,
+      intervalDays: scheduleIntervalDays,
+      qualifyingChangeKinds,
+    });
     setPending(false);
 
-    if (result.ok) setSaved("Saved as a new version. It is in force from now.");
-    else setError(result.message);
+    if (scheduleResult.ok) setSaved("Saved as a new version. It is in force from now.");
+    else
+      setError(
+        `The spending limits were saved, but the cadence was not: ${scheduleResult.message}`,
+      );
   }
 
   return (
@@ -244,6 +339,14 @@ export function ResearchSettingsForm({
         <legend className="mb-1 text-sm font-medium">How often, and how hard it tries</legend>
 
         <NumberField
+          id="research-timezone"
+          label="Schedule timezone"
+          hint="Evaluations follow midnight in this timezone."
+          value={fields.timezone}
+          onChange={(value) => update("timezone", value)}
+          inputMode="text"
+        />
+        <NumberField
           id="research-cooldown"
           label="Minutes to wait between runs"
           hint="Zero means no wait, which is a choice rather than a blank."
@@ -270,6 +373,75 @@ export function ResearchSettingsForm({
           value={fields.evidenceMaxAgeDays}
           onChange={(value) => update("evidenceMaxAgeDays", value)}
         />
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-4">
+        <legend className="mb-1 text-sm font-medium">When research asks on its own</legend>
+
+        {scheduleUnavailable ? (
+          <p role="note" className="text-sm text-muted-foreground">
+            The cadence could not be loaded. The limits above still save; reload to change when
+            research asks on its own.
+          </p>
+        ) : null}
+
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="research-schedule-enabled" className="text-sm font-medium">
+              Evaluate on a schedule
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Off means research only starts when someone asks. Switching this on never switches
+              spending on — the policy above still binds every run.
+            </p>
+          </div>
+          <Switch
+            id="research-schedule-enabled"
+            checked={fields.scheduleEnabled}
+            onCheckedChange={(checked) => update("scheduleEnabled", checked)}
+          />
+        </div>
+
+        <NumberField
+          id="research-schedule-interval"
+          label="Days between scheduled evaluations"
+          hint="From 1 to 30. A missed evaluation stays missed rather than admitting twice."
+          value={fields.scheduleIntervalDays}
+          onChange={(value) => update("scheduleIntervalDays", value)}
+        />
+
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="research-schedule-kind-memory" className="text-sm font-medium">
+              Business Memory changed
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              A new memory digest since the last evaluation warrants research. The same digest seen
+              again warrants nothing.
+            </p>
+          </div>
+          <Switch
+            id="research-schedule-kind-memory"
+            checked={fields.qualifyOnMemoryRevision}
+            onCheckedChange={(checked) => update("qualifyOnMemoryRevision", checked)}
+          />
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="research-schedule-kind-cadence" className="text-sm font-medium">
+              Every scheduled window
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              The window itself warrants research, whether or not anything changed.
+            </p>
+          </div>
+          <Switch
+            id="research-schedule-kind-cadence"
+            checked={fields.qualifyOnCadence}
+            onCheckedChange={(checked) => update("qualifyOnCadence", checked)}
+          />
+        </div>
       </fieldset>
 
       {error === null ? null : (

@@ -46,6 +46,9 @@ import { createLearningRepository } from "@/modules/campaigns/infrastructure/lea
 import { createGeminiLearningDrafter } from "@/modules/campaigns/infrastructure/learning-drafter";
 import { createCampaignMetricIngest } from "@/modules/campaigns/infrastructure/metric-ingest";
 import { sweepResearchLeases } from "@/modules/campaigns/application/research-lease-sweep";
+import { runResearchScheduleSweep } from "@/modules/campaigns/application/research-scheduler";
+import { createResearchDueReader } from "@/modules/campaigns/infrastructure/research-due-reader";
+import { dispatchResearchWorker } from "@/modules/campaigns/infrastructure/research-worker-dispatch";
 import { evaluateCampaign } from "@/modules/campaigns/application/allocation-service";
 import { settleCampaign } from "@/modules/campaigns/application/measurement-service";
 import { proposeLearning } from "@/modules/campaigns/application/learning-service";
@@ -1500,6 +1503,93 @@ export const researchLeaseSweepTask = schedules.task({
       organizationsSwept: result.organizationsSwept,
       reclaimed: result.reclaimed,
       abandoned: result.abandoned,
+      failed: result.failed,
+    });
+
+    return result;
+  },
+});
+
+/**
+ * Every hour: ask for research on behalf of organizations with a due schedule.
+ *
+ * The cadence decides when to ask, never how much may be spent. Each
+ * organization is evaluated inside the database against the policy that
+ * binds it — schedule still on, policy still binding, change still
+ * qualifying, allowance/pending/cooldown still admitting — so a scheduled
+ * run obeys identical rules to a manual Ask. A tick that warrants nothing
+ * stores its outcome in the receipt and proposes nothing; a tick that finds
+ * no settings admits nothing and spends nothing, because this task never
+ * calls a model and dispatches a worker only after an admission exists.
+ *
+ * Bounded per tick (25 organizations, oldest evaluation first). A missed
+ * sweep never floods catch-up: every organization claims only its current
+ * window, and missed windows stay missed.
+ *
+ * `schedules.task` rather than `schemaTask`: the cron payload is fixed by
+ * Trigger.dev, so there is no caller-supplied payload to validate.
+ */
+export const researchScheduleSweepTask = schedules.task({
+  id: "campaign.research-schedule-sweep",
+  cron: "0 * * * *",
+  retry,
+  maxDuration: 300,
+  run: async () => {
+    const supabase = createCampaignWorkerServiceClient();
+    const rpc = (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<{ data: unknown; error: { code?: string; message?: string } | null }> =>
+      (
+        supabase.rpc as unknown as (
+          fn: string,
+          fnArgs: Record<string, unknown>,
+        ) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>
+      )(name, args);
+
+    // The latest manifest identity per organization, read on the service
+    // client with the organization id repeated in every query — the same
+    // explicit-predicate tenancy the research worker's own readers use.
+    // Identifiers only: the digest the tick compares and the revision it
+    // records. Entry bytes stay behind their own access rules.
+    const readManifestDigest = async ({ organizationId }: { organizationId: string }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as unknown as { from(table: string): any };
+      const listed = await db
+        .from("memory_context_manifests")
+        .select("id,context_digest,created_at")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (listed.error) throw new Error("The memory manifest could not be read.");
+      const row = (listed.data ?? [])[0] as
+        | { id: string; context_digest: string }
+        | undefined;
+      if (!row) return null;
+      return { digest: row.context_digest, revision: row.id };
+    };
+
+    const result = await runResearchScheduleSweep({
+      due: createResearchDueReader({ rpc }),
+      memory: { readManifestDigest },
+      dispatch: dispatchResearchWorker,
+      now: () => new Date(),
+      newCorrelationId: () => randomUUID(),
+      maxOrganizationsPerTick: 25,
+    });
+
+    // Identifiers and counts only. `refused` is logged because a tick the
+    // purse stopped must not read the same as a tick that warranted nothing;
+    // `failed` and `dispatchFailed` for the same reason as the lease sweep.
+    logger.info("campaign.research_schedule_sweep_finished", {
+      organizationsSwept: result.organizationsSwept,
+      admitted: result.admitted,
+      replayed: result.replayed,
+      deduplicated: result.deduplicated,
+      notWarranted: result.notWarranted,
+      refused: result.refused,
+      notDue: result.notDue,
+      dispatchFailed: result.dispatchFailed,
       failed: result.failed,
     });
 
