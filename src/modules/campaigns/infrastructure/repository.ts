@@ -1,3 +1,4 @@
+import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import {
   approvalInputSchema,
@@ -69,6 +70,27 @@ export type CampaignPersistence = {
 function constraintName(message: string | undefined): string | undefined {
   return /constraint "([a-z0-9_]+)"/i.exec(message ?? "")?.[1];
 }
+
+/**
+ * What the database refused, in Creative-tab words. A raised `campaign_*`
+ * code would otherwise surface as "something went wrong" over a refusal the
+ * operator can act on — reload, attest again, or review the current version.
+ */
+const APPROVAL_REFUSAL_COPY: Record<string, string> = {
+  campaign_approval_digest_mismatch:
+    "This version changed since you read it. Reload and try again.",
+  campaign_approval_version_superseded:
+    "A newer version exists. Review the current version and approve that instead.",
+  campaign_attestation_missing_for_version:
+    "The attestation does not match this version. Attest again and retry.",
+  campaign_approval_actions_missing: "The approval names no actions. Reload and try again.",
+  campaign_approval_actions_mismatch:
+    "The actions changed since you read them. Reload and try again.",
+  campaign_approval_expires_before_policy:
+    "The approval lapses before the authorized window ends. Pick a later date and try again.",
+  campaign_approval_spend_mismatch: "The spend under review changed. Reload and try again.",
+  campaign_approval_already_live: "This version is already approved. Reload to see the live approval.",
+};
 
 function campaignDatabaseError(context?: {
   operation: string;
@@ -302,7 +324,12 @@ export function createCampaignReadRepository(
           total_spend_ceiling: validated.totalSpendCeiling,
         },
       });
-      if (error || typeof data !== "string") campaignDatabaseError();
+      if (error) {
+        const refusal = error.message ? APPROVAL_REFUSAL_COPY[error.message] : undefined;
+        if (refusal) throw new DomainError("DOMAIN_ERROR", refusal);
+        campaignDatabaseError();
+      }
+      if (typeof data !== "string") campaignDatabaseError();
       return data;
     },
   };

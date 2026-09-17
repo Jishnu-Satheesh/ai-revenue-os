@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { logger } from "@/lib/logger";
 import {
   scheduledEvidenceFingerprint,
   scheduledIdempotencyKey,
@@ -118,10 +119,17 @@ export async function runResearchScheduleSweep(dependencies: {
   for (const organizationId of targets) {
     try {
       await evaluateOneOrganization(dependencies, organizationId, result);
-    } catch {
+    } catch (error) {
       // One tenant's fault must not strand every other tenant's tick until
       // the next hour. Collected rather than swallowed: the caller reports a
-      // partial sweep as partial.
+      // partial sweep as partial. The fault itself is logged with the tenant
+      // it belongs to — counts alone cannot diagnose a failing tick, and an
+      // organization id is routing metadata, not tenant content.
+      logger.error("campaign.research_schedule_tick_failed", {
+        organizationId,
+        errorName: error instanceof Error ? error.name : "unknown",
+        errorMessage: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+      });
       result.failed.push(organizationId);
     }
   }

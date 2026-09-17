@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { logger } from "@/lib/logger";
 import type { EvaluateDueResult } from "@/modules/campaigns/infrastructure/research-due-reader";
 import {
   runResearchScheduleSweep,
@@ -7,6 +8,12 @@ import {
   type ResearchScheduleSweepMemory,
 } from "@/modules/campaigns/application/research-scheduler";
 import type { ResearchWorkerDispatch } from "@/modules/campaigns/application/research-dispatch";
+
+vi.mock("@/lib/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+const loggerError = vi.mocked(logger.error);
 
 const ORG_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ORG_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -246,6 +253,11 @@ describe("the hourly research tick", () => {
     expect(result.failed).toEqual([ORG_A, ORG_B]);
     expect(evaluated).toEqual([]);
     expect(dispatched).toEqual([]);
+    expect(loggerError).toHaveBeenCalledTimes(2);
+    expect(loggerError).toHaveBeenCalledWith(
+      "campaign.research_schedule_tick_failed",
+      expect.objectContaining({ organizationId: ORG_A }),
+    );
   });
 
   it("bounds each tick so a missed sweep never floods catch-up", async () => {

@@ -183,6 +183,50 @@ describe("campaign review writes", () => {
     ).rejects.toThrow();
     expect(rpc).not.toHaveBeenCalled();
   });
+
+  it("names the refusal when the version is already approved", async () => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { code: "22023", message: "campaign_approval_already_live" },
+    }));
+    const persistence = { from: vi.fn(), rpc } as unknown as CampaignPersistence;
+
+    await expect(
+      createCampaignReadRepository(persistence).approve({
+        organizationId: ORGANIZATION_ID,
+        bundleVersionId: "f0000000-0000-4000-8000-000000000001",
+        bundleDigest: "a".repeat(64),
+        attestationId: "d0000000-0000-4000-8000-000000000001",
+        expiresAt: "2027-01-01T00:00:00.000Z",
+        capabilityGrantVersions: {},
+        policyVersionIds: [],
+        actionKeys: ["b0000000-0000-4000-8000-000000000001"],
+        totalSpendCeiling: null,
+      }),
+    ).rejects.toThrow("This version is already approved. Reload to see the live approval.");
+  });
+
+  it("names the refusal when the version changed since it was read", async () => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { code: "22023", message: "campaign_approval_digest_mismatch" },
+    }));
+    const persistence = { from: vi.fn(), rpc } as unknown as CampaignPersistence;
+
+    await expect(
+      createCampaignReadRepository(persistence).approve({
+        organizationId: ORGANIZATION_ID,
+        bundleVersionId: "f0000000-0000-4000-8000-000000000001",
+        bundleDigest: "a".repeat(64),
+        attestationId: "d0000000-0000-4000-8000-000000000001",
+        expiresAt: "2027-01-01T00:00:00.000Z",
+        capabilityGrantVersions: {},
+        policyVersionIds: [],
+        actionKeys: ["b0000000-0000-4000-8000-000000000001"],
+        totalSpendCeiling: null,
+      }),
+    ).rejects.toThrow("This version changed since you read it. Reload and try again.");
+  });
 });
 
 describe("campaign version writer", () => {
