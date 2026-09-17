@@ -68,7 +68,9 @@ async function dispatch(
  * identical requests take two Trigger slots to reach the same replayed row.
  *
  * `extra` is included because it is drawn, so two requests differing only in
- * the free box are genuinely different renders.
+ * the free box are genuinely different renders. The deliverable identity rides
+ * along because it is resolved per request from the approved plan -- two
+ * requests for the same pixels under different identities are different filings.
  */
 export function posterRenderIdempotencyKey(payload: CampaignPosterRenderPayload): string {
   return [
@@ -80,6 +82,10 @@ export function posterRenderIdempotencyKey(payload: CampaignPosterRenderPayload)
     payload.script,
     payload.directionId,
     payload.channel,
+    payload.placement,
+    payload.language,
+    payload.format,
+    payload.ordinal,
     payload.extra ?? "",
   ].join(":");
 }

@@ -166,6 +166,12 @@ export function parseCampaignVariantPayload(payload: unknown): CampaignVariantPa
  * It is bounded here and refused by `checkOperatorSlotText` before it is drawn.
  * Everything else the worker needs, it reads from the database under its own
  * credentials.
+ *
+ * `placement`, `language`, `format` and `ordinal` are the deliverable identity
+ * the finished output is recorded under. They are resolved by the renders route
+ * from the approved poster plan -- never guessed by the worker, which records
+ * them verbatim -- so a retry of the same request files under the same slot
+ * and the database reuses rather than duplicating.
  */
 export const campaignPosterRenderPayloadSchema = z.strictObject({
   organizationId: uuidSchema,
@@ -181,6 +187,10 @@ export const campaignPosterRenderPayloadSchema = z.strictObject({
   script: z.enum(["Latn", "Mlym", "Arab"]),
   directionId: z.string().min(1).max(120),
   channel: z.enum(["instagram", "facebook"]),
+  placement: z.string().trim().min(1).max(60),
+  language: z.string().trim().min(1).max(40),
+  format: z.string().trim().min(1).max(60),
+  ordinal: z.number().int().positive(),
   extra: z.string().max(200).nullable(),
 });
 

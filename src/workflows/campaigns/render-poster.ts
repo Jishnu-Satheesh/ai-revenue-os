@@ -98,6 +98,51 @@ export type PosterRenderStore = {
     state: "rendered" | "refused";
     replayed: boolean;
   }>;
+  /**
+   * The row a previous attempt already wrote for this exact digest, if any.
+   *
+   * The digest covers every input that changes the pixels, so a hit means the
+   * output already exists and drawing it again would only spend a second
+   * upload for the same bytes. Null means nothing was recorded yet.
+   */
+  findByDigest(input: {
+    organizationId: string;
+    campaignId: string;
+    bundleVersionId: string;
+    renderDigest: string;
+  }): Promise<PosterExistingRender | null>;
+};
+
+export type PosterExistingRender = {
+  readonly renderId: string;
+  readonly state: "rendered" | "refused";
+  readonly refusalCode: string | null;
+  readonly textValues: Readonly<Record<string, string>>;
+  readonly outputStoragePath: string | null;
+  readonly outputContentHash: string | null;
+  readonly outputMimeType: string | null;
+  readonly outputWidthPx: number | null;
+  readonly outputHeightPx: number | null;
+};
+
+/**
+ * Recording the finished output as a reviewable deliverable version.
+ *
+ * This is the narrow worker side of `record_campaign_deliverable_version`: the
+ * service-role RPC that files one exact set of finished bytes under the
+ * deliverable identity the route resolved. The payload is the render's own
+ * values, verbatim -- nothing here re-derives identity, rehashes bytes, or
+ * invents copy. An identical retry reuses the recorded version rather than
+ * asking a second review of the same picture; that reuse is the database's
+ * decision, surfaced here as the outcome.
+ */
+export type PosterDeliverableStore = {
+  recordVersion(input: { organizationId: string; payload: Record<string, unknown> }): Promise<{
+    deliverableId: string;
+    deliverableVersionId: string;
+    version: number;
+    outcome: "saved" | "replayed";
+  }>;
 };
 
 /**
@@ -117,7 +162,15 @@ export type RenderPosterDependencies = {
   composite: PosterCompositor;
   storage: PosterOutputStorage;
   renders: PosterRenderStore;
+  deliverables: PosterDeliverableStore;
   isCancelled: () => boolean;
+};
+
+export type RecordedPosterDeliverable = {
+  readonly deliverableId: string;
+  readonly deliverableVersionId: string;
+  readonly version: number;
+  readonly outcome: "saved" | "replayed";
 };
 
 export type RenderPosterResult =
@@ -127,6 +180,7 @@ export type RenderPosterResult =
       replayed: boolean;
       renderDigest: string;
       outputStoragePath: string;
+      deliverable: RecordedPosterDeliverable;
     }
   | {
       status: "refused";
@@ -307,10 +361,103 @@ export async function renderCampaignPoster(
 
   if (dependencies.isCancelled()) return { status: "skipped", reason: "cancelled" };
 
+  const textValues = drawableTextValues(context.template, resolution.slots);
+
+  /**
+   * The digest is computable before a pixel is drawn -- over the same inputs
+   * the compositor hashes -- so a retry can ask whether the output already
+   * exists before paying to draw it again. A hit short-circuits the composite
+   * and the upload entirely: the bytes are already stored, and the row below
+   * replays them rather than stacking a second one.
+   */
+  const prospectiveDigest = renderDigest({
+    plateContentHash: context.plateContentHash,
+    templateKey: context.template.key,
+    templateVersion: context.template.version,
+    script: payload.script,
+    textValues: Object.fromEntries(textValues.map((value) => [value.slot, value.text])),
+    fontManifestDigest: fontManifestDigest(),
+  });
+
+  const existing = await dependencies.renders.findByDigest({
+    organizationId: payload.organizationId,
+    campaignId: payload.campaignId,
+    bundleVersionId: payload.bundleVersionId,
+    renderDigest: prospectiveDigest,
+  });
+
+  if (
+    existing !== null &&
+    existing.state === "rendered" &&
+    existing.outputStoragePath !== null &&
+    existing.outputContentHash !== null
+  ) {
+    const replayed = await dependencies.renders.record(
+      record({
+        textValues: { ...existing.textValues },
+        renderDigest: prospectiveDigest,
+        state: "rendered",
+        refusalCode: null,
+        refusalDetail: null,
+        outputStoragePath: existing.outputStoragePath,
+        outputContentHash: existing.outputContentHash,
+        outputMimeType: existing.outputMimeType,
+        outputWidthPx: existing.outputWidthPx,
+        outputHeightPx: existing.outputHeightPx,
+      }),
+    );
+
+    const deliverable = await recordFinishedDeliverable(payload, dependencies, {
+      plateContentHash: context.plateContentHash,
+      renderId: replayed.renderId,
+      textValues: existing.textValues,
+      renderDigest: prospectiveDigest,
+      outputContentHash: existing.outputContentHash,
+    });
+
+    return {
+      status: "rendered",
+      renderId: replayed.renderId,
+      replayed: replayed.replayed,
+      renderDigest: prospectiveDigest,
+      outputStoragePath: existing.outputStoragePath,
+      deliverable,
+    };
+  }
+
+  /**
+   * A refused poster replays the same way: the row already says what was
+   * decided and why, so there is nothing to draw and -- refusals being
+   * unfinished work rather than finished output -- nothing to file as a
+   * deliverable.
+   */
+  if (existing !== null && existing.state === "refused" && existing.refusalCode !== null) {
+    const replayed = await dependencies.renders.record(
+      record({
+        textValues: { ...existing.textValues },
+        renderDigest: prospectiveDigest,
+        state: "refused",
+        refusalCode: existing.refusalCode,
+        refusalDetail: null,
+        outputStoragePath: null,
+        outputContentHash: null,
+        outputMimeType: null,
+        outputWidthPx: null,
+        outputHeightPx: null,
+      }),
+    );
+
+    return {
+      status: "refused",
+      renderId: replayed.renderId,
+      replayed: replayed.replayed,
+      renderDigest: prospectiveDigest,
+      refusalCode: existing.refusalCode,
+    };
+  }
+
   const plate = await dependencies.plates.read(context.plateStoragePath);
   if (plate === null) return { status: "skipped", reason: "plate_unavailable" };
-
-  const textValues = drawableTextValues(context.template, resolution.slots);
 
   const composed = await dependencies.composite({
     template: context.template,
@@ -385,13 +532,97 @@ export async function renderCampaignPoster(
     }),
   );
 
+  /**
+   * The finished output is filed as a reviewable deliverable version only now
+   * that the bytes exist in storage and the render row points at them. A
+   * failure here throws rather than returning a half-done success: the run
+   * retries, the probe above replays the render without drawing it again, and
+   * the record call files what the first attempt could not. Returning success
+   * instead would leave a downloadable poster nobody can review or publish.
+   */
+  const deliverable = await recordFinishedDeliverable(payload, dependencies, {
+    plateContentHash: context.plateContentHash,
+    renderId: saved.renderId,
+    textValues: composed.drawnValues,
+    renderDigest: composed.renderDigest,
+    outputContentHash: composed.outputContentHash,
+  });
+
   return {
     status: "rendered",
     renderId: saved.renderId,
     replayed: saved.replayed,
     renderDigest: composed.renderDigest,
     outputStoragePath: path,
+    deliverable,
   };
+}
+
+/**
+ * Files one exact set of finished bytes as a deliverable version.
+ *
+ * Every value is the render's own, carried verbatim: the render row id, its
+ * content hash and digest, the words actually drawn, the inputs that produced
+ * them, and the identity the route resolved from the approved poster plan.
+ * Nothing is re-derived here -- the worker has no second opinion about which
+ * slot a render belongs to. A failure throws so the run retries; the
+ * idempotency fence is the database's natural key, which reuses the version an
+ * earlier attempt already filed instead of asking a second review of it.
+ */
+async function recordFinishedDeliverable(
+  payload: CampaignPosterRenderPayload,
+  dependencies: RenderPosterDependencies,
+  finished: {
+    plateContentHash: string;
+    renderId: string;
+    textValues: Readonly<Record<string, string>>;
+    renderDigest: string;
+    outputContentHash: string;
+  },
+): Promise<RecordedPosterDeliverable> {
+  try {
+    return await dependencies.deliverables.recordVersion({
+      organizationId: payload.organizationId,
+      payload: {
+        campaign_id: payload.campaignId,
+        bundle_version_id: payload.bundleVersionId,
+        direction_key: payload.directionId,
+        channel: payload.channel,
+        placement: payload.placement,
+        language: payload.language,
+        format: payload.format,
+        ordinal: payload.ordinal,
+        source_kind: "finished_poster",
+        poster_render_id: finished.renderId,
+        copy: { ...finished.textValues },
+        render_inputs: {
+          plateContentHash: finished.plateContentHash,
+          templateKey: payload.templateKey,
+          templateVersion: payload.templateVersion,
+          script: payload.script,
+          slotValues: { ...finished.textValues },
+          freeLine: payload.extra,
+          fontManifestDigest: fontManifestDigest(),
+        },
+        render_digest: finished.renderDigest,
+        content_hash: finished.outputContentHash,
+        verification: {},
+      },
+    });
+  } catch (error) {
+    logger.error("campaign.poster_deliverable_not_recorded", {
+      organizationId: payload.organizationId,
+      campaignId: payload.campaignId,
+      correlationId: payload.correlationId,
+      errorCode:
+        typeof error === "object" && error !== null && "kind" in error
+          ? String((error as { kind: unknown }).kind)
+          : error instanceof Error
+            ? error.name
+            : "unknown",
+    });
+    throw new Error("The finished poster could not be recorded as a deliverable.");
+  }
 }
 
 /**

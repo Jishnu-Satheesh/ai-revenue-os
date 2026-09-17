@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 
 import { DomainError } from "@/lib/errors";
 import { apiErrorResponse } from "@/lib/api/organization-context";
+import {
+  PosterDeliverableIdentityError,
+  resolvePosterDeliverableIdentity,
+} from "@/domain/campaigns/deliverable-identity";
 import { checkOperatorSlotText } from "@/domain/campaigns/poster-slots";
 import { posterRenderRequestSchema } from "@/modules/campaigns/application/api-schemas";
 import {
@@ -72,6 +76,32 @@ export async function POST(
       }
     }
 
+    /**
+     * Which finished-output slot this render files under, resolved from the
+     * approved poster plan rather than guessed. An unknown template or script
+     * is a 422 with the reason named, never a neighbouring default: filing the
+     * output where nobody will review it is worse than refusing the request.
+     * Thrown as DOMAIN_ERROR so the response is a 422, not a 400 -- the
+     * request is well formed, it names something the plan does not hold.
+     */
+    let placement: string;
+    let language: string;
+    let format: string;
+    let ordinal: number;
+    try {
+      ({ placement, language, format, ordinal } = resolvePosterDeliverableIdentity({
+        posterPlan: version.manifest.posterPlan,
+        templateKey: body.templateKey,
+        templateVersion: body.templateVersion,
+        script: body.script,
+      }));
+    } catch (error) {
+      if (error instanceof PosterDeliverableIdentityError) {
+        throw new DomainError("DOMAIN_ERROR", `${error.reason}: ${error.message}`);
+      }
+      throw error;
+    }
+
     const { workerId } = await dispatchPosterRender({
       organizationId: context.organizationId,
       campaignId,
@@ -83,6 +113,10 @@ export async function POST(
       script: body.script,
       directionId: body.directionId,
       channel: body.channel,
+      placement,
+      language,
+      format,
+      ordinal,
       extra: body.extra,
     });
 

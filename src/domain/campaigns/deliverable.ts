@@ -231,6 +231,16 @@ export type DeliverableCompletion = {
   produced: number;
   complete: boolean;
   missing: readonly { format: string; language: string; shortfall: number }[];
+  /**
+   * Finished output the plan never asked for.
+   *
+   * A manual-brief campaign has no proposal plan, so everything it produces
+   * lands here: an empty plan plus one produced output reads as
+   * produced-but-unplanned, never as complete. Over-production against a real
+   * plan is reported the same way rather than absorbed -- five posters against
+   * four planned is four of four with one unplanned, not a tidy complete.
+   */
+  unplanned: readonly { format: string; language: string; surplus: number }[];
 };
 
 export function deliverableCompletion(input: {
@@ -256,5 +266,54 @@ export function deliverableCompletion(input: {
     }
   }
 
-  return { planned, produced, complete: missing.length === 0, missing };
+  const surplus = unplanned(input);
+
+  return {
+    planned,
+    produced,
+    complete: missing.length === 0 && surplus.length === 0,
+    missing,
+    unplanned: surplus,
+  };
+}
+
+/**
+ * Finished output beyond what the plan asked for, per format and language.
+ *
+ * Computed independently of the capped `produced` count above, keyed by the
+ * pair itself rather than by string concatenation: the plan half of this file
+ * joins its keys with a literal NUL byte, and this stays out of that scheme
+ * rather than depending on an invisible separator.
+ */
+function unplanned(input: {
+  plan: readonly DeliverablePlanItem[];
+  produced: readonly { format: string; language: string }[];
+}): { format: string; language: string; surplus: number }[] {
+  const keyOf = (format: string, language: string): string => JSON.stringify([format, language]);
+
+  const plannedByPair = new Map<string, { format: string; language: string; count: number }>();
+  for (const item of input.plan) {
+    const key = keyOf(item.format, item.language);
+    const prior = plannedByPair.get(key);
+    if (prior) prior.count += item.count;
+    else
+      plannedByPair.set(key, { format: item.format, language: item.language, count: item.count });
+  }
+
+  const madeByPair = new Map<string, { format: string; language: string; made: number }>();
+  for (const item of input.produced) {
+    const key = keyOf(item.format, item.language);
+    const prior = madeByPair.get(key);
+    if (prior) prior.made += 1;
+    else madeByPair.set(key, { format: item.format, language: item.language, made: 1 });
+  }
+
+  const surplus: { format: string; language: string; surplus: number }[] = [];
+  for (const [key, made] of madeByPair) {
+    const planned = plannedByPair.get(key)?.count ?? 0;
+    if (made.made > planned) {
+      surplus.push({ format: made.format, language: made.language, surplus: made.made - planned });
+    }
+  }
+  return surplus;
 }

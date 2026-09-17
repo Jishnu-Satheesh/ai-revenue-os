@@ -77,6 +77,7 @@ import {
   createSupabaseCampaignObjectReader,
 } from "@/modules/campaigns/infrastructure/poster-context-reader";
 import { createPosterRenderStore } from "@/modules/campaigns/infrastructure/poster-render-repository";
+import { createDeliverableRepository } from "@/modules/campaigns/infrastructure/deliverable-repository";
 import { compositePoster } from "@/modules/campaigns/infrastructure/poster-compositor";
 import {
   createFromOpportunity,
@@ -668,6 +669,9 @@ export const renderCampaignPosterTask = schemaTask({
       composite: compositePoster,
       storage: createSupabaseCampaignAssetStorage(supabase),
       renders: createPosterRenderStore(supabase as never),
+      // The worker's own service client: the record RPC is granted to
+      // service_role alone, so no member session could make this call.
+      deliverables: createDeliverableRepository(supabase as never),
       isCancelled: () => signal.aborted,
     });
 
