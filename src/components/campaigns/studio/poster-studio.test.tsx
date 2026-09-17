@@ -364,4 +364,45 @@ describe("an expired preview is said to be expired", () => {
     expect(screen.getByRole("button", { name: /before \/ after/i })).toBeInTheDocument();
     expect(screen.queryByText(/its viewing link could not be signed/i)).not.toBeInTheDocument();
   });
+
+  it("ignores an unsigned render for a script nobody is looking at", () => {
+    // The note names "this script and template". A finished poster for the
+    // other script is out of scope: it must not raise the note here, and it
+    // must not conjure a toggle for a poster that is not on screen.
+    renderStudio({
+      renders: [renderedRender({ id: "d0000000-0000-4000-8000-000000000002", script: "Mlym" })],
+    });
+
+    expect(screen.queryByText(/its viewing link could not be signed/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /before \/ after/i })).not.toBeInTheDocument();
+  });
+
+  it("ignores an unsigned render for another template", () => {
+    renderStudio({
+      renders: [
+        renderedRender({ id: "d0000000-0000-4000-8000-000000000003", templateKey: "other_layout" }),
+      ],
+    });
+
+    expect(screen.queryByText(/its viewing link could not be signed/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /before \/ after/i })).not.toBeInTheDocument();
+  });
+
+  it("shows both the toggle and the note when one of two renders lost its link", () => {
+    // Two finished posters for this script and template: the signed one still
+    // offers before/after, and the unsigned one is still said to be kept. One
+    // must not hide the other.
+    renderStudio(
+      {
+        renders: [
+          renderedRender(),
+          renderedRender({ id: "d0000000-0000-4000-8000-000000000004" }),
+        ],
+      },
+      { [RENDER_ID]: "https://example.test/r.png" },
+    );
+
+    expect(screen.getByRole("button", { name: /before \/ after/i })).toBeInTheDocument();
+    expect(screen.getByText(/its viewing link could not be signed/i)).toBeInTheDocument();
+  });
 });

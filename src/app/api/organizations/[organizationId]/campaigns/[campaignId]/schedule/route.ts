@@ -71,6 +71,17 @@ export async function POST(
           ),
         );
       }
+      // A partial authority schedules only what it covers. When it covers
+      // none of the approved actions, scheduling stops here rather than
+      // recording a silent zero-create that reads as done.
+      if (error?.message?.includes("campaign_schedule_launch_authority_covers_nothing")) {
+        return apiErrorResponse(
+          new DomainError(
+            "DOMAIN_ERROR",
+            "The publication authority does not cover any of these scheduled actions yet. Authorize the missing outputs first, then schedule again.",
+          ),
+        );
+      }
       return apiErrorResponse(new Error("The campaign could not be scheduled."));
     }
 

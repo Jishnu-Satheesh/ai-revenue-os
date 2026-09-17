@@ -24,6 +24,18 @@
 -- but never which authority they were scheduled under. Rewriting the stamp
 -- would let a run borrow authority granted for different bytes.
 --
+-- Coverage is per action, not per campaign. A launch authority names the exact
+-- outputs it covers (its selections); a scheduled channel action is covered by
+-- an authority only when the authority names a selection for an output
+-- prepared under the same direction, for the same channel, in the same bundle
+-- version. Direction and channel are matched exactly — never normalised —
+-- because the two tables use different placement vocabularies and guessing
+-- across them would schedule work nobody authorized. Residual: two outputs
+-- under one direction and channel that differ only in placement, language,
+-- format or ordinal share coverage; the authority's own review checks still
+-- apply per output at authorize time, and narrowing this further needs a real
+-- action-to-output key that the schema does not have.
+--
 -- Additive and forward-only. No existing table is altered beyond two nullable
 -- columns; no existing function signature changes.
 
@@ -95,14 +107,49 @@ create trigger campaign_deliverables_new_version_supersedes_launch_authority
   after update of current_version_id on public.campaign_deliverables
   for each row execute function private.supersede_campaign_launch_authority();
 
+-- Whether one scheduled action falls inside one authority's covered set.
+--
+-- Read against the selections rows, not the manifest JSON: the rows are the
+-- enforced binding (one per reviewed output, written in the same transaction
+-- that granted authority), while the manifest is stored opaquely.
+create function private.launch_authority_covers_action(
+  cover_organization_id uuid,
+  cover_approval_id uuid,
+  cover_bundle_version_id uuid,
+  cover_direction_key uuid,
+  cover_channel text
+)
+returns boolean
+language sql
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.campaign_launch_selections selection
+    join public.campaign_deliverable_versions version_row
+      on version_row.organization_id = selection.organization_id
+     and version_row.id = selection.deliverable_version_id
+    join public.campaign_deliverables deliverable
+      on deliverable.organization_id = selection.organization_id
+     and deliverable.id = selection.deliverable_id
+    where selection.organization_id = cover_organization_id
+      and selection.launch_approval_id = cover_approval_id
+      and version_row.bundle_version_id = cover_bundle_version_id
+      and version_row.direction_key = cover_direction_key
+      and deliverable.channel = cover_channel
+  );
+$$;
+
 -- ---------------------------------------------------------------------------
 -- schedule_campaign_actions, taught to require publication authority.
 -- ---------------------------------------------------------------------------
 --
 -- The body is the scheduling flow as shipped; the only changes are the
--- authority lookup after the proposal-approval checks and the stamp on the
--- inserted runs. Check order is unchanged, so every existing refusal still
--- fires first for its own cause.
+-- authority lookup after the proposal-approval checks, the coverage join that
+-- restricts the insert to the approved actions the authority actually covers,
+-- and the stamp on the inserted runs. Check order is unchanged, so every
+-- existing refusal still fires first for its own cause.
 
 create or replace function public.schedule_campaign_actions(
   target_organization_id uuid,
@@ -180,8 +227,30 @@ begin
     raise exception 'campaign_schedule_requires_launch_authority' using errcode = '22023';
   end if;
 
+  -- A partial authority schedules its covered subset, never the whole approved
+  -- set: stamping an uncovered action would let it dispatch outputs nobody
+  -- authorized. An authority that covers none of the approved actions is a
+  -- caller error worth surfacing, not a silent zero-create that reads as done.
+  if not exists (
+    select 1
+    from public.campaign_channel_actions action
+    where action.organization_id = target_organization_id
+      and action.bundle_version_id = version_row.id
+      and action.action_key = any (approval.action_keys)
+      and private.launch_authority_covers_action(
+        target_organization_id, launch_authority.id, version_row.id,
+        action.direction_key, action.channel
+      )
+  ) then
+    raise exception 'campaign_schedule_launch_authority_covers_nothing' using errcode = '22023';
+  end if;
+
   -- Only the actions the approval actually named. An action present on the
-  -- version but absent from the approval was not agreed to.
+  -- version but absent from the approval was not agreed to. And only the named
+  -- actions the authority actually covers: stamping the rest would convert
+  -- reviewed-one-output into permission to publish them all. Uncovered actions
+  -- get no run at all — an unstamped run would flow through the grandfathered
+  -- path below, which exists only for rows scheduled before enforcement.
   insert into public.campaign_action_runs (
     organization_id, campaign_id, bundle_version_id, action_key, scheduled_for, approval_id,
     launch_approval_id, launch_digest
@@ -194,6 +263,10 @@ begin
   where action.organization_id = target_organization_id
     and action.bundle_version_id = version_row.id
     and action.action_key = any (approval.action_keys)
+    and private.launch_authority_covers_action(
+      target_organization_id, launch_authority.id, version_row.id,
+      action.direction_key, action.channel
+    )
   on conflict (organization_id, bundle_version_id, action_key) do nothing;
 
   get diagnostics created = row_count;
@@ -364,8 +437,11 @@ begin
   -- Publication authority, verified when the run carries it. The stamped
   -- digest must still match a live authority: a superseded or revoked
   -- authority, or terms that moved under it, refuses the claim rather than
-  -- dispatching bytes nobody currently authorizes. Runs scheduled before
-  -- enforcement carry no reference and are evaluated under the proposal
+  -- dispatching bytes nobody currently authorizes. Membership is re-checked
+  -- too: a stamp only proves the run was scheduled under an authority, not
+  -- that the authority covers this action — a forged or over-broad stamp for
+  -- an uncovered action refuses rather than dispatching it. Runs scheduled
+  -- before enforcement carry no reference and are evaluated under the proposal
   -- approval above, exactly as today.
   if not is_pause and run.launch_approval_id is not null then
     select authority.* into launch_authority
@@ -377,6 +453,11 @@ begin
       codes := codes || 'launch_authority_superseded';
     elsif launch_authority.launch_digest is distinct from run.launch_digest then
       codes := codes || 'launch_authority_digest_mismatch';
+    elsif action.id is not null and not private.launch_authority_covers_action(
+      target_organization_id, launch_authority.id, run.bundle_version_id,
+      action.direction_key, action.channel
+    ) then
+      codes := codes || 'launch_authority_action_not_covered';
     end if;
   end if;
 
@@ -463,7 +544,9 @@ begin
 
   -- Pre-enforcement runs proceed, audibly. One marker row per claim keeps the
   -- ledger queryable for how much dispatch still flows without authority, so
-  -- the cutover can be watched rather than assumed.
+  -- the cutover can be watched rather than assumed. This population only
+  -- drains: the schedule gate above creates no new ref-less runs, so each
+  -- marker is an old row working its way out, never a new one arriving.
   if not is_pause and run.launch_approval_id is null then
     insert into private.tool_gateway_operations (
       organization_id, action_run_id, operation, outcome, refusal_codes
@@ -497,7 +580,7 @@ end;
 $$;
 
 comment on function public.schedule_campaign_actions(uuid, jsonb) is
-  'Materialises one action run per approved action. Requires a live launch approval for the exact campaign and bundle version and stamps its id and digest on every run; refuses without one. The claim re-verifies the stamp.';
+  'Materialises one action run per approved action the live launch authority covers. Requires a live launch approval for the exact campaign and bundle version, refuses when it covers none of the approved actions, and stamps its id and digest on every run it creates; uncovered actions get no run. The claim re-verifies the stamp.';
 
 comment on function public.claim_campaign_action(uuid, jsonb) is
-  'Atomically claims a due action. Re-verifies the stamped launch authority when the run carries one and refuses on supersession or digest mismatch; pre-enforcement runs without a reference proceed under the proposal approval and are logged as grandfathered.';
+  'Atomically claims a due action. Re-verifies the stamped launch authority when the run carries one and refuses on supersession, digest mismatch, or an action outside the authority''s covered set; pre-enforcement runs without a reference proceed under the proposal approval and are logged as grandfathered.';

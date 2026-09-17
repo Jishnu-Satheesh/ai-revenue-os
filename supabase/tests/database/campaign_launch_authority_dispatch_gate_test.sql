@@ -6,11 +6,14 @@ select extensions.no_plan();
 
 -- Covers `20260917120000_campaign_launch_authority_dispatch_gate.sql`.
 --
--- The rule under test: no run is created without a live launch authority, and
--- no authority-carrying run dispatches once its authority stops being live.
--- Runs from before enforcement carry no reference and keep flowing under the
--- proposal approval, loudly: each such claim leaves a `grandfathered` marker.
--- Pauses are safety actions, not publications, and stay out of both paths.
+-- The rule under test: no run is created without a live launch authority, a
+-- partial authority schedules only the actions it covers (one reviewed output
+-- out of three actions stamps and clears exactly that action — never the
+-- other two), and no authority-carrying run dispatches once its authority
+-- stops being live or never covered it. Runs from before enforcement carry no
+-- reference and keep flowing under the proposal approval, loudly: each such
+-- claim leaves a `grandfathered` marker. Pauses are safety actions, not
+-- publications, and stay out of both paths.
 
 insert into auth.users (id) values
   ('d7000000-0000-4000-8000-000000000001'::uuid);
@@ -89,11 +92,18 @@ insert into public.campaign_creative_directions (
   'd7000000-0000-4000-8000-000000000501'::uuid,
   'd7000000-0000-4000-8000-000000000601'::uuid,
   'control', 'House style', 'The reference treatment.'
+),
+(
+  'd7000000-0000-4000-8000-000000000101'::uuid,
+  'd7000000-0000-4000-8000-000000000501'::uuid,
+  'd7000000-0000-4000-8000-000000000602'::uuid,
+  'control', 'Second angle', 'The alternative treatment.'
 );
 
--- Three organic actions, all proposal-approved: one scheduled normally, one
--- placed directly with no authority reference (pre-enforcement), one placed
--- directly with a corrupted stamp.
+-- Three organic actions, all proposal-approved, deliberately split across
+-- coverage: the first shares its direction and channel with the one reviewed
+-- output below, the second uses another direction, the third another channel.
+-- A partial authority must schedule the first and nothing else.
 insert into public.campaign_channel_actions (
   organization_id, bundle_version_id, action_key, direction_key, channel, placement,
   scheduled_for, requirement
@@ -109,7 +119,7 @@ insert into public.campaign_channel_actions (
     'd7000000-0000-4000-8000-000000000101'::uuid,
     'd7000000-0000-4000-8000-000000000501'::uuid,
     'd7000000-0000-4000-8000-000000000702'::uuid,
-    'd7000000-0000-4000-8000-000000000601'::uuid,
+    'd7000000-0000-4000-8000-000000000602'::uuid,
     'instagram', 'feed_image', pg_catalog.now() - interval '1 hour', 'optional'
   ),
   (
@@ -117,7 +127,7 @@ insert into public.campaign_channel_actions (
     'd7000000-0000-4000-8000-000000000501'::uuid,
     'd7000000-0000-4000-8000-000000000703'::uuid,
     'd7000000-0000-4000-8000-000000000601'::uuid,
-    'instagram', 'feed_image', pg_catalog.now() - interval '1 hour', 'optional'
+    'facebook', 'feed_image', pg_catalog.now() - interval '1 hour', 'optional'
   );
 
 insert into public.campaign_visual_attestations (
@@ -303,7 +313,22 @@ select 'schedule', public.schedule_campaign_actions(
 select extensions.is(
   (select (value ->> 'created_count')::integer from gate_state where key = 'schedule'),
   1,
-  'scheduling with a live authority creates the one run it had not already placed'
+  'scheduling under a one-of-three authority creates only the covered action, not all three'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer from public.campaign_action_runs
+    where organization_id = 'd7000000-0000-4000-8000-000000000101'::uuid
+      and launch_approval_id
+        = (select (value ->> 'launch_approval_id')::uuid from gate_state where key = 'authority')
+      -- The digest pins it to the schedule above: the directly placed row
+      -- d03 carries the same authority id with a corrupted stamp, and must
+      -- not be counted as scheduled work.
+      and launch_digest = repeat('2', 64)
+  ),
+  1,
+  'and stamps exactly one run — the uncovered actions get no run at all, never an unstamped one'
 );
 
 select extensions.is(
@@ -393,6 +418,89 @@ select extensions.ok(
     from gate_state where key = 'corrupt_claim'
   ),
   'and the refusal names the digest mismatch rather than a generic failure'
+);
+
+-- The covered action clears: its run was stamped by the schedule above and
+-- the authority covers it, so the claim goes through.
+insert into gate_state (key, value)
+select 'covered_claim', public.claim_campaign_action(
+  'd7000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'd7000000-0000-4000-8000-000000000101',
+    'action_run_id', (
+      select id from public.campaign_action_runs
+      where organization_id = 'd7000000-0000-4000-8000-000000000101'::uuid
+        and action_key = 'd7000000-0000-4000-8000-000000000701'::uuid
+    ),
+    'capability_key', 'publish_instagram',
+    'asserted_facts', jsonb_build_object(
+      'credential_healthy', true, 'tracking_ready', true, 'consent_withdrawn', false
+    )
+  )
+);
+
+select extensions.is(
+  (select value ->> 'outcome' from gate_state where key = 'covered_claim'),
+  'claimed',
+  'the one covered action claims under its stamped authority'
+);
+
+-- A correct-looking stamp for an action the authority never covered refuses.
+-- Placed directly like the other pre-enforcement rows: the schedule above
+-- would never create it, which is exactly the hole being closed.
+reset role;
+
+insert into public.campaign_action_runs (
+  id, organization_id, campaign_id, bundle_version_id, action_key, scheduled_for,
+  launch_approval_id, launch_digest
+) values (
+  'd7000000-0000-4000-8000-000000000d04'::uuid,
+  'd7000000-0000-4000-8000-000000000101'::uuid,
+  'd7000000-0000-4000-8000-000000000301'::uuid,
+  'd7000000-0000-4000-8000-000000000501'::uuid,
+  'd7000000-0000-4000-8000-000000000702'::uuid,
+  pg_catalog.now() - interval '1 hour',
+  (select (value ->> 'launch_approval_id')::uuid from gate_state where key = 'authority'),
+  repeat('2', 64)
+);
+
+insert into gate_state (key, value)
+select 'forged_claim', public.claim_campaign_action(
+  'd7000000-0000-4000-8000-000000000101'::uuid,
+  jsonb_build_object(
+    'organization_id', 'd7000000-0000-4000-8000-000000000101',
+    'action_run_id', 'd7000000-0000-4000-8000-000000000d04',
+    'capability_key', 'publish_instagram',
+    'asserted_facts', jsonb_build_object(
+      'credential_healthy', true, 'tracking_ready', true, 'consent_withdrawn', false
+    )
+  )
+);
+
+select extensions.is(
+  (select value ->> 'outcome' from gate_state where key = 'forged_claim'),
+  'refused',
+  'a run stamped under an authority that never covered its action does not dispatch'
+);
+
+select extensions.ok(
+  (
+    select value -> 'reason_codes' @> '["launch_authority_action_not_covered"]'::jsonb
+    from gate_state where key = 'forged_claim'
+  ),
+  'and the refusal names the missing coverage rather than a generic failure'
+);
+
+-- Let the covered run's lease lapse so the supersession block below evaluates
+-- it fully. A live lease would answer `already_claimed` and prove nothing
+-- about the retired authority. Only the lease moves; the stamp is immutable.
+-- Still the session owner, so no role change is needed for this update.
+update public.campaign_action_runs
+set lease_expires_at = pg_catalog.now() - interval '1 minute'
+where id = (
+  select id from public.campaign_action_runs
+  where organization_id = 'd7000000-0000-4000-8000-000000000101'::uuid
+    and action_key = 'd7000000-0000-4000-8000-000000000701'::uuid
 );
 
 -- ---------------------------------------------------------------------------

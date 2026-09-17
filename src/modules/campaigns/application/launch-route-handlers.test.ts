@@ -6,6 +6,15 @@ import { createLaunchRouteHandlers } from "@/modules/campaigns/application/launc
 import type { LaunchRouteContext } from "@/modules/campaigns/application/launch-route-handlers";
 import type { CampaignLaunchService } from "@/modules/campaigns/application/launch-service";
 
+const loggerWarn = vi.fn();
+vi.mock("@/lib/logger", () => ({
+  logger: {
+    info: vi.fn(),
+    warn: (...args: unknown[]) => loggerWarn(...args),
+    error: vi.fn(),
+  },
+}));
+
 const ORGANIZATION = "11111111-1111-4111-8111-111111111111";
 const CAMPAIGN = "22222222-2222-4222-8222-222222222222";
 const BUNDLE = "33333333-3333-4333-8333-333333333333";
@@ -88,6 +97,7 @@ beforeEach(() => {
   context.mockReset();
   publish.mockReset();
   publish.mockResolvedValue(undefined);
+  loggerWarn.mockReset();
   context.mockResolvedValue({
     organizationId: ORGANIZATION,
     user: { id: "user" },
@@ -310,6 +320,13 @@ describe("announcing an approval", () => {
       outcome: "saved",
       launchApprovalId: "approval",
       launchDigest: launchDigest(manifest()),
+    });
+    // The loss must carry the approval id: without it the warn names a
+    // campaign with many authorities and reconciles nothing.
+    expect(loggerWarn).toHaveBeenCalledWith("campaign.launch_approved_announcement_failed", {
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+      launchApprovalId: "approval",
     });
   });
 });

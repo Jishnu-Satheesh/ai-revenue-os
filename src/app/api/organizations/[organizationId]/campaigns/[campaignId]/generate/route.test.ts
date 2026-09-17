@@ -20,6 +20,15 @@ const getCampaign = vi.fn();
 const latestGenerationRun = vi.fn();
 const enqueue = vi.fn();
 const readApprovedCeiling = vi.fn();
+const loggerWarn = vi.fn();
+
+vi.mock("@/lib/logger", () => ({
+  logger: {
+    info: vi.fn(),
+    warn: (...args: unknown[]) => loggerWarn(...args),
+    error: vi.fn(),
+  },
+}));
 
 vi.mock("@/lib/api/organization-context", () => ({
   apiErrorResponse: (error: unknown) =>
@@ -94,6 +103,7 @@ beforeEach(() => {
     latestGenerationRun,
     enqueue,
     readApprovedCeiling,
+    loggerWarn,
   ]) {
     spy.mockReset();
   }
@@ -183,8 +193,26 @@ describe("the approval-to-generation link", () => {
     expect(publishOrganizationEvent).not.toHaveBeenCalled();
   });
 
-  it("leaves campaigns without a proposal on the existing path", async () => {
-    getCampaign.mockResolvedValue({ id: CAMPAIGN_ID, sourceKind: "manual_brief" });
+  it("still returns the saved run when the announcement fails, and logs the loss", async () => {
+    // The run row is the record; the event is a notification about it.
+    // Failing here would report an error over work that happened — and the
+    // button mints a fresh key per click, so the retry would enqueue a second
+    // run and spend the purse twice.
+    publishOrganizationEvent.mockRejectedValue(new Error("event bus unavailable"));
+
+    const response = await generateRoute(jsonRequest({ idempotencyKey: "key-12345678" }), {
+      params: params(),
+    });
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ runId: "run-1", replayed: false });
+    expect(loggerWarn).toHaveBeenCalledWith(
+      "campaign.generation_started_announcement_failed",
+      { organizationId: ORGANIZATION_ID, campaignId: CAMPAIGN_ID, runId: "run-1" },
+    );
+  });
+
+  it("leaves campaigns without a proposal on the existing path", async () => {    getCampaign.mockResolvedValue({ id: CAMPAIGN_ID, sourceKind: "manual_brief" });
 
     const response = await generateRoute(jsonRequest({ idempotencyKey: "key-12345678" }), {
       params: params(),

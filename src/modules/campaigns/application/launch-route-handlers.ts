@@ -174,6 +174,7 @@ export function createLaunchRouteHandlers(dependencies: LaunchRouteHandlerDepend
             logger.warn("campaign.launch_approved_announcement_failed", {
               organizationId: context.organizationId,
               campaignId: body.manifest.campaignId,
+              launchApprovalId: outcome.launchApprovalId,
             });
           }
         }

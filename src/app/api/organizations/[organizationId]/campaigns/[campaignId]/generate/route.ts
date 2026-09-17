@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 import { apiErrorResponse, publishOrganizationEvent } from "@/lib/api/organization-context";
 import { DomainError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import {
   createApprovedGenerationCapReader,
   generationDispatchAllowed,
@@ -104,12 +105,27 @@ export async function POST(
     // Announced once per run, not per click: a double-click replays the same
     // run and must not announce a second generation that never started.
     if (!replayed) {
-      await publishOrganizationEvent({
-        organizationId: context.organizationId,
-        userId: context.user.id,
-        eventName: "campaign.generation_started",
-        payload: { campaignId, runId },
-      });
+      try {
+        await publishOrganizationEvent({
+          organizationId: context.organizationId,
+          userId: context.user.id,
+          eventName: "campaign.generation_started",
+          payload: { campaignId, runId },
+        });
+      } catch {
+        // The run stands with or without its announcement: the run row is the
+        // record, the event is a notification about it. Failing the request
+        // here would report an error over work that happened — and the button
+        // mints a fresh idempotency key per click, so the retry would enqueue
+        // a second run and spend the purse twice. So the loss is logged, with
+        // the identifiers needed to reconcile it, and the saved run is still
+        // returned.
+        logger.warn("campaign.generation_started_announcement_failed", {
+          organizationId: context.organizationId,
+          campaignId,
+          runId,
+        });
+      }
     }
 
     return NextResponse.json({ runId, replayed }, { status: replayed ? 200 : 202 });

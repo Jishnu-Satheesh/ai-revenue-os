@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,24 @@ describe("the Generate control", () => {
     const button = screen.getByRole("button", { name: /generate/i });
     expect(button).toBeEnabled();
     expect(button).toHaveTextContent(/generate/i);
+  });
+
+  it("stays disabled after a successful start, so a second click cannot spend again", async () => {
+    // Each click mints a fresh idempotency key, so a second POST would be a
+    // second run against the same purse. The control unmounts once the fresh
+    // run reads back as generating; until then it holds itself disabled.
+    const user = userEvent.setup();
+    render(<CampaignGenerateButton organizationId={ORGANIZATION} campaignId={CAMPAIGN} />);
+
+    await user.click(screen.getByRole("button", { name: /generate/i }));
+
+    const button = screen.getByRole("button", { name: /generation started/i });
+    expect(button).toBeDisabled();
+    // A real browser never dispatches click on a disabled button; fire one
+    // anyway to prove the guard holds even if an event gets through.
+    fireEvent.click(button);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("stays disabled without the capability and says what is missing", () => {

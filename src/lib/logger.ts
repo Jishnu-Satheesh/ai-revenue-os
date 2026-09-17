@@ -14,6 +14,8 @@ type LogContext = {
   decisionId?: string;
   opportunityId?: string;
   campaignId?: string;
+  /** A launch approval row. Opaque UUID, like the other ids here. */
+  launchApprovalId?: string;
   connectionId?: string;
   dataSourceId?: string;
   /** An organization-owned channel. Opaque, and not a provider connection. */

@@ -83,6 +83,25 @@ describe("scheduling without publication authority", () => {
     expect(publishOrganizationEvent).not.toHaveBeenCalled();
   });
 
+  it("names the missing coverage when the authority covers none of the actions", async () => {
+    // A partial authority schedules its covered subset. When the subset is
+    // empty, the operator must hear that — not a silent zero-create.
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: "22023", message: "campaign_schedule_launch_authority_covers_nothing" },
+    });
+
+    const response = await scheduleRoute(jsonRequest(body()), { params: params() });
+
+    expect(await response.json()).toEqual({
+      error: {
+        message:
+          "The publication authority does not cover any of these scheduled actions yet. Authorize the missing outputs first, then schedule again.",
+      },
+    });
+    expect(publishOrganizationEvent).not.toHaveBeenCalled();
+  });
+
   it("keeps the generic copy for failures that are not the authority gate", async () => {
     rpc.mockResolvedValue({ data: null, error: { code: "40001", message: "serialization failure" } });
 

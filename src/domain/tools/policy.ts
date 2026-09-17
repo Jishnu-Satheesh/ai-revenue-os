@@ -24,6 +24,7 @@ export type PreflightRefusalCode =
   | "action_not_approved"
   | "launch_authority_superseded"
   | "launch_authority_digest_mismatch"
+  | "launch_authority_action_not_covered"
   | "outside_schedule_window"
   | "campaign_cancelled"
   | "policy_version_changed"
@@ -335,6 +336,8 @@ export function explainRefusal(codes: readonly PreflightRefusalCode[]): string {
       "the publication authority covering this action was superseded",
     launch_authority_digest_mismatch:
       "the authorized publication terms no longer match this action",
+    launch_authority_action_not_covered:
+      "the stamped publication authority does not cover this action",
     outside_schedule_window: "it is not yet time for this action",
     campaign_cancelled: "the campaign was cancelled",
     policy_version_changed: "policy changed since the approval was given",

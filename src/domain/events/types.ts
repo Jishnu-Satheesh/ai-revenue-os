@@ -157,6 +157,7 @@ export const campaignEventNames = [
   "campaign.approved",
   "campaign.approval_invalidated",
   "campaign.launch_approved",
+  "campaign.generation_started",
   "campaign.scheduled",
   "campaign.cancelled",
 ] as const;
@@ -186,6 +187,7 @@ export type CampaignEventPayloads = {
     bundleVersionId: string;
     launchApprovalId: string;
   };
+  "campaign.generation_started": { campaignId: string; runId: string };
   "campaign.scheduled": { campaignId: string; bundleVersionId: string; actionCount: number };
   "campaign.cancelled": { campaignId: string };
 };
