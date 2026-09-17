@@ -156,8 +156,17 @@ describe("text that cannot fit is reported, not drawn overflowing", () => {
   });
 });
 
-describe("the safe area is a deliberate overlay", () => {
-  it("is off until asked for", () => {
+describe("an unsignable picture is said to be unsignable", () => {
+  it("places the text anyway and says the picture could not be signed", () => {
+    stubMeasurement(0.5);
+    renderPreview({ plateUrl: null });
+
+    expect(screen.getByText(/could not be signed for viewing/i)).toBeInTheDocument();
+    expect(screen.getByText("Feed the whole family")).toBeInTheDocument();
+  });
+});
+
+describe("the safe area is a deliberate overlay", () => {  it("is off until asked for", () => {
     stubMeasurement(0.5);
     const { container } = renderPreview();
 

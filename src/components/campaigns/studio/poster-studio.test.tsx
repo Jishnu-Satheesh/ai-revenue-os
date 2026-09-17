@@ -6,6 +6,7 @@ import { PosterStudio } from "@/components/campaigns/studio/poster-studio";
 import type { PosterLayout } from "@/domain/campaigns/poster-template";
 import type {
   PosterStudioOffer,
+  PosterStudioRender,
   PosterStudioView,
 } from "@/modules/campaigns/application/poster-studio-view";
 
@@ -13,6 +14,7 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, refresh: vi.fn() }),
 }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 
 const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 const CAMPAIGN_ID = "c1000000-0000-4000-8000-000000000001";
@@ -32,6 +34,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   push.mockReset();
 });
 
@@ -115,7 +118,10 @@ function view(overrides: Partial<PosterStudioView> = {}): PosterStudioView {
   };
 }
 
-function renderStudio(overrides: Partial<PosterStudioView> = {}) {
+function renderStudio(
+  overrides: Partial<PosterStudioView> = {},
+  renderPreviews: Readonly<Record<string, string>> = {},
+) {
   return render(
     <PosterStudio
       view={view(overrides)}
@@ -128,13 +134,34 @@ function renderStudio(overrides: Partial<PosterStudioView> = {}) {
           heightPx: 1080,
         },
       ]}
-      renderPreviews={{}}
+      renderPreviews={renderPreviews}
       organizationId={ORGANIZATION_ID}
       campaignId={CAMPAIGN_ID}
       canRender
       canEdit
     />,
   );
+}
+
+const RENDER_ID = "d0000000-0000-4000-8000-000000000001";
+
+function renderedRender(overrides: Partial<PosterStudioRender> = {}): PosterStudioRender {
+  return {
+    id: RENDER_ID,
+    templateKey: "core_feed_centred",
+    templateVersion: 1,
+    script: "Latn",
+    state: "rendered",
+    renderDigest: "c".repeat(64),
+    textValues: { caption: "Feed the whole family" },
+    refusalCode: null,
+    verification: {},
+    outputStoragePath: `${ORGANIZATION_ID}/${CAMPAIGN_ID}/posters/${"c".repeat(64)}.png`,
+    outputWidthPx: 1080,
+    outputHeightPx: 1080,
+    renderedAt: "2026-09-06T10:00:00.000Z",
+    ...overrides,
+  };
 }
 
 function headline() {
@@ -242,5 +269,99 @@ describe("the offer line is never an input", () => {
 
     expect(screen.getByText("Nothing in the approved campaign supplies one.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Offer line")).not.toBeInTheDocument();
+  });
+});
+
+describe("saving and rendering name the version they were read against", () => {
+  it("saves against the viewed version's id and digest", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json(
+        {
+          bundleVersionId: "b2000000-0000-4000-8000-000000000001",
+          version: 4,
+          digest: "b".repeat(64),
+          changeCount: 1,
+          invalidatesApproval: false,
+        },
+        { status: 201 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    renderStudio();
+    fireEvent.change(headline(), { target: { value: "Feed everyone" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchSpy.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/api/organizations/${ORGANIZATION_ID}/campaigns/${CAMPAIGN_ID}/edits`);
+    const body = JSON.parse(init.body as string) as {
+      baseVersionId: string;
+      baseDigest: string;
+    };
+    expect(body.baseVersionId).toBe("b1000000-0000-4000-8000-000000000001");
+    expect(body.baseDigest).toBe("a".repeat(64));
+  });
+
+  it("renders against the viewed version's id and digest", async () => {
+    const fetchSpy = vi.fn(async () => Response.json({ workerId: "worker-1" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    renderStudio();
+    fireEvent.click(screen.getByRole("button", { name: /render this poster/i }));
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchSpy.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain(`/api/organizations/${ORGANIZATION_ID}/campaigns/${CAMPAIGN_ID}/renders`);
+    const body = JSON.parse(init.body as string) as {
+      bundleVersionId: string;
+      bundleDigest: string;
+    };
+    expect(body.bundleVersionId).toBe("b1000000-0000-4000-8000-000000000001");
+    expect(body.bundleDigest).toBe("a".repeat(64));
+  });
+});
+
+describe("a stale base is a surface, not a toast", () => {
+  it("keeps the typing on screen and quotes the server's reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          {
+            error: {
+              message: "This proposal changed since you read it. Reload and try again.",
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderStudio();
+    fireEvent.change(headline(), { target: { value: "Feed everyone" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(
+      await screen.findByText("This version changed while you were editing"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/This proposal changed since you read it/)).toBeInTheDocument();
+    // Nothing was saved and nothing was retargeted: the words stay where they
+    // were typed so they can be copied forward.
+    expect(headline().value).toBe("Feed everyone");
+    expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe("an expired preview is said to be expired", () => {
+  it("says the finished poster is kept when its link could not be signed", () => {
+    renderStudio({ renders: [renderedRender()] });
+
+    expect(screen.getByText(/its viewing link could not be signed/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /before \/ after/i })).not.toBeInTheDocument();
+  });
+
+  it("offers before / after and no warning once the link is signed", () => {
+    renderStudio({ renders: [renderedRender()] }, { [RENDER_ID]: "https://example.test/r.png" });
+
+    expect(screen.getByRole("button", { name: /before \/ after/i })).toBeInTheDocument();
+    expect(screen.queryByText(/its viewing link could not be signed/i)).not.toBeInTheDocument();
   });
 });

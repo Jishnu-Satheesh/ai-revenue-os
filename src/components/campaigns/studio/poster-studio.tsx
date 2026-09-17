@@ -199,6 +199,18 @@ export function PosterStudio(props: PosterStudioProps) {
     renders.find((render) => render.state === "rendered" && renderPreviews[render.id])?.id ?? null;
 
   /**
+   * A finished poster with no viewable link.
+   *
+   * Preview URLs are signed for ten minutes. When signing fails or the link has
+   * expired, the before/after toggle is withheld for lack of an "after" — and
+   * saying nothing more would read as "no finished poster exists". The render
+   * itself is kept; only the viewing link is missing.
+   */
+  const renderedWithoutPreview = renders.some(
+    (render) => render.state === "rendered" && !renderPreviews[render.id],
+  );
+
+  /**
    * The language picker chooses which face draws the poster; the copy is
    * whatever the approved manifest holds. Nothing stops those disagreeing, and
    * when they do the renderer refuses on glyph coverage — after the render has
@@ -597,6 +609,12 @@ export function PosterStudio(props: PosterStudioProps) {
         </div>
 
         <div className="order-1 min-w-0 md:order-none">
+          {renderedWithoutPreview ? (
+            <p className="mb-3 text-xs text-muted-foreground">
+              A finished poster exists for this script and template, but its viewing link could
+              not be signed. Reload and it will be signed again — the render itself is kept.
+            </p>
+          ) : null}
           {selected ? (
             <StudioPreview
               canvasWidthPx={selected.canvasWidthPx}

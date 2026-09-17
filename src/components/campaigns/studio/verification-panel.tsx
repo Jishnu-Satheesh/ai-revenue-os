@@ -29,6 +29,25 @@ const CHECK_LABEL: Readonly<Record<string, string>> = {
 /** Advisory by design: it informs a human, and never blocks on its own. */
 const ADVISORY_CHECKS: readonly string[] = ["subjectLikeness"];
 
+/**
+ * What a refused render means, in the operator's terms.
+ *
+ * The keys are the refusal codes the render worker records (`render-poster.ts`
+ * and the compositor own the vocabulary; this only translates it). An unknown
+ * code is shown verbatim rather than mapped to a guess, and a missing one is
+ * said to be missing.
+ */
+const REFUSAL_REASON: Readonly<Record<string, string>> = {
+  glyph_not_covered:
+    "A character has no letter in the selected script's font. Switch the language or change the words.",
+  text_does_not_fit:
+    "The words do not fit their box even at the smallest size this template allows. Shorten the words or choose a roomier template.",
+  operator_text_refused:
+    "The free line did not trace back to this campaign's evidence, so it was not drawn.",
+  template_unavailable:
+    "The template needs a slot this campaign does not supply, so there was nothing to draw.",
+};
+
 type Note = { code?: unknown; detail?: unknown };
 
 function notes(value: unknown): Note[] {
@@ -55,12 +74,26 @@ export function VerificationPanel(props: { renders: readonly PosterStudioRender[
   }
 
   if (latest.state === "refused") {
+    const code = latest.refusalCode;
+    const reason = code !== null ? REFUSAL_REASON[code] : undefined;
     return (
       <Alert>
         <CircleAlert />
         <AlertTitle>Refused before verification</AlertTitle>
         <AlertDescription>
-          Nothing was drawn, so there was nothing to check. The refusal above says why.
+          Nothing was drawn, so there was nothing to check.{" "}
+          {code === null ? (
+            <>The refusal was recorded without a code.</>
+          ) : reason !== undefined ? (
+            <>
+              The renderer refused with <span className="font-mono">{code}</span>: {reason}
+            </>
+          ) : (
+            <>
+              The renderer refused with <span className="font-mono">{code}</span>, which this
+              version of the Studio does not describe further.
+            </>
+          )}
         </AlertDescription>
       </Alert>
     );
