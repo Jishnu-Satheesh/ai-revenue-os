@@ -2252,6 +2252,41 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      /**
+       * Frozen original growth projections, one per organization, horizon and
+       * cycle (spec 027, D04). Written once through
+       * publish_organization_growth_projection; never updated or trimmed.
+       */
+      organization_growth_projections: {
+        Row: {
+          id: string;
+          organization_id: string;
+          schedule_origin_date: string;
+          cycle_index: number;
+          horizon_months: number;
+          period_start: string;
+          period_end_exclusive: string;
+          issued_at: string;
+          source_cutoff_date: string;
+          timezone: string;
+          currency: string;
+          metric_key: string;
+          scope_digest: string;
+          input_digest: string;
+          document_version: number;
+          method_version: string;
+          requires_growth_read: boolean;
+          requires_campaign_read: boolean;
+          frozen_document: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_growth_projections"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: never;
+        Relationships: [];
+      };
       organization_subject_profiles: {
         Row: {
           id: string;
@@ -2416,6 +2451,28 @@ export type Database = {
           email: string;
           account_role: "owner" | "admin" | "member";
           default_organization_role: "owner" | "admin" | "operator" | "viewer" | null;
+          token_hash: string;
+          status: "pending" | "accepted" | "revoked" | "expired";
+          invited_by: string;
+          expires_at: string;
+          accepted_by: string | null;
+          accepted_at: string | null;
+          revoked_by: string | null;
+          revoked_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /** Client-scoped invitations. The invitee needs no agency membership; accepting writes an explicit membership row. */
+      organization_invitations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          email: string;
+          role: "owner" | "admin" | "operator" | "viewer";
           token_hash: string;
           status: "pending" | "accepted" | "revoked" | "expired";
           invited_by: string;
@@ -3350,6 +3407,52 @@ export type Database = {
         Args: { p_token_hash: string };
         Returns: Database["public"]["Tables"]["accounts"]["Row"];
       };
+      create_organization_invitation: {
+        Args: {
+          p_organization_id: string;
+          p_email: string;
+          p_role: "owner" | "admin" | "operator" | "viewer";
+          p_token_hash: string;
+          p_expires_at: string;
+        };
+        Returns: Database["public"]["Tables"]["organization_invitations"]["Row"];
+      };
+      reissue_organization_invitation: {
+        Args: { p_invitation_id: string; p_token_hash: string; p_expires_at: string };
+        Returns: Database["public"]["Tables"]["organization_invitations"]["Row"];
+      };
+      revoke_organization_invitation: {
+        Args: { p_invitation_id: string };
+        Returns: Database["public"]["Tables"]["organization_invitations"]["Row"];
+      };
+      preview_organization_invitation: {
+        Args: { p_token_hash: string };
+        /** Every field is null unless the invitation is live, so an unknown token reveals nothing. */
+        Returns: {
+          state: "valid" | "invalid" | "already_accepted";
+          organization_name: string | null;
+          invited_email: string | null;
+          inviter_name: string | null;
+          role: "owner" | "admin" | "operator" | "viewer" | null;
+          expires_at: string | null;
+          matches_caller: boolean | null;
+        }[];
+      };
+      accept_organization_invitation: {
+        Args: { p_token_hash: string };
+        Returns: Database["public"]["Tables"]["organizations"]["Row"];
+      };
+      list_organization_members: {
+        Args: { p_organization_id: string };
+        /** Explicit grants only, with addresses: permission-gated inside to team managers. */
+        Returns: {
+          user_id: string;
+          email: string;
+          display_name: string | null;
+          role: "owner" | "admin" | "operator" | "viewer";
+          created_at: string;
+        }[];
+      };
       current_organization_role: {
         Args: { target_organization_id: string };
         /** Null when the caller has no access, which is indistinguishable from no such organization. */
@@ -3429,6 +3532,22 @@ export type Database = {
           input_entries: unknown;
         };
         Returns: number;
+      };
+      /**
+       * Service-only fixed-projection publication (spec 027, D04). Granted to
+       * service_role only; every other role is denied at the grant level.
+       */
+      publish_organization_growth_projection: {
+        Args: {
+          p_organization_id: string;
+          p_document: Record<string, unknown>;
+          p_correlation_id: string;
+        };
+        Returns: {
+          projection_id: string;
+          digest: string;
+          published: boolean;
+        }[];
       };
     };
     Enums: {
