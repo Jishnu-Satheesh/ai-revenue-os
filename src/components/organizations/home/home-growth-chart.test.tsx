@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   bracketLabelAnchor,
   buildGrowthChartRows,
+  describeGrowthTooltip,
   formatAsOfDay,
   formatCompactMoney,
   formatFooterDay,
@@ -13,9 +14,11 @@ import {
   GROWTH_CURRENT_TEXT,
   GROWTH_PROJECTED,
   growthNiceTicks,
+  growthTooltipForDate,
   HomeGrowthChart,
   placeEndpointLabels,
   placeGrowthPairLabels,
+  selectGrowthLabelDates,
 } from "@/components/organizations/home/home-growth-chart";
 import { buildAheadGrowthView, buildBehindGrowthView } from "@/components/organizations/home/home-growth-fixtures";
 
@@ -253,6 +256,124 @@ describe("HomeGrowthChart behind fixture", () => {
     const nineDays = dots[3] as number - (dots[2] as number);
     expect(secondWeek / firstWeek).toBeCloseTo(1, 1);
     expect(nineDays / secondWeek).toBeCloseTo(9 / 7, 1);
+  });
+});
+
+describe("growthTooltipForDate", () => {
+  it("reports values, range and signed difference for a historical date", () => {
+    const model = growthTooltipForDate(buildBehindGrowthView(ORG_ID), "2026-09-21");
+    expect(model).toMatchObject({
+      date: "2026-09-21",
+      currentMinor: 6_000_000,
+      projectedCentralMinor: 8_400_000,
+      projectedLowMinor: 8_000_000,
+      projectedHighMinor: 8_800_000,
+      differenceMinor: -2_400_000,
+    });
+    expect(describeGrowthTooltip(model as never, "AED")).toMatch(/24,000 behind/);
+  });
+
+  it("never fabricates a current value for a future date", () => {
+    const model = growthTooltipForDate(buildBehindGrowthView(ORG_ID), "2026-09-30");
+    expect(model?.currentMinor).toBeNull();
+    expect(model?.differenceMinor).toBeNull();
+    expect(model?.projectedCentralMinor).toBe(12_000_000);
+  });
+
+  it("treats incomplete coverage as unavailable, not as a comparable zero", () => {
+    const view = buildBehindGrowthView(ORG_ID);
+    const points = view.points.map((point) =>
+      point.date === "2026-09-14"
+        ? { ...point, currentMinor: 3_800_000, currentCoverage: "missing" as const, reasonCode: "COVERAGE_GAP" as const }
+        : point,
+    );
+    const model = growthTooltipForDate({ ...view, points }, "2026-09-14");
+    expect(model?.currentMinor).toBeNull();
+    expect(model?.differenceMinor).toBeNull();
+    expect(describeGrowthTooltip(model as never, "AED")).toContain("Current not reported");
+  });
+
+  it("returns null for a date outside the view", () => {
+    expect(growthTooltipForDate(buildBehindGrowthView(ORG_ID), "2026-10-05")).toBeNull();
+  });
+});
+
+describe("selectGrowthLabelDates", () => {
+  it("keeps every sparse label", () => {
+    const dates = ["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-30"];
+    expect(selectGrowthLabelDates(dates, "2026-09-21", 6)).toEqual(dates);
+  });
+
+  it("thins dense series to the cap while keeping first, latest and last", () => {
+    const dates = Array.from({ length: 30 }, (_, index) => `2026-09-${String(index + 1).padStart(2, "0")}`);
+    const picked = selectGrowthLabelDates(dates, "2026-09-21", 6);
+    expect(picked.length).toBeLessThanOrEqual(6);
+    expect(picked[0]).toBe("2026-09-01");
+    expect(picked).toContain("2026-09-21");
+    expect(picked[picked.length - 1]).toBe("2026-09-30");
+    expect([...picked].sort()).toEqual(picked);
+  });
+});
+
+describe("HomeGrowthChart keyboard and touch interaction", () => {
+  function chartGroup(): HTMLElement {
+    return screen.getByRole("group", { name: /Growth chart/ });
+  }
+
+  it("walks dates with arrows, jumps with Home/End and announces each selection", () => {
+    render(<HomeGrowthChart view={buildBehindGrowthView(ORG_ID)} />);
+    const group = chartGroup();
+    fireEvent.keyDown(group, { key: "ArrowRight" });
+    expect(screen.getByRole("tooltip").textContent).toContain("7 Sep");
+    expect(screen.getByRole("tooltip").textContent).toMatch(/18,000/);
+    fireEvent.keyDown(group, { key: "ArrowRight" });
+    fireEvent.keyDown(group, { key: "ArrowRight" });
+    expect(screen.getByRole("tooltip").textContent).toContain("21 Sep");
+    expect(screen.getByRole("status").textContent).toContain("21 Sep");
+    fireEvent.keyDown(group, { key: "Home" });
+    expect(screen.getByRole("tooltip").textContent).toContain("7 Sep");
+    fireEvent.keyDown(group, { key: "End" });
+    const tip = screen.getByRole("tooltip").textContent ?? "";
+    expect(tip).toContain("30 Sep");
+    expect(tip).toContain("Current: not reported");
+    expect(tip).not.toContain("Difference");
+  });
+
+  it("pins on Enter, keeps summaries at the latest report, and clears on Escape", () => {
+    render(<HomeGrowthChart view={buildBehindGrowthView(ORG_ID)} />);
+    const group = chartGroup();
+    fireEvent.keyDown(group, { key: "ArrowRight" });
+    fireEvent.keyDown(group, { key: "Enter" });
+    expect(screen.getByRole("tooltip").textContent).toContain("Pinned");
+    // Pointer leave dismisses only the transient hover: the pin survives.
+    fireEvent.mouseLeave(group);
+    expect(screen.getByRole("tooltip").textContent).toContain("7 Sep");
+    // The right-panel evidence never follows exploration.
+    expect(screen.getByText("Current · 21 Sep")).toBeTruthy();
+    expect(screen.getByText("AED 60,000")).toBeTruthy();
+    fireEvent.keyDown(group, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("cleared");
+  });
+
+  it("pins on tap and dismisses on a second tap", () => {
+    const { container } = render(<HomeGrowthChart view={buildBehindGrowthView(ORG_ID)} />);
+    const dotAt = (): Element =>
+      [...container.querySelectorAll('circle[class*="growthCurrentDot"]')][0] as Element;
+    fireEvent.click(dotAt());
+    expect(screen.getByRole("tooltip").textContent).toContain("7 Sep");
+    // Re-query: pinning re-renders the chart, so the first node is detached.
+    fireEvent.click(dotAt());
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows a transient hover tooltip that leaves the pin alone", () => {
+    const { container } = render(<HomeGrowthChart view={buildBehindGrowthView(ORG_ID)} />);
+    const dots = [...container.querySelectorAll('circle[class*="growthProjectedDot"]')];
+    fireEvent.mouseEnter(dots[3] as Element);
+    expect(screen.getByRole("tooltip").textContent).toContain("30 Sep");
+    fireEvent.mouseLeave(chartGroup());
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 });
 

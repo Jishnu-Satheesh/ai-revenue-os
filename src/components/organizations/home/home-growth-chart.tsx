@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CartesianGrid, ComposedChart, Line, ReferenceLine, XAxis, YAxis } from "recharts";
 
 import { formatWholeMoney } from "@/components/analysis/format";
@@ -216,6 +216,109 @@ export type GrowthChartRow = {
 };
 
 /**
+ * V05 tooltip content for one date. Difference is null whenever the current
+ * value is unavailable — a future date or a coverage gap never gets a
+ * fabricated current value, so there is nothing to subtract.
+ */
+export type GrowthTooltipModel = {
+  date: string;
+  currentMinor: number | null;
+  projectedLowMinor: number | null;
+  projectedCentralMinor: number | null;
+  projectedHighMinor: number | null;
+  differenceMinor: number | null;
+  reasonCode: GrowthProgressPointView["reasonCode"];
+};
+
+export function growthTooltipForDate(
+  view: GrowthProgressView,
+  date: string,
+): GrowthTooltipModel | null {
+  const point = view.points.find((candidate) => candidate.date === date) ?? null;
+  if (point === null) return null;
+  const currentMinor =
+    point.currentMinor !== null && point.currentCoverage === "complete"
+      ? point.currentMinor
+      : null;
+  return {
+    date: point.date,
+    currentMinor,
+    projectedLowMinor: point.projectedLowMinor,
+    projectedCentralMinor: point.projectedCentralMinor,
+    projectedHighMinor: point.projectedHighMinor,
+    differenceMinor:
+      currentMinor !== null && point.projectedCentralMinor !== null
+        ? currentMinor - point.projectedCentralMinor
+        : null,
+    reasonCode: point.reasonCode,
+  };
+}
+
+/** One announcement sentence for the live region per intentional selection. */
+export function describeGrowthTooltip(model: GrowthTooltipModel, currency: string): string {
+  const parts = [formatShortDate(model.date)];
+  parts.push(
+    model.currentMinor !== null
+      ? `Current ${formatWholeMoney(model.currentMinor, currency)}`
+      : "Current not reported",
+  );
+  if (model.projectedCentralMinor !== null) {
+    parts.push(`Projected ${formatWholeMoney(model.projectedCentralMinor, currency)}`);
+  }
+  if (model.projectedLowMinor !== null && model.projectedHighMinor !== null) {
+    parts.push(
+      `Range ${formatWholeMoney(model.projectedLowMinor, currency)} to ${formatWholeMoney(model.projectedHighMinor, currency)}`,
+    );
+  }
+  if (model.differenceMinor !== null && model.differenceMinor !== 0) {
+    parts.push(
+      `${formatWholeMoney(Math.abs(model.differenceMinor), currency)} ${model.differenceMinor > 0 ? "ahead" : "behind"}`,
+    );
+  } else if (model.differenceMinor === 0) {
+    parts.push("Matches the estimate");
+  }
+  return `${parts.join(". ")}.`;
+}
+
+/**
+ * V04 deterministic label thinning for dense real data: at most maxLabels
+ * dates keep point labels and x ticks. The first date, the latest comparable
+ * date and the final projection always survive; interior dates fill in on an
+ * even round-robin. Sparse fixtures (≤ maxLabels) keep every label.
+ */
+export function selectGrowthLabelDates(
+  dates: readonly string[],
+  latestDate: string | null,
+  maxLabels: number,
+): string[] {
+  if (dates.length <= maxLabels) return [...dates];
+  const first = dates[0] as string;
+  const last = dates[dates.length - 1] as string;
+  const picked = new Set<string>([first, last]);
+  if (latestDate !== null && dates.includes(latestDate)) picked.add(latestDate);
+  const step = (dates.length - 1) / (maxLabels - 1);
+  for (let slot = 1; slot < maxLabels && picked.size < maxLabels; slot += 1) {
+    picked.add(dates[Math.round(slot * step)] as string);
+  }
+  return dates.filter((date) => picked.has(date));
+}
+
+/** Narrow viewports (V03 <560) read at most four x ticks. Viewport is the
+ *  practical proxy here: the card fills it on phones. Server render is wide. */
+function useNarrowGrowthViewport(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia === "undefined") return;
+    const query = window.matchMedia("(max-width: 559px)");
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return narrow;
+}
+
+/**
  * One row per view point in chronological order. Current stays null wherever
  * coverage is not complete — including every future date — so the blue line
  * breaks instead of bridging the gap. Projected carries the frozen central
@@ -285,11 +388,15 @@ function CurrentGlyph({
   showEndpointWord,
   endpointDy,
   currency,
+  onSelectDate,
+  onHoverDate,
 }: GlyphProps & {
   labelSide: GrowthLabelSide | "hidden";
   showEndpointWord: boolean;
   endpointDy: number;
   currency: string;
+  onSelectDate: (date: string) => void;
+  onHoverDate: (date: string | null) => void;
 }) {
   const x = toNumber(cx);
   const y = toNumber(cy);
@@ -297,8 +404,14 @@ function CurrentGlyph({
   const label = formatCompactMoney(payload.currentMinor, currency);
   const full = formatWholeMoney(payload.currentMinor, currency);
   const labelY = y + (labelSide === "above" ? PROJECTED_LABEL_DY : CURRENT_LABEL_DY + 4);
+  const date = payload.date;
   return (
-    <g>
+    <g
+      onClick={() => onSelectDate(date)}
+      onMouseEnter={() => onHoverDate(date)}
+      style={{ cursor: "pointer" }}
+    >
+      <circle cx={x} cy={y} r={14} fill="transparent" stroke="none" />
       <circle
         className={styles.growthCurrentDot}
         cx={x}
@@ -345,11 +458,15 @@ function ProjectedGlyph({
   showEndpointWord,
   endpointDy,
   currency,
+  onSelectDate,
+  onHoverDate,
 }: GlyphProps & {
   labelSide: GrowthLabelSide | "hidden";
   showEndpointWord: boolean;
   endpointDy: number;
   currency: string;
+  onSelectDate: (date: string) => void;
+  onHoverDate: (date: string | null) => void;
 }) {
   const x = toNumber(cx);
   const y = toNumber(cy);
@@ -359,8 +476,14 @@ function ProjectedGlyph({
   const label = formatCompactMoney(payload.projectedCentralMinor, currency);
   const full = formatWholeMoney(payload.projectedCentralMinor, currency);
   const labelY = y + (labelSide === "above" ? PROJECTED_LABEL_DY : CURRENT_LABEL_DY + 4);
+  const date = payload.date;
   return (
-    <g>
+    <g
+      onClick={() => onSelectDate(date)}
+      onMouseEnter={() => onHoverDate(date)}
+      style={{ cursor: "pointer" }}
+    >
+      <circle cx={x} cy={y} r={14} fill="transparent" stroke="none" />
       <circle
         className={styles.growthProjectedDot}
         cx={x}
@@ -421,11 +544,86 @@ function chartAriaLabel(view: GrowthProgressView, currency: string): string {
  * Summaries plus the two-line chart for one ready growth view. Both summaries
  * stay pinned to the latest comparable date; the chart labels every sparse
  * point and stops the blue line where complete coverage stops.
+ *
+ * V05 interaction state machine lives here: hovering a date shows a transient
+ * tooltip and crosshair, tapping/clicking pins it, a second tap or Escape
+ * dismisses, and the keyboard walks every chronological date. Exploring never
+ * moves the summaries or the right panel — those stay at the latest report,
+ * so incidental hovering cannot present an old date as today's evidence.
  */
 export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>) {
   const currency = view.currency ?? "AED";
   const rows = buildGrowthChartRows(view.points, currency);
   const { ref, width } = useMeasuredWidth(CHART_FALLBACK_WIDTH);
+  const narrow = useNarrowGrowthViewport();
+  const [pinnedDate, setPinnedDate] = useState<string | null>(null);
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const dates = rows.map((row) => row.date);
+  const activeDate = hoverDate ?? pinnedDate;
+  const activeModel = activeDate !== null ? growthTooltipForDate(view, activeDate) : null;
+
+  const announce = (date: string) => {
+    const model = growthTooltipForDate(view, date);
+    if (model !== null) setAnnouncement(describeGrowthTooltip(model, currency));
+  };
+  const selectDate = (date: string) => {
+    // A second tap on the pinned date dismisses it.
+    setPinnedDate((pinned) => (pinned === date ? null : date));
+    setHoverDate(null);
+    announce(date);
+  };
+  const stepDate = (direction: 1 | -1) => {
+    if (dates.length === 0) return;
+    const from = activeDate ?? (direction === 1 ? dates[0] : dates[dates.length - 1]);
+    const index = dates.indexOf(from as string);
+    const next =
+      activeDate === null
+        ? (dates[direction === 1 ? 0 : dates.length - 1] as string)
+        : (dates[Math.min(dates.length - 1, Math.max(0, index + direction))] as string);
+    setHoverDate(next);
+    announce(next);
+  };
+  const onChartKeyDown = (event: React.KeyboardEvent) => {
+    switch (event.key) {
+      case "ArrowRight":
+        event.preventDefault();
+        stepDate(1);
+        break;
+      case "ArrowLeft":
+        event.preventDefault();
+        stepDate(-1);
+        break;
+      case "Home":
+        event.preventDefault();
+        if (dates.length > 0) {
+          const first = dates[0] as string;
+          setHoverDate(first);
+          announce(first);
+        }
+        break;
+      case "End":
+        event.preventDefault();
+        if (dates.length > 0) {
+          const last = dates[dates.length - 1] as string;
+          setHoverDate(last);
+          announce(last);
+        }
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        if (activeDate !== null) selectDate(activeDate);
+        break;
+      case "Escape":
+        setPinnedDate(null);
+        setHoverDate(null);
+        setAnnouncement("Date selection cleared.");
+        break;
+      default:
+        break;
+    }
+  };
 
   const latest = rows.find((row) => row.date === view.latestComparableDate) ?? null;
   const latestSummaryDate =
@@ -446,7 +644,19 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
 
   const startMs = utcDate(view.period.startDate).getTime();
   const endMs = utcDate(view.period.endDateExclusive).getTime();
-  const tickValues = rows.map((row) => row.t);
+  // Dense series thin to ≤6 labelled dates (≤4 on narrow phones); the first,
+  // latest comparable and final dates always survive.
+  const labelDates = new Set(
+    selectGrowthLabelDates(dates, view.latestComparableDate, narrow ? 4 : 6),
+  );
+  const tickValues = rows.filter((row) => labelDates.has(row.date)).map((row) => row.t);
+  // Tooltip placement rides the shared time scale as a percentage, flipping
+  // to the left of the date past 70% so it never collides with the edge.
+  const activeT = activeDate !== null ? utcDate(activeDate).getTime() : null;
+  const activeFraction =
+    activeT !== null && endMs > startMs
+      ? Math.min(1, Math.max(0, (activeT - startMs) / (endMs - startMs)))
+      : null;
 
   let lastCurrentIndex = -1;
   let lastProjectedIndex = -1;
@@ -520,10 +730,19 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
       <p className={styles.growthAxisMeasure}>Revenue so far ({currency})</p>
       <div
         ref={ref}
-        className={styles.growthChart}
-        role="img"
-        aria-label={chartAriaLabel(view, currency)}
+        className={styles.growthChartWrap}
+        role="group"
+        tabIndex={0}
+        aria-label="Growth chart. Arrow keys explore dates, Enter pins a date, Escape clears."
+        aria-describedby={activeModel !== null ? "growth-chart-tooltip" : undefined}
+        onKeyDown={onChartKeyDown}
+        onMouseLeave={() => setHoverDate(null)}
       >
+        <div
+          className={styles.growthChart}
+          role="img"
+          aria-label={chartAriaLabel(view, currency)}
+        >
         <ComposedChart
           width={width}
           height={CHART_HEIGHT}
@@ -568,6 +787,14 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
               }}
             />
           ) : null}
+          {activeT !== null ? (
+            <ReferenceLine
+              x={activeT}
+              stroke="var(--foreground)"
+              strokeOpacity={0.45}
+              strokeDasharray="3 3"
+            />
+          ) : null}
           {bracketValues !== null ? (
             <ReferenceLine
               segment={[
@@ -602,10 +829,14 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
               return (
                 <ProjectedGlyph
                   {...(dotProps as GlyphProps)}
-                  labelSide={placement.projected}
+                  labelSide={
+                    payload && labelDates.has(payload.date) ? placement.projected : "hidden"
+                  }
                   showEndpointWord={(dotProps as GlyphProps).index === lastProjectedIndex}
                   endpointDy={endpointPlacement.projectedDy}
                   currency={currency}
+                  onSelectDate={selectDate}
+                  onHoverDate={setHoverDate}
                 />
               );
             }}
@@ -628,16 +859,67 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
               return (
                 <CurrentGlyph
                   {...(dotProps as GlyphProps)}
-                  labelSide={placement.current}
+                  labelSide={
+                    payload && labelDates.has(payload.date) ? placement.current : "hidden"
+                  }
                   showEndpointWord={(dotProps as GlyphProps).index === lastCurrentIndex}
                   endpointDy={endpointPlacement.currentDy}
                   currency={currency}
+                  onSelectDate={selectDate}
+                  onHoverDate={setHoverDate}
                 />
               );
             }}
             activeDot={false}
           />
         </ComposedChart>
+        </div>
+        {activeModel !== null && activeFraction !== null ? (
+          <div
+            id="growth-chart-tooltip"
+            role="tooltip"
+            data-pinned={pinnedDate !== null && hoverDate === null ? "true" : "false"}
+            className={styles.growthTooltip}
+            style={
+              activeFraction > 0.7
+                ? { right: `${(1 - activeFraction) * 100}%` }
+                : { left: `${activeFraction * 100}%` }
+            }
+          >
+            <p className={styles.growthTooltipDate}>
+              {formatShortDate(activeModel.date)}
+              {pinnedDate !== null && hoverDate === null ? " · Pinned" : ""}
+            </p>
+            <p className={styles.growthTooltipRow}>
+              Current:{" "}
+              {activeModel.currentMinor !== null
+                ? formatWholeMoney(activeModel.currentMinor, currency)
+                : "not reported"}
+            </p>
+            {activeModel.projectedCentralMinor !== null ? (
+              <p className={styles.growthTooltipRow}>
+                Projected: {formatWholeMoney(activeModel.projectedCentralMinor, currency)}
+                {activeModel.projectedLowMinor !== null &&
+                activeModel.projectedHighMinor !== null ? (
+                  <>
+                    {" "}
+                    (range {formatWholeMoney(activeModel.projectedLowMinor, currency)}–
+                    {formatWholeMoney(activeModel.projectedHighMinor, currency)})
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+            {activeModel.differenceMinor !== null && activeModel.differenceMinor !== 0 ? (
+              <p className={styles.growthTooltipRow}>
+                Difference: {formatWholeMoney(Math.abs(activeModel.differenceMinor), currency)}{" "}
+                {activeModel.differenceMinor > 0 ? "ahead" : "behind"}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <p className="sr-only" role="status">
+          {announcement}
+        </p>
       </div>
       <p className={styles.growthHint}>Hover or tap a point to compare</p>
     </div>
