@@ -23,8 +23,10 @@ import {
   selectDueSnapshotOrgs,
   toSnapshotBuildOutput,
 } from "@/modules/organizations/application/revenue-snapshot";
-import { createGrowthProgressRepository } from "@/modules/organizations/infrastructure/growth-progress-repository";
-import { createGrowthProjectionRepository } from "@/modules/organizations/infrastructure/growth-projection-repository";
+import {
+  createGrowthProjectionRepository,
+  createGrowthScheduleRepository,
+} from "@/modules/organizations/infrastructure/growth-projection-repository";
 import {
   createRevenueProposalProvider,
   REVENUE_PROPOSAL_MAX_ACTIONS,
@@ -208,25 +210,19 @@ export const revenueSnapshotsBuildOrgTask = schemaTask({
       },
       {
         isEnabled: (organizationId) => isOverviewGrowthProgressEnabled(organizationId),
+        // Schedule discovery runs through the narrow origins RPC on the
+        // service client (Task-5 decision b): direct projection-table SELECT
+        // is revoked for service_role, so the session read port would fail
+        // closed here on every run. A throwing schedule read stays a
+        // fail-closed skip with its reason intact, never a blind publish.
         readSchedule: async (organizationId, asOfDate) => {
-          const envelope = await createGrowthProgressRepository(supabase).readProjections({
-            organizationId,
-            asOfDate,
-          });
-          switch (envelope.status) {
-            case "ready":
-              return {
-                status: "ready",
-                origins: envelope.projections.map((projection) => projection.scheduleOriginDate),
-              };
-            case "missing":
-              return { status: "missing" };
-            case "corrupt":
-              return { status: "unavailable", reasonCode: "SCHEDULE_CORRUPT" as const };
-            case "denied":
-              return { status: "unavailable", reasonCode: "SCHEDULE_DENIED" as const };
-            case "failed":
-              return { status: "unavailable", reasonCode: "SCHEDULE_READ_FAILED" as const };
+          try {
+            return await createGrowthScheduleRepository(supabase).readSchedule({
+              organizationId,
+              asOfDate,
+            });
+          } catch {
+            return { status: "unavailable", reasonCode: "SCHEDULE_READ_FAILED" as const };
           }
         },
         buildCandidate: (material, context) => buildSnapshotGrowthCandidate(material, context),

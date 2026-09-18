@@ -3549,6 +3549,20 @@ export type Database = {
           published: boolean;
         }[];
       };
+      /**
+       * Service-only growth schedule read (spec 027, D08). Returns the
+       * distinct schedule origins behind active/upcoming rows; no amounts,
+       * points, scopes or digests. Granted to service_role only.
+       */
+      read_organization_growth_schedule: {
+        Args: {
+          p_organization_id: string;
+          p_as_of_date: string;
+        };
+        Returns: {
+          schedule_origin_date: string;
+        }[];
+      };
     };
     Enums: {
       organization_status: "draft_onboarding" | "active" | "archived";

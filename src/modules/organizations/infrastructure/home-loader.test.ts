@@ -98,7 +98,28 @@ vi.mock("@/modules/campaigns/infrastructure/proposal-read-repository", () => ({
   })),
 }));
 
+vi.mock("@/modules/organizations/application/growth-progress-access", () => ({
+  isOverviewGrowthProgressEnabled: (...args: [organizationId: string]) => mockGrowthFlag(...args),
+}));
+
+vi.mock("@/modules/organizations/infrastructure/growth-progress-repository", () => ({
+  createGrowthProgressRepository: vi.fn(() => ({
+    readProjections: (...args: unknown[]) => mockReadProjections(...args),
+    readRevenueFacts: (...args: unknown[]) => mockReadRevenueFacts(...args),
+  })),
+}));
+
+vi.mock("@/modules/organizations/infrastructure/growth-advice-reader", () => ({
+  createGrowthAdviceReader: vi.fn(() => ({
+    readCandidates: (...args: unknown[]) => mockReadAdviceCandidates(...args),
+  })),
+}));
+
 const mockReadLatestSnapshot = vi.fn();
+const mockGrowthFlag = vi.fn<(organizationId: string) => boolean>();
+const mockReadProjections = vi.fn();
+const mockReadRevenueFacts = vi.fn();
+const mockReadAdviceCandidates = vi.fn();
 
 vi.mock("@/modules/organizations/infrastructure/revenue-snapshot-repository", () => ({
   readLatestRevenueSnapshot: (...args: unknown[]) => mockReadLatestSnapshot(...args),
@@ -255,6 +276,10 @@ beforeEach(() => {
   mockListWorkspaceItems.mockResolvedValue([]);
   mockListProposals.mockResolvedValue([]);
   mockReadLatestSnapshot.mockResolvedValue({ state: "missing" });
+  mockGrowthFlag.mockReturnValue(false);
+  mockReadProjections.mockResolvedValue({ status: "missing", reason: "PROJECTION_MISSING" });
+  mockReadRevenueFacts.mockResolvedValue({ status: "ready", facts: [] });
+  mockReadAdviceCandidates.mockResolvedValue({ candidates: [], laneErrors: {} });
   mockGetCampaign.mockResolvedValue(null);
   mockGetVersion.mockResolvedValue(null);
   mockLatestGenerationRun.mockResolvedValue(null);
@@ -817,10 +842,105 @@ describe("revenue snapshot reads", () => {
     const supabase = fakeSupabase();
 
     const view = await loadWith(supabase);
-
     expect(mockLoadAnalysedWindowKeys).toHaveBeenCalled();
     expect(view.revenue.status).toBe("ready");
     if (view.revenue.status !== "ready") return;
     expect(view.revenue.data.state).toBe("refused");
+  });
+});
+
+describe("growth flag loading", () => {
+  it("flag OFF keeps legacy behavior exactly with growth disabled", async () => {
+    mockGrowthFlag.mockReturnValue(false);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockGrowthFlag).toHaveBeenCalledWith(ORG_ID);
+    expect(view.growthProgress).toEqual({ state: "disabled" });
+    expect(mockReadProjections).not.toHaveBeenCalled();
+    expect(mockReadRevenueFacts).not.toHaveBeenCalled();
+    expect(mockReadAdviceCandidates).not.toHaveBeenCalled();
+  });
+
+  it("flag ON bypasses the legacy revenue path and composes growth instead", async () => {
+    mockGrowthFlag.mockReturnValue(true);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockReadLatestSnapshot).not.toHaveBeenCalled();
+    expect(mockLoadAnalysedWindowKeys).not.toHaveBeenCalled();
+    expect(mockLoadChannelBandsForWindow).not.toHaveBeenCalled();
+    expect(mockListChannelRecommendationRecords).not.toHaveBeenCalled();
+    expect(mockListWorkspaceItems).not.toHaveBeenCalled();
+    expect(view.revenue).toEqual({ status: "disabled" });
+    expect(mockReadProjections).toHaveBeenCalledWith({
+      organizationId: ORG_ID,
+      asOfDate: "2026-09-11",
+    });
+    expect(view.growthProgress.state).toBe("ready");
+    if (view.growthProgress.state !== "ready") return;
+    expect(view.growthProgress.views[1].state).toBe("missing");
+  });
+
+  it("flag ON leaves campaigns, assets and permissions untouched", async () => {
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    mockedPosters.mockResolvedValue([posterRecord()] as never);
+    mockedReferences.mockResolvedValue([referenceRecord()] as never);
+    const supabase = fakeSupabase();
+
+    mockGrowthFlag.mockReturnValue(false);
+    const legacy = await loadWith(supabase);
+    mockGrowthFlag.mockReturnValue(true);
+    const flagged = await loadWith(fakeSupabase());
+
+    expect(flagged.campaigns).toEqual(legacy.campaigns);
+    expect(flagged.assets).toEqual(legacy.assets);
+    expect(flagged.assetsPartial).toBe(legacy.assetsPartial);
+    expect(flagged.permissions).toEqual(legacy.permissions);
+    expect(flagged.attention).toEqual(legacy.attention);
+    expect(flagged.destinations).toEqual(legacy.destinations);
+    expect(flagged.activity).toEqual(legacy.activity);
+  });
+
+  it("channel.read denied never schedules the projection read", async () => {
+    mockGrowthFlag.mockReturnValue(true);
+    mockedPermissions.mockImplementation((role, permission) => permission !== "channel.read");
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(mockReadProjections).not.toHaveBeenCalled();
+    expect(mockReadRevenueFacts).not.toHaveBeenCalled();
+    expect(mockReadAdviceCandidates).not.toHaveBeenCalled();
+    expect(view.growthProgress.state).toBe("ready");
+    if (view.growthProgress.state !== "ready") return;
+    expect(view.growthProgress.views[1]).toMatchObject({
+      state: "unavailable",
+      reasonCode: "PERMISSION_DENIED",
+    });
+  });
+
+  it("a throwing growth read degrades the section with a safe log, never the lower home", async () => {
+    mockGrowthFlag.mockReturnValue(true);
+    mockReadProjections.mockRejectedValue(new Error("transport down"));
+    mockedReadCampaigns.mockResolvedValue([campaignRecord()] as never);
+    const supabase = fakeSupabase();
+
+    const view = await loadWith(supabase);
+
+    expect(view.growthProgress).toEqual({ state: "failed", reasonCode: "SOURCE_READ_FAILED" });
+    expect(view.campaigns.status).toBe("ready");
+    expect(logger.error).toHaveBeenCalledWith(
+      "organization_home.section_read_failed",
+      expect.objectContaining({
+        organizationId: ORG_ID,
+        correlationId: CORRELATION_ID,
+        errorCode: "growth:home_read_failed",
+      }),
+    );
+    const logged = JSON.stringify(vi.mocked(logger.error).mock.calls);
+    expect(logged).not.toContain("transport down");
   });
 });

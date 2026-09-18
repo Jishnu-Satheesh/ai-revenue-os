@@ -363,7 +363,16 @@ describe("growth-progress repository", () => {
       asOfDate: "2030-01-15",
     });
     if (result.status !== "ready") throw new Error(`expected ready, got ${result.status}`);
-    expect(result.projections.map((doc) => doc.horizonMonths)).toEqual([1, 3]);
+    expect(result.projections.map((stored) => stored.document.horizonMonths)).toEqual([1, 3]);
+    // The storage identity rides with the document so views can cite it.
+    expect(result.projections[0]).toMatchObject({
+      projectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      digest: "b".repeat(64),
+    });
+    expect(result.projections[1]).toMatchObject({
+      projectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003",
+      digest: "b".repeat(64),
+    });
   });
 
   it("tells missing, corrupt, denied and failed apart", async () => {
@@ -402,6 +411,18 @@ describe("growth-progress repository", () => {
         : { data: [projectionRow({ horizon_months: 3 })], error: null },
     );
     expect(await read(mismatched.client)).toEqual({
+      status: "corrupt",
+      reason: "PROJECTION_CORRUPT",
+    });
+
+    // A malformed storage identity corrupts the row: a document without a
+    // citable id or digest must never reach a view as half-cited numbers.
+    const badIdentity = fakeClient((steps) =>
+      steps.table === "organizations"
+        ? { data: [{ id: ORG }], error: null }
+        : { data: [projectionRow({ id: "not-a-uuid", input_digest: "zz" })], error: null },
+    );
+    expect(await read(badIdentity.client)).toEqual({
       status: "corrupt",
       reason: "PROJECTION_CORRUPT",
     });

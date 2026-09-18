@@ -446,10 +446,15 @@ export function buildGrowthProjectionCandidate(
       monthlyLowMinor: monthlyLow,
       monthlyHighMinor: monthlyHigh,
       points: [...points],
-      // No per-row source manifest: the Task 1 fact DTO carries no ledger
-      // revision to bind, and the publication boundary rejects unbound
-      // claims. An empty manifest is contract-valid; the baseline window and
-      // frozen scope preserve what the estimate rests on.
+      // Baseline-only manifests stay empty by Task-5 decision (a): the
+      // publication boundary binds every manifest row to a ledger revision
+      // (`v_row_revision::text <> v_claim_revision` rejects, and a null
+      // revision is rejected outright), while the Task-1 fact DTO carries
+      // no revision to bind. A populated-but-unbound manifest could never
+      // publish, so an empty — contract-valid — manifest plus the frozen
+      // baseline window and scope below preserve what the estimate rests
+      // on. Per-row lineage needs the DTO revision amendment first; that
+      // follow-up is recorded, not silent.
       sources: [],
       actionAssumptions: qualified.map((entry) => ({
         sourceKind: entry.sourceKind,

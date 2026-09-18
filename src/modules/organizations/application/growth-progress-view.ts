@@ -125,3 +125,16 @@ export type GrowthProgressSection =
   | { state: "disabled" }
   | { state: "failed"; reasonCode: string | null }
   | { state: "ready"; initialHorizon: 1; views: GrowthProgressViews };
+
+/**
+ * Single construction sites for the two non-ready section states, so the
+ * home loader and the growth service never drift on what "off" looks like.
+ * Disabled is the flag-off and rollback shape; failed carries the safe code.
+ */
+export function disabledGrowthProgressSection(): GrowthProgressSection {
+  return { state: "disabled" };
+}
+
+export function failedGrowthProgressSection(reasonCode: string | null): GrowthProgressSection {
+  return { state: "failed", reasonCode };
+}

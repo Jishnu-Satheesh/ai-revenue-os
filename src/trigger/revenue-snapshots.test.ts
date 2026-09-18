@@ -49,6 +49,13 @@ describe("Revenue snapshot Trigger registration", () => {
     expect(source).toContain("publishDueGrowthProjections");
     expect(source).toContain("buildSnapshotGrowthCandidate");
     expect(source).toContain("candidateMaterial: result.candidateMaterial");
+    // Schedule discovery uses the narrow worker-only origins adapter, not
+    // the session read port whose projection-table SELECT is revoked for
+    // the worker role; a throwing read stays a fail-closed skip. (The RPC
+    // name itself is pinned in growth-projection-repository.test.ts, where
+    // the adapter calls it.)
+    expect(source).toContain("createGrowthScheduleRepository");
+    expect(source).not.toContain("createGrowthProgressRepository");
     expect(source).toContain("growthPublication");
     expect(source).toContain("revenue.growth_projection_publish_failed");
     // One shared instant feeds both phases so a midnight straddle cannot

@@ -9,6 +9,7 @@ import type {
   HomeSourceResult as CampaignHomeSourceResult,
   PrivatePreviewImage as CampaignPrivatePreviewImage,
 } from "@/modules/campaigns/application/home-preview-types";
+import type { GrowthProgressSection } from "@/modules/organizations/application/growth-progress-view";
 
 /** Server-minted private preview; never a storage path or bucket name. */
 export type HomeImage = CampaignPrivatePreviewImage;
@@ -75,7 +76,12 @@ export type HomePermissions = {
 
 /** Settled revenue-scenario reads behind the Current vs Projected section. */
 export type HomeRevenueSource =
-  | { status: "ready"; input: RevenueScenarioInput; fetchedAt: string; extraNotes: readonly string[] }
+  | {
+      status: "ready";
+      input: RevenueScenarioInput;
+      fetchedAt: string;
+      extraNotes: readonly string[];
+    }
   | { status: "failed" }
   | { status: "disabled" };
 
@@ -96,6 +102,12 @@ export type OrganizationHomeView = {
   assets: HomeSection<readonly HomeAsset[]>;
   assetsPartial: boolean;
   revenue: HomeSection<RevenueScenario>;
+  /**
+   * Fixed-projection growth section. Disabled while the rollout flag is off;
+   * `revenue` stays composed regardless so disabling the flag restores the
+   * existing section without a second deploy.
+   */
+  growthProgress: GrowthProgressSection;
   attention: readonly HomeAttentionItem[];
   attentionIncomplete: boolean;
   destinations: readonly HomeDestination[];

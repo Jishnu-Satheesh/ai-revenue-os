@@ -20,6 +20,10 @@ import type {
   HomeRevenueSource,
   OrganizationHomeView,
 } from "@/modules/organizations/application/home-types";
+import {
+  disabledGrowthProgressSection,
+  type GrowthProgressSection,
+} from "@/modules/organizations/application/growth-progress-view";
 
 export type BuildOrganizationHomeViewInput = {
   snapshot: DigitalTwinSnapshot;
@@ -30,6 +34,8 @@ export type BuildOrganizationHomeViewInput = {
   gates: { campaigns: boolean; growth: boolean; integrations: boolean };
   /** Absent while the revenue slice is still behind its own rollout. */
   revenue?: HomeRevenueSource;
+  /** Absent while the growth-progress slice is still behind its rollout flag. */
+  growthProgress?: GrowthProgressSection;
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -521,6 +527,10 @@ export function buildOrganizationHomeView(
     assets,
     assetsPartial,
     revenue,
+    // The growth section rides alongside revenue, never through it: the
+    // loader decides which read ran, and this composer passes the loaded
+    // section through untouched so lower-home composition stays identical.
+    growthProgress: input.growthProgress ?? disabledGrowthProgressSection(),
     attention,
     attentionIncomplete,
     destinations,

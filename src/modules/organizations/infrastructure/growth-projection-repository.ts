@@ -10,6 +10,7 @@ import {
   type PublishGrowthProjectionInput,
   type PublishGrowthProjectionResult,
 } from "@/modules/organizations/application/growth-progress-ports";
+import type { GrowthScheduleSnapshot } from "@/modules/organizations/application/growth-projection-publisher";
 import type { Database } from "@/lib/supabase/database.types";
 
 /**
@@ -167,6 +168,62 @@ export function createGrowthProjectionRepository(
       }
       const row = rows.data[0];
       return { projectionId: row.projection_id, digest: row.digest, published: row.published };
+    },
+  };
+}
+
+const scheduleRowSchema = z.strictObject({
+  schedule_origin_date: z
+    .string()
+    .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, { message: "Origins read YYYY-MM-DD." }),
+});
+
+const scheduleInputSchema = z.strictObject({
+  organizationId: z.string().uuid(),
+  asOfDate: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, {
+    message: "Schedule dates read YYYY-MM-DD.",
+  }),
+});
+
+/**
+ * Binds the worker-only schedule-read RPC to the service client (Task-5
+ * decision b). The worker runs as service_role with direct projection-table
+ * SELECT revoked, so schedule discovery goes through this narrow RPC —
+ * origins only, never amounts — rather than a widened grant. A malformed
+ * answer throws; the publisher maps the throw to a fail-closed skip.
+ */
+export function createGrowthScheduleRepository(serviceClient: ServiceClient): {
+  readSchedule: (input: z.input<typeof scheduleInputSchema>) => Promise<GrowthScheduleSnapshot>;
+} {
+  return {
+    async readSchedule(rawInput: z.input<typeof scheduleInputSchema>) {
+      const parsed = scheduleInputSchema.safeParse(rawInput);
+      if (!parsed.success) {
+        throw new GrowthProjectionPublishError(
+          "INVALID_INPUT",
+          "The schedule read inputs were not usable.",
+        );
+      }
+      const { data, error } = await serviceClient.rpc("read_organization_growth_schedule", {
+        p_organization_id: parsed.data.organizationId,
+        p_as_of_date: parsed.data.asOfDate,
+      });
+      if (error) {
+        throw new GrowthProjectionPublishError(
+          "PUBLISH_FAILED",
+          "Reading the projection schedule failed.",
+        );
+      }
+      const rows = z.array(scheduleRowSchema).safeParse(data);
+      if (!rows.success) {
+        throw new GrowthProjectionPublishError(
+          "PUBLISH_FAILED",
+          "The schedule answer was not usable.",
+        );
+      }
+      const origins = [...new Set(rows.data.map((row) => row.schedule_origin_date))].sort();
+      if (origins.length === 0) return { status: "missing" };
+      return { status: "ready", origins };
     },
   };
 }

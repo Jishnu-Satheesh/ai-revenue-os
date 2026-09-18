@@ -241,4 +241,62 @@ describe("growth-projection repository", () => {
     );
     expect(source).toContain('import "server-only"');
   });
+
+  it("reads the schedule through the narrow origins RPC, never the table", async () => {
+    const { createGrowthScheduleRepository } = await import(
+      "@/modules/organizations/infrastructure/growth-projection-repository"
+    );
+    const { client, calls } = serviceClient(async () => ({
+      data: [{ schedule_origin_date: "2030-01-01" }, { schedule_origin_date: "2030-01-01" }],
+      error: null,
+    }));
+    const result = await createGrowthScheduleRepository(client).readSchedule({
+      organizationId: ORG,
+      asOfDate: "2030-01-15",
+    });
+    expect(result).toEqual({ status: "ready", origins: ["2030-01-01"] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("read_organization_growth_schedule");
+    expect(calls[0]?.args).toEqual({ p_organization_id: ORG, p_as_of_date: "2030-01-15" });
+  });
+
+  it("maps an empty schedule to missing and failures to throws", async () => {
+    const { createGrowthScheduleRepository } = await import(
+      "@/modules/organizations/infrastructure/growth-projection-repository"
+    );
+    const empty = serviceClient(async () => ({ data: [], error: null }));
+    await expect(
+      createGrowthScheduleRepository(empty.client).readSchedule({
+        organizationId: ORG,
+        asOfDate: "2030-01-15",
+      }),
+    ).resolves.toEqual({ status: "missing" });
+
+    const denied = serviceClient(async () => ({ data: null, error: { code: "42501" } }));
+    await expect(
+      createGrowthScheduleRepository(denied.client).readSchedule({
+        organizationId: ORG,
+        asOfDate: "2030-01-15",
+      }),
+    ).rejects.toMatchObject({ code: "PUBLISH_FAILED" });
+
+    const malformed = serviceClient(async () => ({
+      data: [{ schedule_origin_date: "not-a-date" }],
+      error: null,
+    }));
+    await expect(
+      createGrowthScheduleRepository(malformed.client).readSchedule({
+        organizationId: ORG,
+        asOfDate: "2030-01-15",
+      }),
+    ).rejects.toMatchObject({ code: "PUBLISH_FAILED" });
+
+    await expect(
+      createGrowthScheduleRepository(empty.client).readSchedule({
+        organizationId: "not-a-uuid",
+        asOfDate: "2030-01-15",
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    expect(empty.calls).toHaveLength(1);
+  });
 });

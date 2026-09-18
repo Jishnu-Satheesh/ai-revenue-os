@@ -9,7 +9,6 @@ import {
   frozenGrowthProjectionSchema,
   GROWTH_SERIES_MAX_FACTS,
   revenueFactSchema,
-  type FrozenGrowthProjection,
   type RevenueFact,
   type ScopePartition,
 } from "@/domain/organizations/growth-progress";
@@ -19,6 +18,7 @@ import type {
   ReadProjectionsInput,
   ReadRevenueFactsInput,
   RevenueFactsEnvelope,
+  StoredGrowthProjection,
 } from "@/modules/organizations/application/growth-progress-ports";
 import {
   readProjectionsInputSchema,
@@ -53,6 +53,7 @@ const FACT_MAX_PAGES_PER_TABLE = 22;
 const FETCH_WIDENING_DAYS = 2;
 const MS_PER_DAY = 86_400_000;
 const HEX64_PATTERN = /^[0-9a-f]{64}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const PROJECTION_COLUMNS =
   "id,organization_id,schedule_origin_date,cycle_index,horizon_months,period_start,period_end_exclusive,issued_at,source_cutoff_date,timezone,currency,metric_key,scope_digest,input_digest,document_version,method_version,requires_growth_read,requires_campaign_read,frozen_document,created_at";
@@ -123,12 +124,14 @@ type StoredProjectionRow = {
   created_at: string;
 };
 
-function toValidProjection(row: StoredProjectionRow): FrozenGrowthProjection | null {
+function toValidProjection(row: StoredProjectionRow): StoredGrowthProjection | null {
   const parsed = frozenGrowthProjectionSchema.safeParse(row.frozen_document);
   if (!parsed.success) return null;
   const document = parsed.data;
   // Column/JSON consistency: a row whose envelope disagrees with its frozen
-  // document is corrupt, never repaired on read.
+  // document is corrupt, never repaired on read. The storage identity rides
+  // along only when it parses — a malformed id or digest corrupts the row
+  // rather than reaching a view as a half-cited projection.
   if (
     document.organizationId !== row.organization_id ||
     document.horizonMonths !== row.horizon_months ||
@@ -142,7 +145,8 @@ function toValidProjection(row: StoredProjectionRow): FrozenGrowthProjection | n
   ) {
     return null;
   }
-  return document;
+  if (!UUID_PATTERN.test(row.id)) return null;
+  return { document, projectionId: row.id, digest: row.input_digest };
 }
 
 async function readProjections(
@@ -167,22 +171,22 @@ async function readProjections(
   if (error || !data) return failedProjection();
   if (data.length === 0) return { status: "missing", reason: "PROJECTION_MISSING" };
 
-  const valid: FrozenGrowthProjection[] = [];
+  const valid: StoredGrowthProjection[] = [];
   for (const row of data as StoredProjectionRow[]) {
-    const document = toValidProjection(row);
-    if (!document) return corruptProjection();
-    valid.push(document);
+    const stored = toValidProjection(row);
+    if (!stored) return corruptProjection();
+    valid.push(stored);
   }
   // At most the active-or-upcoming row per horizon: the earliest start wins.
-  const byHorizon = new Map<number, FrozenGrowthProjection>();
-  for (const document of valid) {
-    const current = byHorizon.get(document.horizonMonths);
-    if (!current || document.startDate < current.startDate) {
-      byHorizon.set(document.horizonMonths, document);
+  const byHorizon = new Map<number, StoredGrowthProjection>();
+  for (const stored of valid) {
+    const current = byHorizon.get(stored.document.horizonMonths);
+    if (!current || stored.document.startDate < current.document.startDate) {
+      byHorizon.set(stored.document.horizonMonths, stored);
     }
   }
   const projections = [...byHorizon.values()].sort(
-    (left, right) => left.horizonMonths - right.horizonMonths,
+    (left, right) => left.document.horizonMonths - right.document.horizonMonths,
   );
   return { status: "ready", projections };
 }

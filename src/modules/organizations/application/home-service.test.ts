@@ -1256,3 +1256,78 @@ describe("revenue extra notes", () => {
     expect(refused.revenue.data.state).toBe("refused");
   });
 });
+
+describe("growth progress section", () => {
+  function readySection() {
+    return {
+      state: "ready" as const,
+      initialHorizon: 1 as const,
+      views: {
+        1: {
+          horizonMonths: 1 as const,
+          state: "ready" as const,
+          reasonCode: null,
+          projectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+          projectionDigest: "c".repeat(64),
+          period: {
+            horizonMonths: 1 as const,
+            cycleIndex: 0,
+            startDate: "2026-09-17",
+            endDateExclusive: "2026-10-17",
+          },
+          currency: "AED",
+          scopeLabel: "Organization total",
+          issuedAt: "2026-09-16T20:00:00.000Z",
+          sourceCutoffDate: "2026-09-16",
+          latestComparableDate: "2026-09-18",
+          points: [],
+          latestComparison: {
+            state: "behind" as const,
+            differenceMinor: -100_00,
+            differencePercent: -9,
+            reasonCode: null,
+          },
+          adviceRows: [],
+          limitations: [],
+          freshness: { status: "fresh" as const, note: null },
+          sources: [],
+        },
+      },
+    };
+  }
+
+  it("stays disabled until the loader composes the slice", () => {
+    const view = buildOrganizationHomeView(viewInput());
+    expect(view.growthProgress).toEqual({ state: "disabled" });
+  });
+
+  it("passes a ready section through without touching revenue or lower home", () => {
+    const section = readySection();
+    const fullViews = {
+      1: section.views[1],
+      3: section.views[1],
+      6: section.views[1],
+      12: section.views[1],
+    };
+    const withGrowth = buildOrganizationHomeView({
+      ...viewInput(),
+      growthProgress: { ...section, views: fullViews },
+    });
+    const withoutGrowth = buildOrganizationHomeView(viewInput());
+
+    expect(withGrowth.growthProgress).toEqual({ ...section, views: fullViews });
+    // Revenue keeps its own disabled shape beside the new section.
+    expect(withGrowth.revenue).toEqual({ status: "disabled" });
+    // Every lower-home field composes identically with or without growth.
+    expect(withGrowth.campaigns).toEqual(withoutGrowth.campaigns);
+    expect(withGrowth.assets).toEqual(withoutGrowth.assets);
+    expect(withGrowth.assetsPartial).toBe(withoutGrowth.assetsPartial);
+    expect(withGrowth.attention).toEqual(withoutGrowth.attention);
+    expect(withGrowth.attentionIncomplete).toBe(withoutGrowth.attentionIncomplete);
+    expect(withGrowth.destinations).toEqual(withoutGrowth.destinations);
+    expect(withGrowth.activity).toEqual(withoutGrowth.activity);
+    expect(withGrowth.permissions).toEqual(withoutGrowth.permissions);
+    expect(withGrowth.goals).toEqual(withoutGrowth.goals);
+    expect(withGrowth.focusGoalId).toBe(withoutGrowth.focusGoalId);
+  });
+});

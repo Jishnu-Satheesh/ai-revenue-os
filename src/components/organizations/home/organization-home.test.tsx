@@ -148,6 +148,7 @@ function view(overrides: Partial<OrganizationHomeView> = {}): OrganizationHomeVi
     assets: { status: "ready", data: [asset()], fetchedAt: NOW },
     assetsPartial: false,
     revenue: { status: "disabled" },
+    growthProgress: { state: "disabled" },
     attention: [attention()],
     attentionIncomplete: false,
     destinations: [

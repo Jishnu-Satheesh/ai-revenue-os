@@ -1168,7 +1168,9 @@ select extensions.is(
     join pg_namespace namespace on namespace.oid = procedure.pronamespace
     where namespace.nspname in ('public', 'private')
       and procedure.prosrc ilike '%organization_growth_projections%'
-      and procedure.proname <> 'publish_organization_growth_projection'),
+      and procedure.proname not in (
+        'publish_organization_growth_projection',
+        'read_organization_growth_schedule')),
   0::bigint,
   'no other routine references projections: no trim path exists');
 

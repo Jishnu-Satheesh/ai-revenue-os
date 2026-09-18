@@ -27,6 +27,15 @@ import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/g
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { createCampaignProposalReader } from "@/modules/campaigns/infrastructure/proposal-read-repository";
 import type { ProposalReadPersistence } from "@/modules/campaigns/infrastructure/proposal-read-repository";
+import { isOverviewGrowthProgressEnabled } from "@/modules/organizations/application/growth-progress-access";
+import { loadGrowthProgress } from "@/modules/organizations/application/growth-progress-service";
+import {
+  disabledGrowthProgressSection,
+  failedGrowthProgressSection,
+  type GrowthProgressSection,
+} from "@/modules/organizations/application/growth-progress-view";
+import { createGrowthAdviceReader } from "@/modules/organizations/infrastructure/growth-advice-reader";
+import { createGrowthProgressRepository } from "@/modules/organizations/infrastructure/growth-progress-repository";
 import { filterRevenueInputForViewer } from "@/modules/organizations/infrastructure/revenue-inputs";
 import { readLatestRevenueSnapshot } from "@/modules/organizations/infrastructure/revenue-snapshot-repository";
 import {
@@ -71,7 +80,7 @@ export type LoadOrganizationHomeInput = {
   now: string;
 };
 
-type HomeSource = "campaigns" | "posters" | "references" | "logo" | "revenue";
+type HomeSource = "campaigns" | "posters" | "references" | "logo" | "revenue" | "growth";
 
 function logSectionFailure(input: {
   organizationId: string;
@@ -100,6 +109,11 @@ export async function loadOrganizationHome(
     growth: growthGate,
     integrations: integrationsGate,
   };
+  // Rollout flag guards home loading AND publication (D08). Server-derived
+  // from the environment on every load — never a browser assertion. Flag ON
+  // runs the fixed-projection path and bypasses the legacy revenue
+  // read/recalculation entirely; flag OFF preserves legacy behavior exactly.
+  const growthEnabled = isOverviewGrowthProgressEnabled(organizationId);
 
   const canReadCampaigns = campaignsGate && hasOrganizationPermission(role, "campaign.read");
   const canReadArtwork = hasOrganizationPermission(role, "asset.read");
@@ -147,9 +161,12 @@ export async function loadOrganizationHome(
   // The nightly snapshot answers first when one validates: the page reads
   // instead of analyzing. A read failure here is not a section failure —
   // the live path below is the fallback, and only its failure degrades.
-  const snapshotPromise = canReadRevenueBands
-    ? readLatestRevenueSnapshot(supabase, organizationId).catch(() => null)
-    : Promise.resolve(null);
+  // Behind the growth flag this whole legacy path is bypassed, so the
+  // snapshot row is never even fetched.
+  const snapshotPromise =
+    !growthEnabled && canReadRevenueBands
+      ? readLatestRevenueSnapshot(supabase, organizationId).catch(() => null)
+      : Promise.resolve(null);
   const scheduled: { source: HomeSource; run: Promise<unknown> }[] = [];
   if (campaignsScheduled) {
     scheduled.push({
@@ -205,7 +222,9 @@ export async function loadOrganizationHome(
   // Stored snapshot first, narrowed to this viewer; live reads only when no
   // snapshot validates. Either way the composer builds the same scenario.
   let revenueSource: HomeRevenueSource;
-  if (!canReadRevenueBands) {
+  if (growthEnabled) {
+    revenueSource = { status: "disabled" };
+  } else if (!canReadRevenueBands) {
     revenueSource = { status: "disabled" };
   } else if (stored !== null && stored.state === "ready") {
     const revenueDay = revenueDayInZone(snapshot.organization.default_timezone, now);
@@ -296,6 +315,51 @@ export async function loadOrganizationHome(
     }
   }
 
+  // Fixed-projection growth section. Flag OFF keeps the disabled shape so
+  // rollback is the flag alone. Flag ON composes through the growth
+  // service on the member session; a transport throw degrades the section
+  // with a safe code, never the lower home.
+  let growthProgress: GrowthProgressSection;
+  if (!growthEnabled) {
+    growthProgress = disabledGrowthProgressSection();
+  } else {
+    const growthStartedAt = Date.now();
+    try {
+      growthProgress = await loadGrowthProgress(
+        {
+          organizationId,
+          actorId,
+          nowIso: now,
+          timeZone: snapshot.organization.default_timezone,
+          permissions: {
+            canReadProjections: hasOrganizationPermission(role, "channel.read"),
+            canReadGrowth:
+              growthGate && hasOrganizationPermission(role, "growth_intelligence.read"),
+            canReadCampaigns: campaignsGate && hasOrganizationPermission(role, "campaign.read"),
+          },
+        },
+        {
+          progressReads: createGrowthProgressRepository(supabase),
+          readAdvice: (adviceInput) =>
+            createGrowthAdviceReader({
+              growthReads: createAuthenticatedGrowthIntelligenceReadRepository(supabase),
+              proposalReader: createCampaignProposalReader(
+                supabase as unknown as ProposalReadPersistence,
+              ),
+            }).readCandidates(adviceInput),
+        },
+      );
+    } catch {
+      growthProgress = failedGrowthProgressSection("SOURCE_READ_FAILED");
+      logSectionFailure({
+        organizationId,
+        correlationId,
+        source: "growth",
+        elapsedMs: Date.now() - growthStartedAt,
+      });
+    }
+  }
+
   // Role passes straight through: create/edit/review wording stays Task 1's
   // rules inside the composer. This loader never recomputes CTAs.
   return buildOrganizationHomeView({
@@ -304,6 +368,7 @@ export async function loadOrganizationHome(
     organizationId,
     now,
     revenue: revenueSource,
+    growthProgress,
     sources: {
       campaigns: campaignsSource,
       posters: postersSource,

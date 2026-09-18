@@ -419,4 +419,19 @@ describe("buildGrowthProjectionCandidate", () => {
     const result = buildGrowthProjectionCandidate({ nonsense: true });
     expect(result).toMatchObject({ status: "refused", reason: "INVALID_INPUT" });
   });
+
+  it("freezes baseline-only manifests empty rather than unbound (Task-5 decision a)", () => {
+    const result = buildGrowthProjectionCandidate(baseInput());
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // Empty is contract-valid: the publication boundary binds every
+    // manifest row to a ledger revision the fact DTO does not carry, so a
+    // populated-but-unbound manifest could never publish.
+    expect(result.document.sources).toEqual([]);
+    expect(frozenGrowthProjectionSchema.safeParse(result.document).success).toBe(true);
+    expect(result.document.baselineWindow).toEqual({
+      startDate: "2029-12-01",
+      endDateExclusive: "2030-01-01",
+    });
+    expect(result.document.limitations).toContain(BASELINE_ONLY_LIMITATION);
+  });
 });

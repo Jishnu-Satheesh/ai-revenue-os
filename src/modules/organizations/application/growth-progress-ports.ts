@@ -4,7 +4,6 @@ import { isoDateSchema } from "@/domain/organizations/growth-periods";
 import {
   frozenGrowthProjectionSchema,
   scopePartitionSchema,
-  type FrozenGrowthProjection,
   type RevenueFact,
 } from "@/domain/organizations/growth-progress";
 
@@ -35,12 +34,32 @@ export const readRevenueFactsInputSchema = z.strictObject({
 export type ReadRevenueFactsInput = z.output<typeof readRevenueFactsInputSchema>;
 
 /**
+ * One stored frozen projection with its database identity.
+ *
+ * The document is the frozen numbers the browser draws; the id and digest
+ * are the storage identity Task 5 composes into each view so two viewers of
+ * the same projection id provably see the same numbers. Both travel
+ * together — a document without its identity cannot be cited, and an
+ * identity without its document cannot be drawn.
+ */
+export const storedGrowthProjectionSchema = z.strictObject({
+  document: frozenGrowthProjectionSchema,
+  projectionId: z.string().uuid(),
+  digest: z
+    .string()
+    .trim()
+    .length(64)
+    .regex(/^[0-9a-f]{64}$/, { message: "Digests read as SHA-256 hex." }),
+});
+export type StoredGrowthProjection = z.output<typeof storedGrowthProjectionSchema>;
+
+/**
  * Typed projection-read outcome. Returns at most one active/upcoming row per
  * horizon. Denials, corruption and read failures are explicit envelopes —
  * never laundered into an empty "no data" answer.
  */
 export type ProjectionReadEnvelope =
-  | { status: "ready"; projections: readonly FrozenGrowthProjection[] }
+  | { status: "ready"; projections: readonly StoredGrowthProjection[] }
   | { status: "missing"; reason: "PROJECTION_MISSING" }
   | { status: "corrupt"; reason: "PROJECTION_CORRUPT" }
   | { status: "denied"; reason: "PERMISSION_DENIED" }
