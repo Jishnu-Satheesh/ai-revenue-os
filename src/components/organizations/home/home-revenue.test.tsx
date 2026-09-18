@@ -382,7 +382,7 @@ describe("HomeRevenue", () => {
   });
 
   it("switches horizons and keeps the pulse tip on the current course", () => {
-    const { container } = render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
+    render(<HomeRevenue organizationId={ORG_ID} section={readySection()} />);
 
     expect(screen.getByText("Current course · 1 month")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "3M" }));
