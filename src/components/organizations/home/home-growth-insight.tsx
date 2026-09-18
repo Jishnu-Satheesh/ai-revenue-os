@@ -60,8 +60,7 @@ export function HomeGrowthInsight({
     state !== "within_range" &&
     state !== "equal" ? (
       <p className={styles.growthGapPercent}>
-        {Math.abs(differencePercent)}% {state === "ahead" ? "above" : "below"} the projected
-        revenue
+        {Math.abs(differencePercent)}% {state === "ahead" ? "above" : "below"} the projected revenue
       </p>
     ) : state === "within_range" ? (
       <p className={styles.growthGapPercent}>Tracking within the estimate</p>

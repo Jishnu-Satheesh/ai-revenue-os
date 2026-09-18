@@ -27,22 +27,45 @@ describe("growthDateComparability", () => {
     };
     expect(growthDateComparability(base)).toBe("Reported");
     expect(
-      growthDateComparability({ ...base, currentMinor: null, currentCoverage: "missing" as const, reasonCode: "FUTURE_DATE" }),
+      growthDateComparability({
+        ...base,
+        currentMinor: null,
+        currentCoverage: "missing" as const,
+        reasonCode: "FUTURE_DATE",
+      }),
     ).toBe("Future date — no current value");
     expect(
-      growthDateComparability({ ...base, currentMinor: null, currentCoverage: "missing" as const, reasonCode: "COVERAGE_GAP" }),
+      growthDateComparability({
+        ...base,
+        currentMinor: null,
+        currentCoverage: "missing" as const,
+        reasonCode: "COVERAGE_GAP",
+      }),
     ).toBe("Not reported — incomplete coverage");
     expect(
-      growthDateComparability({ ...base, currentMinor: null, currentCoverage: "conflict" as const, reasonCode: "OVERLAP_CONFLICT" }),
+      growthDateComparability({
+        ...base,
+        currentMinor: null,
+        currentCoverage: "conflict" as const,
+        reasonCode: "OVERLAP_CONFLICT",
+      }),
     ).toBe("Not comparable — overlapping reports");
     expect(
-      growthDateComparability({ ...base, currentMinor: null, currentCoverage: "incomparable" as const, reasonCode: "CURRENCY_MISMATCH" }),
+      growthDateComparability({
+        ...base,
+        currentMinor: null,
+        currentCoverage: "incomparable" as const,
+        reasonCode: "CURRENCY_MISMATCH",
+      }),
     ).toBe("Not comparable — mixed currency");
   });
 });
 
 describe("growthStateCopy", () => {
-  function stateView(state: GrowthProgressView["state"], reasonCode: string | null): GrowthProgressView {
+  function stateView(
+    state: GrowthProgressView["state"],
+    reasonCode: string | null,
+  ): GrowthProgressView {
     return { ...buildBehindGrowthView(ORG_ID), state, reasonCode };
   }
 
@@ -76,7 +99,14 @@ describe("HomeGrowthMethodDialog", () => {
     expect(screen.getByText(/planned\s*means intent, not completed work/i)).toBeTruthy();
     expect(screen.getByText(/never a promise/i)).toBeTruthy();
     const table = screen.getByRole("table");
-    for (const header of ["Date", "Current", "Projected low", "Projected central", "Projected high", "Comparability"]) {
+    for (const header of [
+      "Date",
+      "Current",
+      "Projected low",
+      "Projected central",
+      "Projected high",
+      "Comparability",
+    ]) {
       expect(within(table).getByText(header)).toBeTruthy();
     }
     // Full amounts with currency, low/central/high and comparability per date.

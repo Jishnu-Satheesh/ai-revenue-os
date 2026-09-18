@@ -20,7 +20,10 @@ import {
   placeGrowthPairLabels,
   selectGrowthLabelDates,
 } from "@/components/organizations/home/home-growth-chart";
-import { buildAheadGrowthView, buildBehindGrowthView } from "@/components/organizations/home/home-growth-fixtures";
+import {
+  buildAheadGrowthView,
+  buildBehindGrowthView,
+} from "@/components/organizations/home/home-growth-fixtures";
 
 afterEach(() => {
   cleanup();
@@ -213,7 +216,10 @@ describe("HomeGrowthChart behind fixture", () => {
     const projected = circles(container, "growthProjectedDot");
     const current = circles(container, "growthCurrentDot");
     const perUnitFromProjected =
-      Math.abs(numberAttribute(projected[0] as Element, "cy") - numberAttribute(projected[3] as Element, "cy")) /
+      Math.abs(
+        numberAttribute(projected[0] as Element, "cy") -
+          numberAttribute(projected[3] as Element, "cy"),
+      ) /
       (120_000 - 24_000);
     // The same-date bracket pair (60k current vs 84k projected on 21 Sep).
     const bracketSpan = Math.abs(
@@ -223,7 +229,9 @@ describe("HomeGrowthChart behind fixture", () => {
     expect(bracketSpan / expected24k).toBeCloseTo(1, 1);
     // Same domain, same scale: the current pair must agree with the projected pair.
     const perUnitFromCurrent =
-      Math.abs(numberAttribute(current[0] as Element, "cy") - numberAttribute(current[2] as Element, "cy")) /
+      Math.abs(
+        numberAttribute(current[0] as Element, "cy") - numberAttribute(current[2] as Element, "cy"),
+      ) /
       (60_000 - 18_000);
     expect(perUnitFromCurrent / perUnitFromProjected).toBeCloseTo(1, 1);
   });
@@ -237,7 +245,10 @@ describe("HomeGrowthChart behind fixture", () => {
     const projected = circles(container, "growthProjectedDot");
     const current = circles(container, "growthCurrentDot");
     const perUnit =
-      Math.abs(numberAttribute(projected[0] as Element, "cy") - numberAttribute(projected[3] as Element, "cy")) /
+      Math.abs(
+        numberAttribute(projected[0] as Element, "cy") -
+          numberAttribute(projected[3] as Element, "cy"),
+      ) /
       (120_000 - 24_000);
     // 7 Sep current is now 30,000 and 21 Sep current is 60,000: exactly 30k apart.
     const thirtyKaySpan = Math.abs(
@@ -248,12 +259,10 @@ describe("HomeGrowthChart behind fixture", () => {
 
   it("spaces unequal date intervals proportionally on the time scale", () => {
     const { container } = render(<HomeGrowthChart view={buildBehindGrowthView(ORG_ID)} />);
-    const dots = circles(container, "growthProjectedDot").map((dot) =>
-      numberAttribute(dot, "cx"),
-    );
-    const firstWeek = dots[1] as number - (dots[0] as number);
-    const secondWeek = dots[2] as number - (dots[1] as number);
-    const nineDays = dots[3] as number - (dots[2] as number);
+    const dots = circles(container, "growthProjectedDot").map((dot) => numberAttribute(dot, "cx"));
+    const firstWeek = (dots[1] as number) - (dots[0] as number);
+    const secondWeek = (dots[2] as number) - (dots[1] as number);
+    const nineDays = (dots[3] as number) - (dots[2] as number);
     expect(secondWeek / firstWeek).toBeCloseTo(1, 1);
     expect(nineDays / secondWeek).toBeCloseTo(9 / 7, 1);
   });
@@ -284,7 +293,12 @@ describe("growthTooltipForDate", () => {
     const view = buildBehindGrowthView(ORG_ID);
     const points = view.points.map((point) =>
       point.date === "2026-09-14"
-        ? { ...point, currentMinor: 3_800_000, currentCoverage: "missing" as const, reasonCode: "COVERAGE_GAP" as const }
+        ? {
+            ...point,
+            currentMinor: 3_800_000,
+            currentCoverage: "missing" as const,
+            reasonCode: "COVERAGE_GAP" as const,
+          }
         : point,
     );
     const model = growthTooltipForDate({ ...view, points }, "2026-09-14");
@@ -305,7 +319,10 @@ describe("selectGrowthLabelDates", () => {
   });
 
   it("thins dense series to the cap while keeping first, latest and last", () => {
-    const dates = Array.from({ length: 30 }, (_, index) => `2026-09-${String(index + 1).padStart(2, "0")}`);
+    const dates = Array.from(
+      { length: 30 },
+      (_, index) => `2026-09-${String(index + 1).padStart(2, "0")}`,
+    );
     const picked = selectGrowthLabelDates(dates, "2026-09-21", 6);
     expect(picked.length).toBeLessThanOrEqual(6);
     expect(picked[0]).toBe("2026-09-01");

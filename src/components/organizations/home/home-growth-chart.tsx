@@ -129,8 +129,7 @@ export function growthNiceTicks(
   const normalized = span / 4 / magnitude;
   // Ceiling ladder tuned so the fixture span (18k–120k plotted, norm 2.55)
   // lands on the approved 40k step rather than 25k or 30k.
-  const niceFactor =
-    normalized >= 10 ? 10 : normalized >= 5 ? 5 : normalized >= 2 ? 4 : 1;
+  const niceFactor = normalized >= 10 ? 10 : normalized >= 5 ? 5 : normalized >= 2 ? 4 : 1;
   let step = niceFactor * magnitude;
   let low = Math.min(0, Math.floor(toMajor(minMinor) / step) * step);
   let high = Math.max(1, Math.ceil(toMajor(maxMinor) / step) * step);
@@ -237,9 +236,7 @@ export function growthTooltipForDate(
   const point = view.points.find((candidate) => candidate.date === date) ?? null;
   if (point === null) return null;
   const currentMinor =
-    point.currentMinor !== null && point.currentCoverage === "complete"
-      ? point.currentMinor
-      : null;
+    point.currentMinor !== null && point.currentCoverage === "complete" ? point.currentMinor : null;
   return {
     date: point.date,
     currentMinor,
@@ -349,7 +346,10 @@ export function buildGrowthChartRows(
     }));
 }
 
-function useMeasuredWidth(fallback: number): { ref: React.RefObject<HTMLDivElement | null>; width: number } {
+function useMeasuredWidth(fallback: number): {
+  ref: React.RefObject<HTMLDivElement | null>;
+  width: number;
+} {
   const ref = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(fallback);
   useLayoutEffect(() => {
@@ -710,7 +710,9 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
             <span>{latestSummaryDate ? `Current · ${latestSummaryDate}` : "Current"}</span>
           </dt>
           <dd className={styles.growthSummaryCurrent}>
-            {latestCurrent !== null ? formatWholeMoney(latestCurrent, currency) : "Awaiting reports"}
+            {latestCurrent !== null
+              ? formatWholeMoney(latestCurrent, currency)
+              : "Awaiting reports"}
           </dd>
         </div>
         <div className={styles.growthSummary}>
@@ -738,141 +740,139 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
         onKeyDown={onChartKeyDown}
         onMouseLeave={() => setHoverDate(null)}
       >
-        <div
-          className={styles.growthChart}
-          role="img"
-          aria-label={chartAriaLabel(view, currency)}
-        >
-        <ComposedChart
-          width={width}
-          height={CHART_HEIGHT}
-          data={rows}
-          margin={{ top: 30, right: 70, bottom: 8, left: 0 }}
-        >
-          <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" />
-          <XAxis
-            dataKey="t"
-            type="number"
-            scale="time"
-            domain={[startMs, endMs]}
-            ticks={tickValues}
-            padding={{ left: 0, right: 0 }}
-            tickLine={false}
-            axisLine={{ stroke: "var(--border)" }}
-            tickMargin={10}
-            tick={{ fill: "var(--muted-foreground)" }}
-            tickFormatter={(value: number) => formatShortDate(new Date(value).toISOString().slice(0, 10))}
-          />
-          <YAxis
-            domain={[domain[0], domain[1]]}
-            ticks={ticks}
-            tickLine={false}
-            axisLine={{ stroke: "var(--border)" }}
-            width={56}
-            tick={{ fill: "var(--muted-foreground)" }}
-            tickFormatter={(value: number) =>
-              formatCompactMoney(value * 10 ** majorExponent(currency), currency)
-            }
-          />
-          {view.latestComparableDate !== null ? (
-            <ReferenceLine
-              x={utcDate(view.latestComparableDate).getTime()}
-              stroke="var(--muted-foreground)"
-              strokeDasharray="4 4"
-              label={{
-                value: "Latest report",
-                position: "top",
-                fill: "var(--muted-foreground)",
-                className: styles.growthGuideLabel,
+        <div className={styles.growthChart} role="img" aria-label={chartAriaLabel(view, currency)}>
+          <ComposedChart
+            width={width}
+            height={CHART_HEIGHT}
+            data={rows}
+            margin={{ top: 30, right: 70, bottom: 8, left: 0 }}
+          >
+            <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" />
+            <XAxis
+              dataKey="t"
+              type="number"
+              scale="time"
+              domain={[startMs, endMs]}
+              ticks={tickValues}
+              padding={{ left: 0, right: 0 }}
+              tickLine={false}
+              axisLine={{ stroke: "var(--border)" }}
+              tickMargin={10}
+              tick={{ fill: "var(--muted-foreground)" }}
+              tickFormatter={(value: number) =>
+                formatShortDate(new Date(value).toISOString().slice(0, 10))
+              }
+            />
+            <YAxis
+              domain={[domain[0], domain[1]]}
+              ticks={ticks}
+              tickLine={false}
+              axisLine={{ stroke: "var(--border)" }}
+              width={56}
+              tick={{ fill: "var(--muted-foreground)" }}
+              tickFormatter={(value: number) =>
+                formatCompactMoney(value * 10 ** majorExponent(currency), currency)
+              }
+            />
+            {view.latestComparableDate !== null ? (
+              <ReferenceLine
+                x={utcDate(view.latestComparableDate).getTime()}
+                stroke="var(--muted-foreground)"
+                strokeDasharray="4 4"
+                label={{
+                  value: "Latest report",
+                  position: "top",
+                  fill: "var(--muted-foreground)",
+                  className: styles.growthGuideLabel,
+                }}
+              />
+            ) : null}
+            {activeT !== null ? (
+              <ReferenceLine
+                x={activeT}
+                stroke="var(--foreground)"
+                strokeOpacity={0.45}
+                strokeDasharray="3 3"
+              />
+            ) : null}
+            {bracketValues !== null ? (
+              <ReferenceLine
+                segment={[
+                  { x: bracketValues.t, y: bracketValues.current },
+                  { x: bracketValues.t, y: bracketValues.projected },
+                ]}
+                stroke="var(--muted-foreground)"
+                strokeWidth={1.5}
+                label={{
+                  value: bracketLabel,
+                  position: bracketAnchor === "right" ? "right" : "left",
+                  fill: "var(--muted-foreground)",
+                  className: styles.growthBracketLabel,
+                }}
+              />
+            ) : null}
+            <Line
+              type="linear"
+              dataKey="projected"
+              name="Projected"
+              stroke={GROWTH_PROJECTED}
+              strokeWidth={3}
+              strokeDasharray={PROJECTED_DASH}
+              connectNulls={false}
+              isAnimationActive={false}
+              dot={(dotProps) => {
+                const payload = (dotProps as GlyphProps).payload;
+                const placement = placeGrowthPairLabels(
+                  payload?.currentMinor ?? null,
+                  payload?.projectedCentralMinor ?? null,
+                );
+                return (
+                  <ProjectedGlyph
+                    {...(dotProps as GlyphProps)}
+                    labelSide={
+                      payload && labelDates.has(payload.date) ? placement.projected : "hidden"
+                    }
+                    showEndpointWord={(dotProps as GlyphProps).index === lastProjectedIndex}
+                    endpointDy={endpointPlacement.projectedDy}
+                    currency={currency}
+                    onSelectDate={selectDate}
+                    onHoverDate={setHoverDate}
+                  />
+                );
               }}
+              activeDot={false}
             />
-          ) : null}
-          {activeT !== null ? (
-            <ReferenceLine
-              x={activeT}
-              stroke="var(--foreground)"
-              strokeOpacity={0.45}
-              strokeDasharray="3 3"
-            />
-          ) : null}
-          {bracketValues !== null ? (
-            <ReferenceLine
-              segment={[
-                { x: bracketValues.t, y: bracketValues.current },
-                { x: bracketValues.t, y: bracketValues.projected },
-              ]}
-              stroke="var(--muted-foreground)"
-              strokeWidth={1.5}
-              label={{
-                value: bracketLabel,
-                position: bracketAnchor === "right" ? "right" : "left",
-                fill: "var(--muted-foreground)",
-                className: styles.growthBracketLabel,
+            <Line
+              type="linear"
+              dataKey="current"
+              name="Current"
+              stroke={GROWTH_CURRENT}
+              strokeWidth={3}
+              connectNulls={false}
+              isAnimationActive={false}
+              dot={(dotProps) => {
+                const payload = (dotProps as GlyphProps).payload;
+                const placement = placeGrowthPairLabels(
+                  payload?.currentMinor ?? null,
+                  payload?.projectedCentralMinor ?? null,
+                );
+                return (
+                  <CurrentGlyph
+                    {...(dotProps as GlyphProps)}
+                    labelSide={
+                      payload && labelDates.has(payload.date) ? placement.current : "hidden"
+                    }
+                    showEndpointWord={(dotProps as GlyphProps).index === lastCurrentIndex}
+                    endpointDy={endpointPlacement.currentDy}
+                    currency={currency}
+                    onSelectDate={selectDate}
+                    onHoverDate={setHoverDate}
+                  />
+                );
               }}
+              activeDot={false}
             />
-          ) : null}
-          <Line
-            type="linear"
-            dataKey="projected"
-            name="Projected"
-            stroke={GROWTH_PROJECTED}
-            strokeWidth={3}
-            strokeDasharray={PROJECTED_DASH}
-            connectNulls={false}
-            isAnimationActive={false}
-            dot={(dotProps) => {
-              const payload = (dotProps as GlyphProps).payload;
-              const placement = placeGrowthPairLabels(
-                payload?.currentMinor ?? null,
-                payload?.projectedCentralMinor ?? null,
-              );
-              return (
-                <ProjectedGlyph
-                  {...(dotProps as GlyphProps)}
-                  labelSide={
-                    payload && labelDates.has(payload.date) ? placement.projected : "hidden"
-                  }
-                  showEndpointWord={(dotProps as GlyphProps).index === lastProjectedIndex}
-                  endpointDy={endpointPlacement.projectedDy}
-                  currency={currency}
-                  onSelectDate={selectDate}
-                  onHoverDate={setHoverDate}
-                />
-              );
-            }}
-            activeDot={false}
-          />
-          <Line
-            type="linear"
-            dataKey="current"
-            name="Current"
-            stroke={GROWTH_CURRENT}
-            strokeWidth={3}
-            connectNulls={false}
-            isAnimationActive={false}
-            dot={(dotProps) => {
-              const payload = (dotProps as GlyphProps).payload;
-              const placement = placeGrowthPairLabels(
-                payload?.currentMinor ?? null,
-                payload?.projectedCentralMinor ?? null,
-              );
-              return (
-                <CurrentGlyph
-                  {...(dotProps as GlyphProps)}
-                  labelSide={
-                    payload && labelDates.has(payload.date) ? placement.current : "hidden"
-                  }
-                  showEndpointWord={(dotProps as GlyphProps).index === lastCurrentIndex}
-                  endpointDy={endpointPlacement.currentDy}
-                  currency={currency}
-                  onSelectDate={selectDate}
-                  onHoverDate={setHoverDate}
-                />
-              );
-            }}
-            activeDot={false}
-          />
-        </ComposedChart>
+          </ComposedChart>
         </div>
         {activeModel !== null && activeFraction !== null ? (
           <div

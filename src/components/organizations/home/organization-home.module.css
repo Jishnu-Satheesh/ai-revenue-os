@@ -1268,13 +1268,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .revenuePulse {
-    animation: none;
-    opacity: 0;
-  }
-}
-
 /* ------------------------------------------------- fixed-projection growth */
 
 /* Current vs projected growth (visual contract V01–V04/V06). The section is
@@ -1904,5 +1897,185 @@
   .growthHint {
     font-size: 15px;
     line-height: 1.47;
+  }
+}
+
+/* ---------------- Task 7: interaction, disclosure and degraded states ----
+   Everything below is scoped to the growth section; the legacy revenue rules
+   above and every other card on the page are untouched. */
+
+/* Keyboard group around the chart: position context for the tooltip, with a
+   visible focus ring. Plotting itself stays static (V05 reduced motion). */
+.growthChartWrap {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.growthChartWrap:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+
+/* Small shadcn-surfaced tooltip (V05): date, current, projected central and
+   range, signed difference. No big overlay panel. Flipping is inline
+   (left vs right at 70%); the 8px inset keeps it off the card edge. */
+.growthTooltip {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  min-width: 180px;
+  max-width: min(280px, calc(100% - 16px));
+  margin: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+  padding: 8px 12px;
+  pointer-events: none;
+}
+
+.growthTooltipDate {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.growthTooltipRow {
+  margin: 2px 0 0;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Method dialog trigger: a real button with a 44px target (V03). */
+.growthMethodButton {
+  min-height: 44px;
+}
+
+/* Horizon buttons keep the approved pill look with 44px targets (V03). */
+.growthHorizonRow button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Method dialog body: fact list, assumptions and the value table. Wide
+   enough for six columns with a scroll fallback on narrow cards. */
+.growthDialog {
+  max-width: min(640px, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.growthMethodFacts {
+  display: flex;
+  margin: 0;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.growthMethodFacts > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 4px 12px;
+}
+
+.growthMethodFacts dt {
+  font-weight: 600;
+}
+
+.growthMethodFacts dd {
+  margin: 0;
+  overflow-wrap: break-word;
+}
+
+.growthMethodAssumptions {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.growthMethodAssumptions li + li {
+  margin-top: 4px;
+}
+
+.growthMethodTable {
+  margin-top: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Loading skeleton reserves summary, chart and rail space (V07): blanks
+   only, never example amounts or wavy lines. */
+.growthLoading {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.growthLoadingSummaries {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.growthLoadingSummary {
+  height: 64px;
+}
+
+.growthLoadingChart {
+  height: 340px;
+}
+
+.growthLoadingRail {
+  height: 120px;
+}
+
+.growthFailed {
+  padding: 20px;
+}
+
+/* Small cards (<560): tighter title/values, wrapped summaries, stacked
+   footer with the method control on its own row. The grid is already
+   single-column below 900; these rules only shrink type and spacing so
+   320px viewports never scroll sideways. */
+@container (max-width: 559px) {
+  .growthTitle {
+    font-size: 18px;
+    line-height: 1.44;
+  }
+
+  .growthSummaryCurrent,
+  .growthSummaryProjected {
+    font-size: 22px;
+    line-height: 1.36;
+  }
+
+  .growthSummaryLabel {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .growthFoot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .growthMethodButton {
+    align-self: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .growthTooltip {
+    transition: none;
   }
 }

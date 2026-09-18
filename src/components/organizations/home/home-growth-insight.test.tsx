@@ -3,7 +3,10 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { HomeGrowthInsight } from "@/components/organizations/home/home-growth-insight";
-import { buildAheadGrowthView, buildBehindGrowthView } from "@/components/organizations/home/home-growth-fixtures";
+import {
+  buildAheadGrowthView,
+  buildBehindGrowthView,
+} from "@/components/organizations/home/home-growth-fixtures";
 import type { GrowthProgressView } from "@/modules/organizations/application/growth-progress-view";
 
 afterEach(() => {
@@ -16,7 +19,10 @@ const RECOMMENDATIONS_HREF = `/organizations/${ORG_ID}/growth-intelligence#recom
 describe("HomeGrowthInsight behind fixture", () => {
   it("states the verdict, the gap and the supporting rows", () => {
     render(
-      <HomeGrowthInsight view={buildBehindGrowthView(ORG_ID)} recommendationsHref={RECOMMENDATIONS_HREF} />,
+      <HomeGrowthInsight
+        view={buildBehindGrowthView(ORG_ID)}
+        recommendationsHref={RECOMMENDATIONS_HREF}
+      />,
     );
     expect(screen.getByText("AS OF 21 SEP")).toBeTruthy();
     expect(screen.getByText("Below the projection")).toBeTruthy();
@@ -33,7 +39,10 @@ describe("HomeGrowthInsight behind fixture", () => {
 
   it("links each row to its source-owned destination", () => {
     render(
-      <HomeGrowthInsight view={buildBehindGrowthView(ORG_ID)} recommendationsHref={RECOMMENDATIONS_HREF} />,
+      <HomeGrowthInsight
+        view={buildBehindGrowthView(ORG_ID)}
+        recommendationsHref={RECOMMENDATIONS_HREF}
+      />,
     );
     const list = screen.getByText("What to look at").nextElementSibling;
     expect(list?.tagName).toBe("UL");
@@ -48,7 +57,10 @@ describe("HomeGrowthInsight behind fixture", () => {
 describe("HomeGrowthInsight ahead fixture", () => {
   it("celebrates without claiming attribution", () => {
     const { container } = render(
-      <HomeGrowthInsight view={buildAheadGrowthView(ORG_ID)} recommendationsHref={RECOMMENDATIONS_HREF} />,
+      <HomeGrowthInsight
+        view={buildAheadGrowthView(ORG_ID)}
+        recommendationsHref={RECOMMENDATIONS_HREF}
+      />,
     );
     expect(screen.getByText("Above the projection")).toBeTruthy();
     expect(screen.getByText("AED 14,000 ahead")).toBeTruthy();
@@ -90,7 +102,10 @@ describe("HomeGrowthInsight comparison states", () => {
 
   it("names exact equality without a gap label", () => {
     const { container } = render(
-      <HomeGrowthInsight view={viewWith("equal", 0, 0)} recommendationsHref={RECOMMENDATIONS_HREF} />,
+      <HomeGrowthInsight
+        view={viewWith("equal", 0, 0)}
+        recommendationsHref={RECOMMENDATIONS_HREF}
+      />,
     );
     expect(screen.getByText("In line with the projection")).toBeTruthy();
     expect(screen.getByText("Current revenue matches this estimate.")).toBeTruthy();
@@ -154,10 +169,7 @@ describe("HomeGrowthInsight comparison states", () => {
       point.date === "2026-09-07" ? { ...point, currentMinor: -500_000 } : point,
     );
     const { container } = render(
-      <HomeGrowthInsight
-        view={{ ...base, points }}
-        recommendationsHref={RECOMMENDATIONS_HREF}
-      />,
+      <HomeGrowthInsight view={{ ...base, points }} recommendationsHref={RECOMMENDATIONS_HREF} />,
     );
     expect(screen.getByText("Below the projection")).toBeTruthy();
     expect(container.textContent).not.toMatch(/execut|earn|complet/i);
@@ -171,7 +183,10 @@ describe("HomeGrowthInsight comparison states", () => {
       index === 0 ? { ...row, title: longTitle } : row,
     );
     render(
-      <HomeGrowthInsight view={{ ...base, adviceRows: rows }} recommendationsHref={RECOMMENDATIONS_HREF} />,
+      <HomeGrowthInsight
+        view={{ ...base, adviceRows: rows }}
+        recommendationsHref={RECOMMENDATIONS_HREF}
+      />,
     );
     const link = screen.getByRole("link", { name: new RegExp(longTitle.slice(0, 24)) });
     expect(link.getAttribute("aria-label")).toContain(longTitle);

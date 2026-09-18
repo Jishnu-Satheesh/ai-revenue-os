@@ -135,8 +135,8 @@ export function HomeGrowthMethodDialog({ view }: Readonly<{ view: GrowthProgress
         <DialogHeader>
           <DialogTitle>How this is estimated</DialogTitle>
           <DialogDescription>
-            A frozen projection compared with reported revenue. An estimate with stated
-            assumptions — never a promise of what will happen.
+            A frozen projection compared with reported revenue. An estimate with stated assumptions
+            — never a promise of what will happen.
           </DialogDescription>
         </DialogHeader>
         <dl className={styles.growthMethodFacts}>
@@ -167,12 +167,12 @@ export function HomeGrowthMethodDialog({ view }: Readonly<{ view: GrowthProgress
         <ul className={styles.growthMethodAssumptions}>
           <li>Even-pace assumption: the central estimate spreads the period target evenly.</li>
           <li>
-            Action assumptions: included actions contribute only their listed ranges; planned
-            means intent, not completed work.
+            Action assumptions: included actions contribute only their listed ranges; planned means
+            intent, not completed work.
           </li>
           <li>
-            Central and range: the dashed line is the central scenario estimate; the low–high
-            band is the stored scenario range, not a calibrated promise.
+            Central and range: the dashed line is the central scenario estimate; the low–high band
+            is the stored scenario range, not a calibrated promise.
           </li>
           <li>
             Revision and freshness: figures freeze at publication.{" "}
@@ -267,8 +267,8 @@ export function HomeGrowthFailed({
           {retainedView !== null && retainedView.sourceCutoffDate !== null ? (
             <>
               Showing the last readable view, with reports through{" "}
-              {formatFooterDay(retainedView.sourceCutoffDate)}. Nothing is estimated in the
-              missing reports&apos; place.{" "}
+              {formatFooterDay(retainedView.sourceCutoffDate)}. Nothing is estimated in the missing
+              reports&apos; place.{" "}
             </>
           ) : (
             <>The recent reports could not be read. Nothing is estimated in their place. </>

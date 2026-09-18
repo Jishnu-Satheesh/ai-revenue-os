@@ -565,9 +565,7 @@ describe("HomeRevenue growth horizon switching", () => {
   it("clears the pinned tooltip, announces politely and keeps the projection identity", () => {
     render(growthHome());
     const section = screen.getByRole("region", { name: "Current vs projected growth" });
-    expect(section.getAttribute("data-projection-digest")).toBe(
-      "fixture-digest-september-2026-v1",
-    );
+    expect(section.getAttribute("data-projection-digest")).toBe("fixture-digest-september-2026-v1");
     const group = screen.getByRole("group", { name: /Growth chart/ });
     fireEvent.keyDown(group, { key: "ArrowRight" });
     fireEvent.keyDown(group, { key: "Enter" });
@@ -623,7 +621,13 @@ describe("HomeRevenue growth degraded states", () => {
 
   it("plots the green outlook beside the panel for an upcoming period", () => {
     const base = buildBehindGrowthView(ORG_ID);
-    renderGrowthView({ ...base, state: "upcoming", reasonCode: null, latestComparableDate: null, latestComparison: null });
+    renderGrowthView({
+      ...base,
+      state: "upcoming",
+      reasonCode: null,
+      latestComparableDate: null,
+      latestComparison: null,
+    });
     expect(screen.getByText(/Tracking starts 1 Sep/)).toBeTruthy();
     expect(screen.queryByText("Below the projection")).toBeNull();
     expect(screen.queryByText("Above the projection")).toBeNull();
@@ -633,16 +637,26 @@ describe("HomeRevenue growth degraded states", () => {
 
   it("waits for reports without inventing current values", () => {
     const base = buildBehindGrowthView(ORG_ID);
-    renderGrowthView({ ...base, state: "awaiting_reports", reasonCode: null, latestComparableDate: null, latestComparison: null });
+    renderGrowthView({
+      ...base,
+      state: "awaiting_reports",
+      reasonCode: null,
+      latestComparableDate: null,
+      latestComparison: null,
+    });
     expect(screen.getByText("Waiting for reported revenue")).toBeTruthy();
   });
 
   it("keeps partial points plotted with a missing-scope explanation", () => {
     const base = buildBehindGrowthView(ORG_ID);
-    renderGrowthView({ ...base, state: "unavailable", reasonCode: "COVERAGE_GAP", latestComparableDate: null, latestComparison: null });
-    expect(
-      screen.getByText("Comparison unavailable for the latest reports"),
-    ).toBeTruthy();
+    renderGrowthView({
+      ...base,
+      state: "unavailable",
+      reasonCode: "COVERAGE_GAP",
+      latestComparableDate: null,
+      latestComparison: null,
+    });
+    expect(screen.getByText("Comparison unavailable for the latest reports")).toBeTruthy();
     expect(screen.getByRole("img", { name: /Current \(reported revenue\)/ })).toBeTruthy();
   });
 

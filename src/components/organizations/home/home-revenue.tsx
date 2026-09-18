@@ -403,8 +403,10 @@ export function growthPeriodSubtitle(view: GrowthProgressView): string {
 /** V07 footer identity line: when the estimate was fixed, what it covers. */
 export function growthFooterLine(view: GrowthProgressView): string {
   const parts: string[] = [];
-  if (view.issuedAt !== null) parts.push(`Projection set ${formatFooterDay(view.issuedAt.slice(0, 10))}`);
-  if (view.sourceCutoffDate !== null) parts.push(`Reports through ${formatFooterDay(view.sourceCutoffDate)}`);
+  if (view.issuedAt !== null)
+    parts.push(`Projection set ${formatFooterDay(view.issuedAt.slice(0, 10))}`);
+  if (view.sourceCutoffDate !== null)
+    parts.push(`Reports through ${formatFooterDay(view.sourceCutoffDate)}`);
   parts.push(view.scopeLabel);
   return parts.join(" · ");
 }
@@ -420,7 +422,8 @@ function GrowthStatePanel({
   reviewHref,
 }: Readonly<{ view: GrowthProgressView; reviewHref: string | null }>) {
   const copy = growthStateCopy(view);
-  const reviewable = view.reasonCode === "CURRENCY_MISMATCH" || view.reasonCode === "OVERLAP_CONFLICT";
+  const reviewable =
+    view.reasonCode === "CURRENCY_MISMATCH" || view.reasonCode === "OVERLAP_CONFLICT";
   return (
     <div className={styles.growthStateNote}>
       <p className={styles.growthEyebrow}>
@@ -471,7 +474,10 @@ export function growthHorizonAnnouncement(view: GrowthProgressView): string {
 function HomeRevenueGrowth({
   organizationId,
   section,
-}: Readonly<{ organizationId: string; section: Extract<GrowthProgressSection, { state: "ready" }> }>) {
+}: Readonly<{
+  organizationId: string;
+  section: Extract<GrowthProgressSection, { state: "ready" }>;
+}>) {
   const [horizon, setHorizon] = useState<1 | 3 | 6 | 12>(section.initialHorizon);
   const [horizonAnnouncement, setHorizonAnnouncement] = useState("");
   const view = section.views[horizon];
@@ -598,11 +604,7 @@ export function HomeRevenue({
   }
   if (growth?.state === "failed") {
     return (
-      <section
-        id="home-revenue"
-        aria-label="Current vs projected growth"
-        className={styles.growth}
-      >
+      <section id="home-revenue" aria-label="Current vs projected growth" className={styles.growth}>
         <Alert>
           <AlertTitle>Growth outlook is unavailable right now</AlertTitle>
           <AlertDescription>
