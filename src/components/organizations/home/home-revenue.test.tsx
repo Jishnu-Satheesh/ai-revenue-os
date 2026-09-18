@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 import {
   buildRevenueChartRows,
   growthFooterLine,
+  growthHorizonAnnouncement,
   growthPeriodSubtitle,
   HomeRevenue,
   PulsingTipDot,
@@ -531,6 +532,166 @@ describe("HomeRevenue growth section", () => {
     expect(projectedOf(behind)).toEqual(projectedOf(ahead));
     expect(behind.latestComparison).toMatchObject({ state: "behind" });
     expect(ahead.latestComparison).toMatchObject({ state: "ahead" });
+  });
+});
+
+describe("growthHorizonAnnouncement", () => {
+  it("announces period plus the latest comparison for a ready view", () => {
+    expect(growthHorizonAnnouncement(buildBehindGrowthView(ORG_ID))).toMatch(
+      /Revenue this month · September 2026 — .*behind as of 21 Sep/,
+    );
+  });
+
+  it("announces the state title when no comparison exists", () => {
+    const section = buildBehindGrowthSection(ORG_ID);
+    if (section.state !== "ready") throw new Error("fixture must be ready");
+    expect(growthHorizonAnnouncement(section.views[3])).toMatch(
+      /Revenue over this period.*Projection not set for this period/,
+    );
+  });
+});
+
+describe("HomeRevenue growth horizon switching", () => {
+  function growthHome() {
+    return (
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={buildBehindGrowthSection(ORG_ID)}
+      />
+    );
+  }
+
+  it("clears the pinned tooltip, announces politely and keeps the projection identity", () => {
+    render(growthHome());
+    const section = screen.getByRole("region", { name: "Current vs projected growth" });
+    expect(section.getAttribute("data-projection-digest")).toBe(
+      "fixture-digest-september-2026-v1",
+    );
+    const group = screen.getByRole("group", { name: /Growth chart/ });
+    fireEvent.keyDown(group, { key: "ArrowRight" });
+    fireEvent.keyDown(group, { key: "Enter" });
+    expect(screen.getByRole("tooltip").textContent).toContain("Pinned");
+
+    fireEvent.click(screen.getByRole("button", { name: "3 months" }));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.getByTestId("growth-horizon-announcement").textContent).toMatch(
+      /Revenue over this period.*Projection not set for this period/,
+    );
+    // Atomic switch: no stale advice under the new period label.
+    expect(screen.queryByText("Below the projection")).toBeNull();
+    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
+    expect(screen.getByText("Below the projection")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("region", { name: "Current vs projected growth" })
+        .getAttribute("data-projection-digest"),
+    ).toBe("fixture-digest-september-2026-v1");
+  });
+
+  it("leaves the right panel at the latest report while the chart is explored", () => {
+    render(growthHome());
+    const group = screen.getByRole("group", { name: /Growth chart/ });
+    fireEvent.keyDown(group, { key: "End" });
+    fireEvent.keyDown(group, { key: "Enter" });
+    expect(screen.getByText("AS OF 21 SEP")).toBeTruthy();
+    expect(screen.getByText("AED 24,000 behind")).toBeTruthy();
+  });
+
+  it("opens the method dialog from the footer with the accessible value table", () => {
+    render(growthHome());
+    fireEvent.click(screen.getByRole("button", { name: /How this is estimated/ }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("table")).toBeTruthy();
+  });
+});
+
+describe("HomeRevenue growth degraded states", () => {
+  function renderGrowthView(view: ReturnType<typeof buildBehindGrowthView>) {
+    const section = buildBehindGrowthSection(ORG_ID);
+    if (section.state !== "ready") throw new Error("fixture must be ready");
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={{ ...section, views: { ...section.views, 1: view } }}
+      />,
+    );
+  }
+
+  it("plots the green outlook beside the panel for an upcoming period", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView({ ...base, state: "upcoming", reasonCode: null, latestComparableDate: null, latestComparison: null });
+    expect(screen.getByText(/Tracking starts 1 Sep/)).toBeTruthy();
+    expect(screen.queryByText("Below the projection")).toBeNull();
+    expect(screen.queryByText("Above the projection")).toBeNull();
+    // Green outlook still plotted, blue absent.
+    expect(screen.getByRole("img", { name: /Projected \(frozen estimate\)/ })).toBeTruthy();
+  });
+
+  it("waits for reports without inventing current values", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView({ ...base, state: "awaiting_reports", reasonCode: null, latestComparableDate: null, latestComparison: null });
+    expect(screen.getByText("Waiting for reported revenue")).toBeTruthy();
+  });
+
+  it("keeps partial points plotted with a missing-scope explanation", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView({ ...base, state: "unavailable", reasonCode: "COVERAGE_GAP", latestComparableDate: null, latestComparison: null });
+    expect(
+      screen.getByText("Comparison unavailable for the latest reports"),
+    ).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Current \(reported revenue\)/ })).toBeTruthy();
+  });
+
+  it("never plots a combined amount for mixed currency and offers the permitted review link", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView({
+      ...base,
+      state: "unavailable",
+      reasonCode: "CURRENCY_MISMATCH",
+      points: [],
+      latestComparableDate: null,
+      latestComparison: null,
+    });
+    expect(screen.getByText(/mixed currency/)).toBeTruthy();
+    expect(screen.getByText(/no combined amount is plotted/)).toBeTruthy();
+    const link = screen.getByRole("link", { name: /Review the source reports/ });
+    expect(link.getAttribute("href")).toContain(`/organizations/${ORG_ID}/`);
+  });
+
+  it("names overlapping reports instead of picking a side", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView({
+      ...base,
+      state: "unavailable",
+      reasonCode: "OVERLAP_CONFLICT",
+      points: [],
+      latestComparableDate: null,
+      latestComparison: null,
+    });
+    expect(screen.getByText(/overlapping reports/)).toBeTruthy();
+  });
+
+  it("labels a stale complete observation with its date, never as today", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView({
+      ...base,
+      freshness: { status: "stale", note: "Latest complete report: 21 Sep." },
+    });
+    expect(screen.getByText("Latest complete report: 21 Sep.")).toBeTruthy();
+    expect(screen.queryByText(/today/i)).toBeNull();
+  });
+
+  it("renders only permitted source labels — denied titles stay out of the DOM", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView(base);
+    fireEvent.click(screen.getByRole("button", { name: /How this is estimated/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("2 reporting channels");
+    expect(dialog.textContent).not.toMatch(/confidential|restricted|hidden/i);
   });
 });
 

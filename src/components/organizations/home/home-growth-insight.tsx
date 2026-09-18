@@ -89,7 +89,11 @@ export function HomeGrowthInsight({
           {view.adviceRows.slice(0, 2).map((row) => (
             <li key={row.id} className={styles.growthAdviceRow}>
               {row.href ? (
-                <Link href={row.href} className={styles.growthAdviceLink}>
+                <Link
+                  href={row.href}
+                  className={styles.growthAdviceLink}
+                  aria-label={`${row.title} — ${row.supportingText}`}
+                >
                   <span className={styles.growthAdviceText}>
                     <span className={styles.growthAdviceTitle}>{row.title}</span>
                     <span className={styles.growthAdviceSupporting}>{row.supportingText}</span>

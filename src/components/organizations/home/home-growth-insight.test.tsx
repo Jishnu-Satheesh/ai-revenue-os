@@ -137,6 +137,47 @@ describe("HomeGrowthInsight comparison states", () => {
     expect(list?.querySelectorAll(":scope > li")).toHaveLength(2);
   });
 
+  it("raises no alarm for a below-midpoint actual inside the range", () => {
+    const { container } = render(
+      <HomeGrowthInsight
+        view={viewWith("within_range", -5_000_000, -6)}
+        recommendationsHref={RECOMMENDATIONS_HREF}
+      />,
+    );
+    expect(screen.getByText("Within the projected range")).toBeTruthy();
+    expect(container.textContent).not.toMatch(/behind|ahead/);
+  });
+
+  it("renders negative adjustments in full without implying execution", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    const points = base.points.map((point) =>
+      point.date === "2026-09-07" ? { ...point, currentMinor: -500_000 } : point,
+    );
+    const { container } = render(
+      <HomeGrowthInsight
+        view={{ ...base, points }}
+        recommendationsHref={RECOMMENDATIONS_HREF}
+      />,
+    );
+    expect(screen.getByText("Below the projection")).toBeTruthy();
+    expect(container.textContent).not.toMatch(/execut|earn|complet/i);
+  });
+
+  it("keeps long recommendation titles readable with the full title accessible", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    const longTitle =
+      "Revisit every open cancellation thread across both channels and agree who follows up before the weekend planning session";
+    const rows = base.adviceRows.map((row, index) =>
+      index === 0 ? { ...row, title: longTitle } : row,
+    );
+    render(
+      <HomeGrowthInsight view={{ ...base, adviceRows: rows }} recommendationsHref={RECOMMENDATIONS_HREF} />,
+    );
+    const link = screen.getByRole("link", { name: new RegExp(longTitle.slice(0, 24)) });
+    expect(link.getAttribute("aria-label")).toContain(longTitle);
+    expect(screen.getByText(longTitle)).toBeTruthy();
+  });
+
   it("renders plain text for rows without a link", () => {
     const base = buildBehindGrowthView(ORG_ID);
     const rows = base.adviceRows.map((row) => ({ ...row, href: null }));

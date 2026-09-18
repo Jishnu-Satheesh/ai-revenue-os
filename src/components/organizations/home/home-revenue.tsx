@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight, ChevronDown, Hourglass, Info } from "lucide-react";
+import { ArrowRight, ChevronDown, Hourglass } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -47,6 +47,10 @@ import {
   formatFooterDay,
   HomeGrowthChart,
 } from "@/components/organizations/home/home-growth-chart";
+import {
+  growthStateCopy,
+  HomeGrowthMethodDialog,
+} from "@/components/organizations/home/home-growth-details";
 import { HomeGrowthInsight } from "@/components/organizations/home/home-growth-insight";
 import styles from "@/components/organizations/home/organization-home.module.css";
 
@@ -406,25 +410,62 @@ export function growthFooterLine(view: GrowthProgressView): string {
 }
 
 /**
- * Minimal honest placeholder for a non-ready horizon view. Task 7 builds the
- * full V07 states (upcoming curve, awaiting-reports, sparse/partial, stale,
- * mixed-currency, source-denied) on this same seam.
+ * V07 right-panel for a non-ready horizon view: the state title plus what is
+ * shown and what is missing. Mixed currency and overlapping reports link to
+ * the source-owned review destination when permitted — never a replacement
+ * mutation, and omitted entirely without permission.
  */
-function GrowthStateNote({ view }: Readonly<{ view: GrowthProgressView }>) {
-  const copy =
-    view.state === "upcoming"
-      ? `Tracking starts ${formatFooterDay(view.period.startDate)}`
-      : view.state === "awaiting_reports"
-        ? "Waiting for reported revenue"
-        : view.state === "missing"
-          ? "Projection not set for this period"
-          : (view.reasonCode ?? "Comparison unavailable for the latest reports");
+function GrowthStatePanel({
+  view,
+  reviewHref,
+}: Readonly<{ view: GrowthProgressView; reviewHref: string | null }>) {
+  const copy = growthStateCopy(view);
+  const reviewable = view.reasonCode === "CURRENCY_MISMATCH" || view.reasonCode === "OVERLAP_CONFLICT";
   return (
     <div className={styles.growthStateNote}>
-      <p className={styles.growthStateTitle}>{growthPeriodSubtitle(view)}</p>
-      <p className={styles.emptyNote}>{copy}</p>
+      <p className={styles.growthEyebrow}>
+        {view.latestComparableDate !== null
+          ? `AS OF ${formatFooterDay(view.latestComparableDate).toUpperCase()}`
+          : "AS OF —"}
+      </p>
+      <p className={styles.growthStateTitle}>{copy.title}</p>
+      <p className={styles.emptyNote}>{copy.body}</p>
+      {reviewable && reviewHref !== null ? (
+        <p className={styles.growthRecommendationsRow}>
+          <Link href={reviewHref} className={styles.growthRecommendationsLink}>
+            Review the source reports <ArrowRight aria-hidden="true" />
+          </Link>
+        </p>
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Polite announcement for a horizon switch: the new period plus its latest
+ * comparison, so screen-reader users get the atomic view change as one
+ * sentence. Never a transient zero or a stale comparison under new label.
+ */
+export function growthHorizonAnnouncement(view: GrowthProgressView): string {
+  const currency = view.currency ?? "AED";
+  const comparison = view.latestComparison;
+  const verdict =
+    view.state !== "ready" || comparison === null
+      ? growthStateCopy(view).title
+      : comparison.state === "behind" && comparison.differenceMinor !== null
+        ? `${formatWholeMoney(Math.abs(comparison.differenceMinor), currency)} behind`
+        : comparison.state === "ahead" && comparison.differenceMinor !== null
+          ? `${formatWholeMoney(Math.abs(comparison.differenceMinor), currency)} ahead`
+          : comparison.state === "within_range"
+            ? "Tracking within the estimate"
+            : comparison.state === "equal"
+              ? "Current revenue matches this estimate"
+              : "Comparison unavailable";
+  const asOf =
+    view.latestComparableDate !== null
+      ? ` as of ${formatFooterDay(view.latestComparableDate)}`
+      : "";
+  return `${growthPeriodSubtitle(view)} — ${verdict}${asOf}.`;
 }
 
 function HomeRevenueGrowth({
@@ -432,12 +473,27 @@ function HomeRevenueGrowth({
   section,
 }: Readonly<{ organizationId: string; section: Extract<GrowthProgressSection, { state: "ready" }> }>) {
   const [horizon, setHorizon] = useState<1 | 3 | 6 | 12>(section.initialHorizon);
+  const [horizonAnnouncement, setHorizonAnnouncement] = useState("");
   const view = section.views[horizon];
   const ready = view.state === "ready";
+  // Sparse and partial views still plot their valid points with the state
+  // panel beside them; a view with no points at all shows the panel alone.
+  const hasPoints = view.points.length > 0 && view.currency !== null;
   const recommendationsHref = `/organizations/${organizationId}/growth-intelligence#recommendations`;
 
+  const switchHorizon = (option: 1 | 3 | 6 | 12) => {
+    if (option === horizon) return;
+    setHorizon(option);
+    setHorizonAnnouncement(growthHorizonAnnouncement(section.views[option]));
+  };
+
   return (
-    <section id="home-revenue" aria-label="Current vs projected growth" className={styles.growth}>
+    <section
+      id="home-revenue"
+      aria-label="Current vs projected growth"
+      className={styles.growth}
+      data-projection-digest={view.projectionDigest ?? undefined}
+    >
       <Card className="gap-0 overflow-hidden rounded-2xl py-0 shadow-none">
         <div className={styles.growthHead}>
           <div className={styles.growthHeadRow}>
@@ -457,7 +513,7 @@ function HomeRevenueGrowth({
                   size="sm"
                   aria-pressed={horizon === option}
                   aria-label={option === 1 ? "1 month" : `${option} months`}
-                  onClick={() => setHorizon(option)}
+                  onClick={() => switchHorizon(option)}
                 >
                   {option}M
                 </Button>
@@ -465,9 +521,19 @@ function HomeRevenueGrowth({
             </div>
           </div>
         </div>
+        <p aria-live="polite" data-testid="growth-horizon-announcement" className="sr-only">
+          {horizonAnnouncement}
+        </p>
         <div className={styles.growthGrid}>
           <div className={styles.growthMain}>
-            {ready ? <HomeGrowthChart view={view} /> : <GrowthStateNote view={view} />}
+            {ready || hasPoints ? (
+              // Remount per horizon: period, chart, advice and announcement
+              // switch atomically and any pinned tooltip is cleared.
+              <HomeGrowthChart key={horizon} view={view} />
+            ) : null}
+            {!ready && !hasPoints ? (
+              <GrowthStatePanel view={view} reviewHref={recommendationsHref} />
+            ) : null}
           </div>
           <Separator
             orientation="vertical"
@@ -477,6 +543,8 @@ function HomeRevenueGrowth({
           <div className={styles.growthSide}>
             {ready ? (
               <HomeGrowthInsight view={view} recommendationsHref={recommendationsHref} />
+            ) : hasPoints ? (
+              <GrowthStatePanel view={view} reviewHref={recommendationsHref} />
             ) : null}
           </div>
         </div>
@@ -487,10 +555,14 @@ function HomeRevenueGrowth({
               {view.limitations.length > 0 ? (
                 <p className={styles.growthFootLine}>{view.limitations.join(" ")}</p>
               ) : null}
+              {view.freshness.status === "stale" ? (
+                <p className={styles.growthFootLine}>
+                  {view.freshness.note ??
+                    `Latest complete report: ${formatFooterDay(view.sourceCutoffDate ?? view.period.startDate)}`}
+                </p>
+              ) : null}
             </div>
-            <span className={styles.growthMethodNote}>
-              How this is estimated <Info aria-hidden="true" className={styles.growthMethodIcon} />
-            </span>
+            <HomeGrowthMethodDialog view={view} />
           </div>
         ) : null}
       </Card>
