@@ -10,9 +10,20 @@ import type { ProposalReadPersistence } from "@/modules/campaigns/infrastructure
 import { hasGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
 import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/growth-intelligence/infrastructure/read-repository";
 import {
+  isOverviewGrowthProgressEnabled,
+  parseOverviewGrowthProgressOrganizationIds,
+} from "@/modules/organizations/application/growth-progress-access";
+import {
+  buildSnapshotGrowthCandidate,
+  publishDueGrowthProjections,
+} from "@/modules/organizations/application/growth-projection-publisher";
+import {
+  mergeSnapshotDispatchCandidates,
   runRevenueSnapshotBuild,
   selectDueSnapshotOrgs,
 } from "@/modules/organizations/application/revenue-snapshot";
+import { createGrowthProgressRepository } from "@/modules/organizations/infrastructure/growth-progress-repository";
+import { createGrowthProjectionRepository } from "@/modules/organizations/infrastructure/growth-projection-repository";
 import {
   createRevenueProposalProvider,
   REVENUE_PROPOSAL_MAX_ACTIONS,
@@ -22,6 +33,7 @@ import {
   trimRevenueSnapshots,
   writeRevenueSnapshot,
 } from "@/modules/organizations/infrastructure/revenue-snapshot-repository";
+import { env } from "@/lib/env";
 import { createRevenueWorkerServiceClient } from "@/lib/supabase/service";
 
 /**
@@ -30,6 +42,12 @@ import { createRevenueWorkerServiceClient } from "@/lib/supabase/service";
  * analyzing. An hourly dispatcher fans out only organizations inside their
  * local midnight hour; each build is idempotent per org-day and leaves the
  * last good row alone on any failure.
+ *
+ * The same idempotent org-day run carries a second, separately reported
+ * phase: prospective growth-projection publication for allowlisted
+ * organizations. It reuses the snapshot's validated material without a new
+ * model call, and its failure is reported beside — never hidden behind —
+ * the snapshot outcome.
  */
 
 const retry = {
@@ -40,6 +58,39 @@ const retry = {
 } as const;
 
 const DISPATCH_ORG_SCAN_LIMIT = 500;
+
+/**
+ * Allowlisted growth-publication organizations outside the capped legacy
+ * scan, resolved to their dispatch rows. A misconfigured allowlist — or an
+ * unreadable organizations table — must never break the nightly snapshots,
+ * so every failure here degrades to the legacy scan alone with one warning.
+ */
+async function readGrowthAllowlistOrgs(
+  supabase: ReturnType<typeof createRevenueWorkerServiceClient>,
+  scannedIds: ReadonlySet<string>,
+): Promise<{ organizationId: string; timeZone: string }[]> {
+  let allowlist: Set<string>;
+  try {
+    allowlist = parseOverviewGrowthProgressOrganizationIds(
+      env.OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS,
+    );
+  } catch {
+    logger.warn("revenue.growth_allowlist_unavailable", { reason: "invalid-config" });
+    return [];
+  }
+  const extras = [...allowlist].filter((organizationId) => !scannedIds.has(organizationId));
+  if (extras.length === 0) return [];
+  const { data, error } = await supabase
+    .from("organizations")
+    .select("id,default_timezone")
+    .eq("status", "active")
+    .in("id", extras);
+  if (error || !data) {
+    logger.warn("revenue.growth_allowlist_unavailable", { reason: "read-failed" });
+    return [];
+  }
+  return data.map((row) => ({ organizationId: row.id, timeZone: row.default_timezone }));
+}
 
 const snapshotOrgPayloadSchema = z.strictObject({
   organizationId: z.string().uuid(),
@@ -64,11 +115,16 @@ export const revenueSnapshotsDispatchTask = schedules.task({
       .order("id", { ascending: true })
       .limit(DISPATCH_ORG_SCAN_LIMIT);
     if (error) throw new Error("Revenue snapshot dispatch organization scan failed.");
+    const scanned = (data ?? []).map((row) => ({
+      organizationId: row.id,
+      timeZone: row.default_timezone,
+    }));
+    const allowlisted = await readGrowthAllowlistOrgs(
+      supabase,
+      new Set(scanned.map((org) => org.organizationId)),
+    );
     const { due, skipped } = selectDueSnapshotOrgs(
-      (data ?? []).map((row) => ({
-        organizationId: row.id,
-        timeZone: row.default_timezone,
-      })),
+      mergeSnapshotDispatchCandidates(scanned, allowlisted),
       now,
     );
     let triggered = 0;
@@ -106,12 +162,13 @@ export const revenueSnapshotsBuildOrgTask = schemaTask({
   run: async (payload) => {
     const parsed = snapshotOrgPayloadSchema.parse(payload);
     const supabase = createRevenueWorkerServiceClient();
+    const nowIso = new Date().toISOString();
     const result = await runRevenueSnapshotBuild(
       {
         organizationId: parsed.organizationId,
         snapshotDate: parsed.snapshotDate,
         timeZone: parsed.timeZone,
-        nowIso: new Date().toISOString(),
+        nowIso,
         gates: parsed.gates,
         correlationId: parsed.correlationId,
       },
@@ -134,6 +191,53 @@ export const revenueSnapshotsBuildOrgTask = schemaTask({
         },
       },
     );
-    return result;
+    // Prospective publication rides the same idempotent org-day run: the
+    // transport key on the dispatch trigger already dedupes redeliveries,
+    // and the publication RPC replays stored identities, so a retried run
+    // can neither move the frozen line nor duplicate its audit event. A
+    // publication failure is reported beside the snapshot outcome — the run
+    // never claims stored:true as proof the freeze succeeded.
+    const growthPublication = await publishDueGrowthProjections(
+      {
+        organizationId: parsed.organizationId,
+        nowIso,
+        timeZone: parsed.timeZone,
+        correlationId: parsed.correlationId,
+        candidateMaterial: result.candidateMaterial,
+      },
+      {
+        isEnabled: (organizationId) => isOverviewGrowthProgressEnabled(organizationId),
+        readSchedule: async (organizationId, asOfDate) => {
+          const envelope = await createGrowthProgressRepository(supabase).readProjections({
+            organizationId,
+            asOfDate,
+          });
+          switch (envelope.status) {
+            case "ready":
+              return {
+                status: "ready",
+                origins: envelope.projections.map((projection) => projection.scheduleOriginDate),
+              };
+            case "missing":
+              return { status: "missing" };
+            case "corrupt":
+              return { status: "unavailable", reasonCode: "SCHEDULE_CORRUPT" as const };
+            case "denied":
+              return { status: "unavailable", reasonCode: "SCHEDULE_DENIED" as const };
+            case "failed":
+              return { status: "unavailable", reasonCode: "SCHEDULE_READ_FAILED" as const };
+          }
+        },
+        buildCandidate: (material, context) => buildSnapshotGrowthCandidate(material, context),
+        publish: (publishInput) => createGrowthProjectionRepository(supabase).publish(publishInput),
+      },
+    );
+    if (growthPublication.results.some((entry) => entry.status === "failed")) {
+      logger.warn("revenue.growth_projection_publish_failed", {
+        organizationId: parsed.organizationId,
+        correlationId: parsed.correlationId,
+      });
+    }
+    return { ...result, growthPublication };
   },
 });

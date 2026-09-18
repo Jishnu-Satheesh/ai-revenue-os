@@ -45,9 +45,25 @@ export type RevenueSnapshotRunnerDependencies = {
   onFailure: (info: { organizationId: string; correlationId: string }) => void;
 };
 
+/**
+ * Validated union input (with the run's already-proposed ranges applied)
+ * handed to the growth-publication phase. The publication phase reuses this
+ * material as-is and never proposes a second time; a failed snapshot hands
+ * over null so the phase skips with a typed code instead of guessing.
+ */
+export type RevenueSnapshotCandidateMaterial = {
+  input: RevenueScenarioInput;
+};
+
 export type RevenueSnapshotResult =
-  | { stored: true; acceptedCount: number; rejectedCount: number; trimmed: boolean }
-  | { stored: false; reason: string };
+  | {
+      stored: true;
+      acceptedCount: number;
+      rejectedCount: number;
+      trimmed: boolean;
+      candidateMaterial: RevenueSnapshotCandidateMaterial;
+    }
+  | { stored: false; reason: string; candidateMaterial: null };
 
 /** True while the organization's own clock reads the first hour of the day. */
 export function isOrgLocalMidnightHour(timeZone: string, now: Date): boolean {
@@ -69,6 +85,26 @@ function localDateInZone(timeZone: string, now: Date): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Merges the legacy bounded organization scan with explicitly allowlisted
+ * growth-publication organizations. The scan keeps its order and cap; extras
+ * outside it join the same nightly run exactly once each. Pure: the dispatch
+ * task fetches both lists, this only dedupes.
+ */
+export function mergeSnapshotDispatchCandidates(
+  scanned: readonly { organizationId: string; timeZone: string }[],
+  allowlisted: readonly { organizationId: string; timeZone: string }[],
+): { organizationId: string; timeZone: string }[] {
+  const merged = [...scanned];
+  const seen = new Set(scanned.map((org) => org.organizationId));
+  for (const org of allowlisted) {
+    if (seen.has(org.organizationId)) continue;
+    seen.add(org.organizationId);
+    merged.push({ organizationId: org.organizationId, timeZone: org.timeZone });
+  }
+  return merged;
 }
 
 /**
@@ -109,7 +145,7 @@ export async function runRevenueSnapshotBuild(
   const { organizationId, snapshotDate, correlationId } = input;
   const fail = (reason: string): RevenueSnapshotResult => {
     dependencies.onFailure({ organizationId, correlationId });
-    return { stored: false, reason };
+    return { stored: false, reason, candidateMaterial: null };
   };
 
   let source;
@@ -201,5 +237,6 @@ export async function runRevenueSnapshotBuild(
     acceptedCount,
     rejectedCount,
     trimmed: true,
+    candidateMaterial: { input: { ...source.input, actions } },
   };
 }

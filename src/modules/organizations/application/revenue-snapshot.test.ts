@@ -18,6 +18,7 @@ vi.mock("@/modules/organizations/infrastructure/revenue-source", () => ({
 
 import {
   isOrgLocalMidnightHour,
+  mergeSnapshotDispatchCandidates,
   REVENUE_SNAPSHOT_KEEP_MONTHS,
   runRevenueSnapshotBuild,
   selectDueSnapshotOrgs,
@@ -180,10 +181,65 @@ describe("runRevenueSnapshotBuild", () => {
     const result = await runRevenueSnapshotBuild(buildInput(), deps);
 
     expect(result).toMatchObject({ stored: false });
+    expect(result.candidateMaterial).toBeNull();
     expect(deps.writeSnapshot).not.toHaveBeenCalled();
     expect(deps.onFailure).toHaveBeenCalledWith({
       organizationId: ORG_ID,
       correlationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     });
+  });
+
+  it("hands the validated union input to publication without a second proposal", async () => {
+    mocks.readRevenueSource.mockResolvedValue({
+      status: "ready",
+      input: scenarioInput(),
+      fetchedAt: "2026-09-16T00:00:00.000Z",
+    });
+    const deps = dependencies();
+
+    const result = await runRevenueSnapshotBuild(buildInput(), deps);
+
+    expect(result.stored).toBe(true);
+    // The material carries the same applied ranges the snapshot stored, so
+    // the publication phase reuses them instead of calling the model again.
+    const written = deps.writeSnapshot.mock.calls[0]?.[0] as { input: RevenueScenarioInput };
+    expect(result.candidateMaterial).toEqual({ input: written.input });
+    expect(
+      result.candidateMaterial?.input.actions.find((action) => action.id === "rec-1"),
+    ).toMatchObject({
+      assumptionLow: 0.1,
+      assumptionHigh: 0.3,
+    });
+    expect(deps.proposeRanges).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("mergeSnapshotDispatchCandidates", () => {
+  const scanned = [
+    { organizationId: "org-1", timeZone: "Asia/Dubai" },
+    { organizationId: "org-2", timeZone: "Asia/Dubai" },
+  ];
+
+  it("keeps scan order and appends allowlisted extras outside the scan", () => {
+    const merged = mergeSnapshotDispatchCandidates(scanned, [
+      { organizationId: "org-501", timeZone: "Asia/Dubai" },
+    ]);
+
+    // The 501st organization never appears in the capped scan, yet its
+    // nightly publication still gets a run.
+    expect(merged.map((org) => org.organizationId)).toEqual(["org-1", "org-2", "org-501"]);
+  });
+
+  it("schedules an organization shared by both lists exactly once", () => {
+    const merged = mergeSnapshotDispatchCandidates(scanned, [
+      { organizationId: "org-2", timeZone: "Asia/Dubai" },
+      { organizationId: "org-501", timeZone: "Asia/Dubai" },
+    ]);
+
+    expect(merged.map((org) => org.organizationId)).toEqual(["org-1", "org-2", "org-501"]);
+  });
+
+  it("leaves the legacy scan untouched when no allowlist is configured", () => {
+    expect(mergeSnapshotDispatchCandidates(scanned, [])).toEqual(scanned);
   });
 });
