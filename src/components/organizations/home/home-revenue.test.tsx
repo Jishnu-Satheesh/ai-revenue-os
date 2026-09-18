@@ -1,12 +1,26 @@
 // @vitest-environment jsdom
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+}));
+
 import {
   buildRevenueChartRows,
+  growthFooterLine,
+  growthPeriodSubtitle,
   HomeRevenue,
   PulsingTipDot,
 } from "@/components/organizations/home/home-revenue";
+import {
+  buildAheadGrowthSection,
+  buildAheadGrowthView,
+  buildBehindGrowthSection,
+  buildBehindGrowthView,
+} from "@/components/organizations/home/home-growth-fixtures";
 import {
   buildRevenueScenario,
   type RevenueScenarioInput,
@@ -397,5 +411,160 @@ describe("HomeRevenue", () => {
       expect(screen.getByText(/Rough estimates are unavailable right now/)).toBeTruthy(),
     );
     expect(screen.getByText(/Latest reported revenue/)).toBeTruthy();
+  });
+});
+
+describe("growthPeriodSubtitle", () => {
+  it("names a whole calendar month", () => {
+    expect(growthPeriodSubtitle(buildBehindGrowthView(ORG_ID))).toBe(
+      "Revenue this month · September 2026",
+    );
+  });
+
+  it("prints exact start and end dates for longer fixed periods", () => {
+    const section = buildBehindGrowthSection(ORG_ID);
+    if (section.state !== "ready") throw new Error("fixture must be ready");
+    expect(growthPeriodSubtitle(section.views[3])).toBe(
+      "Revenue over this period · 1 Sep–30 Nov 2026",
+    );
+  });
+});
+
+describe("growthFooterLine", () => {
+  it("states projection, reports and scope on one line", () => {
+    expect(growthFooterLine(buildBehindGrowthView(ORG_ID))).toBe(
+      "Projection set 1 Sep · Reports through 21 Sep · 2 channels",
+    );
+  });
+});
+
+describe("HomeRevenue growth section", () => {
+  it("renders the behind fixture with its stable identity, header and rail", () => {
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={buildBehindGrowthSection(ORG_ID)}
+      />,
+    );
+    const section = screen.getByRole("region", { name: "Current vs projected growth" });
+    expect(section.getAttribute("id")).toBe("home-revenue");
+    expect(screen.getByRole("heading", { name: "Current vs projected growth" })).toBeTruthy();
+    expect(screen.getByText("Revenue this month · September 2026")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "1 month" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByText("Current · 21 Sep")).toBeTruthy();
+    expect(screen.getByText("AED 60,000")).toBeTruthy();
+    expect(screen.getByText("Below the projection")).toBeTruthy();
+    expect(screen.getByText("AED 24,000 behind")).toBeTruthy();
+    expect(
+      screen.getByText("Projection set 1 Sep · Reports through 21 Sep · 2 channels"),
+    ).toBeTruthy();
+    expect(screen.getByText(/How this is estimated/)).toBeTruthy();
+  });
+
+  it("renders the ahead fixture with its own verdict", () => {
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={buildAheadGrowthSection(ORG_ID)}
+      />,
+    );
+    expect(screen.getByText("Above the projection")).toBeTruthy();
+    expect(screen.getByText("AED 98,000")).toBeTruthy();
+    expect(screen.getByText("AED 14,000 ahead")).toBeTruthy();
+    expect(screen.getByText("AED 14k ahead")).toBeTruthy();
+  });
+
+  it("switches horizons to the stored view without reforecasting", () => {
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={buildBehindGrowthSection(ORG_ID)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "3 months" }));
+    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
+    expect(screen.queryByText("Below the projection")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
+    expect(screen.getByText("Below the projection")).toBeTruthy();
+  });
+
+  it("shows a shaped failure with retry when growth reads fail", () => {
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={{ state: "failed", reasonCode: "SOURCE_READ_FAILED" }}
+      />,
+    );
+    expect(screen.getByText("Growth outlook is unavailable right now")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("falls back to the legacy section while growth is disabled", () => {
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={readySection()}
+        growth={{ state: "disabled" }}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Top 3 AI recommendations" })).toBeTruthy();
+  });
+
+  it("keeps the frozen projection byte-identical between behind and ahead", () => {
+    const behind = buildBehindGrowthView(ORG_ID);
+    const ahead = buildAheadGrowthView(ORG_ID);
+    expect(behind.projectionId).toBe(ahead.projectionId);
+    expect(behind.projectionDigest).toBe(ahead.projectionDigest);
+    const projectedOf = (view: typeof behind) =>
+      view.points.map((point) => [
+        point.date,
+        point.projectedLowMinor,
+        point.projectedCentralMinor,
+        point.projectedHighMinor,
+      ]);
+    expect(projectedOf(behind)).toEqual(projectedOf(ahead));
+    expect(behind.latestComparison).toMatchObject({ state: "behind" });
+    expect(ahead.latestComparison).toMatchObject({ state: "ahead" });
+  });
+});
+
+describe("growth fixture boundary", () => {
+  function sourceFiles(directory: string): string[] {
+    const found: string[] = [];
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        found.push(...sourceFiles(full));
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      found.push(full);
+    }
+    return found;
+  }
+
+  it("is never imported by production source files", () => {
+    const offenders = sourceFiles("src").filter((path) => {
+      if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) return false;
+      if (path.endsWith("home-growth-fixtures.ts")) return false;
+      return readFileSync(path, "utf8").includes("home-growth-fixtures");
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("ships no growth-fixture render route under src/app", () => {
+    // Scoped to this slice's harness names: an unrelated pre-existing
+    // integrations-connections fixture route owns the bare word already.
+    const routes = sourceFiles("src/app").filter((path) => {
+      if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) return false;
+      return /overview-growth|growth-harness|growth-fixture/i.test(path);
+    });
+    expect(routes).toEqual([]);
   });
 });

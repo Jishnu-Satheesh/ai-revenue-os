@@ -23,6 +23,7 @@ const mocks = {
 };
 
 import { OrganizationHome } from "@/components/organizations/home/organization-home";
+import { buildBehindGrowthSection } from "@/components/organizations/home/home-growth-fixtures";
 import styles from "@/components/organizations/home/organization-home.module.css";
 import type {
   HomeActivityItem,
@@ -691,5 +692,39 @@ describe("OrganizationHome polish (FIX E)", () => {
     render(<OrganizationHome view={view()} />);
     await user.click(screen.getByRole("button", { name: /view goals/i }));
     expect((await screen.findByRole("dialog")).className.split(" ")).not.toContain(assetClass);
+  });
+});
+
+describe("OrganizationHome growth section", () => {
+  it("mounts the fixed-projection section first with its stable identity", () => {
+    render(
+      <OrganizationHome
+        view={view({ revenue: { status: "disabled" }, growthProgress: buildBehindGrowthSection(ORG_ID) })}
+      />,
+    );
+    const section = screen.getByRole("region", { name: "Current vs projected growth" });
+    expect(section.getAttribute("id")).toBe("home-revenue");
+    const campaigns = screen.getByRole("region", { name: "Your campaigns" });
+    expect(
+      (section.compareDocumentPosition(campaigns) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true);
+    expect(screen.getByText("Below the projection")).toBeTruthy();
+    expect(screen.getByText("AED 24,000 behind")).toBeTruthy();
+  });
+
+  it("shows the shaped growth failure without breaking the lower home", () => {
+    render(
+      <OrganizationHome
+        view={view({
+          revenue: { status: "disabled" },
+          growthProgress: { state: "failed", reasonCode: "SOURCE_READ_FAILED" },
+        })}
+      />,
+    );
+    expect(screen.getByText("Growth outlook is unavailable right now")).toBeTruthy();
+    // This file pins the refresh transition to pending, so the retry control
+    // reads as refreshing; the live copy is pinned in the section suites.
+    expect(screen.getByRole("button", { name: /refreshing/i })).toBeTruthy();
+    expect(screen.getByText("Your campaigns")).toBeTruthy();
   });
 });

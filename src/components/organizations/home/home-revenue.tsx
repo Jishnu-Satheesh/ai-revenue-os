@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight, ChevronDown, Hourglass } from "lucide-react";
+import { ArrowRight, ChevronDown, Hourglass, Info } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -39,6 +39,15 @@ import {
   REVENUE_HORIZON_MONTHS,
 } from "@/domain/organizations/revenue-scenario";
 import type { OrganizationHomeView } from "@/modules/organizations/application/home-types";
+import type {
+  GrowthProgressSection,
+  GrowthProgressView,
+} from "@/modules/organizations/application/growth-progress-view";
+import {
+  formatFooterDay,
+  HomeGrowthChart,
+} from "@/components/organizations/home/home-growth-chart";
+import { HomeGrowthInsight } from "@/components/organizations/home/home-growth-insight";
 import styles from "@/components/organizations/home/organization-home.module.css";
 
 export type RevenueChartRow = {
@@ -335,6 +344,161 @@ function ScenarioFigures({ scenario, months }: { scenario: RevenueScenarioReady;
 }
 
 /**
+ * Fixed-projection growth section (visual contract V00–V04/V06/V08).
+ *
+ * The thin orchestrator for the new Overview growth card: a restrained Card
+ * header with the horizon selector, the two-line chart with same-date
+ * summaries, the advice rail, and the projection/reports/scope footer. No
+ * model calls, no reforecasting — the selector only switches between the
+ * fixed periods the loader already composed. Task 7 layers interaction,
+ * disclosure, responsive refinement and the remaining degraded states onto
+ * these same files.
+ */
+
+const GROWTH_HORIZONS = [1, 3, 6, 12] as const;
+
+function formatMonthYear(isoDate: string): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  const month = date.toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
+  return `${month} ${date.getUTCFullYear()}`;
+}
+
+function addMonthsUtc(isoDate: string, months: number): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  const day = date.getUTCDate();
+  date.setUTCMonth(date.getUTCMonth() + months);
+  // Clamp overflow (Jan 31 + 1 month → Feb 28, not Mar 3) the same way the
+  // domain period arithmetic anchors the original day.
+  if (date.getUTCDate() < day) date.setUTCDate(0);
+  return date.toISOString().slice(0, 10);
+}
+
+function subtractDayUtc(isoDate: string): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * V04 subtitle: a whole calendar month reads "Revenue this month ·
+ * September 2026"; any other fixed range prints its exact start/end dates.
+ */
+export function growthPeriodSubtitle(view: GrowthProgressView): string {
+  const { period } = view;
+  const isWholeCalendarMonth =
+    period.startDate.endsWith("-01") &&
+    period.endDateExclusive === addMonthsUtc(period.startDate, period.horizonMonths);
+  if (period.horizonMonths === 1 && isWholeCalendarMonth) {
+    return `Revenue this month · ${formatMonthYear(period.startDate)}`;
+  }
+  const endInclusive = subtractDayUtc(period.endDateExclusive);
+  const endYear = new Date(`${endInclusive}T00:00:00Z`).getUTCFullYear();
+  return `Revenue over this period · ${formatFooterDay(period.startDate)}–${formatFooterDay(endInclusive)} ${endYear}`;
+}
+
+/** V07 footer identity line: when the estimate was fixed, what it covers. */
+export function growthFooterLine(view: GrowthProgressView): string {
+  const parts: string[] = [];
+  if (view.issuedAt !== null) parts.push(`Projection set ${formatFooterDay(view.issuedAt.slice(0, 10))}`);
+  if (view.sourceCutoffDate !== null) parts.push(`Reports through ${formatFooterDay(view.sourceCutoffDate)}`);
+  parts.push(view.scopeLabel);
+  return parts.join(" · ");
+}
+
+/**
+ * Minimal honest placeholder for a non-ready horizon view. Task 7 builds the
+ * full V07 states (upcoming curve, awaiting-reports, sparse/partial, stale,
+ * mixed-currency, source-denied) on this same seam.
+ */
+function GrowthStateNote({ view }: Readonly<{ view: GrowthProgressView }>) {
+  const copy =
+    view.state === "upcoming"
+      ? `Tracking starts ${formatFooterDay(view.period.startDate)}`
+      : view.state === "awaiting_reports"
+        ? "Waiting for reported revenue"
+        : view.state === "missing"
+          ? "Projection not set for this period"
+          : (view.reasonCode ?? "Comparison unavailable for the latest reports");
+  return (
+    <div className={styles.growthStateNote}>
+      <p className={styles.growthStateTitle}>{growthPeriodSubtitle(view)}</p>
+      <p className={styles.emptyNote}>{copy}</p>
+    </div>
+  );
+}
+
+function HomeRevenueGrowth({
+  organizationId,
+  section,
+}: Readonly<{ organizationId: string; section: Extract<GrowthProgressSection, { state: "ready" }> }>) {
+  const [horizon, setHorizon] = useState<1 | 3 | 6 | 12>(section.initialHorizon);
+  const view = section.views[horizon];
+  const ready = view.state === "ready";
+  const recommendationsHref = `/organizations/${organizationId}/growth-intelligence#recommendations`;
+
+  return (
+    <section id="home-revenue" aria-label="Current vs projected growth" className={styles.growth}>
+      <Card className="gap-0 overflow-hidden rounded-2xl py-0 shadow-none">
+        <div className={styles.growthHead}>
+          <div className={styles.growthHeadRow}>
+            <div className={styles.growthHeadings}>
+              <h2 className={styles.growthTitle}>Current vs projected growth</h2>
+              <p className={styles.growthSubtitle}>{growthPeriodSubtitle(view)}</p>
+            </div>
+            <div
+              className={styles.growthHorizonRow}
+              role="group"
+              aria-label="Projection horizon in months"
+            >
+              {GROWTH_HORIZONS.map((option) => (
+                <Button
+                  key={option}
+                  variant={horizon === option ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={horizon === option}
+                  aria-label={option === 1 ? "1 month" : `${option} months`}
+                  onClick={() => setHorizon(option)}
+                >
+                  {option}M
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className={styles.growthGrid}>
+          <div className={styles.growthMain}>
+            {ready ? <HomeGrowthChart view={view} /> : <GrowthStateNote view={view} />}
+          </div>
+          <Separator
+            orientation="vertical"
+            className={`${styles.growthDivider} ${styles.growthDividerVertical}`}
+          />
+          <Separator className={`${styles.growthDivider} ${styles.growthDividerHorizontal}`} />
+          <div className={styles.growthSide}>
+            {ready ? (
+              <HomeGrowthInsight view={view} recommendationsHref={recommendationsHref} />
+            ) : null}
+          </div>
+        </div>
+        {ready ? (
+          <div className={styles.growthFoot}>
+            <div className={styles.growthFootLines}>
+              <p className={styles.growthFootLine}>{growthFooterLine(view)}</p>
+              {view.limitations.length > 0 ? (
+                <p className={styles.growthFootLine}>{view.limitations.join(" ")}</p>
+              ) : null}
+            </div>
+            <span className={styles.growthMethodNote}>
+              How this is estimated <Info aria-hidden="true" className={styles.growthMethodIcon} />
+            </span>
+          </div>
+        ) : null}
+      </Card>
+    </section>
+  );
+}
+
+/**
  * Current vs projected growth: the first home section. Reported history is
  * solid, the future is two labelled conditional paths after a marked
  * boundary, and every forward figure is a labelled rough estimate with its
@@ -343,16 +507,40 @@ function ScenarioFigures({ scenario, months }: { scenario: RevenueScenarioReady;
 export function HomeRevenue({
   organizationId,
   section,
+  growth,
 }: Readonly<{
   organizationId: string;
   section: OrganizationHomeView["revenue"];
+  growth?: GrowthProgressSection;
 }>) {
+  // Legacy hooks stay unconditionally first: the growth branches below return
+  // early, and hooks must keep the same order on every render.
   const [proposed, setProposed] = useState<RevenueScenario | null>(null);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const [proposeError, setProposeError] = useState<string | null>(null);
   const [months, setMonths] = useState<number>(1);
   const [pending, startTransition] = useTransition();
 
+  if (growth?.state === "ready") {
+    return <HomeRevenueGrowth organizationId={organizationId} section={growth} />;
+  }
+  if (growth?.state === "failed") {
+    return (
+      <section
+        id="home-revenue"
+        aria-label="Current vs projected growth"
+        className={styles.growth}
+      >
+        <Alert>
+          <AlertTitle>Growth outlook is unavailable right now</AlertTitle>
+          <AlertDescription>
+            The recent reports could not be read. Nothing is estimated in their place.{" "}
+            <HomeRefreshButton label="Retry" />
+          </AlertDescription>
+        </Alert>
+      </section>
+    );
+  }
   if (section.status === "disabled") return null;
   if (section.status === "failed") {
     return (

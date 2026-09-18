@@ -22,7 +22,11 @@ export function OrganizationHome({ view }: Readonly<{ view: OrganizationHomeView
     <div className={styles.home}>
       <HomeHeader view={view} />
       <div className={styles.body}>
-        <HomeRevenue organizationId={view.organizationId} section={view.revenue} />
+        <HomeRevenue
+          organizationId={view.organizationId}
+          section={view.revenue}
+          growth={view.growthProgress}
+        />
         <HomeCampaigns
           organizationId={view.organizationId}
           timeZone={view.timeZone}

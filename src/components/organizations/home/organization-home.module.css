@@ -1267,3 +1267,642 @@
     opacity: 0;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .revenuePulse {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------- fixed-projection growth */
+
+/* Current vs projected growth (visual contract V01–V04/V06). The section is
+   its own inline-size container: the V02 canonical/normal type switch keys
+   off the card width (≥1440), not the viewport. Legacy .revenue* rules above
+   stay exactly as the rollback path renders them. */
+.growth {
+  min-width: 0;
+  grid-column: 1 / -1;
+  container-type: inline-size;
+}
+
+.growthHead {
+  background-color: color-mix(in srgb, var(--primary) 5%, transparent);
+  padding: 22px 20px;
+}
+
+.growthHeadRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.growthHeadings {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.growthTitle {
+  overflow-wrap: break-word;
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.growthSubtitle {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.54;
+  color: var(--muted-foreground);
+}
+
+/* Segmented horizon control: the approved header frames the four ghost
+   buttons in one muted pill and floats the selected month on a card pill.
+   Scoped to this section; the legacy revenue row below is untouched. */
+.growthHorizonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-self: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--muted) 60%, transparent);
+  padding: 4px;
+}
+
+.growthHorizonRow [aria-pressed="true"] {
+  background-color: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  color: var(--foreground);
+}
+
+.growthGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.growthMain {
+  min-width: 0;
+  padding: 20px;
+}
+
+.growthSide {
+  min-width: 0;
+  padding: 20px;
+}
+
+/* Divider between chart and advice: horizontal when stacked, a 1px vertical
+   rule at the 68.25/68/65% split when side by side. */
+.growthDividerVertical {
+  display: none;
+}
+
+.growthDividerHorizontal {
+  display: block;
+  margin: 0 20px;
+}
+
+.growthChartBlock {
+  min-width: 0;
+}
+
+.growthSummaries {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+}
+
+.growthSummary {
+  min-width: 0;
+}
+
+.growthSummary + .growthSummary {
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+
+.growthSummaryLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.54;
+  color: var(--muted-foreground);
+}
+
+.growthLegendDotFilled {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: #2563eb;
+}
+
+.growthLegendDotHollow {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 2px solid #08785a;
+  background-color: #ffffff;
+}
+
+.growthSummaryCurrent {
+  margin: 6px 0 0;
+  overflow-wrap: break-word;
+  font-size: 28px;
+  line-height: 1.21;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #173f83;
+}
+
+.growthSummaryProjected {
+  margin: 6px 0 0;
+  overflow-wrap: break-word;
+  font-size: 28px;
+  line-height: 1.21;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #08785a;
+}
+
+.growthSummaryEstimate {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthAxisMeasure {
+  margin: 20px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthChart {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.growthChart text {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chart-internal type (V02): 12px on normal desktop; the ≥1440 container
+   query raises ticks, point labels and endpoint words to 16px. Recharts sets
+   these as SVG attributes, so plain CSS wins without touching the chart. */
+.growthChart .recharts-cartesian-axis-tick-value {
+  font-size: 12px;
+}
+
+.growthCurrentLabel,
+.growthProjectedLabel,
+.growthCurrentWord,
+.growthProjectedWord {
+  font-size: 12px;
+}
+
+.growthGuideLabel,
+.growthBracketLabel {
+  font-size: 12px;
+}
+
+.growthHint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  border-top: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  padding: 12px 20px;
+}
+
+.growthFootLines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.growthFootLine {
+  margin: 0;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthMethodNote {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthMethodIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.growthStateNote {
+  padding: 8px 0;
+}
+
+.growthStateTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Advice rail (V06): eyebrow, verdict, amount, then at most two rows. */
+.growthInsight {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.growthEyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+
+.growthStatusTitle {
+  margin: 6px 0 0;
+  overflow-wrap: break-word;
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.growthGapAmount {
+  margin: 8px 0 0;
+  overflow-wrap: break-word;
+  font-size: 22px;
+  line-height: 1.36;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.growthGapPercent {
+  margin: 4px 0 0;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthInsightDivider {
+  margin: 16px 0;
+}
+
+.growthAdviceHeading {
+  margin: 0 0 4px;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.growthAdviceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.growthAdviceRow {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.growthAdviceRow:last-child {
+  border-bottom: 0;
+}
+
+.growthAdviceLink {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.growthAdviceLink:hover .growthAdviceTitle {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.growthAdviceText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.growthAdviceTitle {
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.growthAdviceSupporting {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthAdviceArrow {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: #08785a;
+}
+
+.growthAdviceEmpty {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthRecommendationsRow {
+  margin: 16px 0 0;
+}
+
+.growthRecommendationsLink {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #08785a;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.growthRecommendationsLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* Dark-mode series tokens (V02): light values ride as SVG props so tests can
+   pin the exact tokens; these rules adapt them after dark. Attribute
+   selectors target the two Line paths without depending on Recharts'
+   internal class names. */
+.dark .growthCurrentDot {
+  fill: #79a8ff;
+  stroke: var(--card);
+}
+
+.dark .growthProjectedDot {
+  fill: var(--card);
+  stroke: #69cfac;
+}
+
+.dark .growthCurrentLabel {
+  fill: #79a8ff;
+}
+
+.dark .growthProjectedLabel,
+.dark .growthProjectedWord {
+  fill: #69cfac;
+}
+
+.dark .growthCurrentWord {
+  fill: #79a8ff;
+}
+
+.dark .growthChart g path[stroke="#2563EB" i] {
+  stroke: #79a8ff;
+}
+
+.dark .growthChart g path[stroke="#08785A" i] {
+  stroke: #69cfac;
+}
+
+.dark .growthSummaryCurrent {
+  color: #79a8ff;
+}
+
+.dark .growthSummaryProjected,
+.dark .growthAdviceArrow,
+.dark .growthRecommendationsLink {
+  color: #69cfac;
+}
+
+.dark .growthLegendDotFilled {
+  background-color: #79a8ff;
+}
+
+.dark .growthLegendDotHollow {
+  border-color: #69cfac;
+  background-color: var(--card);
+}
+
+/* 900–1099 card width: 65/35 side by side. */
+@container (min-width: 900px) {
+  .growthGrid {
+    grid-template-columns: minmax(0, 65%) auto minmax(0, 1fr);
+  }
+
+  .growthDividerVertical {
+    display: block;
+    margin: 24px 0;
+  }
+
+  .growthDividerHorizontal {
+    display: none;
+  }
+
+  .growthHead {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .growthMain,
+  .growthSide {
+    padding: 24px;
+  }
+
+  .growthFoot {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
+
+/* 1100–1439 card width: 68/32 side by side. */
+@container (min-width: 1100px) {
+  .growthGrid {
+    grid-template-columns: minmax(0, 68%) auto minmax(0, 1fr);
+  }
+}
+
+/* ≥1440 card width: canonical 68.25/31.75 grid and the wide type scale. */
+@container (min-width: 1440px) {
+  .growthGrid {
+    grid-template-columns: minmax(0, 68.25%) auto minmax(0, 1fr);
+  }
+
+  .growthHead {
+    padding: 22px 30px;
+  }
+
+  /* Title 26/34 + 8 gap + subtitle 17/24 over 44 padding = 110 ≈ V01 109. */
+  .growthHeadings {
+    gap: 8px;
+  }
+
+  .growthMain {
+    padding: 38px 30px 24px;
+  }
+
+  /* V01 summary anchors: separator at card-x 485, second summary text at
+     553. The 384/613 split of the post-gap 985.9px lane plus the 12px gap,
+     the 1px border and the 67px rail lane land both exactly at the
+     canonical 1550 width and scale below it
+     (93 + 379.7 + 12 = 484.7; + 1 + 67 = 552.7). */
+  .growthSummaries {
+    grid-template-columns: minmax(0, 384fr) minmax(0, 613fr);
+  }
+
+  .growthSummary + .growthSummary {
+    padding-left: 67px;
+  }
+
+  /* V01 plot anchors: the y scale already spans the right distance, so the
+     whole chart rides 36px lower to sit the plot top at y=437 and zero at
+     y=710. Chart-internal text joins the wide type scale. */
+  .growthChart {
+    margin-top: 40px;
+  }
+
+  .growthChart .recharts-cartesian-axis-tick-value,
+  .growthCurrentLabel,
+  .growthProjectedLabel,
+  .growthCurrentWord,
+  .growthProjectedWord {
+    font-size: 16px;
+  }
+
+  .growthGuideLabel,
+  .growthBracketLabel {
+    font-size: 14px;
+  }
+
+  .growthSide {
+    padding: 30px 40px 24px;
+  }
+
+  .growthFoot {
+    padding-left: 30px;
+    padding-right: 30px;
+  }
+
+  .growthTitle {
+    font-size: 26px;
+    line-height: 1.31;
+  }
+
+  .growthSubtitle {
+    font-size: 17px;
+    line-height: 1.41;
+  }
+
+  .growthSummaryLabel {
+    font-size: 17px;
+    line-height: 1.41;
+  }
+
+  .growthSummaryCurrent,
+  .growthSummaryProjected {
+    font-size: 30px;
+    line-height: 1.27;
+  }
+
+  .growthAxisMeasure {
+    font-size: 16px;
+    line-height: 1.38;
+  }
+
+  .growthStatusTitle {
+    font-size: 26px;
+    line-height: 1.31;
+  }
+
+  .growthGapAmount {
+    font-size: 28px;
+    line-height: 1.29;
+  }
+
+  .growthGapPercent {
+    font-size: 17px;
+    line-height: 1.47;
+  }
+
+  .growthEyebrow {
+    font-size: 13px;
+    line-height: 1.54;
+  }
+
+  .growthAdviceTitle {
+    font-size: 19px;
+    line-height: 1.42;
+  }
+
+  .growthAdviceSupporting {
+    font-size: 17px;
+    line-height: 1.47;
+  }
+
+  .growthAdviceHeading {
+    font-size: 19px;
+  }
+
+  .growthFootLine,
+  .growthMethodNote,
+  .growthHint {
+    font-size: 15px;
+    line-height: 1.47;
+  }
+}
