@@ -142,6 +142,12 @@ declare
   v_source_quality text;
   v_source_kind text;
   v_source_currency text;
+  v_row_period_start timestamptz;
+  v_row_period_end timestamptz;
+  v_row_timezone text;
+  v_row_amount numeric;
+  v_row_revision integer;
+  v_claim_revision text;
   v_fraction_low numeric;
   v_fraction_high numeric;
   v_source_kind_lower text;
@@ -268,7 +274,11 @@ begin
   end if;
 
   -- Replay: the same identity returns the stored row untouched, even when the
-  -- new candidate carries different numbers. No second audit event.
+  -- new candidate carries different numbers. No second audit event. The skip
+  -- of source/curve validation here is deliberate per D04 ("even if a new
+  -- candidate digest differs"); the worker emits its replay diagnostic from
+  -- the published=false answer (tracked Task-4 follow-up), the database does
+  -- not invent a second event.
   select id, input_digest into v_existing_id, v_existing_digest
     from public.organization_growth_projections
     where organization_id = p_organization_id
@@ -431,16 +441,27 @@ begin
       raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
     end if;
     v_text := v_element ->> 'digest';
+    -- The digest stays an opaque lineage identifier (data contract D04): the
+    -- row has no digest column to bind it to, so shape is all Postgres can
+    -- prove. The revision below is bound to the ledger row instead.
     if v_text is null or pg_catalog.char_length(v_text) < 1
       or pg_catalog.char_length(v_text) > 256 then
+      raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
+    end if;
+    v_claim_revision := v_element ->> 'revision';
+    if v_claim_revision is null or pg_catalog.char_length(v_claim_revision) < 1
+      or pg_catalog.char_length(v_claim_revision) > 200 then
       raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
     end if;
 
     if v_source_kind = 'normalized_metrics' then
       select organization_id, created_at, superseded_by_id, quality_tier,
-             value_kind, currency
+             value_kind, currency, period_start, period_end, period_timezone,
+             value_numerator, revision
         into v_source_org, v_source_created, v_source_superseded,
-             v_source_quality, v_definition_kind, v_source_currency
+             v_source_quality, v_definition_kind, v_source_currency,
+             v_row_period_start, v_row_period_end, v_row_timezone,
+             v_row_amount, v_row_revision
         from public.normalized_metrics
         where id = v_row_id;
       if not found then
@@ -450,18 +471,35 @@ begin
         raise exception 'Growth projection source belongs to another tenant.'
           using errcode = 'PGR02';
       end if;
+      -- Frozen claims are bound to ledger truth, not just well-formed: the
+      -- declared window matches the row's recorded-timezone day boundaries,
+      -- the amount matches the stored numerator, and the revision matches
+      -- the cited revision. A claim that misstates the ledger is rejected.
+      -- The recorded zone itself is probed first so a corrupt zone fails as
+      -- PGR01 here instead of escaping as an unhandled conversion error.
+      begin
+        perform (pg_catalog.now() at time zone v_row_timezone);
+      exception when others then
+        raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
+      end;
       if v_source_created > v_issued
         or v_source_superseded is not null
         or (v_source_quality <> 'measured' and v_source_quality <> 'derived')
         or v_definition_kind <> 'money'
-        or v_source_currency is null or v_source_currency <> v_currency then
+        or v_source_currency is null or v_source_currency <> v_currency
+        or (v_row_period_start at time zone v_row_timezone)::date <> v_start_text::date
+        or (v_row_period_end at time zone v_row_timezone)::date <> v_end_text::date
+        or v_row_amount <> v_number
+        or v_row_revision::text <> v_claim_revision then
         raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
       end if;
     else
       select organization_id, created_at, superseded_by_id, quality_state,
-             completeness_state, value_kind, currency
+             completeness_state, value_kind, currency, period_start, period_end,
+             value_numerator, revision
         into v_source_org, v_source_created, v_source_superseded,
-             v_source_quality, v_text, v_definition_kind, v_source_currency
+             v_source_quality, v_text, v_definition_kind, v_source_currency,
+             v_row_period_start, v_row_period_end, v_row_amount, v_row_revision
         from public.exact_range_metric_observations
         where id = v_row_id;
       if not found then
@@ -476,7 +514,11 @@ begin
         or v_source_quality <> 'complete'
         or v_text <> 'complete'
         or v_definition_kind <> 'money'
-        or v_source_currency is null or v_source_currency <> v_currency then
+        or v_source_currency is null or v_source_currency <> v_currency
+        or v_row_period_start::date <> v_start_text::date
+        or v_row_period_end::date <> v_end_text::date
+        or v_row_amount <> v_number
+        or v_row_revision::text <> v_claim_revision then
         raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
       end if;
     end if;
@@ -511,6 +553,10 @@ begin
       raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
     end if;
     begin
+      -- The cited finding is carried as opaque lineage for the Task-5 advice
+      -- join, not as a trust anchor: finding rows live in source-owned
+      -- tables this boundary does not admit, so Postgres proves only the
+      -- uuid shape here. Binding it is a tracked follow-up, never silent.
       v_text := v_element ->> 'citedFindingId';
       if v_text is null then
         raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
