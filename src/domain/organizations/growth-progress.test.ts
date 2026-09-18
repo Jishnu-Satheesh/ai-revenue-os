@@ -7,11 +7,16 @@ import {
   frozenGrowthProjectionSchema,
   growthComparisonSchema,
   GrowthProgressError,
+  sparseGrowthPointsSchema,
   type FrozenGrowthProjection,
   type GrowthProgressPoint,
   type RevenueFact,
   type ScopePartition,
 } from "@/domain/organizations/growth-progress";
+import {
+  growthProgressPointViewSchema,
+  growthProgressViewSchema,
+} from "@/modules/organizations/application/growth-progress-view";
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const METRIC_ID = "33333333-3333-4333-8333-333333333333";
@@ -714,5 +719,174 @@ describe("compareGrowthPoint", () => {
           .success,
       ).toBe(true);
     }
+  });
+});
+
+describe("review fixes — coverage states reach the view", () => {
+  it("carries a conflicted endpoint with its reason into the view point", () => {
+    expect(
+      growthProgressPointViewSchema.safeParse({
+        date: "2026-09-03",
+        currentMinor: null,
+        projectedLowMinor: 8_000_000,
+        projectedCentralMinor: 8_400_000,
+        projectedHighMinor: 8_800_000,
+        currentCoverage: "conflict",
+        reasonCode: "OVERLAP_CONFLICT",
+        breakBefore: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      growthProgressPointViewSchema.safeParse({
+        date: "2026-09-02",
+        currentMinor: 10,
+        projectedLowMinor: 8_000_000,
+        projectedCentralMinor: 8_400_000,
+        projectedHighMinor: 8_800_000,
+        currentCoverage: "complete",
+        reasonCode: null,
+        breakBefore: false,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("uppercases view currency like the domain contract", () => {
+    const parsed = growthProgressViewSchema.safeParse({
+      horizonMonths: 1,
+      state: "ready",
+      reasonCode: null,
+      projectionId: ORG_ID,
+      projectionDigest: "digest",
+      period: {
+        horizonMonths: 1,
+        cycleIndex: 0,
+        startDate: "2026-09-01",
+        endDateExclusive: "2026-10-01",
+      },
+      currency: "aed",
+      scopeLabel: "All reporting channels",
+      issuedAt: "2026-08-31T20:00:00.000Z",
+      sourceCutoffDate: "2026-08-31",
+      latestComparableDate: "2026-09-21",
+      points: [],
+      latestComparison: null,
+      adviceRows: [],
+      limitations: [],
+      freshness: { status: "fresh", note: null },
+      sources: [],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.currency).toBe("AED");
+  });
+});
+
+describe("review fixes — mismatch scoping and conflict precedence", () => {
+  const PERIOD = {
+    periodStart: "2026-09-01",
+    periodEndExclusive: "2026-10-01",
+    currency: "AED",
+    scopePartitions: [PARTITION] as readonly ScopePartition[],
+    todayLocalDate: "2026-09-30",
+  };
+
+  it("taints only the dates a mismatched row spans", () => {
+    const series = buildActualGrowthSeries({
+      ...PERIOD,
+      facts: [
+        fact("a", "2026-09-01", "2026-09-02", 10),
+        fact("b", "2026-09-02", "2026-09-03", 7, { currency: "USD" }),
+      ],
+    });
+    // 09-02 has a clean complete cover; the mismatch spans (09-02, 09-03].
+    expect(series.points.find((point) => point.date === "2026-09-02")).toMatchObject({
+      cumulativeMinor: 10,
+      coverage: "complete",
+      reasonCode: null,
+    });
+    expect(series.points.find((point) => point.date === "2026-09-03")).toMatchObject({
+      cumulativeMinor: null,
+      coverage: "incomparable",
+      reasonCode: "CURRENCY_MISMATCH",
+    });
+  });
+
+  it("lets a conflict win over a gap at the shared endpoint", () => {
+    const series = buildActualGrowthSeries({
+      ...PERIOD,
+      scopePartitions: [PARTITION, PARTITION_BRANCH_A],
+      facts: [
+        fact("a1", "2026-09-01", "2026-09-02", 10),
+        fact("b1", "2026-09-01", "2026-09-02", 5, {
+          partitionKey: PARTITION_BRANCH_A.partitionKey,
+        }),
+        fact("b2", "2026-09-02", "2026-09-03", 6, {
+          partitionKey: PARTITION_BRANCH_A.partitionKey,
+        }),
+        fact("c", "2026-09-01", "2026-09-03", 20, {
+          partitionKey: PARTITION_BRANCH_A.partitionKey,
+        }),
+      ],
+    });
+    // 09-02 is complete across both partitions (10 + 5).
+    expect(series.points.find((point) => point.date === "2026-09-02")).toMatchObject({
+      cumulativeMinor: 15,
+      coverage: "complete",
+    });
+    // 09-03: first partition has a gap, second has two disagreeing covers.
+    // The conflict wins: a correction is needed before any total is statable.
+    expect(series.points.find((point) => point.date === "2026-09-03")).toMatchObject({
+      cumulativeMinor: null,
+      coverage: "conflict",
+      reasonCode: "OVERLAP_CONFLICT",
+    });
+  });
+});
+
+describe("review fixes — generic point array vs frozen curve", () => {
+  it("rejects the anchor-share pair generically while the frozen document accepts it", () => {
+    const anchorShare = [
+      { date: "2026-09-01", lowMinor: 0, centralMinor: 0, highMinor: 0, anchor: true },
+      { date: "2026-09-01", lowMinor: 100, centralMinor: 150, highMinor: 200, anchor: false },
+    ];
+    // The generic sparse array demands unique dates, so the shared date fails.
+    expect(sparseGrowthPointsSchema.safeParse(anchorShare).success).toBe(false);
+    // The frozen curve allows exactly this pair: the anchor is zero before
+    // the first day's activity, told apart by flag rather than by date.
+    expect(frozenGrowthProjectionSchema.safeParse(baseProjection()).success).toBe(true);
+  });
+
+  it("rejects duplicate scope keys and misplaced or nonzero anchors", () => {
+    expect(
+      frozenGrowthProjectionSchema.safeParse(
+        baseProjection({ scopePartitions: [PARTITION, PARTITION] }),
+      ).success,
+    ).toBe(false);
+
+    const nonzeroAnchor = septemberPoints().map((point, index) =>
+      index === 0 ? { ...point, highMinor: 1 } : point,
+    );
+    expect(
+      frozenGrowthProjectionSchema.safeParse(baseProjection({ points: nonzeroAnchor })).success,
+    ).toBe(false);
+
+    const movedAnchor = septemberPoints().map((point, index) =>
+      index === 10 ? { ...point, anchor: true } : point,
+    );
+    expect(
+      frozenGrowthProjectionSchema.safeParse(baseProjection({ points: movedAnchor })).success,
+    ).toBe(false);
+  });
+});
+
+describe("review fixes — zero-centre equality", () => {
+  it("calls actual equal to a zero centre with no percentage", () => {
+    expect(
+      compareGrowthPoint({
+        actualMinor: 0,
+        projectedLowMinor: 0,
+        projectedCentralMinor: 0,
+        projectedHighMinor: 10,
+      }),
+    ).toMatchObject({ state: "equal", differenceMinor: 0, differencePercent: null });
   });
 });

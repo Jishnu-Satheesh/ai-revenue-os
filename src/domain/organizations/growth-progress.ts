@@ -39,7 +39,8 @@ function safeMinorSchemaField() {
     });
 }
 
-const currencySchema = z
+/** ISO currency code, uppercased at the boundary; money stays in integer minor units. */
+export const currencySchema = z
   .string()
   .trim()
   .length(3)
@@ -116,8 +117,15 @@ export const growthProgressPointSchema = z
   );
 export type GrowthProgressPoint = z.output<typeof growthProgressPointSchema>;
 
-/** Sorted, date-unique projection points. */
-export const growthProgressPointsSchema = z
+/**
+ * Sorted, date-unique point arrays for sparse (non-dense) series.
+ *
+ * Not for frozen documents: the frozen curve's zero anchor shares the first
+ * day-end's date by D04 design (told apart by flag, not by date), so it
+ * cannot pass a unique-dates array. The frozen document schema below owns
+ * that denser rule instead.
+ */
+export const sparseGrowthPointsSchema = z
   .array(growthProgressPointSchema)
   .min(1)
   .max(368)
@@ -241,14 +249,21 @@ export const growthComparisonSchema = z.strictObject({
 });
 export type GrowthComparison = z.output<typeof growthComparisonSchema>;
 
+/** Why an actual point is not a comparable total; shared with the client view. */
+export const actualCoverageReasonSchema = z.enum([
+  "COVERAGE_GAP",
+  "OVERLAP_CONFLICT",
+  "CURRENCY_MISMATCH",
+  "FUTURE_DATE",
+]);
+export type ActualCoverageReason = z.output<typeof actualCoverageReasonSchema>;
+
 /** One comparable actual observation with its coverage proof. */
 export const actualGrowthPointSchema = z.strictObject({
   date: isoDateSchema,
   cumulativeMinor: safeMinorSchemaField().nullable(),
   coverage: z.enum(["complete", "missing", "conflict", "incomparable"]),
-  reasonCode: z
-    .enum(["COVERAGE_GAP", "OVERLAP_CONFLICT", "CURRENCY_MISMATCH", "FUTURE_DATE"])
-    .nullable(),
+  reasonCode: actualCoverageReasonSchema.nullable(),
   /** Row identities of the chosen exact cover, in scope order then chronological. */
   sourceIds: z.array(z.string().trim().min(1).max(200)),
 });
@@ -589,15 +604,24 @@ export function buildActualGrowthSeries(rawInput: ActualGrowthSeriesInput): Actu
   const inScope = new Set(scopeOrder);
   const seenIdentities = new Set<string>();
   const edgesByPartition = new Map<string, CoverEdge[]>();
-  for (const key of scopeOrder) edgesByPartition.set(key, []);
-  let currencyMismatch = false;
+  const taintByPartition = new Map<string, { start: string; end: string }[]>();
+  for (const key of scopeOrder) {
+    edgesByPartition.set(key, []);
+    taintByPartition.set(key, []);
+  }
 
   for (const fact of facts) {
     if (!inScope.has(fact.partitionKey)) continue;
     // Rows outside the period, or crossing its edges, are never clipped in.
     if (fact.startDate < periodStart || fact.endDateExclusive > periodEndExclusive) continue;
     if (fact.currency !== currency) {
-      currencyMismatch = true;
+      // A mismatched row can never join a cover, but it taints the dates it
+      // spans: an endpoint inside (start, end] of that row is unknowable in
+      // the expected currency. Dates outside the span keep clean covers.
+      taintByPartition.get(fact.partitionKey)!.push({
+        start: fact.startDate,
+        end: fact.endDateExclusive,
+      });
       continue;
     }
     const identity = `${fact.sourceTable}\n${fact.rowId}`;
@@ -613,10 +637,15 @@ export function buildActualGrowthSeries(rawInput: ActualGrowthSeriesInput): Actu
   }
 
   // Candidate plot dates: actual observation endpoints plus selected
-  // projection dates, restricted to the open-closed period window.
+  // projection dates, restricted to the open-closed period window. Tainted
+  // span ends seed candidates too, so a mismatched row stays visible as an
+  // incomparable point instead of vanishing silently.
   const candidates = new Set<string>();
   for (const edges of edgesByPartition.values()) {
     for (const edge of edges) candidates.add(edge.end);
+  }
+  for (const spans of taintByPartition.values()) {
+    for (const span of spans) candidates.add(span.end);
   }
   for (const date of candidateDates) {
     if (date > periodStart && date <= periodEndExclusive) candidates.add(date);
@@ -659,15 +688,6 @@ export function buildActualGrowthSeries(rawInput: ActualGrowthSeriesInput): Actu
   }
 
   const points: ActualGrowthPoint[] = orderedDates.map((date) => {
-    if (currencyMismatch) {
-      return {
-        date,
-        cumulativeMinor: null,
-        coverage: "incomparable" as const,
-        reasonCode: "CURRENCY_MISMATCH" as const,
-        sourceIds: [],
-      };
-    }
     if (todayLocalDate !== undefined && date > todayLocalDate) {
       return {
         date,
@@ -677,11 +697,19 @@ export function buildActualGrowthSeries(rawInput: ActualGrowthSeriesInput): Actu
         sourceIds: [],
       };
     }
+    let incomparable = false;
     let conflicted = false;
     let missing = false;
     let total = BigInt(0);
     const sourceIds: string[] = [];
     for (const key of scopeOrder) {
+      const tainted = taintByPartition
+        .get(key)!
+        .some((span) => span.start < date && date <= span.end);
+      if (tainted) {
+        incomparable = true;
+        continue;
+      }
       const reached = statesByPartition.get(key)!.get(date);
       if (!reached) {
         missing = true;
@@ -693,6 +721,20 @@ export function buildActualGrowthSeries(rawInput: ActualGrowthSeriesInput): Actu
       }
       total += reached[0]!.total;
       for (const edge of reached[0]!.edges) sourceIds.push(edge.rowId);
+    }
+    // D05 keeps missing and conflicting coverage as distinct states. Where
+    // they meet at one endpoint the conflict wins: a conflicting partition
+    // can never yield a trustworthy total while the conflict stands (only a
+    // source correction removes it), whereas a gap may still close with new
+    // reports. Either way no total is stated.
+    if (incomparable) {
+      return {
+        date,
+        cumulativeMinor: null,
+        coverage: "incomparable" as const,
+        reasonCode: "CURRENCY_MISMATCH" as const,
+        sourceIds: [],
+      };
     }
     if (conflicted) {
       return {

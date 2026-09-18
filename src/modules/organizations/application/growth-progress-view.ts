@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { isoDateSchema, type GrowthHorizonMonths } from "@/domain/organizations/growth-periods";
 import {
+  actualCoverageReasonSchema,
+  currencySchema,
   growthComparisonSchema,
   type GrowthComparison,
 } from "@/domain/organizations/growth-progress";
@@ -23,7 +25,9 @@ export const growthProgressPointViewSchema = z.strictObject({
   projectedLowMinor: z.number().int().nullable(),
   projectedCentralMinor: z.number().int().nullable(),
   projectedHighMinor: z.number().int().nullable(),
-  currentCoverage: z.enum(["complete", "missing", "incomparable"]),
+  currentCoverage: z.enum(["complete", "missing", "conflict", "incomparable"]),
+  /** Why the blue line has no comparable value here; null when coverage is complete. */
+  reasonCode: actualCoverageReasonSchema.nullable(),
   /** True when the blue line must break before this point instead of bridging a gap. */
   breakBefore: z.boolean(),
 });
@@ -78,12 +82,7 @@ export const growthProgressViewSchema = z.strictObject({
   projectionId: z.string().uuid().nullable(),
   projectionDigest: z.string().trim().min(1).max(256).nullable(),
   period: growthProgressPeriodViewSchema,
-  currency: z
-    .string()
-    .trim()
-    .length(3)
-    .regex(/^[A-Za-z]{3}$/)
-    .nullable(),
+  currency: currencySchema.nullable(),
   scopeLabel: z.string().trim().min(1).max(300),
   issuedAt: z.string().nullable(),
   sourceCutoffDate: isoDateSchema.nullable(),
