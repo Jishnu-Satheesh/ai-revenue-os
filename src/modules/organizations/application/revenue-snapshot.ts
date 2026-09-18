@@ -4,6 +4,7 @@ import {
   type RevenueScenarioInput,
 } from "@/domain/organizations/revenue-scenario";
 import type { HomeRevenueSource } from "@/modules/organizations/application/home-types";
+import type { PublishDueGrowthProjectionsResult } from "@/modules/organizations/application/growth-projection-publisher";
 import type {
   ReadRevenueSourceInput,
   RevenueSourceReads,
@@ -65,6 +66,34 @@ export type RevenueSnapshotResult =
     }
   | { stored: false; reason: string; candidateMaterial: null };
 
+/**
+ * Trigger run output: the snapshot outcome plus the publication summary,
+ * with the validated union input stripped out. Trigger persists run outputs
+ * outside the database, so full financial inputs (history amounts, actions,
+ * assumptions) must never ride along — the publication phase already
+ * received its copy in memory.
+ */
+export type RevenueSnapshotBuildOutput =
+  | {
+      stored: true;
+      acceptedCount: number;
+      rejectedCount: number;
+      trimmed: boolean;
+      growthPublication: PublishDueGrowthProjectionsResult;
+    }
+  | { stored: false; reason: string; growthPublication: PublishDueGrowthProjectionsResult };
+
+export function toSnapshotBuildOutput(
+  result: RevenueSnapshotResult,
+  growthPublication: PublishDueGrowthProjectionsResult,
+): RevenueSnapshotBuildOutput {
+  if (result.stored) {
+    const { acceptedCount, rejectedCount, trimmed } = result;
+    return { stored: true, acceptedCount, rejectedCount, trimmed, growthPublication };
+  }
+  return { stored: false, reason: result.reason, growthPublication };
+}
+
 /** True while the organization's own clock reads the first hour of the day. */
 export function isOrgLocalMidnightHour(timeZone: string, now: Date): boolean {
   try {
@@ -91,17 +120,21 @@ function localDateInZone(timeZone: string, now: Date): string | null {
  * Merges the legacy bounded organization scan with explicitly allowlisted
  * growth-publication organizations. The scan keeps its order and cap; extras
  * outside it join the same nightly run exactly once each. Pure: the dispatch
- * task fetches both lists, this only dedupes.
+ * task fetches both lists, this only dedupes. Identity comparison is
+ * case-insensitive on both sides — the allowlist parser already lowercases,
+ * and dispatch rows are plain strings — so one organization never books two
+ * runs over letter casing.
  */
 export function mergeSnapshotDispatchCandidates(
   scanned: readonly { organizationId: string; timeZone: string }[],
   allowlisted: readonly { organizationId: string; timeZone: string }[],
 ): { organizationId: string; timeZone: string }[] {
   const merged = [...scanned];
-  const seen = new Set(scanned.map((org) => org.organizationId));
+  const seen = new Set(scanned.map((org) => org.organizationId.toLowerCase()));
   for (const org of allowlisted) {
-    if (seen.has(org.organizationId)) continue;
-    seen.add(org.organizationId);
+    const key = org.organizationId.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
     merged.push({ organizationId: org.organizationId, timeZone: org.timeZone });
   }
   return merged;

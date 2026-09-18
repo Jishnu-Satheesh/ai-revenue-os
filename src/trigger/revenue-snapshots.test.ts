@@ -55,4 +55,17 @@ describe("Revenue snapshot Trigger registration", () => {
     // date the snapshot and the publication on different days.
     expect(source).toContain("const nowIso = new Date().toISOString();");
   });
+
+  it("returns only counts and the publication summary, never financial inputs", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/revenue-snapshots.ts"),
+      "utf8",
+    );
+
+    // Trigger persists run outputs outside the database, so the run return
+    // is shaped through toSnapshotBuildOutput: counts, reasons and the
+    // publication summary only. The validated union input stays in memory.
+    expect(source).toContain("toSnapshotBuildOutput(result, growthPublication)");
+    expect(source).not.toContain("...result");
+  });
 });

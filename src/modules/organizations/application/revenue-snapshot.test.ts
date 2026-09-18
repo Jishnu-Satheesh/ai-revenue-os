@@ -22,7 +22,9 @@ import {
   REVENUE_SNAPSHOT_KEEP_MONTHS,
   runRevenueSnapshotBuild,
   selectDueSnapshotOrgs,
+  toSnapshotBuildOutput,
 } from "@/modules/organizations/application/revenue-snapshot";
+import type { PublishDueGrowthProjectionsResult } from "@/modules/organizations/application/growth-projection-publisher";
 import type { RevenueScenarioInput } from "@/domain/organizations/revenue-scenario";
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
@@ -241,5 +243,75 @@ describe("mergeSnapshotDispatchCandidates", () => {
 
   it("leaves the legacy scan untouched when no allowlist is configured", () => {
     expect(mergeSnapshotDispatchCandidates(scanned, [])).toEqual(scanned);
+  });
+
+  it("dedupes across letter casing", () => {
+    const merged = mergeSnapshotDispatchCandidates(
+      [{ organizationId: "org-2", timeZone: "Asia/Dubai" }],
+      [{ organizationId: "ORG-2", timeZone: "Asia/Dubai" }],
+    );
+
+    expect(merged).toHaveLength(1);
+  });
+});
+
+describe("toSnapshotBuildOutput", () => {
+  const publication: PublishDueGrowthProjectionsResult = {
+    results: [
+      {
+        horizonMonths: 1,
+        status: "published",
+        projectionId: "33333333-3333-4333-8333-333333333333",
+        digest: "a".repeat(64),
+        reasonCode: null,
+      },
+    ],
+  };
+
+  it("strips financial inputs from the worker run output", () => {
+    const output = toSnapshotBuildOutput(
+      {
+        stored: true,
+        acceptedCount: 1,
+        rejectedCount: 0,
+        trimmed: true,
+        candidateMaterial: { input: scenarioInput() },
+      },
+      publication,
+    );
+
+    expect(output).toEqual({
+      stored: true,
+      acceptedCount: 1,
+      rejectedCount: 0,
+      trimmed: true,
+      growthPublication: publication,
+    });
+    // Trigger persists run outputs outside the database: no history
+    // amounts, actions or assumptions may ride along.
+    expect("candidateMaterial" in output).toBe(false);
+    const serialized = JSON.stringify(output);
+    for (const leaked of [
+      "minorUnits",
+      "assumptionLow",
+      "assumptionHigh",
+      "citedFindingId",
+      "80000",
+    ]) {
+      expect(serialized).not.toContain(leaked);
+    }
+  });
+
+  it("keeps the failed short shape without material", () => {
+    const output = toSnapshotBuildOutput(
+      { stored: false, reason: "reads failed", candidateMaterial: null },
+      publication,
+    );
+
+    expect(output).toEqual({
+      stored: false,
+      reason: "reads failed",
+      growthPublication: publication,
+    });
   });
 });

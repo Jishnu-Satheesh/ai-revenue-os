@@ -21,6 +21,7 @@ import {
   mergeSnapshotDispatchCandidates,
   runRevenueSnapshotBuild,
   selectDueSnapshotOrgs,
+  toSnapshotBuildOutput,
 } from "@/modules/organizations/application/revenue-snapshot";
 import { createGrowthProgressRepository } from "@/modules/organizations/infrastructure/growth-progress-repository";
 import { createGrowthProjectionRepository } from "@/modules/organizations/infrastructure/growth-projection-repository";
@@ -238,6 +239,9 @@ export const revenueSnapshotsBuildOrgTask = schemaTask({
         correlationId: parsed.correlationId,
       });
     }
-    return { ...result, growthPublication };
+    // The validated union input stays in memory: the run output Trigger
+    // persists carries only counts, reasons and the publication summary —
+    // never history amounts, actions or assumptions.
+    return toSnapshotBuildOutput(result, growthPublication);
   },
 });

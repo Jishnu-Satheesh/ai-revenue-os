@@ -238,6 +238,8 @@ export async function publishDueGrowthProjections(
   } else {
     const origins = [...new Set(schedule.origins)];
     const agreed = origins.length === 1 ? origins[0] : undefined;
+    // A ready envelope with zero or conflicting origins is malformed — a
+    // truly empty schedule arrives as missing — so both fail closed here.
     if (agreed === undefined) {
       return skippedAll("SCHEDULE_CORRUPT");
     }
@@ -247,6 +249,8 @@ export async function publishDueGrowthProjections(
   const results: GrowthHorizonPublication[] = [];
   for (const horizonMonths of GROWTH_HORIZON_MONTHS) {
     const cycleIndex = dueCycleForHorizon(scheduleOriginDate, horizonMonths, todayLocalDate);
+    // Quiet days short-circuit first: a failed snapshot on a day with
+    // nothing due reports NOT_DUE, since no period was ever at stake.
     if (cycleIndex === null) {
       results.push({
         horizonMonths,
