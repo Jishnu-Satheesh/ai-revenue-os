@@ -91,4 +91,4 @@ URLs, payloads, prompts, customer rows, or amounts in this file.
 - AC09: gaps/coarse-endpoint/no-future-actuals suites green.
 - AC10: lower-home/snapshot/proposal regression green (358).
 - AC11: this file + visual/functional/persistence/worker reviews; skips listed.
-- AC12: this file + task-8-report.md; rollback exercised (flag path).
+- AC12: this file (§ Task 8, final-report.md); rollback exercised (flag path).

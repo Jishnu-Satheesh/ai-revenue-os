@@ -27,7 +27,7 @@ e2e/overview-growth.spec.ts e2e/overview-growth.visual.spec.ts` → exit 0,
 - Forced colors: shaped failure copy + Retry reachable. PASS.
 - Touch FINDING: a real touchscreen tap on a plotted point fires
   touchstart/touchend plus synthesized mouseenter but opens NO tooltip, while a
-  mouse click on the same glyph does (`task-8-report.md` § probing evidence).
+  mouse click on the same glyph does (`final-report.md` § Task 8 probing evidence).
   Task 7 touch coverage is jsdom fireEvent-level only. Encoded in-spec as
   `test.fail` with the finding inline; the chart fix is outside the Task 8
   narrow file map and is tracked as a follow-up, not silently dropped.
