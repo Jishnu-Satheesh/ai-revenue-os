@@ -4,6 +4,7 @@ import { DomainError } from "@/lib/errors";
 import {
   getQualifiedMarketResearchAdapter,
   QUALIFIED_RESEARCH_PROVIDER,
+  QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
   RESEARCH_PROVIDER_REQUIRED_USES,
   resolveResearchAdapterAvailability,
   UNQUALIFIED_RESEARCH_AVAILABILITY,
@@ -133,6 +134,39 @@ describe("the market research provider qualification", () => {
       brave,
     );
     await expect(wrongProvider.searchAndFetch({ ...VALID_INPUT })).rejects.toMatchObject({
+      code: "FEATURE_NOT_AVAILABLE",
+    });
+  });
+
+  it("delegates to the TinyFish adapter only while qualified on TinyFish", async () => {
+    expect(QUALIFIED_TINYFISH_RESEARCH_PROVIDER).toBe("tinyfish");
+    const sentinel = { delegated: true } as unknown as ResearchRetrievalResult;
+    const tinyfish: ResearchAdapter = {
+      availability: { available: true, provider: "tinyfish" },
+      searchAndFetch: async () => sentinel,
+    };
+
+    const qualified = getQualifiedMarketResearchAdapter(
+      { available: true, provider: "tinyfish" },
+      tinyfish,
+      QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
+    );
+    await expect(qualified.searchAndFetch({ ...VALID_INPUT })).resolves.toBe(sentinel);
+
+    const crossProvider = getQualifiedMarketResearchAdapter(
+      { available: true, provider: "brave" },
+      tinyfish,
+      QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
+    );
+    await expect(crossProvider.searchAndFetch({ ...VALID_INPUT })).rejects.toMatchObject({
+      code: "FEATURE_NOT_AVAILABLE",
+    });
+
+    const defaultLaneStillBrave = getQualifiedMarketResearchAdapter(
+      { available: true, provider: "tinyfish" },
+      tinyfish,
+    );
+    await expect(defaultLaneStillBrave.searchAndFetch({ ...VALID_INPUT })).rejects.toMatchObject({
       code: "FEATURE_NOT_AVAILABLE",
     });
   });

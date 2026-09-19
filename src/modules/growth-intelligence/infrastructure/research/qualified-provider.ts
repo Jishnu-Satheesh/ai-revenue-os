@@ -22,6 +22,15 @@ import { researchRequestSchema } from "@/modules/growth-intelligence/infrastruct
  */
 export const QUALIFIED_RESEARCH_PROVIDER = "brave" as const;
 
+/**
+ * Durable research provider once its qualification is staged (agreement with
+ * storage rights, rates, credential, model bounds, passing canary). Brave
+ * stays the ephemeral-preview provider; it never authorizes TinyFish runs
+ * and TinyFish never authorizes Brave runs — the selector below enforces
+ * the match per call.
+ */
+export const QUALIFIED_TINYFISH_RESEARCH_PROVIDER = "tinyfish" as const;
+
 export { RESEARCH_PROVIDER_REQUIRED_USES };
 
 /**
@@ -50,10 +59,15 @@ export function resolveResearchAdapterAvailability(
 
 export function getQualifiedMarketResearchAdapter(
   availability: ResearchAdapterAvailability = UNQUALIFIED_RESEARCH_AVAILABILITY,
-  brave?: ResearchAdapter,
+  candidate?: ResearchAdapter,
+  expectedProvider: string = QUALIFIED_RESEARCH_PROVIDER,
 ): ResearchAdapter {
-  if (brave && availability.available && availability.provider === QUALIFIED_RESEARCH_PROVIDER) {
-    return brave;
+  if (
+    candidate &&
+    availability.available &&
+    availability.provider === expectedProvider
+  ) {
+    return candidate;
   }
   return {
     availability,

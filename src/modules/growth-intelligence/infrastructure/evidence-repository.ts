@@ -308,6 +308,13 @@ const synthesisFailOutcomeSchema = z
   })
   .strict();
 
+const pipelineFailOutcomeSchema = z
+  .object({
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    replayed: z.boolean(),
+  })
+  .strict();
+
 export type MarketEvidencePersistence = {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
 };
@@ -370,6 +377,14 @@ export type MarketEvidenceRepository = {
     runId: string;
     failureCode: string;
   }): Promise<z.infer<typeof synthesisFailOutcomeSchema>>;
+  failPipeline(input: {
+    organizationId: string;
+    pipelineId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string | null;
+    failureCode: string;
+  }): Promise<z.infer<typeof pipelineFailOutcomeSchema>>;
 };
 
 function boundaryError(): DomainError {
@@ -388,7 +403,8 @@ function persistenceError(
     | "append"
     | "completePipeline"
     | "completeSynthesis"
-    | "failSynthesis",
+    | "failSynthesis"
+    | "failPipeline",
 ): DomainError {
   const messages = {
     begin: "Market research could not be started.",
@@ -399,6 +415,7 @@ function persistenceError(
     completePipeline: "Market research handoff could not be completed.",
     completeSynthesis: "Market synthesis could not be finalized.",
     failSynthesis: "Market synthesis could not be marked as failed.",
+    failPipeline: "Market research pipeline could not be marked as failed.",
   } as const;
   return new DomainError("DOMAIN_ERROR", messages[operation]);
 }
@@ -430,8 +447,9 @@ async function invoke(
     | "append"
     | "completePipeline"
     | "completeSynthesis"
-    | "failSynthesis",
-): Promise<unknown> {
+    | "failSynthesis"
+    | "failPipeline",
+  ): Promise<unknown> {
   let result: { data: unknown; error: unknown };
   try {
     result = await persistence.rpc(name, args);
@@ -611,6 +629,25 @@ export function createMarketEvidenceRepository(
         synthesisFailOutcomeSchema,
         "failSynthesis",
       )) as z.infer<typeof synthesisFailOutcomeSchema>;
+    },
+
+    async failPipeline(input) {
+      const failureCode = parseOrThrow(safeCodeSchema, input.failureCode);
+      return (await invoke(
+        persistence,
+        "fail_market_research_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_pipeline_id: parseOrThrow(identifierSchema, input.pipelineId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_market_research_run_id:
+            input.runId === null ? null : parseOrThrow(identifierSchema, input.runId),
+          p_safe_failure_code: failureCode,
+        },
+        pipelineFailOutcomeSchema,
+        "failPipeline",
+      )) as z.infer<typeof pipelineFailOutcomeSchema>;
     },
   };
 }

@@ -116,6 +116,10 @@ import {
   SYNTHESIS_FINDING_LOADER_LIMIT,
   toEligibleMarketClaims,
 } from "@/trigger/synthesis-loaders";
+import {
+  createQualifiedTinyfishResearchAdapter,
+  type TinyfishResearchPersistence,
+} from "@/trigger/growth-intelligence-tinyfish";
 
 const retry = {
   maxAttempts: 3,
@@ -396,10 +400,28 @@ function triggerExcerptProvenance(): {
   };
 }
 
-function createResearchDependencies(signal: AbortSignal) {
+async function createResearchDependencies(
+  signal: AbortSignal,
+  scope: { organizationId: string; requestId: string },
+) {
   const supabase = createGrowthIntelligenceWorkerServiceClient();
-  const adapter: ResearchAdapter = getQualifiedMarketResearchAdapter();
+  // The workflow claims the request after dependencies are built and reads
+  // its token through newClaimToken below, so the spender records that same
+  // token here: reserve_attempt fences spend on the live lease match.
+  const spendClaim: { current: string | null } = { current: null };
+  const adapter: ResearchAdapter = await createQualifiedTinyfishResearchAdapter({
+    persistence: supabase as unknown as TinyfishResearchPersistence,
+    organizationId: scope.organizationId,
+    requestId: scope.requestId,
+    claimToken: () => spendClaim.current,
+    signal,
+  });
   return {
+    newClaimToken: () => {
+      const token = randomUUID();
+      spendClaim.current = token;
+      return token;
+    },
     requests: createRequestOperations(supabase),
     profiles: {
       readCurrent: (input: { organizationId: string; branchId?: string | null }) =>
@@ -929,7 +951,10 @@ export const runMarketResearchTask = schemaTask({
   maxDuration: 300,
   run: async (payload, { signal }) => {
     const parsed = marketResearchPayloadSchema.parse(payload);
-    const dependencies = createResearchDependencies(signal);
+    const dependencies = await createResearchDependencies(signal, {
+      organizationId: parsed.organizationId,
+      requestId: parsed.requestId,
+    });
     const result = await runMarketResearch(parsed, dependencies);
 
     logger.info("growth_intelligence.research_finished", {
@@ -951,7 +976,10 @@ export const consolidateMarketEvidenceTask = schemaTask({
   maxDuration: 300,
   run: async (payload, { signal }) => {
     const parsed = consolidationPayloadSchema.parse(payload);
-    const dependencies = createResearchDependencies(signal);
+    const dependencies = await createResearchDependencies(signal, {
+      organizationId: parsed.organizationId,
+      requestId: parsed.requestId,
+    });
     const result = await consolidateMarketEvidence(parsed, dependencies);
 
     logger.info("growth_intelligence.consolidation_finished", {
@@ -1167,28 +1195,86 @@ export const MONITORING_SWEEP_LIMIT = 25;
 export const MONITORING_SWEEP_MAX_PER_ORGANIZATION = 5;
 
 /**
- * Due recurring monitoring projects with per-org fairness. Active
- * recurring projects scan oldest-first; latest brief revisions arrive in
- * one batched read per organization; scope-unparseable projects degrade to
- * scope-blind (the sweep skips them honestly) and actor-less projects are
- * excluded with a count, never fabricated.
+ * Due monitoring projects with per-org fairness. Active recurring projects
+ * scan oldest-first; one-time projects with still-owed work (active, no
+ * report, no terminal update) re-enter so a lost start nudge is recovered
+ * instead of stranding the project in Researching forever. Latest brief
+ * revisions arrive in one batched read per organization;
+ * scope-unparseable projects degrade to scope-blind (the sweep skips them
+ * honestly) and actor-less projects are excluded with a count, never
+ * fabricated.
  */
 export async function listDueMonitoringProjects(
   supabase: WorkerClient,
   input: { limit: number },
 ): Promise<DueMonitoringProject[]> {
-  const { data: rows, error } = await supabase
+  const cap = Math.min(input.limit * MONITORING_SWEEP_MAX_PER_ORGANIZATION, 200);
+  const projectColumns =
+    "id, organization_id, branch_id, title, question, mode, schedule, lifecycle, created_by";
+  const { data: recurringRows, error: recurringError } = await supabase
     .from("growth_intelligence_research_projects")
-    .select(
-      "id, organization_id, branch_id, title, question, mode, schedule, lifecycle, created_by",
-    )
+    .select(projectColumns)
     .eq("lifecycle", "active")
     .eq("mode", "recurring")
     .not("schedule", "is", null)
     .order("organization_id", { ascending: true })
     .order("updated_at", { ascending: true })
-    .limit(Math.min(input.limit * MONITORING_SWEEP_MAX_PER_ORGANIZATION, 200));
-  if (error) throw new Error("Due monitoring projects could not be listed.");
+    .limit(cap);
+  if (recurringError) throw new Error("Due monitoring projects could not be listed.");
+  const { data: oneTimeRows, error: oneTimeError } = await supabase
+    .from("growth_intelligence_research_projects")
+    .select(projectColumns)
+    .eq("lifecycle", "active")
+    .eq("mode", "one-time")
+    .order("organization_id", { ascending: true })
+    .order("updated_at", { ascending: true })
+    .limit(cap);
+  if (oneTimeError) throw new Error("Due monitoring projects could not be listed.");
+  let rows = [...(recurringRows ?? [])];
+  const oneTimeCandidates = [...(oneTimeRows ?? [])];
+  if (oneTimeCandidates.length > 0) {
+    // A completed one-timer must never re-enter: a report row or a terminal
+    // lifecycle row means the question was answered, and re-listing it would
+    // start fresh research every sweep. Either exclusion read failing closes
+    // the one-time lane for this pass only; recurring work is unaffected.
+    const oneTimeIds = oneTimeCandidates.map((row) => row.id);
+    try {
+      const [
+        { data: reportRows, error: reportsError },
+        { data: terminalRows, error: terminalsError },
+      ] = await Promise.all([
+          supabase
+            .from("growth_intelligence_reports")
+            .select("project_id")
+            .in("project_id", oneTimeIds)
+            .limit(1000),
+          supabase
+            .from("growth_intelligence_monitoring_updates")
+            .select("project_id")
+            .in("project_id", oneTimeIds)
+            .in("stage", [
+              "ready",
+              "partial",
+              "empty",
+              "no_findings",
+              "research_failed",
+              "synthesis_failed",
+              "cancelled",
+            ])
+            .limit(1000),
+        ]);
+      if (reportsError || terminalsError) throw new Error("One-time completion reads failed.");
+      const completed = new Set([
+        ...(reportRows ?? []).map((row) => row.project_id),
+        ...(terminalRows ?? []).map((row) => row.project_id),
+      ]);
+      rows = [...rows, ...oneTimeCandidates.filter((row) => !completed.has(row.id))];
+    } catch {
+      logger.info("growth_intelligence.monitoring_sweep_one_time_skipped", {
+        projects: oneTimeCandidates.length,
+      });
+    }
+  }
 
   const byOrganization = new Map<string, typeof rows>();
   for (const row of rows ?? []) {
@@ -1240,7 +1326,7 @@ export async function listDueMonitoringProjects(
       branchId: row.branch_id,
       title: row.title,
       question: row.question,
-      mode: "recurring",
+      mode: row.mode === "one-time" ? "one-time" : "recurring",
       ...(schedule.success ? { schedule: schedule.data } : {}),
       lifecycle: "active",
       briefInputs: brief.success

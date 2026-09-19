@@ -427,6 +427,25 @@ export async function runMarketResearch(
       claimToken,
       safeFailureCode: code,
     });
+    // A bound pipeline must leave queued with its request: without this the
+    // workspace reports "research is still running" forever with no safe
+    // code. Legacy requests without pipeline lineage keep the old shape.
+    const pipelineId = request?.pipelineId ?? null;
+    if (pipelineId !== null) {
+      try {
+        await dependencies.evidence.failPipeline({
+          organizationId: payload.organizationId,
+          pipelineId,
+          requestId: payload.requestId,
+          claimToken,
+          runId: null,
+          failureCode: code,
+        });
+      } catch (error) {
+        if (isClaimLost(error)) return { outcome: "claim_lost" };
+        throw error;
+      }
+    }
     await publishEvent(dependencies.events, {
       organizationId: payload.organizationId,
       eventName: "market_research.failed",

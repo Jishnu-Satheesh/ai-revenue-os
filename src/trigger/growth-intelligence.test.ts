@@ -1,7 +1,20 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import { DomainError } from "@/lib/errors";
+import {
+  createQualifiedTinyfishResearchAdapter,
+  createTinyfishResearchSpender,
+  TINYFISH_RESEARCH_MAXIMUM_MICROS_USD_PER_ATTEMPT,
+  TINYFISH_RESEARCH_PRICE_VERSION,
+  TINYFISH_RESEARCH_QUOTE_MICROS_USD,
+} from "@/trigger/growth-intelligence-tinyfish";
 
 describe("Growth Intelligence Trigger registration", () => {
   it("registers five bounded schema tasks without activating a dispatcher", async () => {
@@ -33,10 +46,10 @@ describe("Growth Intelligence Trigger registration", () => {
 
     expect(source.match(/tasks\.onCancel\(/g)).toHaveLength(1);
     expect(source).toMatch(
-      /const parsed = marketResearchPayloadSchema\.parse\(payload\);\s+const dependencies = createResearchDependencies\(signal\);/,
+      /const parsed = marketResearchPayloadSchema\.parse\(payload\);\s+const dependencies = await createResearchDependencies\(signal, \{\s+organizationId: parsed\.organizationId,\s+requestId: parsed\.requestId,\s+\}\);/,
     );
     expect(source).toMatch(
-      /const parsed = consolidationPayloadSchema\.parse\(payload\);\s+const dependencies = createResearchDependencies\(signal\);/,
+      /const parsed = consolidationPayloadSchema\.parse\(payload\);\s+const dependencies = await createResearchDependencies\(signal, \{\s+organizationId: parsed\.organizationId,\s+requestId: parsed\.requestId,\s+\}\);/,
     );
     expect(source).toMatch(
       /const parsed = dispatchDuePayloadSchema\.parse\(payload\);\s+const supabase = createGrowthIntelligenceWorkerServiceClient\(\);/,
@@ -305,5 +318,413 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain('from("growth_intelligence_monitoring_updates")');
     expect(source).toContain("cancel_monitoring_update");
     expect(source).toContain("WORKER_CANCELLED");
+  });
+});
+
+describe("TinyFish research assembly (Task 5)", () => {
+  const ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
+  const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
+  const CLAIM_TOKEN = "33333333-3333-4333-8333-333333333333";
+  const RESERVATION_ID = "44444444-4444-4444-8444-444444444444";
+  const FAKE_KEY = "task5-test-key-never-sent-live";
+
+  const savedEnv = { key: "", gate: "" };
+  const hadKey = { current: false };
+  const hadGate = { current: false };
+
+  beforeEach(() => {
+    hadKey.current = "TINYFISH_SEARCH_API_KEY" in process.env;
+    hadGate.current = "TINYFISH_MARKET_RESEARCH_ENABLED" in process.env;
+    savedEnv.key = process.env.TINYFISH_SEARCH_API_KEY ?? "";
+    savedEnv.gate = process.env.TINYFISH_MARKET_RESEARCH_ENABLED ?? "";
+    delete process.env.TINYFISH_SEARCH_API_KEY;
+    delete process.env.TINYFISH_MARKET_RESEARCH_ENABLED;
+  });
+
+  afterEach(() => {
+    if (hadKey.current) process.env.TINYFISH_SEARCH_API_KEY = savedEnv.key;
+    else delete process.env.TINYFISH_SEARCH_API_KEY;
+    if (hadGate.current) process.env.TINYFISH_MARKET_RESEARCH_ENABLED = savedEnv.gate;
+    else delete process.env.TINYFISH_MARKET_RESEARCH_ENABLED;
+  });
+
+  function validRequest() {
+    return {
+      scope: {
+        publicBusinessName: "Acme Bakery",
+        approvedDomains: [],
+        niches: ["bakery"],
+        city: "Austin",
+        countryCode: "US",
+        topics: ["sourdough demand"],
+        competitors: [],
+      },
+      maxQueries: 26,
+      maxResultsPerQuery: 5,
+      maxResponseBytes: 524288,
+      maxRedirects: 0,
+      timeoutMs: 5000,
+      maxCostMicrosUsd: 1000000,
+    };
+  }
+
+  function persistenceFor(
+    qualification: { provider: string; available: boolean; blockers: string[] } | null,
+    options?: { failRpc?: boolean },
+  ) {
+    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (options?.failRpc) throw new Error("connection reset");
+      if (name === "check_research_provider_qualification_for") {
+        return { data: qualification, error: null };
+      }
+      if (name === "reserve_research_request_budget") {
+        return {
+          data: {
+            reservationId: RESERVATION_ID,
+            organizationId: ORGANIZATION_ID,
+            requestId: REQUEST_ID,
+            allowanceDay: "2026-09-18",
+            quoteMicrosUsd: TINYFISH_RESEARCH_QUOTE_MICROS_USD,
+            priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+            replayed: false,
+          },
+          error: null,
+        };
+      }
+      if (name === "reserve_research_attempt") {
+        return {
+          data: {
+            attemptId: randomUUID(),
+            reservationId: RESERVATION_ID,
+            allowanceDay: "2026-09-18",
+            maximumMicrosUsd: TINYFISH_RESEARCH_MAXIMUM_MICROS_USD_PER_ATTEMPT,
+            replayed: false,
+          },
+          error: null,
+        };
+      }
+      if (name === "settle_research_attempt") {
+        const usage = args.p_usage as { kind: string; microsUsd?: number };
+        return {
+          data: {
+            attemptId: args.p_attempt_id,
+            settlementKind: usage.kind,
+            actualMicrosUsd: usage.kind === "unknown" ? null : (usage.microsUsd ?? 0),
+            overrunBlocked: false,
+            replayed: false,
+          },
+          error: null,
+        };
+      }
+      throw new Error(`unexpected rpc ${name}`);
+    });
+    return { persistence: { rpc }, rpc };
+  }
+
+  function tinyfishPage(query: string, page: number, count: number) {
+    const results =
+      page > 0
+        ? []
+        : Array.from({ length: count }, (_, index) => ({
+            position: index + 1,
+            site_name: "example.com",
+            title: `Bakery insight ${index + 1}`,
+            snippet: "Sourdough demand grows steadily across neighborhood bakeries.",
+            url: `https://example.com/research/${encodeURIComponent(query)}-${index}`,
+            publisher: "Example",
+            date: "2026-09-01",
+          }));
+    return { query, results, total_results: results.length, page };
+  }
+
+  it("reports the blocked baseline without any RPC when the key is missing", async () => {
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence, rpc } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toBeInstanceOf(DomainError);
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports the blocked baseline without any RPC when the kill-switch is closed", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = FAKE_KEY;
+    const { persistence, rpc } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports the blocked baseline for an unqualified tinyfish lane", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = FAKE_KEY;
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence, rpc } = persistenceFor({
+      provider: "tinyfish",
+      available: false,
+      blockers: ["credential_missing"],
+    });
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("check_research_provider_qualification_for", {
+      p_provider: "tinyfish",
+    });
+  });
+
+  it("pins the lane to tinyfish when a wrong-provider qualification is staged", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = FAKE_KEY;
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence, rpc } = persistenceFor({
+      provider: "brave",
+      available: true,
+      blockers: [],
+    });
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("check_research_provider_qualification_for", {
+      p_provider: "tinyfish",
+    });
+  });
+
+  it("reports the blocked baseline without any RPC when the key is whitespace-only", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = "   ";
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence, rpc } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toBeInstanceOf(DomainError);
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("fails the tinyfish lane closed on transport failure", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = FAKE_KEY;
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence } = persistenceFor(null, { failRpc: true });
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+  });
+
+  it("selects the delegating adapter for a qualified lane with key and spends fenced", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = FAKE_KEY;
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence, rpc } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+    const seenKeys: Array<string | undefined> = [];
+    const fetchImpl = (async (url: string, init: { headers?: Record<string, string> }) => {
+      seenKeys.push(init.headers?.["X-API-Key"]);
+      const parsed = new URL(url);
+      const body = tinyfishPage(
+        parsed.searchParams.get("query") ?? "q",
+        Number(parsed.searchParams.get("page") ?? "0"),
+        5,
+      );
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+      fetchImpl,
+    });
+
+    expect(adapter.availability).toEqual({ available: true, provider: "tinyfish" });
+    const result = await adapter.searchAndFetch(validRequest());
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(result.coverage).toHaveLength(2);
+
+    const names = rpc.mock.calls.map((call) => call[0]);
+    expect(names[0]).toBe("check_research_provider_qualification_for");
+    expect(names).toContain("reserve_research_request_budget");
+    expect(names).toContain("reserve_research_attempt");
+    expect(names).toContain("settle_research_attempt");
+    expect(rpc).toHaveBeenCalledWith(
+      "reserve_research_request_budget",
+      expect.objectContaining({
+        p_organization_id: ORGANIZATION_ID,
+        p_request_id: REQUEST_ID,
+        p_quote_micros_usd: TINYFISH_RESEARCH_QUOTE_MICROS_USD,
+        p_price_version: TINYFISH_RESEARCH_PRICE_VERSION,
+      }),
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      "reserve_research_attempt",
+      expect.objectContaining({
+        p_organization_id: ORGANIZATION_ID,
+        p_claim_token: CLAIM_TOKEN,
+      }),
+    );
+    expect(seenKeys.length).toBeGreaterThan(0);
+    for (const key of seenKeys) expect(key).toBe(FAKE_KEY);
+  });
+
+  it("reserves before the call and settles every usage kind through the fenced wrappers", async () => {
+    const reserveRequestBudget = vi.fn(async () => ({ replayed: false }));
+    const reserveAttempt = vi.fn(async () => ({ attemptId: randomUUID() }));
+    const settleAttempt = vi.fn(async () => undefined);
+    const spender = createTinyfishResearchSpender({
+      budget: { reserveRequestBudget, reserveAttempt, settleAttempt } as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    const first = await spender.reserve({ slotKey: "topic:sourdough", attemptIndex: 0 });
+    expect(first.attemptId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    await spender.reserve({ slotKey: "topic:sourdough", attemptIndex: 1 });
+    expect(reserveRequestBudget).toHaveBeenCalledTimes(1);
+    expect(reserveRequestBudget).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      quoteMicrosUsd: TINYFISH_RESEARCH_QUOTE_MICROS_USD,
+      priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+    });
+    expect(reserveAttempt).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      scope: { kind: "request", requestId: REQUEST_ID },
+      phase: "research",
+      slotKey: "topic:sourdough",
+      attemptIndex: 1,
+      maximumMicrosUsd: TINYFISH_RESEARCH_MAXIMUM_MICROS_USD_PER_ATTEMPT,
+      claimToken: CLAIM_TOKEN,
+    });
+
+    await spender.settle({ attemptId: first.attemptId, usage: { kind: "reported", microsUsd: 0 } });
+    await spender.settle({
+      attemptId: first.attemptId,
+      usage: { kind: "estimated", microsUsd: 120 },
+    });
+    await spender.settle({ attemptId: first.attemptId, usage: { kind: "unknown" } });
+    expect(settleAttempt).toHaveBeenCalledTimes(3);
+    expect(settleAttempt).toHaveBeenNthCalledWith(1, {
+      organizationId: ORGANIZATION_ID,
+      attemptId: first.attemptId,
+      usage: { kind: "reported", microsUsd: 0 },
+    });
+    expect(settleAttempt).toHaveBeenNthCalledWith(3, {
+      organizationId: ORGANIZATION_ID,
+      attemptId: first.attemptId,
+      usage: { kind: "unknown" },
+    });
+  });
+
+  it("contains settlement failure as unknown and never writes zero", async () => {
+    const settleAttempt = vi.fn(async () => {
+      throw new Error("settle_research_attempt exploded");
+    });
+    const spender = createTinyfishResearchSpender({
+      budget: {
+        reserveRequestBudget: vi.fn(async () => ({ replayed: true })),
+        reserveAttempt: vi.fn(async () => ({ attemptId: randomUUID() })),
+        settleAttempt,
+      } as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+    });
+
+    const reserved = await spender.reserve({ slotKey: "topic:sourdough", attemptIndex: 0 });
+    await expect(
+      spender.settle({ attemptId: reserved.attemptId, usage: { kind: "unknown" } }),
+    ).rejects.toThrow("settle_research_attempt exploded");
+    expect(settleAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to reserve before the workflow claim with zero spend", async () => {
+    const reserveRequestBudget = vi.fn(async () => ({ replayed: false }));
+    const reserveAttempt = vi.fn(async () => ({ attemptId: randomUUID() }));
+    const spender = createTinyfishResearchSpender({
+      budget: { reserveRequestBudget, reserveAttempt, settleAttempt: vi.fn() } as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => null,
+    });
+
+    await expect(spender.reserve({ slotKey: "topic:sourdough", attemptIndex: 0 })).rejects.toEqual(
+      expect.objectContaining({ code: "RESEARCH_BUDGET_UNAVAILABLE" }),
+    );
+    expect(reserveRequestBudget).not.toHaveBeenCalled();
+    expect(reserveAttempt).not.toHaveBeenCalled();
   });
 });

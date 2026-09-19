@@ -180,6 +180,26 @@ describe("provider qualification", () => {
       true,
     );
   });
+
+  it("qualifies TinyFish exactly like Brave and rejects unknown providers", () => {
+    expect(isResearchProviderQualified({ provider: "tinyfish", available: true, blockers: [] })).toBe(
+      true,
+    );
+    expect(
+      isResearchProviderQualified({
+        provider: "tinyfish",
+        available: false,
+        blockers: ["required_rights_missing"],
+      }),
+    ).toBe(false);
+    expect(() =>
+      researchProviderQualificationSchema.parse({
+        provider: "other",
+        available: true,
+        blockers: [],
+      }),
+    ).toThrow();
+  });
 });
 
 describe("retention provenance and eligibility", () => {

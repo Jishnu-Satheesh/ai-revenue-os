@@ -195,6 +195,48 @@ describe("parseLivePreviewResponse", () => {
     expect(items).toHaveLength(15);
   });
 
+  it("shows provider snippets as plain text without highlight markup", () => {
+    const items = parseLivePreviewResponse(
+      envelope([
+        {
+          title: "Brunch <strong>guide</strong>",
+          url: "https://example.com/brunch-guide",
+          description:
+            "In town, <strong>weekend brunch</strong> is sacred. Enjoy Chicken &amp; Waffles, it&#x27;s a classic &#8212; plus &#34;bottomless&#34; coffee.",
+        },
+      ]),
+      RETRIEVED_AT,
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]!.title).toBe("Brunch guide");
+    expect(items[0]!.snippet).toBe(
+      "In town, weekend brunch is sacred. Enjoy Chicken & Waffles, it's a classic — plus \"bottomless\" coffee.",
+    );
+    expect(items[0]!.snippet).not.toContain("<strong>");
+    expect(items[0]!.snippet).not.toContain("&amp;");
+    expect(livePreviewResultItemSchema.safeParse(items[0]).success).toBe(true);
+  });
+
+  it("drops snippets that are only markup and caps after cleaning", () => {
+    const items = parseLivePreviewResponse(
+      envelope([
+        { title: "Markup only", url: "https://example.com/markup", description: "<br/><hr/>" },
+        {
+          title: "Long",
+          url: "https://example.com/long",
+          description: `${"<b>x</b> ".repeat(400)}tail`,
+        },
+      ]),
+      RETRIEVED_AT,
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]!.url).toBe("https://example.com/long");
+    expect(items[0]!.snippet.length).toBeLessThanOrEqual(1_000);
+    expect(items[0]!.snippet).not.toContain("<b>");
+  });
+
   it("rejects a malformed envelope and bad timestamps with a safe message", () => {
     for (const bad of [{}, { web: {} }, { web: { results: "nope" } }, null, "text"]) {
       try {

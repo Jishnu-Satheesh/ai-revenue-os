@@ -76,6 +76,59 @@ const QUERY_OPERATOR = /\b(?:site|inurl|filetype|cache|related|link)\s*:/gi;
 const PROMPT_INJECTION =
   /\b(?:ignore|disregard|forget|override)\b[\s\S]{0,80}\b(?:instruction|instructions|previous|system)\b/gi;
 
+/**
+ * Provider highlight markup and entity coding, decoded for plain-text
+ * display only. Brave wraps matching words in real tags (`<strong>`) and
+ * escapes the rest (`&amp;`, `&#x27;`), so a verbatim snippet paints markup
+ * on screen. Decode first so escaped tags become strippable tags, strip
+ * second so decoded angle brackets never survive as fake markup, then
+ * collapse whitespace. Output stays untrusted text: the panel renders it
+ * escaped, never as HTML.
+ */
+const NAMED_PREVIEW_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+function decodePreviewEntities(value: string): string {
+  const numeric = value
+    .replace(/&#(\d+);/g, (match, digits: string) => {
+      const code = Number(digits);
+      if (!Number.isInteger(code) || code < 1 || code > 0x10ffff) return match;
+      if (code >= 0xd800 && code <= 0xdfff) return match;
+      try {
+        return String.fromCodePoint(code);
+      } catch {
+        return match;
+      }
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (match, digits: string) => {
+      const code = Number.parseInt(digits, 16);
+      if (!Number.isInteger(code) || code < 1 || code > 0x10ffff) return match;
+      if (code >= 0xd800 && code <= 0xdfff) return match;
+      try {
+        return String.fromCodePoint(code);
+      } catch {
+        return match;
+      }
+    });
+  return numeric.replace(
+    /&(amp|lt|gt|quot|apos|nbsp);/g,
+    (match, name: string) => NAMED_PREVIEW_ENTITIES[name] ?? match,
+  );
+}
+
+function cleanPreviewText(value: string): string {
+  return decodePreviewEntities(value)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function safePhrase(value: string): string {
   const clean = value
     .replace(/[\u0000-\u001F\u007F]/g, " ")
@@ -241,12 +294,12 @@ export function parseLivePreviewResponse(
 
     const rawTitle = (result.data.title ?? "").trim();
     if (rawTitle.length === 0) continue;
-    const title = rawTitle.slice(0, 200).trim();
+    const title = cleanPreviewText(rawTitle).slice(0, 200).trim();
     if (title.length === 0) continue;
 
     const rawSnippet = (result.data.description ?? "").trim();
     if (rawSnippet.length === 0) continue;
-    const snippet = rawSnippet.slice(0, 1_000).trim();
+    const snippet = cleanPreviewText(rawSnippet).slice(0, 1_000).trim();
     if (snippet.length === 0) continue;
 
     const normalized = tryNormalizePreviewCitationUrl(result.data.url);

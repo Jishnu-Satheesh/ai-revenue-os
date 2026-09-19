@@ -137,9 +137,19 @@ export const RESEARCH_PROVIDER_BLOCKER_CODES = [
 
 export type ResearchProviderBlockerCode = (typeof RESEARCH_PROVIDER_BLOCKER_CODES)[number];
 
+/**
+ * Providers the market-research pipeline may qualify. Brave remains for the
+ * ephemeral live preview and legacy provenance; TinyFish is the durable
+ * research provider once its agreement, rights, rates, credential, model
+ * bounds, and canary are staged. Unknown ids fail closed at parse time.
+ */
+export const RESEARCH_PROVIDER_IDS = ["brave", "tinyfish"] as const;
+
+export type ResearchProviderId = (typeof RESEARCH_PROVIDER_IDS)[number];
+
 export const researchProviderQualificationSchema = z
   .object({
-    provider: z.literal("brave"),
+    provider: z.enum(RESEARCH_PROVIDER_IDS),
     available: z.boolean(),
     blockers: z.array(z.string()),
   })

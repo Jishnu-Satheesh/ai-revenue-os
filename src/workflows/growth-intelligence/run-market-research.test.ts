@@ -304,6 +304,10 @@ function dependencies(overrides = {}) {
       pipelineStage: "synthesis_failed" as const,
       replayed: false,
     })),
+    failPipeline: vi.fn(async () => ({
+      pipelineStage: "research_failed" as const,
+      replayed: false,
+    })),
     appendEvent: vi.fn(),
   };
   const currentSources = { load: vi.fn(async () => [] as string[]) };
@@ -520,6 +524,40 @@ describe("runMarketResearch profile and request reloading", () => {
     expect(result).toEqual({ outcome: "failed", code: "EXTRACTION_UNAVAILABLE", runId: null });
     expect(deps.evidence.begin).not.toHaveBeenCalled();
     expect(deps.adapter.searchAndFetch).not.toHaveBeenCalled();
+  });
+
+  it("moves a bound pipeline to research_failed with the request, so the workspace stops reporting progress", async () => {
+    const deps = dependencies({ extraction: undefined });
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    deps.requests.load.mockResolvedValueOnce({ ...requestView, pipelineId });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "failed", code: "EXTRACTION_UNAVAILABLE", runId: null });
+    expect(deps.requests.fail).toHaveBeenCalledWith({
+      organizationId,
+      requestId,
+      claimToken: expect.any(String),
+      safeFailureCode: "EXTRACTION_UNAVAILABLE",
+    });
+    expect(deps.evidence.failPipeline).toHaveBeenCalledWith({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken: expect.any(String),
+      runId: null,
+      failureCode: "EXTRACTION_UNAVAILABLE",
+    });
+  });
+
+  it("leaves legacy requests without pipeline lineage on the request-only failure path", async () => {
+    const deps = dependencies({ extraction: undefined });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "failed", code: "EXTRACTION_UNAVAILABLE", runId: null });
+    expect(deps.requests.fail).toHaveBeenCalledOnce();
+    expect(deps.evidence.failPipeline).not.toHaveBeenCalled();
   });
 
   it("refuses business evidence changes because synthesis owns them now", async () => {

@@ -618,4 +618,35 @@ describe("Market Evidence repository pipeline handoff", () => {
       expect.objectContaining({ p_safe_failure_code: "SYNTHESIS_NO_VALID_CANDIDATE" }),
     );
   });
+
+  it("fails research pipelines through the fenced pipeline fail path, with or without a run row", async () => {
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    const rpc = vi.fn(async () => ({
+      data: { pipelineStage: "research_failed", replayed: false },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const withoutRun = await repository.failPipeline({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken,
+      runId: null,
+      failureCode: "EXTRACTION_UNAVAILABLE",
+    });
+
+    expect(withoutRun).toEqual({ pipelineStage: "research_failed", replayed: false });
+    expect(rpc).toHaveBeenCalledWith(
+      "fail_market_research_pipeline",
+      expect.objectContaining({
+        p_organization_id: organizationId,
+        p_pipeline_id: pipelineId,
+        p_request_id: requestId,
+        p_claim_token: claimToken,
+        p_market_research_run_id: null,
+        p_safe_failure_code: "EXTRACTION_UNAVAILABLE",
+      }),
+    );
+  });
 });

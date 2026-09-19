@@ -14,6 +14,7 @@ import {
 } from "@/modules/growth-intelligence/application/api-schemas";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
 import { createMarketProfileService } from "@/modules/growth-intelligence/application/profile-service";
+import { wakeBranchResearchDispatch } from "@/modules/growth-intelligence/application/dispatch";
 import { createAuthenticatedMarketProfileRepository } from "@/modules/growth-intelligence/infrastructure/profile-repository";
 
 export async function POST(
@@ -64,6 +65,12 @@ export async function POST(
       idempotencyKey: body.idempotencyKey,
       correlationId,
     });
+    if (research.outcome === "started") {
+      // Best-effort wake: a bare operator start carries no fresh report, so
+      // without this the request waits for the next report to land. A lost
+      // wake only delays pickup; it never fails this response.
+      await wakeBranchResearchDispatch({ organizationId, correlationId });
+    }
     const response = NextResponse.json(
       { research, correlationId },
       { status: research.outcome === "started" ? 201 : 200 },

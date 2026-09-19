@@ -29,6 +29,7 @@ export type {
 } from "@/domain/growth-intelligence/research-pipeline";
 export {
   RESEARCH_PROVIDER_BLOCKER_CODES,
+  RESEARCH_PROVIDER_IDS,
   RESEARCH_PROVIDER_REQUIRED_USES,
   isResearchProviderQualified,
   isResearchSourceEligibleForSynthesis,
@@ -51,6 +52,7 @@ export type {
   ResearchErasureReason,
   ResearchExcerptProvenance,
   ResearchProviderBlockerCode,
+  ResearchProviderId,
   ResearchProviderQualification,
   ResearchProviderRequiredUse,
   ResearchQuote,

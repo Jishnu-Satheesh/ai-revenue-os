@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   startBranchResearch: vi.fn(),
   createRepository: vi.fn(() => ({ repository: true })),
   warn: vi.fn(),
+  wakeDispatch: vi.fn(),
 }));
 
 vi.mock("@/lib/api/organization-context", () => ({
@@ -25,6 +26,9 @@ vi.mock("@/modules/growth-intelligence/infrastructure/profile-repository", () =>
 }));
 vi.mock("@/modules/growth-intelligence/application/profile-service", () => ({
   createMarketProfileService: () => ({ startBranchResearch: mocks.startBranchResearch }),
+}));
+vi.mock("@/modules/growth-intelligence/application/dispatch", () => ({
+  wakeBranchResearchDispatch: mocks.wakeDispatch,
 }));
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: vi.fn() }),
@@ -146,6 +150,21 @@ describe("POST Market Profile branch research start", () => {
     });
     expect(payload.correlationId).toBe(correlationId);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("wakes the dispatcher on a fresh start, but not when joining existing work", async () => {
+    await post(requestBody());
+    expect(mocks.wakeDispatch).toHaveBeenCalledWith({ organizationId, correlationId });
+
+    vi.clearAllMocks();
+    mocks.startBranchResearch.mockResolvedValue({
+      outcome: "existing_active",
+      profileVersionId,
+      pipelineId,
+      researchRequestId,
+    });
+    await post(requestBody({ idempotencyKey: "branch-research-0002" }));
+    expect(mocks.wakeDispatch).not.toHaveBeenCalled();
   });
 
   it("returns 200 for an identical active scope instead of a second pipeline", async () => {

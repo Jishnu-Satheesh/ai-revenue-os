@@ -1,11 +1,10 @@
 import "server-only";
 
-import { z } from "zod";
-
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import {
   isResearchProviderQualified,
   researchProviderQualificationSchema,
+  type ResearchProviderId,
   type ResearchProviderQualification,
 } from "@/domain/growth-intelligence/research-budget";
 
@@ -42,12 +41,27 @@ export type ResearchProviderQualificationCheck = {
  * Reads the staged provider qualification through the safe availability RPC.
  * The RPC answers with blocker codes only; qualification rows, credentials
  * and contract text stay outside every grant by design.
+ *
+ * The optional provider lane defaults to "brave": the Brave lane calls the
+ * legacy check_research_provider_qualification RPC with {} exactly as
+ * before. Any other provider calls
+ * public.check_research_provider_qualification_for with { p_provider }.
  */
-export function createResearchProviderQualification(persistence: ResearchQualificationPersistence) {
+export function createResearchProviderQualification(
+  persistence: ResearchQualificationPersistence,
+  provider: ResearchProviderId = "brave",
+) {
+  const rpcName =
+    provider === "brave"
+      ? "check_research_provider_qualification"
+      : "check_research_provider_qualification_for";
+  const rpcArgs: Record<string, unknown> =
+    provider === "brave" ? {} : { p_provider: provider };
+
   async function check(): Promise<ResearchProviderQualificationCheck> {
     let result: { data: unknown; error: unknown };
     try {
-      result = await persistence.rpc("check_research_provider_qualification", {});
+      result = await persistence.rpc(rpcName, rpcArgs);
     } catch {
       throw new GrowthIntelligenceError(
         "RESEARCH_PROVIDER_NOT_QUALIFIED",

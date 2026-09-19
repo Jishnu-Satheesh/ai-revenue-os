@@ -58,6 +58,90 @@ describe("research provider qualification", () => {
     ).rejects.toBeInstanceOf(GrowthIntelligenceError);
   });
 
+  it("keeps the explicit brave lane on the legacy RPC with {}", async () => {
+    const { client, rpc } = persistenceFor({
+      provider: "brave",
+      available: true,
+      blockers: [],
+    });
+
+    const { qualification } = await createResearchProviderQualification(client, "brave").check();
+
+    expect(qualification.provider).toBe("brave");
+    expect(rpc).toHaveBeenCalledWith("check_research_provider_qualification", {});
+    await expect(
+      createResearchProviderQualification(client, "brave").assertQualified(),
+    ).resolves.toBeUndefined();
+  });
+
+  it("checks the tinyfish lane through the _for RPC with the provider arg", async () => {
+    const { client, rpc } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+
+    const { qualification, blockers } = await createResearchProviderQualification(
+      client,
+      "tinyfish",
+    ).check();
+
+    expect(qualification.provider).toBe("tinyfish");
+    expect(qualification.available).toBe(true);
+    expect(blockers).toEqual([]);
+    expect(rpc).toHaveBeenCalledWith("check_research_provider_qualification_for", {
+      p_provider: "tinyfish",
+    });
+    await expect(
+      createResearchProviderQualification(client, "tinyfish").assertQualified(),
+    ).resolves.toBeUndefined();
+  });
+
+  it("maps tinyfish blockers and refuses assertQualified", async () => {
+    const { client, rpc } = persistenceFor({
+      provider: "tinyfish",
+      available: false,
+      blockers: ["credential_missing", "controlled_canary_missing"],
+    });
+
+    const { qualification, blockers } = await createResearchProviderQualification(
+      client,
+      "tinyfish",
+    ).check();
+
+    expect(qualification.available).toBe(false);
+    expect(blockers).toEqual(["credential_missing", "controlled_canary_missing"]);
+    expect(rpc).toHaveBeenCalledWith("check_research_provider_qualification_for", {
+      p_provider: "tinyfish",
+    });
+    await expect(
+      createResearchProviderQualification(client, "tinyfish").assertQualified(),
+    ).rejects.toEqual(expect.objectContaining({ code: "RESEARCH_PROVIDER_NOT_QUALIFIED" }));
+  });
+
+  it("fails the tinyfish lane closed on transport failure and malformed answers", async () => {
+    const failing = persistenceFor(null, { message: "connection reset" });
+    await expect(
+      createResearchProviderQualification(failing.client, "tinyfish").assertQualified(),
+    ).rejects.toBeInstanceOf(GrowthIntelligenceError);
+
+    const malformed = persistenceFor({ provider: "tinyfish", available: true });
+    await expect(
+      createResearchProviderQualification(malformed.client, "tinyfish").assertQualified(),
+    ).rejects.toBeInstanceOf(GrowthIntelligenceError);
+  });
+
+  it("fails closed on an unknown-provider answer", async () => {
+    const unknown = persistenceFor({ provider: "unknown", available: true, blockers: [] });
+
+    await expect(
+      createResearchProviderQualification(unknown.client, "tinyfish").check(),
+    ).rejects.toEqual(expect.objectContaining({ code: "RESEARCH_PROVIDER_NOT_QUALIFIED" }));
+    await expect(
+      createResearchProviderQualification(unknown.client, "tinyfish").assertQualified(),
+    ).rejects.toBeInstanceOf(GrowthIntelligenceError);
+  });
+
   it("describes blockers with safe copy and no secrets", () => {
     const copy = describeQualificationBlockers([
       "credential_missing",
