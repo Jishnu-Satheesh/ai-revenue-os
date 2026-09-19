@@ -447,20 +447,21 @@ export function buildMarketWatch(input: MarketWatchInput): MarketWatchView {
 /**
  * Slice 4: report-led project list views for Market Watch.
  *
- * Projects, brief revisions and reports are composed into one row per
- * project. The row state is plain text over durable rows only — project
- * lifecycle, the latest brief revision pin, and persisted reports. There
- * are no durable update-status rows yet (Slice 7 owns them), so a pinned
- * revision without a report reads as one honest `researching` state: the
- * view never invents queued-vs-researching splits or completion
- * percentages, and a failed update is visible only through its retained
- * prior report until lifecycle rows land.
+ * Projects, brief revisions, reports and terminal update outcomes are
+ * composed into one row per project. The row state is plain text over
+ * durable rows only — project lifecycle, the latest brief revision pin,
+ * persisted reports, and terminally failed updates. A pinned revision
+ * whose update terminally failed with no report reads as an honest
+ * `failed` state instead of claiming background work is still running:
+ * the view never invents queued-vs-researching splits or completion
+ * percentages.
  */
 
 export type MarketWatchProjectDisplayState =
   | "ready"
   | "researching"
   | "paused"
+  | "failed"
   | "needs_attention";
 
 export const MARKET_WATCH_PROJECT_DISPLAY_LABEL: Record<
@@ -470,7 +471,13 @@ export const MARKET_WATCH_PROJECT_DISPLAY_LABEL: Record<
   ready: "Ready to review",
   researching: "Researching",
   paused: "Monitoring paused",
+  failed: "Research could not finish",
   needs_attention: "Needs attention",
+};
+
+export type MarketWatchProjectFailedUpdate = {
+  updateId: string;
+  stage: "research_failed" | "synthesis_failed";
 };
 
 export type MarketWatchProjectReportSummary = {
@@ -526,17 +533,19 @@ export const MARKET_WATCH_PROJECT_STATUS_FILTERS: readonly MarketWatchProjectSta
 
 /**
  * Derive one row's display state from durable rows only. Ready means the
- * latest brief scope already has a persisted report; researching means the
- * latest scope is pinned to background work with no report yet; paused
- * follows the project lifecycle; needs attention means an active project
- * with nothing pinned and nothing persisted, so the named next action is
- * to start research.
+ * latest brief scope already has a persisted report; failed means the latest
+ * pinned scope terminally failed with no report, so the row stops claiming
+ * background work is still running; researching means the latest scope is
+ * pinned to background work with no report yet; paused follows the project
+ * lifecycle; needs attention means an active project with nothing pinned
+ * and nothing persisted, so the named next action is to start research.
  */
 export function resolveMarketWatchProjectState(input: {
   lifecycle: MarketWatchProjectRecord["lifecycle"];
   latestRevision: MarketWatchProjectRevisionSummary | null;
   latestReport: MarketWatchProjectReportSummary | null;
   reportedRevisionIds: ReadonlySet<string>;
+  failedUpdate: MarketWatchProjectFailedUpdate | null;
 }): MarketWatchProjectDisplayState {
   if (input.lifecycle === "paused" || input.lifecycle === "archived") return "paused";
   if (
@@ -544,6 +553,13 @@ export function resolveMarketWatchProjectState(input: {
     input.reportedRevisionIds.has(input.latestRevision.revisionId)
   ) {
     return "ready";
+  }
+  if (
+    input.failedUpdate !== null &&
+    input.latestRevision !== null &&
+    input.latestRevision.pinnedToUpdateId === input.failedUpdate.updateId
+  ) {
+    return "failed";
   }
   if (input.latestRevision !== null && input.latestRevision.pinnedToUpdateId !== null) {
     return "researching";
@@ -557,7 +573,10 @@ export function buildMarketWatchProjectList(input: {
   projects: readonly MarketWatchProjectRecord[];
   reportsByProject: ReadonlyMap<string, readonly MarketWatchProjectReportSummary[]>;
   revisionsByProject: ReadonlyMap<string, readonly MarketWatchProjectRevisionSummary[]>;
+  failedUpdatesByProject?: ReadonlyMap<string, readonly MarketWatchProjectFailedUpdate[]>;
 }): MarketWatchProjectListItem[] {
+  const failedByProject: ReadonlyMap<string, readonly MarketWatchProjectFailedUpdate[]> =
+    input.failedUpdatesByProject ?? new Map<string, readonly MarketWatchProjectFailedUpdate[]>();
   return input.projects.map((project) => {
     const reports = [...(input.reportsByProject.get(project.projectId) ?? [])].sort((left, right) =>
       left.createdAt < right.createdAt ? 1 : left.createdAt > right.createdAt ? -1 : 0,
@@ -568,11 +587,21 @@ export function buildMarketWatchProjectList(input: {
     const latestReport = reports[0] ?? null;
     const latestRevision = revisions[0] ?? null;
     const reportedRevisionIds = new Set(reports.map((report) => report.briefRevisionId));
+    const pinnedUpdateId = latestRevision?.pinnedToUpdateId ?? null;
+    const failedUpdate =
+      pinnedUpdateId === null
+        ? null
+        : ((failedByProject.get(project.projectId) ?? []).find(
+            (update) =>
+              update.updateId === pinnedUpdateId &&
+              (update.stage === "research_failed" || update.stage === "synthesis_failed"),
+          ) ?? null);
     const displayState = resolveMarketWatchProjectState({
       lifecycle: project.lifecycle,
       latestRevision,
       latestReport,
       reportedRevisionIds,
+      failedUpdate,
     });
     // Ready rows feature their report inline, so no separate prior link is
     // needed; every other row retains the newest persisted report, if any.
@@ -609,6 +638,7 @@ export function countMarketWatchProjectsByStatus(
       case "paused":
         counts.paused += 1;
         break;
+      case "failed":
       case "needs_attention":
         counts.needs_attention += 1;
         break;
@@ -650,7 +680,7 @@ export function filterMarketWatchProjects(
         if (item.displayState !== "paused") return false;
         break;
       case "needs_attention":
-        if (item.displayState !== "needs_attention") return false;
+        if (item.displayState !== "needs_attention" && item.displayState !== "failed") return false;
         break;
     }
     if (needle.length === 0) return true;

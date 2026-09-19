@@ -79,6 +79,14 @@ const briefRevisionIdRowSchema = z
   .object({ brief_revision_id: z.string().uuid() })
   .passthrough();
 
+const failedUpdateRowSchema = z
+  .object({
+    project_id: z.string().uuid(),
+    update_id: z.string().uuid(),
+    stage: z.enum(["research_failed", "synthesis_failed"]),
+  })
+  .passthrough();
+
 const UUID_ZERO = "00000000-0000-0000-0000-000000000000";
 
 const startBodySchema = z
@@ -230,8 +238,13 @@ export async function GET(
         createdAt: string;
       }[]
     > = {};
+    // Terminally failed updates per project, newest first. A pinned scope
+    // whose update failed with no report reads as failed instead of
+    // claiming research is still running; an unreadable row degrades to
+    // absent (researching) rather than failing the whole list.
+    const failedUpdatesByProject: Record<string, { updateId: string; stage: string }[]> = {};
     if (projectIds.length > 0) {
-      const [reportRows, revisionRows] = await Promise.all([
+      const [reportRows, revisionRows, failedRows] = await Promise.all([
         context.supabase
           .from("growth_intelligence_reports")
           .select("project_id,brief_revision_id,report_version_id,review_state,content,created_at")
@@ -245,6 +258,14 @@ export async function GET(
           .eq("organization_id", organizationId)
           .in("project_id", projectIds)
           .order("revision_number", { ascending: false })
+          .limit(projectIds.length * 5),
+        context.supabase
+          .from("growth_intelligence_monitoring_updates")
+          .select("project_id,update_id,stage")
+          .eq("organization_id", organizationId)
+          .in("project_id", projectIds)
+          .in("stage", ["research_failed", "synthesis_failed"])
+          .order("updated_at", { ascending: false })
           .limit(projectIds.length * 5),
       ]);
       const reportData = (reportRows as { data: unknown }).data;
@@ -281,6 +302,17 @@ export async function GET(
           revisionsByProject[parsed.data.project_id] = list;
         }
       }
+      const failedData = (failedRows as { data: unknown }).data;
+      if (Array.isArray(failedData)) {
+        for (const row of failedData) {
+          const parsed = failedUpdateRowSchema.safeParse(row);
+          if (!parsed.success) continue;
+          const list = failedUpdatesByProject[parsed.data.project_id] ?? [];
+          if (list.length >= 5) continue;
+          list.push({ updateId: parsed.data.update_id, stage: parsed.data.stage });
+          failedUpdatesByProject[parsed.data.project_id] = list;
+        }
+      }
     }
 
     const response = NextResponse.json({
@@ -290,6 +322,7 @@ export async function GET(
       })),
       reportsByProject,
       revisionsByProject,
+      failedUpdatesByProject,
       correlationId,
     });
     response.headers.set("x-correlation-id", correlationId);

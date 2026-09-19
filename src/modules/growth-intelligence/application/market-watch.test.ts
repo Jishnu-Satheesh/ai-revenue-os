@@ -8,6 +8,7 @@ import {
   filterMarketWatchProjects,
   selectFeaturedMarketWatchReport,
   type MarketWatchInput,
+  type MarketWatchProjectFailedUpdate,
   type MarketWatchProjectListItem,
   type MarketWatchProjectRecord,
   type MarketWatchProjectReportSummary,
@@ -347,11 +348,13 @@ function projectList(
   records: MarketWatchProjectRecord[],
   reports: Record<string, MarketWatchProjectReportSummary[]> = {},
   revisions: Record<string, MarketWatchProjectRevisionSummary[]> = {},
+  failed: Record<string, MarketWatchProjectFailedUpdate[]> = {},
 ): MarketWatchProjectListItem[] {
   return buildMarketWatchProjectList({
     projects: records,
     reportsByProject: new Map(Object.entries(reports)),
     revisionsByProject: new Map(Object.entries(revisions)),
+    failedUpdatesByProject: new Map(Object.entries(failed)),
   });
 }
 
@@ -409,6 +412,57 @@ describe("buildMarketWatchProjectList", () => {
     expect(item!.stateLabel).toBe("Needs attention");
     expect(item!.latestReport).toBeNull();
     expect(item!.priorReport).toBeNull();
+  });
+
+  it("marks a pinned scope whose update terminally failed with no report as failed, not researching", () => {
+    const record = projectRecord();
+    const revision = revisionSummary();
+    const [item] = projectList(
+      [record],
+      {},
+      { [record.projectId]: [revision] },
+      {
+        [record.projectId]: [{ updateId: revision.pinnedToUpdateId!, stage: "research_failed" }],
+      },
+    );
+
+    expect(item!.displayState).toBe("failed");
+    expect(item!.stateLabel).toBe("Research could not finish");
+    expect(item!.priorReport).toBeNull();
+  });
+
+  it("keeps a failed update for an older pin from shadowing the latest researching scope", () => {
+    const record = projectRecord();
+    const latest = revisionSummary({
+      revisionId: "66000000-0000-4000-8000-000000000066",
+      revisionNumber: 2,
+      pinnedToUpdateId: "67000000-0000-4000-8000-000000000067",
+    });
+    const [item] = projectList(
+      [record],
+      {},
+      { [record.projectId]: [latest] },
+      {
+        [record.projectId]: [
+          { updateId: "62000000-0000-4000-8000-000000000062", stage: "research_failed" },
+        ],
+      },
+    );
+
+    expect(item!.displayState).toBe("researching");
+  });
+
+  it("keeps a reported revision ready even when its update also settled terminally", () => {
+    const record = projectRecord();
+    const revision = revisionSummary();
+    const [item] = projectList(
+      [record],
+      { [record.projectId]: [reportSummary({ briefRevisionId: revision.revisionId })] },
+      { [record.projectId]: [revision] },
+      { [record.projectId]: [{ updateId: revision.pinnedToUpdateId!, stage: "research_failed" }] },
+    );
+
+    expect(item!.displayState).toBe("ready");
   });
 
   it("never invents progress figures or promises on any row", () => {
@@ -509,5 +563,30 @@ describe("filterMarketWatchProjects", () => {
       status: "in_progress",
     });
     expect(selectFeaturedMarketWatchReport(withoutReady)).toBeNull();
+  });
+
+  it("counts failed rows under needs attention and keeps them out of in progress", () => {
+    const record = projectRecord({ projectId: "53000000-0000-4000-8000-000000000053" });
+    const revision = revisionSummary();
+    const failed = projectList(
+      [record],
+      {},
+      { [record.projectId]: [revision] },
+      {
+        [record.projectId]: [{ updateId: revision.pinnedToUpdateId!, stage: "synthesis_failed" }],
+      },
+    );
+
+    expect(countMarketWatchProjectsByStatus(failed)).toMatchObject({
+      all: 1,
+      in_progress: 0,
+      needs_attention: 1,
+    });
+    expect(
+      filterMarketWatchProjects(failed, { branchId: null, search: "", status: "needs_attention" }),
+    ).toHaveLength(1);
+    expect(
+      filterMarketWatchProjects(failed, { branchId: null, search: "", status: "in_progress" }),
+    ).toHaveLength(0);
   });
 });

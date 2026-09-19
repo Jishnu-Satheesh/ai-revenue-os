@@ -141,23 +141,6 @@ function viewProps(overrides: Record<string, unknown> = {}) {
     items: items(),
     branches,
     timeZone: "Asia/Dubai",
-    businessInsights: [
-      {
-        id: "insight-1",
-        title: "Check delivery readiness before an event offer",
-        detail: "Review preparation times and cancellation reasons alongside expected demand.",
-        scopeLabel: "Downtown · Channel reports",
-        evidencePeriodLabel: "1–31 Aug 2026",
-      },
-    ],
-    contextGaps: [
-      {
-        id: "gap-1",
-        title: "Marina coverage",
-        scopeLabel: "Marina",
-        nextAction: "Add recent channel reports",
-      },
-    ],
     onNewResearch: vi.fn(),
     ...overrides,
   };
@@ -265,20 +248,16 @@ describe("MarketWatchProjectsView", () => {
     expect(onNewResearch).toHaveBeenCalled();
   });
 
-  it("renders business insights with named evidence periods and the grouped next-report area", () => {
+  it("heads the list as Research projects without duplicating tab sections", () => {
     render(<MarketWatchProjectsView {...viewProps()} />);
 
-    expect(screen.getByText("Business insights")).toBeTruthy();
-    expect(screen.getByText(/1–31 Aug 2026/)).toBeTruthy();
-    expect(screen.getByText("Improve the next report")).toBeTruthy();
-    expect(screen.getByText("Add recent channel reports")).toBeTruthy();
-  });
-
-  it("names next actions when insights and gaps are both empty", () => {
-    render(<MarketWatchProjectsView {...viewProps({ businessInsights: [], contextGaps: [] })} />);
-
-    expect(screen.getByText(/Connect and analyse a channel/)).toBeTruthy();
-    expect(screen.getByText(/Nothing missing right now/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Research projects" })).toBeTruthy();
+    // Insights and data gaps live in their own tab sections with triage
+    // controls; this list keeps no second copies.
+    expect(screen.queryByText("Business insights")).toBeNull();
+    expect(screen.queryByText("Improve the next report")).toBeNull();
+    expect(screen.queryByText("Check delivery readiness before an event offer")).toBeNull();
+    expect(screen.queryByText("Add recent channel reports")).toBeNull();
   });
 
   it("reflows long names without clipped controls", () => {
@@ -356,8 +335,6 @@ describe("MarketWatchProjectsSection", () => {
       organizationId: ORGANIZATION,
       branches,
       timeZone: "Asia/Dubai",
-      businessInsights: [],
-      contextGaps: [],
       evidencePeriods: [],
       canManage: true,
       ...overrides,
@@ -485,8 +462,6 @@ describe("MarketWatchProjectsSection report reader wiring", () => {
       organizationId: ORGANIZATION,
       branches,
       timeZone: "Asia/Dubai",
-      businessInsights: [],
-      contextGaps: [],
       evidencePeriods: [],
       canManage: true,
       ...overrides,

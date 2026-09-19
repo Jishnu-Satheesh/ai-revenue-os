@@ -134,12 +134,15 @@ export function orderDueMonitoringProjectsFairly(input: {
 }
 
 /**
- * Cadence sweep for recurring monitoring. Due-ness timing belongs to the
- * injected lister; this caller re-verifies lifecycle eligibility (active,
- * recurring, within end date) and starts through the converging path, so a
- * repeat sweep joins rather than duplicates. Starts are interleaved fairly
- * across organizations, and a joined start whose incoming scope differs
- * from the active record carries scopeDrifted for Slice 4's notice.
+ * Cadence sweep for recurring monitoring plus one-time recovery. Due-ness
+ * timing belongs to the injected lister; this caller re-verifies lifecycle
+ * eligibility (active, recurring, within end date) and starts through the
+ * converging path, so a repeat sweep joins rather than duplicates. One-time
+ * candidates arrive pre-filtered to never-completed work and join the same
+ * converging path, so a lost start nudge is recovered instead of stranding
+ * the project. Starts are interleaved fairly across organizations, and a
+ * joined start whose incoming scope differs from the active record carries
+ * scopeDrifted for Slice 4's notice.
  */
 export async function enqueueDueMonitoringUpdates(
   input: unknown,
@@ -182,10 +185,18 @@ export async function enqueueDueMonitoringUpdates(
       continue;
     }
     let eligible = false;
-    try {
-      eligible = isProjectEligibleForScheduledStart(parsedProject.data, now().toISOString());
-    } catch {
-      eligible = false;
+    if (parsedProject.data.mode === "one-time") {
+      // One-time projects carry no schedule and no due time: the lister
+      // pre-excluded completed ones (report row or terminal update), so an
+      // active brief here is still-owed work, never a re-run. Missing brief
+      // scope still skips honestly below.
+      eligible = parsedProject.data.lifecycle === "active";
+    } else {
+      try {
+        eligible = isProjectEligibleForScheduledStart(parsedProject.data, now().toISOString());
+      } catch {
+        eligible = false;
+      }
     }
     if (!eligible) {
       skipped += 1;

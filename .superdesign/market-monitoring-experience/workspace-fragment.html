@@ -1,0 +1,25 @@
+<section id="panel-insights" role="tabpanel" aria-labelledby="tab-insights" hidden class="pt-7 mw-workspace">
+  <div class="mw-section-heading"><div><div class="mw-eyebrow"><iconify-icon icon="lucide:radar"></iconify-icon> YOUR MARKET, IN CONTEXT</div><h2>Market Watch</h2><p>Research your market. Review what matters for your business.</p></div></div>
+  <div class="mw-toolbar">
+    <label class="mw-location"><iconify-icon icon="lucide:map-pin"></iconify-icon><span class="sr-only">Research location</span><select id="mw-location" aria-label="Research location"><option value="all">All locations</option><option value="downtown">Downtown</option><option value="marina">Marina</option></select></label>
+    <span class="mw-toolbar-note">Each question has its own research and reports.</span>
+    <label class="mw-search"><iconify-icon icon="lucide:search"></iconify-icon><span class="sr-only">Find a research project</span><input id="mw-search" aria-label="Find a research project" type="search" placeholder="Find a research project…"></label>
+  </div>
+  <div class="mw-filters" aria-label="Filter research projects"><button data-mw-filter="all" aria-pressed="true">All projects <span>5</span></button><button data-mw-filter="review" aria-pressed="false">Ready to review <span>1</span></button><button data-mw-filter="running" aria-pressed="false">In progress <span>2</span></button><button data-mw-filter="attention" aria-pressed="false">Needs attention <span>1</span></button><button data-mw-filter="paused" aria-pressed="false">Paused <span>1</span></button></div>
+  <div id="mw-projects" aria-live="polite"></div>
+  <div class="mw-lower">
+    <section class="mw-business" aria-labelledby="mw-business-title"><div class="mw-minor-heading"><div><h2 id="mw-business-title">Business insights</h2><p>What your own business evidence is telling us.</p></div><span class="mw-small-tag">Internal evidence</span></div>
+      <article class="mw-insight"><div class="mw-square"><iconify-icon icon="lucide:shopping-bag"></iconify-icon></div><div><h3>Check delivery readiness before an event offer</h3><p>Review preparation times and cancellation reasons alongside expected demand.</p><div class="mw-evidence-line">Downtown · Channel reports · 1–31 Aug 2026</div><button class="link" data-mw-action="evidence" data-mw-id="delivery">Inspect evidence <iconify-icon icon="lucide:arrow-up-right"></iconify-icon></button></div></article>
+      <article class="mw-insight"><div class="mw-square"><iconify-icon icon="lucide:messages-square"></iconify-icon></div><div><h3>Bring recent customer feedback into the next brief</h3><p>Compare what customers like with the issues they mention repeatedly.</p><div class="mw-evidence-line">All locations · Business Memory · Updated 10 Sep 2026</div><button class="link" data-mw-action="evidence" data-mw-id="feedback">Inspect evidence <iconify-icon icon="lucide:arrow-up-right"></iconify-icon></button></div></article>
+    </section>
+    <aside class="mw-context-card"><div class="mw-square"><iconify-icon icon="lucide:notebook-pen"></iconify-icon></div><h3>Improve the next report</h3><p>A little more business context can make the advice more useful.</p><div class="mw-context-item"><iconify-icon icon="lucide:circle-dashed"></iconify-icon><div><strong>Confirm event capacity</strong><span>Downtown · Orders the team can fulfil</span></div></div><div class="mw-context-item"><iconify-icon icon="lucide:circle-dashed"></iconify-icon><div><strong>Add recent channel reports</strong><span>Marina · Latest period is missing</span></div></div><button class="link" data-mw-action="context">Review missing context <iconify-icon icon="lucide:arrow-right"></iconify-icon></button></aside>
+  </div>
+  <p class="mw-preview-foot">Fictional examples for design review. Preview changes reset when this page reloads.</p>
+</section>
+
+<dialog id="mw-dialog" class="mw-dialog" aria-labelledby="mw-dialog-title">
+  <header class="mw-dialog-header"><div><p id="mw-dialog-kicker" class="mw-eyebrow">MARKET WATCH</p><h2 id="mw-dialog-title">New research</h2><p id="mw-dialog-subtitle">A useful answer starts with a clear question.</p></div><button class="mw-icon-button" aria-label="Close research dialog" data-mw-action="close"><iconify-icon icon="lucide:x"></iconify-icon></button></header>
+  <nav id="mw-steps" class="mw-steps" aria-label="Research setup steps"></nav>
+  <div id="mw-dialog-body" class="mw-dialog-body"></div>
+  <footer id="mw-dialog-footer" class="mw-dialog-footer"></footer>
+</dialog>

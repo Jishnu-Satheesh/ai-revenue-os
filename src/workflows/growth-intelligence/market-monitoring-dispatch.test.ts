@@ -89,15 +89,50 @@ describe("enqueueDueMonitoringUpdates", () => {
     expect(dispatch.nudges).toHaveLength(1);
   });
 
-  it("skips paused, one-time, past-end and scope-blind candidates honestly", async () => {
+  it("recovers never-completed one-time projects through the converging path", async () => {
+    const { projects, updates, dispatch, events } = harness();
+    const candidate = dueProject({
+      projectId: "81000000-0000-4000-8000-000000000009",
+      mode: "one-time",
+      schedule: undefined,
+    });
+    const result = await enqueueDueMonitoringUpdates(
+      { correlationId: FIXTURE_IDS.correlationId, limit: 25 },
+      {
+        listDue: async () => [candidate],
+        projects,
+        updates,
+        dispatch,
+        events,
+        now: () => FIXED_NOW,
+        newCorrelationId: () => "c1000000-0000-4000-8000-000000000001",
+      },
+    );
+    expect(result).toMatchObject({ outcome: "swept", started: 1, skipped: 0 });
+    expect(result.projects).toMatchObject([{ outcome: "started" }]);
+    expect(dispatch.nudges).toHaveLength(1);
+
+    // A repeat sweep joins instead of duplicating paid work or re-nudging.
+    const repeat = await enqueueDueMonitoringUpdates(
+      { correlationId: FIXTURE_IDS.correlationId, limit: 25 },
+      {
+        listDue: async () => [candidate],
+        projects,
+        updates,
+        dispatch,
+        events,
+        now: () => FIXED_NOW,
+        newCorrelationId: () => "c1000000-0000-4000-8000-000000000002",
+      },
+    );
+    expect(repeat).toMatchObject({ started: 0, openedProgress: 1 });
+    expect(dispatch.nudges).toHaveLength(1);
+  });
+
+  it("skips paused, past-end and scope-blind candidates honestly", async () => {
     const { projects, updates, dispatch, events } = harness();
     const candidates = [
       dueProject({ projectId: "81000000-0000-4000-8000-000000000001", lifecycle: "paused" }),
-      dueProject({
-        projectId: "81000000-0000-4000-8000-000000000002",
-        mode: "one-time",
-        schedule: undefined,
-      }),
       dueProject({
         projectId: "81000000-0000-4000-8000-000000000003",
         schedule: { cadence: "weekly", localTime: "07:00", timeZone: "Asia/Dubai", endDate: "2026-09-13" },
@@ -116,15 +151,13 @@ describe("enqueueDueMonitoringUpdates", () => {
         newCorrelationId: () => "c1000000-0000-4000-8000-000000000001",
       },
     );
-    expect(result).toMatchObject({ started: 0, openedProgress: 0, skipped: 4 });
+    expect(result).toMatchObject({ started: 0, openedProgress: 0, skipped: 3 });
     expect(result.projects.map((row) => row.outcome)).toEqual([
-      "skipped",
       "skipped",
       "skipped",
       "skipped",
     ]);
     expect(result.projects.map((row) => (row.outcome === "skipped" ? row.reason : null))).toEqual([
-      "not_due",
       "not_due",
       "not_due",
       "scope_unavailable",

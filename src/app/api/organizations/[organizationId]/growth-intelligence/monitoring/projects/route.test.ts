@@ -98,13 +98,14 @@ function reportContent(overrides: Record<string, unknown> = {}) {
   };
 }
 
-type Db = { branches: unknown[]; reports: unknown[]; revisions: unknown[] };
+type Db = { branches: unknown[]; reports: unknown[]; revisions: unknown[]; updates?: unknown[] };
 
 function supabaseFake(db: Db) {
   const tables: Record<string, keyof Db> = {
     branches: "branches",
     growth_intelligence_reports: "reports",
     growth_intelligence_brief_revisions: "revisions",
+    growth_intelligence_monitoring_updates: "updates",
   };
   return {
     from(table: string) {
@@ -134,7 +135,7 @@ function supabaseFake(db: Db) {
           return builder;
         },
         then(resolve: (value: { data: unknown[]; error: null }) => void) {
-          let rows = [...(db[key] as Record<string, unknown>[])];
+          let rows = [...((db[key] ?? []) as Record<string, unknown>[])];
           for (const filter of filters) {
             rows = rows.filter((row) => row[filter.column] === filter.value);
           }
@@ -324,6 +325,45 @@ describe("monitoring projects GET", () => {
 
     expect(response.status).toBe(403);
     expect(repository.listActiveProjects).not.toHaveBeenCalled();
+  });
+
+  it("serves terminally failed updates beside the list so failed rows stop claiming progress", async () => {
+    const db: Db = {
+      branches: [],
+      reports: [],
+      revisions: [],
+      updates: [
+        {
+          organization_id: ORGANIZATION,
+          project_id: PROJECT,
+          update_id: UPDATE,
+          stage: "research_failed",
+        },
+        {
+          organization_id: ORGANIZATION,
+          project_id: PROJECT,
+          update_id: UPDATE,
+          stage: "queued",
+        },
+      ],
+    };
+    mocks.createProjects.mockImplementation(() =>
+      repositoryFake({ listActiveProjects: vi.fn(async () => [projectSummary()]) }),
+    );
+    contextWith(db);
+
+    const response = await GET(new Request("https://example.test/monitoring/projects"), {
+      params: Promise.resolve({ organizationId: ORGANIZATION }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      failedUpdatesByProject: Record<string, Record<string, unknown>[]>;
+    };
+    // Only the failed stage is served; the queued row never appears.
+    expect(body.failedUpdatesByProject[PROJECT]).toEqual([
+      { updateId: UPDATE, stage: "research_failed" },
+    ]);
   });
 });
 

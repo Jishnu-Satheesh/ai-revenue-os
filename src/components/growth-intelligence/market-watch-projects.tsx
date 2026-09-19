@@ -30,6 +30,7 @@ import {
   filterMarketWatchProjects,
   selectFeaturedMarketWatchReport,
   type MarketWatchProjectListItem,
+  type MarketWatchProjectFailedUpdate,
   type MarketWatchProjectRecord,
   type MarketWatchProjectReportSummary,
   type MarketWatchProjectRevisionSummary,
@@ -40,24 +41,6 @@ export type MarketWatchLocationOption = {
   name: string;
 };
 
-export type MarketWatchBusinessInsight = {
-  id: string;
-  title: string;
-  detail: string;
-  /** Location or source scope, e.g. "Downtown · Channel reports". */
-  scopeLabel: string;
-  /** Named evidence period, e.g. "1–31 Aug 2026". */
-  evidencePeriodLabel: string | null;
-};
-
-export type MarketWatchContextGap = {
-  id: string;
-  title: string;
-  scopeLabel: string;
-  /** The specific next action, e.g. "Add recent channel reports". */
-  nextAction: string;
-};
-
 export type MarketWatchEvidencePeriod = {
   label: string;
 };
@@ -66,6 +49,7 @@ type ProjectsResponse = {
   projects: MarketWatchProjectRecord[];
   reportsByProject: Record<string, MarketWatchProjectReportSummary[]>;
   revisionsByProject: Record<string, MarketWatchProjectRevisionSummary[]>;
+  failedUpdatesByProject?: Record<string, MarketWatchProjectFailedUpdate[]>;
 };
 
 function formatReportDate(value: string, timeZone: string): string {
@@ -110,96 +94,24 @@ export function MarketWatchProjectsSkeleton() {
   );
 }
 
-function BusinessInsights({
-  insights,
-  gaps,
-}: {
-  insights: readonly MarketWatchBusinessInsight[];
-  gaps: readonly MarketWatchContextGap[];
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-6">
-      <section aria-label="Business insights" className="flex min-w-0 flex-col gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Business insights</h2>
-          <p className="text-sm text-muted-foreground">
-            What your own business evidence is telling us.
-          </p>
-        </div>
-        {insights.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No business insights yet. Connect and analyse a channel to ground the next report in
-            your own evidence.
-          </p>
-        ) : null}
-        {insights.map((insight) => (
-          <Card key={insight.id}>
-            <CardContent className="flex min-w-0 flex-col gap-1 py-4">
-              <h3 className="min-w-0 text-sm font-semibold break-words">{insight.title}</h3>
-              <p className="min-w-0 text-sm text-muted-foreground break-words">{insight.detail}</p>
-              <p className="min-w-0 text-xs text-muted-foreground break-words">
-                {insight.scopeLabel}
-                {insight.evidencePeriodLabel ? ` · ${insight.evidencePeriodLabel}` : null}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
-      </section>
-      <section aria-label="Improve the next report" className="flex min-w-0 flex-col gap-3">
-        <Card>
-          <CardContent className="flex min-w-0 flex-col gap-3 py-4">
-            <div>
-              <h3 className="text-sm font-semibold">Improve the next report</h3>
-              <p className="text-xs text-muted-foreground">
-                A little more business context can make the advice more useful.
-              </p>
-            </div>
-            {gaps.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nothing missing right now. New gaps appear here with their next action.
-              </p>
-            ) : (
-              <ul className="flex min-w-0 flex-col gap-2">
-                {gaps.map((gap) => (
-                  <li
-                    key={gap.id}
-                    className="flex min-w-0 flex-col gap-0.5 border-t pt-2 first:border-t-0 first:pt-0"
-                  >
-                    <span className="min-w-0 text-sm font-medium break-words">{gap.nextAction}</span>
-                    <span className="min-w-0 text-xs text-muted-foreground break-words">
-                      {gap.title} · {gap.scopeLabel}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </section>
-    </div>
-  );
-}
-
 /**
- * Report-led Market Watch list: filters, featured ready report, compact
- * project rows, business insights and the grouped next-report area. All
- * content arrives through props — branch names, questions, report dates
- * and takeaways are the organization's own records, never fixtures.
+ * Report-led Market Watch list: filters, featured ready report and compact
+ * project rows. Business insights and data gaps live in their own tab
+ * sections above — this list never keeps second copies, so triage controls
+ * exist in exactly one place. All content arrives through props — branch
+ * names, questions, report dates and takeaways are the organization's own
+ * records, never fixtures.
  */
 export function MarketWatchProjectsView({
   items,
   branches,
   timeZone,
-  businessInsights,
-  contextGaps,
   onNewResearch,
   onReviewReport,
 }: {
   items: readonly MarketWatchProjectListItem[];
   branches: readonly MarketWatchLocationOption[];
   timeZone: string;
-  businessInsights: readonly MarketWatchBusinessInsight[];
-  contextGaps: readonly MarketWatchContextGap[];
   onNewResearch: () => void;
   /**
    * Report reader entry point. Absent by default: the Review report
@@ -235,9 +147,9 @@ export function MarketWatchProjectsView({
           <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
             Your market, in context
           </p>
-          <h2 className="mt-1 text-xl font-semibold">Market Watch</h2>
+          <h2 className="mt-1 text-xl font-semibold">Research projects</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Research your market. Review what matters for your business.
+            Each question gets its own research and reports.
           </p>
         </div>
         <Button size="sm" onClick={onNewResearch} className="shrink-0">
@@ -386,8 +298,6 @@ export function MarketWatchProjectsView({
           </p>
         </>
       )}
-
-      <BusinessInsights insights={businessInsights} gaps={contextGaps} />
     </section>
   );
 }
@@ -402,8 +312,6 @@ export function MarketWatchProjectsSection({
   organizationId,
   branches,
   timeZone,
-  businessInsights,
-  contextGaps,
   evidencePeriods,
   canManage,
   onReviewReport,
@@ -411,8 +319,6 @@ export function MarketWatchProjectsSection({
   organizationId: string;
   branches: readonly MarketWatchLocationOption[];
   timeZone: string;
-  businessInsights: readonly MarketWatchBusinessInsight[];
-  contextGaps: readonly MarketWatchContextGap[];
   evidencePeriods: readonly MarketWatchEvidencePeriod[];
   /** Viewers read the list and the dialog; only managers see start controls. */
   canManage: boolean;
@@ -446,6 +352,7 @@ export function MarketWatchProjectsSection({
           projects: body.projects,
           reportsByProject: body.reportsByProject ?? {},
           revisionsByProject: body.revisionsByProject ?? {},
+          failedUpdatesByProject: body.failedUpdatesByProject ?? {},
         });
         setLoadState("ready");
       } catch (error) {
@@ -473,6 +380,7 @@ export function MarketWatchProjectsSection({
             projects: projects.projects,
             reportsByProject: new Map(Object.entries(projects.reportsByProject)),
             revisionsByProject: new Map(Object.entries(projects.revisionsByProject)),
+            failedUpdatesByProject: new Map(Object.entries(projects.failedUpdatesByProject ?? {})),
           })
         : [],
     [projects],
@@ -509,8 +417,6 @@ export function MarketWatchProjectsSection({
         items={items}
         branches={branches}
         timeZone={timeZone}
-        businessInsights={businessInsights}
-        contextGaps={contextGaps}
         onNewResearch={() => setDialogOpen(true)}
         onReviewReport={(reportVersionId) => {
           if (onReviewReport) {
