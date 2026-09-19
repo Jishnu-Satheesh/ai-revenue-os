@@ -131,13 +131,76 @@ figures, or customer fixtures appear below.
   "public.organization_growth_projections" does not exist` — expected: the
   migration push is still deferred (Task 2 gate), so the table is absent on
   staging. The suite cannot pass before the push gate.
-- First-call rule status: UNMET — the new RPC has still never been called
-  against staging (Task 5 RPC-first-call deferral carries forward). A clean
-  apply alone will not pass AC02/08; first-call evidence belongs to the push
-  gate. Nothing was pushed to make anything pass.
+- First-call rule status at that time: UNMET — the new RPC had still never
+  been called against staging. A clean apply alone will not pass AC02/08;
+  first-call evidence belongs to the push gate. Nothing was pushed to make
+  anything pass.
 - Safe-ids disclosure: only suite paths, assertion counts (0), fixed fixture
   prefixes (`a1000000`), and the constraint/relation names above. No amounts,
   no customer rows.
+
+## 9. Push-gate day (2026-09-19) — syntax fix, pre-applied discovery, green suites
+
+- The push failed at statement 6 with `syntax error at or near "v_issued_text"`
+  (SQLSTATE 42601): the migration qualified `POSITION`, which is special SQL
+  syntax rather than a real `pg_catalog` function, so `pg_catalog.position(...)`
+  can never parse. One-word fix in
+  `20260918120000_organization_growth_projections.sql:205`:
+  `pg_catalog.position('T' in v_issued_text)` →
+  `pg_catalog.strpos(v_issued_text, 'T')`. No other keyword-function
+  qualification exists in either growth migration (grep for
+  `pg_catalog.position|substring|overlay|trim|extract`: one hit, fixed).
+- Discovery on inspection: staging ALREADY holds both migrations
+  (`schema_migrations` records `20260918120000` + `20260918130000`), the table
+  with trigger + forced RLS + member-only SELECT policy, and the publish
+  function whose body is byte-identical (whitespace-normalized) to the fixed
+  file — including `strpos`. The peer `20260919120000` migration is likewise
+  recorded with both its functions live. No push was run from this session;
+  the tree fix restores file/staging consistency so any future push is a
+  no-op for these versions. Who applied it is unconfirmed — recorded, not
+  explained away.
+- Suite repairs (all in-test, zero production changes): the suites had never
+  executed green — earlier "collisions" were authoring bugs, not staging
+  state (fixture tables verified empty for the synthetic orgs):
+  - Same-tuple fixtures collided on `normalized_metrics_revision_idx` and the
+    partial `current_revision_idx`: breaker rows now carry distinct revisions
+    (2..5, claims bind each exactly) and arrive already superseded inline
+    (the only state the append-only trigger tolerates at insert; no UPDATEs —
+    the trigger forbids them and cannot be reopened).
+  - `extensions.has_*_privilege` does not exist on this staging host:
+    all 15 call sites now use the built-in `pg_catalog.has_*_privilege`.
+  - Unqualified `pg_temp` helper calls fail on this host's search_path
+    (proven minimal case; schema-qualified calls work): all 24 call sites
+    qualified. Definitions unchanged.
+  - Peer-drifted NOT NULL columns added to exact-range fixtures with live
+    values: `report_contract_versions.parser_version = 1`,
+    `fingerprint_version = 3` (current generation per `20260822143000`);
+    `report_projection_versions.calculation_version = 1`,
+    `proposal_source = 'human'`; validation `validator_version = 1`;
+    projection-run `calculation_version = 1`.
+  - Schedule setup's "retired origin" row duplicated the identity key
+    `(org, horizon, cycle)`: it is now cycle 1, matching its "finished
+    cycle" comment.
+  - Horizon-1 permission read pinned to `cycle_index = 0`: three rows share
+    horizon 1 (cycles 0/22/24) and the scalar subquery needs exactly one.
+  - Trim-isolation allowlist adds the trigger function itself
+    (`refuse_organization_growth_projection_change` names the table in its
+    guard; trigger count is asserted separately).
+- Result: `pnpm db:test` on both suites → exit 0,
+  `organization_growth_projections_test.sql` 83/83,
+  `organization_growth_schedule_read_test.sql` 10/10, all rollback-wrapped
+  (synthetic-org tables verified empty afterwards).
+- First-call rule status: MET for `publish_organization_growth_projection`
+  and `read_organization_growth_schedule` — both executed on staging with
+  success + rejection branches covered (happy publish, replay id/digest
+  stability, changed-candidate immutability, concurrent same-key semantics
+  via advisory-lock procedure note, tenant/source denials, immutability
+  trigger, audit atomicity). True two-session concurrency remains a
+  documented procedure (in-suite note), not an executed proof.
+- Remaining live gates (unchanged): worker deploy with version record,
+  staged publication run with before/after id/digest + replay proof,
+  authenticated operator/viewer/nonmember E2E, populated-comparison
+  acceptance on eligible fresh reports. Nothing seeded, nothing planted.
 
 ## 6. Local checks (commands + exits)
 

@@ -51,48 +51,50 @@ insert into public.metric_definitions (
 
 -- Ledger fixtures. srcA is the healthy org-A observation; the rest each break
 -- exactly one publication rule so the failure matrix stays honest.
+-- revision_idx admits one row per (tuple, revision): every same-tuple breaker
+-- carries its own revision (claims below bind the matching revision), and the
+-- ledger is append-only -- the only legal mutation is closing 064 via its
+-- successor, which the trigger permits.
 insert into public.normalized_metrics (
   id, organization_id, metric_definition_id, value_kind, period_grain,
   period_start, period_end, period_timezone, value_numerator, currency,
-  quality_tier, observed_at
+  quality_tier, observed_at, revision, created_at, superseded_by_id, supersede_reason
 ) values
   ('a1000000-0000-4000-8000-000000000061'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
    'money', 'day', '2029-12-01T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 5000, 'AED',
-   'measured', '2029-12-15T00:00:00Z'),
+   'measured', '2029-12-15T00:00:00Z', 1, pg_catalog.now(), null, null),
   ('a1000000-0000-4000-8000-000000000062'::uuid, 'a1000000-0000-4000-8000-000000000022'::uuid,
    (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
    'money', 'day', '2029-12-01T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 5000, 'AED',
-   'measured', '2029-12-15T00:00:00Z'),
-  ('a1000000-0000-4000-8000-000000000063'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
-   (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
-   'money', 'day', '2029-12-01T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 5000, 'AED',
-   'estimated', '2029-12-15T00:00:00Z'),
+   'measured', '2029-12-15T00:00:00Z', 1, pg_catalog.now(), null, null),
   ('a1000000-0000-4000-8000-000000000065'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
    'money', 'day', '2029-12-02T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 4000, 'AED',
-   'measured', '2029-12-15T00:00:00Z'),
+   'measured', '2029-12-15T00:00:00Z', 1, pg_catalog.now(), null, null),
+  ('a1000000-0000-4000-8000-000000000063'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
+   (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
+   'money', 'day', '2029-12-01T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 5000, 'AED',
+   'estimated', '2029-12-15T00:00:00Z', 2, pg_catalog.now(),
+   'a1000000-0000-4000-8000-000000000065'::uuid, 'test restatement'),
   ('a1000000-0000-4000-8000-000000000064'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
    'money', 'day', '2029-12-01T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 5000, 'AED',
-   'measured', '2029-12-15T00:00:00Z'),
+   'measured', '2029-12-15T00:00:00Z', 3, pg_catalog.now(),
+   'a1000000-0000-4000-8000-000000000065'::uuid, 'test restatement'),
   ('a1000000-0000-4000-8000-000000000066'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
    'money', 'day', '2029-12-01T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 5000, 'AED',
-   'measured', '2029-12-15T00:00:00Z'),
+   'measured', '2029-12-15T00:00:00Z', 4, '2031-06-01T00:00:00Z'::timestamptz,
+   'a1000000-0000-4000-8000-000000000065'::uuid, 'test restatement'),
   ('a1000000-0000-4000-8000-000000000067'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
    'money', 'day', '2029-12-01T00:00:00Z', '2030-01-01T00:00:00Z', 'Asia/Dubai', 5000, 'EUR',
-   'measured', '2029-12-15T00:00:00Z');
+   'measured', '2029-12-15T00:00:00Z', 5, pg_catalog.now(),
+   'a1000000-0000-4000-8000-000000000065'::uuid, 'test restatement');
 
-update public.normalized_metrics
-set superseded_by_id = 'a1000000-0000-4000-8000-000000000065'::uuid,
-    supersede_reason = 'test restatement'
-where id = 'a1000000-0000-4000-8000-000000000064'::uuid;
-
-update public.normalized_metrics
-set created_at = '2031-06-01T00:00:00Z'::timestamptz
-where id = 'a1000000-0000-4000-8000-000000000066'::uuid;
+-- No UPDATEs on these fixtures: the ledger is append-only and the only
+-- legal mutation (closing via successor) is already expressed inline above.
 
 -- Org-A branch for the exact-range happy path (exact observations always
 -- carry a branch; normalized fixtures above stay organization-level).
@@ -129,18 +131,21 @@ insert into public.report_contract_versions (
   id, organization_id, report_contract_id, report_package_id, version,
   schema_fingerprint, mapping_document, mapping_digest, declared_currency,
   financial_sign_semantics, controls, unmapped_field_disposition,
-  proposal_source, created_by, correlation_id
+  proposal_source, created_by, correlation_id, parser_version, fingerprint_version
+  -- parser_version added by a later peer migration as NOT NULL integer;
+  -- live value 1. fingerprint_version current generation is 3
+  -- (20260822143000). Without both, every exact-range fixture aborts.
 ) values
   ('b2000000-0000-4000-8000-000000000103'::uuid, 'a1000000-0000-4000-8000-000000000022'::uuid,
    'b2000000-0000-4000-8000-000000000101'::uuid, 'b2000000-0000-4000-8000-000000000102'::uuid, 1,
    repeat('b', 64), '{}'::jsonb, repeat('b', 64), 'AED',
    '[]'::jsonb, '[]'::jsonb, 'reviewed_ignore', 'human',
-   'a1000000-0000-4000-8000-000000000002'::uuid, 'b2000000-0000-4000-8000-000000000001'::uuid),
+   'a1000000-0000-4000-8000-000000000002'::uuid, 'b2000000-0000-4000-8000-000000000001'::uuid, 1, 3),
   ('a2000000-0000-4000-8000-000000000113'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    'a2000000-0000-4000-8000-000000000111'::uuid, 'a2000000-0000-4000-8000-000000000112'::uuid, 1,
    repeat('b', 64), '{}'::jsonb, repeat('b', 64), 'AED',
    '[]'::jsonb, '[]'::jsonb, 'reviewed_ignore', 'human',
-   'a1000000-0000-4000-8000-000000000001'::uuid, 'a2000000-0000-4000-8000-000000000001'::uuid);
+   'a1000000-0000-4000-8000-000000000001'::uuid, 'a2000000-0000-4000-8000-000000000001'::uuid, 1, 3);
 
 insert into public.report_contract_bindings (
   id, organization_id, report_contract_id, report_contract_version_id, channel_id,
@@ -157,14 +162,16 @@ insert into public.report_contract_bindings (
 
 insert into public.report_projection_versions (
   id, organization_id, report_contract_version_id, version, projection_document,
-  projection_digest, created_by, correlation_id
+  projection_digest, created_by, correlation_id, calculation_version, proposal_source
+  -- calculation_version/proposal_source added by later peer migrations
+  -- (NOT NULL, calculation_version = 1; proposal_source human|library).
 ) values
   ('b2000000-0000-4000-8000-000000000105'::uuid, 'a1000000-0000-4000-8000-000000000022'::uuid,
    'b2000000-0000-4000-8000-000000000103'::uuid, 1, '{}'::jsonb, repeat('b', 64),
-   'a1000000-0000-4000-8000-000000000002'::uuid, 'b2000000-0000-4000-8000-000000000001'::uuid),
+   'a1000000-0000-4000-8000-000000000002'::uuid, 'b2000000-0000-4000-8000-000000000001'::uuid, 1, 'human'),
   ('a2000000-0000-4000-8000-000000000115'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    'a2000000-0000-4000-8000-000000000113'::uuid, 1, '{}'::jsonb, repeat('b', 64),
-   'a1000000-0000-4000-8000-000000000001'::uuid, 'a2000000-0000-4000-8000-000000000001'::uuid);
+   'a1000000-0000-4000-8000-000000000001'::uuid, 'a2000000-0000-4000-8000-000000000001'::uuid, 1, 'human');
 
 insert into public.report_projection_bindings (
   id, organization_id, report_contract_version_id, report_contract_binding_id,
@@ -182,35 +189,37 @@ insert into public.report_projection_bindings (
 insert into public.integration_report_validation_runs (
   id, organization_id, report_package_id, report_contract_version_id,
   report_contract_binding_id, input_digest, status, completed_at, result_digest,
-  quality_state, completeness_state, correlation_id
+  quality_state, completeness_state, correlation_id, validator_version
+  -- validator_version added by a later peer migration (NOT NULL, = 1).
 ) values
   ('b2000000-0000-4000-8000-000000000107'::uuid, 'a1000000-0000-4000-8000-000000000022'::uuid,
    'b2000000-0000-4000-8000-000000000102'::uuid, 'b2000000-0000-4000-8000-000000000103'::uuid,
    'b2000000-0000-4000-8000-000000000104'::uuid, repeat('b', 64), 'validated', now(), repeat('b', 64),
-   'complete', 'complete', 'b2000000-0000-4000-8000-000000000001'::uuid),
+   'complete', 'complete', 'b2000000-0000-4000-8000-000000000001'::uuid, 1),
   ('a2000000-0000-4000-8000-000000000117'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    'a2000000-0000-4000-8000-000000000112'::uuid, 'a2000000-0000-4000-8000-000000000113'::uuid,
    'a2000000-0000-4000-8000-000000000114'::uuid, repeat('b', 64), 'validated', now(), repeat('b', 64),
-   'complete', 'complete', 'a2000000-0000-4000-8000-000000000001'::uuid);
+   'complete', 'complete', 'a2000000-0000-4000-8000-000000000001'::uuid, 1);
 
 insert into public.integration_report_projection_runs (
   id, organization_id, report_package_id, report_contract_version_id,
   report_contract_binding_id, report_projection_version_id, report_projection_binding_id,
   validation_run_id, input_digest, status, completed_at, result_digest,
-  quality_state, completeness_state, correlation_id
+  quality_state, completeness_state, correlation_id, calculation_version
+  -- calculation_version added by a later peer migration (NOT NULL, = 1).
 ) values
   ('b2000000-0000-4000-8000-000000000108'::uuid, 'a1000000-0000-4000-8000-000000000022'::uuid,
    'b2000000-0000-4000-8000-000000000102'::uuid, 'b2000000-0000-4000-8000-000000000103'::uuid,
    'b2000000-0000-4000-8000-000000000104'::uuid, 'b2000000-0000-4000-8000-000000000105'::uuid,
    'b2000000-0000-4000-8000-000000000106'::uuid, 'b2000000-0000-4000-8000-000000000107'::uuid,
    repeat('b', 64), 'projected', now(), repeat('b', 64),
-   'complete', 'complete', 'b2000000-0000-4000-8000-000000000001'::uuid),
+   'complete', 'complete', 'b2000000-0000-4000-8000-000000000001'::uuid, 1),
   ('a2000000-0000-4000-8000-000000000118'::uuid, 'a1000000-0000-4000-8000-000000000021'::uuid,
    'a2000000-0000-4000-8000-000000000112'::uuid, 'a2000000-0000-4000-8000-000000000113'::uuid,
    'a2000000-0000-4000-8000-000000000114'::uuid, 'a2000000-0000-4000-8000-000000000115'::uuid,
    'a2000000-0000-4000-8000-000000000116'::uuid, 'a2000000-0000-4000-8000-000000000117'::uuid,
    repeat('b', 64), 'projected', now(), repeat('b', 64),
-   'complete', 'complete', 'a2000000-0000-4000-8000-000000000001'::uuid);
+   'complete', 'complete', 'a2000000-0000-4000-8000-000000000001'::uuid, 1);
 
 insert into public.exact_range_metric_observations (
   id, organization_id, branch_id, channel_id, metric_definition_id,
@@ -312,7 +321,7 @@ language sql stable as $$
       'startDate', '2029-12-01', 'endDateExclusive', '2030-01-01'),
     'monthlyLowMinor', p_low,
     'monthlyHighMinor', p_high,
-    'points', test_points(p_start, p_days),
+    'points', pg_temp.test_points(p_start, p_days),
     'sources', p_sources,
     'actionAssumptions', p_assumptions,
     'limitations', pg_catalog.jsonb_build_array('Seeded capacity note.'))
@@ -326,33 +335,33 @@ create temp table test_docs (name text primary key, doc jsonb);
 grant select on test_docs to authenticated, service_role;
 
 insert into test_docs (name, doc) values
-  ('doc-a-h1', test_doc(
+  ('doc-a-h1', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 0, 1,
     '2030-01-01'::date, '2030-02-01'::date, 31,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('normalized_metrics',
+    jsonb_build_array(pg_temp.test_source('normalized_metrics',
       'a1000000-0000-4000-8000-000000000061'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     '[]'::jsonb, 31000, 37200)),
-  ('doc-b-h1', test_doc(
+  ('doc-b-h1', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000022'::uuid, '2030-01-01'::date, 0, 1,
     '2030-01-01'::date, '2030-02-01'::date, 31,
     'aed', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('normalized_metrics',
+    jsonb_build_array(pg_temp.test_source('normalized_metrics',
       'a1000000-0000-4000-8000-000000000062'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     '[]'::jsonb, 31000, 37200)),
-  ('doc-a-h3-campaign', test_doc(
+  ('doc-a-h3-campaign', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 0, 3,
     '2030-01-01'::date, '2030-04-01'::date, 90,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('normalized_metrics',
+    jsonb_build_array(pg_temp.test_source('normalized_metrics',
       'a1000000-0000-4000-8000-000000000061'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     jsonb_build_array(jsonb_build_object(
@@ -361,13 +370,13 @@ insert into test_docs (name, doc) values
       'citedFindingId', 'a1000000-0000-4000-8000-000000000081',
       'lowFraction', 0.1, 'highFraction', 0.3)),
     93000, 111600)),
-  ('doc-a-h6-growth', test_doc(
+  ('doc-a-h6-growth', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 0, 6,
     '2030-01-01'::date, '2030-07-01'::date, 181,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('normalized_metrics',
+    jsonb_build_array(pg_temp.test_source('normalized_metrics',
       'a1000000-0000-4000-8000-000000000061'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     jsonb_build_array(jsonb_build_object(
@@ -376,13 +385,13 @@ insert into test_docs (name, doc) values
       'citedFindingId', 'a1000000-0000-4000-8000-000000000082',
       'lowFraction', 0.0, 'highFraction', 0.2)),
     186000, 223200)),
-  ('doc-a-h12-unknown', test_doc(
+  ('doc-a-h12-unknown', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 0, 12,
     '2030-01-01'::date, '2031-01-01'::date, 365,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('normalized_metrics',
+    jsonb_build_array(pg_temp.test_source('normalized_metrics',
       'a1000000-0000-4000-8000-000000000061'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     jsonb_build_array(jsonb_build_object(
@@ -394,13 +403,13 @@ insert into test_docs (name, doc) values
 
 -- Failure-identity documents: cycles 5..18 on org A, horizon 1.
 insert into test_docs (name, doc)
-select 'fail-' || s.cycle::text, test_doc(
+select 'fail-' || s.cycle::text, pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, s.cycle, 1,
     s.start_date, s.end_date, s.days,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('normalized_metrics',
+    jsonb_build_array(pg_temp.test_source('normalized_metrics',
       'a1000000-0000-4000-8000-000000000061'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     '[]'::jsonb, 31000, 37200)
@@ -428,37 +437,37 @@ from (values
 -- happy path (cycle 24), exact-range partial rejection (cycle 25), and the
 -- pinned zero-source rule (cycle 22: an empty sources array is valid).
 insert into test_docs (name, doc) values
-  ('fail-23', test_doc(
+  ('fail-23', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 23, 1,
     '2031-12-01'::date, '2032-01-01'::date, 31,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('exact_range_metric_observations',
+    jsonb_build_array(pg_temp.test_source('exact_range_metric_observations',
       'b2000000-0000-4000-8000-000000000109'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     '[]'::jsonb, 31000, 37200)),
-  ('doc-a-h1-exact', test_doc(
+  ('doc-a-h1-exact', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 24, 1,
     '2032-01-01'::date, '2032-02-01'::date, 31,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('exact_range_metric_observations',
+    jsonb_build_array(pg_temp.test_source('exact_range_metric_observations',
       'a2000000-0000-4000-8000-000000000119'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     '[]'::jsonb, 31000, 37200)),
-  ('fail-25', test_doc(
+  ('fail-25', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 25, 1,
     '2032-02-01'::date, '2032-03-01'::date, 29,
     'AED', 'Asia/Dubai',
     (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
     null, null,
-    jsonb_build_array(test_source('exact_range_metric_observations',
+    jsonb_build_array(pg_temp.test_source('exact_range_metric_observations',
       'a2000000-0000-4000-8000-000000000120'::uuid, 'pk-a1000000',
       '2029-12-01'::date, '2030-01-01'::date)),
     '[]'::jsonb, 31000, 37200)),
-  ('doc-a-h1-empty', test_doc(
+  ('doc-a-h1-empty', pg_temp.test_doc(
     'a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 22, 1,
     '2031-11-01'::date, '2031-12-01'::date, 30,
     'AED', 'Asia/Dubai',
@@ -517,35 +526,35 @@ select extensions.has_trigger(
   'organization_growth_projections_refuse_update',
   'the immutability trigger is attached');
 select extensions.ok(
-  extensions.has_table_privilege(
+  pg_catalog.has_table_privilege(
     'authenticated', 'public.organization_growth_projections', 'SELECT'),
   'members hold SELECT and nothing else');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'authenticated', 'public.organization_growth_projections', 'INSERT'),
   'members hold no INSERT');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'authenticated', 'public.organization_growth_projections', 'UPDATE'),
   'members hold no UPDATE');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'authenticated', 'public.organization_growth_projections', 'DELETE'),
   'members hold no DELETE');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'service_role', 'public.organization_growth_projections', 'INSERT'),
   'the worker holds no direct INSERT: it must use the RPC');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'service_role', 'public.organization_growth_projections', 'UPDATE'),
   'the worker holds no direct UPDATE');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'service_role', 'public.organization_growth_projections', 'DELETE'),
   'the worker holds no direct DELETE: no retention path exists');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'anon', 'public.organization_growth_projections', 'SELECT'),
   'anonymous callers hold no grant at all');
 
@@ -563,19 +572,19 @@ select extensions.is(
   true,
   'the RPC runs as definer behind revoked execute');
 select extensions.ok(
-  extensions.has_function_privilege(
+  pg_catalog.has_function_privilege(
     'service_role',
     'public.publish_organization_growth_projection(uuid, jsonb, uuid)',
     'EXECUTE'),
   'only the worker role may execute the RPC');
 select extensions.ok(
-  not extensions.has_function_privilege(
+  not pg_catalog.has_function_privilege(
     'authenticated',
     'public.publish_organization_growth_projection(uuid, jsonb, uuid)',
     'EXECUTE'),
   'members cannot execute the RPC, owner included');
 select extensions.ok(
-  not extensions.has_function_privilege(
+  not pg_catalog.has_function_privilege(
     'anon',
     'public.publish_organization_growth_projection(uuid, jsonb, uuid)',
     'EXECUTE'),
@@ -732,11 +741,15 @@ select extensions.throws_ok(
   'PGR02', null,
   'a cross-tenant source observation is rejected');
 
+-- fail-10..13 cite the revision-differentiated breaker rows (revisions
+-- 2..5); the claimed revision binds each row exactly, so every rejection
+-- below fires for its named rule and no other.
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    (select pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
-       '"a1000000-0000-4000-8000-000000000063"') from test_docs where name = 'fail-10'),
+    (select pg_catalog.jsonb_set(pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
+       '"a1000000-0000-4000-8000-000000000063"'), '{sources,0,revision}', '"2"')
+       from test_docs where name = 'fail-10'),
     'a1000000-0000-4000-8000-000000000072'::uuid)$_$,
   'PGR01', null,
   'an estimated observation never becomes recorded revenue');
@@ -744,8 +757,9 @@ select extensions.throws_ok(
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    (select pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
-       '"a1000000-0000-4000-8000-000000000064"') from test_docs where name = 'fail-11'),
+    (select pg_catalog.jsonb_set(pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
+       '"a1000000-0000-4000-8000-000000000064"'), '{sources,0,revision}', '"3"')
+       from test_docs where name = 'fail-11'),
     'a1000000-0000-4000-8000-000000000072'::uuid)$_$,
   'PGR01', null,
   'a superseded observation is rejected');
@@ -753,8 +767,9 @@ select extensions.throws_ok(
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    (select pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
-       '"a1000000-0000-4000-8000-000000000066"') from test_docs where name = 'fail-12'),
+    (select pg_catalog.jsonb_set(pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
+       '"a1000000-0000-4000-8000-000000000066"'), '{sources,0,revision}', '"4"')
+       from test_docs where name = 'fail-12'),
     'a1000000-0000-4000-8000-000000000072'::uuid)$_$,
   'PGR01', null,
   'evidence created after issue is rejected');
@@ -762,8 +777,9 @@ select extensions.throws_ok(
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    (select pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
-       '"a1000000-0000-4000-8000-000000000067"') from test_docs where name = 'fail-13'),
+    (select pg_catalog.jsonb_set(pg_catalog.jsonb_set(doc, '{sources,0,rowId}',
+       '"a1000000-0000-4000-8000-000000000067"'), '{sources,0,revision}', '"5"')
+       from test_docs where name = 'fail-13'),
     'a1000000-0000-4000-8000-000000000072'::uuid)$_$,
   'PGR01', null,
   'a mismatched source currency is rejected');
@@ -857,7 +873,7 @@ select extensions.throws_ok(
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2025-11-01'::date, 0, 1,
+    pg_temp.test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2025-11-01'::date, 0, 1,
       '2025-11-01'::date, '2025-12-01'::date, 30,
       'AED', 'Asia/Dubai',
       (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
@@ -869,7 +885,7 @@ select extensions.throws_ok(
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 1, 1,
+    pg_temp.test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 1, 1,
       '2030-01-01'::date, '2030-02-01'::date, 31,
       'AED', 'Asia/Dubai',
       (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
@@ -881,7 +897,7 @@ select extensions.throws_ok(
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2030-05-01'::date, 0, 1,
+    pg_temp.test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2030-05-01'::date, 0, 1,
       '2030-05-01'::date, '2030-06-01'::date, 30,
       'AED', 'Asia/Dubai',
       (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
@@ -893,7 +909,7 @@ select extensions.throws_ok(
 select extensions.throws_ok(
   $_$select * from public.publish_organization_growth_projection(
     'a1000000-0000-4000-8000-000000000021'::uuid,
-    test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 2, 1,
+    pg_temp.test_doc('a1000000-0000-4000-8000-000000000021'::uuid, '2030-01-01'::date, 2, 1,
       '2030-03-01'::date, '2030-04-01'::date, 31,
       'AED', 'America/New_York',
       (select id from public.metric_definitions where key = 'revenue.gross' and organization_id is null),
@@ -1004,7 +1020,7 @@ select extensions.is(
   (select requires_growth_read or requires_campaign_read
     from public.organization_growth_projections
     where organization_id = 'a1000000-0000-4000-8000-000000000021'::uuid
-      and horizon_months = 1),
+      and horizon_months = 1 and cycle_index = 0),
   false,
   'a baseline-only projection needs no extra source permission');
 
@@ -1170,7 +1186,10 @@ select extensions.is(
       and procedure.prosrc ilike '%organization_growth_projections%'
       and procedure.proname not in (
         'publish_organization_growth_projection',
-        'read_organization_growth_schedule')),
+        'read_organization_growth_schedule',
+        -- The immutability trigger itself names the table in its guard;
+        -- it is counted separately above and writes nothing.
+        'refuse_organization_growth_projection_change')),
   0::bigint,
   'no other routine references projections: no trim path exists');
 

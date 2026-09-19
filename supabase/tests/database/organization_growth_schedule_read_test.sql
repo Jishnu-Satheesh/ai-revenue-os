@@ -53,7 +53,9 @@ insert into public.organization_growth_projections (
    'Asia/Dubai', 'AED', 'revenue.gross', repeat('a', 64), repeat('b', 64),
    1, 'even_pace_v1', false, false, '{}'::jsonb),
   -- A finished cycle on a retired origin: invisible to the schedule read.
-  ('b2000000-0000-4000-8000-000000000021'::uuid, '2029-06-01', 0, 1,
+  -- cycle_index 1: the identity key is (organization, horizon, cycle), so a
+  -- second cycle-0 row would abort the suite on the unique constraint.
+  ('b2000000-0000-4000-8000-000000000021'::uuid, '2029-06-01', 1, 1,
    '2029-06-01', '2029-07-01', '2029-05-31T20:00:00Z', '2029-05-31',
    'Asia/Dubai', 'AED', 'revenue.gross', repeat('a', 64), repeat('b', 64),
    1, 'even_pace_v1', false, false, '{}'::jsonb);
@@ -72,25 +74,25 @@ select extensions.is(
   true,
   'the RPC runs as definer behind revoked execute');
 select extensions.ok(
-  extensions.has_function_privilege(
+  pg_catalog.has_function_privilege(
     'service_role',
     'public.read_organization_growth_schedule(uuid, date)',
     'EXECUTE'),
   'only the worker role may execute the RPC');
 select extensions.ok(
-  not extensions.has_function_privilege(
+  not pg_catalog.has_function_privilege(
     'authenticated',
     'public.read_organization_growth_schedule(uuid, date)',
     'EXECUTE'),
   'members cannot execute the RPC, owner included');
 select extensions.ok(
-  not extensions.has_function_privilege(
+  not pg_catalog.has_function_privilege(
     'anon',
     'public.read_organization_growth_schedule(uuid, date)',
     'EXECUTE'),
   'anonymous callers cannot execute the RPC');
 select extensions.ok(
-  not extensions.has_table_privilege(
+  not pg_catalog.has_table_privilege(
     'service_role', 'public.organization_growth_projections', 'SELECT'),
   'the Task-2 revocation stands: the worker still holds no direct SELECT');
 

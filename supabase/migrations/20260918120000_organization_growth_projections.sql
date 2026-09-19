@@ -202,7 +202,7 @@ begin
       or v_start_text !~ '^\d{4}-\d{2}-\d{2}$'
       or v_end_text !~ '^\d{4}-\d{2}-\d{2}$'
       or v_cutoff_text !~ '^\d{4}-\d{2}-\d{2}$'
-      or pg_catalog.position('T' in v_issued_text) = 0 then
+      or pg_catalog.strpos(v_issued_text, 'T') = 0 then
       raise exception 'Growth projection envelope is invalid.' using errcode = 'PGR01';
     end if;
     v_origin := v_origin_text::date;
