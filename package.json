@@ -39,7 +39,7 @@
     "@supabase/supabase-js": "2.50.0",
     "@tanstack/react-form": "^1.33.3",
     "@tanstack/react-query": "^5.101.4",
-    "@trigger.dev/sdk": "4.5.16",
+    "@trigger.dev/sdk": "4.6.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.4",
     "ai": "6.0.280",
@@ -85,7 +85,7 @@
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.1.0",
     "@testing-library/user-event": "^14.6.7",
-    "@trigger.dev/build": "4.5.16",
+    "@trigger.dev/build": "4.6.0",
     "@types/facebook-nodejs-business-sdk": "24.0.0",
     "@types/fontkit": "^2.0.9",
     "@types/node": "22.10.2",
@@ -109,5 +109,13 @@
     "tsx": "^4.23.10",
     "typescript": "5.7.2",
     "vitest": "2.1.8"
-  }
+  },
+  "description": "Lunes AI is a multi-tenant, goal-driven platform that helps an agency increase measurable business outcomes for multiple clients through AI-assisted planning, durable automation, experimentation, and continuous learning.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

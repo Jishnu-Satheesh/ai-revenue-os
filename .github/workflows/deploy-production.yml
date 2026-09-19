@@ -1,0 +1,103 @@
+# Deploy production — runs when a PR merges into main.
+#
+# Same shape as deploy-staging.yml, pointed at production: migrations first,
+# then workers. Deliberately no pgTAP job here — the suites execute against
+# whichever database they are pointed at, and they must never run at
+# production. Staging is where suites run; main deploys only what staging
+# has already proven.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+# - PRODUCTION_DATABASE_URL: session-mode pooler URL of the production
+#   Supabase project (port 5432).
+# - TRIGGER_ACCESS_TOKEN: Trigger.dev personal access token.
+# - TRIGGER_PROJECT_REF_PROD: ref of the production Trigger project.
+#
+# Strongly recommended in repository Settings -> Environments -> production:
+# add a required reviewer so every production deploy waits for a human tap.
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Same rule as staging, with higher stakes: production migration pushes
+# queue behind each other and are never cancelled mid-flight.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Push migrations to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Read-only visibility: which local migrations are still unapplied.
+      - name: List pending migrations
+        run: pnpm db:migrations:list
+
+      # Still read-only: shows the exact SQL that would run, applies nothing.
+      - name: Dry-run pending migrations
+        run: pnpm db:migrations:dry-run
+
+      # Live the moment it runs. Merge to main only when the same commit is
+      # already green on staging.
+      - name: Push migrations to production
+        run: pnpm db:migrations:push
+
+  trigger:
+    name: Deploy workers to Trigger production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    needs: migrate
+    env:
+      TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
+      TRIGGER_PROJECT_REF: ${{ secrets.TRIGGER_PROJECT_REF_PROD }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Same version-matching rule as deploy-staging.yml (see the comment
+      # there). No --env flag: production is the default target.
+      # --external-id tags the deployment with its commit, so a bad release
+      # traces back to one merge.
+      - name: Deploy Trigger.dev workers
+        run: |
+          SDK_VERSION=$(node -p "require('./package.json').devDependencies['@trigger.dev/sdk']")
+          echo "Deploying with trigger.dev CLI $SDK_VERSION to match the SDK"
+          pnpm dlx trigger.dev@$SDK_VERSION deploy --external-id ${{ github.sha }}

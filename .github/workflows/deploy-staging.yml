@@ -1,0 +1,136 @@
+# Deploy staging — runs when a PR merges into the staging branch.
+#
+# Like promoting a dish from prep to the pass: migrations go onto the shared
+# staging database first, then the workers serving staging are redeployed.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+# - STAGING_DATABASE_URL: session-mode pooler URL of the staging Supabase
+#   project (port 5432; the repo's db scripts rewrite 6543 to 5432 anyway).
+# - TRIGGER_ACCESS_TOKEN: Trigger.dev personal access token.
+# - TRIGGER_PROJECT_REF_STAGING: ref of the separate staging Trigger project.
+#
+# Optional hardening in repository Settings -> Environments -> staging:
+# add required reviewers and the merge will wait for a human tap before
+# anything touches the shared staging database.
+name: Deploy staging
+
+on:
+  push:
+    branches:
+      - staging
+
+permissions:
+  contents: read
+
+# One staging deploy at a time, queued never cancelled: two migration pushes
+# racing each other is how a shared database ends up half-migrated.
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Push migrations to staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    env:
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Read-only visibility: which local migrations are still unapplied.
+      - name: List pending migrations
+        run: pnpm db:migrations:list
+
+      # Still read-only: shows the exact SQL that would run, applies nothing.
+      - name: Dry-run pending migrations
+        run: pnpm db:migrations:dry-run
+
+      # Live the moment it runs: there is no local database to rehearse on,
+      # so the dry-run above is the last look before this step writes.
+      - name: Push migrations to staging
+        run: pnpm db:migrations:push
+
+  pgtap:
+    name: pgTAP suites against staging (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: migrate
+    # Advisory on purpose: the suites share the staging database with live
+    # data and other sessions, so a failure can mean a sick suite or a busy
+    # database rather than a bad migration. Investigate red runs, but they
+    # never block the worker redeploy below.
+    continue-on-error: true
+    environment: staging
+    env:
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run pgTAP suites
+        run: pnpm db:test
+
+  trigger:
+    name: Deploy workers to Trigger staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: migrate
+    environment: staging
+    env:
+      TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
+      TRIGGER_PROJECT_REF: ${{ secrets.TRIGGER_PROJECT_REF_STAGING }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The CLI aborts every CI deploy unless its version exactly matches
+      # every @trigger.dev/* version in package.json, and the repo-pinned
+      # CLI trails the SDK — so this step fetches the exact CLI matching the
+      # SDK instead of using the repo install or @latest. The version is read
+      # from package.json at runtime, so bumping the SDK can never silently
+      # reintroduce the mismatch. --external-id tags the deployment with its
+      # commit for traceability.
+      - name: Deploy Trigger.dev workers
+        run: |
+          SDK_VERSION=$(node -p "require('./package.json').devDependencies['@trigger.dev/sdk']")
+          echo "Deploying with trigger.dev CLI $SDK_VERSION to match the SDK"
+          pnpm dlx trigger.dev@$SDK_VERSION deploy --env staging --external-id ${{ github.sha }}
