@@ -49,8 +49,8 @@ describe("marketing content guardrails", () => {
     expect(WALKTHROUGH_MAILTO).toMatch(/^mailto:[^@]+@[^@]+\.[^@]+$/);
   });
 
-  it("brands the public surface as RIO, never the internal product name", () => {
-    expect(nav.productName).toBe("RIO");
+  it("brands the public surface as Lunes AI, never the old product names", () => {
+    expect(nav.productName).toBe("Lunes AI");
     const haystack = allCopy().join("\n").toLowerCase();
     expect(haystack).not.toContain("ai revenue os");
   });

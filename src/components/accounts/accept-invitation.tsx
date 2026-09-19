@@ -42,7 +42,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <UserCheck />
           </div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Revenue Intelligence
+            The Revenue Intelligence
           </p>
         </div>
         {children}

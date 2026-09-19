@@ -39,9 +39,9 @@ export default function LoginPage() {
             <ArrowRight />
           </div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Revenue Intelligence
+            The Revenue Intelligence
           </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Sign in to AI Revenue OS</h1>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Sign in to Lunes AI</h1>
           <p className="mt-3 text-muted-foreground">
             Use your workspace email. We’ll send a passwordless sign-in link.
           </p>

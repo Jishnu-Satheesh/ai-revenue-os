@@ -1,6 +1,6 @@
-# AI Revenue OS
+# Lunes AI
 
-AI Revenue OS is a multi-tenant, goal-driven platform that helps an agency increase measurable business outcomes for multiple clients through AI-assisted planning, durable automation, experimentation, and continuous learning.
+Lunes AI is a multi-tenant, goal-driven platform that helps an agency increase measurable business outcomes for multiple clients through AI-assisted planning, durable automation, experimentation, and continuous learning.
 
 The first pilot is a Dubai restaurant business that wants to increase:
 

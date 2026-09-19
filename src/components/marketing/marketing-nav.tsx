@@ -10,7 +10,7 @@ export function MarketingNav() {
             aria-hidden="true"
             className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground"
           >
-            R
+            L
           </span>
           <span className="text-sm font-semibold tracking-tight">{nav.productName}</span>
         </span>

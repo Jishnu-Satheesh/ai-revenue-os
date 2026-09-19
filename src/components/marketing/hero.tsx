@@ -65,7 +65,7 @@ export function Hero() {
               <span className="size-2.5 rounded-full bg-muted-foreground/30" />
             </span>
             <span className="mx-auto rounded-md border border-border bg-card px-3 py-0.5 text-[11px] text-muted-foreground">
-              app.airevenueos.com
+              lunes.in
             </span>
             <span aria-hidden="true" className="w-10" />
           </div>

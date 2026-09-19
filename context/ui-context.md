@@ -1,4 +1,4 @@
-# AI Revenue OS — UI/UX Design Context
+# Lunes AI — UI/UX Design Context
 
 > **Status:** Canonical design-language specification  
 > **Audience:** Product designers, frontend engineers, AI coding agents, QA engineers  
@@ -10,7 +10,7 @@
 
 ## 1. Purpose
 
-This document defines the UI/UX design language for AI Revenue OS. It is a binding implementation context for coding agents and engineers.
+This document defines the UI/UX design language for Lunes AI. It is a binding implementation context for coding agents and engineers.
 
 The platform is a multi-tenant AI revenue operating system used by a small agency team to manage many client businesses. It must help users understand:
 
@@ -1770,7 +1770,7 @@ This specification was informed by current guidance and component capabilities f
 - Google People + AI Guidebook guidance on explainability and trust.
 - IBM Design for AI guidance on explainability.
 
-The cited sources inform accessibility, component capability, explainability, and human-AI interaction. The final design direction and rules in this document are product-specific decisions for AI Revenue OS.
+The cited sources inform accessibility, component capability, explainability, and human-AI interaction. The final design direction and rules in this document are product-specific decisions for Lunes AI.
 
 ---
 

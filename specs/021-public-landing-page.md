@@ -114,9 +114,9 @@ None added. A static page has no failure modes worth instrumenting beyond Next.j
 
 ## Copy skeleton
 
-- Eyebrow: `Revenue intelligence for client businesses`
+- Eyebrow: `The Revenue Intelligence`
 - H1: `The operating cockpit for measurable client revenue.`
-- Subhead: `AI Revenue OS builds a living twin of every business you serve, surfaces the safest
+- Subhead: `Lunes AI builds a living twin of every business you serve, surfaces the safest
   high-value action each day, and measures what actually moved gross profit — with a human
   approving every consequential step.`
 - Capabilities: `See every business clearly` / `Act on ranked opportunities` /

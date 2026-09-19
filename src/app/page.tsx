@@ -6,11 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveLandingPath } from "@/modules/organizations/application/landing";
 
 export const metadata: Metadata = {
-  title: "RIO — Revenue Intelligence OS",
+  title: "Lunes AI — The Revenue Intelligence",
   description:
-    "RIO builds a living twin of every business you serve, surfaces the safest high-value action each day, and measures what actually moved gross profit.",
+    "Lunes AI builds a living twin of every business you serve, surfaces the safest high-value action each day, and measures what actually moved gross profit.",
   openGraph: {
-    title: "RIO",
+    title: "Lunes AI",
     description: "The operating cockpit for measurable client revenue.",
     type: "website",
   },

@@ -1,17 +1,17 @@
-export const WALKTHROUGH_MAILTO = "mailto:walkthroughs@airevenueos.com";
+export const WALKTHROUGH_MAILTO = "mailto:admin@lunes.in";
 
 export const nav = {
-  productName: "RIO",
+  productName: "Lunes AI",
   signInLabel: "Sign in",
   signInHref: "/login",
   ctaLabel: "Book a walkthrough",
 };
 
 export const hero = {
-  eyebrow: "Revenue intelligence for client businesses",
+  eyebrow: "The Revenue Intelligence",
   headline: "The operating cockpit for measurable client revenue.",
   subhead:
-    "RIO builds a living twin of every business you serve, surfaces the safest high-value action each day, and measures what actually moved gross profit — with a human approving every consequential step.",
+    "Lunes AI builds a living twin of every business you serve, surfaces the safest high-value action each day, and measures what actually moved gross profit — with a human approving every consequential step.",
   primaryCta: "Book a walkthrough",
 };
 
@@ -178,16 +178,16 @@ export const governance = {
 
 export const closingCta = {
   headline: "Know exactly what to do next.",
-  body: "See how RIO turns fragmented client data into measured, approved revenue actions.",
+  body: "See how Lunes AI turns fragmented client data into measured, approved revenue actions.",
   ctaLabel: "Book a walkthrough",
 };
 
 export const footer = {
-  tagline: "A trustworthy operating cockpit for measurable revenue growth.",
+  tagline: "The Revenue Intelligence",
   signInLabel: "Sign in",
   signInHref: "/login",
   contactLabel: "Book a walkthrough",
-  copyright: `© ${new Date().getFullYear()} RIO`,
+  copyright: `© ${new Date().getFullYear()} Lunes AI`,
 };
 
 export const dashboardMock = {

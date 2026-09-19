@@ -10,7 +10,7 @@ The first pilot is a Dubai multi-cuisine restaurant, likely focused on Indian cu
 
 ## Long-term product
 
-The product is not a dashboard full of disconnected automations. It is an **AI Revenue Operating System** with:
+The product is not a dashboard full of disconnected automations. It is **Lunes AI**, the revenue intelligence, with:
 
 - A structured Digital Twin for every organization.
 - Durable organizational memory.

@@ -14,10 +14,10 @@ describe("MarketingFooter", () => {
     expect(screen.getByText(footer.tagline)).toBeTruthy();
   });
 
-  it("shows a copyright naming RIO", () => {
+  it("shows a copyright naming Lunes AI", () => {
     render(<MarketingFooter />);
 
-    expect(screen.getByText(/© \d{4} RIO/)).toBeTruthy();
+    expect(screen.getByText(/© \d{4} Lunes AI/)).toBeTruthy();
   });
 
   it("links sign in and contact with correct targets", () => {

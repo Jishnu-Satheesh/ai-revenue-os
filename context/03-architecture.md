@@ -2,7 +2,7 @@
 
 ## Architectural style
 
-AI Revenue OS uses a modular monolith for the control plane, durable asynchronous workflows for execution, event-driven communication, and strict multi-tenant data isolation.
+Lunes AI uses a modular monolith for the control plane, durable asynchronous workflows for execution, event-driven communication, and strict multi-tenant data isolation.
 
 A modular monolith is the preferred starting point because it maximizes delivery speed and type safety while preserving clear boundaries that can later become services if scale requires it.
 
