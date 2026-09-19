@@ -9,11 +9,12 @@ vi.mock("resend", () => ({
   },
 }));
 vi.mock("@/lib/env", () => ({
-  env: { INVITATION_FROM_ADDRESS: "AI Revenue OS <invitations@themarga.in>" },
+  env: { INVITATION_FROM_ADDRESS: "Lunes AI <admin@lunes.in>" },
 }));
 
 import {
   createNoopInvitationEmailSender,
+  createOrganizationInvitationEmailSender,
   createResendInvitationEmailSender,
 } from "@/modules/accounts/application/email";
 
@@ -44,9 +45,17 @@ describe("the Resend sender", () => {
     await createResendInvitationEmailSender("re_test").send(request);
 
     const [payload] = send.mock.calls[0];
-    expect(payload.from).toBe("AI Revenue OS <invitations@themarga.in>");
+    expect(payload.from).toBe("Super-admin agency <superadminagency@lunes.in>");
     expect(payload.to).toEqual(["sarah@example.com"]);
     expect(payload.subject).toContain("Super-admin agency");
+  });
+
+  it("falls back to the configured sender when the agency name has no usable letters", async () => {
+    send.mockResolvedValue({ data: { id: "email-1" }, error: null });
+    await createResendInvitationEmailSender("re_test").send({ ...request, accountName: "مطعم النور" });
+
+    const [payload] = send.mock.calls[0];
+    expect(payload.from).toBe("Lunes AI <admin@lunes.in>");
   });
 
   it("carries both an HTML and a plain-text body", async () => {
@@ -80,6 +89,40 @@ describe("the Resend sender", () => {
     await expect(createResendInvitationEmailSender("re_test").send(request)).resolves.toEqual({
       sent: false,
     });
+  });
+
+  it("derives the organization sender from the client name", async () => {
+    send.mockResolvedValue({ data: { id: "email-1" }, error: null });
+    await createOrganizationInvitationEmailSender("re_test").send({
+      to: "client@example.com",
+      invitationId: "11111111-1111-4111-8111-111111111111",
+      organizationName: "Al Noor Kitchen",
+      inviterName: "Jishnu",
+      roleLabel: "Viewer — read only",
+      actionUrl: "https://app.example.com/organization-invitations/abc",
+      isOneClick: false,
+      expiresAt: "2026-09-24T00:00:00.000Z",
+    });
+
+    const [payload] = send.mock.calls[0];
+    expect(payload.from).toBe("Al Noor Kitchen <alnoorkitchen@lunes.in>");
+    expect(payload.subject).toContain("Al Noor Kitchen");
+  });
+
+  it("sends nothing without an API key, rather than pretending", async () => {
+    await expect(
+      createOrganizationInvitationEmailSender(undefined).send({
+        to: "client@example.com",
+        invitationId: "11111111-1111-4111-8111-111111111111",
+        organizationName: "Al Noor Kitchen",
+        inviterName: null,
+        roleLabel: "Viewer — read only",
+        actionUrl: "https://app.example.com/organization-invitations/abc",
+        isOneClick: false,
+        expiresAt: "2026-09-24T00:00:00.000Z",
+      }),
+    ).resolves.toEqual({ sent: false });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("escapes the agency name, so a quote cannot break out of the markup", async () => {

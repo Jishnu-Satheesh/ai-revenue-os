@@ -82,6 +82,9 @@ export const organizationPermissions = [
   "policy.update",
   "budget.modify",
   "audit.read",
+  "organization.member.invite",
+  "organization.member.manage_role",
+  "organization.member.remove",
 ] as const;
 
 export type OrganizationPermission = (typeof organizationPermissions)[number];
@@ -153,6 +156,9 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "policy.update": "Change governance policies and approval thresholds.",
   "budget.modify": "Change spend limits and budgets.",
   "audit.read": "Read the audit and decision timeline.",
+  "organization.member.invite": "Invite a new member to this client.",
+  "organization.member.manage_role": "Change what an existing member of this client is allowed to do.",
+  "organization.member.remove": "Remove a member from this client.",
 };
 
 /**
@@ -281,6 +287,14 @@ const adminPermissions = [
   "campaign.research_request",
   "policy.update",
   "budget.modify",
+  /**
+   * Team management sits above the operator line: inviting, reassigning roles,
+   * and removing members decides who may act in the client's name. Seeded by
+   * the organization-invitations migration for owner and admin.
+   */
+  "organization.member.invite",
+  "organization.member.manage_role",
+  "organization.member.remove",
 ] as const satisfies readonly OrganizationPermission[];
 
 const ownerPermissions = [

@@ -48,6 +48,7 @@ describe("Sidebar", () => {
       "Guided onboarding",
       "Agents",
       "Executions",
+      "Settings",
     ]);
     expect(screen.getByRole("link", { name: /Overview/ })).toHaveAttribute(
       "href",

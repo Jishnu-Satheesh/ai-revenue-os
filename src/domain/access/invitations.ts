@@ -30,6 +30,12 @@ export const invitationRefusalCodes = [
 ] as const;
 export type InvitationRefusalCode = (typeof invitationRefusalCodes)[number];
 
+/**
+ * Organization invitations refuse for exactly the same reasons, and the
+ * accept route keeps the same opaque message, so one alias covers both.
+ */
+export type OrganizationRefusalCode = InvitationRefusalCode;
+
 /** What the accept page renders. `already_accepted` is only ever shown to the person who accepted. */
 export const invitationPreviewStateSchema = z.enum(["valid", "invalid", "already_accepted"]);
 export type InvitationPreviewState = z.infer<typeof invitationPreviewStateSchema>;
@@ -93,6 +99,76 @@ export type InvitationPreview = z.infer<typeof invitationPreviewSchema>;
 export const invitationTokenSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{43}$/, "That invitation link is not valid.");
+
+/**
+ * Organization invitations. Same token discipline as account invitations, but
+ * scoped to one client: a single role, no agency membership, and the invitee
+ * may be a complete outsider.
+ */
+export const createOrganizationInvitationInputSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Enter a valid email address.").max(320),
+  role: organizationRoleSchema.default("viewer"),
+});
+export type CreateOrganizationInvitationInput = z.infer<
+  typeof createOrganizationInvitationInputSchema
+>;
+
+/**
+ * The token is returned exactly once, in the response that created or reissued
+ * the invitation. It is never stored in recoverable form and never re-read, so
+ * a client that discards it must reissue.
+ */
+export const organizationInvitationWithTokenSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string(),
+  role: organizationRoleSchema,
+  expiresAt: z.string(),
+  acceptUrl: z.string().url(),
+  /** False when no email left the system, so the UI never implies one did. */
+  emailSent: z.boolean(),
+});
+export type OrganizationInvitationWithToken = z.infer<
+  typeof organizationInvitationWithTokenSchema
+>;
+
+export const pendingOrganizationInvitationSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string(),
+  role: organizationRoleSchema,
+  expiresAt: z.string(),
+  createdAt: z.string(),
+  invitedByName: z.string().nullable(),
+  isExpired: z.boolean(),
+});
+export type PendingOrganizationInvitation = z.infer<
+  typeof pendingOrganizationInvitationSchema
+>;
+
+export const organizationInvitationPreviewSchema = z.object({
+  state: invitationPreviewStateSchema,
+  organizationId: z.string().uuid().nullable(),
+  organizationName: z.string().nullable(),
+  invitedEmail: z.string().nullable(),
+  inviterName: z.string().nullable(),
+  role: organizationRoleSchema.nullable(),
+  expiresAt: z.string().nullable(),
+  matchesCaller: z.boolean(),
+  /** Null when nobody is signed in, so the page can offer sign-in rather than a mismatch. */
+  signedInEmail: z.string().nullable(),
+});
+export type OrganizationInvitationPreview = z.infer<
+  typeof organizationInvitationPreviewSchema
+>;
+
+/** One row of the Team Members table: an explicit grant, never derived access. */
+export const organizationTeamMemberSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().nullable(),
+  displayName: z.string().nullable(),
+  role: organizationRoleSchema,
+  createdAt: z.string(),
+});
+export type OrganizationTeamMember = z.infer<typeof organizationTeamMemberSchema>;
 
 export function invitationExpiresAt(from: Date = new Date()): Date {
   return new Date(from.getTime() + INVITATION_LIFETIME_DAYS * 24 * 60 * 60 * 1000);

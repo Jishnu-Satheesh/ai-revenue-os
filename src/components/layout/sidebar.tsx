@@ -12,11 +12,17 @@ import {
   LayoutDashboard,
   type LucideIcon,
   Megaphone,
+  Settings,
   Sparkles,
   Waypoints,
 } from "lucide-react";
 
-import { growthIntelligencePath, organizationIdFromPathname, overviewPath } from "@/lib/routes";
+import {
+  growthIntelligencePath,
+  organizationIdFromPathname,
+  organizationSettingsPath,
+  overviewPath,
+} from "@/lib/routes";
 import { OrganizationSwitcher } from "@/components/layout/organization-switcher";
 import { SidebarIdentity } from "@/components/accounts/sidebar-identity";
 import {
@@ -98,6 +104,8 @@ const workspaceEntries: readonly WorkspaceEntry[] = [
   },
   { label: "Business Memory", icon: BrainCircuit, path: (id) => `/organizations/${id}/memory` },
   { label: "Channels", icon: Waypoints, path: (id) => `/organizations/${id}/channels` },
+  // Setup sits last: the entries above carry revenue, this one configures it.
+  { label: "Settings", icon: Settings, path: organizationSettingsPath },
   { label: "Integration Hub", icon: Cable, path: (id) => `/organizations/${id}/integrations` },
   { label: "Guided onboarding", icon: Compass, path: (id) => `/organizations/${id}/onboarding` },
   { label: "Agents", icon: Bot },
@@ -240,16 +248,16 @@ export function Sidebar() {
       <SidebarHeader className="gap-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild tooltip="AI Revenue OS">
+            <SidebarMenuButton size="lg" asChild tooltip="Lunes AI">
               <Link href="/">
-                <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
-                  <Waypoints />
+                <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md bg-foreground text-background text-sm font-bold">
+                  L
                 </span>
                 <span className="grid min-w-0 flex-1 text-left leading-tight">
                   <span className="truncate text-[10px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-                    Revenue Intelligence
+                    The Revenue Intelligence
                   </span>
-                  <span className="truncate text-sm font-semibold">AI Revenue OS</span>
+                  <span className="truncate text-sm font-semibold">Lunes AI</span>
                 </span>
               </Link>
             </SidebarMenuButton>

@@ -27,7 +27,7 @@ const serverEnvSchema = z.object({
   RESEND_API_KEY: optionalNonEmptyString,
   INVITATION_FROM_ADDRESS: z.preprocess(
     emptyToUndefined,
-    z.string().min(3).default("AI Revenue OS <invitations@themarga.in>"),
+    z.string().min(3).default("Lunes AI <admin@lunes.in>"),
   ),
   OPENAI_API_KEY: optionalNonEmptyString,
   ANTHROPIC_API_KEY: optionalNonEmptyString,
