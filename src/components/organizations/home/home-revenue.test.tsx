@@ -423,11 +423,25 @@ describe("growthPeriodSubtitle", () => {
   });
 
   it("prints exact start and end dates for longer fixed periods", () => {
+    const view = {
+      ...buildBehindGrowthView(ORG_ID),
+      period: {
+        horizonMonths: 3 as const,
+        cycleIndex: 0,
+        startDate: "2026-09-01",
+        endDateExclusive: "2026-12-01",
+      },
+    };
+    expect(growthPeriodSubtitle(view)).toBe("Revenue over this period · 1 Sep–30 Nov 2026");
+  });
+
+  it("never prints the epoch placeholder for a view without a projection", () => {
     const section = buildBehindGrowthSection(ORG_ID);
     if (section.state !== "ready") throw new Error("fixture must be ready");
-    expect(growthPeriodSubtitle(section.views[3])).toBe(
-      "Revenue over this period · 1 Sep–30 Nov 2026",
-    );
+    const subtitle = growthPeriodSubtitle(section.views[3]);
+    expect(section.views[3].projectionId).toBeNull();
+    expect(subtitle).not.toContain("1970");
+    expect(subtitle).not.toMatch(/\d Jan/);
   });
 });
 

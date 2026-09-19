@@ -391,6 +391,10 @@ function subtractDayUtc(isoDate: string): string {
  */
 export function growthPeriodSubtitle(view: GrowthProgressView): string {
   const { period } = view;
+  // No frozen period exists behind a missing projection (the service marks
+  // "no period" with an epoch placeholder): printing it would read
+  // "1 Jan–1 Jan 1970". A dateless label stays honest instead.
+  if (view.projectionId === null) return "Revenue over this period";
   const isWholeCalendarMonth =
     period.startDate.endsWith("-01") &&
     period.endDateExclusive === addMonthsUtc(period.startDate, period.horizonMonths);
