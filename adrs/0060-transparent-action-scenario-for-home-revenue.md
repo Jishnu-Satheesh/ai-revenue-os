@@ -1,5 +1,7 @@
 # ADR 0060 — Transparent action scenario for the home revenue section
 
+> 2026-09-18 successor proposal: ADR 0064 and Spec 027 describe the user-approved actual-versus-fixed-original-projection display. Their technical execution plan is proposed; this ADR remains authoritative for existing candidate estimation and mutable nightly snapshots. The new design does not relabel this ADR's current-course forecast as an actual result.
+
 Status: Accepted 2026-09-16. Approves the proposal in
 `docs/superpowers/plans/2026-09-11-organization-home-revenue-adr-draft.md` and the
 contract in `docs/superpowers/specs/2026-09-11-organization-home-revenue-scenario.md`

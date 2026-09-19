@@ -143,6 +143,12 @@ readiness contract in section 10 is satisfied.
 - A model-generated financial value, confidence value, risk tier, eligibility result, rank, policy
   decision, outcome verdict, or realized-impact claim.
 - A live research call during page rendering.
+- Exception (2026-09-15, live-only preview; narrowed 2026-09-19 by ADR 0065): an explicit
+  manager-clicked preview may show fresh Brave results on screen and then discard them. It stores
+  nothing, creates no evidence, and stays disabled without `growth_intelligence.manage`. Brave
+  remains ONLY this ephemeral preview; the durable research lane is now TinyFish Search behind
+  the staged per-provider qualification. The preview exception stays until preview repointing,
+  which is an explicit follow-up and not part of this change.
 
 ## 5. Domain language
 
@@ -245,8 +251,14 @@ limitation. A country-level pattern is never presented as proof of branch-level 
 - Operators may exclude a publisher/domain or an approved competitor.
 - The first production adapter must pass commercial, privacy, retention, citation, crawl-failure,
   and SSRF review before any organization is enabled.
-- ADR 0047 specifies Brave Web Search under explicit account-specific storage/reuse rights and
-  Gemini analysis without Google Search tools. Initial retrieval uses permitted snippets, not
+- ADR 0047 specified Brave Web Search under explicit account-specific storage/reuse rights and
+  Gemini analysis without Google Search tools. Amended 2026-09-19 by ADR 0065: the durable
+  research provider is now TinyFish Search behind the staged per-provider qualification —
+  `check_research_provider_qualification_for(p_provider)` re-attesting the same six required
+  uses (`snippet_storage`, `commercial_inference`, `organization_display`, `derived_claims`,
+  `synthesis_reuse`, `agreed_retention`), fail-closed and canary-gated (migration
+  `20260919120000`, additive, staging apply owed). Brave remains ONLY the ephemeral live
+  preview that stores nothing. Initial retrieval uses permitted snippets, not
   returned-page crawling. Ordinary API access does not qualify evidence storage.
 - Record evidence rights and retention; narrowly audited payload erasure withdraws unavailable
   support while preserving safe lifecycle history. This is an explicit exception to content
@@ -328,6 +340,9 @@ month receives an independent tenant-scoped request. One channel failure does no
 - An approved profile revision or source exclusion creates re-evaluation work for affected current
   intelligence; it does not rewrite prior research.
 - Opening Growth Intelligence performs reads only and never starts research or analysis.
+- Exception (2026-09-15, live-only preview, Brave-only per ADR 0065): the preview button
+  beside Market Watch may fetch fresh results on explicit click only. It stores nothing and
+  creates no research request.
 
 ### 8.3 Durable work identity
 
@@ -498,10 +513,12 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
   end, with Last fetched and Refresh on the other. There is no section heading and no
   reporting-period line below; the picker names the range and Last fetched sits by Refresh.
 - The picker offers only dates the organization's approved reports cover, with the same
-  grain warnings as the Channel Audit. A picked range becomes figures only through exactly
-  one declared window: the grain with a completed analysis wins, ties break toward the
-  coarser grain, and a range matching no exact window states that plainly instead of
-  showing another range's figures.
+  grain warnings as the Channel Audit. The card itself reads governed rows for any covered
+  range, with no analysis gate: the exact-window rule below governs analyses (and the
+  picker's resolved state), not the card's figures. A picked range becomes analysis only
+  through exactly one declared window: the grain with a completed analysis wins, ties
+  break toward the coarser grain, and a range matching no exact window states that plainly
+  instead of showing another range's figures.
 - The channel selector narrows rows, totals, and coverage counts to that channel. The
   location selector keeps channels actively mapped to that branch; channels with no active
   mapping are excluded while a location is picked. Filter state travels in `from`, `to`,
@@ -514,31 +531,39 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
   restriction is retired following the ADR 0048 pattern: the picker offers any range the
   organization's approved reports cover, with the newest coverage first; dates outside
   coverage stay unpickable rather than falling back silently.
-- The card header carries a rule-composed headline from measured movement (never
+- The card reads governed metric rows directly -- no finding, run, or analysis gates any
+  figure. Two aggregate loads (the picked range plus its previous equal-length range)
+  carry sales (`revenue.gross`), orders (`listing.placed_orders`), menu views
+  (`listing.menu_views`), cancellations (`order.avoidable_cancellation_count`), and cost
+  presence (`cost.commission`, the cost line both cost-context detectors read). A covered
+  range with reported rows reads whether or not anyone ever analysed it.
+- Range totals dedup per channel and key: fully-inside period rows read at the finest
+  grain available (day, then week, then month) and fully-inside exact-range rows add once
+  each on top; rows merely overlapping the range never arrive clipped or split. The card
+  header carries a rule-composed headline from measured movement (never
   a live model call during page rendering), the measured range, the comparison range
   (the previous equal-length covered period), and the channel/location scope. Four
   tiles -- reported sales, orders placed, menu views, cancelled orders -- show deltas
-  against the previous equal-length period over the channels analysed in both periods;
-  anything unmeasured stays absent with its reason, never zero.
-- The trend plots the finest honest buckets available: analysed whole weeks first,
-  then analysed whole calendar months in the range, then distinct analysed windows
-  picked for maximum covered days without overlap (each labelled with its exact
-  dates). It states which tier it plots with its week and channel coverage. With
-  fewer than two plottable buckets, the axes keep their shape with the plain reason
-  in the middle rather than hiding. Past about six buckets the axis and value
-  labels thin to readable ticks while every point stays plotted. Channel shares
-  refuse mixed currencies with a reason.
+  against the previous equal-length period over the channels reporting in both periods;
+  anything unmeasured stays absent with its reason, never zero. The cancelled share is
+  cancellations over placed orders from the same totals, with its point change.
+- The trend plots daily bars summed per day across the visible channels, with gaps left
+  absent rather than zero-filled. It states its day and channel coverage
+  ("X of Y days · Z of N channels with reported sales"). With fewer than two plottable
+  days, the axes keep their shape with the plain reason in the middle rather than hiding.
+  Past about six buckets the axis and value labels thin to readable ticks while every
+  point stays plotted. Sales, bars, and channel shares all refuse mixed currencies with
+  a reason.
 - The assembled card is cached per organization, range, channel, and location,
   following ADR 0048: the cache holds answers, never verdicts about whether an answer
-  is current. A completed analysis for that scope rebuilds the cached card; the
-  "already analysed?" lookup is never cached and fails through to the database, and
-  every key is namespaced by organization id.
-- A picked range with no finished analysis starts the governed build: the page
-  triggers the same admissibility-checked channel-analysis runs the Channel Audit
-  uses (the property is unchanged -- no analysis over dates the approved reports do
-  not declare), shows the page-content loader (§9.10) while polling build status, and
-  reveals the card when the build lands. Authorization answers who may start a build;
-  a per-organization sliding-window rate limit caps how often builds can be spent.
+  is current. A new report arrival -- a changed evidence-window list, hashed into the
+  envelope -- rebuilds the cached card; completed analyses are no signal and trigger no
+  rebuild. The "already analysed?" lookup is never cached and fails through to the
+  database, and every key is namespaced by organization id.
+- A picked range with no reported rows states the gap honestly and points at the Channel
+  Audit instead of building: dispatching analyses would not help, because runs read
+  these same rows and write findings, never new figures. Authorization answers who may
+  import and analyse reports; the card itself spends nothing.
 - "View data sources" opens the reporting period, scope, per-metric source
   notes, and cost context behind the figures. The footer states channel and
   location coverage, and "Order & fulfillment details" opens order and

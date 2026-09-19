@@ -92,6 +92,19 @@ Creates controlled tests, calculates guardrails, and records results.
 
 Evaluates technical execution, output quality, business impact, and long-term playbook evidence.
 
+### Growth Intelligence
+
+The organization workspace at `/organizations/[organizationId]/growth-intelligence`
+(Spec 022, ADRs 0044 and 0047). Composes four tabs — Overview, Recommendations, Your
+actions, Insights & market — from source-owned reads (Channel findings, Channel
+Recommendations, Decision Opportunities, synthesized items, Market Evidence) without
+copying lifecycle state. Branch-scoped market research, durable pipelines, synthesis,
+and Campaign draft handoff live under `src/domain/growth-intelligence/`,
+`src/modules/growth-intelligence/`, `src/components/growth-intelligence/`, and the
+`growth_intelligence_*` migrations. An explicit manager-clicked live preview may show
+fresh Brave results on screen and discard them; it stores nothing and creates no
+evidence (Spec 022 ss 4.2/8.2 exception).
+
 ### Campaign Bundles
 
 Owns the industry-neutral campaign identity, immutable Campaign Bundle versions and digests, qualification, structured generation ports, revisions and diffs, channel-action manifests, exact-version approval envelopes, measurement plans, and campaign-scoped learning proposals. Decision Engine opportunities and manual briefs enter the same service. Studio and Telegram review are presentation adapters over the same version chain. See ADRs 0015, 0017, 0018, and 0019.

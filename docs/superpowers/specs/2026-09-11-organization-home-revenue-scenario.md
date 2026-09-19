@@ -1,5 +1,7 @@
 # Organization home: revenue scenario (Approved for building 2026-09-16 — ADR 0060)
 
+> 2026-09-18 design successor: the user approved an actual-versus-fixed-original-projection Overview chart. Spec 027 (`specs/027-overview-growth-progress.md`), proposed ADR 0064 and the 2026-09-18 Overview growth handoff define its execution proposal. This document still describes the existing candidate/scenario implementation; do not interpret its current-course forecast as recorded actual revenue. No successor implementation or migration was performed in the planning turn. Historical contradictory “deferred” paragraphs below are retained as proposal history; the accepted nightly-snapshot addendum remains the current implementation until the successor ships.
+
 Status: Approved. The calculation contract below is authorized for
 implementation under the GROWTH execution plan (approved 2026-09-16); the
 implementation lives in `src/domain/organizations/revenue-scenario.ts` and the
