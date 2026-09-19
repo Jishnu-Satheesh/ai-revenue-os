@@ -174,7 +174,7 @@ function input(overrides: Record<string, unknown> = {}) {
     actorId: ACTOR_A,
     nowIso: NOW_ISO,
     timeZone: TIME_ZONE,
-    permissions: { canReadProjections: true, canReadGrowth: true, canReadCampaigns: true },
+    permissions: { canReadProjections: true, canReadGrowth: true, canReadCampaigns: true, canTriggerPublication: true },
     ...overrides,
   };
 }
@@ -201,7 +201,8 @@ describe("ready composition", () => {
 
     expect(section.state).toBe("ready");
     if (section.state !== "ready") return;
-    expect(section.initialHorizon).toBe(1);
+    expect(section.initialHorizon).toBe(3);
+    expect(section.canTriggerImmediatePublication).toBe(true);
     // One union read covers both horizons sharing the scope.
     expect(d.readRevenueFacts).toHaveBeenCalledTimes(1);
     expect(d.readRevenueFacts.mock.calls[0]?.[0]).toMatchObject({
@@ -240,6 +241,24 @@ describe("ready composition", () => {
 
     if (section.state !== "ready") throw new Error("expected ready");
     expect(section.views[1].latestComparableDate).toBe("2026-09-18");
+  });
+
+  it("carries the trigger permission through untouched", async () => {
+    const d = deps({ projections: [stored(1)] });
+    const section = await loadGrowthProgress(
+      input({
+        permissions: {
+          canReadProjections: true,
+          canReadGrowth: true,
+          canReadCampaigns: true,
+          canTriggerPublication: false,
+        },
+      }),
+      { progressReads: d.progressReads, readAdvice: d.readAdvice },
+    );
+
+    if (section.state !== "ready") throw new Error("expected ready");
+    expect(section.canTriggerImmediatePublication).toBe(false);
   });
 
   it("breaks the blue line across gaps instead of bridging them", async () => {
@@ -281,7 +300,7 @@ describe("denial hides without recomputing", () => {
 
     const section = await loadGrowthProgress(
       input({
-        permissions: { canReadProjections: false, canReadGrowth: false, canReadCampaigns: false },
+        permissions: { canReadProjections: false, canReadGrowth: false, canReadCampaigns: false, canTriggerPublication: false },
       }),
       { progressReads: d.progressReads, readAdvice: d.readAdvice },
     );
@@ -427,7 +446,7 @@ describe("state coverage", () => {
     });
     const section = await loadGrowthProgress(
       input({
-        permissions: { canReadProjections: true, canReadGrowth: false, canReadCampaigns: false },
+        permissions: { canReadProjections: true, canReadGrowth: false, canReadCampaigns: false, canTriggerPublication: false },
       }),
       { progressReads: d.progressReads, readAdvice: d.readAdvice },
     );

@@ -1261,7 +1261,8 @@ describe("growth progress section", () => {
   function readySection() {
     return {
       state: "ready" as const,
-      initialHorizon: 1 as const,
+      initialHorizon: 3 as const,
+      canTriggerImmediatePublication: false,
       views: {
         1: {
           horizonMonths: 1 as const,

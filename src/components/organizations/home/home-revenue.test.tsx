@@ -465,10 +465,14 @@ describe("HomeRevenue growth section", () => {
     const section = screen.getByRole("region", { name: "Current vs projected growth" });
     expect(section.getAttribute("id")).toBe("home-revenue");
     expect(screen.getByRole("heading", { name: "Current vs projected growth" })).toBeTruthy();
-    expect(screen.getByText("Revenue this month · September 2026")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "1 month" }).getAttribute("aria-pressed")).toBe(
+    // 3M is the default horizon, so the blank 3-month view shows first.
+    expect(screen.getByRole("button", { name: "3 months" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
+    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
+    // The 1M ready content is unchanged behind the switch.
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
+    expect(screen.getByText("Revenue this month · September 2026")).toBeTruthy();
     expect(screen.getByText("Current · 21 Sep")).toBeTruthy();
     expect(screen.getByText("AED 60,000")).toBeTruthy();
     expect(screen.getByText("Below the projection")).toBeTruthy();
@@ -487,6 +491,7 @@ describe("HomeRevenue growth section", () => {
         growth={buildAheadGrowthSection(ORG_ID)}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     expect(screen.getByText("Above the projection")).toBeTruthy();
     expect(screen.getByText("AED 98,000")).toBeTruthy();
     expect(screen.getByText("AED 14,000 ahead")).toBeTruthy();
@@ -506,6 +511,86 @@ describe("HomeRevenue growth section", () => {
     expect(screen.queryByText("Below the projection")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     expect(screen.getByText("Below the projection")).toBeTruthy();
+  });
+
+  describe("GrowthProjectionTrigger", () => {
+    function sectionWithTrigger(canTrigger: boolean) {
+      const section = buildBehindGrowthSection(ORG_ID);
+      if (section.state !== "ready") throw new Error("fixture must be ready");
+      return { ...section, canTriggerImmediatePublication: canTrigger };
+    }
+
+    function renderMissing(canTrigger: boolean) {
+      render(
+        <HomeRevenue
+          organizationId={ORG_ID}
+          section={{ status: "disabled" }}
+          growth={sectionWithTrigger(canTrigger)}
+        />,
+      );
+    }
+
+    it("hides the trigger without permission on a blank view", () => {
+      renderMissing(false);
+      expect(screen.getByText("Projection not set for this period")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Set up tracking now" })).toBeNull();
+    });
+
+    it("hides the trigger on a ready view even with permission", () => {
+      renderMissing(true);
+      fireEvent.click(screen.getByRole("button", { name: "1 month" }));
+      expect(screen.getByText("Below the projection")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Set up tracking now" })).toBeNull();
+    });
+
+    it("posts once with an idempotency key and confirms the request", async () => {
+      const seen: unknown[][] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (...args: unknown[]) => {
+          seen.push(args);
+          return Response.json({ triggered: true }, { status: 202 });
+        }),
+      );
+      renderMissing(true);
+      fireEvent.click(screen.getByRole("button", { name: "Set up tracking now" }));
+      await waitFor(() =>
+        expect(screen.getByText(/tracking usually appears within a few minutes/)).toBeTruthy(),
+      );
+      expect(seen).toHaveLength(1);
+      expect(String(seen[0]?.[0])).toContain(`/api/organizations/${ORG_ID}/growth/projection`);
+      const body = JSON.parse(String(seen[0]?.[1] && (seen[0][1] as RequestInit).body)) as {
+        idempotencyKey: string;
+      };
+      expect(body.idempotencyKey.length).toBeGreaterThanOrEqual(16);
+      expect(screen.getByRole("button", { name: "Refresh to check" })).toBeTruthy();
+    });
+
+    it("says the nightly run is unaffected when the worker cannot be reached", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ error: { message: "busy" } }, { status: 503 })),
+      );
+      renderMissing(true);
+      fireEvent.click(screen.getByRole("button", { name: "Set up tracking now" }));
+      await waitFor(() =>
+        expect(screen.getByText(/scheduled run is unaffected/)).toBeTruthy(),
+      );
+    });
+
+    it("fails honestly on a network error", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new Error("down");
+        }),
+      );
+      renderMissing(true);
+      fireEvent.click(screen.getByRole("button", { name: "Set up tracking now" }));
+      await waitFor(() =>
+        expect(screen.getByText(/scheduled run is unaffected/)).toBeTruthy(),
+      );
+    });
   });
 
   it("shows a shaped failure with retry when growth reads fail", () => {
@@ -595,6 +680,7 @@ describe("HomeRevenue growth horizon switching", () => {
 
   it("clears the pinned tooltip, announces politely and keeps the projection identity", () => {
     render(growthHome());
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     const section = screen.getByRole("region", { name: "Current vs projected growth" });
     expect(section.getAttribute("data-projection-digest")).toBe("fixture-digest-september-2026-v1");
     const group = screen.getByRole("group", { name: /Growth chart/ });
@@ -622,6 +708,7 @@ describe("HomeRevenue growth horizon switching", () => {
 
   it("leaves the right panel at the latest report while the chart is explored", () => {
     render(growthHome());
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     const group = screen.getByRole("group", { name: /Growth chart/ });
     fireEvent.keyDown(group, { key: "End" });
     fireEvent.keyDown(group, { key: "Enter" });
@@ -631,6 +718,7 @@ describe("HomeRevenue growth horizon switching", () => {
 
   it("opens the method dialog from the footer with the accessible value table", () => {
     render(growthHome());
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     fireEvent.click(screen.getByRole("button", { name: /How this is estimated/ }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByRole("table")).toBeTruthy();
@@ -648,6 +736,26 @@ describe("HomeRevenue growth degraded states", () => {
         growth={{ ...section, views: { ...section.views, 1: view } }}
       />,
     );
+    // Fixtures default to the blank 3M horizon; these states render on 1M.
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
+  }
+
+  // The horizon switch also writes the polite live-region announcement, so
+  // visible-panel copy that echoes the state title matches twice in the
+  // DOM. Scope those assertions to the rendered panel, never the announcer.
+  function panelText(pattern: RegExp) {
+    return screen.getByText((_, element) => {
+      if (!element || element.closest('[data-testid="growth-horizon-announcement"]') !== null) {
+        return false;
+      }
+      // Direct text only (like the default matcher): ancestors share the
+      // descendant copy but are not the panel line under test.
+      const direct = [...element.childNodes]
+        .filter((node) => node.nodeType === 3)
+        .map((node) => node.textContent ?? "")
+        .join("");
+      return pattern.test(direct);
+    });
   }
 
   it("plots the green outlook beside the panel for an upcoming period", () => {
@@ -659,7 +767,7 @@ describe("HomeRevenue growth degraded states", () => {
       latestComparableDate: null,
       latestComparison: null,
     });
-    expect(screen.getByText(/Tracking starts 1 Sep/)).toBeTruthy();
+    expect(panelText(/Tracking starts 1 Sep/)).toBeTruthy();
     expect(screen.queryByText("Below the projection")).toBeNull();
     expect(screen.queryByText("Above the projection")).toBeNull();
     // Green outlook still plotted, blue absent.
@@ -701,7 +809,7 @@ describe("HomeRevenue growth degraded states", () => {
       latestComparableDate: null,
       latestComparison: null,
     });
-    expect(screen.getByText(/mixed currency/)).toBeTruthy();
+    expect(panelText(/mixed currency/)).toBeTruthy();
     expect(screen.getByText(/no combined amount is plotted/)).toBeTruthy();
     const link = screen.getByRole("link", { name: /Review the source reports/ });
     expect(link.getAttribute("href")).toContain(`/organizations/${ORG_ID}/`);
@@ -717,7 +825,7 @@ describe("HomeRevenue growth degraded states", () => {
       latestComparableDate: null,
       latestComparison: null,
     });
-    expect(screen.getByText(/overlapping reports/)).toBeTruthy();
+    expect(panelText(/overlapping reports/)).toBeTruthy();
   });
 
   it("labels a stale complete observation with its date, never as today", () => {

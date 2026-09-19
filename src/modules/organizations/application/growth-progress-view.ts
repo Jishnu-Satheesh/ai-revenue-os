@@ -123,14 +123,26 @@ export const growthProgressSectionSchema = z.union([
   }),
   z.strictObject({
     state: z.literal("ready"),
-    initialHorizon: z.literal(1),
+    initialHorizon: z.literal(3),
+    /**
+     * Server-derived owner/admin flag for the on-demand worker trigger.
+     * The button renders only on a blank (missing-projection) view when
+     * this is true; the route re-checks the role, so a forged view cannot
+     * widen access.
+     */
+    canTriggerImmediatePublication: z.boolean(),
     views: growthProgressViewsSchema,
   }),
 ]);
 export type GrowthProgressSection =
   | { state: "disabled" }
   | { state: "failed"; reasonCode: string | null; retainedView: GrowthProgressView | null }
-  | { state: "ready"; initialHorizon: 1; views: GrowthProgressViews };
+  | {
+      state: "ready";
+      initialHorizon: 3;
+      canTriggerImmediatePublication: boolean;
+      views: GrowthProgressViews;
+    };
 
 /**
  * Single construction sites for the two non-ready section states, so the

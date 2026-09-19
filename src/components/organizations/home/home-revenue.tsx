@@ -451,6 +451,68 @@ function GrowthStatePanel({
 }
 
 /**
+ * On-demand run of tonight's build, rendered only on a blank
+ * (missing-projection) view for a permitted viewer. The route re-checks the
+ * role and the flag, so hiding the button hides the control but never the
+ * authorization. Success means "accepted": the worker answers
+ * asynchronously, and a stale baseline still refuses inside the worker with
+ * its honest reason on the next load.
+ */
+function GrowthProjectionTrigger({ organizationId }: Readonly<{ organizationId: string }>) {
+  const [status, setStatus] = useState<"idle" | "pending" | "sent" | "failed">("idle");
+
+  async function trigger() {
+    setStatus("pending");
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/growth/projection`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
+        },
+      );
+      setStatus(response.ok ? "sent" : "failed");
+    } catch {
+      setStatus("failed");
+    }
+  }
+
+  if (status === "sent") {
+    return (
+      <div className={styles.growthTriggerNote}>
+        <p className={styles.emptyNote}>
+          Requested — tracking usually appears within a few minutes. Refresh to check.
+        </p>
+        <HomeRefreshButton label="Refresh to check" />
+      </div>
+    );
+  }
+  return (
+    <div className={styles.growthTriggerNote}>
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={status === "pending"}
+        onClick={trigger}
+      >
+        {status === "pending" ? "Requesting…" : "Set up tracking now"}
+      </Button>
+      {status === "failed" ? (
+        <p className={styles.emptyNote}>
+          The worker could not be reached just now — tonight&apos;s scheduled run is
+          unaffected. Try again.
+        </p>
+      ) : (
+        <p className={styles.emptyNote}>
+          Runs tonight&apos;s check immediately — the first projection starts tomorrow.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * Polite announcement for a horizon switch: the new period plus its latest
  * comparison, so screen-reader users get the atomic view change as one
  * sentence. Never a transient zero or a stale comparison under new label.
@@ -545,6 +607,9 @@ function HomeRevenueGrowth({
             ) : null}
             {!ready && !hasPoints ? (
               <GrowthStatePanel view={view} reviewHref={recommendationsHref} />
+            ) : null}
+            {view.state === "missing" && section.canTriggerImmediatePublication ? (
+              <GrowthProjectionTrigger organizationId={organizationId} />
             ) : null}
           </div>
           <Separator

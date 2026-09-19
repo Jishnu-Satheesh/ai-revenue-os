@@ -118,3 +118,16 @@ export async function settleHarness(page: Page): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(GROWTH_FROZEN.settleMs);
 }
+
+/**
+ * Show the ready 1M chart: fixtures default to the 3M horizon (missing),
+ * so chart-dependent tests switch explicitly. Selection is atomic per
+ * Task 7: the pressed pill proves the switch completed.
+ */
+export async function showReadyMonthChart(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "1 month" }).click();
+  await page.waitForFunction(() => {
+    const pressed = document.querySelector('#home-revenue [aria-pressed="true"]');
+    return pressed?.textContent?.includes("1M") ?? false;
+  });
+}

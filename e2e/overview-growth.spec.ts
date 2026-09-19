@@ -9,6 +9,7 @@ import {
   missingHarnessReason,
   overviewPath,
   settleHarness,
+  showReadyMonthChart,
 } from "./support/overview-growth-fixtures";
 import {
   missingEnvironmentReason,
@@ -157,14 +158,16 @@ test.describe("Overview growth V09 matrix (isolated card)", () => {
     await page.goto(harnessUrl("behind"), { waitUntil: "networkidle" });
     await settleHarness(page);
 
-    const threeMonths = page.getByRole("button", { name: "3 months" });
-    await threeMonths.focus();
-    await expect(threeMonths).toBeFocused();
+    // Fixtures default to the 3M horizon; switching to 1M exercises the
+    // announcement and the pressed-once invariant from a real change.
+    const oneMonth = page.getByRole("button", { name: "1 month" });
+    await oneMonth.focus();
+    await expect(oneMonth).toBeFocused();
     await page.keyboard.press("Enter");
     const announcement = page.getByTestId("growth-horizon-announcement");
     await expect(announcement).not.toBeEmpty();
     // The horizon control stays pressed exactly once.
-    await expect(page.getByRole("button", { name: "3 months" })).toHaveAttribute(
+    await expect(page.getByRole("button", { name: "1 month" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -174,6 +177,7 @@ test.describe("Overview growth V09 matrix (isolated card)", () => {
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.goto(harnessUrl("behind"), { waitUntil: "networkidle" });
     await settleHarness(page);
+    await showReadyMonthChart(page);
 
     const dots = page.locator("#home-revenue svg circle");
     expect(await dots.count()).toBeGreaterThan(0);
@@ -203,6 +207,7 @@ test.describe("Overview growth V09 matrix (isolated card)", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(harnessUrl("behind"), { waitUntil: "networkidle" });
     await settleHarness(page);
+    await showReadyMonthChart(page);
 
     const section = page.locator("#home-revenue");
     await expect(
@@ -224,6 +229,7 @@ test.describe("Overview growth V09 matrix (isolated card)", () => {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(harnessUrl("behind"), { waitUntil: "networkidle" });
       await settleHarness(page);
+      await showReadyMonthChart(page);
 
       const dots = page.locator("#home-revenue svg circle");
       expect(await dots.count()).toBeGreaterThan(0);

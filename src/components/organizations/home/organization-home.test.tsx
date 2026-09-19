@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -708,6 +708,9 @@ describe("OrganizationHome growth section", () => {
     expect(
       (section.compareDocumentPosition(campaigns) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     ).toBe(true);
+    // The blank 3M horizon mounts first; the 1M ready verdict sits one switch away.
+    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     expect(screen.getByText("Below the projection")).toBeTruthy();
     expect(screen.getByText("AED 24,000 behind")).toBeTruthy();
   });

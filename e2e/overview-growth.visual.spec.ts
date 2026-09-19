@@ -10,6 +10,7 @@ import {
   isHarnessScenarioAvailable,
   missingHarnessReason,
   settleHarness,
+  showReadyMonthChart,
 } from "./support/overview-growth-fixtures";
 
 /**
@@ -47,6 +48,8 @@ test.describe("Overview growth visual review", () => {
     test(`${state}: canonical render anchors hold within tolerance`, async ({ page }) => {
       await page.goto(harnessUrl(state), { waitUntil: "networkidle" });
       await settleHarness(page);
+      // Fixtures default to the blank 3M horizon; anchors measure the 1M chart.
+      await showReadyMonthChart(page);
 
       const section = page.locator("#home-revenue");
       await expect(section).toBeVisible();
@@ -101,6 +104,7 @@ test.describe("Overview growth visual review", () => {
     const measure = async (state: "behind" | "ahead") => {
       await page.goto(harnessUrl(state), { waitUntil: "networkidle" });
       await settleHarness(page);
+      await showReadyMonthChart(page);
       const section = page.locator("#home-revenue");
       const titleSize = await section
         .getByRole("heading", { name: "Current vs projected growth" })
@@ -161,6 +165,7 @@ test.describe("Overview growth visual review", () => {
       test.skip(!(await isHarnessScenarioAvailable(request, state)), missingHarnessReason());
       await page.goto(harnessUrl(state), { waitUntil: "networkidle" });
       await settleHarness(page);
+      await showReadyMonthChart(page);
       await page.screenshot({ path: `${EVIDENCE_DIR}/task8-${state}.png` });
 
       const approved = readFileSync(

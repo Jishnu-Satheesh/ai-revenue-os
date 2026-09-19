@@ -343,6 +343,10 @@ export async function loadOrganizationHome(
             canReadGrowth:
               growthGate && hasOrganizationPermission(role, "growth_intelligence.read"),
             canReadCampaigns: campaignsGate && hasOrganizationPermission(role, "campaign.read"),
+            // Owner/admin only, and only behind the growth flag: the button
+            // that spends a worker run. The route re-checks both.
+            canTriggerPublication:
+              growthEnabled && (role === "owner" || role === "admin"),
           },
         },
         {

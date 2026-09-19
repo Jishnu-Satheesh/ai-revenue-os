@@ -61,6 +61,7 @@ export const loadGrowthProgressInputSchema = z.strictObject({
     canReadProjections: z.boolean(),
     canReadGrowth: z.boolean(),
     canReadCampaigns: z.boolean(),
+    canTriggerPublication: z.boolean(),
   }),
 });
 export type LoadGrowthProgressInput = z.output<typeof loadGrowthProgressInputSchema>;
@@ -189,6 +190,7 @@ export async function loadGrowthProgress(
           unavailableView(horizon, "PERMISSION_DENIED"),
         ]),
       ),
+      input.permissions.canTriggerPublication,
     );
   }
   if (envelope.status === "failed") {
@@ -199,6 +201,7 @@ export async function loadGrowthProgress(
           unavailableView(horizon, "SOURCE_READ_FAILED"),
         ]),
       ),
+      input.permissions.canTriggerPublication,
     );
   }
   if (envelope.status === "corrupt") {
@@ -209,11 +212,13 @@ export async function loadGrowthProgress(
           unavailableView(horizon, "PROJECTION_CORRUPT"),
         ]),
       ),
+      input.permissions.canTriggerPublication,
     );
   }
   if (envelope.status === "missing") {
     return readySection(
       new Map(GROWTH_HORIZON_MONTHS.map((horizon) => [horizon, missingView(horizon)])),
+      input.permissions.canTriggerPublication,
     );
   }
 
@@ -322,13 +327,17 @@ export async function loadGrowthProgress(
       }),
     );
   }
-  return readySection(views);
+  return readySection(views, input.permissions.canTriggerPublication);
 }
 
-function readySection(views: Map<GrowthHorizonMonths, GrowthProgressView>): GrowthProgressSection {
+function readySection(
+  views: Map<GrowthHorizonMonths, GrowthProgressView>,
+  canTriggerImmediatePublication: boolean,
+): GrowthProgressSection {
   return {
     state: "ready",
-    initialHorizon: 1,
+    initialHorizon: 3,
+    canTriggerImmediatePublication,
     views: {
       1: views.get(1)!,
       3: views.get(3)!,

@@ -204,7 +204,8 @@ export function buildAheadGrowthView(organizationId: string): GrowthProgressView
 function sectionFor(oneMonthView: GrowthProgressView): GrowthProgressSection {
   const section: GrowthProgressSection = {
     state: "ready",
-    initialHorizon: 1,
+    initialHorizon: 3,
+    canTriggerImmediatePublication: false,
     views: {
       1: oneMonthView,
       3: missingHorizonView(3, "2026-12-01", ""),
