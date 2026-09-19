@@ -3,17 +3,29 @@ import { z } from "zod";
 /**
  * The assembled business-performance card, cached per selected period.
  *
- * The findings a card aggregates are already durable rows -- what this cache
+ * The figures a card aggregates are governed report rows -- what this cache
  * saves is re-reading and re-aggregating them on every visit to the same
  * period. Following ADR 0048 it holds answers, never verdicts about whether
- * an answer is current: every hit is revalidated against a live
- * completed-since query by the caller, and a miss (or a failed revalidation)
- * rebuilds from the database. Redis holds no authority here.
+ * an answer is current: every hit is revalidated against the live evidence
+ * fingerprint by the caller, and a miss (or a failed revalidation) rebuilds
+ * from the database. Redis holds no authority here.
+ *
+ * The fingerprint names the report arrival the card depends on. Card figures
+ * come straight from governed rows, never from an analysis run, so a
+ * completed run is no signal: only a changed evidence-window list -- a new
+ * report filed, a window re-declared, a governed row count moved -- rebuilds
+ * the card. The list is newest-first and capped like the picker's, so an
+ * arrival always shifts it; an old window falling off the cap only causes an
+ * extra rebuild, never a stale read. The TTL below stays as the backstop.
  */
 
 /** An hour: a memory bound, not a correctness device. Revalidation decides. */
 export const CARD_CACHE_TTL_SECONDS = 3600;
-const CARD_CACHE_VERSION = "v1";
+/**
+ * Bumped when the card's source moved from analysed findings to governed
+ * aggregates: v1 envelopes carry no evidence fingerprint and never validate.
+ */
+const CARD_CACHE_VERSION = "v2";
 
 const rangeSchema = z.object({ from: z.string(), to: z.string() });
 const cardMoneySchema = z.object({ minorUnits: z.number(), currency: z.string() });
@@ -107,14 +119,54 @@ export function performanceCardCacheKey(input: {
 }
 
 /**
- * The envelope around a cached card. `builtAt` is the live currency
- * verdict's anchor: a hit is served only when no run completed inside the
- * card's date box after it, so a newer analysis always rebuilds instead of
- * reading stale.
+ * The envelope around a cached card. `builtAt` dates the answer;
+ * `evidenceFingerprint` is the live currency verdict's anchor: a hit is
+ * served only when the organization's evidence-window list still hashes to
+ * the same value, so a newer report always rebuilds instead of reading stale.
  */
 export const performanceCardEnvelopeSchema = z.object({
   builtAt: z.string(),
+  evidenceFingerprint: z.string(),
   card: performanceCardViewSchema,
 });
 
 export type CachedPerformanceCardEnvelope = z.infer<typeof performanceCardEnvelopeSchema>;
+
+/**
+ * The report-arrival signal behind a cached card: one line per evidence
+ * window, sorted so window order never matters, hashed so the envelope stays
+ * small. Two 32-bit FNV-1a lanes rather than a cryptographic digest: this
+ * only decides rebuild-vs-serve, and a collision merely serves a TTL-bounded
+ * answer. Plain 32-bit arithmetic throughout, so the function runs wherever
+ * the cache module is imported.
+ */
+export function evidenceFingerprint(
+  windows: readonly {
+    channelId: string;
+    windowStart: string;
+    windowEnd: string;
+    grain: string;
+    governedRowCount: number;
+    sourceFilename: string | null;
+  }[],
+): string {
+  const lines = windows
+    .map(
+      (window) =>
+        `${window.channelId}|${window.windowStart}|${window.windowEnd}|${window.grain}|${window.governedRowCount}|${window.sourceFilename ?? ""}`,
+    )
+    .sort();
+  let first = 0x811c9dc5;
+  let second = 0x811c9dc5 ^ 0x9e3779b9;
+  const feed = (code: number) => {
+    first = Math.imul(first ^ code, 0x01000193) >>> 0;
+    second = Math.imul(second ^ code, 0x01000193) >>> 0;
+  };
+  for (const line of lines) {
+    for (let index = 0; index < line.length; index += 1) {
+      feed(line.charCodeAt(index));
+    }
+    feed(10);
+  }
+  return `${first.toString(16).padStart(8, "0")}${second.toString(16).padStart(8, "0")}`;
+}

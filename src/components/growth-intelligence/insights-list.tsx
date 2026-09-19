@@ -18,7 +18,12 @@ export function InsightsList({
 }) {
   return (
     <section aria-label="Insights" className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Insights</h2>
+      <div>
+        <h2 className="text-xl font-semibold">Insights</h2>
+        <p className="text-sm text-muted-foreground">
+          Material observations from your business and market evidence.
+        </p>
+      </div>
       {insights.length === 0 ? (
         <p className="text-sm text-muted-foreground">No insights for this month.</p>
       ) : null}

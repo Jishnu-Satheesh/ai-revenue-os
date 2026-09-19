@@ -18,6 +18,7 @@ import type {
   ChannelBandRecord,
   ChannelEvidenceWindow,
   ChannelFindingRecord,
+  DailyMetricAggregate,
 } from "@/modules/analysis/application/ports";
 
 /**
@@ -277,6 +278,18 @@ export function wholeWeeksOfRange(range: CoveredMonth): CoveredMonth[] {
 }
 
 /**
+ * Every calendar day a picked range contains, for the trend's finest tier.
+ * A day is its own whole period, so every day counts: there are no edge
+ * stubs to exclude, only days nothing analysed to leave unplotted.
+ */
+export function wholeDaysOfRange(range: CoveredMonth): CoveredMonth[] {
+  return enumerateLocalPeriodStarts(range.from, range.to, "day").map((start) => ({
+    from: start,
+    to: localPeriodEnd(start, "day"),
+  }));
+}
+
+/**
  * The whole calendar months a picked range contains, for the trend's second
  * tier. A month counts only when the range covers it fully: a stub month
  * beside full months would read as a collapse nobody measured.
@@ -412,8 +425,30 @@ export function prettyRange(from: string, to: string): string {
   return `${fromDay} ${month} – ${toDay} ${monthName(to).slice(0, 3)} ${toYear}`;
 }
 
+const REVENUE_GROSS_METRIC = "revenue.gross";
 const PLACED_ORDERS_METRIC = "listing.placed_orders";
 const MENU_VIEWS_METRIC = "listing.menu_views";
+const CANCELLED_METRIC = "order.avoidable_cancellation_count";
+/**
+ * The one cost line both cost-context detectors read: the channel detector
+ * sums it with the other merchant-borne deductions, the company detector
+ * reads it as the marketplace line. The card asks it only whether any cost
+ * was reported, for the footnote and the sources note.
+ */
+const COST_METRIC = "cost.commission";
+
+/**
+ * Every metric key the business-performance card aggregates: the four tiles
+ * plus cost presence. The page loads exactly these for the picked range and
+ * its previous equal range.
+ */
+export const PERFORMANCE_CARD_METRIC_KEYS = [
+  REVENUE_GROSS_METRIC,
+  PLACED_ORDERS_METRIC,
+  MENU_VIEWS_METRIC,
+  CANCELLED_METRIC,
+  COST_METRIC,
+] as const;
 
 export type CardMoney = { minorUnits: number; currency: string };
 
@@ -500,53 +535,6 @@ export type BusinessPerformanceCardView = {
   };
 };
 
-function observationOf(
-  findings: readonly ChannelFindingRecord[] | undefined,
-  code: string,
-  metricKey?: string,
-): ChannelFindingRecord | undefined {
-  return findings?.find(
-    (finding) =>
-      finding.kind === "observation" &&
-      finding.code === code &&
-      (metricKey === undefined || finding.metricKey === metricKey),
-  );
-}
-
-function moneyFigure(
-  findings: readonly ChannelFindingRecord[] | undefined,
-  code: string,
-): CardMoney | null {
-  const finding = observationOf(findings, code);
-  if (!finding || finding.valueKind !== "money") return null;
-  if (finding.valueNumerator === null || finding.currency === null) return null;
-  return { minorUnits: finding.valueNumerator, currency: finding.currency };
-}
-
-function countFigure(
-  findings: readonly ChannelFindingRecord[] | undefined,
-  code: string,
-  metricKey?: string,
-): number | null {
-  const finding = observationOf(findings, code, metricKey);
-  if (!finding) return null;
-  if (finding.valueKind === "count") return finding.valueNumerator;
-  // Funnel stages arrive as ratios whose numerator is the window sum; a ratio
-  // with no numerator measured nothing.
-  if (finding.valueKind === "ratio") return finding.valueNumerator;
-  return null;
-}
-
-function shareFigure(
-  findings: readonly ChannelFindingRecord[] | undefined,
-): { numerator: number; denominator: number } | null {
-  const finding = observationOf(findings, "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS");
-  if (!finding || finding.valueKind !== "ratio") return null;
-  if (finding.valueNumerator === null || finding.valueDenominator === null) return null;
-  if (finding.valueDenominator === 0) return null;
-  return { numerator: finding.valueNumerator, denominator: finding.valueDenominator };
-}
-
 /**
  * The channels carrying a figure in both months. A delta over two different
  * channel sets would describe the portfolio's changing shape rather than a
@@ -559,54 +547,36 @@ function comparableChannelIds(
   return [...current.keys()].filter((id) => previous.has(id));
 }
 
-const NO_EARLIER_PERIOD_REASON = "No earlier comparable period was analysed.";
-const NO_COMMON_CHANNEL_REASON = "No channel was analysed in both periods.";
+const NO_EARLIER_PERIOD_REASON = "No earlier comparable period was reported.";
+const NO_COMMON_CHANNEL_REASON = "No channel has reported figures in both periods.";
 
 /**
  * The business-performance card over one picked covered range: four tiles
  * with deltas against the previous equal-length period, a rule-composed
- * headline, a weekly trend, channel shares, and the payloads behind both
+ * headline, daily bars, channel shares, and the payloads behind both
  * modals.
  *
- * Pure. Every figure it carries came out of a detector already; the only
- * arithmetic here is presentation -- sums over the visible channels and whole
- * percent changes -- and anything unmeasured stays absent with its reason,
- * never zero.
+ * Pure. Every figure it carries came out of a governed report row already;
+ * the only arithmetic here is presentation -- range totals with finest-grain
+ * dedup per channel, sums over the visible channels, and whole percent
+ * changes -- and anything unmeasured stays absent with its reason, never
+ * zero. No finding, run, or analysis gates any figure: a covered range with
+ * reported rows reads, whether or not anyone ever analysed it.
  */
 export function buildBusinessPerformanceCard(input: {
   month: CoveredMonth;
   /** The visible channels: already filtered to the picked channel/location. */
   channels: readonly { id: string; displayName: string }[];
-  current: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
-  previous: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
-  /** Nested analysed weeks, each with the same card findings for its window. */
-  trendWeeks: readonly {
-    window: CoveredMonth;
-    records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
-  }[];
-  /**
-   * Nested analysed calendar months, same shape as the weeks: the trend's
-   * second tier when whole weeks were never analysed.
-   */
-  trendMonths: readonly {
-    window: CoveredMonth;
-    records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
-  }[];
-  /**
-   * Distinct analysed windows inside the range, picked for maximum covered
-   * days without overlap: the trend's third tier when neither weeks nor
-   * months were analysed.
-   */
-  trendWindows: readonly {
-    window: CoveredMonth;
-    records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
-  }[];
+  /** Governed aggregates for the picked range, unfiltered: scope applies here. */
+  currentAggregates: readonly DailyMetricAggregate[];
+  /** Governed aggregates for the previous equal-length range. */
+  previousAggregates: readonly DailyMetricAggregate[];
   /** Actively mapped branches across the visible channels, for the footer. */
   locationCount: number;
   /** Scope names for the sources modal; null reads "all". */
   channelScopeName: string | null;
   locationScopeName: string | null;
-  /** Report filenames behind the current month's windows. */
+  /** Report filenames behind the picked range. */
   reportFiles: readonly string[];
 }): BusinessPerformanceCardView {
   const previous = previousEqualRange(input.month);
@@ -619,25 +589,71 @@ export function buildBusinessPerformanceCard(input: {
     : `vs ${prettyRange(previous.from, previous.to)}`;
   const byId = new Map(input.channels.map((channel) => [channel.id, channel.displayName]));
 
-  const grossByChannel = (records: ReadonlyMap<string, readonly ChannelFindingRecord[]>) => {
-    const figures = new Map<string, CardMoney>();
-    for (const [channelId, findings] of records) {
-      if (!byId.has(channelId)) continue;
-      const money = moneyFigure(findings, "WINDOW_GROSS_REVENUE");
-      if (money) figures.set(channelId, money);
+  /**
+   * One channel's range total for one key. Fully-inside period rows dedup by
+   * finest grain -- day rows win, else week, else month -- and fully-inside
+   * span rows add once each on top. Currency merges across every included
+   * row: a null or a second code marks the channel mixed, while counts simply
+   * ignore a field their rows never carry.
+   */
+  const rangeTotal = (
+    rows: readonly DailyMetricAggregate[],
+    channelId: string,
+    metricKey: string,
+  ): { total: number; currency: string | null; mixed: boolean } | null => {
+    const scoped = rows.filter(
+      (row) => row.channelId === channelId && row.metricKey === metricKey,
+    );
+    const days = scoped.filter((row) => row.grain === "day");
+    const weeks = scoped.filter((row) => row.grain === "week");
+    const months = scoped.filter((row) => row.grain === "month");
+    const spans = scoped.filter((row) => row.grain === "span");
+    const period = days.length > 0 ? days : weeks.length > 0 ? weeks : months;
+    const included = [...period, ...spans];
+    if (included.length === 0) return null;
+    const currencies = new Set<string>();
+    let mixed = false;
+    for (const row of included) {
+      if (row.currency === null) mixed = true;
+      else currencies.add(row.currency);
     }
-    return figures;
+    if (currencies.size > 1) mixed = true;
+    const [currency] = currencies;
+    return {
+      total: included.reduce((sum, row) => sum + row.totalNumerator, 0),
+      currency: !mixed && currencies.size === 1 && currency !== undefined ? currency : null,
+      mixed,
+    };
   };
+
+  /** Visible channels carrying a money figure for the key; mixed ones named apart. */
+  const moneyByChannel = (
+    rows: readonly DailyMetricAggregate[],
+    metricKey: string,
+  ): { figures: Map<string, CardMoney>; mixed: Set<string> } => {
+    const figures = new Map<string, CardMoney>();
+    const mixed = new Set<string>();
+    for (const channel of input.channels) {
+      const range = rangeTotal(rows, channel.id, metricKey);
+      if (!range) continue;
+      if (range.mixed || range.currency === null) {
+        mixed.add(channel.id);
+        continue;
+      }
+      figures.set(channel.id, { minorUnits: range.total, currency: range.currency });
+    }
+    return { figures, mixed };
+  };
+
+  /** Visible channels carrying any total for the key; currency never matters to a count. */
   const countByChannel = (
-    records: ReadonlyMap<string, readonly ChannelFindingRecord[]>,
-    code: string,
-    metricKey?: string,
-  ) => {
+    rows: readonly DailyMetricAggregate[],
+    metricKey: string,
+  ): Map<string, number> => {
     const figures = new Map<string, number>();
-    for (const [channelId, findings] of records) {
-      if (!byId.has(channelId)) continue;
-      const value = countFigure(findings, code, metricKey);
-      if (value !== null) figures.set(channelId, value);
+    for (const channel of input.channels) {
+      const range = rangeTotal(rows, channel.id, metricKey);
+      if (range) figures.set(channel.id, range.total);
     }
     return figures;
   };
@@ -680,35 +696,26 @@ export function buildBusinessPerformanceCard(input: {
     return { deltaPercent: Math.round(((now - base) / base) * 100), reason: null };
   };
 
-  const currentGross = grossByChannel(input.current);
-  const previousGross = grossByChannel(input.previous);
+  const currentMoney = moneyByChannel(input.currentAggregates, REVENUE_GROSS_METRIC);
+  const previousMoney = moneyByChannel(input.previousAggregates, REVENUE_GROSS_METRIC);
+  const currentGross = currentMoney.figures;
+  const previousGross = previousMoney.figures;
   const currentSales = sumMoney(currentGross);
   const salesDelta = deltaOver(
     new Map([...currentGross].map(([id, money]) => [id, money.minorUnits])),
     new Map([...previousGross].map(([id, money]) => [id, money.minorUnits])),
   );
   const salesDeltaBlockedByCurrency =
-    currentGross.size > 0 &&
-    new Set([...currentGross.values()].map((figure) => figure.currency)).size > 1;
+    currentMoney.mixed.size > 0 ||
+    (currentGross.size > 0 &&
+      new Set([...currentGross.values()].map((figure) => figure.currency)).size > 1);
 
-  const currentOrders = countByChannel(
-    input.current,
-    "FUNNEL_STAGE_CONVERSION",
-    PLACED_ORDERS_METRIC,
-  );
-  const previousOrders = countByChannel(
-    input.previous,
-    "FUNNEL_STAGE_CONVERSION",
-    PLACED_ORDERS_METRIC,
-  );
-  const currentViews = countByChannel(input.current, "FUNNEL_STAGE_CONVERSION", MENU_VIEWS_METRIC);
-  const previousViews = countByChannel(
-    input.previous,
-    "FUNNEL_STAGE_CONVERSION",
-    MENU_VIEWS_METRIC,
-  );
-  const currentCancelled = countByChannel(input.current, "ORDER_CANCELLATION_LOSS");
-  const previousCancelled = countByChannel(input.previous, "ORDER_CANCELLATION_LOSS");
+  const currentOrders = countByChannel(input.currentAggregates, PLACED_ORDERS_METRIC);
+  const previousOrders = countByChannel(input.previousAggregates, PLACED_ORDERS_METRIC);
+  const currentViews = countByChannel(input.currentAggregates, MENU_VIEWS_METRIC);
+  const previousViews = countByChannel(input.previousAggregates, MENU_VIEWS_METRIC);
+  const currentCancelled = countByChannel(input.currentAggregates, CANCELLED_METRIC);
+  const previousCancelled = countByChannel(input.previousAggregates, CANCELLED_METRIC);
 
   const ordersTotal = sumCounts(currentOrders);
   const viewsTotal = sumCounts(currentViews);
@@ -717,14 +724,13 @@ export function buildBusinessPerformanceCard(input: {
   const viewsDelta = deltaOver(currentViews, previousViews);
   const cancelledDelta = deltaOver(currentCancelled, previousCancelled);
 
-  const viewChannelNames = [...currentViews.keys()].map((id) => byId.get(id) ?? id);
-  const hasCostContext = [...input.current.values()].some((findings) =>
-    findings.some(
-      (finding) =>
-        finding.kind === "observation" &&
-        (finding.code === "CHANNEL_COST_LOAD_OF_REVENUE" ||
-          finding.code === "COMPANY_COST_STRUCTURE_OF_REVENUE"),
-    ),
+  const viewChannelNames = input.channels
+    .filter((channel) => currentViews.has(channel.id))
+    .map((channel) => channel.displayName);
+  // Any reported cost line counts as cost context: the detector names the
+  // lines it read, and presence here is what the footnote goes on to promise.
+  const hasCostContext = input.channels.some(
+    (channel) => rangeTotal(input.currentAggregates, channel.id, COST_METRIC) !== null,
   );
 
   const channelWord = (count: number) => `${count} ${count === 1 ? "channel" : "channels"}`;
@@ -832,30 +838,23 @@ export function buildBusinessPerformanceCard(input: {
       ? `${firstSentence} ${secondSentence}`
       : (firstSentence ?? (secondSentence ? `${neutralTitle} ${secondSentence}` : neutralTitle));
 
-  const shareByChannel = (records: ReadonlyMap<string, readonly ChannelFindingRecord[]>) => {
-    const numerator: number[] = [];
-    const denominator: number[] = [];
-    for (const [channelId, findings] of records) {
-      if (!byId.has(channelId)) continue;
-      const share = shareFigure(findings);
-      if (share) {
-        numerator.push(share.numerator);
-        denominator.push(share.denominator);
-      }
-    }
-    const numTotal = numerator.reduce((total, value) => total + value, 0);
-    const denTotal = denominator.reduce((total, value) => total + value, 0);
-    if (numerator.length === 0 || denTotal === 0) return null;
-    return { percent: Math.round((numTotal / denTotal) * 100) };
-  };
-  const currentShare = shareByChannel(input.current);
-  const previousShare = shareByChannel(input.previous);
-  const cancelledShare = currentShare
-    ? {
-        percent: currentShare.percent,
-        pointChange: previousShare !== null ? currentShare.percent - previousShare.percent : null,
-      }
-    : null;
+  // The cancelled share of placed orders, from the same range totals as the
+  // tiles: cancellations over orders, rounded whole, with the point change
+  // against the previous equal range. Null whenever orders are unmeasured,
+  // never a share of nothing stated as zero.
+  const shareOfOrders = (cancelled: number | null, orders: number | null): number | null =>
+    cancelled === null || orders === null || orders <= 0
+      ? null
+      : Math.round((cancelled / orders) * 100);
+  const currentShare = shareOfOrders(cancelledTotal, ordersTotal);
+  const previousShare = shareOfOrders(sumCounts(previousCancelled), sumCounts(previousOrders));
+  const cancelledShare =
+    currentShare === null
+      ? null
+      : {
+          percent: currentShare,
+          pointChange: previousShare === null ? null : currentShare - previousShare,
+        };
 
   const shareRows = [...currentGross.entries()].map(([channelId, money]) => ({
     channelId,
@@ -866,8 +865,12 @@ export function buildBusinessPerformanceCard(input: {
   const shareCurrencies = new Set(shareRows.map((row) => row.currency));
   const shareTotal = shareRows.reduce((total, row) => total + row.minorUnits, 0);
   const [shareCurrency] = shareCurrencies;
+  // A channel whose own rows mix currencies never reaches the rows above,
+  // but it still poisons the combination: shares over the clean subset alone
+  // would present a part as the whole.
+  const sharesBlockedByCurrency = currentMoney.mixed.size > 0 || shareCurrencies.size > 1;
   const shares =
-    shareRows.length > 0 && shareCurrencies.size === 1 && shareCurrency && shareTotal > 0
+    !sharesBlockedByCurrency && shareRows.length > 0 && shareCurrency && shareTotal > 0
       ? {
           rows: shareRows
             .map((row) => ({
@@ -882,136 +885,92 @@ export function buildBusinessPerformanceCard(input: {
   const sharesAbsentReason =
     shares !== null
       ? null
-      : shareRows.length === 0
-        ? `No channel has a reported sales figure for ${periodPhrase}.`
-        : "Channels reported in more than one currency, so shares cannot be combined.";
+      : sharesBlockedByCurrency
+        ? "Channels reported in more than one currency, so shares cannot be combined."
+        : `No channel has a reported sales figure for ${periodPhrase}.`;
 
-  const wholeWeeks = wholeWeeksOfRange(input.month);
-  const weekLabel = (week: CoveredMonth) =>
-    monthName(week.from) === monthName(week.to)
-      ? `${dayOfMonth(week.from)}–${dayOfMonth(week.to)} ${monthName(week.from).slice(0, 3)}`
-      : `${dayOfMonth(week.from)} ${monthName(week.from).slice(0, 3)}–${dayOfMonth(week.to)} ${monthName(week.to).slice(0, 3)}`;
-  const monthBucketLabel = (month: CoveredMonth) =>
-    input.month.from.slice(0, 4) === input.month.to.slice(0, 4)
-      ? monthName(month.from).slice(0, 3)
-      : `${monthName(month.from).slice(0, 3)} ${month.from.slice(2, 4)}`;
+  /** `2026-02-05` reads "Feb 5", so bucket labels never carry a leading zero. */
+  const dayLabel = (day: string) => `${monthName(day).slice(0, 3)} ${dayOfMonth(day)}`;
 
-  /** One tier's pass over its entries: same currency rule, same sums. */
-  const collectTier = (
-    entries: readonly {
-      window: CoveredMonth;
-      records: ReadonlyMap<string, readonly ChannelFindingRecord[]>;
-    }[],
-    labelOf: (window: CoveredMonth) => string,
-  ) => {
-    const buckets: { label: string; minorUnits: number }[] = [];
-    let currency: string | null = null;
-    let blocked = false;
-    const channels = new Set<string>();
-    for (const entry of entries) {
-      const figures = grossByChannel(entry.records);
-      if (figures.size === 0) continue;
-      const currencies = new Set([...figures.values()].map((figure) => figure.currency));
-      if (currencies.size !== 1) {
-        blocked = true;
-        break;
-      }
-      const [entryCurrency] = currencies;
-      if (currency !== null && entryCurrency !== currency) {
-        blocked = true;
-        break;
-      }
-      currency = entryCurrency ?? currency;
-      for (const id of figures.keys()) channels.add(id);
-      buckets.push({
-        label: labelOf(entry.window),
-        minorUnits: [...figures.values()].reduce((total, figure) => total + figure.minorUnits, 0),
-      });
+  // Daily bars, summed per day across the visible channels from single-day
+  // facts only. A day with no row stays absent: there is no zero-fill for
+  // days nothing reported. Week, month, and span rows never plot -- plotting
+  // one beside days would either split a stated total or repeat it.
+  const dayBuckets = new Map<
+    string,
+    { total: number; currencies: Set<string>; mixed: boolean; channels: Set<string> }
+  >();
+  for (const channel of input.channels) {
+    for (const row of input.currentAggregates) {
+      if (row.channelId !== channel.id) continue;
+      if (row.metricKey !== REVENUE_GROSS_METRIC || row.grain !== "day") continue;
+      const bucket = dayBuckets.get(row.day) ?? {
+        total: 0,
+        currencies: new Set<string>(),
+        mixed: false,
+        channels: new Set<string>(),
+      };
+      bucket.total += row.totalNumerator;
+      if (row.currency === null) bucket.mixed = true;
+      else bucket.currencies.add(row.currency);
+      bucket.channels.add(channel.id);
+      dayBuckets.set(row.day, bucket);
     }
-    return { buckets, currency, blocked, channels };
-  };
-
-  // Three tiers, finest first: analysed whole weeks, then analysed whole
-  // calendar months, then distinct analysed windows picked for maximum
-  // coverage. A tier with fewer than two plotted buckets yields to the next;
-  // a coarser tier whose own figures combine cleanly still reads even when a
-  // finer tier mixed currencies -- its runs stand alone, and the note names
-  // the tier shown.
-  const wholeMonths = wholeMonthsOfRange(input.month);
-  const weekEntries = wholeWeeks.map((week) => ({
-    window: week,
-    records:
-      input.trendWeeks.find(
-        (entry) => entry.window.from === week.from && entry.window.to === week.to,
-      )?.records ?? new Map<string, readonly ChannelFindingRecord[]>(),
-  }));
-  const monthEntries = wholeMonths.map((month) => ({
-    window: month,
-    records:
-      input.trendMonths.find(
-        (entry) => entry.window.from === month.from && entry.window.to === month.to,
-      )?.records ?? new Map<string, readonly ChannelFindingRecord[]>(),
-  }));
-  const windowEntries = [...input.trendWindows].sort((left, right) =>
-    left.window.from < right.window.from ? -1 : 1,
+  }
+  // One currency across every plotted day, or no plot: a series that changes
+  // currency halfway is two series, and naming one would mislabel the other.
+  const trendBlockedByCurrency = [...dayBuckets.values()].some(
+    (bucket) => bucket.mixed || bucket.currencies.size > 1,
   );
-  const weekTier = collectTier(weekEntries, weekLabel);
-  const monthTier = collectTier(monthEntries, monthBucketLabel);
-  const windowTier = collectTier(windowEntries, (window) => compactRange(window.from, window.to));
-  const readyTier =
-    !weekTier.blocked && weekTier.buckets.length >= 2 && weekTier.currency !== null
+  const trendCurrencies = new Set<string>();
+  if (!trendBlockedByCurrency) {
+    for (const bucket of dayBuckets.values()) {
+      for (const currency of bucket.currencies) trendCurrencies.add(currency);
+    }
+  }
+  const [trendCurrency] = trendCurrencies;
+  const buckets = [...dayBuckets.entries()]
+    .sort(([left], [right]) => (left < right ? -1 : 1))
+    .map(([day, bucket]) => ({ label: dayLabel(day), minorUnits: bucket.total }));
+  const totalDays = localDaysBetween(input.month.from, input.month.to) + 1;
+  // Channels with reported sales at any grain, not only the plotted days: a
+  // channel whose month arrived as one row still reported.
+  const channelsWithSales = new Set<string>();
+  for (const channel of input.channels) {
+    if (rangeTotal(input.currentAggregates, channel.id, REVENUE_GROSS_METRIC) !== null) {
+      channelsWithSales.add(channel.id);
+    }
+  }
+  // The axes keep their shape while the plot stays empty, so the frame never
+  // collapses around a missing series: one label per day of the range.
+  const dayAxis = wholeDaysOfRange(input.month).map((day) => dayLabel(day.from));
+  const trend: PerformanceCardTrend =
+    typeof trendCurrency === "string" && buckets.length >= 2
       ? {
-          buckets: weekTier.buckets,
-          currency: weekTier.currency,
-          coverageNote: wholeMonth
-            ? `${weekTier.buckets.length} of ${wholeWeeks.length} ${monthName(input.month.from)} weeks · ${weekTier.channels.size} of ${input.channels.length} channels`
-            : `${weekTier.buckets.length} of ${wholeWeeks.length} weeks · ${weekTier.channels.size} of ${input.channels.length} channels`,
+          state: "ready",
+          buckets,
+          currency: trendCurrency,
+          coverageNote: `${buckets.length} of ${totalDays} days · ${channelsWithSales.size} of ${input.channels.length} channels with reported sales`,
         }
-      : !monthTier.blocked && monthTier.buckets.length >= 2 && monthTier.currency !== null
+      : trendBlockedByCurrency
         ? {
-            buckets: monthTier.buckets,
-            currency: monthTier.currency,
-            coverageNote: `${monthTier.buckets.length} of ${wholeMonths.length} months · ${monthTier.channels.size} of ${input.channels.length} channels`,
+            state: "empty",
+            reason: "Periods reported in more than one currency.",
+            weeks: dayAxis,
           }
-        : !windowTier.blocked && windowTier.buckets.length >= 2 && windowTier.currency !== null
+        : totalDays < 2
           ? {
-              buckets: windowTier.buckets,
-              currency: windowTier.currency,
-              coverageNote: `${windowTier.buckets.length} analysed windows · ${windowTier.channels.size} of ${input.channels.length} channels`,
+              state: "empty",
+              reason: "The selected period holds fewer than two days to plot.",
+              weeks: dayAxis,
             }
-          : null;
-  // A currency split only refuses the card when no tier could plot: the
-  // weeks keep their own reason, coarser tiers share one.
-  const trendBlockedByCurrency =
-    readyTier === null && (weekTier.blocked || monthTier.blocked || windowTier.blocked);
-  const trendCurrencyBlockedInWeeks = readyTier === null && weekTier.blocked;
-  const trend: PerformanceCardTrend = readyTier
-    ? {
-        state: "ready",
-        buckets: readyTier.buckets,
-        currency: readyTier.currency,
-        coverageNote: readyTier.coverageNote,
-      }
-    : trendBlockedByCurrency
-      ? {
-          state: "empty",
-          reason: trendCurrencyBlockedInWeeks
-            ? "Weeks reported in more than one currency."
-            : "Periods reported in more than one currency.",
-          weeks: wholeWeeks.map(weekLabel),
-        }
-      : {
-          state: "empty",
-          reason:
-            wholeWeeks.length < 2
-              ? wholeMonth
-                ? "This month holds fewer than two whole weeks to plot."
-                : "The selected period holds fewer than two whole weeks to plot."
-              : wholeMonth
-                ? "Fewer than two weeks of this month have a completed analysis."
-                : "Fewer than two weeks of the selected period have a completed analysis.",
-          weeks: wholeWeeks.map(weekLabel),
-        };
+          : {
+              state: "empty",
+              reason: wholeMonth
+                ? "Fewer than two days of this month have reported sales."
+                : "Fewer than two days of the selected period have reported sales.",
+              weeks: dayAxis,
+            };
 
   const orderChannels = currentOrders.size;
   const locationWord = `${input.locationCount} ${input.locationCount === 1 ? "location" : "locations"}`;
@@ -1045,7 +1004,7 @@ export function buildBusinessPerformanceCard(input: {
           ? `${viewChannelNames.join(", ")} listing report only. Menu views are a source-specific traffic measure.`
           : `No approved report carried menu views for ${periodPhrase}.`,
       costNote: hasCostContext
-        ? `Cost reports were analysed for ${periodPhrase}; profit is still not stated here.`
+        ? `Cost figures were reported for ${periodPhrase}; profit is still not stated here.`
         : "Cost reports are missing, so this screen shows reported sales without claiming profit.",
       reportFiles: files,
     },

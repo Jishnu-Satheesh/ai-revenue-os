@@ -11,13 +11,15 @@ import {
   previousEqualRange,
   resolveDefaultWindow,
   resolveOverviewWindow,
+  wholeDaysOfRange,
   wholeMonthsOfRange,
   wholeWeeksOfRange,
 } from "@/modules/analysis/application/channels-overview";
 import type {
   ChannelBandRecord,
   ChannelEvidenceWindow,
-  ChannelFindingRecord,
+  DailyMetricAggregate,
+  MetricAggregateGrain,
 } from "@/modules/analysis/application/ports";
 
 const CHANNELS = [
@@ -577,90 +579,44 @@ describe("picked ranges", () => {
   });
 });
 
-function cardFinding(input: {
-  channelId: string;
-  code: string;
+const GROSS = "revenue.gross";
+const PLACED = "listing.placed_orders";
+const VIEWS = "listing.menu_views";
+const CANCELLED = "order.avoidable_cancellation_count";
+const COST = "cost.commission";
+
+function agg(input: {
+  day?: string;
+  spanStart?: string;
+  spanEnd?: string;
+  grain?: MetricAggregateGrain;
+  channelId?: string;
   metricKey?: string;
-  valueKind: "money" | "count" | "ratio";
-  numerator: number | null;
-  denominator?: number | null;
-  currency?: string;
-}): ChannelFindingRecord {
+  total?: number;
+  currency?: string | null;
+}): DailyMetricAggregate {
+  const spanStart = input.spanStart ?? input.day ?? "2026-02-01";
+  const spanEnd = input.spanEnd ?? input.day ?? spanStart;
+  const metricKey = input.metricKey ?? GROSS;
   return {
-    id: `f-${input.channelId}-${input.code}-${input.metricKey ?? "none"}`,
-    analysisRunId: `run-${input.channelId}`,
-    channelId: input.channelId,
-    branchId: null,
-    detectorKey: "test.detector",
-    detectorVersion: 1,
-    kind: "observation",
-    code: input.code,
-    severity: null,
-    priority: null,
-    metricKey: input.metricKey ?? null,
-    periodStart: "2026-02-01",
-    periodEnd: "2026-02-28",
-    valueKind: input.valueKind,
-    valueNumerator: input.numerator,
-    valueDenominator: input.denominator ?? null,
-    currency: input.currency ?? (input.valueKind === "money" ? "AED" : null),
-    monetaryImpactMinorUnits: null,
-    expectedPeriodCount: 1,
-    observedPeriodCount: 1,
-    absentPeriodCount: 0,
-    qualityState: "complete",
-    needsDataReason: null,
-    limitations: [],
-    calculationDigest: "b".repeat(64),
-    createdAt: "2026-02-28T00:00:00Z",
+    day: spanStart,
+    spanStart,
+    spanEnd,
+    grain: input.grain ?? "day",
+    channelId: input.channelId ?? "ch-a",
+    metricKey,
+    totalNumerator: input.total ?? 0,
+    currency:
+      input.currency !== undefined ? input.currency : metricKey === GROSS ? "AED" : null,
   };
 }
 
-const GROSS = "WINDOW_GROSS_REVENUE";
-const LOSS = "ORDER_CANCELLATION_LOSS";
-const FUNNEL = "FUNNEL_STAGE_CONVERSION";
-const SHARE = "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS";
-const PLACED = "listing.placed_orders";
-const VIEWS = "listing.menu_views";
-
-function monthRecords(
-  entries: { channelId: string; findings: readonly ChannelFindingRecord[] }[],
-): Map<string, readonly ChannelFindingRecord[]> {
-  return new Map<string, readonly ChannelFindingRecord[]>(
-    entries.map((entry) => [entry.channelId, entry.findings]),
-  );
+function salesRow(channelId: string, day: string, total: number, currency = "AED") {
+  return agg({ channelId, day, metricKey: GROSS, total, currency });
 }
 
-function fullMonth(input: { gross: number; orders: number; cancelled: number; shareDen: number }) {
-  return [
-    cardFinding({
-      channelId: "ch-a",
-      code: GROSS,
-      valueKind: "money",
-      numerator: input.gross,
-    }),
-    cardFinding({
-      channelId: "ch-a",
-      code: FUNNEL,
-      metricKey: PLACED,
-      valueKind: "ratio",
-      numerator: input.orders,
-      denominator: 100,
-    }),
-    cardFinding({
-      channelId: "ch-a",
-      code: LOSS,
-      valueKind: "count",
-      numerator: input.cancelled,
-    }),
-    cardFinding({
-      channelId: "ch-a",
-      code: SHARE,
-      valueKind: "ratio",
-      numerator: input.cancelled,
-      denominator: input.shareDen,
-    }),
-  ];
+function countRow(channelId: string, day: string, metricKey: string, total: number) {
+  return agg({ channelId, day, metricKey, total, currency: null });
 }
 
 function cardInput(overrides: Partial<Parameters<typeof buildBusinessPerformanceCard>[0]> = {}) {
@@ -670,124 +626,34 @@ function cardInput(overrides: Partial<Parameters<typeof buildBusinessPerformance
       { id: "ch-a", displayName: "Delivery A" },
       { id: "ch-b", displayName: "Delivery B" },
     ],
-    current: monthRecords([
-      {
-        channelId: "ch-a",
-        findings: fullMonth({ gross: 6_000_000, orders: 1200, cancelled: 60, shareDen: 1200 }),
-      },
-      {
-        channelId: "ch-b",
-        findings: [
-          cardFinding({ channelId: "ch-b", code: GROSS, valueKind: "money", numerator: 6_000_000 }),
-          cardFinding({
-            channelId: "ch-b",
-            code: FUNNEL,
-            metricKey: PLACED,
-            valueKind: "ratio",
-            numerator: 1200,
-            denominator: 50,
-          }),
-          cardFinding({ channelId: "ch-b", code: LOSS, valueKind: "count", numerator: 60 }),
-          cardFinding({
-            channelId: "ch-b",
-            code: SHARE,
-            valueKind: "ratio",
-            numerator: 60,
-            denominator: 1200,
-          }),
-        ],
-      },
-    ]),
-    previous: monthRecords([
-      {
-        channelId: "ch-a",
-        findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 50, shareDen: 1000 }),
-      },
-      {
-        channelId: "ch-b",
-        findings: [
-          cardFinding({ channelId: "ch-b", code: GROSS, valueKind: "money", numerator: 5_000_000 }),
-          cardFinding({
-            channelId: "ch-b",
-            code: FUNNEL,
-            metricKey: PLACED,
-            valueKind: "ratio",
-            numerator: 1000,
-            denominator: 50,
-          }),
-          cardFinding({ channelId: "ch-b", code: LOSS, valueKind: "count", numerator: 50 }),
-          cardFinding({
-            channelId: "ch-b",
-            code: SHARE,
-            valueKind: "ratio",
-            numerator: 50,
-            denominator: 1000,
-          }),
-        ],
-      },
-    ]),
-    trendWeeks: [
-      {
-        window: { from: "2026-02-02", to: "2026-02-08" },
-        records: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: [
-              cardFinding({
-                channelId: "ch-a",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 2_400_000,
-              }),
-            ],
-          },
-          {
-            channelId: "ch-b",
-            findings: [
-              cardFinding({
-                channelId: "ch-b",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 2_400_000,
-              }),
-            ],
-          },
-        ]),
-      },
-      {
-        window: { from: "2026-02-09", to: "2026-02-15" },
-        records: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: [
-              cardFinding({
-                channelId: "ch-a",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 3_600_000,
-              }),
-            ],
-          },
-          {
-            channelId: "ch-b",
-            findings: [
-              cardFinding({
-                channelId: "ch-b",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 3_600_000,
-              }),
-            ],
-          },
-        ]),
-      },
+    currentAggregates: [
+      salesRow("ch-a", "2026-02-02", 2_400_000),
+      salesRow("ch-a", "2026-02-09", 3_600_000),
+      salesRow("ch-b", "2026-02-02", 2_400_000),
+      salesRow("ch-b", "2026-02-09", 3_600_000),
+      countRow("ch-a", "2026-02-02", PLACED, 480),
+      countRow("ch-a", "2026-02-09", PLACED, 720),
+      countRow("ch-b", "2026-02-02", PLACED, 480),
+      countRow("ch-b", "2026-02-09", PLACED, 720),
+      countRow("ch-a", "2026-02-02", CANCELLED, 24),
+      countRow("ch-a", "2026-02-09", CANCELLED, 36),
+      countRow("ch-b", "2026-02-02", CANCELLED, 24),
+      countRow("ch-b", "2026-02-09", CANCELLED, 36),
+    ],
+    previousAggregates: [
+      salesRow("ch-a", "2026-01-02", 2_000_000),
+      salesRow("ch-a", "2026-01-09", 3_000_000),
+      salesRow("ch-b", "2026-01-02", 2_000_000),
+      salesRow("ch-b", "2026-01-09", 3_000_000),
+      countRow("ch-a", "2026-01-05", PLACED, 1000),
+      countRow("ch-b", "2026-01-05", PLACED, 1000),
+      countRow("ch-a", "2026-01-05", CANCELLED, 50),
+      countRow("ch-b", "2026-01-05", CANCELLED, 50),
     ],
     locationCount: 2,
     channelScopeName: null,
     locationScopeName: null,
     reportFiles: ["DeliveryA-Feb.xlsx"],
-    trendMonths: [],
-    trendWindows: [],
     ...overrides,
   };
 }
@@ -814,48 +680,41 @@ describe("buildBusinessPerformanceCard", () => {
 
   it("reads menu views from the reporting channel only", () => {
     const input = cardInput();
-    const chA = input.current.get("ch-a") ?? [];
-    input.current = monthRecords([
-      {
-        channelId: "ch-a",
-        findings: [
-          ...chA,
-          cardFinding({
-            channelId: "ch-a",
-            code: FUNNEL,
-            metricKey: VIEWS,
-            valueKind: "ratio",
-            numerator: 12000,
-            denominator: 100,
-          }),
-        ],
-      },
-      { channelId: "ch-b", findings: input.current.get("ch-b") ?? [] },
-    ]);
+    input.currentAggregates = [
+      ...input.currentAggregates,
+      countRow("ch-a", "2026-02-02", VIEWS, 5000),
+      countRow("ch-a", "2026-02-09", VIEWS, 7000),
+    ];
     const card = buildBusinessPerformanceCard(input);
     expect(card.tiles.views.value).toEqual({ kind: "count", value: 12000 });
     expect(card.tiles.views.footnote).toBe("Delivery A only");
     expect(card.footer).toContain("Menu views: Delivery A only.");
   });
 
-  it("compares only channels analysed in both months", () => {
-    const input = cardInput();
-    input.previous = monthRecords([
-      {
-        channelId: "ch-a",
-        findings: fullMonth({ gross: 6_000_000, orders: 1200, cancelled: 60, shareDen: 1200 }),
-      },
-    ]);
-    const card = buildBusinessPerformanceCard(input);
-    // ch-a is flat across the two months; ch-b is new and stays out of the delta.
-    expect(card.tiles.sales.deltaPercent).toBe(0);
+  it("compares only channels reporting in both periods", () => {
+    const card = buildBusinessPerformanceCard(
+      cardInput({
+        currentAggregates: [
+          salesRow("ch-a", "2026-02-02", 6_000_000),
+          salesRow("ch-b", "2026-02-02", 6_000_000),
+        ],
+        previousAggregates: [salesRow("ch-a", "2026-01-02", 5_000_000)],
+      }),
+    );
+    // ch-b reports only in the current period: it counts toward the 12M
+    // total but stays out of the delta, which reads ch-a's +20% alone.
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 12_000_000, currency: "AED" },
+    });
+    expect(card.tiles.sales.deltaPercent).toBe(20);
   });
 
-  it("states no comparison rather than a delta when last month is missing", () => {
-    const card = buildBusinessPerformanceCard(cardInput({ previous: new Map() }));
+  it("states no comparison rather than a delta when nothing was reported before", () => {
+    const card = buildBusinessPerformanceCard(cardInput({ previousAggregates: [] }));
     expect(card.tiles.sales.value).not.toBeNull();
     expect(card.tiles.sales.deltaPercent).toBeNull();
-    expect(card.tiles.sales.deltaAbsentReason).toBe("No earlier comparable period was analysed.");
+    expect(card.tiles.sales.deltaAbsentReason).toBe("No earlier comparable period was reported.");
     expect(card.headline).toBe(
       "Performance for February 2026. Cancellations still need attention.",
     );
@@ -864,48 +723,42 @@ describe("buildBusinessPerformanceCard", () => {
   it("writes the down and steady headlines by rule", () => {
     const down = buildBusinessPerformanceCard(
       cardInput({
-        current: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: fullMonth({ gross: 4_000_000, orders: 800, cancelled: 60, shareDen: 800 }),
-          },
-        ]),
-        previous: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 50, shareDen: 1000 }),
-          },
-        ]),
+        currentAggregates: [
+          salesRow("ch-a", "2026-02-02", 4_000_000),
+          countRow("ch-a", "2026-02-02", PLACED, 800),
+          countRow("ch-a", "2026-02-02", CANCELLED, 60),
+        ],
+        previousAggregates: [
+          salesRow("ch-a", "2026-01-02", 5_000_000),
+          countRow("ch-a", "2026-01-02", PLACED, 1000),
+          countRow("ch-a", "2026-01-02", CANCELLED, 50),
+        ],
         channels: [{ id: "ch-a", displayName: "Delivery A" }],
-        trendWeeks: [],
       }),
     );
     expect(down.headline).toBe("Sales are down. Cancellations still need attention.");
 
     const flat = buildBusinessPerformanceCard(
       cardInput({
-        current: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 0, shareDen: 1000 }),
-          },
-        ]),
-        previous: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: fullMonth({ gross: 5_000_000, orders: 1000, cancelled: 0, shareDen: 1000 }),
-          },
-        ]),
+        currentAggregates: [
+          salesRow("ch-a", "2026-02-02", 5_000_000),
+          countRow("ch-a", "2026-02-02", PLACED, 1000),
+          countRow("ch-a", "2026-02-02", CANCELLED, 0),
+        ],
+        previousAggregates: [
+          salesRow("ch-a", "2026-01-02", 5_000_000),
+          countRow("ch-a", "2026-01-02", PLACED, 1000),
+          countRow("ch-a", "2026-01-02", CANCELLED, 0),
+        ],
         channels: [{ id: "ch-a", displayName: "Delivery A" }],
-        trendWeeks: [],
       }),
     );
     expect(flat.headline).toBe("Sales held steady. No cancellations recorded.");
   });
 
-  it("keeps every tile absent with its reason when nothing was analysed", () => {
+  it("keeps every tile absent with its reason when nothing was reported", () => {
     const card = buildBusinessPerformanceCard(
-      cardInput({ current: new Map(), previous: new Map(), trendWeeks: [] }),
+      cardInput({ currentAggregates: [], previousAggregates: [] }),
     );
     expect(card.tiles.sales.value).toBeNull();
     expect(card.tiles.sales.unavailableReason).toBe(
@@ -915,29 +768,20 @@ describe("buildBusinessPerformanceCard", () => {
     expect(card.headline).toBe("Performance for February 2026.");
     expect(card.trend).toEqual({
       state: "empty",
-      reason: "Fewer than two weeks of this month have a completed analysis.",
-      weeks: ["2–8 Feb", "9–15 Feb", "16–22 Feb"],
+      reason: "Fewer than two days of this month have reported sales.",
+      weeks: expect.arrayContaining(["Feb 1", "Feb 28"]),
     });
+    if (card.trend.state === "empty") {
+      expect(card.trend.weeks).toHaveLength(28);
+    }
     expect(card.shares).toBeNull();
   });
 
   it("refuses combined figures across currencies rather than converting them", () => {
     const input = cardInput();
-    input.current = monthRecords([
-      {
-        channelId: "ch-a",
-        findings: [
-          cardFinding({
-            channelId: "ch-a",
-            code: GROSS,
-            valueKind: "money",
-            numerator: 6_000_000,
-            currency: "USD",
-          }),
-        ],
-      },
-      { channelId: "ch-b", findings: input.current.get("ch-b") ?? [] },
-    ]);
+    input.currentAggregates = input.currentAggregates.map((row) =>
+      row.channelId === "ch-a" && row.metricKey === GROSS ? { ...row, currency: "USD" } : row,
+    );
     const card = buildBusinessPerformanceCard(input);
     expect(card.tiles.sales.value).toBeNull();
     expect(card.tiles.sales.unavailableReason).toContain("more than one currency");
@@ -945,18 +789,115 @@ describe("buildBusinessPerformanceCard", () => {
     expect(card.sharesAbsentReason).toContain("more than one currency");
   });
 
-  it("plots analysed weeks and shares the channels behind them", () => {
+  it("refuses the tile when one channel mixes currencies inside its own rows", () => {
+    const card = buildBusinessPerformanceCard(
+      cardInput({
+        currentAggregates: [
+          salesRow("ch-a", "2026-02-02", 6_000_000, "AED"),
+          agg({
+            channelId: "ch-a",
+            spanStart: "2026-02-03",
+            spanEnd: "2026-02-05",
+            grain: "span",
+            metricKey: GROSS,
+            total: 1_000_000,
+            currency: "USD",
+          }),
+        ],
+        channels: [{ id: "ch-a", displayName: "Delivery A" }],
+      }),
+    );
+    expect(card.tiles.sales.value).toBeNull();
+    expect(card.tiles.sales.unavailableReason).toContain("more than one currency");
+  });
+
+  it("plots daily bars and shares the channels behind them", () => {
     const card = buildBusinessPerformanceCard(cardInput());
     expect(card.trend).toEqual({
       state: "ready",
       buckets: [
-        { label: "2–8 Feb", minorUnits: 4_800_000 },
-        { label: "9–15 Feb", minorUnits: 7_200_000 },
+        { label: "Feb 2", minorUnits: 4_800_000 },
+        { label: "Feb 9", minorUnits: 7_200_000 },
       ],
       currency: "AED",
-      coverageNote: "2 of 3 February weeks · 2 of 2 channels",
+      coverageNote: "2 of 28 days · 2 of 2 channels with reported sales",
     });
     expect(card.shares?.rows.map((row) => row.sharePercent)).toEqual([50, 50]);
+  });
+
+  it("leaves gap days absent instead of zero-filling them", () => {
+    const card = buildBusinessPerformanceCard(
+      cardInput({
+        currentAggregates: [
+          salesRow("ch-a", "2026-02-02", 1_000_000),
+          salesRow("ch-a", "2026-02-27", 2_000_000),
+        ],
+        channels: [{ id: "ch-a", displayName: "Delivery A" }],
+      }),
+    );
+    expect(card.trend).toMatchObject({
+      state: "ready",
+      buckets: [
+        { label: "Feb 2", minorUnits: 1_000_000 },
+        { label: "Feb 27", minorUnits: 2_000_000 },
+      ],
+    });
+  });
+
+  it("ignores rows from channels outside the visible scope", () => {
+    const card = buildBusinessPerformanceCard(
+      cardInput({
+        currentAggregates: [
+          ...cardInput().currentAggregates,
+          salesRow("ch-stranger", "2026-02-02", 99_000_000),
+          countRow("ch-stranger", "2026-02-02", PLACED, 9999),
+        ],
+      }),
+    );
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 12_000_000, currency: "AED" },
+    });
+    expect(card.tiles.orders.value).toEqual({ kind: "count", value: 2400 });
+    expect(card.channelCount).toBe(2);
+  });
+
+  it("states cost presence from the reported cost line", () => {
+    const without = buildBusinessPerformanceCard(cardInput());
+    expect(without.tiles.sales.footnote).toBe("Costs are not yet included");
+    expect(without.sources.costNote).toContain("Cost reports are missing");
+
+    const input = cardInput();
+    input.currentAggregates = [
+      ...input.currentAggregates,
+      agg({ channelId: "ch-a", day: "2026-02-02", metricKey: COST, total: 900_000 }),
+    ];
+    const withCost = buildBusinessPerformanceCard(input);
+    expect(withCost.tiles.sales.footnote).toBeNull();
+    expect(withCost.sources.costNote).toBe(
+      "Cost figures were reported for this month; profit is still not stated here.",
+    );
+  });
+
+  it("derives the cancelled share from range totals with a point change", () => {
+    const input = cardInput();
+    // Previous: 60 cancelled over 2000 orders = 3%, against 5% now.
+    input.previousAggregates = input.previousAggregates.map((row) =>
+      row.metricKey === CANCELLED ? { ...row, totalNumerator: 30 } : row,
+    );
+    const card = buildBusinessPerformanceCard(input);
+    expect(card.cancelledShare).toEqual({ percent: 5, pointChange: 2 });
+  });
+
+  it("leaves the cancelled share absent when orders are unmeasured", () => {
+    const card = buildBusinessPerformanceCard(
+      cardInput({
+        currentAggregates: [countRow("ch-a", "2026-02-02", CANCELLED, 10)],
+        previousAggregates: [],
+        channels: [{ id: "ch-a", displayName: "Delivery A" }],
+      }),
+    );
+    expect(card.cancelledShare).toBeNull();
   });
 
   it("carries the modal payloads without inventing cost context", () => {
@@ -973,6 +914,21 @@ describe("buildBusinessPerformanceCard", () => {
       ordersAbsentReason: null,
       cancelled: 120,
       cancelledAbsentReason: null,
+    });
+  });
+
+  it("names a single-day range too short to plot", () => {
+    const card = buildBusinessPerformanceCard(
+      cardInput({
+        month: { from: "2026-02-02", to: "2026-02-02" },
+        currentAggregates: [salesRow("ch-a", "2026-02-02", 1_000_000)],
+        channels: [{ id: "ch-a", displayName: "Delivery A" }],
+      }),
+    );
+    expect(card.trend).toEqual({
+      state: "empty",
+      reason: "The selected period holds fewer than two days to plot.",
+      weeks: ["Feb 2"],
     });
   });
 });
@@ -992,196 +948,187 @@ describe("buildBusinessPerformanceCard over a picked range", () => {
 
   it("names the range in titles and absent reasons instead of a month", () => {
     const card = buildBusinessPerformanceCard(
-      rangeInput({ current: new Map(), previous: new Map(), trendWeeks: [] }),
+      rangeInput({ currentAggregates: [], previousAggregates: [] }),
     );
     expect(card.headline).toBe("Performance for 1 Jan – 28 Feb 2026.");
     expect(card.tiles.sales.unavailableReason).toBe(
       "No approved report carried a sales figure for the selected period.",
     );
-    expect(card.trend).toEqual({
+    expect(card.trend).toMatchObject({
       state: "empty",
-      reason: "Fewer than two weeks of the selected period have a completed analysis.",
-      weeks: [
-        "5–11 Jan",
-        "12–18 Jan",
-        "19–25 Jan",
-        "26 Jan–1 Feb",
-        "2–8 Feb",
-        "9–15 Feb",
-        "16–22 Feb",
-      ],
+      reason: "Fewer than two days of the selected period have reported sales.",
+    });
+    if (card.trend.state === "empty") {
+      expect(card.trend.weeks).toHaveLength(59);
+      expect(card.trend.weeks[0]).toBe("Jan 1");
+    }
+  });
+});
+
+describe("buildBusinessPerformanceCard range-total dedup", () => {
+  const CHANNELS = [{ id: "ch-a", displayName: "Delivery A" }];
+  const MONTH = { from: "2026-02-01", to: "2026-02-28" };
+
+  function totals(currentAggregates: DailyMetricAggregate[]) {
+    return buildBusinessPerformanceCard({
+      month: MONTH,
+      channels: CHANNELS,
+      currentAggregates,
+      previousAggregates: [],
+      locationCount: 0,
+      channelScopeName: null,
+      locationScopeName: null,
+      reportFiles: [],
+    });
+  }
+
+  it("lets fully-inside day rows win over coarser grains", () => {
+    const card = totals([
+      salesRow("ch-a", "2026-02-02", 100),
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-08",
+        grain: "week",
+        metricKey: GROSS,
+        total: 10_000,
+      }),
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-28",
+        grain: "month",
+        metricKey: GROSS,
+        total: 1_000_000,
+      }),
+    ]);
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 100, currency: "AED" },
     });
   });
 
-  it("plots analysed weeks of the range with a month-free coverage note", () => {
-    const input = rangeInput();
-    input.trendWeeks = [
-      {
-        window: { from: "2026-01-05", to: "2026-01-11" },
-        records: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: [
-              cardFinding({
-                channelId: "ch-a",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 2_400_000,
-              }),
-            ],
-          },
-          {
-            channelId: "ch-b",
-            findings: [
-              cardFinding({
-                channelId: "ch-b",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 2_400_000,
-              }),
-            ],
-          },
-        ]),
-      },
-      {
-        window: { from: "2026-01-12", to: "2026-01-18" },
-        records: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: [
-              cardFinding({
-                channelId: "ch-a",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 3_600_000,
-              }),
-            ],
-          },
-          {
-            channelId: "ch-b",
-            findings: [
-              cardFinding({
-                channelId: "ch-b",
-                code: GROSS,
-                valueKind: "money",
-                numerator: 3_600_000,
-              }),
-            ],
-          },
-        ]),
-      },
-    ];
-    const card = buildBusinessPerformanceCard(input);
-    expect(card.trend).toEqual({
-      state: "ready",
-      buckets: [
-        { label: "5–11 Jan", minorUnits: 4_800_000 },
-        { label: "12–18 Jan", minorUnits: 7_200_000 },
-      ],
-      currency: "AED",
-      coverageNote: "2 of 7 weeks · 2 of 2 channels",
+  it("reads week rows when no day rows sit fully inside", () => {
+    const card = totals([
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-08",
+        grain: "week",
+        metricKey: GROSS,
+        total: 10_000,
+      }),
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-28",
+        grain: "month",
+        metricKey: GROSS,
+        total: 1_000_000,
+      }),
+    ]);
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 10_000, currency: "AED" },
     });
   });
 
-  it("falls back to analysed calendar months when weeks were never analysed", () => {
-    const input = rangeInput({ trendWeeks: [] });
-    const monthRecordsFor = (channelId: string, numerator: number) =>
-      monthRecords([
-        {
-          channelId,
-          findings: [cardFinding({ channelId, code: GROSS, valueKind: "money", numerator })],
-        },
-      ]);
-    input.trendMonths = [
-      {
-        window: { from: "2026-01-01", to: "2026-01-31" },
-        records: monthRecordsFor("ch-a", 4_000_000),
-      },
-      {
-        window: { from: "2026-02-01", to: "2026-02-28" },
-        records: monthRecordsFor("ch-a", 6_000_000),
-      },
-    ];
-    const card = buildBusinessPerformanceCard(input);
-    expect(card.trend).toEqual({
-      state: "ready",
-      buckets: [
-        { label: "Jan", minorUnits: 4_000_000 },
-        { label: "Feb", minorUnits: 6_000_000 },
-      ],
-      currency: "AED",
-      coverageNote: "2 of 2 months · 1 of 2 channels",
+  it("falls back to month rows when nothing finer sits fully inside", () => {
+    const card = totals([
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-28",
+        grain: "month",
+        metricKey: GROSS,
+        total: 1_000_000,
+      }),
+    ]);
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 1_000_000, currency: "AED" },
+    });
+    // A month row never plots as bars: with no day facts the trend stays empty.
+    expect(card.trend.state).toBe("empty");
+  });
+
+  it("adds fully-inside spans once each on top of the winning grain", () => {
+    const card = totals([
+      salesRow("ch-a", "2026-02-02", 100),
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-03",
+        spanEnd: "2026-02-05",
+        grain: "span",
+        metricKey: GROSS,
+        total: 500,
+      }),
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-10",
+        spanEnd: "2026-02-12",
+        grain: "span",
+        metricKey: GROSS,
+        total: 700,
+      }),
+    ]);
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 1300, currency: "AED" },
+    });
+    // The bars still plot only the single-day fact.
+    expect(card.trend).toMatchObject({
+      state: "empty",
+      reason: "Fewer than two days of this month have reported sales.",
     });
   });
 
-  it("falls back to distinct analysed windows with exact-date labels", () => {
-    const input = rangeInput({ trendWeeks: [], trendMonths: [] });
-    const windowRecordsFor = (channelId: string, numerator: number) =>
-      monthRecords([
-        {
-          channelId,
-          findings: [cardFinding({ channelId, code: GROSS, valueKind: "money", numerator })],
-        },
-      ]);
-    input.trendWindows = [
-      {
-        window: { from: "2026-01-01", to: "2026-02-28" },
-        records: windowRecordsFor("ch-a", 10_000_000),
-      },
-      {
-        window: { from: "2026-03-01", to: "2026-03-31" },
-        records: windowRecordsFor("ch-a", 6_000_000),
-      },
-    ];
-    const card = buildBusinessPerformanceCard({
-      ...input,
-      month: { from: "2026-01-01", to: "2026-03-31" },
-    });
-    expect(card.trend).toEqual({
-      state: "ready",
-      buckets: [
-        { label: "1 Jan – 28 Feb", minorUnits: 10_000_000 },
-        { label: "1–31 Mar", minorUnits: 6_000_000 },
-      ],
-      currency: "AED",
-      coverageNote: "2 analysed windows · 1 of 2 channels",
+  it("adds spans on top of a coarser winning grain", () => {
+    const card = totals([
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-08",
+        grain: "week",
+        metricKey: GROSS,
+        total: 10_000,
+      }),
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-10",
+        spanEnd: "2026-02-12",
+        grain: "span",
+        metricKey: GROSS,
+        total: 500,
+      }),
+    ]);
+    expect(card.tiles.sales.value).toEqual({
+      kind: "money",
+      money: { minorUnits: 10_500, currency: "AED" },
     });
   });
 
-  it("prefers weeks over months and refuses mixed-currency tiers", () => {
-    const input = rangeInput();
-    input.trendMonths = [
-      {
-        window: { from: "2026-01-01", to: "2026-01-31" },
-        records: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: [
-              cardFinding({ channelId: "ch-a", code: GROSS, valueKind: "money", numerator: 1 }),
-            ],
-          },
-        ]),
-      },
-      {
-        window: { from: "2026-02-01", to: "2026-02-28" },
-        records: monthRecords([
-          {
-            channelId: "ch-a",
-            findings: [
-              cardFinding({ channelId: "ch-a", code: GROSS, valueKind: "money", numerator: 1 }),
-            ],
-          },
-        ]),
-      },
-    ];
-    // Weeks (from cardInput's default trendWeeks) win while present.
-    expect(buildBusinessPerformanceCard(input).trend).toMatchObject({ state: "ready" });
-    // A currency split in the weeks yields to the clean months, not to empty.
-    const mixed = rangeInput({ trendWeeks: [] });
-    mixed.trendMonths = input.trendMonths;
-    expect(buildBusinessPerformanceCard(mixed).trend).toMatchObject({
-      state: "ready",
-      coverageNote: "2 of 2 months · 1 of 2 channels",
-    });
+  it("sums counts at the winning grain the same way", () => {
+    const card = totals([
+      countRow("ch-a", "2026-02-02", PLACED, 40),
+      agg({
+        channelId: "ch-a",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-08",
+        grain: "week",
+        metricKey: PLACED,
+        total: 999,
+        currency: null,
+      }),
+    ]);
+    expect(card.tiles.orders.value).toEqual({ kind: "count", value: 40 });
+  });
+
+  it("lists every calendar day of the range", () => {
+    expect(wholeDaysOfRange({ from: "2026-02-01", to: "2026-02-03" })).toEqual([
+      { from: "2026-02-01", to: "2026-02-01" },
+      { from: "2026-02-02", to: "2026-02-02" },
+      { from: "2026-02-03", to: "2026-02-03" },
+    ]);
   });
 });

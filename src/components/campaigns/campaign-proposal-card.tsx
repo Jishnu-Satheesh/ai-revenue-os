@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
-import { ArrowRight, FlaskConical, Megaphone } from "lucide-react";
+import { useId, useState } from "react";
+import { ArrowRight, ChevronDown, FlaskConical, Megaphone } from "lucide-react";
 
 import {
   formatProposalDay,
@@ -9,8 +12,9 @@ import {
   summarizeChannels,
 } from "@/components/campaigns/proposal-copy";
 import { RequestCampaignResearch } from "@/components/campaigns/request-campaign-research";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { CARD_CHIP_CLASSNAME, CardFootnote, CardQuote } from "@/components/ui/card-accents";
 import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
 
 /**
@@ -99,95 +103,146 @@ export function CampaignProposalCard({
   timeZone: string;
 }) {
   const document = proposal.content.kind === "document" ? proposal.content.document : null;
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  const stateLabel =
+    proposalStateLabel(proposal.state) +
+    (proposal.state === "snoozed" && proposal.snoozedUntil !== null
+      ? ` until ${formatProposalDay(proposal.snoozedUntil, timeZone)}`
+      : "");
 
+  // The same emerald advice shape as the recommendation card: icon plus type
+  // line, full title, two-line preview, then everything else — the state
+  // sentence, the channels/budget/cost grid, the linked campaign — waiting
+  // inside the expander. The Updated foot with its decision link never
+  // collapses, so the answer is always one tap away.
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-4 py-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <span
-              aria-hidden="true"
-              className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted"
-            >
-              <Megaphone className="size-4 text-muted-foreground" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-bold">
-                {document?.title ?? "A campaign proposal is being worked out"}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Last change {formatProposalDay(proposal.updatedAt, timeZone)}
-                {proposal.content.kind === "document"
-                  ? ` · version ${proposal.content.versionNumber}`
-                  : ""}
-              </p>
+    <section
+      data-testid={`proposal-card-${proposal.proposalId}`}
+      aria-label={`Campaign opportunity: ${document?.title ?? "A campaign proposal is being worked out"}`}
+      className="flex h-full flex-col gap-4 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 sm:p-5"
+    >
+      <Collapsible open={expanded} onOpenChange={setExpanded} className="flex flex-1 flex-col">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white"
+          >
+            <Megaphone className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <span className="font-semibold text-primary">Campaign opportunity</span>
+              <span aria-hidden="true">·</span>
+              <span className={CARD_CHIP_CLASSNAME}>{stateLabel}</span>
+            </div>
+            <h3 className="mt-1.5 text-[15px] font-bold leading-snug">
+              {document?.title ?? "A campaign proposal is being worked out"}
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Last change {formatProposalDay(proposal.updatedAt, timeZone)}
+              {proposal.content.kind === "document"
+                ? ` · version ${proposal.content.versionNumber}`
+                : ""}
+            </p>
+            <div className="mt-2 flex items-end gap-2">
+              {document ? (
+                <p className="flex-1 line-clamp-2 max-w-4xl text-sm leading-relaxed text-muted-foreground">
+                  {document.businessProblem}
+                </p>
+              ) : (
+                <span className="flex-1" aria-hidden="true" />
+              )}
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={contentId}
+                  className="inline-flex shrink-0 items-center gap-1 self-end rounded text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  {expanded ? "Show less" : "Read more"}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={
+                      expanded
+                        ? "size-3.5 rotate-180 transition-transform"
+                        : "size-3.5 transition-transform"
+                    }
+                  />
+                </button>
+              </CollapsibleTrigger>
             </div>
           </div>
-          <Badge variant={proposal.decidable ? "default" : "secondary"}>
-            {proposalStateLabel(proposal.state)}
-            {proposal.state === "snoozed" && proposal.snoozedUntil !== null
-              ? ` until ${formatProposalDay(proposal.snoozedUntil, timeZone)}`
-              : ""}
-          </Badge>
         </div>
+        <CollapsibleContent id={contentId} className="flex flex-1 flex-col">
+          <div className="flex flex-1 flex-col gap-3 pt-2">
+            {document ? (
+              <CardQuote testId={`proposal-card-${proposal.proposalId}-quote`}>
+                {document.businessProblem}
+              </CardQuote>
+            ) : null}
+            {proposal.content.kind === "unreadable" ? (
+              // A document that no longer satisfies the schema is not shown in
+              // part. Half a proposal is not a smaller argument for spending
+              // money, it is an unreliable one.
+              <CardFootnote>
+                This proposal was written in a form this version of the platform cannot read, so it is
+                not being shown. Nothing has been approved and nothing has been spent.
+              </CardFootnote>
+            ) : (
+              <CardFootnote>{proposalStateDetail(proposal)}</CardFootnote>
+            )}
 
-        {proposal.content.kind === "unreadable" ? (
-          // A document that no longer satisfies the schema is not shown in
-          // part. Half a proposal is not a smaller argument for spending
-          // money, it is an unreliable one.
-          <p className="text-sm text-muted-foreground">
-            This proposal was written in a form this version of the platform cannot read, so it is
-            not being shown. Nothing has been approved and nothing has been spent.
+            {document ? (
+              <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+                <div>
+                  <dt className="text-muted-foreground">Channels</dt>
+                  <dd className="mt-0.5 font-medium">{summarizeChannels(document.channels)}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Media budget</dt>
+                  {/* Two separate amounts, never added together and never
+                      defaulted to zero: one buys attention, the other pays for
+                      drafting the creative. */}
+                  <dd className="mt-0.5 font-medium">
+                    {formatProposalMoney(document.proposedMediaBudget, "None — organic only")}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Cost of preparing it</dt>
+                  <dd className="mt-0.5 font-medium">
+                    {formatProposalMoney(document.generationCostCeiling, "Not stated")} at most
+                  </dd>
+                </div>
+              </dl>
+            ) : null}
+
+            {proposal.linkedCampaignId !== null ? (
+              <Link
+                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                href={`/organizations/${organizationId}/campaigns/${proposal.linkedCampaignId}`}
+              >
+                Open the campaign this opened
+              </Link>
+            ) : null}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      <div data-testid={`proposal-card-${proposal.proposalId}-footer`} className="mt-auto">
+        <div className="flex items-center justify-between gap-2 border-t border-emerald-100 pt-3">
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Updated {formatProposalDay(proposal.updatedAt, timeZone)}
           </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">{proposalStateDetail(proposal)}</p>
-        )}
-
-        {document ? (
-          <>
-            <p className="text-sm">{document.businessProblem}</p>
-            <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
-              <div>
-                <dt className="text-muted-foreground">Channels</dt>
-                <dd className="mt-0.5 font-medium">{summarizeChannels(document.channels)}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Media budget</dt>
-                {/* Two separate amounts, never added together and never
-                    defaulted to zero: one buys attention, the other pays for
-                    drafting the creative. */}
-                <dd className="mt-0.5 font-medium">
-                  {formatProposalMoney(document.proposedMediaBudget, "None — organic only")}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Cost of preparing it</dt>
-                <dd className="mt-0.5 font-medium">
-                  {formatProposalMoney(document.generationCostCeiling, "Not stated")} at most
-                </dd>
-              </div>
-            </dl>
-          </>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-4">
           <Link
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+            className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary underline-offset-4 hover:underline"
             href={`/organizations/${organizationId}/campaign-proposals/${proposal.proposalId}`}
           >
             {proposal.decidable ? "Review and decide" : "Open proposal"}
-            <ArrowRight aria-hidden="true" className="size-3" />
+            <ArrowRight aria-hidden="true" className="size-3" data-icon="inline-end" />
           </Link>
-          {proposal.linkedCampaignId !== null ? (
-            <Link
-              className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-              href={`/organizations/${organizationId}/campaigns/${proposal.linkedCampaignId}`}
-            >
-              Open the campaign this opened
-            </Link>
-          ) : null}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

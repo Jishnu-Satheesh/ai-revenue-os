@@ -1,15 +1,13 @@
 import { GrowthIntelligenceWorkspace } from "@/components/growth-intelligence/growth-intelligence-workspace";
-import { PerformanceBuildWatcher } from "@/components/growth-intelligence/performance-build-watcher";
+import { MarketWatchLivePreview } from "@/components/growth-intelligence/market-watch-live-preview";
 import type { MonitoringBranchOption } from "@/components/growth-intelligence/market-monitoring-dialog";
 import { MarketWatch } from "@/components/growth-intelligence/market-watch";
-import { formatWindow } from "@/components/analysis/format";
-import { PageContentLoader } from "@/components/ui/page-content-loader";
 import {
   parseWorkspaceMonth,
   summarizeServiceArea,
 } from "@/components/growth-intelligence/query-options";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
-import { addLocalDays, localDaysBetween } from "@/domain/analysis/calendar";
+import { addLocalDays, localDaysBetween, localPeriodEnd } from "@/domain/analysis/calendar";
 import { ChannelAnalysisError } from "@/domain/analysis/errors";
 import type { AnalysisGrain } from "@/domain/analysis/types";
 import { isWindowCovered } from "@/domain/analysis/window-selection";
@@ -18,17 +16,14 @@ import type { MarketGeographicLayer } from "@/domain/growth-intelligence/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import { createEventPublisher } from "@/domain/events/publisher";
 import { getOrganizationContext } from "@/lib/api/organization-context";
-import { consumeAnalysisRunAllowance } from "@/lib/cache/rate-limit";
 import { cacheGet, cacheSet } from "@/lib/cache/redis";
 import { DomainError, toPublicError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import {
   buildBusinessPerformanceCard,
-  pickTrendWindows,
+  PERFORMANCE_CARD_METRIC_KEYS,
   previousEqualRange,
   resolveOverviewWindow,
-  wholeMonthsOfRange,
-  wholeWeeksOfRange,
 } from "@/modules/analysis/application/channels-overview";
 import type {
   BusinessPerformanceCardView,
@@ -36,12 +31,11 @@ import type {
 } from "@/modules/analysis/application/channels-overview";
 import {
   CARD_CACHE_TTL_SECONDS,
+  evidenceFingerprint,
   performanceCardCacheKey,
   performanceCardEnvelopeSchema,
 } from "@/modules/analysis/application/performance-card-cache";
-import { requestChannelAnalysis } from "@/modules/analysis/application/dispatch";
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
-import type { ChannelBandRecord } from "@/modules/analysis/application/ports";
 import { assertCampaignsEnabled } from "@/modules/campaigns/application/feature-access";
 import {
   createCampaignProposalReader,
@@ -232,21 +226,6 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
   let performanceCard: BusinessPerformanceCardView | null = null;
   let performanceFetchedAt: string | null = null;
   let performanceFilters: PerformanceFilterState | null = null;
-  // The auto-build the loader watches. `buildPending` means runs are in
-  // flight (or were just dispatched) for the picked range; `buildFailed`
-  // means every missing channel's latest run failed and nothing is left to
-  // wait for; `buildRefused` means the scope was too wide to fan out.
-  let buildPending = false;
-  let buildFailed = false;
-  let buildRefused = false;
-  let canRequestBuild = false;
-  let pendingChannelIds: string[] = [];
-  /**
-   * One page load fans out at most this many analyses. Past it the page
-   * refuses honestly and names the Channel Audit instead of firing a burst
-   * of detector passes and narrations behind a loader.
-   */
-  const MAX_AUTO_BUILD_CHANNELS = 10;
   const channelAnalysisEnabled = isGovernedChannelAnalysisEnabled(context.organizationId);
   if (channelAnalysisEnabled) {
     try {
@@ -297,6 +276,24 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         requested = null;
       }
       if (requested === null) {
+        // The default opens on the current month plus the previous month, so
+        // the daily trend has room to read. Only when that two-month box is
+        // not fully covered does the page fall back to the newest analysed
+        // dates inside coverage, then to the 28-day tail.
+        try {
+          const today = todayInZone(view.timeZone);
+          const currentMonthStart = `${today.slice(0, 7)}-01`;
+          const prevMonthEnd = addLocalDays(currentMonthStart, -1);
+          const prevMonthStart = `${prevMonthEnd.slice(0, 7)}-01`;
+          const currentMonthEnd = localPeriodEnd(currentMonthStart, "month");
+          if (isWindowCovered(prevMonthStart, currentMonthEnd, segments)) {
+            requested = { from: prevMonthStart, to: currentMonthEnd };
+          }
+        } catch {
+          requested = null;
+        }
+      }
+      if (requested === null) {
         // The newest analysed dates inside coverage open the card with
         // figures instead of a loader; only when nothing was ever analysed
         // does the newest coverage open behind a build. `loadAnalysedWindowKeys`
@@ -343,32 +340,6 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
                 grain: resolution.grain,
               }
             : null;
-        const analysedWeekKeys = new Set(
-          analysedKeys
-            .filter((key) => key.grain === "week")
-            .map((key) => `${key.windowStart}|${key.windowEnd}`),
-        );
-        const trendTargets = wholeWeeksOfRange({ from, to }).filter((week) =>
-          analysedWeekKeys.has(`${week.from}|${week.to}`),
-        );
-        // Second tier: whole calendar months with a finished month-grain
-        // analysis. Third tier: distinct analysed windows picked for maximum
-        // covered days -- week runs are excluded there because weeks already
-        // have their own tier above.
-        const analysedMonthKeys = new Set(
-          analysedKeys
-            .filter((key) => key.grain === "month")
-            .map((key) => `${key.windowStart}|${key.windowEnd}`),
-        );
-        const monthTargets = wholeMonthsOfRange({ from, to }).filter((month) =>
-          analysedMonthKeys.has(`${month.from}|${month.to}`),
-        );
-        const windowTargets = pickTrendWindows(
-          analysedKeys
-            .filter((key) => key.grain !== "week")
-            .map((key) => ({ from: key.windowStart, to: key.windowEnd })),
-          { from, to },
-        );
 
         // Unknown ids fall back to All rather than failing the page, and a
         // foreign id can only ever do that: every read below stays scoped to
@@ -398,18 +369,12 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
           visibleChannels = visibleChannels.filter((channel) => mappedChannelIds.has(channel.id));
         }
         const visibleIds = new Set(visibleChannels.map((channel) => channel.id));
-        const toFindings = (bands: readonly ChannelBandRecord[]) =>
-          new Map(
-            bands
-              .filter((record) => visibleIds.has(record.channelId))
-              .map((record) => [record.channelId, record.findings] as const),
-          );
 
         // The assembled card, cached per period and scope. A hit is served
-        // only when no run completed inside the card's date box after it was
-        // built, so a newer analysis always rebuilds instead of reading
-        // stale. A revalidation failure serves the hit and warns: a transient
-        // outage must not take the card down with it.
+        // only when the evidence fingerprint still matches, so a newer
+        // report always rebuilds instead of reading stale. The fingerprint
+        // is computed from the windows already loaded above, so
+        // revalidation needs no extra read and cannot fail on its own.
         const cacheKey = performanceCardCacheKey({
           organizationId: context.organizationId,
           from,
@@ -417,92 +382,43 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
           channelId: selectedChannelId,
           branchId: selectedBranchId,
         });
+        const fingerprint = evidenceFingerprint(evidenceWindows);
         const cached = await cacheGet(cacheKey, performanceCardEnvelopeSchema);
-        let cacheUsable =
-          cached !== null && cached.card.month.from === from && cached.card.month.to === to;
-        if (cacheUsable && cached !== null) {
-          try {
-            const newer = await analysis.loadCompletedRunCountSince({
-              organizationId: context.organizationId,
-              since: cached.builtAt,
-              windowStartMin: previous.from,
-              windowEndMax: to,
-            });
-            cacheUsable = newer === 0;
-          } catch (error) {
-            logger.warn("growth_intelligence.performance_cache_revalidation_failed", {
-              organizationId: context.organizationId,
-              errorCode: error instanceof Error ? error.name : "unknown",
-            });
-          }
-        }
+        const cacheUsable =
+          cached !== null &&
+          cached.card.month.from === from &&
+          cached.card.month.to === to &&
+          cached.evidenceFingerprint === fingerprint;
         if (cacheUsable && cached !== null) {
           performanceCard = cached.card;
         } else {
-          const [currentBands, previousBands, ...restBands] = await Promise.all([
-            analysis.loadChannelRangeCardFindingsForWindow({
+          // Two aggregate reads and nothing analysis-gated: the picked range
+          // and its previous equal range over the card's metric keys. Cost
+          // travels along only as presence for the footnote.
+          const [currentAggregates, previousAggregates] = await Promise.all([
+            analysis.loadDailyMetricAggregates({
               organizationId: context.organizationId,
-              windowStart: from,
-              windowEnd: to,
+              from,
+              to,
+              metricKeys: PERFORMANCE_CARD_METRIC_KEYS,
             }),
-            analysis.loadChannelRangeCardFindingsForWindow({
+            analysis.loadDailyMetricAggregates({
               organizationId: context.organizationId,
-              windowStart: previous.from,
-              windowEnd: previous.to,
+              from: previous.from,
+              to: previous.to,
+              metricKeys: PERFORMANCE_CARD_METRIC_KEYS,
             }),
-            ...trendTargets.map((week) =>
-              analysis.loadChannelCardFindingsForWindow({
-                organizationId: context.organizationId,
-                grain: "week" as const,
-                windowStart: week.from,
-                windowEnd: week.to,
-              }),
-            ),
-            ...monthTargets.map((month) =>
-              analysis.loadChannelCardFindingsForWindow({
-                organizationId: context.organizationId,
-                grain: "month" as const,
-                windowStart: month.from,
-                windowEnd: month.to,
-              }),
-            ),
-            ...windowTargets.map((window) =>
-              analysis.loadChannelRangeCardFindingsForWindow({
-                organizationId: context.organizationId,
-                windowStart: window.from,
-                windowEnd: window.to,
-              }),
-            ),
           ]);
-          const trendBands = restBands.slice(0, trendTargets.length);
-          const monthBands = restBands.slice(
-            trendTargets.length,
-            trendTargets.length + monthTargets.length,
-          );
-          const windowBands = restBands.slice(trendTargets.length + monthTargets.length);
-          const current = toFindings(currentBands);
 
-          if ([...current.values()].some((findings) => findings.length > 0)) {
+          if (currentAggregates.some((row) => visibleIds.has(row.channelId))) {
             performanceCard = buildBusinessPerformanceCard({
               month: { from, to },
               channels: visibleChannels.map((channel) => ({
                 id: channel.id,
                 displayName: channel.display_name,
               })),
-              current,
-              previous: toFindings(previousBands),
-              trendWeeks: trendTargets.map((week, index) => ({
-                window: week,
-                records: toFindings(trendBands[index] ?? []),
-              })),
-              trendMonths: monthTargets.map((month, index) => ({
-                window: month,
-                records: toFindings(monthBands[index] ?? []),
-              })),
-              trendWindows: windowTargets.map((window, index) => ({
-                window,
-                records: toFindings(windowBands[index] ?? []),
-              })),
+              currentAggregates,
+              previousAggregates,
               locationCount: new Set(
                 snapshot.branchMappings
                   .filter(
@@ -522,80 +438,24 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
             });
             await cacheSet(
               cacheKey,
-              { builtAt: new Date().toISOString(), card: performanceCard },
+              {
+                builtAt: new Date().toISOString(),
+                evidenceFingerprint: fingerprint,
+                card: performanceCard,
+              },
               CARD_CACHE_TTL_SECONDS,
             );
           } else {
-            // Nothing measured for this range yet. Viewers without the run
-            // permission get an honest note instead of a build: starting an
-            // analysis spends detector passes and narration, which
-            // `report.retry` -- not this page -- authorizes.
-            canRequestBuild = hasOrganizationPermission(role, "report.retry");
-            if (canRequestBuild && visibleChannels.length <= MAX_AUTO_BUILD_CHANNELS) {
-              const correlationId = crypto.randomUUID();
-              let dispatched = 0;
-              let inflight = 0;
-              let failed = 0;
-              const pending: string[] = [];
-              for (const channel of visibleChannels) {
-                const resolvedInput = await analysis.resolveWindowInput({
-                  organizationId: context.organizationId,
-                  channelId: channel.id,
-                  from,
-                  to,
-                });
-                // Covered for the organization but not for this channel: the
-                // worker would refuse it, so it stays honestly absent.
-                if (resolvedInput === null) continue;
-                const existing = await analysis.loadRunForWindow({
-                  organizationId: context.organizationId,
-                  channelId: channel.id,
-                  windowStart: resolvedInput.windowStart,
-                  windowEnd: resolvedInput.windowEnd,
-                });
-                // A completed run with no card figures is measured-and-empty,
-                // not missing: re-dispatching it would rebuild forever.
-                if (existing !== null && existing.status === "completed") continue;
-                if (existing !== null && existing.status === "running") {
-                  inflight += 1;
-                  pending.push(channel.id);
-                  continue;
-                }
-                if (existing !== null && existing.status === "failed") {
-                  failed += 1;
-                  continue;
-                }
-                if (!(await consumeAnalysisRunAllowance(context.organizationId))) break;
-                const started = await requestChannelAnalysis({
-                  organizationId: context.organizationId,
-                  channelId: channel.id,
-                  branchId: null,
-                  windowStart: resolvedInput.windowStart,
-                  windowEnd: resolvedInput.windowEnd,
-                  periodGrain: resolvedInput.grain,
-                  windowTimezone: resolvedInput.timeZone,
-                  analysisRunId: crypto.randomUUID(),
-                  correlationId,
-                });
-                if (started) {
-                  dispatched += 1;
-                  pending.push(channel.id);
-                } else {
-                  failed += 1;
-                }
-              }
-              buildPending = dispatched > 0 || inflight > 0;
-              buildFailed = !buildPending && failed > 0;
-              pendingChannelIds = pending;
-              logger.info("growth_intelligence.performance_build_checked", {
-                organizationId: context.organizationId,
-                windowStart: from,
-                windowEnd: to,
-                correlationId,
-              });
-            } else if (canRequestBuild) {
-              buildRefused = true;
-            }
+            // Nothing reported for this range yet. Dispatching analyses would
+            // not help: runs read these same rows and write findings, never
+            // new figures, so the page states the gap and leaves the next
+            // step to the Channel Audit pointer below instead of spending
+            // detector passes behind a loader.
+            logger.info("growth_intelligence.performance_empty_range", {
+              organizationId: context.organizationId,
+              windowStart: from,
+              windowEnd: to,
+            });
           }
         }
         performanceFilters = {
@@ -633,6 +493,24 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
     />
   );
 
+  // Ephemeral live-only preview beside stored Market Watch. Mounts only for
+  // managers with a branch selected; stored watch logic below is untouched and
+  // the preview fetches nothing on page load (explicit click only).
+  const marketWatchWithPreview = (
+    <div className="flex flex-col gap-3">
+      {branchId && canManage ? (
+        <div className="flex justify-end">
+          <MarketWatchLivePreview
+            organizationId={context.organizationId}
+            branchId={branchId}
+            canManage={canManage}
+          />
+        </div>
+      ) : null}
+      {marketWatch}
+    </div>
+  );
+
   // Branches feed the Review market monitoring dialog's Location selector.
   // A failed list degrades to no branches rather than failing the page.
   let branches: MonitoringBranchOption[] = [];
@@ -663,15 +541,11 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         view={view}
         organizationId={context.organizationId}
         canManage={canManage}
-        marketWatch={marketWatch}
+        marketWatch={marketWatchWithPreview}
         isCurrentMonth={activityMonth === null}
         performanceCard={performanceCard}
         fetchedAt={performanceFetchedAt}
         performanceFilters={performanceFilters}
-        buildPending={buildPending}
-        buildFailed={buildFailed}
-        buildRefused={buildRefused}
-        canRequestBuild={canRequestBuild}
         branches={branches}
         selectedBranchId={branchId}
         canRequestResearch={
@@ -679,20 +553,6 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
           hasOrganizationPermission(role, "campaign.research_request")
         }
       />
-      {buildPending && performanceFilters ? (
-        <>
-          <PageContentLoader
-            title="Building this period's figures"
-            detail={`${formatWindow(performanceFilters.from, performanceFilters.to)} · watching ${pendingChannelIds.length} ${pendingChannelIds.length === 1 ? "channel" : "channels"}`}
-          />
-          <PerformanceBuildWatcher
-            organizationId={context.organizationId}
-            from={performanceFilters.from}
-            to={performanceFilters.to}
-            channelIds={pendingChannelIds}
-          />
-        </>
-      ) : null}
     </div>
   );
 }

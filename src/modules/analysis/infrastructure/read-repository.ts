@@ -16,6 +16,8 @@ import type {
   ChannelFindingRecord,
   ChannelRecommendationDecisionRecord,
   ChannelRecommendationRecord,
+  DailyMetricAggregate,
+  MetricAggregateGrain,
   RecommendationViewerState,
 } from "@/modules/analysis/application/ports";
 
@@ -91,6 +93,22 @@ const MAX_CHANNEL_BAND_RUNS = 2_000;
  * history must not be able to make this query unbounded.
  */
 const MAX_ANALYSED_WINDOW_ROWS = 500;
+/**
+ * How far a daily-aggregate read looks beyond the asked range. A period row's
+ * `period_start` is an instant while the range names calendar days, and the
+ * two can disagree by a day at every timezone edge -- a Dubai day opens at
+ * 20:00 UTC the evening before. Two days comfortably covers any zone offset;
+ * the calendar-day check below still decides what counts.
+ */
+const DAILY_AGGREGATE_FETCH_WIDENING_DAYS = 2;
+/** A day in milliseconds, for the fetch-window widening above. */
+const MS_PER_DAY = 86_400_000;
+/**
+ * Governed rows one organization can plausibly hold for a handful of metric
+ * keys over one picked range, at every grain the card reads. A fence, not a
+ * page size: reaching it means the caller asked for more than a card may read.
+ */
+const MAX_DAILY_AGGREGATE_ROWS = 10_000;
 
 export class ChannelAnalysisReadError extends Error {
   constructor(public readonly code: string) {
@@ -1094,6 +1112,217 @@ export function createAuthenticatedChannelAnalysisRepository(
         .lte("window_end", windowEndMax);
       if (countError) throw new ChannelAnalysisReadError(countError.code ?? "unknown");
       return count ?? 0;
+    },
+
+    async loadDailyMetricAggregates({ organizationId, from, to, metricKeys }) {
+      const keys = [...new Set(metricKeys)].filter((key) => key.length > 0);
+      // Nothing to resolve and no days to cover: answer without touching the
+      // database rather than issuing queries that can only return empty.
+      if (keys.length === 0 || from > to) return [];
+
+      // Metric keys name shared or organization-owned definitions; the ledgers
+      // below carry only definition ids. The organization's own row wins over
+      // the shared one, mirroring the metric series repository, and an
+      // inactive definition contributes nothing. Keys are at most a handful
+      // per card, so one query covers the shared and owned rows together.
+      const { data: definitionRows, error: definitionError } = await supabase
+        .from("metric_definitions")
+        .select("id, key, organization_id, is_active")
+        .in("key", keys)
+        .limit(keys.length * 2 + 1);
+      if (definitionError) throw new ChannelAnalysisReadError(definitionError.code ?? "unknown");
+      if ((definitionRows ?? []).length > keys.length * 2)
+        throw new ChannelAnalysisReadError("METRIC_DEFINITIONS_NOT_BOUNDED");
+      const definitionIdByKey = new Map<string, string>();
+      for (const row of definitionRows ?? []) {
+        if (!row.is_active) continue;
+        if (row.organization_id !== null && row.organization_id !== organizationId) continue;
+        if (!definitionIdByKey.has(row.key) || row.organization_id === organizationId) {
+          definitionIdByKey.set(row.key, row.id);
+        }
+      }
+      const definitionIds = [...definitionIdByKey.values()];
+      if (definitionIds.length === 0) return [];
+      const keyByDefinitionId = new Map<string, string>();
+      for (const [key, id] of definitionIdByKey) keyByDefinitionId.set(id, key);
+
+      const fetchStart = new Date(
+        Date.parse(`${from}T00:00:00Z`) - DAILY_AGGREGATE_FETCH_WIDENING_DAYS * MS_PER_DAY,
+      );
+      const fetchEndExclusive = new Date(
+        Date.parse(`${to}T00:00:00Z`) +
+          (DAILY_AGGREGATE_FETCH_WIDENING_DAYS + 1) * MS_PER_DAY,
+      );
+
+      // Day, week, and month period rows. A row is never split across the
+      // range edge or the days inside it: fully-inside rows arrive whole at
+      // their own grain, and the card builder -- not this read -- picks which
+      // grain states each range total. Digested and channel-carrying, like the
+      // governed window reads: a row without a digest was never reconciled,
+      // and an organization-wide row belongs to no channel's figure.
+      const { data: periodRows, error: periodError } = await supabase
+        .from("normalized_metrics")
+        .select(
+          "channel_id, metric_definition_id, period_grain, period_start, period_end, period_timezone, value_numerator, currency",
+        )
+        .eq("organization_id", organizationId)
+        .in("metric_definition_id", definitionIds)
+        .in("period_grain", ["day", "week", "month"])
+        .is("superseded_by_id", null)
+        .eq("reconciliation_state", "current")
+        .not("reconciliation_digest", "is", null)
+        .not("channel_id", "is", null)
+        .gte("period_start", fetchStart.toISOString())
+        .lt("period_start", fetchEndExclusive.toISOString())
+        .order("period_start", { ascending: true })
+        .limit(MAX_DAILY_AGGREGATE_ROWS);
+      if (periodError) throw new ChannelAnalysisReadError(periodError.code ?? "unknown");
+      if ((periodRows ?? []).length >= MAX_DAILY_AGGREGATE_ROWS)
+        throw new ChannelAnalysisReadError("DAILY_AGGREGATES_NOT_BOUNDED");
+
+      // Span totals overlapping the range, under the same standing-row rule.
+      // The dates are plain calendar days, compared directly like the
+      // analysis evidence loader compares them.
+      const { data: spanRows, error: spanError } = await supabase
+        .from("exact_range_metric_observations")
+        .select(
+          "channel_id, metric_definition_id, period_start, period_end, value_numerator, currency",
+        )
+        .eq("organization_id", organizationId)
+        .in("metric_definition_id", definitionIds)
+        .is("superseded_by_id", null)
+        .eq("reconciliation_state", "current")
+        .not("reconciliation_digest", "is", null)
+        .not("channel_id", "is", null)
+        .lte("period_start", to)
+        .gte("period_end", from)
+        .limit(MAX_DAILY_AGGREGATE_ROWS);
+      if (spanError) throw new ChannelAnalysisReadError(spanError.code ?? "unknown");
+      if ((spanRows ?? []).length >= MAX_DAILY_AGGREGATE_ROWS)
+        throw new ChannelAnalysisReadError("DAILY_AGGREGATES_NOT_BOUNDED");
+
+      const buckets = new Map<
+        string,
+        {
+          spanStart: string;
+          spanEnd: string;
+          grain: MetricAggregateGrain;
+          channelId: string;
+          metricKey: string;
+          total: number;
+          currencies: Set<string>;
+          hasNullCurrency: boolean;
+        }
+      >();
+      const add = (
+        spanStart: string,
+        spanEnd: string,
+        grain: MetricAggregateGrain,
+        channelId: string,
+        metricKey: string,
+        numerator: number,
+        currency: string | null,
+      ) => {
+        const fingerprint = `${grain}|${spanStart}|${spanEnd}|${channelId}|${metricKey}`;
+        const bucket = buckets.get(fingerprint) ?? {
+          spanStart,
+          spanEnd,
+          grain,
+          channelId,
+          metricKey,
+          total: 0,
+          currencies: new Set<string>(),
+          hasNullCurrency: false,
+        };
+        bucket.total += numerator;
+        if (currency === null) bucket.hasNullCurrency = true;
+        else bucket.currencies.add(currency);
+        buckets.set(fingerprint, bucket);
+      };
+
+      for (const row of periodRows ?? []) {
+        const metricKey = keyByDefinitionId.get(row.metric_definition_id);
+        const channelId = row.channel_id;
+        if (!metricKey || typeof channelId !== "string") continue;
+        if (row.period_grain !== "day" && row.period_grain !== "week" && row.period_grain !== "month")
+          continue;
+        // `period_end` is the exclusive next local midnight, so the last day
+        // inside the period is the instant a millisecond before it -- the same
+        // conversion the evidence read uses.
+        const startDay = toCalendarDate(new Date(row.period_start), row.period_timezone);
+        const endDay = toCalendarDate(
+          new Date(Date.parse(row.period_end) - 1),
+          row.period_timezone,
+        );
+        // Fully inside the range or nothing: a row reaching past either edge
+        // states a total for days nobody asked about, and clipping it would
+        // state a part nobody reported.
+        if (startDay < from || endDay > to) continue;
+        // A day-grain row is one calendar day by definition; a wider one is
+        // corrupt input rather than a wider fact, and stays out.
+        if (row.period_grain === "day" && startDay !== endDay) continue;
+        const numerator = toExactQuantity(row.value_numerator);
+        if (numerator === null) throw new ChannelAnalysisReadError("VALUE_NOT_EXACT");
+        add(startDay, endDay, row.period_grain, channelId, metricKey, numerator, row.currency);
+      }
+
+      for (const row of spanRows ?? []) {
+        const metricKey = keyByDefinitionId.get(row.metric_definition_id);
+        const channelId = row.channel_id;
+        if (!metricKey || typeof channelId !== "string") continue;
+        // Fully inside at any length, stated in plain calendar days like the
+        // analysis evidence loader compares them. A single-day span is a day
+        // fact and merges into the day bucket; a longer span arrives whole so
+        // the builder can add it once to its range totals, never as bars.
+        if (row.period_start < from || row.period_end > to) continue;
+        const numerator = toExactQuantity(row.value_numerator);
+        if (numerator === null) throw new ChannelAnalysisReadError("VALUE_NOT_EXACT");
+        add(
+          row.period_start,
+          row.period_end,
+          row.period_start === row.period_end ? "day" : "span",
+          channelId,
+          metricKey,
+          numerator,
+          row.currency,
+        );
+      }
+
+      const aggregates: DailyMetricAggregate[] = [...buckets.values()].map((bucket) => ({
+        day: bucket.spanStart,
+        spanStart: bucket.spanStart,
+        spanEnd: bucket.spanEnd,
+        grain: bucket.grain,
+        channelId: bucket.channelId,
+        metricKey: bucket.metricKey,
+        totalNumerator: bucket.total,
+        // One currency or none: a mixed group refuses to name one, so the
+        // builder states no combined total rather than one in a lucky currency.
+        currency:
+          !bucket.hasNullCurrency && bucket.currencies.size === 1
+            ? [...bucket.currencies][0] ?? null
+            : null,
+      }));
+      aggregates.sort((left, right) =>
+        left.spanStart < right.spanStart
+          ? -1
+          : left.spanStart > right.spanStart
+            ? 1
+            : left.spanEnd < right.spanEnd
+              ? -1
+              : left.spanEnd > right.spanEnd
+                ? 1
+                : left.channelId < right.channelId
+                  ? -1
+                  : left.channelId > right.channelId
+                    ? 1
+                    : left.metricKey < right.metricKey
+                      ? -1
+                      : left.metricKey > right.metricKey
+                        ? 1
+                        : 0,
+      );
+      return aggregates;
     },
   };
   return repository;

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -106,7 +106,9 @@ describe("workspace sections", () => {
     expect(screen.getByText("Operator recommendations")).toBeTruthy();
     expect(screen.getByText(/Shift budget/)).toBeTruthy();
     expect(screen.getByText(/Extend Friday hours/)).toBeTruthy();
-    // The full tab renders the same prototype card as the preview.
+    // The full tab renders the same prototype card as the preview; Why this
+    // waits inside the card expander.
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
   });
 
@@ -123,6 +125,7 @@ describe("workspace sections", () => {
     expect(screen.queryByText(/No open platform opportunities/)).toBeNull();
     expect(screen.queryByText(/Shift budget/)).toBeNull();
     expect(screen.getByText(/Extend Friday hours/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
     cleanup();
     render(<PriorityActions opportunities={[]} recommendations={[]} {...shared} hideHeading />);

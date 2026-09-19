@@ -208,6 +208,48 @@ export type ChannelBandRecord = {
   findings: readonly ChannelFindingRecord[];
 };
 
+/**
+ * Which governed statement one aggregate row carries.
+ *
+ * `day` is a day-grain period row for exactly one calendar day (single-day
+ * exact-range rows merge into the same bucket -- both are one-day facts).
+ * `week` and `month` are period rows whose whole calendar span sits fully
+ * inside the asked range. `span` is an exact-range row stated for several
+ * days, fully inside the range, carried whole: splitting it would invent
+ * daily figures nobody reported.
+ */
+export type MetricAggregateGrain = "day" | "week" | "month" | "span";
+
+/**
+ * One governed metric's summed fact for one channel: a single calendar day,
+ * or -- for `week`, `month`, and `span` rows -- the fully-inside calendar
+ * span the figure was stated for.
+ *
+ * Daily bars read `day` rows only: every such row states exactly one day
+ * inside the asked range, so summing them per day never splits a week total
+ * or repeats it once per day it touches. Gaps stay absent: a day with no row
+ * is unmeasured, never zero.
+ *
+ * Range totals (the tiles and shares the card builder assembles) sum these
+ * per channel and key with the dedup a daily shape cannot state: per channel
+ * and key, the finest period grain fully inside the range wins (day, then
+ * week, then month), and `span` rows fully inside the range are added once
+ * each on top. `currency` is null when a merged group mixes currencies or
+ * carries none, so the builder refuses a mixed-currency total honestly
+ * rather than stating one in an arbitrary currency.
+ */
+export type DailyMetricAggregate = {
+  day: string;
+  /** Inclusive calendar days, stated in each row's own timezone. */
+  spanStart: string;
+  spanEnd: string;
+  grain: MetricAggregateGrain;
+  channelId: string;
+  metricKey: string;
+  totalNumerator: number;
+  currency: string | null;
+};
+
 /** A window some channel has a completed analysis for. */
 export type AnalysedWindowKey = {
   windowStart: string;
@@ -442,4 +484,31 @@ export type ChannelAnalysisReadPort = {
     windowStartMin: string;
     windowEndMax: string;
   }): Promise<number>;
+
+  /**
+   * Summed governed metric facts per channel over an inclusive date range,
+   * for the business-performance card's aggregate read path (sales, orders,
+   * menu views, cancellations, cost presence).
+   *
+   * Single-day facts arrive as `day` rows; week and month period rows fully
+   * inside the range arrive whole as `week` and `month` rows; exact-range
+   * rows fully inside the range arrive whole as `span` rows (single-day ones
+   * merge into the day bucket). Rows merely overlapping the range never
+   * arrive clipped or split: a partial figure stated as whole would invent
+   * coverage nobody reported.
+   *
+   * Only `reconciliation_state = 'current'` rows with no successor take part,
+   * each carrying a reconciliation digest and a channel, exactly like the
+   * governed window reads detectors see. Everything stays scoped to the
+   * organization through the caller's authenticated session; RLS decides
+   * visibility, and no service role is involved. Unknown or inactive metric
+   * keys simply contribute nothing. An empty key list, or `from` later than
+   * `to`, answers empty without querying.
+   */
+  loadDailyMetricAggregates(input: {
+    organizationId: string;
+    from: string;
+    to: string;
+    metricKeys: readonly string[];
+  }): Promise<DailyMetricAggregate[]>;
 };

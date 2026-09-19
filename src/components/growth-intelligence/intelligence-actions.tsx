@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { CalendarCheck, Check, Clock, ThumbsDown, ThumbsUp, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -97,22 +97,26 @@ export function IntelligenceActions({
         {mayDecide ? (
           <>
             <Button
-              size="sm"
+              size="icon"
               variant="outline"
-              className="min-h-[38px] bg-white max-sm:min-h-[42px]"
+              className="min-h-[38px] min-w-[38px] bg-white max-sm:min-h-[42px] max-sm:min-w-[42px]"
+              aria-label={`Acknowledge: ${card.title}`}
+              title="Acknowledge"
               disabled={pending}
               onClick={() => post("decisions", decisionBody("acknowledged"))}
             >
-              Acknowledge
+              <Check aria-hidden="true" />
             </Button>
             <Button
-              size="sm"
+              size="icon"
               variant="outline"
-              className="min-h-[38px] bg-white max-sm:min-h-[42px]"
+              className="min-h-[38px] min-w-[38px] bg-white max-sm:min-h-[42px] max-sm:min-w-[42px]"
+              aria-label={`Planned: ${card.title}`}
+              title="Planned"
               disabled={pending}
               onClick={() => post("decisions", decisionBody("planned"))}
             >
-              Planned
+              <CalendarCheck aria-hidden="true" />
             </Button>
           </>
         ) : null}
@@ -150,14 +154,15 @@ export function IntelligenceActions({
           {mayDecide ? (
             <>
               <Button
-                size="sm"
+                size="icon"
                 variant="ghost"
-                className="min-h-[38px] border-transparent bg-transparent max-sm:min-h-[42px]"
+                className="min-h-[38px] min-w-[38px] border-transparent bg-transparent max-sm:min-h-[42px] max-sm:min-w-[42px]"
+                aria-label={`Snooze: ${card.title}`}
+                title="Snooze"
                 disabled={pending}
                 onClick={() => setSnoozeOpen(true)}
               >
                 <Clock aria-hidden="true" />
-                Snooze
               </Button>
               <Button
                 size="icon"

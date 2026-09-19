@@ -840,9 +840,9 @@ export function ReportReaderDialog({
           openerRef.current = document.activeElement;
         }}
         onEscapeKeyDown={scheduleRestore}
-        className="flex max-h-[90vh] w-full flex-col gap-0 p-0 sm:max-w-[860px] lg:max-w-[1024px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
+        className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[860px] lg:max-w-[1024px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
       >
-        <DialogHeader className="shrink-0 border-b px-5 py-4 text-left sm:px-7">
+        <DialogHeader className="static shrink-0 border-b px-5 py-4 text-left sm:px-7">
           <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
             Research report
           </p>
@@ -892,7 +892,7 @@ export function ReportReaderDialog({
           )}
         </div>
 
-        <DialogFooter className="shrink-0 flex-row items-center justify-between gap-2 border-t px-5 py-3 sm:px-7">
+        <DialogFooter className="static mx-0 mb-0 shrink-0 flex-row items-center justify-between gap-2 border-t px-5 py-3 sm:px-7">
           <span className="hidden min-w-0 text-xs text-muted-foreground sm:block">
             {payload === null
               ? "Pinned report version."

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   BusinessPerformanceCard,
+  trendYAxisTicks,
+  visibleBarLabelIndexes,
   visibleTickIndexes,
 } from "@/components/growth-intelligence/business-performance-card";
 import type { BusinessPerformanceCardView } from "@/modules/analysis/application/channels-overview";
@@ -140,11 +142,37 @@ describe("the business performance card", () => {
 
     expect(screen.getByRole("img", { name: /Weekly reported sales/ })).toBeInTheDocument();
     expect(
-      screen.getByRole("img", { name: "Delivery A 50% of reported sales" }),
+      screen.getByRole("img", { name: /Channel shares: Delivery A 50%/ }),
     ).toBeInTheDocument();
     expect(screen.getByText("AED 60,000")).toBeInTheDocument();
     expect(
       screen.getByText("Cost data is needed to explain how much of these sales became profit."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the pie even when a single channel owns every sale", () => {
+    render(
+      <BusinessPerformanceCard
+        card={cardView({
+          shares: {
+            rows: [
+              {
+                channelId: "ch-a",
+                displayName: "Delivery A",
+                minorUnits: 6_000_000,
+                currency: "AED",
+                sharePercent: 100,
+              },
+            ],
+            totalMinorUnits: 6_000_000,
+            currency: "AED",
+          },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("img", { name: /Channel shares: Delivery A 100%/ }),
     ).toBeInTheDocument();
   });
 
@@ -279,5 +307,74 @@ describe("visibleTickIndexes", () => {
       true,
       true,
     ]);
+  });
+});
+
+describe("trend value labels", () => {
+  it("labels every bar at thirty-one or fewer", () => {
+    expect(visibleBarLabelIndexes(2)).toEqual([true, true]);
+    expect(visibleBarLabelIndexes(31)).toEqual(Array.from({ length: 31 }, () => true));
+  });
+
+  it("thins crowded bars to every nth plus the latest", () => {
+    const thinned = visibleBarLabelIndexes(32);
+    expect(thinned).toHaveLength(32);
+    expect(thinned[0]).toBe(true);
+    expect(thinned[1]).toBe(false);
+    expect(thinned[30]).toBe(true);
+    expect(thinned[31]).toBe(true);
+  });
+
+  it("names every bucket for assistive tech even when labels thin", () => {
+    const buckets = Array.from({ length: 35 }, (_, index) => ({
+      label: `Day ${index + 1}`,
+      minorUnits: (index + 1) * 100_000,
+    }));
+    render(<BusinessPerformanceCard card={cardView({ trend: { state: "ready", buckets, currency: "AED", coverageNote: "35 days" } })} />);
+
+    const trend = screen.getByRole("img", { name: /Weekly reported sales/ });
+    const label = trend.getAttribute("aria-label") ?? "";
+    expect(label).toContain("Day 1");
+    expect(label).toContain("Day 35");
+    expect(label).toContain("Day 17");
+  });
+
+  it("invents no zero-fill for missing days", () => {
+    render(
+      <BusinessPerformanceCard
+        card={cardView({
+          trend: {
+            state: "ready",
+            buckets: [
+              { label: "2–8 Feb", minorUnits: 2_400_000 },
+              { label: "16–22 Feb", minorUnits: 3_600_000 },
+            ],
+            currency: "AED",
+            coverageNote: "2 days with data",
+          },
+        })}
+      />,
+    );
+
+    const trend = screen.getByRole("img", { name: /Weekly reported sales/ });
+    const label = trend.getAttribute("aria-label") ?? "";
+    expect(label).toContain("2–8 Feb");
+    expect(label).toContain("16–22 Feb");
+    expect(label).not.toContain("9–15 Feb");
+  });
+});
+
+describe("trend plot shape", () => {
+  it("matches the pie visual height so both sections end level", () => {
+    render(<BusinessPerformanceCard card={cardView()} />);
+
+    const trend = screen.getByRole("img", { name: /Weekly reported sales/ });
+    expect(trend).toHaveClass("h-55");
+    expect(trend).not.toHaveClass("h-52");
+  });
+
+  it("grows the y-axis to five round ticks", () => {
+    expect(trendYAxisTicks(36_000)).toEqual([0, 10_000, 20_000, 30_000, 40_000]);
+    expect(trendYAxisTicks(1)).toEqual([0, 0.5, 1, 1.5, 2]);
   });
 });

@@ -1477,3 +1477,548 @@ describe("resolveWindowInput", () => {
     });
   });
 });
+
+type AggregateFilterLog = {
+  table: string;
+  eq: [string, unknown][];
+  in: [string, unknown[]][];
+  is: [string, unknown][];
+  not: [string, unknown][];
+  range: [string, string, unknown][];
+};
+
+/**
+ * Answers the three aggregate queries the way PostgREST would: `eq`, `in`,
+ * `is`, and `not(... is null)` filters actually remove rows, so a query that
+ * drops one of them sees rows it must not. Range and ordering filters are
+ * recorded but not applied -- the rows are already scoped to the window and
+ * the day-clipping under test happens in application code.
+ */
+function aggregateStub(input: {
+  definitions?: Record<string, unknown>[];
+  metrics?: Record<string, unknown>[];
+  spans?: Record<string, unknown>[];
+}) {
+  const queries: AggregateFilterLog[] = [];
+  const from = (table: string) => {
+    const log: AggregateFilterLog = { table, eq: [], in: [], is: [], not: [], range: [] };
+    queries.push(log);
+    const builder = {
+      select: () => builder,
+      eq: (column: string, value: unknown) => {
+        log.eq.push([column, value]);
+        return builder;
+      },
+      in: (column: string, values: unknown[]) => {
+        log.in.push([column, [...values]]);
+        return builder;
+      },
+      is: (column: string, value: unknown) => {
+        log.is.push([column, value]);
+        return builder;
+      },
+      not: (column: string, operator: string, value?: unknown) => {
+        log.not.push([column, `${operator}${value === null ? ":null" : ""}`]);
+        return builder;
+      },
+      gte: (column: string, value: unknown) => {
+        log.range.push(["gte", column, value]);
+        return builder;
+      },
+      lt: (column: string, value: unknown) => {
+        log.range.push(["lt", column, value]);
+        return builder;
+      },
+      lte: (column: string, value: unknown) => {
+        log.range.push(["lte", column, value]);
+        return builder;
+      },
+      order: () => builder,
+      limit: () => builder,
+      then: (
+        onFulfilled: (value: QueryResult) => unknown,
+        onRejected?: (reason: unknown) => unknown,
+      ) => {
+        let rows: Record<string, unknown>[] =
+          table === "metric_definitions"
+            ? [...(input.definitions ?? [])]
+            : table === "normalized_metrics"
+              ? [...(input.metrics ?? [])]
+              : table === "exact_range_metric_observations"
+                ? [...(input.spans ?? [])]
+                : [];
+        for (const [column, value] of log.eq) {
+          rows = rows.filter((row) => row[column] === value);
+        }
+        for (const [column, values] of log.in) {
+          rows = rows.filter((row) => values.includes(row[column]));
+        }
+        for (const [column, value] of log.is) {
+          rows = rows.filter((row) =>
+            value === null ? row[column] === null || row[column] === undefined : row[column] === value,
+          );
+        }
+        for (const [column, operator] of log.not) {
+          if (operator === "is:null") {
+            rows = rows.filter((row) => row[column] !== null && row[column] !== undefined);
+          }
+        }
+        return Promise.resolve({ data: rows, error: null }).then(onFulfilled, onRejected);
+      },
+    };
+    return builder;
+  };
+  return {
+    supabase: { from } as unknown as SupabaseClient<Database>,
+    queries,
+  };
+}
+
+const AGGREGATE_DEFINITIONS: Record<string, unknown>[] = [
+  { id: "def-gross", key: "revenue.gross", organization_id: null, is_active: true },
+  { id: "def-gross-org", key: "revenue.gross", organization_id: ORGANIZATION, is_active: true },
+  { id: "def-orders", key: "listing.placed_orders", organization_id: null, is_active: true },
+  { id: "def-views", key: "listing.menu_views", organization_id: null, is_active: true },
+  {
+    id: "def-cancelled",
+    key: "order.avoidable_cancellation_count",
+    organization_id: null,
+    is_active: true,
+  },
+];
+
+/** One Dubai day: local midnight to local midnight, stated as instants. */
+function dubaiDayMetric(overrides: Record<string, unknown> = {}) {
+  return {
+    organization_id: ORGANIZATION,
+    channel_id: "channel-1",
+    metric_definition_id: "def-gross-org",
+    period_grain: "day",
+    period_start: "2026-01-31T20:00:00Z",
+    period_end: "2026-02-01T20:00:00Z",
+    period_timezone: "Asia/Dubai",
+    value_numerator: 10000,
+    currency: "AED",
+    reconciliation_state: "current",
+    reconciliation_digest: "digest-1",
+    superseded_by_id: null,
+    ...overrides,
+  };
+}
+
+function exactSpan(overrides: Record<string, unknown> = {}) {
+  return {
+    organization_id: ORGANIZATION,
+    channel_id: "channel-1",
+    metric_definition_id: "def-orders",
+    period_start: "2026-02-02",
+    period_end: "2026-02-02",
+    value_numerator: 7,
+    currency: null,
+    reconciliation_state: "current",
+    reconciliation_digest: "digest-1",
+    superseded_by_id: null,
+    ...overrides,
+  };
+}
+
+const AGGREGATE_INPUT = {
+  organizationId: ORGANIZATION,
+  from: "2026-02-01",
+  to: "2026-02-03",
+  metricKeys: ["revenue.gross", "listing.placed_orders"],
+};
+
+describe("loadDailyMetricAggregates", () => {
+  it("sums same-day rows per channel and metric, preferring the organization's own definition", async () => {
+    const { supabase, queries } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        dubaiDayMetric({ value_numerator: 10000 }),
+        dubaiDayMetric({ value_numerator: 2500 }),
+        dubaiDayMetric({ channel_id: "channel-2", value_numerator: 5000 }),
+        dubaiDayMetric({
+          metric_definition_id: "def-orders",
+          value_numerator: 40,
+          currency: null,
+        }),
+        dubaiDayMetric({
+          period_start: "2026-02-01T20:00:00Z",
+          period_end: "2026-02-02T20:00:00Z",
+          value_numerator: 7000,
+        }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates(AGGREGATE_INPUT);
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "listing.placed_orders",
+        totalNumerator: 40,
+        currency: null,
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 12500,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-2",
+        metricKey: "revenue.gross",
+        totalNumerator: 5000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-02",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-02",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 7000,
+        currency: "AED",
+      },
+    ]);
+
+    const metricsQuery = queries.find((query) => query.table === "normalized_metrics");
+    expect(metricsQuery?.eq).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(metricsQuery?.eq).toContainEqual(["reconciliation_state", "current"]);
+    // Day, week, and month rows arrive together; the builder picks the grain.
+    const grainFilter = metricsQuery?.in.find(([column]) => column === "period_grain");
+    expect(grainFilter?.[1]).toEqual(["day", "week", "month"]);
+    const definitionFilter = metricsQuery?.in.find(([column]) => column === "metric_definition_id");
+    // The organization's own revenue definition wins over the shared one, so
+    // the shared id must never reach the ledger query.
+    expect(definitionFilter?.[1]).toContain("def-gross-org");
+    expect(definitionFilter?.[1]).not.toContain("def-gross");
+  });
+
+  it("clips to the range in each row's own timezone and carries longer rows whole", async () => {
+    const { supabase, queries } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        // The previous local day: its UTC instant touches the fetch window,
+        // but its calendar day sits before `from`.
+        dubaiDayMetric({
+          period_start: "2026-01-30T20:00:00Z",
+          period_end: "2026-01-31T20:00:00Z",
+          value_numerator: 999,
+        }),
+        dubaiDayMetric({ value_numerator: 9000 }),
+        // A UTC day at the far edge of the range.
+        dubaiDayMetric({
+          period_start: "2026-02-03T00:00:00Z",
+          period_end: "2026-02-04T00:00:00Z",
+          period_timezone: "UTC",
+          value_numerator: 3000,
+        }),
+        // A week row reaching past the range edge never arrives clipped:
+        // stating its week total for the in-range days alone would invent a
+        // part nobody reported.
+        dubaiDayMetric({
+          period_grain: "week",
+          period_start: "2026-01-25T20:00:00Z",
+          period_end: "2026-02-01T20:00:00Z",
+          value_numerator: 77777,
+        }),
+      ],
+      spans: [
+        // A three-day span fully inside the range arrives whole, tagged so
+        // the builder adds it once to its totals and never as daily bars.
+        exactSpan({
+          metric_definition_id: "def-gross-org",
+          period_start: "2026-02-01",
+          period_end: "2026-02-03",
+          value_numerator: 60000,
+          currency: "AED",
+        }),
+        exactSpan({ value_numerator: 7 }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates(AGGREGATE_INPUT);
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 9000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-03",
+        grain: "span",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 60000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-02",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-02",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "listing.placed_orders",
+        totalNumerator: 7,
+        currency: null,
+      },
+      {
+        day: "2026-02-03",
+        spanStart: "2026-02-03",
+        spanEnd: "2026-02-03",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 3000,
+        currency: "AED",
+      },
+    ]);
+
+    const spansQuery = queries.find(
+      (query) => query.table === "exact_range_metric_observations",
+    );
+    expect(spansQuery?.eq).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(spansQuery?.eq).toContainEqual(["reconciliation_state", "current"]);
+  });
+
+  it("excludes superseded, held, undigested, channel-less, foreign and inactive-definition rows", async () => {
+    const { supabase } = aggregateStub({
+      definitions: [
+        ...AGGREGATE_DEFINITIONS,
+        { id: "def-stale", key: "operations.closed_days", organization_id: null, is_active: false },
+      ],
+      metrics: [
+        dubaiDayMetric({ value_numerator: 8000 }),
+        dubaiDayMetric({ superseded_by_id: "newer-row" }),
+        dubaiDayMetric({ reconciliation_state: "blocked_overlap" }),
+        dubaiDayMetric({ reconciliation_state: "excluded" }),
+        dubaiDayMetric({ reconciliation_digest: null }),
+        dubaiDayMetric({ channel_id: null }),
+        dubaiDayMetric({ organization_id: "org-2" }),
+        dubaiDayMetric({ metric_definition_id: "def-stale", value_numerator: 11 }),
+      ],
+      spans: [
+        // A sound row for a key nobody asked for stays out as well.
+        exactSpan({ period_start: "2026-02-01" }),
+        exactSpan({
+          metric_definition_id: "def-gross-org",
+          period_start: "2026-02-01",
+          superseded_by_id: "newer-span",
+        }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates({
+      ...AGGREGATE_INPUT,
+      metricKeys: ["revenue.gross", "operations.closed_days"],
+    });
+
+    // Only the one current, digested, channel-carrying row of this tenant.
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 8000,
+        currency: "AED",
+      },
+    ]);
+  });
+
+  it("nulls the currency when a day group mixes currencies or carries none", async () => {
+    const { supabase } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        dubaiDayMetric({ value_numerator: 100 }),
+        dubaiDayMetric({ value_numerator: 200 }),
+        dubaiDayMetric({
+          metric_definition_id: "def-orders",
+          value_numerator: 10,
+          currency: null,
+        }),
+        dubaiDayMetric({
+          metric_definition_id: "def-orders",
+          value_numerator: 5,
+          currency: null,
+        }),
+        dubaiDayMetric({ channel_id: "channel-2", value_numerator: 100 }),
+        dubaiDayMetric({ channel_id: "channel-2", value_numerator: 50, currency: "USD" }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates({ ...AGGREGATE_INPUT, to: "2026-02-01" });
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "listing.placed_orders",
+        totalNumerator: 15,
+        currency: null,
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 300,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-2",
+        metricKey: "revenue.gross",
+        totalNumerator: 150,
+        currency: null,
+      },
+    ]);
+  });
+
+  it("reads fully-inside week and month rows whole and drops rows past either edge", async () => {
+    const { supabase } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        // Monday 2026-02-02 to Sunday 2026-02-08 in Dubai: a week fully inside.
+        dubaiDayMetric({
+          period_grain: "week",
+          period_start: "2026-02-01T20:00:00Z",
+          period_end: "2026-02-08T20:00:00Z",
+          value_numerator: 70000,
+        }),
+        // February in Dubai: a month fully inside.
+        dubaiDayMetric({
+          period_grain: "month",
+          period_start: "2026-01-31T20:00:00Z",
+          period_end: "2026-02-28T20:00:00Z",
+          value_numerator: 250000,
+        }),
+        // A week reaching past the range start: out, never clipped.
+        dubaiDayMetric({
+          period_grain: "week",
+          period_start: "2026-01-25T20:00:00Z",
+          period_end: "2026-02-01T20:00:00Z",
+          value_numerator: 77777,
+        }),
+        // January: out on both sides of a February range.
+        dubaiDayMetric({
+          period_grain: "month",
+          period_start: "2025-12-31T20:00:00Z",
+          period_end: "2026-01-31T20:00:00Z",
+          value_numerator: 88888,
+        }),
+        // A day-grain row spanning two calendar days is corrupt input, not a
+        // wider fact: it stays out rather than landing on either day.
+        dubaiDayMetric({
+          period_start: "2026-02-01T20:00:00Z",
+          period_end: "2026-02-03T20:00:00Z",
+          value_numerator: 11111,
+        }),
+      ],
+      spans: [
+        // A multi-day span reaching past the range start stays out with the
+        // period rows: fully inside or nothing.
+        exactSpan({
+          metric_definition_id: "def-gross-org",
+          period_start: "2026-01-30",
+          period_end: "2026-02-02",
+          value_numerator: 22222,
+          currency: "AED",
+        }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates({
+      ...AGGREGATE_INPUT,
+      from: "2026-02-01",
+      to: "2026-02-28",
+      metricKeys: ["revenue.gross"],
+    });
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-28",
+        grain: "month",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 250000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-02",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-08",
+        grain: "week",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 70000,
+        currency: "AED",
+      },
+    ]);
+  });
+
+  it("returns nothing without querying when the input names no keys or no days", async () => {
+    const first = aggregateStub({ definitions: AGGREGATE_DEFINITIONS });
+    await expect(
+      createAuthenticatedChannelAnalysisRepository(first.supabase).loadDailyMetricAggregates({
+        ...AGGREGATE_INPUT,
+        metricKeys: [],
+      }),
+    ).resolves.toEqual([]);
+    expect(first.queries).toEqual([]);
+
+    const second = aggregateStub({ definitions: AGGREGATE_DEFINITIONS });
+    await expect(
+      createAuthenticatedChannelAnalysisRepository(second.supabase).loadDailyMetricAggregates({
+        ...AGGREGATE_INPUT,
+        from: "2026-02-05",
+        to: "2026-02-01",
+      }),
+    ).resolves.toEqual([]);
+    expect(second.queries).toEqual([]);
+  });
+});

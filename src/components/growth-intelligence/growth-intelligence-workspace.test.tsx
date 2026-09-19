@@ -190,11 +190,19 @@ describe("GrowthIntelligenceWorkspace", () => {
     vi.unstubAllGlobals();
   });
 
-  it("opens on the filter row, previous actions, and Top Recommendations in that order", () => {
+  it("opens on the filter row and the merged recommendations grid", () => {
     const { container } = workspace();
     const text = container.textContent ?? "";
-    expect(text.indexOf("Last fetched")).toBeLessThan(text.indexOf("Previous actions"));
-    expect(text.indexOf("Previous actions")).toBeLessThan(text.indexOf("Top Recommendations"));
+    expect(text.indexOf("Last fetched")).toBeLessThan(
+      text.indexOf("Top AI recommendations"),
+    );
+    expect(
+      screen.queryByRole("region", { name: "Previous actions" }),
+    ).toBeNull();
+    expect(container.textContent).not.toContain("Previous actions");
+    expect(
+      screen.getByRole("region", { name: "Top AI recommendations & Campaign opportunities" }),
+    ).toBeTruthy();
     expect(screen.getByRole("group", { name: "Performance filters" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "2026-02-01 to 2026-02-28" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Channel" })).toBeTruthy();
@@ -202,7 +210,7 @@ describe("GrowthIntelligenceWorkspace", () => {
     expect(screen.getByRole("link", { name: /More/ }).getAttribute("href")).toBe(
       "#recommendations",
     );
-    expect(screen.getByText(/Useful next steps, with the evidence behind each one/)).toBeTruthy();
+    expect(screen.getByText(/Best next moves, scored by impact and freshness/)).toBeTruthy();
   });
 
   it("names an unmatched range instead of showing another range", () => {
@@ -343,6 +351,15 @@ describe("GrowthIntelligenceWorkspace market monitoring", () => {
     workspace();
     fireEvent.click(screen.getByRole("tab", { name: /insights/i }));
     expect(screen.getByText(/follows one branch at a time/i)).toBeTruthy();
+  });
+
+  it("heads Insights & market with the same intro card pattern as Recommendations", () => {
+    workspace();
+    fireEvent.click(screen.getByRole("tab", { name: /insights/i }));
+    expect(screen.getByText(/what your evidence says, what is missing/i)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Insights" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Data gaps" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Market Watch" })).toBeTruthy();
   });
 
   it("observes the selected branch pipeline without branchless copy", async () => {

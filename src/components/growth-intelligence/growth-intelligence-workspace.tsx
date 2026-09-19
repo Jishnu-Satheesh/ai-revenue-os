@@ -2,20 +2,21 @@
 
 import { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Clock3, RefreshCw, Settings2 } from "lucide-react";
+import { ArrowRight, RefreshCw, Settings2 } from "lucide-react";
 
 import { formatWindow } from "@/components/analysis/format";
 import { WindowRangePicker } from "@/components/analysis/window-range-picker";
 import { CampaignProposalSection } from "@/components/campaigns/campaign-proposal-card";
+import { RequestCampaignResearch } from "@/components/campaigns/request-campaign-research";
 import { BusinessPerformanceCard } from "@/components/growth-intelligence/business-performance-card";
 import { DataGaps } from "@/components/growth-intelligence/data-gaps";
 import { InsightsList } from "@/components/growth-intelligence/insights-list";
-import { IntelligenceTimeline } from "@/components/growth-intelligence/intelligence-timeline";
 import {
   MarketMonitoringDialog,
   type MonitoringBranchOption,
 } from "@/components/growth-intelligence/market-monitoring-dialog";
 import { MarketWatchProjectsSection } from "@/components/growth-intelligence/market-watch-projects";
+import { MergedRecommendations } from "@/components/growth-intelligence/merged-recommendations";
 import { PriorityActions } from "@/components/growth-intelligence/priority-actions";
 import {
   MARKET_MONITORING_OPEN_EVENT,
@@ -456,7 +457,6 @@ export function GrowthIntelligenceWorkspace({
   }
 
   const acted = view.timeline.filter((event) => event.type !== "generated");
-  const topRecommendations = view.priorityActions.recommendations.slice(0, 3);
   const channelNames = new Map(
     (performanceFilters?.channels ?? []).map((channel) => [channel.id, channel.displayName]),
   );
@@ -524,79 +524,41 @@ export function GrowthIntelligenceWorkspace({
             canRequestBuild={canRequestBuild}
           />
 
-          <section aria-label="Previous actions" className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold">Previous actions</h2>
-                <p className="text-sm text-muted-foreground">
-                  What you decided and what happened next.
-                </p>
-              </div>
-              <Button variant="ghost" size="sm" asChild>
-                <a href="#actions" onClick={() => setTab("actions")}>
-                  View all <ArrowRight aria-hidden="true" />
-                </a>
-              </Button>
-            </div>
-            {acted.length > 0 ? (
-              <Card>
-                <CardContent>
-                  <IntelligenceTimeline
-                    events={acted.slice(0, 4)}
-                    timeZone={view.timeZone}
-                    compact
-                  />
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardContent className="flex items-center gap-3 py-6 text-sm text-muted-foreground">
-                  <Clock3 aria-hidden="true" />
-                  Your acknowledgements, plans, snoozes, and draft progress will appear here.
-                </CardContent>
-              </Card>
-            )}
-          </section>
-
-          <section aria-label="Top Recommendations" className="flex flex-col gap-4">
-            <div className="mb-1 flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold tracking-tight">Top Recommendations</h2>
+          <section
+            aria-label="Top AI recommendations & Campaign opportunities"
+            className="flex flex-col gap-4"
+          >
+            <div className="mb-1 flex flex-wrap items-end justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold tracking-tight">
+                  Top AI recommendations &amp; Campaign opportunities
+                </h2>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  Useful next steps, with the evidence behind each one.
+                  Best next moves, scored by impact and freshness. Advice and campaign drafts
+                  share one grid.
                 </p>
               </div>
-              <Button variant="link" size="sm" asChild className="font-bold text-primary">
-                <a href="#recommendations" onClick={() => setTab("recommendations")}>
-                  More <ArrowRight aria-hidden="true" />
-                </a>
-              </Button>
+              <div className="flex shrink-0 items-center gap-3">
+                {canRequestResearch ? (
+                  <RequestCampaignResearch organizationId={organizationId} />
+                ) : null}
+                <Button variant="link" size="sm" asChild className="font-bold text-primary">
+                  <a href="#recommendations" onClick={() => setTab("recommendations")}>
+                    More <ArrowRight aria-hidden="true" />
+                  </a>
+                </Button>
+              </div>
             </div>
-            <PriorityActions
-              opportunities={[]}
-              recommendations={topRecommendations}
+            <MergedRecommendations
+              recommendations={view.priorityActions.recommendations}
+              proposals={view.campaignProposals}
               organizationId={organizationId}
               timeZone={view.timeZone}
               canManage={canManage}
               channelNames={channelNames}
               branchNames={branchNames}
-              hideHeading
             />
           </section>
-
-          {/* Only when there is one. A proposal waiting on a decision that
-              nobody happens to open the Recommendations tab for is the same
-              failure this section was built to fix, one level up — but an empty
-              section here would add a permanent heading to every overview for
-              the sake of a case that is usually absent. */}
-          {view.campaignProposals.length > 0 ? (
-            <CampaignProposalSection
-              proposals={view.campaignProposals}
-              organizationId={organizationId}
-              timeZone={view.timeZone}
-              canRequest={canRequestResearch}
-            />
-          ) : null}
         </TabsContent>
 
         <TabsContent value="recommendations" className="flex flex-col gap-8">
@@ -644,90 +606,78 @@ export function GrowthIntelligenceWorkspace({
           />
         </TabsContent>
 
-        <TabsContent value="insights" className="grid items-start gap-8 lg:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-8">
-            <InsightsList
-              insights={view.insights}
-              organizationId={organizationId}
-              timeZone={view.timeZone}
-              canManage={canManage}
-            />
-            <DataGaps
-              dataGaps={view.dataGaps}
-              organizationId={organizationId}
-              timeZone={view.timeZone}
-              canManage={canManage}
-            />
-          </div>
-          <div className="min-w-0 flex flex-col gap-8">
-            <MarketWatchProjectsSection
-              organizationId={organizationId}
-              branches={branches.map((branch) => ({ id: branch.id, name: branch.name }))}
-              timeZone={view.timeZone}
-              canManage={canManage}
-              businessInsights={view.insights.slice(0, 2).map((insight) => ({
-                id: insight.id,
-                title: insight.title,
-                detail: insight.detail,
-                scopeLabel:
-                  (insight.branchId && branchNames.get(insight.branchId)) ||
-                  (insight.channelId && channelNames.get(insight.channelId)) ||
-                  "All locations",
-                evidencePeriodLabel: insight.evidenceWindow
-                  ? (formatEvidencePeriod(
-                      insight.evidenceWindow.start,
-                      insight.evidenceWindow.end,
-                      view.timeZone,
-                    ) ?? `${insight.evidenceWindow.start}–${insight.evidenceWindow.end}`)
-                  : null,
-              }))}
-              contextGaps={view.dataGaps.slice(0, 3).map((gap) => ({
-                id: gap.id,
-                title: gap.title,
-                scopeLabel:
-                  (gap.channelId && channelNames.get(gap.channelId)) || "All locations",
-                nextAction: gap.missingInput,
-              }))}
-              evidencePeriods={(performanceFilters?.coverageWindows ?? [])
-                .slice()
-                .sort((left, right) => (left.windowEnd < right.windowEnd ? 1 : -1))
-                .slice(0, 3)
-                .map((window) => {
-                  const period = formatEvidencePeriod(
-                    window.windowStart,
-                    window.windowEnd,
-                    view.timeZone,
-                  );
-                  return {
-                    label: `Channel reports · ${period ?? `${window.windowStart}–${window.windowEnd}`}`,
-                  };
-                })}
-            />
-            {selectedBranchId ? (
-              <BranchResearch
+        <TabsContent value="insights" className="flex flex-col gap-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Insights &amp; market</CardTitle>
+              <CardDescription>
+                What your evidence says, what is missing, and what market research found — each
+                item names its source and next step.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+          <div className="grid items-start gap-8 lg:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-8">
+              <InsightsList
+                insights={view.insights}
                 organizationId={organizationId}
-                active={research.active}
-                history={research.history}
-                lastSuccess={research.lastSuccess}
-                status={research.status}
                 timeZone={view.timeZone}
                 canManage={canManage}
               />
-            ) : (
-              <Card>
-                <CardContent className="flex flex-col gap-3 py-6 text-sm text-muted-foreground">
-                  <p>
-                    Market research follows one branch at a time. Review market monitoring to choose
-                    a location.
-                  </p>
-                  <Button variant="outline" size="sm" onClick={requestMarketMonitoringDialog}>
-                    <Settings2 aria-hidden="true" />
-                    Review market monitoring
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-            {marketWatch}
+              <DataGaps
+                dataGaps={view.dataGaps}
+                organizationId={organizationId}
+                timeZone={view.timeZone}
+                canManage={canManage}
+              />
+            </div>
+            <div className="min-w-0 flex flex-col gap-8">
+              <MarketWatchProjectsSection
+                organizationId={organizationId}
+                branches={branches.map((branch) => ({ id: branch.id, name: branch.name }))}
+                timeZone={view.timeZone}
+                canManage={canManage}
+                evidencePeriods={(performanceFilters?.coverageWindows ?? [])
+                  .slice()
+                  .sort((left, right) => (left.windowEnd < right.windowEnd ? 1 : -1))
+                  .slice(0, 3)
+                  .map((window) => {
+                    const period = formatEvidencePeriod(
+                      window.windowStart,
+                      window.windowEnd,
+                      view.timeZone,
+                    );
+                    return {
+                      label: `Channel reports · ${period ?? `${window.windowStart}–${window.windowEnd}`}`,
+                    };
+                  })}
+              />
+              {selectedBranchId ? (
+                <BranchResearch
+                  organizationId={organizationId}
+                  active={research.active}
+                  history={research.history}
+                  lastSuccess={research.lastSuccess}
+                  status={research.status}
+                  timeZone={view.timeZone}
+                  canManage={canManage}
+                />
+              ) : (
+                <Card>
+                  <CardContent className="flex flex-col gap-3 py-6 text-sm text-muted-foreground">
+                    <p>
+                      Market research follows one branch at a time. Review market monitoring to
+                      choose a location.
+                    </p>
+                    <Button variant="outline" size="sm" onClick={requestMarketMonitoringDialog}>
+                      <Settings2 aria-hidden="true" />
+                      Review market monitoring
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+              {marketWatch}
+            </div>
           </div>
         </TabsContent>
       </Tabs>

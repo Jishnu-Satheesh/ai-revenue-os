@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CampaignProposalSection } from "@/components/campaigns/campaign-proposal-card";
@@ -146,6 +146,7 @@ describe("campaign-ready opportunities", () => {
   it("shows an organic campaign as having no media budget, not a zero one", () => {
     renderSection([card()]);
 
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText(/none — organic only/i)).toBeInTheDocument();
     expect(screen.getByText("AED 80.00 at most")).toBeInTheDocument();
   });
@@ -155,6 +156,7 @@ describe("campaign-ready opportunities", () => {
 
     // An empty card is not an error and must not read as one.
     expect(screen.getByText(/being researched/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText(/nothing has been written yet/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open proposal/i })).toBeInTheDocument();
   });
@@ -162,6 +164,7 @@ describe("campaign-ready opportunities", () => {
   it("shows no part of a document it cannot read", () => {
     renderSection([card({ storedDocument: { schemaVersion: 1, title: "Half" } })]);
 
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText(/cannot read, so it is not being shown/i)).toBeInTheDocument();
     expect(screen.queryByText(/weekday lunch covers are down/i)).not.toBeInTheDocument();
   });
@@ -172,6 +175,7 @@ describe("campaign-ready opportunities", () => {
     ]);
 
     expect(screen.getByText(/approved to prepare creative/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText(/publishing needs its own approval/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open the campaign this opened/i })).toHaveAttribute(
       "href",
@@ -182,7 +186,120 @@ describe("campaign-ready opportunities", () => {
   it("does not offer a campaign link when the approval opened none it can name", () => {
     renderSection([card({ state: "approved_for_preparation", linkedCampaignId: null })]);
 
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText(/cannot be linked from here/i)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /open the campaign/i })).not.toBeInTheDocument();
+  });
+
+  it("stays compact by default: type line, full title, clamped problem, Read more collapsed", () => {
+    renderSection([card()]);
+
+    expect(screen.getByText("Campaign opportunity")).toBeInTheDocument();
+    expect(screen.getByText("Weekday lunch footfall")).toBeInTheDocument();
+    expect(screen.getByText(/weekday lunch covers are down/i)).toBeInTheDocument();
+    // The decision foot never collapses, so the answer is always one tap away.
+    expect(screen.getByRole("link", { name: /review and decide/i })).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Read more" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    // The state sentence and the channels/budget/cost grid wait inside.
+    expect(screen.queryByText(/someone needs to read this and decide/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/none — organic only/i)).not.toBeInTheDocument();
+  });
+
+  it("Read more reveals the state sentence and the meta grid", () => {
+    renderSection([card()]);
+
+    const trigger = screen.getByRole("button", { name: "Read more" });
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(/someone needs to read this and decide/i)).toBeInTheDocument();
+    expect(screen.getByText(/none — organic only/i)).toBeInTheDocument();
+    expect(screen.getByText("AED 80.00 at most")).toBeInTheDocument();
+  });
+
+  it("stretches to its grid row so sibling cards equalize", () => {
+    renderSection([card()]);
+
+    expect(
+      screen.getByTestId(`proposal-card-${PROPOSAL}`).classList.contains("h-full"),
+    ).toBe(true);
+  });
+});
+
+describe("campaign proposal card refinements", () => {
+  it("keeps the collapsed preview clamped to two lines", () => {
+    renderSection([card()]);
+
+    const preview = screen.getByText(/weekday lunch covers are down/i);
+    expect(preview.classList.contains("line-clamp-2")).toBe(true);
+  });
+
+  it("shows the full business problem in a fixed-height white quote box when expanded", () => {
+    renderSection([card()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    const quote = screen.getByTestId(`proposal-card-${PROPOSAL}-quote`);
+    expect(quote.textContent).toContain(
+      "Weekday lunch covers are down against the same weeks last quarter.",
+    );
+    expect(quote.classList.contains("h-28")).toBe(true);
+    expect(quote.className).toContain("bg-white");
+    expect(quote.className).toContain("overflow-hidden");
+    const scroller = quote.querySelector("blockquote");
+    expect(scroller).not.toBeNull();
+    expect(scroller?.className).toContain("overflow-y-auto");
+    expect(scroller?.className).toContain("[scrollbar-width:none]");
+    expect(scroller?.className).toContain("[&::-webkit-scrollbar]:hidden");
+    expect(quote.textContent).toContain("\u201C");
+    expect(quote.className).toContain("text-center");
+    expect(scroller?.className).toContain("italic");
+    expect(quote.className).toContain("px-5");
+  });
+
+  it("keeps the toggle inline in the description row with Show less on expand", () => {
+    renderSection([card()]);
+
+    const trigger = screen.getByRole("button", { name: "Read more" });
+    const row = trigger.parentElement;
+    expect(row?.className).toContain("flex");
+    const preview = screen.getByText(/weekday lunch covers are down/i);
+    expect(preview.className).toContain("flex-1");
+    expect(trigger.className).toContain("shrink-0");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
+  });
+
+  it("renders the state label as a white primary-green chip", () => {
+    renderSection([card()]);
+
+    const chip = screen.getByText("Ready for your decision");
+    expect(chip.className).toContain("bg-white");
+    expect(chip.className).toContain("text-primary");
+    expect(chip.className).toContain("rounded-full");
+    expect(chip.className).toContain("font-semibold");
+  });
+
+  it("gives the state sentence the shared footnote treatment with an Info icon", () => {
+    renderSection([card()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    const note = screen.getByText(/someone needs to read this and decide/i);
+    const footnote = note.closest("p");
+    expect(footnote?.className).toContain("text-xs");
+    expect(footnote?.className).toContain("leading-relaxed");
+    expect(footnote?.className).toContain("text-muted-foreground");
+    expect(footnote?.querySelector("svg")).not.toBeNull();
+  });
+
+  it("keeps the Updated plus Review/Open footer outside the expander", () => {
+    renderSection([card()]);
+
+    // The decision foot never collapses, so the answer is always one tap away.
+    expect(screen.getByRole("link", { name: /review and decide/i })).toBeInTheDocument();
+    const section = screen.getByTestId(`proposal-card-${PROPOSAL}`);
+    const footer = section.querySelector('[data-testid$="-footer"]');
+    expect(footer).not.toBeNull();
+    expect(footer?.className).toContain("mt-auto");
+    expect(section.querySelector(".border-t")).not.toBeNull();
   });
 });

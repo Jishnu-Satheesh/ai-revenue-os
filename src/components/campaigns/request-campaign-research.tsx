@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 
@@ -25,17 +26,19 @@ import { Button } from "@/components/ui/button";
  * cooldown and the pending cap comes back as its own sentence, because "could
  * not start research" tells somebody nothing about whether to wait, to raise a
  * budget, or to ask an owner.
+ *
+ * Allowance and outcome info always surface as toasts, never as inline page
+ * content, so every host of this button (the Overview merged header and the
+ * Recommendations proposal section) inherits the same behaviour with no extra
+ * copy under the button.
  */
 export function RequestCampaignResearch({
   organizationId,
 }: Readonly<{ organizationId: string }>) {
   const router = useRouter();
-  const [state, setState] = useState<
-    | { kind: "idle" }
-    | { kind: "working" }
-    | { kind: "started"; queuedOnly: boolean }
-    | { kind: "refused"; message: string }
-  >({ kind: "idle" });
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "working" }>({
+    kind: "idle",
+  });
 
   /**
    * One key per attempt, held across retries.
@@ -48,6 +51,11 @@ export function RequestCampaignResearch({
 
   async function request() {
     setState({ kind: "working" });
+    // Spend context is never inline page content, but never lost either: it
+    // goes out as a toast the moment the user presses Ask, before the fetch.
+    toast.info("Uses research allowance", {
+      description: "This spends part of the research allowance set in Research settings.",
+    });
     attemptKey.current ??= crypto.randomUUID();
 
     let response: Response;
@@ -63,10 +71,10 @@ export function RequestCampaignResearch({
     } catch {
       // A request that never arrived admitted nothing and spent nothing, and
       // must not be reported as if it might have.
-      setState({
-        kind: "refused",
-        message: "That could not be sent. Nothing was started and nothing was spent.",
+      toast.error("Research could not be started", {
+        description: "That could not be sent. Nothing was started and nothing was spent.",
       });
+      setState({ kind: "idle" });
       return;
     }
 
@@ -82,7 +90,8 @@ export function RequestCampaignResearch({
         typeof (body as { error: { message?: unknown } }).error.message === "string"
           ? (body as { error: { message: string } }).error.message
           : "Research could not be started. Nothing was spent.";
-      setState({ kind: "refused", message });
+      toast.error("Research could not be started", { description: message });
+      setState({ kind: "idle" });
       return;
     }
 
@@ -92,43 +101,28 @@ export function RequestCampaignResearch({
       typeof body === "object" && body !== null && "started" in body
         ? Boolean((body as { started: unknown }).started)
         : false;
-    setState({ kind: "started", queuedOnly: !started });
+    const queuedOnly = !started;
+    toast.success("Research has started", {
+      description: queuedOnly
+        ? "The request is recorded and waiting for a worker to pick it up. Nothing has been written yet."
+        : "A proposal will appear here when there is something worth deciding on.",
+    });
+    setState({ kind: "idle" });
     router.refresh();
   }
 
-  if (state.kind === "started") {
-    return (
-      <p role="status" className="text-sm text-muted-foreground">
-        {state.queuedOnly
-          ? "The request is recorded and waiting for a worker to pick it up. Nothing has been written yet."
-          : "Research has started. A proposal will appear here when there is something worth deciding on."}
-      </p>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-2">
-      <div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={state.kind === "working"}
-          onClick={request}
-        >
-          <Sparkles aria-hidden="true" />
-          {state.kind === "working" ? "Asking…" : "Ask for a campaign"}
-        </Button>
-      </div>
-      {state.kind === "refused" ? (
-        <p role="alert" className="text-sm font-medium text-destructive">
-          {state.message}
-        </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          This spends part of the research allowance set in Research settings.
-        </p>
-      )}
+    <div>
+      <Button
+        type="button"
+        variant="default"
+        size="sm"
+        disabled={state.kind === "working"}
+        onClick={request}
+      >
+        <Sparkles aria-hidden="true" />
+        {state.kind === "working" ? "Asking…" : "Ask for a campaign"}
+      </Button>
     </div>
   );
 }

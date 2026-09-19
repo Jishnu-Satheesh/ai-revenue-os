@@ -488,7 +488,7 @@ export function NewResearchDialog({
       >
         <DialogContent
           showCloseButton={false}
-          className="flex max-h-[90vh] w-full flex-col gap-0 p-0 sm:max-w-[820px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
+          className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[820px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
           onEscapeKeyDown={(event) => {
             if (dirty && submitState !== "working") {
               event.preventDefault();
@@ -502,7 +502,7 @@ export function NewResearchDialog({
             }
           }}
         >
-          <DialogHeader className="shrink-0 border-b px-6 py-5 text-left">
+          <DialogHeader className="static shrink-0 border-b px-6 py-5 text-left">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
@@ -1068,7 +1068,7 @@ export function NewResearchDialog({
           </div>
 
           {canManage ? (
-            <DialogFooter className="shrink-0 flex-col gap-2 border-t px-6 py-4 sm:flex-row sm:items-center">
+            <DialogFooter className="static mx-0 mb-0 shrink-0 flex-col gap-2 border-t px-6 py-4 sm:flex-row sm:items-center">
               <span className="mr-auto hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
                 Your business context stays private.
               </span>

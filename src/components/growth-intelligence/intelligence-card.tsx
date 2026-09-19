@@ -1,9 +1,14 @@
-import Link from "next/link";
+"use client";
 
-import { Info, Zap } from "lucide-react";
+import Link from "next/link";
+import { useId, useState } from "react";
+
+import { ChevronDown, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { CARD_CHIP_CLASSNAME, CardFootnote, CardQuote } from "@/components/ui/card-accents";
 import { CampaignDraftAction } from "@/components/growth-intelligence/campaign-draft-action";
 import { IntelligenceActions } from "@/components/growth-intelligence/intelligence-actions";
 import { RecommendationWhyDialog } from "@/components/growth-intelligence/recommendation-why-dialog";
@@ -268,67 +273,94 @@ function RecommendationBody({
   const channelHref = card.channelId
     ? `/organizations/${organizationId}/channels/${card.channelId}`
     : null;
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
   // Deliberate token deviation from the Superdesign prototype (which uses
   // primary/sage): emerald matches the approved channel-workspace advice block
   // in recommendation-controls.tsx, so both surfaces read as one product.
+  // The card stays compact by default — title plus a two-line preview — and
+  // the limitation, evidence, Why dialog, provenance, and decision controls
+  // wait inside the expander. Nothing is removed, only collapsed.
   return (
     <section
       data-testid={`intelligence-card-${card.id}`}
       aria-label={`Recommendation: ${card.title}`}
-      className="flex flex-col gap-4 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 sm:p-5"
+      className="flex h-full flex-col gap-4 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 sm:p-5"
     >
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden="true"
-          className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white"
-        >
-          <Zap className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <span className="font-semibold text-primary">{recommendationTag(card)}</span>
-            <span aria-hidden="true">·</span>
-            <span>{scopeLabel}</span>
-          </div>
-          <h3 className="mt-1.5 text-[15px] font-bold leading-snug">{card.title}</h3>
-          <p className="mt-2 max-w-4xl text-sm leading-relaxed text-muted-foreground">
-            {card.detail}
-          </p>
-          <DecisionLine card={card} timeZone={timeZone} />
-          {limitation ? (
-            <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
-              <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-              <span>{limitation}</span>
-            </p>
-          ) : null}
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-            <span>{evidenceText}</span>
-            <RecommendationWhyDialog
-              title={card.title}
-              detail={card.detail}
-              scopeLabel={scopeLabel}
-              evidenceText={evidenceText}
-              limitation={limitation}
-              supportedActions={card.supportedActions}
-              channelHref={channelHref}
-              canManage={canManage}
-              citationCount={card.citationFindingIds?.length ?? 0}
-            />
-          </div>
-          {card.researchProvenance ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="outline">From market research</Badge>
-              <Link
-                className="font-medium text-primary underline-offset-4 hover:underline"
-                href={card.researchProvenance.statusPath}
-              >
-                View supporting outcomes
-              </Link>
+      <Collapsible open={expanded} onOpenChange={setExpanded} className="flex flex-1 flex-col">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white"
+          >
+            <Zap className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <span className="font-semibold text-primary">{recommendationTag(card)}</span>
+              <span aria-hidden="true">·</span>
+              <span className={CARD_CHIP_CLASSNAME}>{scopeLabel}</span>
             </div>
-          ) : null}
+            <h3 className="mt-1.5 text-[15px] font-bold leading-snug">{card.title}</h3>
+            <div className="mt-2 flex items-end gap-2">
+              <p className="flex-1 line-clamp-2 max-w-4xl text-sm leading-relaxed text-muted-foreground">
+                {card.detail}
+              </p>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={contentId}
+                  className="inline-flex shrink-0 items-center gap-1 self-end rounded text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  {expanded ? "Show less" : "Read more"}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={
+                      expanded
+                        ? "size-3.5 rotate-180 transition-transform"
+                        : "size-3.5 transition-transform"
+                    }
+                  />
+                </button>
+              </CollapsibleTrigger>
+            </div>
+            <DecisionLine card={card} timeZone={timeZone} />
+          </div>
         </div>
-      </div>
-      <div className="sm:ml-11">
+        <CollapsibleContent id={contentId} className="flex flex-1 flex-col">
+          <div className="flex flex-1 flex-col gap-4 pt-2">
+            <CardQuote testId={`intelligence-card-${card.id}-quote`}>{card.detail}</CardQuote>
+            {limitation ? <CardFootnote>{limitation}</CardFootnote> : null}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+              <span>{evidenceText}</span>
+              <RecommendationWhyDialog
+                title={card.title}
+                detail={card.detail}
+                scopeLabel={scopeLabel}
+                evidenceText={evidenceText}
+                limitation={limitation}
+                supportedActions={card.supportedActions}
+                channelHref={channelHref}
+                canManage={canManage}
+                citationCount={card.citationFindingIds?.length ?? 0}
+              />
+            </div>
+            {card.researchProvenance ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="outline">From market research</Badge>
+                <Link
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                  href={card.researchProvenance.statusPath}
+                >
+                  View supporting outcomes
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      <div data-testid={`intelligence-card-${card.id}-actions-footer`} className="mt-auto">
         <IntelligenceActions card={card} organizationId={organizationId} canManage={canManage} />
       </div>
     </section>

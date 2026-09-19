@@ -2,10 +2,13 @@
 
 import { ArrowRight, ArrowUpRight, Info } from "lucide-react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
   LabelList,
-  Line,
-  LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   XAxis,
   YAxis,
@@ -42,13 +45,19 @@ function roundScaleTop(dataMax: number): number {
   return step * exponent;
 }
 
-/** Darkest first, in rank order, like the prototype bars. */
-const SHARE_BAR_PALETTE = [
-  "var(--chart-4)",
-  "var(--chart-2)",
-  "var(--chart-1)",
-  "var(--chart-3)",
-  "var(--chart-5)",
+/**
+ * Light distinct hues, one per channel, so the pie never reads as shades of
+ * one colour. Rank order matches the legend below it.
+ */
+const SHARE_PIE_PALETTE = [
+  "#A7E5C4",
+  "#FDE68A",
+  "#BFDBFE",
+  "#DDD6FE",
+  "#FBCFE8",
+  "#FED7AA",
+  "#BAE6FD",
+  "#C7D2FE",
 ];
 
 function deltaText(tile: PerformanceCardTile): string | null {
@@ -109,6 +118,26 @@ export function visibleTickIndexes(total: number, maxLabels = 6): boolean[] {
   return Array.from({ length: total }, (_, index) => index % step === 0 || index === total - 1);
 }
 
+/**
+ * Which bars keep their on-top value label: thirty-one or fewer keeps
+ * every label, past that every nth plus the latest -- the same first-plus-
+ * latest rule as the axis, with a wider budget for small numerals.
+ */
+export const MAX_BAR_LABELS = 31;
+
+export function visibleBarLabelIndexes(total: number): boolean[] {
+  return visibleTickIndexes(total, MAX_BAR_LABELS);
+}
+
+/**
+ * Five round y-axis ticks -- zero plus quarters of the existing rounded
+ * top -- so the grid grows from [0, mid, top] without changing the top.
+ */
+export function trendYAxisTicks(dataMax: number): number[] {
+  const top = roundScaleTop(dataMax);
+  return [0, top / 4, top / 2, (top * 3) / 4, top];
+}
+
 function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
   if (card.trend.state === "empty") {
     // The axes keep their shape while the plot stays empty: week labels
@@ -156,21 +185,27 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
           value: bucket.minorUnits / 10 ** exponent,
         }))
       : [];
-  // Long ranges crowd the axis: keep about six labels (always the latest)
-  // while every point stays plotted and named for assistive tech above. A
-  // crowded chart also earns a wider right margin so the latest figure --
-  // always shown -- never clips off the edge.
-  const crowded = points.length > 6;
-  const visible = visibleTickIndexes(points.length);
-  const scaleTop = roundScaleTop(Math.max(...points.map((point) => point.value)));
+  // Whatever buckets arrive plot -- daily now, gaps stay absent with no
+  // zero-fill -- with a wider axis-label budget: up to ten labels (always
+  // the latest) while every bar stays plotted and named for assistive tech
+  // above. Every bar also carries its whole-unit total on top, thinning to
+  // every nth plus the latest past thirty-one bars. A crowded chart earns a
+  // wider right margin so the latest point -- always named -- never clips
+  // off the edge.
+  const crowded = points.length > 8;
+  const visible = visibleTickIndexes(points.length, 10);
+  const labelVisible = visibleBarLabelIndexes(points.length);
+  const dataMax = Math.max(...points.map((point) => point.value));
+  const scaleTop = roundScaleTop(dataMax);
+  const yTicks = trendYAxisTicks(dataMax);
   return (
     <div
-      className="h-52 w-full"
+      className="h-55 w-full"
       role="img"
       aria-label={`Weekly reported sales: ${points.map((point) => `${point.label} ${group.format(point.value)}`).join(", ")}. ${card.trend.state === "ready" ? card.trend.coverageNote : ""}.`}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={points} margin={{ top: 20, right: crowded ? 28 : 8, bottom: 0, left: 0 }}>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={points} margin={{ top: 20, right: crowded ? 28 : 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="3 5" stroke="var(--border)" />
           <XAxis
             dataKey="label"
@@ -179,64 +214,36 @@ function TrendChart({ card }: { card: BusinessPerformanceCardView }) {
             tickMargin={8}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             tickFormatter={(value: string, index: number) => (visible[index] === true ? value : "")}
+            interval={0}
           />
           <YAxis
             tickLine={false}
             axisLine={false}
             width={56}
             domain={[0, scaleTop]}
-            ticks={[0, scaleTop / 2, scaleTop]}
+            ticks={yTicks}
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             tickFormatter={(value: number) => group.format(value)}
           />
-          <Line
-            type="linear"
+          <Bar
             dataKey="value"
             name="Reported sales"
-            stroke="var(--primary)"
-            strokeWidth={3}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            dot={{ r: 4, fill: "white", stroke: "var(--primary)", strokeWidth: 2 }}
-            activeDot={{ r: 5 }}
+            fill="var(--primary)"
+            radius={[6, 6, 0, 0]}
+            maxBarSize={8}
           >
             <LabelList
-              dataKey="value"
               position="top"
-              offset={8}
-              content={(props: {
-                x?: number | string;
-                y?: number | string;
-                value?: unknown;
-                index?: number;
-              }) => {
-                // The same thinning as the axis: hidden points keep their dot
-                // and their screen-reader naming, only the floating figure
-                // steps aside.
-                if (visible[props.index ?? 0] !== true) return <g />;
-                // A halo in the card's own colour: on a steep segment the
-                // figure sits on the line itself, and without this the line
-                // strikes through the digits.
-                return (
-                  <text
-                    x={props.x}
-                    y={props.y}
-                    textAnchor="middle"
-                    fontSize={12}
-                    fontWeight={700}
-                    fill="var(--foreground)"
-                    stroke="var(--card)"
-                    strokeWidth={4}
-                    strokeLinejoin="round"
-                    paintOrder="stroke"
-                  >
-                    {group.format(Number(props.value))}
-                  </text>
-                );
+              fontSize={11}
+              fill="var(--muted-foreground)"
+              style={{ fontVariantNumeric: "tabular-nums" }}
+              valueAccessor={(entry, index) => {
+                if (labelVisible[index] !== true) return undefined;
+                return typeof entry.value === "number" ? group.format(entry.value) : undefined;
               }}
             />
-          </Line>
-        </LineChart>
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
     </div>
   );
@@ -360,7 +367,6 @@ export function BusinessPerformanceCard({ card }: { card: BusinessPerformanceCar
     deltaAbsentReason: null,
   };
   const share = card.cancelledShare;
-  const sharesTotal = card.shares?.totalMinorUnits ?? 0;
   const shareLine =
     share !== null && cancelled.value
       ? `${share.percent}% of orders${share.pointChange === null || cancelled.deltaLabel === null ? "" : share.pointChange === 0 ? " · unchanged" : ` · ${share.pointChange > 0 ? "+" : ""}${share.pointChange} pts ${cancelled.deltaLabel}`}`
@@ -428,35 +434,65 @@ export function BusinessPerformanceCard({ card }: { card: BusinessPerformanceCar
             <p className="text-xs text-muted-foreground">Share of sales in this reporting period</p>
           </div>
           {card.shares ? (
-            <ul className="flex flex-col gap-5">
-              {card.shares.rows.map((row, index) => (
-                <li key={row.channelId}>
-                  <div className="mb-2 flex items-center justify-between gap-3 text-[13px]">
-                    <span className="font-semibold">{row.displayName}</span>
+            <div className="flex flex-col gap-4">
+              <div
+                className="h-55 w-full"
+                role="img"
+                aria-label={`Channel shares: ${card.shares.rows.map((row) => `${row.displayName} ${row.sharePercent}%`).join(", ")}`}
+              >
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={card.shares.rows.map((row) => ({
+                        name: row.displayName,
+                        value: row.minorUnits,
+                        channelId: row.channelId,
+                      }))}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={55}
+                      outerRadius={85}
+                      paddingAngle={3}
+                      stroke="var(--card)"
+                      strokeWidth={2}
+                    >
+                      {card.shares.rows.map((row, index) => (
+                        <Cell
+                          key={row.channelId}
+                          fill={SHARE_PIE_PALETTE[index % SHARE_PIE_PALETTE.length]}
+                        />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <ul className="flex flex-col gap-2.5">
+                {card.shares.rows.map((row, index) => (
+                  <li
+                    key={row.channelId}
+                    className="flex items-center justify-between gap-3 text-[13px]"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="size-3 shrink-0 rounded-full border"
+                        style={{
+                          background: SHARE_PIE_PALETTE[index % SHARE_PIE_PALETTE.length],
+                          borderColor: "var(--border)",
+                        }}
+                      />
+                      <span className="truncate font-semibold">{row.displayName}</span>
+                    </span>
                     <span className="shrink-0 font-bold tabular-nums">
                       {formatWholeMoney(row.minorUnits, row.currency)}{" "}
                       <span className="ml-1 font-normal text-muted-foreground">
                         {row.sharePercent}%
                       </span>
                     </span>
-                  </div>
-                  <div
-                    className="h-2 overflow-hidden rounded-full bg-muted"
-                    role="img"
-                    aria-label={`${row.displayName} ${row.sharePercent}% of reported sales`}
-                  >
-                    <div
-                      aria-hidden="true"
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${sharesTotal > 0 ? (row.minorUnits / sharesTotal) * 100 : 0}%`,
-                        background: SHARE_BAR_PALETTE[index % SHARE_BAR_PALETTE.length],
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : (
             <p className="text-sm leading-relaxed text-muted-foreground">
               {card.sharesAbsentReason}

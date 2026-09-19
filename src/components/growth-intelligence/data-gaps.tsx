@@ -19,7 +19,12 @@ export function DataGaps({
 }) {
   return (
     <section aria-label="Data gaps" className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Data gaps</h2>
+      <div>
+        <h2 className="text-xl font-semibold">Data gaps</h2>
+        <p className="text-sm text-muted-foreground">
+          Missing or stale inputs that weaken advice, each with a repair link.
+        </p>
+      </div>
       {dataGaps.length === 0 ? (
         <p className="text-sm text-muted-foreground">No missing evidence right now.</p>
       ) : null}

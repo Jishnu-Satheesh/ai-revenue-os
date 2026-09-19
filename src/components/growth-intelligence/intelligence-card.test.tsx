@@ -146,10 +146,12 @@ describe("IntelligenceCard", () => {
       />,
     );
     expect(container.querySelector("button")).not.toBeNull();
+    // Decision controls and the Why dialog wait inside the expander.
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(
       screen.getByRole("button", { name: "Helpful: Extend Friday hours" }),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Acknowledge: Extend Friday hours" })).toBeNull();
     // The channel path lives behind Why this, not as a card link, so the
     // preview matches the prototype without losing the repair route. Viewers
     // get viewing words, never an action they cannot complete.
@@ -213,6 +215,7 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     fireEvent.click(screen.getByRole("button", { name: /Not helpful/ }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
@@ -229,7 +232,13 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
-    for (const name of ["Acknowledge", "Planned", "Snooze"]) {
+    // The decision controls are icon-only and live inside the expander.
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    for (const name of [
+      "Acknowledge: Extend Friday hours",
+      "Planned: Extend Friday hours",
+      "Snooze: Extend Friday hours",
+    ]) {
       expect(screen.getByRole("button", { name })).toBeTruthy();
     }
     expect(
@@ -261,6 +270,8 @@ describe("IntelligenceCard", () => {
     );
     expect(screen.getByText("Channel recommendation")).toBeTruthy();
     expect(screen.getByText("Delivery A")).toBeTruthy();
+    // Limitation, evidence, and Why this wait inside the expander.
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText(/Traffic evidence covers Delivery A only/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
     // Evidence names the stored window and generated date, never a mock
@@ -300,6 +311,7 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
     expect(screen.getByRole("link", { name: /Answer in the channel workspace/i })).toBeTruthy();
     cleanup();
@@ -312,6 +324,7 @@ describe("IntelligenceCard", () => {
         canManage={false}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
     expect(screen.getByRole("link", { name: /View in the channel workspace/i })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Answer in the channel workspace/i })).toBeNull();
@@ -358,9 +371,10 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
-    expect(screen.queryByRole("button", { name: "Acknowledge" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Planned" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Snooze" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    expect(screen.queryByRole("button", { name: "Acknowledge: Extend Friday hours" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Planned: Extend Friday hours" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Snooze: Extend Friday hours" })).toBeNull();
     expect(
       screen.getByRole("button", { name: "Helpful: Extend Friday hours" }),
     ).toBeTruthy();
@@ -376,6 +390,7 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText(/No evidence window/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
     expect(screen.getByText(/next step to investigate/)).toBeTruthy();
@@ -393,6 +408,7 @@ describe("IntelligenceCard", () => {
         canManage
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     fireEvent.click(screen.getByRole("button", { name: /Why this/ }));
     const dialog = screen.getByRole("dialog", { name: "Why this recommendation?" });
     expect(dialog).toBeTruthy();
@@ -432,6 +448,7 @@ describe("IntelligenceCard research provenance", () => {
         canManage
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(screen.getByText("From market research")).toBeTruthy();
     expect(
       screen.getByRole("link", { name: /view supporting outcomes/i }).getAttribute("href"),
@@ -453,8 +470,11 @@ describe("IntelligenceCard research provenance", () => {
 });
 
 describe("IntelligenceCard context provenance", () => {
-  it("distinguishes research brief from synthesis context with degradation copy", () => {
-    render(
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("distinguishes research brief from synthesis context with degradation copy", () => {    render(
       <IntelligenceCard
         card={recommendationCard()}
         organizationId={ORGANIZATION}
@@ -471,5 +491,256 @@ describe("IntelligenceCard context provenance", () => {
     expect(screen.getByText("Research brief")).toBeTruthy();
     expect(screen.getByText("Synthesis context")).toBeTruthy();
     expect(screen.getByText(/cited refs only/i)).toBeTruthy();
+  });
+});
+
+describe("IntelligenceCard compact shape", () => {
+  beforeEach(() => vi.stubGlobal("fetch", fetchMock));
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    fetchMock.mockClear();
+    refresh.mockClear();
+  });
+
+  it("stays compact by default: full title, clamped detail, Read more collapsed", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          limitations: ["Traffic evidence covers Delivery A only."],
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    // The title is never clamped; the detail previews at two lines.
+    expect(screen.getByText("Extend Friday hours")).toBeTruthy();
+    expect(
+      screen.getByText("Friday evenings carry the week's strongest observed demand."),
+    ).toBeTruthy();
+    const trigger = screen.getByRole("button", { name: "Read more" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    // The rest waits inside the expander: limitation, evidence, Why this.
+    // Decision and feedback controls stay in the always-visible footer.
+    expect(screen.queryByText(/Traffic evidence covers Delivery A only/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Why this/ })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Helpful: Extend Friday hours" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Acknowledge: Extend Friday hours" }),
+    ).toBeTruthy();
+  });
+
+  it("Read more toggles the full content and flips aria-expanded", async () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard({
+          limitations: ["Traffic evidence covers Delivery A only."],
+        })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Read more" });
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(/Traffic evidence covers Delivery A only/)).toBeTruthy();
+    expect(screen.getByText(/1 Aug 2026 to 31 Aug 2026.*generated/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Acknowledge: Extend Friday hours" }),
+    ).toBeTruthy();
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await waitFor(() =>
+      expect(screen.queryByText(/Traffic evidence covers Delivery A only/)).toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: /Why this/ })).toBeNull();
+  });
+
+  it("stretches to its grid row so sibling cards equalize", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    expect(
+      screen
+        .getByTestId("intelligence-card-60000000-0000-4000-8000-000000000006")
+        .classList.contains("h-full"),
+    ).toBe(true);
+  });
+
+  it("records answers through the icon-only decision buttons", async () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge: Extend Friday hours" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      `/api/organizations/${ORGANIZATION}/channel-recommendations/60000000-0000-4000-8000-000000000006/decisions`,
+    );
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))).toEqual({
+      decision: "acknowledged",
+    });
+
+    fetchMock.mockClear();
+    refresh.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Planned: Extend Friday hours" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))).toEqual({
+      decision: "planned",
+    });
+  });
+
+  it("opens the snooze dialog from the icon-only snooze button", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    // The footer is always visible; expanding first still works.
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Snooze: Extend Friday hours" }));
+    expect(screen.getByRole("dialog", { name: "Snooze this item" })).toBeTruthy();
+  });
+});
+
+describe("IntelligenceCard card refinements", () => {
+  beforeEach(() => vi.stubGlobal("fetch", fetchMock));
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    fetchMock.mockClear();
+    refresh.mockClear();
+  });
+
+  it("keeps the collapsed preview clamped to two lines", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    const preview = screen.getByText(
+      "Friday evenings carry the week's strongest observed demand.",
+    );
+    expect(preview.classList.contains("line-clamp-2")).toBe(true);
+  });
+
+  it("shows the full detail in a fixed-height white quote box when expanded", () => {
+    const detail =
+      "Friday evenings carry the week's strongest observed demand across every channel we could measure, and the pattern holds for six weeks running.";
+    render(
+      <IntelligenceCard
+        card={recommendationCard({ detail })}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    const quote = screen.getByTestId(
+      "intelligence-card-60000000-0000-4000-8000-000000000006-quote",
+    );
+    expect(quote.textContent).toContain(detail);
+    // Fixed height regardless of content.
+    expect(quote.classList.contains("h-28")).toBe(true);
+    expect(quote.className).toContain("bg-white");
+    expect(quote.className).toContain("overflow-hidden");
+    // The scrollable copy inside hides its scrollbar but still scrolls.
+    const scroller = quote.querySelector("blockquote");
+    expect(scroller).not.toBeNull();
+    expect(scroller?.className).toContain("overflow-y-auto");
+    expect(scroller?.className).toContain("[scrollbar-width:none]");
+    expect(scroller?.className).toContain("[&::-webkit-scrollbar]:hidden");
+    // Italic, centered, comfortable padding, with a quote mark.
+    expect(quote.textContent).toContain("\u201C");
+    expect(quote.className).toContain("text-center");
+    expect(scroller?.className).toContain("italic");
+    expect(quote.className).toContain("px-5");
+  });
+
+  it("keeps the toggle inline in the description row with Show less on expand", () => {
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Read more" });
+    const row = trigger.parentElement;
+    expect(row?.className).toContain("flex");
+    const preview = screen.getByText(
+      "Friday evenings carry the week's strongest observed demand.",
+    );
+    expect(preview.className).toContain("flex-1");
+    expect(trigger.className).toContain("shrink-0");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
+  });
+
+  it("renders the scope as a white primary-green chip", () => {
+    const channelNames = new Map([
+      ["61000000-0000-4000-8000-000000000061", "Delivery A"],
+    ]);
+    render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+        channelNames={channelNames}
+      />,
+    );
+    const chip = screen.getByText("Delivery A");
+    expect(chip.className).toContain("bg-white");
+    expect(chip.className).toContain("text-primary");
+    expect(chip.className).toContain("rounded-full");
+    expect(chip.className).toContain("font-semibold");
+  });
+
+  it("keeps decision and feedback actions always visible in a pinned footer", () => {
+    const { container } = render(
+      <IntelligenceCard
+        card={recommendationCard()}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+        canManage
+      />,
+    );
+    // No expander click: the footer is already there.
+    expect(
+      screen.getByRole("button", { name: "Acknowledge: Extend Friday hours" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Helpful: Extend Friday hours" }),
+    ).toBeTruthy();
+    const section = screen.getByTestId(
+      "intelligence-card-60000000-0000-4000-8000-000000000006",
+    );
+    const footer = section.querySelector('[data-testid$="-actions-footer"]');
+    expect(footer).not.toBeNull();
+    expect(footer?.className).toContain("mt-auto");
+    expect(container.querySelector(".border-t")).not.toBeNull();
   });
 });

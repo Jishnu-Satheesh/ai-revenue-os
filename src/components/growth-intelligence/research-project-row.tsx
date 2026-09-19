@@ -20,8 +20,8 @@ function modeLabel(mode: MarketWatchProjectListItem["mode"]): string {
 /**
  * One compact research project row. State is plain text with real dates —
  * never a percentage or a promised completion time. Paused, researching,
- * ready and needs-attention rows stay visually distinct, and a paused or
- * researching row keeps its prior report with its date.
+ * failed, ready and needs-attention rows stay visually distinct, and a
+ * paused, researching or failed row keeps its prior report with its date.
  */
 export function ResearchProjectRow({
   item,
@@ -60,7 +60,9 @@ export function ResearchProjectRow({
                 ? `Researching${item.latestRevision ? ` · requested ${formatReportDate(item.latestRevision.createdAt, timeZone)}` : ""}`
                 : item.displayState === "paused"
                   ? "Monitoring paused"
-                  : `Needs attention · created ${formatReportDate(item.createdAt, timeZone)}`}
+                  : item.displayState === "failed"
+                    ? "Research could not finish"
+                    : `Needs attention · created ${formatReportDate(item.createdAt, timeZone)}`}
           </span>
         </div>
         <p className="min-w-0 text-sm break-words">{item.question}</p>
@@ -71,7 +73,9 @@ export function ResearchProjectRow({
               ? "Comparing public sources. Closing this page never stops the background work."
               : item.displayState === "paused"
                 ? "Future scheduled starts are paused; past reports stay available."
-                : "Start research to receive the first report."}
+                : item.displayState === "failed"
+                  ? "The background research run could not finish. No findings were saved."
+                  : "Start research to receive the first report."}
         </p>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {item.priorReport ? (
