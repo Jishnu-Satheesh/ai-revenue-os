@@ -33,6 +33,7 @@ import {
   disabledGrowthProgressSection,
   failedGrowthProgressSection,
   type GrowthProgressSection,
+  type GrowthProgressView,
 } from "@/modules/organizations/application/growth-progress-view";
 import { createGrowthAdviceReader } from "@/modules/organizations/infrastructure/growth-advice-reader";
 import { createGrowthProgressRepository } from "@/modules/organizations/infrastructure/growth-progress-repository";
@@ -78,6 +79,12 @@ export type LoadOrganizationHomeInput = {
   snapshot: DigitalTwinSnapshot;
   correlationId: string;
   now: string;
+  /**
+   * Last readable horizon view, supplied by the caller when it still holds
+   * one (client-side refresh retry). The loader never fabricates it: absent
+   * means the initial load, and the failed section honestly carries null.
+   */
+  retainedGrowthView?: GrowthProgressView | null;
 };
 
 type HomeSource = "campaigns" | "posters" | "references" | "logo" | "revenue" | "growth";
@@ -350,7 +357,10 @@ export async function loadOrganizationHome(
         },
       );
     } catch {
-      growthProgress = failedGrowthProgressSection("SOURCE_READ_FAILED");
+      growthProgress = failedGrowthProgressSection(
+        "SOURCE_READ_FAILED",
+        input.retainedGrowthView ?? null,
+      );
       logSectionFailure({
         organizationId,
         correlationId,

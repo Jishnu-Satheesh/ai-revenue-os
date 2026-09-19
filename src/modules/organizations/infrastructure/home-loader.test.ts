@@ -15,6 +15,7 @@ import {
 } from "@/modules/campaigns/infrastructure/home-asset-reader";
 import { loadOrganizationHome } from "@/modules/organizations/infrastructure/home-loader";
 import type { DigitalTwinSnapshot } from "@/modules/organizations/infrastructure/repository";
+import { buildBehindGrowthView } from "@/components/organizations/home/home-growth-fixtures";
 
 vi.mock("@/modules/campaigns/application/feature-access", () => ({
   isCampaignsEnabled: vi.fn(() => true),
@@ -930,7 +931,11 @@ describe("growth flag loading", () => {
 
     const view = await loadWith(supabase);
 
-    expect(view.growthProgress).toEqual({ state: "failed", reasonCode: "SOURCE_READ_FAILED" });
+    expect(view.growthProgress).toEqual({
+      state: "failed",
+      reasonCode: "SOURCE_READ_FAILED",
+      retainedView: null,
+    });
     expect(view.campaigns.status).toBe("ready");
     expect(logger.error).toHaveBeenCalledWith(
       "organization_home.section_read_failed",
@@ -942,5 +947,29 @@ describe("growth flag loading", () => {
     );
     const logged = JSON.stringify(vi.mocked(logger.error).mock.calls);
     expect(logged).not.toContain("transport down");
+  });
+
+  it("carries a caller-supplied last-good view on a throwing growth read", async () => {
+    mockGrowthFlag.mockReturnValue(true);
+    mockReadProjections.mockRejectedValue(new Error("transport down"));
+    const supabase = fakeSupabase();
+    const retained = buildBehindGrowthView(ORG_ID);
+
+    const view = await loadOrganizationHome({
+      supabase: supabase as never,
+      organizationId: ORG_ID,
+      role: "admin",
+      actorId: "99999999-9999-4999-8999-999999999999",
+      snapshot: snapshot(),
+      correlationId: CORRELATION_ID,
+      now: NOW,
+      retainedGrowthView: retained,
+    });
+
+    expect(view.growthProgress).toEqual({
+      state: "failed",
+      reasonCode: "SOURCE_READ_FAILED",
+      retainedView: retained,
+    });
   });
 });

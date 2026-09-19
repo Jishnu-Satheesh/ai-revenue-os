@@ -1330,4 +1330,20 @@ describe("growth progress section", () => {
     expect(withGrowth.goals).toEqual(withoutGrowth.goals);
     expect(withGrowth.focusGoalId).toBe(withoutGrowth.focusGoalId);
   });
+
+  it("passes a failed section with its retained view through untouched", () => {
+    const section = readySection();
+    const failed = {
+      state: "failed" as const,
+      reasonCode: "SOURCE_READ_FAILED",
+      retainedView: section.views[1],
+    };
+    const withGrowth = buildOrganizationHomeView({ ...viewInput(), growthProgress: failed });
+    const withoutGrowth = buildOrganizationHomeView(viewInput());
+
+    expect(withGrowth.growthProgress).toEqual(failed);
+    expect(withGrowth.campaigns).toEqual(withoutGrowth.campaigns);
+    expect(withGrowth.assets).toEqual(withoutGrowth.assets);
+    expect(withGrowth.revenue).toEqual(withoutGrowth.revenue);
+  });
 });

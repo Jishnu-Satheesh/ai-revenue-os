@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowRight, ChevronDown, Hourglass } from "lucide-react";
 import {
   CartesianGrid,
@@ -49,6 +50,7 @@ import {
 } from "@/components/organizations/home/home-growth-chart";
 import {
   growthStateCopy,
+  HomeGrowthFailed,
   HomeGrowthMethodDialog,
 } from "@/components/organizations/home/home-growth-details";
 import { HomeGrowthInsight } from "@/components/organizations/home/home-growth-insight";
@@ -598,20 +600,18 @@ export function HomeRevenue({
   const [proposeError, setProposeError] = useState<string | null>(null);
   const [months, setMonths] = useState<number>(1);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   if (growth?.state === "ready") {
     return <HomeRevenueGrowth organizationId={organizationId} section={growth} />;
   }
   if (growth?.state === "failed") {
+    // A refresh failure keeps the last readable view's report date on
+    // screen; the initial load (no retained view) keeps the shaped failure.
+    // Retry only re-runs the reads — it never reforecasts or publishes.
     return (
       <section id="home-revenue" aria-label="Current vs projected growth" className={styles.growth}>
-        <Alert>
-          <AlertTitle>Growth outlook is unavailable right now</AlertTitle>
-          <AlertDescription>
-            The recent reports could not be read. Nothing is estimated in their place.{" "}
-            <HomeRefreshButton label="Retry" />
-          </AlertDescription>
-        </Alert>
+        <HomeGrowthFailed retainedView={growth.retainedView} onRetry={() => router.refresh()} />
       </section>
     );
   }

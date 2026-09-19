@@ -499,10 +499,27 @@ describe("HomeRevenue growth section", () => {
       <HomeRevenue
         organizationId={ORG_ID}
         section={{ status: "disabled" }}
-        growth={{ state: "failed", reasonCode: "SOURCE_READ_FAILED" }}
+        growth={{ state: "failed", reasonCode: "SOURCE_READ_FAILED", retainedView: null }}
       />,
     );
     expect(screen.getByText("Growth outlook is unavailable right now")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("keeps the retained report date on a refresh failure without inventing estimates", () => {
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={{
+          state: "failed",
+          reasonCode: "SOURCE_READ_FAILED",
+          retainedView: buildBehindGrowthView(ORG_ID),
+        }}
+      />,
+    );
+    expect(screen.getByText(/Showing the last readable view/)).toBeTruthy();
+    expect(screen.getByText(/reports through 21 Sep/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 

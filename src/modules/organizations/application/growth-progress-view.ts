@@ -114,6 +114,12 @@ export const growthProgressSectionSchema = z.union([
   z.strictObject({
     state: z.literal("failed"),
     reasonCode: z.string().trim().min(1).max(120).nullable(),
+    /**
+     * Last readable horizon view, kept so a refresh failure can stay
+     * labelled with its own report date. Null on the initial load, where
+     * the shaped failure state is the honest surface.
+     */
+    retainedView: growthProgressViewSchema.nullable(),
   }),
   z.strictObject({
     state: z.literal("ready"),
@@ -123,7 +129,7 @@ export const growthProgressSectionSchema = z.union([
 ]);
 export type GrowthProgressSection =
   | { state: "disabled" }
-  | { state: "failed"; reasonCode: string | null }
+  | { state: "failed"; reasonCode: string | null; retainedView: GrowthProgressView | null }
   | { state: "ready"; initialHorizon: 1; views: GrowthProgressViews };
 
 /**
@@ -135,6 +141,9 @@ export function disabledGrowthProgressSection(): GrowthProgressSection {
   return { state: "disabled" };
 }
 
-export function failedGrowthProgressSection(reasonCode: string | null): GrowthProgressSection {
-  return { state: "failed", reasonCode };
+export function failedGrowthProgressSection(
+  reasonCode: string | null,
+  retainedView: GrowthProgressView | null = null,
+): GrowthProgressSection {
+  return { state: "failed", reasonCode, retainedView };
 }

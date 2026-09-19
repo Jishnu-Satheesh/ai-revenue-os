@@ -444,7 +444,7 @@ describe("state coverage", () => {
       progressReads: d.progressReads,
       readAdvice: d.readAdvice,
     });
-    expect(section).toEqual({ state: "failed", reasonCode: "INVALID_INPUT" });
+    expect(section).toEqual({ state: "failed", reasonCode: "INVALID_INPUT", retainedView: null });
     expect(d.readProjections).not.toHaveBeenCalled();
   });
 });

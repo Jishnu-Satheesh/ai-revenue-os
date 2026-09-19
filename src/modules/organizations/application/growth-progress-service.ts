@@ -160,7 +160,7 @@ export async function loadGrowthProgress(
 ): Promise<GrowthProgressSection> {
   const parsed = loadGrowthProgressInputSchema.safeParse(rawInput);
   if (!parsed.success) {
-    return { state: "failed", reasonCode: "INVALID_INPUT" };
+    return { state: "failed", reasonCode: "INVALID_INPUT", retainedView: null };
   }
   const input = parsed.data;
 
@@ -168,7 +168,7 @@ export async function loadGrowthProgress(
   try {
     todayLocal = organizationLocalDate(input.nowIso, input.timeZone);
   } catch {
-    return { state: "failed", reasonCode: "INVALID_INPUT" };
+    return { state: "failed", reasonCode: "INVALID_INPUT", retainedView: null };
   }
 
   // A viewer without projection access schedules no projection read at all:

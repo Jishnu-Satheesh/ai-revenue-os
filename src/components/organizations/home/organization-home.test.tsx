@@ -717,14 +717,14 @@ describe("OrganizationHome growth section", () => {
       <OrganizationHome
         view={view({
           revenue: { status: "disabled" },
-          growthProgress: { state: "failed", reasonCode: "SOURCE_READ_FAILED" },
+          growthProgress: { state: "failed", reasonCode: "SOURCE_READ_FAILED", retainedView: null },
         })}
       />,
     );
     expect(screen.getByText("Growth outlook is unavailable right now")).toBeTruthy();
-    // This file pins the refresh transition to pending, so the retry control
-    // reads as refreshing; the live copy is pinned in the section suites.
-    expect(screen.getByRole("button", { name: /refreshing/i })).toBeTruthy();
+    // The retained-state failure renders its own Retry control (router
+    // refresh); the live copy is pinned in the section suites.
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.getByText("Your campaigns")).toBeTruthy();
   });
 });
