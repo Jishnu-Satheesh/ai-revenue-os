@@ -19,7 +19,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       return NextResponse.json({
         preview: {
           state: "invalid",
-          organizationId: null,
           organizationName: null,
           invitedEmail: null,
           inviterName: null,

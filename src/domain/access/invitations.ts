@@ -146,7 +146,6 @@ export type PendingOrganizationInvitation = z.infer<
 
 export const organizationInvitationPreviewSchema = z.object({
   state: invitationPreviewStateSchema,
-  organizationId: z.string().uuid().nullable(),
   organizationName: z.string().nullable(),
   invitedEmail: z.string().nullable(),
   inviterName: z.string().nullable(),

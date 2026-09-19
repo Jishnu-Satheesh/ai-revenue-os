@@ -23,7 +23,7 @@ export default async function OrganizationSettingsPage({
 
   return (
     <>
-      <RegisterRouteLabel label="Settings" />
+      <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
       <OrganizationSettings
         organizationId={context.organizationId}
         organizationName={organization.name}

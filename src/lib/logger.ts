@@ -6,6 +6,8 @@
 type LogContext = {
   organizationId?: string;
   accountId?: string;
+  /** The user a member change acted on. Opaque UUID, like the other ids here. */
+  userId?: string;
   invitationId?: string;
   /** A stable reason code. Never the message shown to the caller. */
   refusalCode?: string;

@@ -8,7 +8,6 @@ import { AcceptOrganizationInvitation } from "@/components/organizations/accept-
 
 const INVALID_PREVIEW: OrganizationInvitationPreview = {
   state: "invalid",
-  organizationId: null,
   organizationName: null,
   invitedEmail: null,
   inviterName: null,

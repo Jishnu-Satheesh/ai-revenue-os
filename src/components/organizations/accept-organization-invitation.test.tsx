@@ -21,7 +21,6 @@ const TOKEN = "B".repeat(43);
 function preview(overrides: Partial<OrganizationInvitationPreview> = {}) {
   const base: OrganizationInvitationPreview = {
     state: "valid",
-    organizationId: "22222222-2222-4222-8222-222222222222",
     organizationName: "Client Alpha",
     invitedEmail: "client@example.com",
     inviterName: "Owner O",

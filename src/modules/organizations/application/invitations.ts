@@ -332,7 +332,6 @@ export async function previewOrganizationInvitation(
 
   return organizationInvitationPreviewSchema.parse({
     state: data?.state ?? "invalid",
-    organizationId: data?.organization_id ?? null,
     organizationName: data?.organization_name ?? null,
     invitedEmail: data?.invited_email ?? null,
     inviterName: data?.inviter_name ?? null,

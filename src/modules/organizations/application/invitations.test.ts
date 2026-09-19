@@ -215,7 +215,6 @@ describe("previewOrganizationInvitation", () => {
       rpcImpl: {
         data: {
           state: "valid",
-          organization_id: ORG_ID,
           organization_name: "Client Alpha",
           invited_email: "invitee@example.com",
           inviter_name: "Owner O",
