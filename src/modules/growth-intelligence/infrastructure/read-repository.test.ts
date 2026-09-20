@@ -511,6 +511,49 @@ describe("workspace reads", () => {
     expect(call.filters).toContainEqual(["organization_id", organizationId]);
   });
 
+  it("skips per-viewer lookups for the worker's empty actor on recommendations", async () => {
+    const db = workspacePersistence({
+      channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
+      channel_recommendation_decisions: [{ data: [], error: null }],
+      channel_recommendation_citations: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const rows = await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId: "",
+      limit: 100,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.pinned).toBe(false);
+    expect(rows[0]!.myFeedback).toBeNull();
+    const tables = db.calls.map((entry) => entry.table);
+    expect(tables).not.toContain("channel_recommendation_preferences");
+    expect(tables).not.toContain("channel_recommendation_feedback");
+  });
+
+  it("skips per-viewer lookups for the worker's empty actor on items", async () => {
+    const db = workspacePersistence({
+      growth_intelligence_items: [{ data: [workspaceItemRow()], error: null }],
+      growth_intelligence_item_decisions: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const items = await repository.listWorkspaceItems({
+      organizationId,
+      actorId: "",
+      throughMonth: "2026-09",
+      limit: 100,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]!.pinned).toBe(false);
+    expect(items[0]!.myFeedback).toBeNull();
+    const tables = db.calls.map((entry) => entry.table);
+    expect(tables).not.toContain("growth_intelligence_item_preferences");
+    expect(tables).not.toContain("growth_intelligence_item_feedback");
+  });
   it("carries a stored channel snooze with its horizon instead of failing the read", async () => {
     const db = workspacePersistence({
       channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],

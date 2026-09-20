@@ -120,9 +120,9 @@ export async function settleHarness(page: Page): Promise<void> {
 }
 
 /**
- * Show the ready 1M chart: fixtures default to the 3M horizon (missing),
- * so chart-dependent tests switch explicitly. Selection is atomic per
- * Task 7: the pressed pill proves the switch completed.
+ * Show the ready 1M chart: fixtures default to the ready 1M horizon, so this
+ * is a confirming click. Selection is atomic per Task 7: the pressed pill
+ * proves the switch completed.
  */
 export async function showReadyMonthChart(page: Page): Promise<void> {
   await page.getByRole("button", { name: "1 month" }).click();

@@ -550,6 +550,13 @@ function HomeRevenueGrowth({
   const [horizonAnnouncement, setHorizonAnnouncement] = useState("");
   const view = section.views[horizon];
   const ready = view.state === "ready";
+  // Provenance belongs to every view with an attached projection, not only
+  // the ready one: before the first report the footer is the only place
+  // naming when the estimate was fixed and what it covers.
+  const showProvenance =
+    ready ||
+    (view.projectionId !== null &&
+      (view.state === "upcoming" || view.state === "awaiting_reports"));
   // Sparse and partial views still plot their valid points with the state
   // panel beside them; a view with no points at all shows the panel alone.
   const hasPoints = view.points.length > 0 && view.currency !== null;
@@ -625,7 +632,7 @@ function HomeRevenueGrowth({
             ) : null}
           </div>
         </div>
-        {ready ? (
+        {showProvenance ? (
           <div className={styles.growthFoot}>
             <div className={styles.growthFootLines}>
               <p className={styles.growthFootLine}>{growthFooterLine(view)}</p>

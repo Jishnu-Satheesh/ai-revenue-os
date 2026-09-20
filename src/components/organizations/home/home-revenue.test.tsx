@@ -465,13 +465,10 @@ describe("HomeRevenue growth section", () => {
     const section = screen.getByRole("region", { name: "Current vs projected growth" });
     expect(section.getAttribute("id")).toBe("home-revenue");
     expect(screen.getByRole("heading", { name: "Current vs projected growth" })).toBeTruthy();
-    // 3M is the default horizon, so the blank 3-month view shows first.
-    expect(screen.getByRole("button", { name: "3 months" }).getAttribute("aria-pressed")).toBe(
+    // 1M is the default horizon, so the ready 1-month view shows first.
+    expect(screen.getByRole("button", { name: "1 month" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
-    // The 1M ready content is unchanged behind the switch.
-    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     expect(screen.getByText("Revenue this month · September 2026")).toBeTruthy();
     expect(screen.getByText("Current · 21 Sep")).toBeTruthy();
     expect(screen.getByText("AED 60,000")).toBeTruthy();
@@ -481,6 +478,9 @@ describe("HomeRevenue growth section", () => {
       screen.getByText("Projection set 1 Sep · Reports through 21 Sep · 2 channels"),
     ).toBeTruthy();
     expect(screen.getByText(/How this is estimated/)).toBeTruthy();
+    // The blank 3M view sits one switch away.
+    fireEvent.click(screen.getByRole("button", { name: "3 months" }));
+    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
   });
 
   it("renders the ahead fixture with its own verdict", () => {
@@ -491,7 +491,6 @@ describe("HomeRevenue growth section", () => {
         growth={buildAheadGrowthSection(ORG_ID)}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
     expect(screen.getByText("Above the projection")).toBeTruthy();
     expect(screen.getByText("AED 98,000")).toBeTruthy();
     expect(screen.getByText("AED 14,000 ahead")).toBeTruthy();
@@ -506,6 +505,7 @@ describe("HomeRevenue growth section", () => {
         growth={buildBehindGrowthSection(ORG_ID)}
       />,
     );
+    expect(screen.getByText("Below the projection")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "3 months" }));
     expect(screen.getByText("Projection not set for this period")).toBeTruthy();
     expect(screen.queryByText("Below the projection")).toBeNull();
@@ -520,15 +520,17 @@ describe("HomeRevenue growth section", () => {
       return { ...section, canTriggerImmediatePublication: canTrigger };
     }
 
-    function renderMissing(canTrigger: boolean) {
-      render(
-        <HomeRevenue
-          organizationId={ORG_ID}
-          section={{ status: "disabled" }}
-          growth={sectionWithTrigger(canTrigger)}
-        />,
-      );
-    }
+  function renderMissing(canTrigger: boolean) {
+    render(
+      <HomeRevenue
+        organizationId={ORG_ID}
+        section={{ status: "disabled" }}
+        growth={sectionWithTrigger(canTrigger)}
+      />,
+    );
+    // Fixtures open on the ready 1M horizon; the blank views sit on 3M+.
+    fireEvent.click(screen.getByRole("button", { name: "3 months" }));
+  }
 
     it("hides the trigger without permission on a blank view", () => {
       renderMissing(false);
@@ -736,7 +738,8 @@ describe("HomeRevenue growth degraded states", () => {
         growth={{ ...section, views: { ...section.views, 1: view } }}
       />,
     );
-    // Fixtures default to the blank 3M horizon; these states render on 1M.
+    // These states render on the ready 1M horizon (the default); the click
+    // below is a no-op when already there.
     fireEvent.click(screen.getByRole("button", { name: "1 month" }));
   }
 
@@ -784,6 +787,23 @@ describe("HomeRevenue growth degraded states", () => {
       latestComparison: null,
     });
     expect(screen.getByText("Waiting for reported revenue")).toBeTruthy();
+  });
+
+  it("shows provenance and the method dialog before the first report", () => {
+    const base = buildBehindGrowthView(ORG_ID);
+    renderGrowthView({
+      ...base,
+      state: "awaiting_reports",
+      reasonCode: null,
+      latestComparableDate: null,
+      latestComparison: null,
+    });
+    expect(
+      screen.getByText("Projection set 1 Sep · Reports through 21 Sep · 2 channels"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /How this is estimated/ }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("table")).toBeTruthy();
   });
 
   it("keeps partial points plotted with a missing-scope explanation", () => {

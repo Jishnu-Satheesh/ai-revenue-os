@@ -21,6 +21,7 @@ import {
   mergeSnapshotDispatchCandidates,
   runRevenueSnapshotBuild,
   selectDueSnapshotOrgs,
+  throwIfSnapshotBuildFailed,
   toSnapshotBuildOutput,
 } from "@/modules/organizations/application/revenue-snapshot";
 import {
@@ -237,7 +238,11 @@ export const revenueSnapshotsBuildOrgTask = schemaTask({
     }
     // The validated union input stays in memory: the run output Trigger
     // persists carries only counts, reasons and the publication summary —
-    // never history amounts, actions or assumptions.
-    return toSnapshotBuildOutput(result, growthPublication);
+    // never history amounts, actions or assumptions. A failed primary job or
+    // an errored horizon fails the run red (bounded retries apply) instead
+    // of completing green-with-skips; honest skips stay green with reasons.
+    const output = toSnapshotBuildOutput(result, growthPublication);
+    throwIfSnapshotBuildFailed(output, parsed.organizationId);
+    return output;
   },
 });

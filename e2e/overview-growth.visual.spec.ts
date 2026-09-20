@@ -48,7 +48,7 @@ test.describe("Overview growth visual review", () => {
     test(`${state}: canonical render anchors hold within tolerance`, async ({ page }) => {
       await page.goto(harnessUrl(state), { waitUntil: "networkidle" });
       await settleHarness(page);
-      // Fixtures default to the blank 3M horizon; anchors measure the 1M chart.
+      // Fixtures default to the ready 1M horizon; anchors measure the 1M chart.
       await showReadyMonthChart(page);
 
       const section = page.locator("#home-revenue");

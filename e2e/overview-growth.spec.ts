@@ -158,16 +158,16 @@ test.describe("Overview growth V09 matrix (isolated card)", () => {
     await page.goto(harnessUrl("behind"), { waitUntil: "networkidle" });
     await settleHarness(page);
 
-    // Fixtures default to the 3M horizon; switching to 1M exercises the
+    // Fixtures default to the ready 1M horizon; switching to 3M exercises the
     // announcement and the pressed-once invariant from a real change.
-    const oneMonth = page.getByRole("button", { name: "1 month" });
-    await oneMonth.focus();
-    await expect(oneMonth).toBeFocused();
+    const threeMonths = page.getByRole("button", { name: "3 months" });
+    await threeMonths.focus();
+    await expect(threeMonths).toBeFocused();
     await page.keyboard.press("Enter");
     const announcement = page.getByTestId("growth-horizon-announcement");
     await expect(announcement).not.toBeEmpty();
     // The horizon control stays pressed exactly once.
-    await expect(page.getByRole("button", { name: "1 month" })).toHaveAttribute(
+    await expect(page.getByRole("button", { name: "3 months" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

@@ -123,7 +123,7 @@ export const growthProgressSectionSchema = z.union([
   }),
   z.strictObject({
     state: z.literal("ready"),
-    initialHorizon: z.literal(3),
+    initialHorizon: z.literal(1),
     /**
      * Server-derived owner/admin flag for the on-demand worker trigger.
      * The button renders only on a blank (missing-projection) view when
@@ -139,7 +139,7 @@ export type GrowthProgressSection =
   | { state: "failed"; reasonCode: string | null; retainedView: GrowthProgressView | null }
   | {
       state: "ready";
-      initialHorizon: 3;
+      initialHorizon: 1;
       canTriggerImmediatePublication: boolean;
       views: GrowthProgressViews;
     };

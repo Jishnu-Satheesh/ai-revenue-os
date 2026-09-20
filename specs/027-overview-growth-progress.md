@@ -47,6 +47,26 @@ Help a nontechnical client see reported progress against an earlier growth outlo
 - Fresh AI calls on page load, hover or horizon selection; new AI narration in the advice rail.
 - Recreating the PNG's illustrative September data in staging or production.
 
+### Staging demo-data exception (2026-09-20, user-directed)
+
+The owner overrode the out-of-scope rule above for development: stand-in
+September rows were written to shared staging for the canary organization
+(`2dda45b8-82db-4f5f-b17d-611b9bbb7846`) only, so the real pipeline draws blue
+today with zero code changes. Two backdated frozen projections (cycle 99,
+period Sep 11 → Oct 11 / Dec 11, same August-partial baseline and limitations
+as the Sep-20 rows) plus ten daily `normalized_metrics` rows (Sep 11–20,
+287,583 minor/day ≈ 85% of the frozen pace, digests
+`sha256('demo-canary-<date>:1')`). Display picks the earliest start per
+horizon, so these rows win over the Sep-20 cycle-0 rows; cycle 99 keeps clear
+of the nightly worker's numbering. No other org, table, or ledger touched.
+Cleanup (offered, not executed): delete the canary metric rows by digest
+formula and `delete from organization_growth_projections where
+organization_id = ... and cycle_index = 99`.
+2026-09-20 follow-up: the Sep-20 cycle-0 rows were deleted (dormant,
+superseded; ids 970c9376/7955ddde survive only in audit payloads) because
+their second schedule origin (Sep 20 vs Sep 11) tripped the worker's
+fail-closed SCHEDULE_CORRUPT. Single origin Sep 11 remains.
+
 ## UX flow
 
 - Open Overview: preserve HomeHeader, then mount this section before campaigns.

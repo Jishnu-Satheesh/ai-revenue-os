@@ -1742,6 +1742,61 @@
   background-color: var(--card);
 }
 
+/* Living ends on both growth lines: a soft ring breathing outward at the
+   last current point and the last projected point, so the growth reads as
+   alive. Opacity and scale only — never position — and fully still under
+   reduced motion. Mirrors the legacy .revenuePulse pattern in series green
+   and blue. */
+.growthPulseCurrent,
+.growthPulseProjected {
+  fill: none;
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: growth-ping 2.2s ease-out infinite;
+}
+
+.growthPulseCurrent {
+  stroke: #2563eb;
+}
+
+.growthPulseProjected {
+  stroke: #08785a;
+}
+
+@keyframes growth-ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+
+  70% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .growthPulseCurrent,
+  .growthPulseProjected {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.dark .growthPulseCurrent {
+  stroke: #79a8ff;
+}
+
+.dark .growthPulseProjected {
+  stroke: #69cfac;
+}
+
 /* 900–1099 card width: 65/35 side by side. */
 @container (min-width: 900px) {
   .growthGrid {

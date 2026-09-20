@@ -18,12 +18,13 @@ import {
   HomeGrowthChart,
   placeEndpointLabels,
   placeGrowthPairLabels,
-  selectGrowthLabelDates,
+  selectGrowthTickDates,
 } from "@/components/organizations/home/home-growth-chart";
 import {
   buildAheadGrowthView,
   buildBehindGrowthView,
 } from "@/components/organizations/home/home-growth-fixtures";
+import type { GrowthProgressView } from "@/modules/organizations/application/growth-progress-view";
 
 afterEach(() => {
   cleanup();
@@ -312,22 +313,39 @@ describe("growthTooltipForDate", () => {
   });
 });
 
-describe("selectGrowthLabelDates", () => {
-  it("keeps every sparse label", () => {
+describe("selectGrowthTickDates", () => {
+  it("keeps every sparse tick", () => {
     const dates = ["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-30"];
-    expect(selectGrowthLabelDates(dates, "2026-09-21", 6)).toEqual(dates);
+    expect(selectGrowthTickDates(dates, 6)).toEqual(dates);
   });
 
-  it("thins dense series to the cap while keeping first, latest and last", () => {
+  it("spreads dense ticks evenly with first and last pinned", () => {
     const dates = Array.from(
       { length: 30 },
       (_, index) => `2026-09-${String(index + 1).padStart(2, "0")}`,
     );
-    const picked = selectGrowthLabelDates(dates, "2026-09-21", 6);
+    expect(selectGrowthTickDates(dates, 6)).toEqual([
+      "2026-09-01",
+      "2026-09-07",
+      "2026-09-13",
+      "2026-09-18",
+      "2026-09-24",
+      "2026-09-30",
+    ]);
+  });
+
+  it("caps long periods without bunching", () => {
+    const dates = Array.from(
+      { length: 91 },
+      (_, index) =>
+        new Date(Date.parse("2026-09-11T00:00:00Z") + index * 86_400_000)
+          .toISOString()
+          .slice(0, 10),
+    );
+    const picked = selectGrowthTickDates(dates, 6);
     expect(picked.length).toBeLessThanOrEqual(6);
-    expect(picked[0]).toBe("2026-09-01");
-    expect(picked).toContain("2026-09-21");
-    expect(picked[picked.length - 1]).toBe("2026-09-30");
+    expect(picked[0]).toBe("2026-09-11");
+    expect(picked[picked.length - 1]).toBe("2026-12-10");
     expect([...picked].sort()).toEqual(picked);
   });
 });
@@ -405,5 +423,153 @@ describe("HomeGrowthChart ahead fixture", () => {
     // Blue runs higher: its label prints above its dot.
     expect(numberAttribute(latestLabel, "y")).toBeLessThan(numberAttribute(latestCurrent, "cy"));
     expect(container.textContent).not.toContain("gap");
+  });
+});
+
+describe("HomeGrowthChart dense awaiting view", () => {
+  // A 91-day 3M outlook with no reports yet: every daily point carries the
+  // frozen even pace, nothing is comparable, the projection is attached.
+  function buildDenseAwaitingView(): GrowthProgressView {
+    const base = buildBehindGrowthView(ORG_ID);
+    const startMs = Date.parse("2026-09-20T00:00:00Z");
+    const points = Array.from({ length: 91 }, (_, index) => {
+      const date = new Date(startMs + index * 86_400_000).toISOString().slice(0, 10);
+      const centralMinor = Math.round((30_450_000 * (index + 1)) / 91);
+      return {
+        date,
+        currentMinor: null as number | null,
+        projectedLowMinor: centralMinor,
+        projectedCentralMinor: centralMinor,
+        projectedHighMinor: centralMinor,
+        currentCoverage: "missing" as const,
+        reasonCode: "FUTURE_DATE" as const,
+        breakBefore: false,
+      };
+    });
+    return {
+      ...base,
+      horizonMonths: 3 as const,
+      state: "awaiting_reports",
+      reasonCode: null,
+      period: {
+        horizonMonths: 3 as const,
+        cycleIndex: 0,
+        startDate: "2026-09-20",
+        endDateExclusive: "2026-12-20",
+      },
+      latestComparableDate: null,
+      latestComparison: null,
+      points,
+    };
+  }
+
+  it("names the outlook total instead of claiming the projection is missing", () => {
+    render(<HomeGrowthChart view={buildDenseAwaitingView()} />);
+    expect(screen.getByText("Projected · 19 Dec")).toBeTruthy();
+    expect(screen.getByText("AED 304,500")).toBeTruthy();
+    expect(screen.getByText("Estimate")).toBeTruthy();
+    expect(screen.getByText("Awaiting reports")).toBeTruthy();
+    expect(screen.queryByText("Projection not set")).toBeNull();
+  });
+
+  it("thins dense markers to labelled dates while keeping every date explorable", () => {
+    const { container } = render(<HomeGrowthChart view={buildDenseAwaitingView()} />);
+    const projectedDots = circles(container, "growthProjectedDot");
+    expect(projectedDots.length).toBeGreaterThan(1);
+    expect(projectedDots.length).toBeLessThanOrEqual(6);
+    expect(circles(container, "growthCurrentDot")).toHaveLength(0);
+    // The endpoint word still closes the line.
+    expect(screen.getByText("Projected")).toBeTruthy();
+  });
+
+  it("pulses the projected end while blue has nothing to pulse yet", () => {
+    const { container } = render(<HomeGrowthChart view={buildDenseAwaitingView()} />);
+    expect(container.querySelectorAll('circle[class*="growthPulseProjected"]')).toHaveLength(1);
+    expect(container.querySelectorAll('circle[class*="growthPulseCurrent"]')).toHaveLength(0);
+  });
+
+  it("pulses both living ends once reports exist", () => {
+    const { container } = render(<HomeGrowthChart view={buildBehindGrowthView(ORG_ID)} />);
+    expect(container.querySelectorAll('circle[class*="growthPulseProjected"]')).toHaveLength(1);
+    expect(container.querySelectorAll('circle[class*="growthPulseCurrent"]')).toHaveLength(1);
+  });
+});
+
+describe("HomeGrowthChart full-period domain", () => {
+  // Ten reported days against a 101.5k frozen 1M total: the action sits in
+  // the bottom third of the full-period grid.
+  function buildEarlyReadyView(): GrowthProgressView {
+    const base = buildBehindGrowthView(ORG_ID);
+    const startMs = Date.parse("2026-09-11T00:00:00Z");
+    const points = Array.from({ length: 30 }, (_, index) => {
+      const date = new Date(startMs + index * 86_400_000).toISOString().slice(0, 10);
+      const centralMinor = Math.round((10_149_983 * (index + 1)) / 30);
+      const reported = index < 10;
+      return {
+        date,
+        currentMinor: reported ? Math.round(centralMinor * 0.85) : null,
+        projectedLowMinor: centralMinor,
+        projectedCentralMinor: centralMinor,
+        projectedHighMinor: centralMinor,
+        currentCoverage: reported ? ("complete" as const) : ("missing" as const),
+        reasonCode: reported ? null : ("COVERAGE_GAP" as const),
+        breakBefore: false,
+      };
+    });
+    const latest = points[9]!;
+    const differenceMinor = latest.currentMinor! - latest.projectedCentralMinor!;
+    return {
+      ...base,
+      state: "ready" as const,
+      period: {
+        horizonMonths: 1 as const,
+        cycleIndex: 0,
+        startDate: "2026-09-11",
+        endDateExclusive: "2026-10-11",
+      },
+      latestComparableDate: "2026-09-20",
+      latestComparison: {
+        state: "behind" as const,
+        differenceMinor,
+        differencePercent: -15,
+        reasonCode: null,
+      },
+      points,
+    };
+  }
+
+  // Axis tick text needs layout so jsdom leaves it empty; geometry on the
+  // plotted dots proves the domain instead. Plot height is 302px: the 25.9k
+  // early climb fills ~65px of the full [0,120k] grid, while the fixture's
+  // 42k climb fills ~106px.
+  it("keeps the full-period domain early in the period", () => {
+    const { container } = render(<HomeGrowthChart view={buildEarlyReadyView()} />);
+    const current = circles(container, "growthCurrentDot").map((dot) =>
+      numberAttribute(dot, "cy"),
+    );
+    expect(current).toHaveLength(3);
+    expect(Math.abs((current[0] as number) - (current[2] as number))).toBeLessThan(150);
+  });
+
+  it("labels the latest report on top of the even ticks", () => {
+    const { container } = render(<HomeGrowthChart view={buildEarlyReadyView()} />);
+    // Six even ticks plus the latest report's own label.
+    expect(circles(container, "growthProjectedDot")).toHaveLength(7);
+    expect(screen.getByText("33.8k")).toBeTruthy();
+  });
+
+  it("shows both endpoint words with the future in view", () => {
+    render(<HomeGrowthChart view={buildEarlyReadyView()} />);
+    expect(screen.getByText("Projected")).toBeTruthy();
+    expect(screen.getByText("Current")).toBeTruthy();
+  });
+
+  it("keeps the full domain and endpoint word on the late-period fixture", () => {
+    const { container } = render(<HomeGrowthChart view={buildBehindGrowthView(ORG_ID)} />);
+    const current = circles(container, "growthCurrentDot").map((dot) =>
+      numberAttribute(dot, "cy"),
+    );
+    expect(Math.abs((current[0] as number) - (current[2] as number))).toBeLessThan(150);
+    expect(screen.getByText("Projected")).toBeTruthy();
   });
 });

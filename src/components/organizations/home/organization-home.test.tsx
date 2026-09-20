@@ -708,11 +708,11 @@ describe("OrganizationHome growth section", () => {
     expect(
       (section.compareDocumentPosition(campaigns) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     ).toBe(true);
-    // The blank 3M horizon mounts first; the 1M ready verdict sits one switch away.
-    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "1 month" }));
+    // The ready 1M horizon mounts first; the blank 3M view sits one switch away.
     expect(screen.getByText("Below the projection")).toBeTruthy();
     expect(screen.getByText("AED 24,000 behind")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "3 months" }));
+    expect(screen.getByText("Projection not set for this period")).toBeTruthy();
   });
 
   it("shows the shaped growth failure without breaking the lower home", () => {

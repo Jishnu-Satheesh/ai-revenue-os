@@ -22,6 +22,7 @@ import {
   REVENUE_SNAPSHOT_KEEP_MONTHS,
   runRevenueSnapshotBuild,
   selectDueSnapshotOrgs,
+  throwIfSnapshotBuildFailed,
   toSnapshotBuildOutput,
 } from "@/modules/organizations/application/revenue-snapshot";
 import type { PublishDueGrowthProjectionsResult } from "@/modules/organizations/application/growth-projection-publisher";
@@ -313,5 +314,64 @@ describe("toSnapshotBuildOutput", () => {
       reason: "reads failed",
       growthPublication: publication,
     });
+  });
+});
+
+describe("throwIfSnapshotBuildFailed", () => {
+  const skippedPublication: PublishDueGrowthProjectionsResult = {
+    results: [
+      { horizonMonths: 1, status: "skipped", projectionId: null, digest: null, reasonCode: "NOT_DUE" },
+      {
+        horizonMonths: 3,
+        status: "skipped",
+        projectionId: null,
+        digest: null,
+        reasonCode: "CANDIDATE_BASELINE_INCOMPLETE",
+      },
+    ],
+  };
+
+  it("stays silent on a stored snapshot with honest skips", () => {
+    expect(() =>
+      throwIfSnapshotBuildFailed(
+        { stored: true, acceptedCount: 0, rejectedCount: 0, trimmed: true, growthPublication: skippedPublication },
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      ),
+    ).not.toThrow();
+  });
+
+  it("fails red when the snapshot was not stored", () => {
+    expect(() =>
+      throwIfSnapshotBuildFailed(
+        { stored: false, reason: "reads not ready", growthPublication: skippedPublication },
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      ),
+    ).toThrow(/not stored.*reads not ready/);
+  });
+
+  it("fails red when any horizon errored, even with a stored snapshot", () => {
+    expect(() =>
+      throwIfSnapshotBuildFailed(
+        {
+          stored: true,
+          acceptedCount: 0,
+          rejectedCount: 0,
+          trimmed: true,
+          growthPublication: {
+            results: [
+              ...skippedPublication.results,
+              {
+                horizonMonths: 6,
+                status: "failed",
+                projectionId: null,
+                digest: null,
+                reasonCode: "PUBLISH_FAILED",
+              },
+            ],
+          },
+        },
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      ),
+    ).toThrow(/publication errored/);
   });
 });

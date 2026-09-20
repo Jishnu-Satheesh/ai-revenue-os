@@ -94,6 +94,26 @@ export function toSnapshotBuildOutput(
   return { stored: false, reason: result.reason, growthPublication };
 }
 
+/**
+ * Fail-red gate for the nightly run: a run whose primary job failed, or that
+ * errored on any due horizon, throws instead of completing green-with-skips,
+ * so the dashboard shows the failure and Trigger's bounded retries apply.
+ * Honest skips (NOT_DUE, BASELINE_INCOMPLETE, DISABLED, CANDIDATE_UNAVAILABLE)
+ * stay silent — a skipped horizon is reported, never hidden, but it is not a
+ * failure. Only fixed reason strings and the organization id reach the error.
+ */
+export function throwIfSnapshotBuildFailed(
+  output: RevenueSnapshotBuildOutput,
+  organizationId: string,
+): void {
+  if (!output.stored) {
+    throw new Error(`Revenue snapshot not stored for ${organizationId}: ${output.reason}.`);
+  }
+  if (output.growthPublication.results.some((entry) => entry.status === "failed")) {
+    throw new Error(`Growth projection publication errored for ${organizationId}.`);
+  }
+}
+
 /** True while the organization's own clock reads the first hour of the day. */
 export function isOrgLocalMidnightHour(timeZone: string, now: Date): boolean {
   try {

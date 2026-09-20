@@ -336,7 +336,7 @@ function readySection(
 ): GrowthProgressSection {
   return {
     state: "ready",
-    initialHorizon: 3,
+    initialHorizon: 1,
     canTriggerImmediatePublication,
     views: {
       1: views.get(1)!,

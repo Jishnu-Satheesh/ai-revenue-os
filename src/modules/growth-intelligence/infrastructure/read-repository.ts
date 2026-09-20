@@ -378,6 +378,14 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const rows = result.data ?? [];
       if (rows.length === 0) return [];
       const itemIds = rows.map((row) => String(row.id));
+      // The nightly worker passes an empty actor so shared reads stay
+      // viewer-neutral: per-viewer preference and feedback lookups match
+      // nothing by contract, so they are skipped rather than sent with an
+      // unusable actor filter that the database would reject.
+      const noViewerRows = Promise.resolve({
+        data: [] as Record<string, unknown>[],
+        error: null,
+      });
       const [decisions, preferences, feedback] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_decisions")
           .select(
@@ -386,16 +394,20 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .eq("organization_id", input.organizationId)
           .in("growth_intelligence_item_id", itemIds)
           .order("created_at", { ascending: false }),
-        query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_preferences")
-          .select("growth_intelligence_item_id,pinned")
-          .eq("organization_id", input.organizationId)
-          .eq("user_id", input.actorId)
-          .in("growth_intelligence_item_id", itemIds),
-        query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_feedback")
-          .select("growth_intelligence_item_id,helpful")
-          .eq("organization_id", input.organizationId)
-          .eq("actor_id", input.actorId)
-          .in("growth_intelligence_item_id", itemIds),
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_preferences")
+              .select("growth_intelligence_item_id,pinned")
+              .eq("organization_id", input.organizationId)
+              .eq("user_id", input.actorId)
+              .in("growth_intelligence_item_id", itemIds),
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_feedback")
+              .select("growth_intelligence_item_id,helpful")
+              .eq("organization_id", input.organizationId)
+              .eq("actor_id", input.actorId)
+              .in("growth_intelligence_item_id", itemIds),
       ]);
       if (decisions.error) readFailure();
       if (preferences.error) readFailure();
@@ -438,22 +450,32 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const rows = result.data ?? [];
       if (rows.length === 0) return [];
       const recommendationIds = rows.map((row) => String(row.id));
+      // Empty-actor reads skip the per-viewer lookups (see listWorkspaceItems):
+      // the nightly worker shares rows across viewers by design.
+      const noViewerRows = Promise.resolve({
+        data: [] as Record<string, unknown>[],
+        error: null,
+      });
       const [decisions, preferences, feedback, citations] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "channel_recommendation_decisions")
           .select("recommendation_id,decision,snoozed_until,created_at")
           .eq("organization_id", input.organizationId)
           .in("recommendation_id", recommendationIds)
           .order("created_at", { ascending: false }),
-        query<Record<string, unknown>[]>(persistence, "channel_recommendation_preferences")
-          .select("channel_recommendation_id,pinned,snoozed_until")
-          .eq("organization_id", input.organizationId)
-          .eq("user_id", input.actorId)
-          .in("channel_recommendation_id", recommendationIds),
-        query<Record<string, unknown>[]>(persistence, "channel_recommendation_feedback")
-          .select("recommendation_id,helpful")
-          .eq("organization_id", input.organizationId)
-          .eq("actor_id", input.actorId)
-          .in("recommendation_id", recommendationIds),
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "channel_recommendation_preferences")
+              .select("channel_recommendation_id,pinned,snoozed_until")
+              .eq("organization_id", input.organizationId)
+              .eq("user_id", input.actorId)
+              .in("channel_recommendation_id", recommendationIds),
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "channel_recommendation_feedback")
+              .select("recommendation_id,helpful")
+              .eq("organization_id", input.organizationId)
+              .eq("actor_id", input.actorId)
+              .in("recommendation_id", recommendationIds),
         // Lazy-load the stored finding ids each narration cited, so the card
         // can name its evidence instead of claiming none was cited.
         query<Record<string, unknown>[]>(persistence, "channel_recommendation_citations")

@@ -201,7 +201,7 @@ describe("ready composition", () => {
 
     expect(section.state).toBe("ready");
     if (section.state !== "ready") return;
-    expect(section.initialHorizon).toBe(3);
+    expect(section.initialHorizon).toBe(1);
     expect(section.canTriggerImmediatePublication).toBe(true);
     // One union read covers both horizons sharing the scope.
     expect(d.readRevenueFacts).toHaveBeenCalledTimes(1);

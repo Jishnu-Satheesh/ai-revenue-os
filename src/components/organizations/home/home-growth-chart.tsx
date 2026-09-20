@@ -278,21 +278,21 @@ export function describeGrowthTooltip(model: GrowthTooltipModel, currency: strin
 }
 
 /**
- * V04 deterministic label thinning for dense real data: at most maxLabels
- * dates keep point labels and x ticks. The first date, the latest comparable
- * date and the final projection always survive; interior dates fill in on an
- * even round-robin. Sparse fixtures (≤ maxLabels) keep every label.
+ * V04 deterministic tick thinning for dense real data: at most maxLabels
+ * evenly-spread ticks with first and last always pinned, so the axis reads
+ * on a calendar-even rhythm instead of bunching around the latest report.
+ * Point labels follow these ticks plus the latest comparable date (see the
+ * label set at the call site), which keeps its marker, value and guide line
+ * without warping the axis. Sparse fixtures (≤ maxLabels) keep every tick.
  */
-export function selectGrowthLabelDates(
+export function selectGrowthTickDates(
   dates: readonly string[],
-  latestDate: string | null,
   maxLabels: number,
 ): string[] {
   if (dates.length <= maxLabels) return [...dates];
   const first = dates[0] as string;
   const last = dates[dates.length - 1] as string;
   const picked = new Set<string>([first, last]);
-  if (latestDate !== null && dates.includes(latestDate)) picked.add(latestDate);
   const step = (dates.length - 1) / (maxLabels - 1);
   for (let slot = 1; slot < maxLabels && picked.size < maxLabels; slot += 1) {
     picked.add(dates[Math.round(slot * step)] as string);
@@ -385,6 +385,7 @@ function CurrentGlyph({
   cy,
   payload,
   labelSide,
+  showMarker,
   showEndpointWord,
   endpointDy,
   currency,
@@ -392,6 +393,8 @@ function CurrentGlyph({
   onHoverDate,
 }: GlyphProps & {
   labelSide: GrowthLabelSide | "hidden";
+  /** Visible dot only on labelled dates and the series end; the hit area below always stays. */
+  showMarker: boolean;
   showEndpointWord: boolean;
   endpointDy: number;
   currency: string;
@@ -412,39 +415,52 @@ function CurrentGlyph({
       style={{ cursor: "pointer" }}
     >
       <circle cx={x} cy={y} r={14} fill="transparent" stroke="none" />
-      <circle
-        className={styles.growthCurrentDot}
-        cx={x}
-        cy={y}
-        r={DOT_RADIUS}
-        fill={GROWTH_CURRENT}
-        stroke="#ffffff"
-        strokeWidth={2}
-      />
-      {labelSide === "hidden" ? null : (
-        <text
-          className={styles.growthCurrentLabel}
-          x={x}
-          y={labelY}
-          textAnchor="middle"
-          fontWeight={500}
-          fill={GROWTH_CURRENT_TEXT}
-        >
-          <title>{`${full} current on ${formatShortDate(payload.date)}`}</title>
-          {label}
-        </text>
-      )}
-      {showEndpointWord ? (
-        <text
-          className={styles.growthCurrentWord}
-          x={x + ENDPOINT_LABEL_DX}
-          y={y + endpointDy}
-          textAnchor="start"
-          fontWeight={500}
-          fill={GROWTH_CURRENT}
-        >
-          Current
-        </text>
+      {showMarker ? (
+        <>
+          {showEndpointWord ? (
+            <circle
+              aria-hidden="true"
+              className={styles.growthPulseCurrent}
+              cx={x}
+              cy={y}
+              r={DOT_RADIUS}
+            />
+          ) : null}
+          <circle
+            className={styles.growthCurrentDot}
+            cx={x}
+            cy={y}
+            r={DOT_RADIUS}
+            fill={GROWTH_CURRENT}
+            stroke="#ffffff"
+            strokeWidth={2}
+          />
+          {labelSide === "hidden" ? null : (
+            <text
+              className={styles.growthCurrentLabel}
+              x={x}
+              y={labelY}
+              textAnchor="middle"
+              fontWeight={500}
+              fill={GROWTH_CURRENT_TEXT}
+            >
+              <title>{`${full} current on ${formatShortDate(payload.date)}`}</title>
+              {label}
+            </text>
+          )}
+          {showEndpointWord ? (
+            <text
+              className={styles.growthCurrentWord}
+              x={x + ENDPOINT_LABEL_DX}
+              y={y + endpointDy}
+              textAnchor="start"
+              fontWeight={500}
+              fill={GROWTH_CURRENT}
+            >
+              Current
+            </text>
+          ) : null}
+        </>
       ) : null}
     </g>
   );
@@ -455,6 +471,7 @@ function ProjectedGlyph({
   cy,
   payload,
   labelSide,
+  showMarker,
   showEndpointWord,
   endpointDy,
   currency,
@@ -462,6 +479,8 @@ function ProjectedGlyph({
   onHoverDate,
 }: GlyphProps & {
   labelSide: GrowthLabelSide | "hidden";
+  /** Visible dot only on labelled dates and the series end; the hit area below always stays. */
+  showMarker: boolean;
   showEndpointWord: boolean;
   endpointDy: number;
   currency: string;
@@ -484,39 +503,52 @@ function ProjectedGlyph({
       style={{ cursor: "pointer" }}
     >
       <circle cx={x} cy={y} r={14} fill="transparent" stroke="none" />
-      <circle
-        className={styles.growthProjectedDot}
-        cx={x}
-        cy={y}
-        r={DOT_RADIUS}
-        fill="#ffffff"
-        stroke={GROWTH_PROJECTED}
-        strokeWidth={2.5}
-      />
-      {labelSide === "hidden" ? null : (
-        <text
-          className={styles.growthProjectedLabel}
-          x={x}
-          y={labelY}
-          textAnchor="middle"
-          fontWeight={500}
-          fill={GROWTH_PROJECTED}
-        >
-          <title>{`${full} projected on ${formatShortDate(payload.date)}`}</title>
-          {label}
-        </text>
-      )}
-      {showEndpointWord ? (
-        <text
-          className={styles.growthProjectedWord}
-          x={x + ENDPOINT_LABEL_DX}
-          y={y + endpointDy}
-          textAnchor="start"
-          fontWeight={500}
-          fill={GROWTH_PROJECTED}
-        >
-          Projected
-        </text>
+      {showMarker ? (
+        <>
+          {showEndpointWord ? (
+            <circle
+              aria-hidden="true"
+              className={styles.growthPulseProjected}
+              cx={x}
+              cy={y}
+              r={DOT_RADIUS}
+            />
+          ) : null}
+          <circle
+            className={styles.growthProjectedDot}
+            cx={x}
+            cy={y}
+            r={DOT_RADIUS}
+            fill="#ffffff"
+            stroke={GROWTH_PROJECTED}
+            strokeWidth={2.5}
+          />
+          {labelSide === "hidden" ? null : (
+            <text
+              className={styles.growthProjectedLabel}
+              x={x}
+              y={labelY}
+              textAnchor="middle"
+              fontWeight={500}
+              fill={GROWTH_PROJECTED}
+            >
+              <title>{`${full} projected on ${formatShortDate(payload.date)}`}</title>
+              {label}
+            </text>
+          )}
+          {showEndpointWord ? (
+            <text
+              className={styles.growthProjectedWord}
+              x={x + ENDPOINT_LABEL_DX}
+              y={y + endpointDy}
+              textAnchor="start"
+              fontWeight={500}
+              fill={GROWTH_PROJECTED}
+            >
+              Projected
+            </text>
+          ) : null}
+        </>
       ) : null}
     </g>
   );
@@ -626,10 +658,24 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
   };
 
   const latest = rows.find((row) => row.date === view.latestComparableDate) ?? null;
+  // Before the first comparable report there is no same-date pair to pin the
+  // summaries to, but an attached projection still names its outlook total:
+  // the projected summary falls back to the final projected point (an
+  // estimate, never a verdict) instead of claiming the projection is missing.
+  // Views with no projection at all keep the honest placeholders.
+  const outlookRow =
+    latest ??
+    (view.projectionId !== null
+      ? [...rows].reverse().find((row) => row.projectedCentralMinor !== null) ?? null
+      : null);
   const latestSummaryDate =
-    view.latestComparableDate !== null ? formatShortDate(view.latestComparableDate) : null;
+    view.latestComparableDate !== null
+      ? formatShortDate(view.latestComparableDate)
+      : outlookRow !== null
+        ? formatShortDate(outlookRow.date)
+        : null;
   const latestCurrent = latest?.currentMinor ?? null;
-  const latestProjected = latest?.projectedCentralMinor ?? null;
+  const latestProjected = outlookRow?.projectedCentralMinor ?? null;
 
   const minors = view.points.flatMap((point) =>
     [point.currentMinor, point.projectedCentralMinor].filter(
@@ -644,12 +690,17 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
 
   const startMs = utcDate(view.period.startDate).getTime();
   const endMs = utcDate(view.period.endDateExclusive).getTime();
-  // Dense series thin to ≤6 labelled dates (≤4 on narrow phones); the first,
-  // latest comparable and final dates always survive.
-  const labelDates = new Set(
-    selectGrowthLabelDates(dates, view.latestComparableDate, narrow ? 4 : 6),
-  );
-  const tickValues = rows.filter((row) => labelDates.has(row.date)).map((row) => row.t);
+  // Dense series thin to ≤6 evenly-spread ticks (≤4 on narrow phones) with
+  // first and last pinned; point labels follow the ticks plus the latest
+  // comparable date, which keeps its marker, value and guide line without
+  // warping the axis rhythm.
+  const tickDates = selectGrowthTickDates(dates, narrow ? 4 : 6);
+  const tickSet = new Set(tickDates);
+  const labelDates = new Set(tickDates);
+  if (view.latestComparableDate !== null && dates.includes(view.latestComparableDate)) {
+    labelDates.add(view.latestComparableDate);
+  }
+  const tickValues = rows.filter((row) => tickSet.has(row.date)).map((row) => row.t);
   // Tooltip placement rides the shared time scale as a percentage, flipping
   // to the left of the date past 70% so it never collides with the edge.
   const activeT = activeDate !== null ? utcDate(activeDate).getTime() : null;
@@ -821,18 +872,23 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
               connectNulls={false}
               isAnimationActive={false}
               dot={(dotProps) => {
-                const payload = (dotProps as GlyphProps).payload;
+                const glyph = dotProps as GlyphProps;
+                const payload = glyph.payload;
+                const isEndpoint = glyph.index === lastProjectedIndex;
                 const placement = placeGrowthPairLabels(
                   payload?.currentMinor ?? null,
                   payload?.projectedCentralMinor ?? null,
                 );
                 return (
                   <ProjectedGlyph
-                    {...(dotProps as GlyphProps)}
+                    {...glyph}
                     labelSide={
                       payload && labelDates.has(payload.date) ? placement.projected : "hidden"
                     }
-                    showEndpointWord={(dotProps as GlyphProps).index === lastProjectedIndex}
+                    showMarker={Boolean(
+                      payload && (labelDates.has(payload.date) || isEndpoint),
+                    )}
+                    showEndpointWord={isEndpoint}
                     endpointDy={endpointPlacement.projectedDy}
                     currency={currency}
                     onSelectDate={selectDate}
@@ -851,18 +907,23 @@ export function HomeGrowthChart({ view }: Readonly<{ view: GrowthProgressView }>
               connectNulls={false}
               isAnimationActive={false}
               dot={(dotProps) => {
-                const payload = (dotProps as GlyphProps).payload;
+                const glyph = dotProps as GlyphProps;
+                const payload = glyph.payload;
+                const isEndpoint = glyph.index === lastCurrentIndex;
                 const placement = placeGrowthPairLabels(
                   payload?.currentMinor ?? null,
                   payload?.projectedCentralMinor ?? null,
                 );
                 return (
                   <CurrentGlyph
-                    {...(dotProps as GlyphProps)}
+                    {...glyph}
                     labelSide={
                       payload && labelDates.has(payload.date) ? placement.current : "hidden"
                     }
-                    showEndpointWord={(dotProps as GlyphProps).index === lastCurrentIndex}
+                    showMarker={Boolean(
+                      payload && (labelDates.has(payload.date) || isEndpoint),
+                    )}
+                    showEndpointWord={isEndpoint}
                     endpointDy={endpointPlacement.currentDy}
                     currency={currency}
                     onSelectDate={selectDate}
