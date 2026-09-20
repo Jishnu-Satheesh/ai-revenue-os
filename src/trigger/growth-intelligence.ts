@@ -1476,6 +1476,7 @@ export const runMarketMonitoringUpdateTask = schemaTask({
       updates: createMonitoringUpdateStore(supabase),
       research: await createQualifiedMonitoringResearcher({
         persistence: supabase as unknown as TinyfishResearchPersistence,
+        budget: createResearchBudgetRepository(supabase as unknown as TinyfishResearchPersistence),
         organizationId: parsed.organizationId,
         brief: parsed.brief,
         organizationCountryCode: await readMonitoringOrganizationCountry(

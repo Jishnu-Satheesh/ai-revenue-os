@@ -227,6 +227,56 @@ describe("runMarketMonitoringUpdate", () => {
     expect(failed[0]?.payload).toMatchObject({ phase: "research", code: "ADAPTER_UNAVAILABLE" });
   });
 
+  it("settles precise per-slot coverage when a partial outage fails research", async () => {
+    const { db, events, updates, payload } = await startedUpdate();
+    const persister = createFakePersister(db);
+
+    const result = await runMarketMonitoringUpdate(payload, {
+      updates,
+      research: createFakeResearcher({
+        status: "failed",
+        code: "RESEARCH_EXECUTION_UNAVAILABLE",
+        retrievalCoverage: [
+          { slotKey: "area:demand", kind: "local_market", outcome: "supported" },
+          { slotKey: "area:reviews", kind: "topic", outcome: "failed" },
+          {
+            slotKey: "competitor:stitch-house",
+            kind: "competitor",
+            outcome: "searched_no_usable_evidence",
+          },
+        ],
+        usages: [{ kind: "unknown" }],
+      }),
+      reports: persister,
+      events,
+      now: () => FIXED_NOW,
+      newReportIds: stableIds,
+    });
+
+    expect(result).toMatchObject({ outcome: "research_failed", reportVersionId: null });
+    expect(persister.persistCalls).toBe(0);
+    const record = await updates.get({
+      organizationId: FIXTURE_IDS.organizationId,
+      updateId: payload.updateId,
+    });
+    expect(record?.status).toBe("research_failed");
+    // The researcher's own split survives instead of collapsing to
+    // all-unavailable: searched slots read not-found, the dead slot reads
+    // unavailable, and the update stays retryable through the failed stage.
+    const byDimension = new Map(
+      (record?.coverage ?? []).map((entry) => [entry.dimensionKey, entry.status] as const),
+    );
+    expect(byDimension.get("area:demand")).toBe("not-found");
+    expect(byDimension.get("area:reviews")).toBe("unavailable");
+    expect(byDimension.get("competitor:stitch-house")).toBe("not-found");
+    const failed = events.events.filter((event) => event.eventName === "market_research.failed");
+    expect(failed[0]?.payload).toMatchObject({
+      phase: "research",
+      code: "RESEARCH_EXECUTION_UNAVAILABLE",
+      reportVersionId: null,
+    });
+  });
+
   it("marks synthesis_failed without persisting when composition is invalid", async () => {
     const { db, events, updates, payload } = await startedUpdate();
     const outcome = succeededResearchFixture();

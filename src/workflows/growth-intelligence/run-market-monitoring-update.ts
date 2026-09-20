@@ -6,7 +6,10 @@ import {
   briefRevisionSchema,
 } from "@/domain/growth-intelligence/brief";
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
-import { isTerminalPipelineStage } from "@/domain/growth-intelligence/research-pipeline";
+import {
+  isTerminalPipelineStage,
+  researchCoverageEntrySchema,
+} from "@/domain/growth-intelligence/research-pipeline";
 import { DomainError } from "@/lib/errors";
 import {
   buildMonitoringQueryPlan,
@@ -705,21 +708,39 @@ export async function runMarketMonitoringUpdate(
   const failResearch = async (
     code: string,
     usages: Parameters<typeof summarizeMonitoringCost>[0],
+    retrievalCoverage: ReadonlyArray<z.input<typeof researchCoverageEntrySchema>>,
   ): Promise<RunMonitoringUpdateResult> => {
     const cost = summarizeMonitoringCost(usages);
-    // Honest failure coverage: every requested dimension settles as
-    // unavailable (never an empty list), derived from the same query plan
-    // research would have run. The entry kind is structural; the checklist
-    // resolves support by slot key, so every dimension reads unavailable.
+    // Honest failure coverage: prefer the researcher's own per-slot coverage
+    // when it accounts for every planned slot (a mixed outage keeps its
+    // precise supported/searched/failed split instead of collapsing to
+    // all-unavailable). Otherwise backfill every requested dimension as
+    // unavailable from the same deterministic plan research would have run.
+    // The entry kind is structural; the checklist resolves support by slot
+    // key, so every dimension reads unavailable or not-found, never supported.
+    const planKeys = queryPlan.map((query) => query.slotKey);
+    const precise = researchCoverageEntrySchema.array().safeParse([...retrievalCoverage]);
+    const coversPlan =
+      precise.success &&
+      precise.data.length === planKeys.length &&
+      new Set(precise.data.map((entry) => entry.slotKey)).size === planKeys.length &&
+      precise.data.every((entry) => planKeys.includes(entry.slotKey));
+    const effectiveRetrievalCoverage = coversPlan && precise.success
+      ? precise.data.map((entry) => ({
+          slotKey: entry.slotKey,
+          kind: entry.kind,
+          outcome: entry.outcome,
+        }))
+      : queryPlan.map((query) => ({
+          slotKey: query.slotKey,
+          kind: (query.kind === "competitor" ? "competitor" : "local_market") as
+            | "competitor"
+            | "local_market",
+          outcome: "failed" as const,
+        }));
     const backfilled = buildMonitoringCoverageChecklist({
       brief: payload.brief,
-      retrievalCoverage: queryPlan.map((query) => ({
-        slotKey: query.slotKey,
-        kind: (query.kind === "competitor" ? "competitor" : "local_market") as
-          | "competitor"
-          | "local_market",
-        outcome: "failed" as const,
-      })),
+      retrievalCoverage: effectiveRetrievalCoverage,
       supportedSlotKeys: new Set<string>(),
     });
     await dependencies.updates.completeResearchAndAttachSynthesis({
@@ -786,7 +807,7 @@ export async function runMarketMonitoringUpdate(
     return { outcome: "cancelled", updateId: payload.updateId, reportVersionId: null, scopeDrift };
   }
   if (research.status === "failed") {
-    return failResearch(research.code, research.usages);
+    return failResearch(research.code, research.usages, research.retrievalCoverage);
   }
 
   // Single fenced settle: coverage, cost and the synthesis child commit

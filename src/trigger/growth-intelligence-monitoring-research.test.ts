@@ -30,12 +30,18 @@ import { startMonitoringUpdate } from "@/modules/growth-intelligence/application
 
 import {
   buildMonitoringModelScope,
+  createFencedMonitoringUpdateModelSpender,
+  createFencedMonitoringUpdateSearchSpender,
   createMonitoringResearchExecutor,
-  createMonitoringResearchSpender,
   createQualifiedMonitoringResearcher,
+  createSharedMonitoringUpdateBudget,
   deriveMonitoringClaimId,
+  MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT,
+  MONITORING_UPDATE_QUOTE_MICROS_USD,
   type MonitoringResearchExecutorDependencies,
+  type MonitoringUpdateBudget,
 } from "@/trigger/growth-intelligence-monitoring-research";
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 
 const FIXED_NOW = new Date("2026-09-14T06:00:00.000Z");
 
@@ -206,20 +212,21 @@ function wiredDependencies(
   options: {
     extraction?: ResearchModelTransport;
     review?: ResearchModelTransport;
+    budget?: MonitoringUpdateBudget;
+    now?: () => Date;
   } = {},
 ): MonitoringResearchExecutorDependencies {
   return {
     availability: { available: true, provider: "tinyfish" },
     brief,
     scope: buildMonitoringModelScope({ brief, countryCode: "AE" }),
+    budget: options.budget ?? createFakeMonitoringBudget(),
     search: {
       transport: search,
-      spender: createMonitoringResearchSpender(),
       gate: { isAvailable: () => true },
     },
     extraction: {
       transport: options.extraction ?? scriptedExtractionTransport(),
-      spender: createMonitoringResearchSpender(),
       budget: {
         phase: "extraction",
         maxCalls: 4,
@@ -231,7 +238,6 @@ function wiredDependencies(
     },
     supportReview: {
       transport: options.review ?? scriptedReviewTransport(),
-      spender: createMonitoringResearchSpender(),
       budget: {
         phase: "support_review",
         maxCalls: 4,
@@ -241,7 +247,130 @@ function wiredDependencies(
       },
       modelId: "test-review-model",
     },
-    now: () => FIXED_NOW,
+    now: options.now ?? (() => FIXED_NOW),
+  };
+}
+
+/**
+ * In-memory fenced budget: one reservation per update, replay-safe attempt
+ * rows, liability enforced against the admitted quote. Mirrors the SQL
+ * contract (replay returns the kept row, over-cap refuses) so wiring tests
+ * prove the spend path without a database.
+ */
+function createFakeMonitoringBudget(
+  options: { refuse?: "budget" | "attempt"; spendLimitMicrosUsd?: number } = {},
+): MonitoringUpdateBudget & {
+  calls: Array<{ name: string; args: Record<string, unknown> }>;
+  reservations: Map<string, { quoteMicrosUsd: number }>;
+  attempts: Map<string, string>;
+  liabilityMicrosUsd: number;
+} {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const reservations = new Map<string, { quoteMicrosUsd: number }>();
+  const attempts = new Map<string, string>();
+  const ledger = { liabilityMicrosUsd: 0 };
+  let attemptCounter = 0;
+  const nextAttemptId = () => {
+    attemptCounter += 1;
+    return `11111111-1111-4111-8111-1111111111${String(attemptCounter).padStart(2, "0").slice(-2)}`;
+  };
+  const limit = options.spendLimitMicrosUsd ?? Number.POSITIVE_INFINITY;
+  return {
+    calls,
+    reservations,
+    attempts,
+    get liabilityMicrosUsd() {
+      return ledger.liabilityMicrosUsd;
+    },
+    async reserveUpdateBudget(input) {
+      calls.push({ name: "reserveUpdateBudget", args: { ...input } });
+      if (options.refuse === "budget") {
+        throw new GrowthIntelligenceError(
+          "RESEARCH_BUDGET_ALLOWANCE_EXCEEDED",
+          "The organization research allowance for today is fully reserved.",
+        );
+      }
+      const existing = reservations.get(input.updateId);
+      if (existing) {
+        if (existing.quoteMicrosUsd !== input.quoteMicrosUsd) {
+          throw new GrowthIntelligenceError(
+            "RESEARCH_BUDGET_CONFLICT",
+            "This reservation was replayed with different terms.",
+          );
+        }
+        return {
+          reservationId: "40000000-0000-4000-8000-000000000004",
+          organizationId: input.organizationId,
+          updateId: input.updateId,
+          allowanceDay: "2026-09-14",
+          quoteMicrosUsd: existing.quoteMicrosUsd,
+          priceVersion: input.priceVersion,
+          replayed: true,
+        };
+      }
+      reservations.set(input.updateId, { quoteMicrosUsd: input.quoteMicrosUsd });
+      return {
+        reservationId: "40000000-0000-4000-8000-000000000004",
+        organizationId: input.organizationId,
+        updateId: input.updateId,
+        allowanceDay: "2026-09-14",
+        quoteMicrosUsd: input.quoteMicrosUsd,
+        priceVersion: input.priceVersion,
+        replayed: false,
+      };
+    },
+    async reserveUpdateAttempt(input) {
+      calls.push({ name: "reserveUpdateAttempt", args: { ...input } });
+      if (options.refuse === "attempt") {
+        throw new GrowthIntelligenceError(
+          "RESEARCH_BUDGET_RESERVATION_EXCEEDED",
+          "This attempt would exceed the admitted research quote.",
+        );
+      }
+      if (!reservations.has(input.updateId)) {
+        throw new GrowthIntelligenceError(
+          "RESEARCH_BUDGET_UNAVAILABLE",
+          "Research spend could not be reserved.",
+        );
+      }
+      const key = `${input.phase}|${input.slotKey}|${input.attemptIndex}`;
+      const replayed = attempts.get(key);
+      if (replayed) {
+        return {
+          attemptId: replayed,
+          reservationId: "40000000-0000-4000-8000-000000000004",
+          allowanceDay: "2026-09-14",
+          maximumMicrosUsd: input.maximumMicrosUsd,
+          replayed: true,
+        };
+      }
+      if (ledger.liabilityMicrosUsd + input.maximumMicrosUsd > limit) {
+        throw new GrowthIntelligenceError(
+          "RESEARCH_BUDGET_RESERVATION_EXCEEDED",
+          "This attempt would exceed the admitted research quote.",
+        );
+      }
+      ledger.liabilityMicrosUsd += input.maximumMicrosUsd;
+      const attemptId = nextAttemptId();
+      attempts.set(key, attemptId);
+      return {
+        attemptId,
+        reservationId: "40000000-0000-4000-8000-000000000004",
+        allowanceDay: "2026-09-14",
+        maximumMicrosUsd: input.maximumMicrosUsd,
+        replayed: false,
+      };
+    },
+    async settleAttempt(input) {
+      calls.push({ name: "settleAttempt", args: { ...input } });
+      return {
+        attemptId: input.attemptId,
+        settlementKind: "unknown" as const,
+        actualMicrosUsd: null,
+        overrunBlocked: false,
+        replayed: false,
+      };
+    },
   };
 }
 
@@ -307,6 +436,127 @@ describe("deriveMonitoringClaimId", () => {
   });
 });
 
+describe("fenced monitoring update spenders", () => {
+  const ORGANIZATION_ID = FIXTURE_IDS.organizationId;
+  const UPDATE_ID = "91000000-0000-4000-8000-000000000001";
+
+  it("sizes the worst-case call plan inside the admitted quote", () => {
+    // 28 search attempts plus 4 extraction plus 4 review calls must fit.
+    expect(MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT * 36).toBeLessThanOrEqual(
+      MONITORING_UPDATE_QUOTE_MICROS_USD,
+    );
+  });
+
+  it("ensures the update reservation once across all three phases", async () => {
+    const budget = createFakeMonitoringBudget();
+    const shared = createSharedMonitoringUpdateBudget({
+      budget,
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+    });
+    const ensure = () => shared.ensure();
+    const search = createFencedMonitoringUpdateSearchSpender({
+      budget,
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+      ensureReservation: ensure,
+    });
+    const extraction = createFencedMonitoringUpdateModelSpender({
+      budget,
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+      ensureReservation: ensure,
+    });
+    const review = createFencedMonitoringUpdateModelSpender({
+      budget,
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+      ensureReservation: ensure,
+    });
+
+    const first = await search.reserve({ slotKey: "area:demand", attemptIndex: 0 });
+    const second = await extraction.reserve({
+      phase: "extraction",
+      slotKey: "extraction:batch-0",
+      attemptIndex: 0,
+    });
+    const third = await review.reserve({
+      phase: "support_review",
+      slotKey: "support-review:batch-0",
+      attemptIndex: 0,
+    });
+    await search.settle({ attemptId: first.attemptId, usage: { kind: "reported", microsUsd: 0 } });
+
+    expect(budget.calls.filter((call) => call.name === "reserveUpdateBudget")).toHaveLength(1);
+    expect(budget.calls.filter((call) => call.name === "reserveUpdateBudget")[0]?.args).toMatchObject({
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+      quoteMicrosUsd: MONITORING_UPDATE_QUOTE_MICROS_USD,
+    });
+    const attempts = budget.calls.filter((call) => call.name === "reserveUpdateAttempt");
+    expect(attempts).toHaveLength(3);
+    for (const attempt of attempts) {
+      expect(attempt.args).toMatchObject({
+        organizationId: ORGANIZATION_ID,
+        updateId: UPDATE_ID,
+        phase: "research",
+        maximumMicrosUsd: MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT,
+      });
+    }
+    expect(new Set([first.attemptId, second.attemptId, third.attemptId]).size).toBe(3);
+    expect(budget.calls.filter((call) => call.name === "settleAttempt")).toHaveLength(1);
+  });
+
+  it("replays an identical reserve without double booking", async () => {
+    const budget = createFakeMonitoringBudget();
+    const search = createFencedMonitoringUpdateSearchSpender({
+      budget,
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+    });
+
+    const first = await search.reserve({ slotKey: "area:demand", attemptIndex: 0 });
+    const second = await search.reserve({ slotKey: "area:demand", attemptIndex: 0 });
+
+    // A redelivered run re-books the same attempt rows: two reserve calls,
+    // one ledger row, one liability charge.
+    expect(second.attemptId).toBe(first.attemptId);
+    expect(budget.attempts.size).toBe(1);
+    expect(budget.liabilityMicrosUsd).toBe(MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT);
+  });
+
+  it("refuses spend when the quote is exhausted before any call", async () => {
+    const budget = createFakeMonitoringBudget({ refuse: "attempt" });
+    const search = createFencedMonitoringUpdateSearchSpender({
+      budget,
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+    });
+
+    await expect(search.reserve({ slotKey: "area:demand", attemptIndex: 0 })).rejects.toBeInstanceOf(
+      GrowthIntelligenceError,
+    );
+  });
+
+  it("refuses unknown model phases exactly like the fenced spender", async () => {
+    const budget = createFakeMonitoringBudget();
+    const extraction = createFencedMonitoringUpdateModelSpender({
+      budget,
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+    });
+
+    await expect(
+      extraction.reserve({
+        phase: "synthesis" as never,
+        slotKey: "synthesis:batch-0",
+        attemptIndex: 0,
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_BUDGET_UNAVAILABLE" });
+    expect(budget.calls).toEqual([]);
+  });
+});
+
 describe("createQualifiedMonitoringResearcher", () => {
   it("stays fail-closed with ADAPTER_UNAVAILABLE while the lane is unqualified", async () => {
     setEnv({
@@ -317,6 +567,7 @@ describe("createQualifiedMonitoringResearcher", () => {
       const brief = briefFixture();
       const research = await createQualifiedMonitoringResearcher({
         persistence: unqualifiedPersistence(),
+        budget: createFakeMonitoringBudget(),
         organizationId: brief.organizationId,
         brief,
         organizationCountryCode: "AE",
@@ -338,6 +589,7 @@ describe("createQualifiedMonitoringResearcher", () => {
       const brief = briefFixture();
       const research = await createQualifiedMonitoringResearcher({
         persistence: qualifiedPersistence(rpcCalls),
+        budget: createFakeMonitoringBudget(),
         organizationId: brief.organizationId,
         brief,
         organizationCountryCode: "AE",
@@ -359,6 +611,7 @@ describe("createQualifiedMonitoringResearcher", () => {
       const brief = briefFixture();
       await createQualifiedMonitoringResearcher({
         persistence: qualifiedPersistence(rpcCalls),
+        budget: createFakeMonitoringBudget(),
         organizationId: brief.organizationId,
         brief,
         organizationCountryCode: "AE",
@@ -382,6 +635,7 @@ describe("createQualifiedMonitoringResearcher", () => {
       const brief = briefFixture();
       const research = await createQualifiedMonitoringResearcher({
         persistence: qualifiedPersistence([]),
+        budget: createFakeMonitoringBudget(),
         organizationId: brief.organizationId,
         brief,
         organizationCountryCode: null,
@@ -571,6 +825,98 @@ describe("createMonitoringResearchExecutor", () => {
     expect(
       outcome.retrievalCoverage.every((entry) => entry.outcome === "supported"),
     ).toBe(true);
+  });
+
+  it("fails closed with precise coverage when one slot dies and nothing is admitted", async () => {
+    const brief = briefFixture();
+    let searchCalls = 0;
+    const emptyExtraction: ResearchModelTransport = {
+      async complete() {
+        return { text: "[]", usage: { kind: "unknown" }, latencyMs: 1 };
+      },
+    };
+    const research = createMonitoringResearchExecutor(
+      wiredDependencies(
+        brief,
+        scriptedSearchTransport(() => {
+          searchCalls += 1;
+          // The first slot retrieves evidence; the rest transport-fail, so a
+          // partial outage with zero admitted findings must stay retryable.
+          return searchCalls === 1
+            ? { status: 200, results: twoResults("mix") }
+            : { status: 500, results: [] };
+        }),
+        { extraction: emptyExtraction },
+      ),
+    );
+    const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+    expect(outcome).toMatchObject({ status: "failed", code: "RESEARCH_EXECUTION_UNAVAILABLE" });
+    if (outcome.status !== "failed") return;
+    expect(outcome.retrievalCoverage.map((entry) => entry.outcome)).toEqual([
+      "supported",
+      "failed",
+      "failed",
+    ]);
+  });
+
+  it("refuses paid calls once the admitted quote is exhausted", async () => {
+    const searchCalls: string[] = [];
+    const brief = briefFixture();
+    const research = createMonitoringResearchExecutor(
+      wiredDependencies(
+        brief,
+        scriptedSearchTransport(() => ({ status: 200, results: twoResults("a") }), searchCalls),
+        { budget: createFakeMonitoringBudget({ spendLimitMicrosUsd: 0 }) },
+      ),
+    );
+    const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+    expect(outcome).toMatchObject({ status: "failed", code: "RESEARCH_EXECUTION_UNAVAILABLE" });
+    // The first reserve exceeds the quote, so no provider call is ever made.
+    expect(searchCalls).toEqual([]);
+  });
+
+  it("aborts hanging model calls at the research deadline instead of the task timeout", async () => {
+    const brief = briefFixture();
+    const hangingTransport: ResearchModelTransport = {
+      async complete(call: { signal?: AbortSignal }): Promise<never> {
+        await new Promise<never>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error("model too slow")), 30_000);
+          call.signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new Error("model call aborted at the research deadline"));
+            },
+            { once: true },
+          );
+          if (call.signal?.aborted) {
+            clearTimeout(timer);
+            reject(new Error("model call aborted at the research deadline"));
+          }
+        });
+        throw new Error("unreachable: the research deadline always aborts first");
+      },
+    };
+    const research = createMonitoringResearchExecutor(
+      wiredDependencies(
+        brief,
+        scriptedSearchTransport((url) => {
+          const tag = createHash("sha256").update(url, "utf8").digest("hex").slice(0, 8);
+          return { status: 200, results: twoResults(tag) };
+        }),
+        { extraction: hangingTransport, now: () => new Date() },
+      ),
+    );
+    const startedAt = Date.now();
+    const outcome = await research({
+      ...executorInput(brief, buildMonitoringQueryPlan(brief)),
+      deadlineMs: 1_000,
+    });
+    const elapsedMs = Date.now() - startedAt;
+    // Failed closed at the ~1s research deadline, not the 30s model hang and
+    // far inside the 300s task envelope.
+    expect(outcome).toMatchObject({ status: "failed", code: "RESEARCH_EXECUTION_UNAVAILABLE" });
+    expect(elapsedMs).toBeLessThan(15_000);
   });
 
   it("answers cancelled when the run signal is already aborted", async () => {

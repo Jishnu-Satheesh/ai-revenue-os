@@ -179,6 +179,12 @@ describe("research budget repository", () => {
     expect(toResearchBudgetError({ message: "research_budget_pipeline_closed" })).toEqual(
       expect.objectContaining({ code: "RESEARCH_BUDGET_SCOPE_CLOSED" }),
     );
+    expect(toResearchBudgetError({ message: "research_budget_update_closed" })).toEqual(
+      expect.objectContaining({ code: "RESEARCH_BUDGET_LEASE_STALE" }),
+    );
+    expect(toResearchBudgetError({ message: "research_budget_update_not_found" })).toEqual(
+      expect.objectContaining({ code: "RESEARCH_BUDGET_UNAVAILABLE" }),
+    );
     expect(toResearchBudgetError(new Error("connection reset"))).toEqual(
       expect.objectContaining({ code: "RESEARCH_BUDGET_UNAVAILABLE" }),
     );
@@ -202,5 +208,95 @@ describe("research budget repository", () => {
 
     expect(error).toBeInstanceOf(GrowthIntelligenceError);
     expect((error as Error).message).not.toMatch(/token|key|secret|payload/i);
+  });
+
+  it("reserves an update quote through the update-keyed RPC", async () => {
+    const UPDATE_ID = "70000000-0000-4000-8000-000000000007";
+    const { client, rpc } = persistenceFor({
+      reserve_monitoring_update_budget: {
+        reservationId: RESERVATION_ID,
+        organizationId: ORGANIZATION_ID,
+        updateId: UPDATE_ID,
+        allowanceDay: "2026-09-08",
+        quoteMicrosUsd: 1_000_000,
+        priceVersion: "tinyfish-search-2026-09",
+        replayed: false,
+      },
+    });
+
+    const result = await createResearchBudgetRepository(client).reserveUpdateBudget({
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+      quoteMicrosUsd: 1_000_000,
+      priceVersion: "tinyfish-search-2026-09",
+    });
+
+    expect(result.updateId).toBe(UPDATE_ID);
+    expect(result.replayed).toBe(false);
+    expect(rpc).toHaveBeenCalledWith(
+      "reserve_monitoring_update_budget",
+      expect.objectContaining({
+        p_organization_id: ORGANIZATION_ID,
+        p_update_id: UPDATE_ID,
+        p_quote_micros_usd: 1_000_000,
+      }),
+    );
+  });
+
+  it("debits an update attempt without a claim token", async () => {
+    const UPDATE_ID = "70000000-0000-4000-8000-000000000007";
+    const { client, rpc } = persistenceFor({
+      reserve_monitoring_update_attempt: {
+        attemptId: ATTEMPT_ID,
+        reservationId: RESERVATION_ID,
+        allowanceDay: "2026-09-08",
+        maximumMicrosUsd: 25_000,
+        replayed: false,
+      },
+    });
+
+    const result = await createResearchBudgetRepository(client).reserveUpdateAttempt({
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+      phase: "research",
+      slotKey: "area:demand",
+      attemptIndex: 0,
+      maximumMicrosUsd: 25_000,
+    });
+
+    expect(result.attemptId).toBe(ATTEMPT_ID);
+    expect(result.replayed).toBe(false);
+    const [, args] = rpc.mock.calls[0] as [string, Record<string, unknown>];
+    expect(args).not.toHaveProperty("p_claim_token");
+    expect(args).toMatchObject({
+      p_update_id: UPDATE_ID,
+      p_phase: "research",
+      p_slot_key: "area:demand",
+    });
+  });
+
+  it("replays an update attempt debit without double booking", async () => {
+    const UPDATE_ID = "70000000-0000-4000-8000-000000000007";
+    const { client, rpc } = persistenceFor({
+      reserve_monitoring_update_attempt: {
+        attemptId: ATTEMPT_ID,
+        reservationId: RESERVATION_ID,
+        allowanceDay: "2026-09-08",
+        maximumMicrosUsd: 25_000,
+        replayed: true,
+      },
+    });
+
+    const result = await createResearchBudgetRepository(client).reserveUpdateAttempt({
+      organizationId: ORGANIZATION_ID,
+      updateId: UPDATE_ID,
+      phase: "research",
+      slotKey: "area:demand",
+      attemptIndex: 0,
+      maximumMicrosUsd: 25_000,
+    });
+
+    expect(result).toMatchObject({ attemptId: ATTEMPT_ID, replayed: true });
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 });

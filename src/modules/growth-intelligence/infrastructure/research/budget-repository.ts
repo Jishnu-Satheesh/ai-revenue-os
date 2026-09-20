@@ -5,6 +5,7 @@ import { z } from "zod";
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import {
   researchAttemptReservationSchema,
+  researchAttemptPhaseSchema,
   researchQuoteSchema,
   researchWorkScopeSchema,
   settleResearchAttemptSchema,
@@ -43,6 +44,35 @@ const requestReservationResponseSchema = z
   })
   .strict();
 
+const updateReservationResponseSchema = z
+  .object({
+    reservationId: identifierSchema,
+    organizationId: identifierSchema,
+    updateId: identifierSchema,
+    allowanceDay: allowanceDaySchema,
+    quoteMicrosUsd: z.number().int().min(1),
+    priceVersion: z.string().min(1).max(80),
+    replayed: z.boolean(),
+  })
+  .strict();
+
+/**
+ * Update-scoped attempt key. Same bounds as the request path, minus the
+ * claim token: the lifecycle row state (non-terminal, same organization) is
+ * the fence, because the worker never threads its lease token to the
+ * researcher. Replay reuses the reservation/phase/slot/attempt tuple and
+ * never debits twice.
+ */
+const researchUpdateAttemptReservationSchema = z
+  .object({
+    updateId: identifierSchema,
+    phase: researchAttemptPhaseSchema,
+    slotKey: z.string().trim().min(1).max(160),
+    attemptIndex: z.number().int().min(0).max(100),
+    maximumMicrosUsd: z.number().int().min(1).max(1_000_000),
+  })
+  .strict();
+
 const attemptResponseSchema = z
   .object({
     attemptId: identifierSchema,
@@ -73,6 +103,7 @@ const releaseResponseSchema = z
 
 export type PipelineBudgetReservation = z.infer<typeof pipelineReservationResponseSchema>;
 export type RequestBudgetReservation = z.infer<typeof requestReservationResponseSchema>;
+export type UpdateBudgetReservation = z.infer<typeof updateReservationResponseSchema>;
 export type ResearchAttemptDebit = z.infer<typeof attemptResponseSchema>;
 export type ResearchAttemptSettlement = z.infer<typeof settleResponseSchema>;
 export type ResearchBudgetRelease = z.infer<typeof releaseResponseSchema>;
@@ -125,6 +156,14 @@ export function toResearchBudgetError(error: unknown): GrowthIntelligenceError {
     return new GrowthIntelligenceError(
       "RESEARCH_BUDGET_SCOPE_CLOSED",
       "This research scope is closed; it admits no new spend.",
+    );
+  }
+  // A terminal monitoring update ends its run's lease the way an expired
+  // request claim ends a request run: no new call is issued under it.
+  if (message.includes("research_budget_update_closed")) {
+    return new GrowthIntelligenceError(
+      "RESEARCH_BUDGET_LEASE_STALE",
+      "The worker lease is no longer current; no new call was issued.",
     );
   }
   if (
@@ -187,6 +226,12 @@ export type ResearchBudgetRepository = {
     quoteMicrosUsd: number;
     priceVersion: string;
   }): Promise<RequestBudgetReservation>;
+  reserveUpdateBudget(input: {
+    organizationId: string;
+    updateId: string;
+    quoteMicrosUsd: number;
+    priceVersion: string;
+  }): Promise<UpdateBudgetReservation>;
   reserveAttempt(input: {
     organizationId: string;
     scope: ResearchWorkScope;
@@ -195,6 +240,14 @@ export type ResearchBudgetRepository = {
     attemptIndex: number;
     maximumMicrosUsd: number;
     claimToken: string;
+  }): Promise<ResearchAttemptDebit>;
+  reserveUpdateAttempt(input: {
+    organizationId: string;
+    updateId: string;
+    phase: "research" | "synthesis";
+    slotKey: string;
+    attemptIndex: number;
+    maximumMicrosUsd: number;
   }): Promise<ResearchAttemptDebit>;
   settleAttempt(input: {
     organizationId: string;
@@ -277,6 +330,47 @@ export function createResearchBudgetRepository(
           p_attempt_index: reservation.attemptIndex,
           p_maximum_micros_usd: reservation.maximumMicrosUsd,
           p_claim_token: reservation.claimToken,
+        },
+        attemptResponseSchema,
+      );
+    },
+
+    async reserveUpdateBudget(input) {
+      const quote = parseOrThrow(researchQuoteSchema, {
+        quoteMicrosUsd: input.quoteMicrosUsd,
+        priceVersion: input.priceVersion,
+      });
+      return invoke(
+        persistence,
+        "reserve_monitoring_update_budget",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_update_id: parseOrThrow(identifierSchema, input.updateId),
+          p_quote_micros_usd: quote.quoteMicrosUsd,
+          p_price_version: quote.priceVersion,
+        },
+        updateReservationResponseSchema,
+      );
+    },
+
+    async reserveUpdateAttempt(input) {
+      const attempt = parseOrThrow(researchUpdateAttemptReservationSchema, {
+        updateId: parseOrThrow(identifierSchema, input.updateId),
+        phase: input.phase,
+        slotKey: input.slotKey,
+        attemptIndex: input.attemptIndex,
+        maximumMicrosUsd: input.maximumMicrosUsd,
+      });
+      return invoke(
+        persistence,
+        "reserve_monitoring_update_attempt",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_update_id: attempt.updateId,
+          p_phase: attempt.phase,
+          p_slot_key: attempt.slotKey,
+          p_attempt_index: attempt.attemptIndex,
+          p_maximum_micros_usd: attempt.maximumMicrosUsd,
         },
         attemptResponseSchema,
       );

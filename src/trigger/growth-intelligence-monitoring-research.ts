@@ -1,6 +1,5 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import {
@@ -14,7 +13,6 @@ import {
   researchCoverageEntrySchema,
   type ResearchAttemptUsage,
   type ResearchCoverageEntry,
-  type ResearchCoverageOutcome,
 } from "@/domain/growth-intelligence/research-pipeline";
 import {
   RESEARCH_MODEL_CALL_LIMITS,
@@ -44,8 +42,7 @@ import {
   type ExtractableSource,
   type ResearchModelSpender,
   type ResearchModelTransport,
-} from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
-import {
+} from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";import {
   reviewResearchClaimSupport,
   selectAdmissibleClaims,
 } from "@/modules/growth-intelligence/infrastructure/research/claim-support-review";
@@ -71,9 +68,11 @@ import {
   readResearchModelId,
   shouldWireResearchModelPhase,
 } from "@/trigger/growth-intelligence-research-models";
+import type { ResearchBudgetRepository } from "@/modules/growth-intelligence/infrastructure/research/budget-repository";
 import {
   isTinyfishResearchGateOpen,
   readTinyfishSearchApiKey,
+  TINYFISH_RESEARCH_PRICE_VERSION,
   type TinyfishResearchPersistence,
 } from "@/trigger/growth-intelligence-tinyfish";
 
@@ -93,16 +92,17 @@ import {
  * a closed lane, RESEARCH_EXECUTION_UNAVAILABLE for everything else the
  * executor refuses).
  *
- * Spend honesty: update-scoped spend cannot reserve through the fenced
- * attempt ledger — reserve_research_attempt fences on a claimed
- * growth_intelligence_requests row with its claim token, and a monitoring
- * update is neither a request nor a pipeline (no migration may add a scope).
- * Paid calls therefore run under the lane kill-switch, the staged TinyFish
- * qualification, the G45 research deadline, the shared attempt ceiling
- * (26 + 2) and the per-phase model call caps — with every usage returned on
- * the outcome so the worker settles honest known/unknown cost through
- * settle_monitoring_update. A follow-up migration keying reservations to
- * update ids should close this gap.
+ * Spend is fenced per update: the migration alongside this module keys
+ * budget reservations to monitoring update ids, so every paid call reserves
+ * its worst case through reserve_monitoring_update_attempt before the call
+ * and settles explicitly afterwards — the USD 1 update quote and the shared
+ * USD 5 organization-day allowance are enforced pre-call by the database.
+ * Replay returns the kept attempt row and never double-books, so a
+ * redelivered run re-books the same rows instead of spending twice. The
+ * fence is lifecycle row state (non-terminal row for this organization),
+ * because the worker never threads its lease token to the researcher; a
+ * stale run spending under a rival's live lease still books against the same
+ * capped reservation, and anything after settle refuses.
  */
 
 /** The stub's unqualified-lane code, preserved exactly. */
@@ -110,14 +110,6 @@ const ADAPTER_UNAVAILABLE = "ADAPTER_UNAVAILABLE";
 
 /** The stub's qualified-but-unstaged code, reused for every executor refusal. */
 const RESEARCH_EXECUTION_UNAVAILABLE = "RESEARCH_EXECUTION_UNAVAILABLE";
-
-/** Coverage outcomes that prove an outage rather than an honest empty. */
-const OUTAGE_OUTCOMES: ReadonlySet<ResearchCoverageOutcome> = new Set([
-  "failed",
-  "skipped_budget",
-  "skipped_policy",
-  "not_started",
-]);
 
 const countryCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
 
@@ -178,34 +170,156 @@ export function deriveMonitoringClaimId(input: {
 }
 
 /**
- * Ledger-free run-local spender for monitoring research. Reserve mints a
- * synthetic attempt id and settle acknowledges the receipt — no fenced RPC,
- * because no request-scoped reservation exists for an update (see the module
- * note). Bounds stay with the runners: the search runner enforces the shared
- * attempt/byte/source ceilings and the model runners enforce their per-phase
- * call caps from the budgets below. A spend phase outside the two known
- * phases is refused exactly like the fenced spender refuses it.
+ * Update-scoped spend bounds. One update carries the same USD 1 story as one
+ * pipeline: at most 28 search attempts plus 4 extraction plus 4 review calls
+ * (36 worst case) at this per-attempt maximum stays within the quote
+ * (36 x 25,000 = 900,000), so a full run can never breach its admitted
+ * reservation and the ledger refuses over-cap calls before they are made.
+ * Rates are untouched: TinyFish settles its staged $0 receipt and model
+ * calls settle unknown, exactly as on the request path.
  */
-export function createMonitoringResearchSpender(): ResearchModelSpender & {
-  reserve(input: { slotKey: string; attemptIndex: number }): Promise<{ attemptId: string }>;
-} {
-  const attemptIds = new Set<string>();
-  const attemptIdSchema = z.string().uuid();
+export const MONITORING_UPDATE_QUOTE_MICROS_USD = 1_000_000;
+export const MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT = 25_000;
+
+export type MonitoringUpdateBudget = Pick<
+  ResearchBudgetRepository,
+  "reserveUpdateBudget" | "reserveUpdateAttempt" | "settleAttempt"
+>;
+
+/**
+ * Shared run-once update reservation. One instance is created per researcher
+ * call and handed to the search and both model-phase spenders, so a run
+ * issues exactly one reserve_monitoring_update_budget RPC. A refused ensure
+ * stays unmarked, so the next reserve retries rather than caching a failure.
+ */
+export function createSharedMonitoringUpdateBudget(input: {
+  budget: Pick<ResearchBudgetRepository, "reserveUpdateBudget">;
+  organizationId: string;
+  updateId: string;
+}): { ensure: () => Promise<void> } {
+  let ensured = false;
   return {
-    async reserve(input: { phase?: ResearchModelPhase; slotKey: string; attemptIndex: number }) {
-      if (input.phase !== undefined && input.phase !== "extraction" && input.phase !== "support_review") {
+    async ensure() {
+      if (ensured) return;
+      await input.budget.reserveUpdateBudget({
+        organizationId: input.organizationId,
+        updateId: input.updateId,
+        quoteMicrosUsd: MONITORING_UPDATE_QUOTE_MICROS_USD,
+        priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+      });
+      ensured = true;
+    },
+  };
+}
+
+/**
+ * Fenced TinyFish search spender over the update-keyed budget wrappers.
+ * Reserve-before-call: every provider call reserves its worst case first
+ * through reserve_monitoring_update_attempt (which re-verifies the update
+ * row, its tenant binding, and its non-terminal stage server-side) and
+ * settles explicitly afterwards. Unknown cost stays reserved, never converts
+ * to zero. The update reservation is ensured lazily on the first reserve, so
+ * refused lanes never touch the ledger.
+ */
+export function createFencedMonitoringUpdateSearchSpender(input: {
+  budget: MonitoringUpdateBudget;
+  organizationId: string;
+  updateId: string;
+  ensureReservation?: () => Promise<void>;
+}): TinyfishSearchSpender {
+  let reservationEnsured = false;
+  const ensureReservation =
+    input.ensureReservation ??
+    (async () => {
+      if (reservationEnsured) return;
+      await input.budget.reserveUpdateBudget({
+        organizationId: input.organizationId,
+        updateId: input.updateId,
+        quoteMicrosUsd: MONITORING_UPDATE_QUOTE_MICROS_USD,
+        priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+      });
+      reservationEnsured = true;
+    });
+  return {
+    async reserve({ slotKey, attemptIndex }) {
+      if (!reservationEnsured) {
+        await ensureReservation();
+        reservationEnsured = true;
+      }
+      const debit = await input.budget.reserveUpdateAttempt({
+        organizationId: input.organizationId,
+        updateId: input.updateId,
+        phase: "research",
+        slotKey,
+        attemptIndex,
+        maximumMicrosUsd: MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT,
+      });
+      return { attemptId: debit.attemptId };
+    },
+    async settle({ attemptId, usage }) {
+      await input.budget.settleAttempt({
+        organizationId: input.organizationId,
+        attemptId,
+        usage,
+      });
+    },
+  };
+}
+
+/**
+ * Fenced model spender over the update-keyed budget wrappers. Same
+ * reserve-before-call contract as the search spender above. The phase column
+ * stays "research" while the slot key carries the model-phase namespace the
+ * runners emit (extraction:batch-N, support-review:batch-N), exactly as on
+ * the request path — attribution without a schema change.
+ */
+export function createFencedMonitoringUpdateModelSpender(input: {
+  budget: MonitoringUpdateBudget;
+  organizationId: string;
+  updateId: string;
+  ensureReservation?: () => Promise<void>;
+}): ResearchModelSpender {
+  let reservationEnsured = false;
+  const ensureReservation =
+    input.ensureReservation ??
+    (async () => {
+      if (reservationEnsured) return;
+      await input.budget.reserveUpdateBudget({
+        organizationId: input.organizationId,
+        updateId: input.updateId,
+        quoteMicrosUsd: MONITORING_UPDATE_QUOTE_MICROS_USD,
+        priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+      });
+      reservationEnsured = true;
+    });
+  return {
+    async reserve({ phase, slotKey, attemptIndex }) {
+      if (phase !== "extraction" && phase !== "support_review") {
         throw new GrowthIntelligenceError(
           "RESEARCH_BUDGET_UNAVAILABLE",
           "Research spend could not be reserved.",
         );
       }
-      const attemptId = randomUUID();
-      attemptIds.add(attemptId);
-      return { attemptId };
+      if (!reservationEnsured) {
+        await ensureReservation();
+        reservationEnsured = true;
+      }
+      const debit = await input.budget.reserveUpdateAttempt({
+        organizationId: input.organizationId,
+        updateId: input.updateId,
+        phase: "research",
+        slotKey,
+        attemptIndex,
+        maximumMicrosUsd: MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT,
+      });
+      return { attemptId: debit.attemptId };
     },
-    async settle(input: { attemptId: string; usage: unknown }) {
-      attemptIdSchema.parse(input.attemptId);
-      researchAttemptUsageSchema.parse(input.usage);
+    async settle({ attemptId, usage }) {
+      await input.budget.settleAttempt({
+        organizationId: input.organizationId,
+        attemptId,
+        usage,
+      });
     },
   };
 }
@@ -263,20 +377,18 @@ export type MonitoringResearchExecutorDependencies = {
   availability: { available: boolean; provider: string };
   brief: BriefRevision;
   scope: ApprovedResearchScope;
+  budget: MonitoringUpdateBudget;
   search: {
     transport: TinyfishSearchTransport;
-    spender: TinyfishSearchSpender;
     gate: TinyfishSearchGate;
   };
   extraction: {
     transport: ResearchModelTransport;
-    spender: ResearchModelSpender;
     budget: ResearchModelBudget;
     modelId: string;
   };
   supportReview: {
     transport: ResearchModelTransport;
-    spender: ResearchModelSpender;
     budget: ResearchModelBudget;
     modelId: string;
   };
@@ -343,10 +455,51 @@ export function createMonitoringResearchExecutor(
     }
     if (signal?.aborted) return { status: "cancelled" };
 
+    // Per-call fenced spenders over one shared run-once update reservation:
+    // the update id arrives per call, so the reservation is ensured here,
+    // lazily on the first reserve, and every paid call books liability
+    // before it is made. Replay returns the kept rows, never double-books.
+    const sharedReservation = createSharedMonitoringUpdateBudget({
+      budget: dependencies.budget,
+      organizationId: parsed.data.organizationId,
+      updateId: parsed.data.updateId,
+    });
+    const sharedEnsure = () => sharedReservation.ensure();
+    const searchSpender = createFencedMonitoringUpdateSearchSpender({
+      budget: dependencies.budget,
+      organizationId: parsed.data.organizationId,
+      updateId: parsed.data.updateId,
+      ensureReservation: sharedEnsure,
+    });
+    const extractionSpender = createFencedMonitoringUpdateModelSpender({
+      budget: dependencies.budget,
+      organizationId: parsed.data.organizationId,
+      updateId: parsed.data.updateId,
+      ensureReservation: sharedEnsure,
+    });
+    const reviewSpender = createFencedMonitoringUpdateModelSpender({
+      budget: dependencies.budget,
+      organizationId: parsed.data.organizationId,
+      updateId: parsed.data.updateId,
+      ensureReservation: sharedEnsure,
+    });
+
+    // The G45 deadline binds the model phases too: the search runner stops
+    // itself at deadlineMs, and extraction/review abort on whatever remains,
+    // so the whole researcher settles inside the 300s task envelope with the
+    // designed 60s settle headroom. An aborted phase fails its batches and
+    // lands retryable research_failed — never a silent empty, never a task
+    // timeout redelivery loop.
+    const researchStartedAtMs = now().getTime();
+    const boundedPhaseSignal = (): AbortSignal => {
+      const remainingMs = parsed.data.deadlineMs - (now().getTime() - researchStartedAtMs);
+      const timeoutSignal = AbortSignal.timeout(Math.max(1, remainingMs));
+      return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    };
+
     const finish = (
       outcome: MonitoringResearchOutcome,
-    ): MonitoringResearchOutcome => {
-      // Identifiers and platform codes only (the logger allowlist forbids
+    ): MonitoringResearchOutcome => {      // Identifiers and platform codes only (the logger allowlist forbids
       // anything else): the worker and task logs carry outcome and counts.
       if (outcome.status === "failed") {
         logger.info("growth_intelligence.monitoring_research_finished", {
@@ -403,7 +556,7 @@ export function createMonitoringResearchExecutor(
               },
             ],
             transport: dependencies.search.transport,
-            spender: dependencies.search.spender,
+            spender: searchSpender,
             gate: dependencies.search.gate,
             ...(resumeFrom ? { resumeFrom } : {}),
             deadlineMs: parsed.data.deadlineMs,
@@ -458,10 +611,10 @@ export function createMonitoringResearchExecutor(
         sources: extractable,
         budget: extractionBudget,
         transport: dependencies.extraction.transport,
-        spender: dependencies.extraction.spender,
+        spender: extractionSpender,
         modelId: dependencies.extraction.modelId,
         now,
-        ...(signal ? { signal } : {}),
+        signal: boundedPhaseSignal(),
       });
       if (signal?.aborted) return { status: "cancelled" };
 
@@ -473,10 +626,10 @@ export function createMonitoringResearchExecutor(
         eligibleSourceKeys,
         budget: reviewBudget,
         transport: dependencies.supportReview.transport,
-        spender: dependencies.supportReview.spender,
+        spender: reviewSpender,
         modelId: dependencies.supportReview.modelId,
         now,
-        ...(signal ? { signal } : {}),
+        signal: boundedPhaseSignal(),
       });
       if (signal?.aborted) return { status: "cancelled" };
 
@@ -490,7 +643,6 @@ export function createMonitoringResearchExecutor(
         .parse([...attemptUsages, ...extraction.usages, ...review.usages]);
 
       if (admission.admitted.length === 0) {
-        const totalOutage = coverages.every((entry) => OUTAGE_OUTCOMES.has(entry.outcome));
         // A refused model phase is an outage, never an empty: extraction
         // reports failed/unprocessed batches, and review marks unjudged
         // candidates REVIEW_INCONCLUSIVE (deterministic verdicts carry
@@ -501,11 +653,15 @@ export function createMonitoringResearchExecutor(
         const reviewInconclusive = review.reviews.some((item) =>
           item.limitations.includes("REVIEW_INCONCLUSIVE"),
         );
-        // Retryability follows outage-ness: a dead lane or a refused model
-        // phase stays retryable research_failed, while searched-but-empty
-        // (or judged-but-inadmissible) keeps its precise coverage and lands
-        // no_findings.
-        if (totalOutage || extractionIncomplete || reviewInconclusive) {
+        // Retryability follows outage-ness: any slot that did not finish
+        // healthy (failed, not_started, skipped_* — never silently absorbed
+        // into no_findings) keeps the Retry signal with its precise per-slot
+        // coverage. Only a fully searched-but-empty (or judged-but-
+        // inadmissible) run lands no_findings.
+        const anySlotUnhealthy = coverages.some(
+          (entry) => entry.outcome !== "supported" && entry.outcome !== "searched_no_usable_evidence",
+        );
+        if (extractionIncomplete || reviewInconclusive || anySlotUnhealthy) {
           return finish(failedOutcome(RESEARCH_EXECUTION_UNAVAILABLE, coverages, usages));
         }
         return finish({
@@ -585,11 +741,13 @@ export function createMonitoringResearchExecutor(
  * kill-switch, and a staged tinyfish-lane qualification together authorize
  * live retrieval; anything else keeps the stub-equivalent refusal with zero
  * spend. The extraction and support-review phases reuse the Task 2 wiring
- * predicate and transports, with run-local spenders (see the module note)
- * and no brief refs — monitoring runs evidence-only until snapshot staging.
+ * predicate and transports, with per-call fenced spenders over one shared
+ * run-once update reservation, and no brief refs — monitoring runs
+ * evidence-only until snapshot staging.
  */
 export async function createQualifiedMonitoringResearcher(input: {
   persistence: TinyfishResearchPersistence;
+  budget: MonitoringUpdateBudget;
   organizationId: string;
   brief: BriefRevision;
   organizationCountryCode: string | null;
@@ -659,12 +817,12 @@ export async function createQualifiedMonitoringResearcher(input: {
     availability: { available: true, provider: QUALIFIED_TINYFISH_RESEARCH_PROVIDER },
     brief,
     scope,
+    budget: input.budget,
     search: {
       transport: createTinyfishSearchTransport({
         apiKey,
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
       }),
-      spender: createMonitoringResearchSpender(),
       gate: { isAvailable: () => isTinyfishResearchGateOpen() },
     },
     extraction: wireExtraction
@@ -674,13 +832,11 @@ export async function createQualifiedMonitoringResearcher(input: {
             apiKey: modelApiKey,
             logging,
           }),
-          spender: createMonitoringResearchSpender(),
           budget: monitoringModelBudget("extraction"),
           modelId: extractionModelId,
         }
       : {
           transport: unconfiguredMonitoringModelTransport("extraction"),
-          spender: createMonitoringResearchSpender(),
           budget: monitoringModelBudget("extraction"),
           modelId:
             extractionModelId.trim().length > 0
@@ -694,13 +850,11 @@ export async function createQualifiedMonitoringResearcher(input: {
             apiKey: modelApiKey,
             logging,
           }),
-          spender: createMonitoringResearchSpender(),
           budget: monitoringModelBudget("support_review"),
           modelId: reviewModelId,
         }
       : {
           transport: unconfiguredMonitoringModelTransport("support_review"),
-          spender: createMonitoringResearchSpender(),
           budget: monitoringModelBudget("support_review"),
           modelId:
             reviewModelId.trim().length > 0 ? reviewModelId : "unconfigured-review-model",
