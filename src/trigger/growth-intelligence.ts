@@ -31,7 +31,11 @@ import {
   type ResearchAdapter,
   type ResearchRequest,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
-import { getQualifiedMarketResearchAdapter } from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
+import {
+  getQualifiedMarketResearchAdapter,
+  QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
+} from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
+import { createResearchBudgetRepository } from "@/modules/growth-intelligence/infrastructure/research/budget-repository";
 import {
   digestClaimCandidate,
   extractResearchClaims,
@@ -120,6 +124,14 @@ import {
   createQualifiedTinyfishResearchAdapter,
   type TinyfishResearchPersistence,
 } from "@/trigger/growth-intelligence-tinyfish";
+import {
+  createFencedResearchModelSpender,
+  createWiredResearchModelTransport,
+  isResearchModelGateOpen,
+  readResearchModelApiKey,
+  readResearchModelId,
+  shouldWireResearchModelPhase,
+} from "@/trigger/growth-intelligence-research-models";
 
 const retry = {
   maxAttempts: 3,
@@ -416,6 +428,37 @@ async function createResearchDependencies(
     claimToken: () => spendClaim.current,
     signal,
   });
+  // Task 2: wire the extraction and support-review model phases behind the
+  // existing environment names. The single TinyFish lane kill-switch governs
+  // model transports too; a qualified TinyFish lane plus a present Google
+  // API key and per-phase model id together authorize the wired pair.
+  // Any refusal keeps the fail-closed unconfigured pair, so the phases fail
+  // their batches with honest unknown-cost accounting — never a worker
+  // throw. Synthesis keeps its existing provider (untouched). Model spend
+  // maps to the fenced attempt ledger with phase "research" and the
+  // model-phase-namespaced slot keys the runners emit; no migration.
+  const laneQualified =
+    adapter.availability.available &&
+    adapter.availability.provider === QUALIFIED_TINYFISH_RESEARCH_PROVIDER;
+  const modelGateOpen = isResearchModelGateOpen();
+  const modelApiKey = readResearchModelApiKey();
+  const extractionModelIdRaw = readResearchModelId("RESEARCH_EXTRACTION_MODEL");
+  const reviewModelIdRaw = readResearchModelId("RESEARCH_SUPPORT_REVIEW_MODEL");
+  const modelBudget = createResearchBudgetRepository(
+    supabase as unknown as TinyfishResearchPersistence,
+  );
+  const wireExtraction = shouldWireResearchModelPhase({
+    gateOpen: modelGateOpen,
+    laneQualified,
+    apiKey: modelApiKey,
+    modelId: extractionModelIdRaw,
+  });
+  const wireReview = shouldWireResearchModelPhase({
+    gateOpen: modelGateOpen,
+    laneQualified,
+    apiKey: modelApiKey,
+    modelId: reviewModelIdRaw,
+  });
   return {
     newClaimToken: () => {
       const token = randomUUID();
@@ -454,18 +497,48 @@ async function createResearchDependencies(
     }),
     evidence: createMarketEvidenceRepository(supabase as unknown as MarketEvidencePersistence),
     adapter,
-    extraction: {
-      transport: unconfiguredResearchModelTransport("extraction"),
-      spender: unconfiguredResearchModelSpender(),
-      budget: researchModelBudget("extraction"),
-      modelId: researchModelId("RESEARCH_EXTRACTION_MODEL", "unconfigured-extraction-model"),
-    },
-    supportReview: {
-      transport: unconfiguredResearchModelTransport("support_review"),
-      spender: unconfiguredResearchModelSpender(),
-      budget: researchModelBudget("support_review"),
-      modelId: researchModelId("RESEARCH_SUPPORT_REVIEW_MODEL", "unconfigured-review-model"),
-    },
+    extraction: wireExtraction
+      ? {
+          transport: createWiredResearchModelTransport({
+            modelId: extractionModelIdRaw,
+            apiKey: modelApiKey,
+          }),
+          spender: createFencedResearchModelSpender({
+            budget: modelBudget,
+            organizationId: scope.organizationId,
+            requestId: scope.requestId,
+            claimToken: () => spendClaim.current,
+          }),
+          budget: researchModelBudget("extraction"),
+          modelId: extractionModelIdRaw,
+        }
+      : {
+          transport: unconfiguredResearchModelTransport("extraction"),
+          spender: unconfiguredResearchModelSpender(),
+          budget: researchModelBudget("extraction"),
+          modelId: researchModelId("RESEARCH_EXTRACTION_MODEL", "unconfigured-extraction-model"),
+        },
+    supportReview: wireReview
+      ? {
+          transport: createWiredResearchModelTransport({
+            modelId: reviewModelIdRaw,
+            apiKey: modelApiKey,
+          }),
+          spender: createFencedResearchModelSpender({
+            budget: modelBudget,
+            organizationId: scope.organizationId,
+            requestId: scope.requestId,
+            claimToken: () => spendClaim.current,
+          }),
+          budget: researchModelBudget("support_review"),
+          modelId: reviewModelIdRaw,
+        }
+      : {
+          transport: unconfiguredResearchModelTransport("support_review"),
+          spender: unconfiguredResearchModelSpender(),
+          budget: researchModelBudget("support_review"),
+          modelId: researchModelId("RESEARCH_SUPPORT_REVIEW_MODEL", "unconfigured-review-model"),
+        },
     excerptProvenance: triggerExcerptProvenance(),
     // Only Trigger constructs infrastructure implementations: the workflow
     // runner receives these pure claim engines as dependencies and never
