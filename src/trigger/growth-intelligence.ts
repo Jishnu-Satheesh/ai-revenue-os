@@ -31,10 +31,7 @@ import {
   type ResearchAdapter,
   type ResearchRequest,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
-import {
-  getQualifiedMarketResearchAdapter,
-  QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
-} from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
+import { QUALIFIED_TINYFISH_RESEARCH_PROVIDER } from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
 import { createResearchBudgetRepository } from "@/modules/growth-intelligence/infrastructure/research/budget-repository";
 import {
   digestClaimCandidate,
@@ -78,7 +75,6 @@ import {
 } from "@/modules/growth-intelligence/application/market-monitoring-context";
 import {
   MONITORING_UPDATE_TASK_MAX_DURATION_S,
-  type MonitoringResearcher,
   type MonitoringUpdateStore,
   type MonitoringUpdateTerminalStage,
 } from "@/modules/growth-intelligence/application/market-monitoring-update";
@@ -124,6 +120,7 @@ import {
   createQualifiedTinyfishResearchAdapter,
   type TinyfishResearchPersistence,
 } from "@/trigger/growth-intelligence-tinyfish";
+import { createQualifiedMonitoringResearcher } from "@/trigger/growth-intelligence-monitoring-research";
 import {
   createFencedResearchModelSpender,
   createSharedResearchRequestBudget,
@@ -1107,29 +1104,26 @@ export const runSynthesisTask = schemaTask({
 });
 
 /**
- * Fail-closed project-scope research (Slice 3). The provider gate stays
- * closed: without a qualified adapter no paid call is made, and even a
- * qualified adapter has no project-scope executor staged yet, so both paths
- * fail with safe codes, retain the prior report, and spend nothing.
+ * Organization country for the monitoring researcher's model-phase scope.
+ * Tenant-pinned read on the worker client; missing, malformed, or unreadable
+ * resolves to null and the executor fails closed — geography is never
+ * invented, because the brief carries no country of its own.
  */
-function createFailClosedMonitoringResearch(): MonitoringResearcher {
-  return async () => {
-    const adapter = getQualifiedMarketResearchAdapter();
-    if (!adapter.availability.available) {
-      return {
-        status: "failed",
-        code: "ADAPTER_UNAVAILABLE",
-        retrievalCoverage: [],
-        usages: [],
-      };
-    }
-    return {
-      status: "failed",
-      code: "RESEARCH_EXECUTION_UNAVAILABLE",
-      retrievalCoverage: [],
-      usages: [],
-    };
-  };
+async function readMonitoringOrganizationCountry(
+  supabase: WorkerClient,
+  organizationId: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from("organizations")
+      .select("country_code")
+      .eq("id", organizationId)
+      .maybeSingle();
+    if (error || !data || typeof data.country_code !== "string") return null;
+    return data.country_code;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1480,7 +1474,15 @@ export const runMarketMonitoringUpdateTask = schemaTask({
     const projects = createAuthenticatedResearchProjectRepository(supabase);
     const result = await runMarketMonitoringUpdate(parsed, {
       updates: createMonitoringUpdateStore(supabase),
-      research: createFailClosedMonitoringResearch(),
+      research: await createQualifiedMonitoringResearcher({
+        persistence: supabase as unknown as TinyfishResearchPersistence,
+        organizationId: parsed.organizationId,
+        brief: parsed.brief,
+        organizationCountryCode: await readMonitoringOrganizationCountry(
+          supabase,
+          parsed.organizationId,
+        ),
+      }),
       reports: {
         persist: (input) => projects.persistReportVersion(input),
       },

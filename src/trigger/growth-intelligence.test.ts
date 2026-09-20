@@ -250,16 +250,18 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).toContain("MONITORING_CONTEXT_SNAPSHOTS_ENABLED");
   });
 
-  it("keeps monitoring research fail-closed behind the qualified-provider gate", async () => {
+  it("drives monitoring research through the qualified project-scope executor", async () => {
     const source = await readFile(
       resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
       "utf8",
     );
 
-    expect(source).toContain("createFailClosedMonitoringResearch");
-    expect(source).toContain("getQualifiedMarketResearchAdapter()");
-    expect(source).toContain("ADAPTER_UNAVAILABLE");
-    expect(source).toContain("RESEARCH_EXECUTION_UNAVAILABLE");
+    expect(source).toContain("createQualifiedMonitoringResearcher");
+    expect(source).not.toContain("createFailClosedMonitoringResearch");
+    expect(source).toContain("organizationCountryCode");
+    expect(source).toContain('from("organizations")');
+    // Persistence still flows only through the fenced project repository.
+    expect(source).toContain("persistReportVersion");
   });
 
   it("nudges the monitoring update task with identifiers only", async () => {
