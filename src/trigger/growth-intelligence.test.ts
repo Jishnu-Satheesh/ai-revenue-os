@@ -46,10 +46,10 @@ describe("Growth Intelligence Trigger registration", () => {
 
     expect(source.match(/tasks\.onCancel\(/g)).toHaveLength(1);
     expect(source).toMatch(
-      /const parsed = marketResearchPayloadSchema\.parse\(payload\);\s+const dependencies = await createResearchDependencies\(signal, \{\s+organizationId: parsed\.organizationId,\s+requestId: parsed\.requestId,\s+\}\);/,
+      /const parsed = marketResearchPayloadSchema\.parse\(payload\);\s+const dependencies = await createResearchDependencies\(signal, \{\s+organizationId: parsed\.organizationId,\s+requestId: parsed\.requestId,\s+correlationId: parsed\.correlationId,\s+\}\);/,
     );
     expect(source).toMatch(
-      /const parsed = consolidationPayloadSchema\.parse\(payload\);\s+const dependencies = await createResearchDependencies\(signal, \{\s+organizationId: parsed\.organizationId,\s+requestId: parsed\.requestId,\s+\}\);/,
+      /const parsed = consolidationPayloadSchema\.parse\(payload\);\s+const dependencies = await createResearchDependencies\(signal, \{\s+organizationId: parsed\.organizationId,\s+requestId: parsed\.requestId,\s+correlationId: parsed\.correlationId,\s+\}\);/,
     );
     expect(source).toMatch(
       /const parsed = dispatchDuePayloadSchema\.parse\(payload\);\s+const supabase = createGrowthIntelligenceWorkerServiceClient\(\);/,

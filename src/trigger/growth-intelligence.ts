@@ -126,6 +126,7 @@ import {
 } from "@/trigger/growth-intelligence-tinyfish";
 import {
   createFencedResearchModelSpender,
+  createSharedResearchRequestBudget,
   createWiredResearchModelTransport,
   isResearchModelGateOpen,
   readResearchModelApiKey,
@@ -414,7 +415,7 @@ function triggerExcerptProvenance(): {
 
 async function createResearchDependencies(
   signal: AbortSignal,
-  scope: { organizationId: string; requestId: string },
+  scope: { organizationId: string; requestId: string; correlationId?: string },
 ) {
   const supabase = createGrowthIntelligenceWorkerServiceClient();
   // The workflow claims the request after dependencies are built and reads
@@ -447,6 +448,17 @@ async function createResearchDependencies(
   const modelBudget = createResearchBudgetRepository(
     supabase as unknown as TinyfishResearchPersistence,
   );
+  // One shared run-once reservation for both model phases: a run wiring
+  // extraction and support review issues a single reserveRequestBudget RPC.
+  const sharedModelReservation = createSharedResearchRequestBudget({
+    budget: modelBudget,
+    organizationId: scope.organizationId,
+    requestId: scope.requestId,
+  });
+  const modelLogging = {
+    ...(scope.organizationId ? { organizationId: scope.organizationId } : {}),
+    ...(scope.correlationId ? { correlationId: scope.correlationId } : {}),
+  };
   const wireExtraction = shouldWireResearchModelPhase({
     gateOpen: modelGateOpen,
     laneQualified,
@@ -502,12 +514,14 @@ async function createResearchDependencies(
           transport: createWiredResearchModelTransport({
             modelId: extractionModelIdRaw,
             apiKey: modelApiKey,
+            logging: modelLogging,
           }),
           spender: createFencedResearchModelSpender({
             budget: modelBudget,
             organizationId: scope.organizationId,
             requestId: scope.requestId,
             claimToken: () => spendClaim.current,
+            ensureReservation: () => sharedModelReservation.ensure(),
           }),
           budget: researchModelBudget("extraction"),
           modelId: extractionModelIdRaw,
@@ -523,12 +537,14 @@ async function createResearchDependencies(
           transport: createWiredResearchModelTransport({
             modelId: reviewModelIdRaw,
             apiKey: modelApiKey,
+            logging: modelLogging,
           }),
           spender: createFencedResearchModelSpender({
             budget: modelBudget,
             organizationId: scope.organizationId,
             requestId: scope.requestId,
             claimToken: () => spendClaim.current,
+            ensureReservation: () => sharedModelReservation.ensure(),
           }),
           budget: researchModelBudget("support_review"),
           modelId: reviewModelIdRaw,
@@ -1027,6 +1043,7 @@ export const runMarketResearchTask = schemaTask({
     const dependencies = await createResearchDependencies(signal, {
       organizationId: parsed.organizationId,
       requestId: parsed.requestId,
+      correlationId: parsed.correlationId,
     });
     const result = await runMarketResearch(parsed, dependencies);
 
@@ -1052,6 +1069,7 @@ export const consolidateMarketEvidenceTask = schemaTask({
     const dependencies = await createResearchDependencies(signal, {
       organizationId: parsed.organizationId,
       requestId: parsed.requestId,
+      correlationId: parsed.correlationId,
     });
     const result = await consolidateMarketEvidence(parsed, dependencies);
 

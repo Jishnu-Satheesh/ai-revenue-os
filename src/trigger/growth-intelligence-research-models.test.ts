@@ -15,6 +15,7 @@ import { extractResearchClaims } from "@/modules/growth-intelligence/infrastruct
 import { reviewResearchClaimSupport } from "@/modules/growth-intelligence/infrastructure/research/claim-support-review";
 import {
   createFencedResearchModelSpender,
+  createSharedResearchRequestBudget,
   createWiredResearchModelTransport,
   isResearchModelGateOpen,
   readResearchModelApiKey,
@@ -283,6 +284,84 @@ describe("wired research model transport", () => {
     expect(result.callsIssued).toBe(1);
     expect(result.usages).toEqual([{ kind: "unknown" }]);
     expect(generateText).not.toHaveBeenCalled();
+  });
+  it("issues one request-budget reservation shared across both wired phases", async () => {
+    const fakes = budgetFakes();
+    const shared = createSharedResearchRequestBudget({
+      budget: fakes as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+    });
+    const extractionSpender = createFencedResearchModelSpender({
+      budget: fakes as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+      ensureReservation: () => shared.ensure(),
+    });
+    const reviewSpender = createFencedResearchModelSpender({
+      budget: fakes as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+      ensureReservation: () => shared.ensure(),
+    });
+
+    await extractionSpender.reserve({
+      phase: "extraction",
+      slotKey: "extraction:batch-0",
+      attemptIndex: 0,
+    });
+    await reviewSpender.reserve({
+      phase: "support_review",
+      slotKey: "support-review:batch-0",
+      attemptIndex: 0,
+    });
+    await extractionSpender.reserve({
+      phase: "extraction",
+      slotKey: "extraction:batch-0",
+      attemptIndex: 1,
+    });
+
+    expect(fakes.reserveRequestBudget).toHaveBeenCalledTimes(1);
+    expect(fakes.reserveRequestBudget).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      quoteMicrosUsd: TINYFISH_RESEARCH_QUOTE_MICROS_USD,
+      priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+    });
+    expect(fakes.reserveAttempt).toHaveBeenCalledTimes(3);
+    expect(fakes.reserveAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: "research", slotKey: "extraction:batch-0" }),
+    );
+    expect(fakes.reserveAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: "research", slotKey: "support-review:batch-0" }),
+    );
+  });
+
+  it("retries a refused shared reservation instead of caching the failure", async () => {
+    const fakes = budgetFakes();
+    fakes.reserveRequestBudget.mockRejectedValueOnce(new Error("ledger busy"));
+    const shared = createSharedResearchRequestBudget({
+      budget: fakes as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+    });
+    const spender = createFencedResearchModelSpender({
+      budget: fakes as never,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+      ensureReservation: () => shared.ensure(),
+    });
+
+    await expect(
+      spender.reserve({ phase: "extraction", slotKey: "extraction:batch-0", attemptIndex: 0 }),
+    ).rejects.toThrow("ledger busy");
+    await spender.reserve({ phase: "extraction", slotKey: "extraction:batch-0", attemptIndex: 0 });
+
+    expect(fakes.reserveRequestBudget).toHaveBeenCalledTimes(2);
+    expect(fakes.reserveAttempt).toHaveBeenCalledTimes(1);
   });
 });
 

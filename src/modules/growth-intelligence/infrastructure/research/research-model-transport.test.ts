@@ -9,8 +9,12 @@ vi.mock("ai", () => ({ generateText: (...args: unknown[]) => generateText(...arg
 vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: () => languageModel,
 }));
+vi.mock("@/lib/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 import { DomainError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import {
   createResearchModelTransport,
   RESEARCH_MODEL_TRANSPORT_TIMEOUT_MS,
@@ -163,6 +167,64 @@ describe("research model transport fail-closed refusals", () => {
       }),
     ).rejects.toMatchObject({ name: "DomainError", code: "INTEGRATION_ERROR" });
     expect(generateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits an attributed per-phase log with identifiers and codes but never the secret", async () => {
+    const organizationId = "10000000-0000-4000-8000-000000000001";
+    const correlationId = "60000000-0000-4000-8000-000000000006";
+    generateText.mockRejectedValueOnce(new Error("boom with secret input"));
+    const transport = createResearchModelTransport({
+      modelId: MODEL_ID,
+      apiKey: API_KEY,
+      gate: openGate(),
+      logging: { organizationId, correlationId },
+    });
+
+    await expect(
+      transport.complete({
+        phase: "support_review",
+        prompt: '{"phase":"support_review"}',
+        maxInputTokens: 12_000,
+        maxOutputTokens: 4_000,
+      }),
+    ).rejects.toMatchObject({ code: "INTEGRATION_ERROR" });
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [message, context] = vi.mocked(logger.error).mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(message).toBe("growth_intelligence.research_support_review_failed");
+    expect(context).toEqual({ organizationId, correlationId, errorCode: "Error" });
+    const serialized = JSON.stringify([message, context]);
+    expect(serialized).not.toContain(API_KEY);
+    expect(serialized).not.toContain('{"phase":"support_review"}');
+    expect(serialized).not.toContain("boom with secret input");
+  });
+
+  it("names the extraction phase in its failure event with only the available keys", async () => {
+    generateText.mockRejectedValueOnce(new Error("socket hang up"));
+    const transport = createResearchModelTransport({
+      modelId: MODEL_ID,
+      apiKey: API_KEY,
+      gate: openGate(),
+    });
+
+    await expect(
+      transport.complete({
+        phase: "extraction",
+        prompt: '{"phase":"extraction"}',
+        maxInputTokens: 12_000,
+        maxOutputTokens: 4_000,
+      }),
+    ).rejects.toMatchObject({ code: "INTEGRATION_ERROR" });
+
+    const [message, context] = vi.mocked(logger.error).mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(message).toBe("growth_intelligence.research_extraction_failed");
+    expect(context).toEqual({ errorCode: "Error" });
   });
 
   it("fails the extraction batch closed with unknown-cost accounting, never a worker throw", async () => {

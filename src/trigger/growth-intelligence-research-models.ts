@@ -71,12 +71,41 @@ export function shouldWireResearchModelPhase(input: {
 export function createWiredResearchModelTransport(input: {
   modelId: string;
   apiKey: string;
+  logging?: { organizationId?: string; correlationId?: string };
 }): ResearchModelTransport {
   return createResearchModelTransport({
     modelId: input.modelId,
     apiKey: input.apiKey,
     gate: { isAvailable: () => isResearchModelGateOpen() },
+    ...(input.logging ? { logging: input.logging } : {}),
   });
+}
+
+/**
+ * Shared run-once request-budget reservation. One instance is created per
+ * worker run and handed to both phase spenders, so a run wiring extraction
+ * and support review issues exactly one `reserveRequestBudget` RPC instead
+ * of one per phase. A refused ensure stays unmarked, so the next reserve
+ * retries rather than caching a failure.
+ */
+export function createSharedResearchRequestBudget(input: {
+  budget: Pick<ResearchBudgetRepository, "reserveRequestBudget">;
+  organizationId: string;
+  requestId: string;
+}): { ensure: () => Promise<void> } {
+  let ensured = false;
+  return {
+    async ensure() {
+      if (ensured) return;
+      await input.budget.reserveRequestBudget({
+        organizationId: input.organizationId,
+        requestId: input.requestId,
+        quoteMicrosUsd: TINYFISH_RESEARCH_QUOTE_MICROS_USD,
+        priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+      });
+      ensured = true;
+    },
+  };
 }
 
 /**
@@ -101,8 +130,26 @@ export function createFencedResearchModelSpender(input: {
   organizationId: string;
   requestId: string;
   claimToken: () => string | null;
+  /**
+   * Shared run-once reservation (one per worker run, passed to both phase
+   * spenders). When omitted the spender falls back to its own lazy
+   * single ensure, so blocked paths still never touch the ledger.
+   */
+  ensureReservation?: () => Promise<void>;
 }): ResearchModelSpender {
   let reservationEnsured = false;
+  const ensureReservation =
+    input.ensureReservation ??
+    (async () => {
+      if (reservationEnsured) return;
+      await input.budget.reserveRequestBudget({
+        organizationId: input.organizationId,
+        requestId: input.requestId,
+        quoteMicrosUsd: TINYFISH_RESEARCH_QUOTE_MICROS_USD,
+        priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+      });
+      reservationEnsured = true;
+    });
   return {
     async reserve({ phase, slotKey, attemptIndex }) {
       if (phase !== "extraction" && phase !== "support_review") {
@@ -119,12 +166,7 @@ export function createFencedResearchModelSpender(input: {
         );
       }
       if (!reservationEnsured) {
-        await input.budget.reserveRequestBudget({
-          organizationId: input.organizationId,
-          requestId: input.requestId,
-          quoteMicrosUsd: TINYFISH_RESEARCH_QUOTE_MICROS_USD,
-          priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
-        });
+        await ensureReservation();
         reservationEnsured = true;
       }
       const debit = await input.budget.reserveAttempt({
