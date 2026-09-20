@@ -246,6 +246,96 @@ describe("Market Evidence repository", () => {
     ]);
   });
 
+  it("accepts begin metadata with research-brief fields (canary regression)", async () => {
+    const db = persistence();
+    const repository = createMarketEvidenceRepository(db.client);
+
+    const result = await repository.begin({
+      organizationId,
+      requestId,
+      claimToken,
+      metadata: {
+        adapterProvider: "qualified-research",
+        adapterVersion: "market-research@1",
+        modelProvider: "gemini",
+        modelVersion: "gemini-2.5-flash",
+        runFingerprint: "c".repeat(64),
+        queryPlanDigest: "e".repeat(64),
+        correlationId: "60000000-0000-4000-8000-000000000006",
+        briefManifestId: "manifest-001",
+        briefDigest: "f".repeat(64),
+        briefStatus: "ready",
+      },
+    });
+
+    expect(result).toEqual({ runId, status: "partial", replayed: false });
+    expect(db.rpc).toHaveBeenCalledWith(
+      "begin_market_research_run",
+      expect.objectContaining({
+        p_metadata: expect.objectContaining({
+          briefManifestId: "manifest-001",
+          briefDigest: "f".repeat(64),
+          briefStatus: "ready",
+        }),
+      }),
+    );
+  });
+
+  it("accepts begin metadata with null brief identity (brief resolved without manifest)", async () => {
+    const db = persistence();
+    const repository = createMarketEvidenceRepository(db.client);
+
+    const result = await repository.begin({
+      organizationId,
+      requestId,
+      claimToken,
+      metadata: {
+        adapterProvider: "qualified-research",
+        adapterVersion: "market-research@1",
+        modelProvider: "gemini",
+        modelVersion: "gemini-2.5-flash",
+        runFingerprint: "c".repeat(64),
+        queryPlanDigest: "e".repeat(64),
+        correlationId: "60000000-0000-4000-8000-000000000006",
+        briefManifestId: null,
+        briefDigest: null,
+        briefStatus: "empty",
+      },
+    });
+
+    expect(result).toEqual({ runId, status: "partial", replayed: false });
+    expect(db.rpc).toHaveBeenCalledOnce();
+  });
+
+  it("still refuses unknown extra metadata keys at the begin boundary", async () => {
+    const db = persistence();
+    const repository = createMarketEvidenceRepository(db.client);
+
+    await expect(
+      repository.begin({
+        organizationId,
+        requestId,
+        claimToken,
+        metadata: {
+          adapterProvider: "qualified-research",
+          adapterVersion: "market-research@1",
+          modelProvider: null,
+          modelVersion: null,
+          runFingerprint: "c".repeat(64),
+          queryPlanDigest: "e".repeat(64),
+          correlationId: "60000000-0000-4000-8000-000000000006",
+          unexpectedKey: "nope",
+        } as unknown as Parameters<typeof repository.begin>[0]["metadata"],
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "DOMAIN_ERROR",
+        message: "Market Evidence must contain compact citations and claims only.",
+      }),
+    );
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
   it("returns safe persistence copy instead of exposing a worker database error", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: null,

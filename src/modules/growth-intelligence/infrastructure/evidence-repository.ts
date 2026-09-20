@@ -203,6 +203,9 @@ const metadataSchema = z
     runFingerprint: digestSchema,
     queryPlanDigest: digestSchema,
     correlationId: identifierSchema,
+    briefManifestId: z.string().min(1).max(160).nullable().optional(),
+    briefDigest: z.string().min(1).max(160).nullable().optional(),
+    briefStatus: z.enum(["ready", "empty", "partial", "unavailable", "disabled"]).optional(),
   })
   .strict();
 
