@@ -266,6 +266,13 @@ reset role;
 
 -- Qualification fails closed before any spend -----------------------------------
 -- (request 503 is inserted by the runner: members hold SELECT only.)
+-- The canary lane may have committed a live tinyfish row on shared staging.
+-- Remove it inside this transaction (rolled back afterwards) so the refusal
+-- below stays meaningful: with no staged lane of either provider, spend
+-- refuses under both the retired brave assert and the TinyFish cutover.
+
+delete from private.growth_intelligence_provider_qualifications
+where provider = 'tinyfish';
 
 insert into public.growth_intelligence_requests (
   id, organization_id, branch_id, kind, trigger_reason, request_fingerprint,
@@ -303,6 +310,9 @@ select extensions.throws_ok(
 reset role;
 
 -- A staged qualification row unlocks the boundary -------------------------------
+-- Brave keeps the legacy status RPC green; TinyFish carries the durable
+-- spend lane after the provider cutover, so both rows are staged and every
+-- later success test holds a qualified lane under either assert body.
 
 insert into private.growth_intelligence_provider_qualifications (
   provider, agreement_version, agreement_date, agreement_expires_at,
@@ -314,6 +324,20 @@ insert into private.growth_intelligence_provider_qualifications (
   'retain permitted excerpts for 400 days, then erase',
   'erase on termination within 30 days, including derived text on request',
   'brave-search-2026-09', 1200, true,
+  '{"extraction": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "supportReview": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "synthesis": {"maxInputTokens": 24000, "maxOutputTokens": 6000}}'::jsonb,
+  'passed'
+);
+
+insert into private.growth_intelligence_provider_qualifications (
+  provider, agreement_version, agreement_date, agreement_expires_at,
+  permitted_uses, retention_policy, deletion_rules, pricing_version,
+  search_rate_micros_usd, credential_ready, model_bounds, canary_result
+) values (
+  'tinyfish', 'TINYFISH-ORDER-2026-09-20', '2026-09-01', pg_catalog.now() + interval '90 days',
+  array['snippet_storage', 'commercial_inference', 'organization_display', 'derived_claims', 'synthesis_reuse', 'agreed_retention'],
+  'retain permitted excerpts per agreement, then erase',
+  'erase on termination within 30 days, including derived text on request',
+  'tinyfish-search-2026-09', 1, true,
   '{"extraction": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "supportReview": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "synthesis": {"maxInputTokens": 24000, "maxOutputTokens": 6000}}'::jsonb,
   'passed'
 );

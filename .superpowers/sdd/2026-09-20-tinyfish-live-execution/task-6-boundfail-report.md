@@ -125,3 +125,36 @@ did a redundant double-settle (`requests.fail` then `failPipeline`).
 - After push, call the new 8-arg overload once against staging (plpgsql
   first-call rule) before considering it done.
 - No grant/RLS, failure-code, or schema changes beyond the new overload.
+
+## Provider cutover: spend assert follows TinyFish (migration unpushed)
+
+- Live defect: lane opens end to end but every reserve refuses
+  (`research_provider_not_qualified`), all canary slots `skipped_policy`,
+  pipeline `no_findings` with zero sources. The assert evaluated Brave-only
+  blockers while the gate uses per-provider blockers; no brave row is staged
+  by design.
+- Migration `20260920154000_growth_intelligence_research_provider_tinyfish_cutover.sql`
+  (dry-run clean, NOT pushed): `CREATE OR REPLACE
+  private.assert_research_provider_qualified()` evaluating
+  `research_provider_blockers_for('tinyfish')`. Brave-only semantics retired;
+  legacy brave status RPC untouched; no table/grant/RLS change. All assert
+  callers (request-scope reserves + repair copies, synthesis retries +
+  coalesce copy) serve the TinyFish-only durable lane.
+- Suites (assertions untouched, premises repaired): budget suite deletes the
+  live tinyfish row before the refusal test, then stages brave (legacy RPC)
+  + full tinyfish fixture for all later spend tests — plan stays 60.
+  Pipeline suite stages the same tinyfish fixture next to its brave row for
+  the retry/attempt success tests — plan stays 68. Retention audited: no
+  gated calls, untouched.
+- Pre-push execution baselines (migration absent on staging): budget 60/60
+  PASS, pipeline 68/68 PASS — the rework is forward-compatible both ways.
+  Retention errors pre-existing and unrelated (`memory source erasure is not
+  authorized`, file untouched, deterministic across reruns).
+- Pending-push verification: `pnpm db:migrations:push`, then
+  `node scripts/run-pgtap.mjs supabase/tests/database/growth_intelligence_research_budget_test.sql supabase/tests/database/growth_intelligence_research_pipeline_test.sql`
+  must report PASS with 0 failing assertions; without the push the refusal
+  test would fail (live tinyfish lane qualifies).
+- Files: `supabase/migrations/20260920154000_...cutover.sql`,
+  `supabase/tests/database/growth_intelligence_research_budget_test.sql`,
+  `supabase/tests/database/growth_intelligence_research_pipeline_test.sql`,
+  this report.

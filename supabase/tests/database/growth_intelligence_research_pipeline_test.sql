@@ -1433,6 +1433,13 @@ select extensions.throws_ok(
 reset role;
 
 -- Analysis-only retry reuses the child within its prequoted budget ---------------
+-- The retry and attempt reserves assert the staged lane: brave is kept for
+-- legacy provenance while TinyFish carries the durable lane after the
+-- provider cutover. A live tinyfish row is removed first (rolled back
+-- afterwards) so the fixture insert works with or without shared staging.
+
+delete from private.growth_intelligence_provider_qualifications
+where provider = 'tinyfish';
 
 insert into private.growth_intelligence_provider_qualifications (
   provider, agreement_version, agreement_date, agreement_expires_at,
@@ -1444,6 +1451,20 @@ insert into private.growth_intelligence_provider_qualifications (
   'retain permitted excerpts for 400 days, then erase',
   'erase on termination within 30 days, including derived text on request',
   'brave-search-2026-09', 1200, true,
+  '{"extraction": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "supportReview": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "synthesis": {"maxInputTokens": 24000, "maxOutputTokens": 6000}}'::jsonb,
+  'passed'
+);
+
+insert into private.growth_intelligence_provider_qualifications (
+  provider, agreement_version, agreement_date, agreement_expires_at,
+  permitted_uses, retention_policy, deletion_rules, pricing_version,
+  search_rate_micros_usd, credential_ready, model_bounds, canary_result
+) values (
+  'tinyfish', 'TINYFISH-ORDER-2026-09-20', '2026-09-01', pg_catalog.now() + interval '90 days',
+  array['snippet_storage', 'commercial_inference', 'organization_display', 'derived_claims', 'synthesis_reuse', 'agreed_retention'],
+  'retain permitted excerpts per agreement, then erase',
+  'erase on termination within 30 days, including derived text on request',
+  'tinyfish-search-2026-09', 1, true,
   '{"extraction": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "supportReview": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "synthesis": {"maxInputTokens": 24000, "maxOutputTokens": 6000}}'::jsonb,
   'passed'
 );
