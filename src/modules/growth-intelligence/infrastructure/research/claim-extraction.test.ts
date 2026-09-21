@@ -499,4 +499,49 @@ describe("extraction brief relevance", () => {
     expect(prompt).toContain("[a-z][a-z0-9_.-]{0,79}");
     expect(prompt).toContain("[A-Z][A-Z0-9_]{2,80}");
   });
+
+  it("admits a mundane directory fact when a span directly states it", async () => {
+    const excerptText =
+      "Harbor Eats saw record weekend footfall near the marina promenade.";
+    const { transport, prompts } = transportFor([
+      {
+        text: candidateJson({
+          candidateKey: "harbor-eats-address-1",
+          claimKind: "location_detail",
+          paraphrase: "Harbor Eats sits near the marina promenade.",
+          quotation: excerptText,
+          claimCategory: "structural_context",
+          geographicLayer: "city",
+          geographyRef: "ae:du",
+          citations: [
+            {
+              sourceKey: "src-0-aabbccddeeff",
+              spanStart: 0,
+              spanEnd: excerptText.length,
+              quotedText: excerptText,
+            },
+          ],
+          observedAt: null,
+        }),
+        microsUsd: 140,
+      },
+    ]);
+
+    const result = await extractResearchClaims({
+      scope,
+      sources: [source()],
+      budget,
+      transport,
+      spender: spender(),
+      modelId: "gemini-fixture-1",
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      candidateKey: "harbor-eats-address-1",
+      claimKind: "location_detail",
+      claimCategory: "structural_context",
+    });
+    expect(prompts[0] ?? "").toContain("directory facts ARE wanted");
+  });
 });

@@ -226,6 +226,26 @@ const EXTRACTION_INSTRUCTIONS =
   "matching [a-z][a-z0-9_.-]{0,79}; publishedAt/observedAt are ISO datetimes " +
   "with offset or null; limitations are UPPER_SNAKE codes matching " +
   "[A-Z][A-Z0-9_]{2,80} or []. " +
+  "Ordinary verifiable directory facts ARE wanted when a span directly states " +
+  "them: address, hours, ratings, cuisines, features. Mundane-but-cited beats " +
+  "withheld. Example shape (illustrative offsets): " +
+  '[{"candidateKey":"harbor-eats-address","subjectKind":"market",' +
+  '"subjectRef":"harbor eats","claimKind":"location_detail",' +
+  '"paraphrase":"Harbor Eats is located at Marina Promenade, Dubai.",' +
+  '"quotation":"located at Marina Promenade, Dubai",' +
+  '"claimCategory":"structural_context","geographicLayer":"city",' +
+  '"geographyRef":"ae:du",' +
+  '"citations":[{"sourceKey":"src-0-aabbccddeeff","spanStart":12,"spanEnd":45,' +
+  '"quotedText":"located at Marina Promenade, Dubai"}],"publishedAt":null,' +
+  '"observedAt":null,"limitations":[]},' +
+  '{"candidateKey":"harbor-eats-rating","subjectKind":"market",' +
+  '"subjectRef":"harbor eats","claimKind":"rating_signal",' +
+  '"paraphrase":"Harbor Eats holds a 4.6 diner rating.",' +
+  '"quotation":"rated 4.6 by diners","claimCategory":"review_trend",' +
+  '"geographicLayer":"city","geographyRef":"ae:du",' +
+  '"citations":[{"sourceKey":"src-0-aabbccddeeff","spanStart":50,"spanEnd":71,' +
+  '"quotedText":"rated 4.6 by diners"}],"publishedAt":null,"observedAt":null,' +
+  '"limitations":[]}] ' +
   "Cite only the listed source keys. Never invent sources, offsets or dates.";
 
 function buildExtractionPrompt(
