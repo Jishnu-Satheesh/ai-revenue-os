@@ -21,6 +21,7 @@ import {
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
 import {
   fingerprintMonitoringScope,
+  MONITORING_UPDATE_TERMINAL_STAGES,
   startMonitoringUpdate,
 } from "@/modules/growth-intelligence/application/market-monitoring-update";
 import {
@@ -41,7 +42,10 @@ import { triggerMarketMonitoringUpdate } from "@/trigger/growth-intelligence";
  * POST starts research through the Slice 3 orchestration with the pinned
  * brief revision: an identical active scope joins existing progress instead
  * of duplicating paid work, and a changed scope during active work is
- * reported — never silently applied.
+ * reported — never silently applied. A pin whose update already settled
+ * terminal (failed, cancelled, or otherwise finished) is not joinable: the
+ * retry falls through to a fresh update, because the worker replays terminal
+ * updates without reworking and joining one could never retry honestly.
  */
 
 const listQuerySchema = z
@@ -454,8 +458,36 @@ export async function POST(
       : null;
     const brief = parsedDocument && parsedDocument.success ? parsedDocument.data : null;
     const pinnedToUpdateId = latestRevision?.pinned_to_update_id ?? null;
+    // A terminally settled pin is not joinable: retrying a failed,
+    // cancelled, or otherwise finished update must fall through to
+    // startMonitoringUpdate for a fresh update. The stage read is
+    // best-effort: a failed read or a missing row keeps today's join, so a
+    // transient failure never forks paid work.
+    let pinnedUpdateTerminal = false;
+    if (pinnedToUpdateId && latestRevision && !reportedRevisionIds.has(latestRevision.id)) {
+      try {
+        const stageResult = await context.supabase
+          .from("growth_intelligence_monitoring_updates")
+          .select("stage")
+          .eq("organization_id", organizationId)
+          .eq("update_id", pinnedToUpdateId)
+          .limit(1);
+        const stageRows = (stageResult as { data: unknown }).data;
+        const stage = Array.isArray(stageRows)
+          ? (stageRows[0] as { stage?: unknown } | undefined)?.stage
+          : undefined;
+        pinnedUpdateTerminal =
+          typeof stage === "string" &&
+          (MONITORING_UPDATE_TERMINAL_STAGES as readonly string[]).includes(stage);
+      } catch {
+        pinnedUpdateTerminal = false;
+      }
+    }
     const activeUpdateId =
-      pinnedToUpdateId && latestRevision && !reportedRevisionIds.has(latestRevision.id)
+      pinnedToUpdateId &&
+      latestRevision &&
+      !reportedRevisionIds.has(latestRevision.id) &&
+      !pinnedUpdateTerminal
         ? pinnedToUpdateId
         : null;
 
@@ -471,8 +503,9 @@ export async function POST(
         frequency,
       });
       if (sameScope) {
-        // Idempotent convergence: the retry joins the running update. A
-        // best-effort re-nudge assures delivery of work that lost its wake-up.
+        // Idempotent convergence: the retry joins the running (non-terminal)
+        // update. A best-effort re-nudge assures delivery of work that lost
+        // its wake-up.
         try {
           await triggerMarketMonitoringUpdate({
             organizationId,

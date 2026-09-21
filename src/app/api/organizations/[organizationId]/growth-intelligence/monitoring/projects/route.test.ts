@@ -515,6 +515,99 @@ describe("monitoring projects POST", () => {
     expect(body.start).toMatchObject({ outcome: "opened_progress", updateId: UPDATE });
   });
 
+  it("opens a fresh update instead of joining a terminally failed pin", async () => {
+    const withTitle = () => startBody({ title: TITLE });
+    const repository = repositoryFake({
+      listActiveProjects: vi.fn(async () => [projectSummary()]),
+    });
+    mocks.createProjects.mockImplementation(() => repository);
+    contextWith({
+      branches: [],
+      reports: [],
+      revisions: [
+        {
+          organization_id: ORGANIZATION,
+          id: REVISION_ROW,
+          project_id: PROJECT,
+          revision_number: 1,
+          document: briefDocument(),
+          pinned_to_update_id: UPDATE,
+          created_at: "2026-09-10T11:00:00.000Z",
+        },
+      ],
+      updates: [
+        {
+          organization_id: ORGANIZATION,
+          update_id: UPDATE,
+          stage: "research_failed",
+        },
+      ],
+    });
+
+    const response = await POST(
+      new Request("https://example.test/monitoring/projects", {
+        method: "POST",
+        headers: { "x-correlation-id": CORRELATION },
+        body: JSON.stringify(withTitle()),
+      }),
+      { params: Promise.resolve({ organizationId: ORGANIZATION }) },
+    );
+
+    // The dead pin is not joinable: the retry falls through to a fresh
+    // update (the worker would only replay the terminal row, never rework).
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { start: Record<string, unknown> };
+    expect(body.start).toMatchObject({ outcome: "started", projectId: PROJECT });
+    expect(body.start).not.toMatchObject({ outcome: "opened_progress" });
+    expect(mocks.triggerUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("still joins a running pinned update with the same scope", async () => {
+    const withTitle = () => startBody({ title: TITLE });
+    const repository = repositoryFake({
+      listActiveProjects: vi.fn(async () => [projectSummary()]),
+    });
+    mocks.createProjects.mockImplementation(() => repository);
+    contextWith({
+      branches: [],
+      reports: [],
+      revisions: [
+        {
+          organization_id: ORGANIZATION,
+          id: REVISION_ROW,
+          project_id: PROJECT,
+          revision_number: 1,
+          document: briefDocument(),
+          pinned_to_update_id: UPDATE,
+          created_at: "2026-09-10T11:00:00.000Z",
+        },
+      ],
+      updates: [
+        {
+          organization_id: ORGANIZATION,
+          update_id: UPDATE,
+          stage: "researching",
+        },
+      ],
+    });
+
+    const response = await POST(
+      new Request("https://example.test/monitoring/projects", {
+        method: "POST",
+        headers: { "x-correlation-id": CORRELATION },
+        body: JSON.stringify(withTitle()),
+      }),
+      { params: Promise.resolve({ organizationId: ORGANIZATION }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(repository.createProject).not.toHaveBeenCalled();
+    expect(repository.saveBriefRevision).not.toHaveBeenCalled();
+    expect(mocks.triggerUpdate).toHaveBeenCalledTimes(1);
+    const body = (await response.json()) as { start: Record<string, unknown> };
+    expect(body.start).toMatchObject({ outcome: "opened_progress", updateId: UPDATE });
+  });
+
   it("reports scope drift beside active progress without applying the new settings", async () => {
     const repository = repositoryFake({
       listActiveProjects: vi.fn(async () => [projectSummary()]),
