@@ -47,15 +47,17 @@ describe("Revenue snapshot Trigger registration", () => {
     // a second model call, and its outcome rides beside — never behind — the
     // snapshot outcome.
     expect(source).toContain("publishDueGrowthProjections");
-    expect(source).toContain("buildSnapshotGrowthCandidate");
+    expect(source).toContain("assembleLedgerBaselineCandidate");
     expect(source).toContain("candidateMaterial: result.candidateMaterial");
     // Schedule discovery uses the narrow worker-only origins adapter, not
     // the session read port whose projection-table SELECT is revoked for
     // the worker role; a throwing read stays a fail-closed skip. (The RPC
     // name itself is pinned in growth-projection-repository.test.ts, where
-    // the adapter calls it.)
+    // the adapter calls it.) Baseline facts read through the session read
+    // port instead: RLS plus the organization predicate scope every row, and
+    // the worker role holds explicit SELECT grants there.
     expect(source).toContain("createGrowthScheduleRepository");
-    expect(source).not.toContain("createGrowthProgressRepository");
+    expect(source).toContain("createGrowthProgressRepository");
     expect(source).toContain("growthPublication");
     expect(source).toContain("revenue.growth_projection_publish_failed");
     // One shared instant feeds both phases so a midnight straddle cannot

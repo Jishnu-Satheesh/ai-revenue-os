@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { FrozenGrowthProjection } from "@/domain/organizations/growth-progress";
 import type { RevenueScenarioInput } from "@/domain/organizations/revenue-scenario";
 import {
-  buildSnapshotGrowthCandidate,
   publishDueGrowthProjections,
   type GrowthCandidateBuildContext,
   type GrowthProjectionPublisherDependencies,
@@ -429,20 +428,5 @@ describe("publishDueGrowthProjections idempotency", () => {
       status: "failed",
       reasonCode: "PUBLISH_FAILED",
     });
-  });
-});
-
-describe("buildSnapshotGrowthCandidate", () => {
-  it("refuses honestly until ledger-bound baseline inputs arrive", () => {
-    const refused = buildSnapshotGrowthCandidate(material().input, {
-      organizationId: ORG_ID,
-      scheduleOriginDate: "2026-09-18",
-      horizonMonths: 1,
-      cycleIndex: 0,
-      issuedAt: NOW_ISO,
-      sourceCutoffDate: "2026-09-17",
-      timeZone: "Asia/Dubai",
-    });
-    expect(refused).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
   });
 });

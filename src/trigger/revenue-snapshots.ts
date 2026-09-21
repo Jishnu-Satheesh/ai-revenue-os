@@ -13,11 +13,8 @@ import {
   isOverviewGrowthProgressEnabled,
   parseOverviewGrowthProgressOrganizationIds,
 } from "@/modules/organizations/application/growth-progress-access";
-import {
-  buildSnapshotGrowthCandidate,
-  publishDueGrowthProjections,
-} from "@/modules/organizations/application/growth-projection-publisher";
-import {
+import { assembleLedgerBaselineCandidate } from "@/modules/organizations/application/growth-candidate-assembly";
+import { publishDueGrowthProjections } from "@/modules/organizations/application/growth-projection-publisher";import {
   mergeSnapshotDispatchCandidates,
   runRevenueSnapshotBuild,
   selectDueSnapshotOrgs,
@@ -28,6 +25,11 @@ import {
   createGrowthProjectionRepository,
   createGrowthScheduleRepository,
 } from "@/modules/organizations/infrastructure/growth-projection-repository";
+import {
+  createGrowthProgressRepository,
+  listBaselineCoordinates,
+  resolveGrowthRevenueDefinitionId,
+} from "@/modules/organizations/infrastructure/growth-progress-repository";
 import {
   createRevenueProposalProvider,
   REVENUE_PROPOSAL_MAX_ACTIONS,
@@ -226,7 +228,15 @@ export const revenueSnapshotsBuildOrgTask = schemaTask({
             return { status: "unavailable", reasonCode: "SCHEDULE_READ_FAILED" as const };
           }
         },
-        buildCandidate: (material, context) => buildSnapshotGrowthCandidate(material, context),
+        buildCandidate: (material, context) =>
+          assembleLedgerBaselineCandidate(material, context, {
+            resolveRevenueDefinitionId: (organizationId) =>
+              resolveGrowthRevenueDefinitionId(supabase, organizationId),
+            listBaselineCoordinates: (coordinateInput) =>
+              listBaselineCoordinates(supabase, coordinateInput),
+            readBaselineFacts: (factInput) =>
+              createGrowthProgressRepository(supabase).readRevenueFacts(factInput),
+          }),
         publish: (publishInput) => createGrowthProjectionRepository(supabase).publish(publishInput),
       },
     );

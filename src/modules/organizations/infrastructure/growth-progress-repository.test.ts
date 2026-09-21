@@ -881,3 +881,113 @@ describe("growth-progress repository", () => {
     expect(failedResult).toEqual({ status: "failed", reason: "SOURCE_READ_FAILED" });
   });
 });
+
+describe("resolveGrowthRevenueDefinitionId", () => {
+  it("returns the effective definition id", async () => {
+    const { resolveGrowthRevenueDefinitionId } = await import(
+      "@/modules/organizations/infrastructure/growth-progress-repository"
+    );
+    const { client } = fakeClient((steps) =>
+      steps.table === "metric_definitions"
+        ? { data: registryRows(), error: null }
+        : { data: [], error: null },
+    );
+    await expect(resolveGrowthRevenueDefinitionId(client, ORG)).resolves.toBe(DEF);
+  });
+
+  it("returns null when no active definition applies", async () => {
+    const { resolveGrowthRevenueDefinitionId } = await import(
+      "@/modules/organizations/infrastructure/growth-progress-repository"
+    );
+    const { client } = fakeClient(() => ({ data: [], error: null }));
+    await expect(resolveGrowthRevenueDefinitionId(client, ORG)).resolves.toBeNull();
+  });
+
+  it("returns null on transport trouble instead of throwing", async () => {
+    const { resolveGrowthRevenueDefinitionId } = await import(
+      "@/modules/organizations/infrastructure/growth-progress-repository"
+    );
+    const { client } = fakeClient(() => ({ data: null, error: { code: "XX000" } }));
+    await expect(resolveGrowthRevenueDefinitionId(client, ORG)).resolves.toBeNull();
+  });
+});
+
+describe("listBaselineCoordinates", () => {
+  const CHANNEL = "33333333-3333-4333-8333-333333333333";
+  const BRANCH = "44444444-4444-4444-8444-444444444444";
+
+  function coordRows() {
+    return [
+      // Org-level Dubai row inside the window.
+      {
+        channel_id: null,
+        branch_id: null,
+        period_start: "2026-07-31T20:00:00.000Z",
+        period_timezone: "Asia/Dubai",
+      },
+      // Same coordinate twice: deduped, across both ledgers below.
+      {
+        channel_id: CHANNEL,
+        branch_id: null,
+        period_start: "2026-08-05T20:00:00.000Z",
+        period_timezone: "Asia/Dubai",
+      },
+      // Neighbor day and foreign timezone: never coordinates.
+      {
+        channel_id: CHANNEL,
+        branch_id: BRANCH,
+        period_start: "2026-09-01T20:00:00.000Z",
+        period_timezone: "Asia/Dubai",
+      },
+      {
+        channel_id: CHANNEL,
+        branch_id: null,
+        period_start: "2026-08-05T04:00:00.000Z",
+        period_timezone: "UTC",
+      },
+    ];
+  }
+
+  it("mirrors the window's own coordinates across both ledgers", async () => {
+    const { listBaselineCoordinates } = await import(
+      "@/modules/organizations/infrastructure/growth-progress-repository"
+    );
+    const { client } = fakeClient((steps) => {
+      if (
+        steps.table === "normalized_metrics" ||
+        steps.table === "exact_range_metric_observations"
+      ) {
+        return { data: coordRows(), error: null };
+      }
+      return { data: [], error: null };
+    });
+    await expect(
+      listBaselineCoordinates(client, {
+        organizationId: ORG,
+        metricDefinitionId: DEF,
+        from: "2026-08-01",
+        toExclusive: "2026-09-01",
+        periodTimezone: "Asia/Dubai",
+      }),
+    ).resolves.toEqual([
+      { channelId: null, branchId: null },
+      { channelId: CHANNEL, branchId: null },
+    ]);
+  });
+
+  it("throws on transport trouble so the assembly refuses", async () => {
+    const { listBaselineCoordinates } = await import(
+      "@/modules/organizations/infrastructure/growth-progress-repository"
+    );
+    const { client } = fakeClient(() => ({ data: null, error: { code: "XX000" } }));
+    await expect(
+      listBaselineCoordinates(client, {
+        organizationId: ORG,
+        metricDefinitionId: DEF,
+        from: "2026-08-01",
+        toExclusive: "2026-09-01",
+        periodTimezone: "Asia/Dubai",
+      }),
+    ).rejects.toThrow(/coordinates could not be read/);
+  });
+});

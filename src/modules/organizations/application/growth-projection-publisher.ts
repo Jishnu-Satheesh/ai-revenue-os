@@ -178,28 +178,6 @@ function skippedAll(
   };
 }
 
-/**
- * Default candidate step over the snapshot material. The snapshot union
- * input carries month totals and applied ranges but no ledger-bound scope
- * partitions or baseline facts — and a frozen baseline without that proof
- * is never stated. Until the populate-vs-amend lineage decision (owed
- * before Task 5) brings bound inputs to this boundary, every due horizon
- * skips with its reason intact rather than publishing a guessed curve.
- */
-export function buildSnapshotGrowthCandidate(
-  _material: RevenueScenarioInput,
-  _context: GrowthCandidateBuildContext,
-): BuildGrowthProjectionCandidateResult {
-  void _material;
-  void _context;
-  return {
-    status: "refused",
-    reason: "BASELINE_INCOMPLETE",
-    detail:
-      "The nightly snapshot material carries no ledger-bound baseline facts, so no frozen baseline is stated.",
-  };
-}
-
 export async function publishDueGrowthProjections(
   input: PublishDueGrowthProjectionsInput,
   dependencies: GrowthProjectionPublisherDependencies,

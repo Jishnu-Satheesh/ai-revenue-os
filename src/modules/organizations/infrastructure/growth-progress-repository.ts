@@ -226,6 +226,93 @@ async function resolveRevenueDefinition(
   return { definitionId: effective.id };
 }
 
+/**
+ * Narrow read for the nightly candidate assembly: the revenue definition id
+ * binding an organization's baseline scope, or null when no active
+ * money-kind sum definition applies. Read-only; transport trouble reads as
+ * absent and the assembly refuses rather than guessing.
+ */
+export async function resolveGrowthRevenueDefinitionId(
+  supabase: SessionClient,
+  organizationId: string,
+): Promise<string | null> {
+  const registry = await resolveRevenueDefinition(supabase, organizationId);
+  if ("failed" in registry || "none" in registry) return null;
+  return registry.definitionId;
+}
+
+/** One reporting coordinate in a baseline window: nulls mark org-level rows. */
+export type BaselineCoordinate = {
+  channelId: string | null;
+  branchId: string | null;
+};
+
+/**
+ * Distinct revenue coordinates reporting inside a window, for the worker's
+ * evidence-populated scope: the frozen scope mirrors what actually reported
+ * (per channel/branch, plus org-level rows when present) instead of an
+ * asserted shape that matches nothing. Bounds are widened like the fact
+ * read; each row is pinned to its calendar day in the window timezone
+ * client-side so a neighbor day never smuggles a coordinate in. Throws on
+ * transport trouble and the assembly refuses.
+ */
+export async function listBaselineCoordinates(
+  supabase: SessionClient,
+  input: {
+    organizationId: string;
+    metricDefinitionId: string;
+    from: string;
+    toExclusive: string;
+    periodTimezone: string;
+  },
+): Promise<BaselineCoordinate[]> {
+  const seen = new Map<string, BaselineCoordinate>();
+  // Widened like the fact read: a local-midnight instant sits up to a day
+  // off UTC midnight, and the calendar-day pin below decides membership.
+  const fetchStart = new Date(Date.parse(`${input.from}T00:00:00Z`) - 2 * MS_PER_DAY).toISOString();
+  const fetchEndExclusive = new Date(
+    Date.parse(`${input.toExclusive}T00:00:00Z`) + 2 * MS_PER_DAY,
+  ).toISOString();
+  for (const table of ["normalized_metrics", "exact_range_metric_observations"] as const) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("channel_id,branch_id,period_start,period_timezone")
+      .eq("organization_id", input.organizationId)
+      .eq("metric_definition_id", input.metricDefinitionId)
+      .gte("period_start", fetchStart)
+      .lt("period_start", fetchEndExclusive)
+      .limit(2000);
+    if (error || !data) {
+      throw new Error(`Baseline coordinates could not be read from ${table}.`);
+    }
+    for (const row of data as unknown as Array<{
+      channel_id: string | null;
+      branch_id: string | null;
+      period_start: string;
+      period_timezone: string;
+    }>) {
+      if (row.period_timezone !== input.periodTimezone) continue;
+      let day: string;
+      try {
+        day = toCalendarDate(new Date(row.period_start), row.period_timezone);
+      } catch {
+        continue;
+      }
+      if (day < input.from || day >= input.toExclusive) continue;
+      const key = `${row.channel_id ?? "-"}|${row.branch_id ?? "-"}`;
+      if (!seen.has(key)) {
+        seen.set(key, { channelId: row.channel_id, branchId: row.branch_id });
+      }
+    }
+  }
+  return [...seen.values()].sort((left, right) =>
+    `${left.channelId ?? "-"}|${left.branchId ?? "-"}` <
+    `${right.channelId ?? "-"}|${right.branchId ?? "-"}`
+      ? -1
+      : 1,
+  );
+}
+
 async function verifyScopeTenancy(
   supabase: SessionClient,
   organizationId: string,
