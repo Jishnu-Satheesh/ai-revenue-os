@@ -77,6 +77,47 @@ did a redundant double-settle (`requests.fail` then `failPipeline`).
   `src/trigger/growth-intelligence.ts`,
   `src/workflows/growth-intelligence/run-market-research.test.ts`, this report.
 
+## Follow-up: lane snapshot on the failed run output
+
+- The event-payload diagnostics are invisible: `createEventPublisher` only
+  logs identifiers and drops payloads with no log-fetch channel. The same
+  snapshot now rides the failed run output, which the Trigger run preserves
+  where the controller can read it.
+- `MarketResearchResult` failed shape gains optional `lane: { keyPresent;
+  gateOpen; available; provider }`; `failRun` (bound + legacy) populates it
+  from the existing supplier + adapter availability. Event fields stay.
+  `failRequest`, success, and terminal shapes untouched; no behavior, code,
+  DB, or key changes.
+- Tests: 45/45 in `run-market-research.test.ts` (2 new: failed output carries
+  supplied lane; completed has no `lane`, cancelled exact), 20/20 evidence
+  repo, 31/31 trigger wiring. `tsc` clean, `eslint` 0 errors.
+- Files: `src/workflows/growth-intelligence/run-market-research.ts`,
+  `src/workflows/growth-intelligence/run-market-research.test.ts`, this report.
+
+## Fix round 2/5: suite-only RLS rework (PASS 34/34)
+
+- Live defect: the suite died at once with `permission denied for table
+  market_research_runs`. The table forces RLS even for the owner and grants
+  SELECT only to authenticated — direct INSERTs/SELECTs are impossible for
+  every available role, so both run-row fixture INSERTs could never run.
+- Fix (suite only, no production code): run rows are now created only through
+  the governed RPCs like the worker — claim replays on the fixture token,
+  `begin_market_research_run` opens the run with valid metadata, the run id
+  is read back via definer-owned `pg_temp.fail_run_*` helpers (same pattern
+  as the pipeline handoff suite). The pre-failed run is driven to failed
+  through the new 8-arg RPC itself.
+- One assertion changed for a logic reason (test was wrong, migration is
+  right): a queued-pipeline + terminal-run state is unbuildable through
+  governed paths — the legacy fail refuses bound requests, rebinding is
+  blocked by the request-identity trigger, and the new RPC settles
+  atomically — so the `23505` conflict branch is defensive-only. The
+  divergent-cost redelivery now asserts convergence (`replayed:true`, first
+  run costs stand), matching the preserved terminal-pipeline behavior.
+- Plan 33 -> 34, verified by execution (not construction):
+  `node scripts/run-pgtap.mjs ...pipeline_fail_test.sql` ->
+  `--- PASS: 0 failing assertion(s)` (1..34, all ok) against staging.
+- Files: only `supabase/tests/database/growth_intelligence_research_pipeline_fail_test.sql`.
+
 ## Pending-push items (do NOT run before push)
 - Push `20260920153000` to staging, then run the pgTAP file: pre-push it
   fails at `has_function` 8-arg + every 8-arg call (`function does not

@@ -601,7 +601,12 @@ describe("runMarketResearch fail-closed adapter", () => {
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_UNAVAILABLE", runId });
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "ADAPTER_UNAVAILABLE",
+      runId,
+      lane: { keyPresent: false, gateOpen: false, available: false, provider: "exa" },
+    });
     expect(deps.evidence.begin).toHaveBeenCalledOnce();
     expect(deps.evidence.fail).toHaveBeenCalledWith({
       organizationId,
@@ -664,7 +669,12 @@ describe("runMarketResearch fail-closed adapter", () => {
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_UNAVAILABLE", runId });
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "ADAPTER_UNAVAILABLE",
+      runId,
+      lane: { keyPresent: true, gateOpen: true, available: false, provider: "tinyfish" },
+    });
     expect(deps.events.publish).toHaveBeenCalledWith(
       expect.objectContaining({
         eventName: "market_research.failed",
@@ -706,6 +716,43 @@ describe("runMarketResearch fail-closed adapter", () => {
     );
   });
 
+  it("carries the lane snapshot on the failed run output where the controller can read it", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: false, provider: "brave" },
+        searchAndFetch: vi.fn(async () => {
+          throw new Error("Market research is not enabled for this organization.");
+        }),
+      },
+      laneDiagnostics: () => ({ keyPresent: true, gateOpen: false }),
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "ADAPTER_UNAVAILABLE",
+      runId,
+      lane: { keyPresent: true, gateOpen: false, available: false, provider: "brave" },
+    });
+  });
+
+  it("leaves success and terminal shapes without a lane key", async () => {
+    const completed = await runMarketResearch(payload, dependencies());
+    expect(completed.outcome).toBe("completed");
+    expect(completed).not.toHaveProperty("lane");
+
+    const lost = await runMarketResearch(payload, {
+      ...dependencies(),
+      signal: (() => {
+        const controller = new AbortController();
+        controller.abort();
+        return controller.signal;
+      })(),
+    });
+    expect(lost).toEqual({ outcome: "cancelled" });
+  });
+
   it("settles a bound run, request and pipeline with one pipeline RPC instead of the forbidden run-level fail", async () => {
     const pipelineId = "50000000-0000-4000-8000-000000000005";
     const deps = dependencies({
@@ -720,7 +767,12 @@ describe("runMarketResearch fail-closed adapter", () => {
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_UNAVAILABLE", runId });
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "ADAPTER_UNAVAILABLE",
+      runId,
+      lane: { keyPresent: false, gateOpen: false, available: false, provider: "exa" },
+    });
     expect(deps.evidence.begin).toHaveBeenCalledOnce();
     expect(deps.evidence.fail).not.toHaveBeenCalled();
     expect(deps.requests.fail).not.toHaveBeenCalled();
@@ -764,7 +816,12 @@ describe("runMarketResearch fail-closed adapter", () => {
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_UNAVAILABLE", runId });
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "ADAPTER_UNAVAILABLE",
+      runId,
+      lane: { keyPresent: false, gateOpen: false, available: false, provider: "exa" },
+    });
     expect(deps.evidence.fail).not.toHaveBeenCalled();
     expect(deps.requests.fail).not.toHaveBeenCalled();
     expect(deps.evidence.failPipeline).toHaveBeenCalledOnce();
@@ -1122,7 +1179,12 @@ describe("runMarketResearch extraction and admission", () => {
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toEqual({ outcome: "failed", code: "EVIDENCE_RECORD_INVALID", runId });
+    expect(result).toEqual({
+      outcome: "failed",
+      code: "EVIDENCE_RECORD_INVALID",
+      runId,
+      lane: { keyPresent: false, gateOpen: false, available: true, provider: "test-adapter" },
+    });
     expect(deps.evidence.record).not.toHaveBeenCalled();
   });
 });

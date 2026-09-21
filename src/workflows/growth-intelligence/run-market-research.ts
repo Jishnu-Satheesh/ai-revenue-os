@@ -279,6 +279,22 @@ export type MarketResearchDependencies = {
   signal?: AbortSignal;
 };
 
+/**
+ * TinyFish lane snapshot carried on the failed run output.
+ *
+ * The failure event payload already carries these fields, but the event
+ * publisher only logs identifiers and drops payloads with no log-fetch
+ * channel — so the same snapshot rides the failed result, which the Trigger
+ * run output preserves where the controller can read it. Booleans and the
+ * short provider id only; the key itself never travels.
+ */
+export type MarketResearchLane = {
+  keyPresent: boolean;
+  gateOpen: boolean;
+  available: boolean;
+  provider: string;
+};
+
 export type MarketResearchResult =
   | {
       outcome: "completed" | "partial";
@@ -292,7 +308,7 @@ export type MarketResearchResult =
       unknownUsageCount: number;
       reassessmentEnqueued: boolean;
     }
-  | { outcome: "failed"; code: string; runId: string | null }
+  | { outcome: "failed"; code: string; runId: string | null; lane?: MarketResearchLane }
   | { outcome: "not_acquired"; claimOutcome: string }
   | { outcome: "claim_lost" }
   | { outcome: "cancelled" };
@@ -613,13 +629,21 @@ export async function runMarketResearch(
     //
     // Lane diagnostics ride the failure event so the next canary carries its
     // own lane inputs: the blocked-adapter mystery cost hours because the
-    // worker-side key/gate state was invisible from outside.
+    // worker-side key/gate state was invisible from outside. The event
+    // publisher drops payloads, so the same snapshot also rides the failed
+    // result, which the Trigger run output preserves where it can be read.
     const lane = dependencies.laneDiagnostics?.() ?? { keyPresent: false, gateOpen: false };
     const laneDiagnostics = {
       laneKeyPresent: lane.keyPresent,
       laneGateOpen: lane.gateOpen,
       laneAvailable: adapter.availability.available,
       laneProvider: adapter.availability.provider,
+    };
+    const laneResult: MarketResearchLane = {
+      keyPresent: lane.keyPresent,
+      gateOpen: lane.gateOpen,
+      available: adapter.availability.available,
+      provider: adapter.availability.provider,
     };
     const boundPipelineId = request.pipelineId ?? null;
     if (boundPipelineId !== null) {
@@ -653,7 +677,7 @@ export async function runMarketResearch(
           ...laneDiagnostics,
         },
       });
-      return { outcome: "failed", code, runId: begun.runId };
+      return { outcome: "failed", code, runId: begun.runId, lane: laneResult };
     }
     try {
       await dependencies.evidence.fail({
@@ -694,7 +718,7 @@ export async function runMarketResearch(
         ...laneDiagnostics,
       },
     });
-    return { outcome: "failed", code, runId: begun.runId };
+    return { outcome: "failed", code, runId: begun.runId, lane: laneResult };
   };
 
   if (!adapter.availability.available) return failRun("ADAPTER_UNAVAILABLE");
