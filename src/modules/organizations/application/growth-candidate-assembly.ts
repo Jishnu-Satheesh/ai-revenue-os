@@ -1,12 +1,11 @@
 import {
-  organizationLocalDate,
   resolveGrowthPeriod,
 } from "@/domain/organizations/growth-periods";
 import type { ScopePartition } from "@/domain/organizations/growth-progress";
 import type { RevenueScenarioInput } from "@/domain/organizations/revenue-scenario";
 import {
   buildGrowthProjectionCandidate,
-  resolvePriorCalendarMonthWindow,
+  resolveTrailingBaselineWindow,
   type BuildGrowthProjectionCandidateResult,
 } from "@/modules/organizations/application/growth-projection-builder";
 import type { GrowthCandidateBuildContext } from "@/modules/organizations/application/growth-projection-publisher";
@@ -18,10 +17,11 @@ import type { RevenueFactsEnvelope } from "@/modules/organizations/application/g
  *
  * Like developing a photo from its negative: the frozen scope is derived
  * from the organization's own revenue vocabulary, the baseline is the
- * complete prior calendar month proven by exact cover over ledger facts,
- * and the curve carries no action money until cited findings bind it — an
- * unproven month refuses instead of guessing. The snapshot material rides
- * along for future finding/action bindings but contributes nothing today.
+ * trailing reported window ending at the source cutoff (the observed daily
+ * mean over reported days, scaled to a standard month), and the curve
+ * carries no action money until cited findings bind it — an unproven window
+ * refuses instead of guessing. The snapshot material rides along for future
+ * finding/action bindings but contributes nothing today.
  *
  * Pure orchestration with injected boundaries: same inputs always give the
  * same result. No database, clock, model or network is touched, so every
@@ -72,19 +72,18 @@ export async function assembleLedgerBaselineCandidate(
     );
   }
 
-  let issueLocalDate: string;
-  try {
-    issueLocalDate = organizationLocalDate(context.issuedAt, context.timeZone);
-  } catch {
-    return refused("INVALID_INPUT", "The organization timezone is not usable.");
-  }
   // Populate path: the frozen scope mirrors the baseline window's own
   // reporting coordinates (per channel/branch, plus org-level rows when
   // present) instead of an asserted shape that matches nothing. An asserted
   // org-total would refuse every real organization forever: ledger rows live
   // under channels. The frozen document records exactly what froze, so the
-  // scope stays checkable even as it varies month to month.
-  const baselineWindow = resolvePriorCalendarMonthWindow(issueLocalDate);
+  // scope stays checkable even as it varies run to run.
+  let baselineWindow: { startDate: string; endDateExclusive: string };
+  try {
+    baselineWindow = resolveTrailingBaselineWindow(context.sourceCutoffDate);
+  } catch {
+    return refused("INVALID_INPUT", "The source cutoff cannot place the baseline window.");
+  }
 
   let coordinates: Array<{ channelId: string | null; branchId: string | null }>;
   try {
@@ -99,7 +98,7 @@ export async function assembleLedgerBaselineCandidate(
     return refused("BASELINE_INCOMPLETE", "Baseline coordinates could not be read.");
   }
   if (coordinates.length === 0) {
-    return refused("BASELINE_INCOMPLETE", "Nothing reported in the baseline month.");
+    return refused("BASELINE_INCOMPLETE", "Nothing reported in the trailing baseline window.");
   }
   const scopePartitions: ScopePartition[] = coordinates.map((coordinate) => ({
     partitionKey:
@@ -144,7 +143,7 @@ export async function assembleLedgerBaselineCandidate(
   }
   const facts = envelope.facts;
   if (facts.length === 0) {
-    return refused("BASELINE_INCOMPLETE", "The baseline month carries no ledger facts.");
+    return refused("BASELINE_INCOMPLETE", "The trailing window carries no ledger facts.");
   }
   const currencies = new Set(facts.map((fact) => fact.currency));
   if (currencies.size !== 1) {

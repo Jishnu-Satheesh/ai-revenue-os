@@ -4,7 +4,8 @@ import {
   BASELINE_ONLY_LIMITATION,
   buildGrowthProjectionCandidate,
   GROWTH_BASELINE_MAX_AGE_DAYS,
-  resolvePriorCalendarMonthWindow,
+  GROWTH_BASELINE_MIN_REPORTED_DAYS,
+  resolveTrailingBaselineWindow,
   type BuildGrowthProjectionCandidateInput,
 } from "@/modules/organizations/application/growth-projection-builder";
 import { frozenGrowthProjectionSchema } from "@/domain/organizations/growth-progress";
@@ -13,10 +14,11 @@ import type { RevenueFact } from "@/domain/organizations/growth-progress";
 /**
  * Candidate documents for the fixed-projection worker (data contract D03).
  *
- * Like checking a month's shop ledger before writing next month's rota: the
- * rota only exists when the whole prior month is counted, counted once, and
- * fresh enough to trust — otherwise the answer is a typed refusal, never a
- * guessed rota.
+ * Like estimating a shop's monthly pace from its recent till receipts: the
+ * estimate only exists when enough recent days actually reported, each day is
+ * counted exactly once, and the freshest receipt is new enough to trust.
+ * Missing days are left out and named — never zero-filled, never invented —
+ * otherwise the answer is a typed refusal, never a guessed figure.
  */
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -108,43 +110,48 @@ function qualifiedInputs(): Pick<
   };
 }
 
-describe("resolvePriorCalendarMonthWindow", () => {
-  it("names the calendar month before the issue date", () => {
-    expect(resolvePriorCalendarMonthWindow("2030-01-15")).toEqual({
-      startDate: "2029-12-01",
+describe("resolveTrailingBaselineWindow", () => {
+  it("names the 30 local days ending at the source cutoff", () => {
+    expect(resolveTrailingBaselineWindow("2029-12-31")).toEqual({
+      startDate: "2029-12-02",
       endDateExclusive: "2030-01-01",
     });
-    expect(resolvePriorCalendarMonthWindow("2030-03-01")).toEqual({
-      startDate: "2030-02-01",
-      endDateExclusive: "2030-03-01",
+    expect(resolveTrailingBaselineWindow("2030-03-01")).toEqual({
+      startDate: "2030-01-31",
+      endDateExclusive: "2030-03-02",
     });
   });
 
-  it("pins the 45-day freshness bound as a named constant", () => {
+  it("pins the freshness and minimum-day floors as named constants", () => {
     expect(GROWTH_BASELINE_MAX_AGE_DAYS).toBe(45);
+    expect(GROWTH_BASELINE_MIN_REPORTED_DAYS).toBe(7);
   });
 });
 
 describe("buildGrowthProjectionCandidate", () => {
-  it("builds a ready document from a complete prior month", () => {
+  it("builds a ready document scaled from the trailing reported days", () => {
     const result = buildGrowthProjectionCandidate(baseInput(qualifiedInputs()));
     if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
     const parsed = frozenGrowthProjectionSchema.safeParse(result.document);
     expect(parsed.success).toBe(true);
     expect(result.document.metricKey).toBe("revenue.gross");
-    expect(result.document.monthlyLowMinor).toBe(3_100_000 + 50_000);
-    expect(result.document.monthlyHighMinor).toBe(3_100_000 + 100_000);
+    // 31 reported days at 100k: the mean scales to a 30-day month of 3M.
+    expect(result.document.monthlyLowMinor).toBe(3_000_000 + 50_000);
+    expect(result.document.monthlyHighMinor).toBe(3_000_000 + 100_000);
     // 31-day horizon: anchor plus one point per day, final day exact.
     expect(result.document.points).toHaveLength(32);
     const final = result.document.points[31]!;
     expect(final.date).toBe("2030-01-31");
-    expect(final.lowMinor).toBe(3_150_000);
-    expect(final.highMinor).toBe(3_200_000);
+    expect(final.lowMinor).toBe(3_050_000);
+    expect(final.highMinor).toBe(3_100_000);
     expect(result.document.actionAssumptions).toHaveLength(1);
     expect(result.document.limitations.join(" ")).not.toContain(BASELINE_ONLY_LIMITATION);
+    expect(result.document.limitations.join(" ")).toContain(
+      "Baseline from 31 reported days (ending 2029-12-31)",
+    );
   });
 
-  it("labels the history month from the window, never from an arbitrary bucket", () => {
+  it("labels the history from the latest reported day, never from an arbitrary bucket", () => {
     const stray: RevenueFact = {
       sourceTable: "normalized_metrics",
       rowId: "stray-nov",
@@ -162,15 +169,15 @@ describe("buildGrowthProjectionCandidate", () => {
     );
     if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
     // The stray November day is outside the window, so the total is unchanged
-    // and the label stays the window month rather than anything the stray implies.
-    expect(result.document.monthlyLowMinor).toBe(3_150_000);
+    // and the label stays the latest reported day rather than anything the stray implies.
+    expect(result.document.monthlyLowMinor).toBe(3_050_000);
     expect(result.document.baselineWindow).toEqual({
       startDate: "2029-12-01",
       endDateExclusive: "2030-01-01",
     });
   });
 
-  it("treats an equivalent coarse span as one value, not a double count", () => {
+  it("prefers the daily cover over an equivalent coarse span, never adding both", () => {
     const span: RevenueFact = {
       sourceTable: "exact_range_metric_observations",
       rowId: "span-dec",
@@ -187,17 +194,11 @@ describe("buildGrowthProjectionCandidate", () => {
       baseInput({ baselineFacts: [...dailyDecemberFacts(), span] }),
     );
     if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
-    expect(result.document.monthlyLowMinor).toBe(3_100_000);
-    expect(result.document.monthlyHighMinor).toBe(3_100_000);
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    expect(result.document.monthlyHighMinor).toBe(3_000_000);
   });
 
-  it("refuses a gapped baseline instead of inventing the missing days", () => {
-    const facts = dailyDecemberFacts().filter((fact) => fact.rowId !== "day-10");
-    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: facts }));
-    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
-  });
-
-  it("refuses a conflicting baseline instead of picking a winner", () => {
+  it("prefers the daily cover when a coarse span disagrees with it", () => {
     const span: RevenueFact = {
       sourceTable: "exact_range_metric_observations",
       rowId: "span-wrong",
@@ -213,24 +214,102 @@ describe("buildGrowthProjectionCandidate", () => {
     const result = buildGrowthProjectionCandidate(
       baseInput({ baselineFacts: [...dailyDecemberFacts(), span] }),
     );
-    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
   });
 
-  it("refuses a foreign-currency baseline instead of converting it", () => {
-    const facts = dailyDecemberFacts().map((fact, index) =>
-      index === 0 ? { ...fact, currency: "USD" } : fact,
+  it("scales a gapped window from its reported days instead of refusing it", () => {
+    const facts = dailyDecemberFacts().filter((fact) => fact.rowId !== "day-10");
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: facts }));
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // 30 reported days at 100k scale to the same 3M pace; the gap is named.
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    expect(result.document.limitations.join(" ")).toContain(
+      "Baseline from 30 reported days (ending 2029-12-31)",
     );
+  });
+
+  it("refuses fewer than 7 reported days instead of guessing from a sliver", () => {
+    const facts = dailyDecemberFacts().slice(0, 6);
     const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: facts }));
     expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
   });
 
-  it("refuses a non-calendar-month window instead of blessing an arbitrary bucket", () => {
+  it("spreads one weekly span over its own reported days, never inventing money", () => {
+    const weeks: RevenueFact[] = [];
+    const starts = ["2029-12-02", "2029-12-09", "2029-12-16", "2029-12-23"];
+    for (const [index, start] of starts.entries()) {
+      const end =
+        index === 3 ? "2029-12-30" : `2029-12-${String(Number(start.slice(8, 10)) + 7).padStart(2, "0")}`;
+      weeks.push({
+        sourceTable: "exact_range_metric_observations",
+        rowId: `week-${index}`,
+        organizationId: ORG,
+        partitionKey: "pk-1",
+        startDate: start,
+        endDateExclusive: end,
+        amountMinor: 700_000,
+        currency: "AED",
+        createdAt: "2029-12-15T00:00:00Z",
+        reconciliationDigest: `digest-week-${index}`,
+      });
+    }
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: weeks }));
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // 28 reported days at exactly 100k/day scale to the same 3M monthly pace
+    // as daily grain would: the mean is honest about what reported.
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    expect(result.document.limitations.join(" ")).toContain(
+      "Baseline from 28 reported days (ending 2029-12-29)",
+    );
+  });
+
+  it("refuses disagreeing spans instead of picking a winner", () => {
+    const spans = [3_100_000, 3_100_001].map(
+      (amountMinor, index): RevenueFact => ({
+        sourceTable: "exact_range_metric_observations",
+        rowId: `span-${index}`,
+        organizationId: ORG,
+        partitionKey: "pk-1",
+        startDate: "2029-12-01",
+        endDateExclusive: "2030-01-01",
+        amountMinor,
+        currency: "AED",
+        createdAt: "2029-12-15T00:00:00Z",
+        reconciliationDigest: `digest-span-${index}`,
+      }),
+    );
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: spans }));
+    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+  });
+
+  it("excludes one foreign-currency day instead of converting it", () => {
+    const facts = dailyDecemberFacts().map((fact, index) =>
+      index === 0 ? { ...fact, currency: "USD" } : fact,
+    );
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: facts }));
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    expect(result.document.limitations.join(" ")).toContain("Baseline from 30 reported days");
+  });
+
+  it("refuses an all-foreign-currency window instead of converting it", () => {
+    const facts = dailyDecemberFacts().map((fact) => ({ ...fact, currency: "USD" }));
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: facts }));
+    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+  });
+
+  it("accepts a partial trailing window scaled from its reported days", () => {
     const result = buildGrowthProjectionCandidate(
       baseInput({
         baselineWindow: { startDate: "2029-12-05", endDateExclusive: "2030-01-01" },
       }),
     );
-    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // 27 reported days at 100k scale to the same 3M pace; the window is a
+    // trailing slice, never a blessed calendar month.
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    expect(result.document.limitations.join(" ")).toContain("Baseline from 27 reported days");
   });
 
   it("refuses a baseline overlapping the projection period", () => {
@@ -243,7 +322,7 @@ describe("buildGrowthProjectionCandidate", () => {
     expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
   });
 
-  it("accepts a 45-day-old baseline and refuses a 46-day-old one", () => {
+  it("accepts a 45-day-old latest report and refuses a 46-day-old one", () => {
     const januaryFacts: RevenueFact[] = [];
     for (let day = 1; day <= 31; day += 1) {
       const start = `2030-01-${String(day).padStart(2, "0")}`;
@@ -270,13 +349,14 @@ describe("buildGrowthProjectionCandidate", () => {
         endDateExclusive: "2030-07-01",
       },
       issuedAt,
+      sourceCutoffDate: "2030-01-31",
       baselineWindow: { startDate: "2030-01-01", endDateExclusive: "2030-02-01" },
       baselineFacts: januaryFacts,
     });
-    // Month end Jan 31 to issue Mar 17 is exactly 45 days: fresh.
+    // Latest report Jan 31 to issue Mar 17 is exactly 45 days: fresh.
     const fresh = buildGrowthProjectionCandidate(baseInput(aged("2030-03-17T12:00:00Z")));
-    expect(fresh.status).toBe("ready");
-    // One day later the same month is stale.
+    if (fresh.status !== "ready") throw new Error(`expected ready, got ${fresh.status}`);
+    // One day later the same evidence is stale.
     const stale = buildGrowthProjectionCandidate(baseInput(aged("2030-03-18T12:00:00Z")));
     expect(stale).toMatchObject({ status: "refused", reason: "BASELINE_STALE" });
   });
@@ -301,8 +381,8 @@ describe("buildGrowthProjectionCandidate", () => {
     );
     if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
     // Joint maximum, never the sum: low max(50k, 25k), high max(100k, 150k).
-    expect(result.document.monthlyLowMinor).toBe(3_150_000);
-    expect(result.document.monthlyHighMinor).toBe(3_250_000);
+    expect(result.document.monthlyLowMinor).toBe(3_050_000);
+    expect(result.document.monthlyHighMinor).toBe(3_150_000);
     expect(result.document.actionAssumptions).toHaveLength(2);
   });
 
@@ -324,8 +404,8 @@ describe("buildGrowthProjectionCandidate", () => {
       if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
       // The range stays out of the frozen numbers, and the estimate says so.
       expect(result.document.actionAssumptions).toHaveLength(0);
-      expect(result.document.monthlyLowMinor).toBe(3_100_000);
-      expect(result.document.monthlyHighMinor).toBe(3_100_000);
+      expect(result.document.monthlyLowMinor).toBe(3_000_000);
+      expect(result.document.monthlyHighMinor).toBe(3_000_000);
       expect(result.document.limitations).toContain(BASELINE_ONLY_LIMITATION);
     }
   });
@@ -380,21 +460,27 @@ describe("buildGrowthProjectionCandidate", () => {
     expect(result).toMatchObject({ status: "refused", reason: "SCOPE_NOT_COMPARABLE" });
   });
 
-  it("refuses an overflowing monthly total instead of wrapping it", () => {
-    const big: RevenueFact = {
-      sourceTable: "exact_range_metric_observations",
-      rowId: "span-big",
-      organizationId: ORG,
-      partitionKey: "pk-1",
-      startDate: "2029-12-01",
-      endDateExclusive: "2030-01-01",
-      amountMinor: Number.MAX_SAFE_INTEGER - 50,
-      currency: "AED",
-      createdAt: "2029-12-15T00:00:00Z",
-      reconciliationDigest: "digest-big",
-    };
-    const inputs = qualifiedInputs();
-    const result = buildGrowthProjectionCandidate(baseInput({ ...inputs, baselineFacts: [big] }));
+  it("refuses an overflowing monthly pace instead of wrapping it", () => {
+    // Seven maximum days: the observed mean already touches the safe-integer
+    // ceiling, so scaling it to a standard month must refuse, not wrap.
+    const huge: RevenueFact[] = [];
+    for (let day = 25; day <= 31; day += 1) {
+      const start = `2029-12-${day}`;
+      const end = day === 31 ? "2030-01-01" : `2029-12-${day + 1}`;
+      huge.push({
+        sourceTable: "normalized_metrics",
+        rowId: `huge-${day}`,
+        organizationId: ORG,
+        partitionKey: "pk-1",
+        startDate: start,
+        endDateExclusive: end,
+        amountMinor: Number.MAX_SAFE_INTEGER,
+        currency: "AED",
+        createdAt: "2029-12-15T00:00:00Z",
+        reconciliationDigest: `digest-huge-${day}`,
+      });
+    }
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: huge }));
     expect(result).toMatchObject({ status: "refused", reason: "MONEY_OVERFLOW" });
   });
 
@@ -433,5 +519,6 @@ describe("buildGrowthProjectionCandidate", () => {
       endDateExclusive: "2030-01-01",
     });
     expect(result.document.limitations).toContain(BASELINE_ONLY_LIMITATION);
+    expect(result.document.limitations.join(" ")).toContain("Baseline from 31 reported days");
   });
 });

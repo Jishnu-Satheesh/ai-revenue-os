@@ -88,6 +88,7 @@ fail-closed SCHEDULE_CORRUPT. Single origin Sep 11 remains.
 - Central estimate is the deterministic rounded midpoint of the saved low/high range. Within-range actuals are not labelled underperforming merely because they fall below midpoint.
 - Behind/ahead classification uses low/high bounds. Displayed money/percentage difference uses the midpoint and says so in details.
 - Projection generation and actual aggregation rules are fully defined in the companion data contract. Technical constants there are proposed implementation decisions, not claims the user personally approved every numerical threshold.
+- Baseline rule (amended 2026-09-21, user-approved, ADR 0066): the frozen monthly level is the observed daily mean over the 30 days ending at the source cutoff, scaled to a 30-day standard month, requiring at least 7 reported days. Missing days are excluded and named on the surface — one gap no longer voids a month, and a new organization publishes within days of reporting instead of waiting out a calendar month. Display-actuals exact-cover semantics (D05) are unchanged.
 - Source permissions are rechecked on every read. They never cause the original numbers to be recomputed.
 - Useful unquantified advice remains available; unknown impact is not zero.
 
