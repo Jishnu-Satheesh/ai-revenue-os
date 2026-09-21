@@ -11,7 +11,12 @@ import {
   type AgentClientSeam,
 } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-agent-adapter";
 
-type StartCall = { url: string; goal: string; browserProfile: "lite" | "stealth" };
+type StartCall = {
+  url: string;
+  goal: string;
+  browserProfile: "lite" | "stealth";
+  maxDurationSeconds: number;
+};
 
 function createFakeClient(overrides?: {
   startRuns?: Array<{ runId: string } | { error: Error }>;
@@ -68,6 +73,23 @@ describe("tinyfish agent adapter", () => {
     expect(fake.starts).toHaveLength(1);
     expect(fake.starts[0]).toMatchObject({ url: SLOT.url, browserProfile: "lite" });
     expect(fake.cancels).toHaveLength(0);
+  });
+
+  it("passes maxDurationSeconds 120 on every start, including the stealth retry", async () => {
+    const fake = createFakeClient({
+      getRun: (runId) =>
+        runId === "run-1"
+          ? { status: "COMPLETED", result: { blocked: true } }
+          : { status: "COMPLETED", result: { menus: ["dinner"] } },
+    });
+    const adapter = createTinyfishAgentAdapter(fake.client);
+
+    await adapter.runCompetitorSlot(SLOT);
+
+    expect(fake.starts).toHaveLength(2);
+    for (const start of fake.starts) {
+      expect(start.maxDurationSeconds).toBe(120);
+    }
   });
 
   it("retries once with stealth after a lite block, then returns ok", async () => {

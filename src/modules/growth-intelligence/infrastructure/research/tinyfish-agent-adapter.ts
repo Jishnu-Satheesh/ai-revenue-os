@@ -13,10 +13,15 @@ import type { TinyFish } from "@tiny-fish/sdk";
  *
  * SDK surface used (installed @tiny-fish/sdk version reported in the Task 1
  * report): `client.agent.queue` (async start), `client.runs.get` (poll).
- * The SDK exposes no cancel-run endpoint, so `cancelRun` on the SDK-backed
- * client stops polling and abandons the server-side run — it never invents
- * an HTTP endpoint. The seam still carries `cancelRun` so lane semantics
- * (timeout/abort settle) stay intact and a future SDK cancel can plug in.
+ * The SDK exposes no cancel-run method, so the Task 3 wiring implements
+ * `cancelRun` as a raw `POST https://agent.tinyfish.ai/v1/runs/{runId}/cancel`
+ * with the `X-API-Key` header (per the TinyFish Agent API reference). The
+ * seam signature stays `cancelRun(runId: string): Promise<void>` so lane
+ * semantics (timeout/abort settle) are intact.
+ *
+ * Every start carries `maxDurationSeconds` (120, i.e. AGENT_SLOT_TIMEOUT_MS
+ * / 1000) so the run is server-side bounded by
+ * `agent_config: { max_duration_seconds: 120 }` even if local polling stops.
  *
  * Fail-closed: provider-shaped outcomes never throw; only programmer errors
  * (empty url/goal) throw. No API key handling here (the seam takes no
@@ -38,8 +43,14 @@ export type AgentClientSeam = {
     url: string;
     goal: string;
     browserProfile: "lite" | "stealth";
+    maxDurationSeconds: number;
   }): Promise<{ runId: string }>;
   getRun(runId: string): Promise<{ status: string; result: unknown }>;
+  /**
+   * Real cancel, not a no-op. The SDK-backed implementation (Task 3 wiring)
+   * performs a raw `POST https://agent.tinyfish.ai/v1/runs/{runId}/cancel`
+   * with the `X-API-Key` header, per the TinyFish Agent API reference.
+   */
   cancelRun(runId: string): Promise<void>;
 };
 
@@ -73,6 +84,7 @@ export function createTinyfishSdkAgentClient(client: TinyFish): AgentClientSeam 
         url: input.url,
         goal: input.goal,
         browser_profile: input.browserProfile,
+        agent_config: { max_duration_seconds: input.maxDurationSeconds },
       });
       if (response.run_id === null) {
         throw new Error("TinyFish agent queue refused the run.");
@@ -84,9 +96,10 @@ export function createTinyfishSdkAgentClient(client: TinyFish): AgentClientSeam 
       return { status: run.status, result: run.result };
     },
     async cancelRun(runId) {
-      // No cancel-run endpoint in the installed SDK: stop polling and leave
-      // the server-side run to expire on its own. The void keeps the
-      // parameter part of the contract for a future SDK cancel.
+      // Placeholder until the Task 3 wiring lands: the real implementation
+      // performs a raw `POST https://agent.tinyfish.ai/v1/runs/{runId}/cancel`
+      // with the `X-API-Key` header (the installed SDK has no cancel-run
+      // method, so nothing is invented here). Task 3 replaces this body.
       void runId;
     },
   };
@@ -120,7 +133,12 @@ export function createTinyfishAgentAdapter(client: AgentClientSeam): {
         browserProfile: "lite" | "stealth",
       ): Promise<{ runId: string } | null> => {
         try {
-          return await client.startRun({ url: input.url, goal, browserProfile });
+          return await client.startRun({
+            url: input.url,
+            goal,
+            browserProfile,
+            maxDurationSeconds: AGENT_SLOT_TIMEOUT_MS / 1000,
+          });
         } catch {
           return null;
         }
