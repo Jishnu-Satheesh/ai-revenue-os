@@ -118,6 +118,8 @@ import {
 } from "@/trigger/synthesis-loaders";
 import {
   createQualifiedTinyfishResearchAdapter,
+  isTinyfishResearchGateOpen,
+  readTinyfishSearchApiKey,
   type TinyfishResearchPersistence,
 } from "@/trigger/growth-intelligence-tinyfish";
 import { createQualifiedMonitoringResearcher } from "@/trigger/growth-intelligence-monitoring-research";
@@ -506,6 +508,13 @@ async function createResearchDependencies(
     }),
     evidence: createMarketEvidenceRepository(supabase as unknown as MarketEvidencePersistence),
     adapter,
+    // Lane diagnostics for the failure event: the same env readers the
+    // adapter assembly uses, re-read per failure so an operator key/gate
+    // change mid-run shows up on the event. Booleans only, never the key.
+    laneDiagnostics: () => ({
+      keyPresent: readTinyfishSearchApiKey().length > 0,
+      gateOpen: isTinyfishResearchGateOpen(),
+    }),
     extraction: wireExtraction
       ? {
           transport: createWiredResearchModelTransport({

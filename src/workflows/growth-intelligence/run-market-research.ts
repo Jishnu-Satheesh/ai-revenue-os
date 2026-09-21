@@ -108,6 +108,21 @@ export type MarketResearchExcerptProvenance = {
 };
 
 /**
+ * TinyFish lane diagnostics for failure observability.
+ *
+ * The workflow runner never imports the trigger layer that reads the lane
+ * environment (architecture boundary: only Trigger constructs infrastructure
+ * implementations), so the lane inputs arrive as this injected supplier.
+ * Booleans and the short provider id only — the key itself never travels.
+ */
+export type MarketResearchLaneDiagnostics = {
+  /** TinyFish search key non-empty. */
+  keyPresent: boolean;
+  /** TinyFish lane kill-switch open. */
+  gateOpen: boolean;
+};
+
+/**
  * Claim engines the worker receives instead of importing.
  *
  * The architecture boundary forbids workflow runners from importing
@@ -253,6 +268,12 @@ export type MarketResearchDependencies = {
    * function of approved public fields only.
    */
   researchBrief?: MarketResearchBriefBuilder;
+  /**
+   * Optional TinyFish lane diagnostics supplier (Trigger wires the real env
+   * readers). When absent the failure event reports the lane as closed, the
+   * fail-closed default — the same direction the lane itself fails.
+   */
+  laneDiagnostics?: () => MarketResearchLaneDiagnostics;
   now?: () => Date;
   newClaimToken?: () => string;
   signal?: AbortSignal;
@@ -589,6 +610,17 @@ export async function runMarketResearch(
     // market_research_pipeline_bypass_forbidden, so calling it first would
     // throw inside failRun before the request or pipeline ever settle. The
     // pipeline RPC now fails run + request + pipeline in one transaction.
+    //
+    // Lane diagnostics ride the failure event so the next canary carries its
+    // own lane inputs: the blocked-adapter mystery cost hours because the
+    // worker-side key/gate state was invisible from outside.
+    const lane = dependencies.laneDiagnostics?.() ?? { keyPresent: false, gateOpen: false };
+    const laneDiagnostics = {
+      laneKeyPresent: lane.keyPresent,
+      laneGateOpen: lane.gateOpen,
+      laneAvailable: adapter.availability.available,
+      laneProvider: adapter.availability.provider,
+    };
     const boundPipelineId = request.pipelineId ?? null;
     if (boundPipelineId !== null) {
       try {
@@ -618,6 +650,7 @@ export async function runMarketResearch(
           runId: begun.runId,
           code,
           unknownUsageCount: ledger.unknownCount,
+          ...laneDiagnostics,
         },
       });
       return { outcome: "failed", code, runId: begun.runId };
@@ -658,6 +691,7 @@ export async function runMarketResearch(
         runId: begun.runId,
         code,
         unknownUsageCount: ledger.unknownCount,
+        ...laneDiagnostics,
       },
     });
     return { outcome: "failed", code, runId: begun.runId };

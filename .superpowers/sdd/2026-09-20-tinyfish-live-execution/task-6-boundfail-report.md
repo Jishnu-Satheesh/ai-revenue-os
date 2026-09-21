@@ -54,6 +54,29 @@ did a redundant double-settle (`requests.fail` then `failPipeline`).
 - `src/modules/growth-intelligence/infrastructure/evidence-repository.test.ts`
 - `supabase/tests/database/growth_intelligence_research_pipeline_fail_test.sql`
 
+## Follow-up: lane diagnostics on the run failure event
+
+- Importing the key/gate readers into the workflow would violate the
+  `growth-intelligence.ts:556-558` boundary (runners never import trigger or
+  infrastructure modules), so the workflow takes an optional
+  `laneDiagnostics` supplier on `MarketResearchDependencies` instead, wired in
+  `createResearchDependencies` from the same `readTinyfishSearchApiKey` /
+  `isTinyfishResearchGateOpen` readers the adapter assembly uses.
+- `failRun` (both bound and legacy branches) now publishes
+  `market_research.failed` with `laneKeyPresent`, `laneGateOpen`,
+  `laneAvailable` (adapter availability), `laneProvider` (adapter provider).
+  Booleans and short id only, never the key. Absent supplier reads as
+  closed (fail-closed default). `failRequest` untouched; no behavior, code,
+  or flow change. Publisher does not Zod-validate (passthrough), so no
+  schema change needed.
+- Tests: `vitest run run-market-research.test.ts growth-intelligence.test.ts`
+  — 74 passed (43 + 31), incl. 2 new (supplied values land on the event;
+  absent supplier reports closed with the live provider id).
+- `tsc` clean; `eslint` 0 errors on touched files.
+- Files (follow-up): `src/workflows/growth-intelligence/run-market-research.ts`,
+  `src/trigger/growth-intelligence.ts`,
+  `src/workflows/growth-intelligence/run-market-research.test.ts`, this report.
+
 ## Pending-push items (do NOT run before push)
 - Push `20260920153000` to staging, then run the pgTAP file: pre-push it
   fails at `has_function` 8-arg + every 8-arg call (`function does not

@@ -651,6 +651,61 @@ describe("runMarketResearch fail-closed adapter", () => {
     expect(deps.evidence.failPipeline).not.toHaveBeenCalled();
   });
 
+  it("carries the supplied lane diagnostics on the run failure event", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: false, provider: "tinyfish" },
+        searchAndFetch: vi.fn(async () => {
+          throw new Error("Market research is not enabled for this organization.");
+        }),
+      },
+      laneDiagnostics: () => ({ keyPresent: true, gateOpen: true }),
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_UNAVAILABLE", runId });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.failed",
+        payload: expect.objectContaining({
+          requestId,
+          runId,
+          code: "ADAPTER_UNAVAILABLE",
+          laneKeyPresent: true,
+          laneGateOpen: true,
+          laneAvailable: false,
+          laneProvider: "tinyfish",
+        }),
+      }),
+    );
+  });
+
+  it("reports the lane as closed on the run failure event when no supplier is wired", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: false, provider: "brave" },
+        searchAndFetch: vi.fn(async () => {
+          throw new Error("Market research is not enabled for this organization.");
+        }),
+      },
+    });
+
+    await runMarketResearch(payload, deps);
+
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.failed",
+        payload: expect.objectContaining({
+          laneKeyPresent: false,
+          laneGateOpen: false,
+          laneAvailable: false,
+          laneProvider: "brave",
+        }),
+      }),
+    );
+  });
+
   it("settles a bound run, request and pipeline with one pipeline RPC instead of the forbidden run-level fail", async () => {
     const pipelineId = "50000000-0000-4000-8000-000000000005";
     const deps = dependencies({
