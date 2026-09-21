@@ -158,3 +158,35 @@ did a redundant double-settle (`requests.fail` then `failPipeline`).
   `supabase/tests/database/growth_intelligence_research_budget_test.sql`,
   `supabase/tests/database/growth_intelligence_research_pipeline_test.sql`,
   this report.
+
+---
+
+## Fix: retry on a terminal unreported pin opens a fresh update (route-only)
+
+Defect (proven live, canary project e63354c6): a retry POST on a TERMINAL
+unreported update (research_failed, retryable) joined the dead update
+(opened_progress on the same update id) because the route's pre-check
+(pinnedToUpdateId + not-reported) never looked at the pin's stage. The worker
+then replayed without reworking (508ms, outcome replayed), so the failure
+could never honestly be retried.
+
+Fix in `monitoring/projects/route.ts` only: when computing activeUpdateId,
+the route now reads the pinned update's stage from
+`growth_intelligence_monitoring_updates` by (organization_id, update_id) with
+the authenticated client and treats any `MONITORING_UPDATE_TERMINAL_STAGES`
+member as inactive for joining — the request falls through to
+`startMonitoringUpdate`, which opens a fresh update. A failed read or missing
+row keeps today's join, so a transient failure never forks paid work. No
+migration, no schema change, no new failure codes; header comment updated.
+
+Tests (`route.test.ts` +2): terminal pinned unreported + same scope →
+`started` (201, never `opened_progress`); running (`researching`) pinned
+unreported → still joins (`opened_progress`, 200). Suite 16/16 green;
+`tsc --noEmit` clean; eslint clean on both files (2 warnings elsewhere are
+pre-existing in untouched memory/ files). Commit b5184b5 (WIP, no push).
+
+Note: two follow-up repairs landed from other work on the round-1 migration
+(`..._coalesce_repair` for `pg_catalog.coalesce(numeric, integer)`, and the
+scope-check repair dropping the legacy pipeline-xor-request check that
+rejected update rows) — both were first-live-call traps of exactly the kind
+AGENTS.md warns about; neither is touched here.
