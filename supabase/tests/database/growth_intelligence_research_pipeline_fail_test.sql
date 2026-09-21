@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(33);
+select extensions.plan(34);
 
 -- Contract and grants ----------------------------------------------------------
 -- The 8-argument overload settles run + request + pipeline atomically. The
@@ -197,16 +197,84 @@ set research_request_id = 'f1000000-0000-4000-8000-000000000508'::uuid
 where pipeline.organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid
   and pipeline.id = 'f1000000-0000-4000-8000-000000000507'::uuid;
 
-insert into public.market_research_runs (
-  id, organization_id, growth_intelligence_request_id, market_profile_version_id,
-  claim_token, adapter_provider, adapter_version, run_fingerprint, query_plan_digest,
-  correlation_id
-) values
-  ('f1000000-0000-4000-8000-000000000509'::uuid, 'f1000000-0000-4000-8000-000000000201'::uuid, 'f1000000-0000-4000-8000-000000000508'::uuid, 'f1000000-0000-4000-8000-000000000402'::uuid,
-  'f1000000-0000-4000-8000-000000000604'::uuid, 'tinyfish', 'market-research@1',
-  '9999999999999999999999999999999999999999999999999999999999999999',
-  '8888888888888888888888888888888888888888888888888888888888888888',
-  'f1000000-0000-4000-8000-000000000705'::uuid);
+-- Run rows are created only through the governed RPCs, exactly like the
+-- worker does: the runs table forces RLS even for the owner and no available
+-- role holds a table grant, so direct writes are impossible for every role.
+-- Run reads below go through definer-owned helpers for the same reason.
+
+create or replace function pg_temp.fail_run_metadata()
+returns jsonb
+language sql
+immutable
+as $$
+  select pg_catalog.jsonb_build_object(
+    'adapterProvider', 'tinyfish', 'adapterVersion', 'market-research@1',
+    'modelProvider', 'gemini', 'modelVersion', 'gemini-fixture-review-1',
+    'runFingerprint', pg_catalog.repeat('9', 64),
+    'queryPlanDigest', pg_catalog.repeat('8', 64),
+    'correlationId', 'f1000000-0000-4000-8000-000000000705'
+  );
+$$;
+
+create or replace function pg_temp.fail_run_id(p_request_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select id from public.market_research_runs
+  where growth_intelligence_request_id = p_request_id
+  order by created_at desc, id desc limit 1;
+$$;
+
+create or replace function pg_temp.fail_run_status(p_request_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select status from public.market_research_runs
+  where growth_intelligence_request_id = p_request_id
+  order by created_at desc, id desc limit 1;
+$$;
+
+create or replace function pg_temp.fail_run_code(p_request_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select safe_failure_code from public.market_research_runs
+  where growth_intelligence_request_id = p_request_id
+  order by created_at desc, id desc limit 1;
+$$;
+
+create or replace function pg_temp.fail_run_cost(p_request_id uuid)
+returns bigint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select adapter_cost_micros_usd from public.market_research_runs
+  where growth_intelligence_request_id = p_request_id
+  order by created_at desc, id desc limit 1;
+$$;
+
+create or replace function pg_temp.fail_run_latency(p_request_id uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select adapter_latency_ms from public.market_research_runs
+  where growth_intelligence_request_id = p_request_id
+  order by created_at desc, id desc limit 1;
+$$;
 
 -- Pre-failed run: run row already failed, pipeline still queued -------------
 -- A duplicate delivery with identical code + costs replays; different costs
@@ -239,18 +307,8 @@ set research_request_id = 'f1000000-0000-4000-8000-000000000511'::uuid
 where pipeline.organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid
   and pipeline.id = 'f1000000-0000-4000-8000-000000000510'::uuid;
 
-insert into public.market_research_runs (
-  id, organization_id, growth_intelligence_request_id, market_profile_version_id,
-  claim_token, adapter_provider, adapter_version, run_fingerprint, query_plan_digest,
-  correlation_id, status, safe_failure_code, adapter_cost_micros_usd, adapter_latency_ms,
-  failed_at
-) values
-  ('f1000000-0000-4000-8000-000000000512'::uuid, 'f1000000-0000-4000-8000-000000000201'::uuid, 'f1000000-0000-4000-8000-000000000511'::uuid, 'f1000000-0000-4000-8000-000000000402'::uuid,
-  'f1000000-0000-4000-8000-000000000605'::uuid, 'tinyfish', 'market-research@1',
-  '7777777777777777777777777777777777777777777777777777777777777777',
-  '6666666666666666666666666666666666666666666666666666666666666666',
-  'f1000000-0000-4000-8000-000000000706'::uuid, 'failed', 'ADAPTER_UNAVAILABLE',
-  100::bigint, 50::integer, pg_catalog.now() - interval '30 minutes');
+-- The 512 run row is driven to failed through the 8-arg RPC in the test body
+-- below (the behavior under test), not inserted: see the pre-failed block.
 
 -- Live failure moves request and pipeline together ----------------------------
 
@@ -356,6 +414,22 @@ select extensions.is(
 );
 
 -- Bound-run failure settles run + request + pipeline in one call ----------
+-- The worker's run row is begun through the governed RPCs, exactly like the
+-- live path: claim replays on the fixture token, begin opens the run.
+
+select public.claim_growth_intelligence_request(
+  'f1000000-0000-4000-8000-000000000201'::uuid,
+  'f1000000-0000-4000-8000-000000000508'::uuid,
+  'f1000000-0000-4000-8000-000000000604'::uuid,
+  600
+);
+
+select public.begin_market_research_run(
+  'f1000000-0000-4000-8000-000000000201'::uuid,
+  'f1000000-0000-4000-8000-000000000508'::uuid,
+  'f1000000-0000-4000-8000-000000000604'::uuid,
+  pg_temp.fail_run_metadata()
+);
 
 select extensions.is(
   (select public.fail_market_research_pipeline(
@@ -363,7 +437,7 @@ select extensions.is(
     'f1000000-0000-4000-8000-000000000507'::uuid,
     'f1000000-0000-4000-8000-000000000508'::uuid,
     'f1000000-0000-4000-8000-000000000604'::uuid,
-    'f1000000-0000-4000-8000-000000000509'::uuid,
+    pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000508'::uuid),
     'ADAPTER_UNAVAILABLE',
     1500::bigint,
     275::integer
@@ -373,33 +447,25 @@ select extensions.is(
 );
 
 select extensions.is(
-  (select status from public.market_research_runs
-   where organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid
-     and id = 'f1000000-0000-4000-8000-000000000509'::uuid),
+  pg_temp.fail_run_status('f1000000-0000-4000-8000-000000000508'::uuid),
   'failed',
   'the run row leaves running on bound failure'
 );
 
 select extensions.is(
-  (select safe_failure_code from public.market_research_runs
-   where organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid
-     and id = 'f1000000-0000-4000-8000-000000000509'::uuid),
+  pg_temp.fail_run_code('f1000000-0000-4000-8000-000000000508'::uuid),
   'ADAPTER_UNAVAILABLE',
   'the run row carries the worker safe code'
 );
 
 select extensions.is(
-  (select adapter_cost_micros_usd from public.market_research_runs
-   where organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid
-     and id = 'f1000000-0000-4000-8000-000000000509'::uuid),
+  pg_temp.fail_run_cost('f1000000-0000-4000-8000-000000000508'::uuid),
   1500::bigint,
   'the run row carries the measured adapter cost'
 );
 
 select extensions.is(
-  (select adapter_latency_ms from public.market_research_runs
-   where organization_id = 'f1000000-0000-4000-8000-000000000201'::uuid
-     and id = 'f1000000-0000-4000-8000-000000000509'::uuid),
+  pg_temp.fail_run_latency('f1000000-0000-4000-8000-000000000508'::uuid),
   275::integer,
   'the run row carries the measured adapter latency'
 );
@@ -427,7 +493,7 @@ select extensions.is(
     'f1000000-0000-4000-8000-000000000507'::uuid,
     'f1000000-0000-4000-8000-000000000508'::uuid,
     'f1000000-0000-4000-8000-000000000604'::uuid,
-    'f1000000-0000-4000-8000-000000000509'::uuid,
+    pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000508'::uuid),
     'ADAPTER_UNAVAILABLE',
     1500::bigint,
     275::integer
@@ -445,19 +511,34 @@ select extensions.is(
   'bound replay writes no second audit event'
 );
 
-select extensions.throws_ok(
-  $$ select public.fail_market_research_pipeline(
-    'f1000000-0000-4000-8000-000000000201'::uuid,
-    'f1000000-0000-4000-8000-000000000510'::uuid,
-    'f1000000-0000-4000-8000-000000000511'::uuid,
-    'f1000000-0000-4000-8000-000000000605'::uuid,
-    'f1000000-0000-4000-8000-000000000512'::uuid,
-    'ADAPTER_UNAVAILABLE',
-    101::bigint,
-    50::integer
-  ) $$,
-  '23505', null,
-  'a terminal run with different costs conflicts instead of rewriting'
+-- Pre-failed run: the run row is driven to failed through the 8-arg RPC
+-- itself (the behavior under test), after claiming and beginning like the
+-- worker. A divergent redelivery on the settled pipeline then replays the
+-- first outcome instead of rewriting it; the first write wins.
+
+select public.claim_growth_intelligence_request(
+  'f1000000-0000-4000-8000-000000000201'::uuid,
+  'f1000000-0000-4000-8000-000000000511'::uuid,
+  'f1000000-0000-4000-8000-000000000605'::uuid,
+  600
+);
+
+select public.begin_market_research_run(
+  'f1000000-0000-4000-8000-000000000201'::uuid,
+  'f1000000-0000-4000-8000-000000000511'::uuid,
+  'f1000000-0000-4000-8000-000000000605'::uuid,
+  pg_temp.fail_run_metadata()
+);
+
+select public.fail_market_research_pipeline(
+  'f1000000-0000-4000-8000-000000000201'::uuid,
+  'f1000000-0000-4000-8000-000000000510'::uuid,
+  'f1000000-0000-4000-8000-000000000511'::uuid,
+  'f1000000-0000-4000-8000-000000000605'::uuid,
+  pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000511'::uuid),
+  'ADAPTER_UNAVAILABLE',
+  100::bigint,
+  50::integer
 );
 
 select extensions.is(
@@ -466,7 +547,28 @@ select extensions.is(
     'f1000000-0000-4000-8000-000000000510'::uuid,
     'f1000000-0000-4000-8000-000000000511'::uuid,
     'f1000000-0000-4000-8000-000000000605'::uuid,
-    'f1000000-0000-4000-8000-000000000512'::uuid,
+    pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000511'::uuid),
+    'ADAPTER_UNAVAILABLE',
+    101::bigint,
+    50::integer
+  ) ->> 'replayed'),
+  'true',
+  'a divergent-cost redelivery on a settled pipeline replays instead of rewriting'
+);
+
+select extensions.is(
+  pg_temp.fail_run_cost('f1000000-0000-4000-8000-000000000511'::uuid),
+  100::bigint,
+  'the first terminal run costs stand after a divergent redelivery'
+);
+
+select extensions.is(
+  (select public.fail_market_research_pipeline(
+    'f1000000-0000-4000-8000-000000000201'::uuid,
+    'f1000000-0000-4000-8000-000000000510'::uuid,
+    'f1000000-0000-4000-8000-000000000511'::uuid,
+    'f1000000-0000-4000-8000-000000000605'::uuid,
+    pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000511'::uuid),
     'ADAPTER_UNAVAILABLE',
     100::bigint,
     50::integer
@@ -481,7 +583,7 @@ select extensions.is(
     'f1000000-0000-4000-8000-000000000510'::uuid,
     'f1000000-0000-4000-8000-000000000511'::uuid,
     'f1000000-0000-4000-8000-000000000605'::uuid,
-    'f1000000-0000-4000-8000-000000000512'::uuid,
+    pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000511'::uuid),
     'ADAPTER_UNAVAILABLE',
     100::bigint,
     50::integer
@@ -505,7 +607,7 @@ select extensions.throws_ok(
     'f1000000-0000-4000-8000-000000000507'::uuid,
     'f1000000-0000-4000-8000-000000000508'::uuid,
     'f1000000-0000-4000-8000-000000000604'::uuid,
-    'f1000000-0000-4000-8000-000000000509'::uuid,
+    pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000508'::uuid),
     'ADAPTER_UNAVAILABLE',
     50000001::bigint,
     275::integer
@@ -520,7 +622,7 @@ select extensions.throws_ok(
     'f1000000-0000-4000-8000-000000000507'::uuid,
     'f1000000-0000-4000-8000-000000000508'::uuid,
     'f1000000-0000-4000-8000-000000000604'::uuid,
-    'f1000000-0000-4000-8000-000000000509'::uuid,
+    pg_temp.fail_run_id('f1000000-0000-4000-8000-000000000508'::uuid),
     'ADAPTER_UNAVAILABLE',
     1500::bigint,
     600001::integer
