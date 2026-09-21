@@ -421,15 +421,13 @@ export async function runMarketResearch(
   }
 
   const failRequest = async (code: string): Promise<MarketResearchResult> => {
-    await dependencies.requests.fail({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-      claimToken,
-      safeFailureCode: code,
-    });
     // A bound pipeline must leave queued with its request: without this the
     // workspace reports "research is still running" forever with no safe
     // code. Legacy requests without pipeline lineage keep the old shape.
+    // Bound pre-begin failures settle request + pipeline atomically through
+    // the pipeline RPC alone: the legacy request-level fail would only
+    // duplicate what the handoff already fences, and the pipeline RPC owns
+    // the replay. No run row exists yet, so zero spend travels with it.
     const pipelineId = request?.pipelineId ?? null;
     if (pipelineId !== null) {
       try {
@@ -440,11 +438,20 @@ export async function runMarketResearch(
           claimToken,
           runId: null,
           failureCode: code,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
         });
       } catch (error) {
         if (isClaimLost(error)) return { outcome: "claim_lost" };
         throw error;
       }
+    } else {
+      await dependencies.requests.fail({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        claimToken,
+        safeFailureCode: code,
+      });
     }
     await publishEvent(dependencies.events, {
       organizationId: payload.organizationId,
@@ -577,6 +584,44 @@ export async function runMarketResearch(
   });
 
   const failRun = async (code: string): Promise<MarketResearchResult> => {
+    // Pipeline-bound runs settle only through the atomic pipeline handoff:
+    // the legacy run-level RPC refuses bound requests with
+    // market_research_pipeline_bypass_forbidden, so calling it first would
+    // throw inside failRun before the request or pipeline ever settle. The
+    // pipeline RPC now fails run + request + pipeline in one transaction.
+    const boundPipelineId = request.pipelineId ?? null;
+    if (boundPipelineId !== null) {
+      try {
+        await dependencies.evidence.failPipeline({
+          organizationId: payload.organizationId,
+          pipelineId: boundPipelineId,
+          requestId: payload.requestId,
+          claimToken,
+          runId: begun.runId,
+          failureCode: code,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        });
+      } catch (error) {
+        // Lease loss ends the run without further mutations: no request
+        // write, no reassessment, no failure event under a dead claim.
+        if (isClaimLost(error)) return { outcome: "claim_lost" };
+        throw error;
+      }
+      await publishEvent(dependencies.events, {
+        organizationId: payload.organizationId,
+        eventName: "market_research.failed",
+        correlationId: payload.correlationId,
+        occurredAt: now().toISOString(),
+        payload: {
+          requestId: payload.requestId,
+          runId: begun.runId,
+          code,
+          unknownUsageCount: ledger.unknownCount,
+        },
+      });
+      return { outcome: "failed", code, runId: begun.runId };
+    }
     try {
       await dependencies.evidence.fail({
         organizationId: payload.organizationId,

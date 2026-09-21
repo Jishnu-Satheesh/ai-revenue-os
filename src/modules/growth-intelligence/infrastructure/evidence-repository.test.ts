@@ -724,6 +724,8 @@ describe("Market Evidence repository pipeline handoff", () => {
       claimToken,
       runId: null,
       failureCode: "EXTRACTION_UNAVAILABLE",
+      adapterCostMicrosUsd: 0,
+      adapterLatencyMs: 0,
     });
 
     expect(withoutRun).toEqual({ pipelineStage: "research_failed", replayed: false });
@@ -736,7 +738,63 @@ describe("Market Evidence repository pipeline handoff", () => {
         p_claim_token: claimToken,
         p_market_research_run_id: null,
         p_safe_failure_code: "EXTRACTION_UNAVAILABLE",
+        p_adapter_cost_micros_usd: 0,
+        p_adapter_latency_ms: 0,
       }),
     );
+
+    const withRun = await repository.failPipeline({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken,
+      runId,
+      failureCode: "ADAPTER_UNAVAILABLE",
+      adapterCostMicrosUsd: 1_000,
+      adapterLatencyMs: 210,
+    });
+
+    expect(withRun).toEqual({ pipelineStage: "research_failed", replayed: false });
+    expect(rpc).toHaveBeenCalledWith(
+      "fail_market_research_pipeline",
+      expect.objectContaining({
+        p_market_research_run_id: runId,
+        p_safe_failure_code: "ADAPTER_UNAVAILABLE",
+        p_adapter_cost_micros_usd: 1_000,
+        p_adapter_latency_ms: 210,
+      }),
+    );
+  });
+
+  it("refuses pipeline failure spend outside the governed bounds", async () => {
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    await expect(
+      repository.failPipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        failureCode: "ADAPTER_UNAVAILABLE",
+        adapterCostMicrosUsd: 50_000_001,
+        adapterLatencyMs: 0,
+      }),
+    ).rejects.toThrow(DomainError);
+    await expect(
+      repository.failPipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        failureCode: "ADAPTER_UNAVAILABLE",
+        adapterCostMicrosUsd: 0,
+        adapterLatencyMs: 600_001,
+      }),
+    ).rejects.toThrow(DomainError);
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

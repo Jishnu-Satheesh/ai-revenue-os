@@ -534,12 +534,9 @@ describe("runMarketResearch profile and request reloading", () => {
     const result = await runMarketResearch(payload, deps);
 
     expect(result).toEqual({ outcome: "failed", code: "EXTRACTION_UNAVAILABLE", runId: null });
-    expect(deps.requests.fail).toHaveBeenCalledWith({
-      organizationId,
-      requestId,
-      claimToken: expect.any(String),
-      safeFailureCode: "EXTRACTION_UNAVAILABLE",
-    });
+    // Bound pre-begin failures settle atomically through the pipeline RPC
+    // alone: no separate request-level fail, no run row yet.
+    expect(deps.requests.fail).not.toHaveBeenCalled();
     expect(deps.evidence.failPipeline).toHaveBeenCalledWith({
       organizationId,
       pipelineId,
@@ -547,7 +544,19 @@ describe("runMarketResearch profile and request reloading", () => {
       claimToken: expect.any(String),
       runId: null,
       failureCode: "EXTRACTION_UNAVAILABLE",
+      adapterCostMicrosUsd: 0,
+      adapterLatencyMs: 0,
     });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.failed",
+        payload: expect.objectContaining({
+          requestId,
+          runId: null,
+          code: "EXTRACTION_UNAVAILABLE",
+        }),
+      }),
+    );
   });
 
   it("leaves legacy requests without pipeline lineage on the request-only failure path", async () => {
@@ -639,6 +648,101 @@ describe("runMarketResearch fail-closed adapter", () => {
         },
       }),
     );
+    expect(deps.evidence.failPipeline).not.toHaveBeenCalled();
+  });
+
+  it("settles a bound run, request and pipeline with one pipeline RPC instead of the forbidden run-level fail", async () => {
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    const deps = dependencies({
+      adapter: {
+        availability: { available: false, provider: "exa" },
+        searchAndFetch: vi.fn(async () => {
+          throw new Error("Market research is not enabled for this organization.");
+        }),
+      },
+    });
+    deps.requests.load.mockResolvedValueOnce({ ...requestView, pipelineId });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_UNAVAILABLE", runId });
+    expect(deps.evidence.begin).toHaveBeenCalledOnce();
+    expect(deps.evidence.fail).not.toHaveBeenCalled();
+    expect(deps.requests.fail).not.toHaveBeenCalled();
+    expect(deps.evidence.failPipeline).toHaveBeenCalledTimes(1);
+    expect(deps.evidence.failPipeline).toHaveBeenCalledWith({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken: expect.any(String),
+      runId,
+      failureCode: "ADAPTER_UNAVAILABLE",
+      adapterCostMicrosUsd: 0,
+      adapterLatencyMs: 0,
+    });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId,
+        eventName: "market_research.failed",
+        actorType: "system",
+        correlationId,
+        payload: expect.objectContaining({ requestId, runId, code: "ADAPTER_UNAVAILABLE" }),
+      }),
+    );
+  });
+
+  it("tolerates a replayed bound pipeline failure and still publishes the event", async () => {
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    const deps = dependencies({
+      adapter: {
+        availability: { available: false, provider: "exa" },
+        searchAndFetch: vi.fn(async () => {
+          throw new Error("Market research is not enabled for this organization.");
+        }),
+      },
+    });
+    deps.requests.load.mockResolvedValueOnce({ ...requestView, pipelineId });
+    deps.evidence.failPipeline.mockResolvedValueOnce({
+      pipelineStage: "research_failed",
+      replayed: true,
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "failed", code: "ADAPTER_UNAVAILABLE", runId });
+    expect(deps.evidence.fail).not.toHaveBeenCalled();
+    expect(deps.requests.fail).not.toHaveBeenCalled();
+    expect(deps.evidence.failPipeline).toHaveBeenCalledOnce();
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.failed",
+        payload: expect.objectContaining({ requestId, runId, code: "ADAPTER_UNAVAILABLE" }),
+      }),
+    );
+  });
+
+  it("returns claim_lost without an event when a bound pipeline failure loses the lease", async () => {
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    const deps = dependencies({
+      adapter: {
+        availability: { available: false, provider: "exa" },
+        searchAndFetch: vi.fn(async () => {
+          throw new Error("Market research is not enabled for this organization.");
+        }),
+      },
+    });
+    deps.requests.load.mockResolvedValueOnce({ ...requestView, pipelineId });
+    deps.evidence.failPipeline.mockRejectedValueOnce(
+      new GrowthIntelligenceError(
+        "RESEARCH_CLAIM_LOST",
+        "The research lease is no longer current.",
+      ),
+    );
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toEqual({ outcome: "claim_lost" });
+    expect(deps.events.publish).not.toHaveBeenCalled();
   });
 });
 

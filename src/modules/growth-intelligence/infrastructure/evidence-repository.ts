@@ -387,6 +387,8 @@ export type MarketEvidenceRepository = {
     claimToken: string;
     runId: string | null;
     failureCode: string;
+    adapterCostMicrosUsd: number;
+    adapterLatencyMs: number;
   }): Promise<z.infer<typeof pipelineFailOutcomeSchema>>;
 };
 
@@ -636,6 +638,18 @@ export function createMarketEvidenceRepository(
 
     async failPipeline(input) {
       const failureCode = parseOrThrow(safeCodeSchema, input.failureCode);
+      const costs = parseOrThrow(
+        z
+          .object({
+            adapterCostMicrosUsd: z.number().int().min(0).max(50_000_000),
+            adapterLatencyMs: z.number().int().min(0).max(600_000),
+          })
+          .strict(),
+        {
+          adapterCostMicrosUsd: input.adapterCostMicrosUsd,
+          adapterLatencyMs: input.adapterLatencyMs,
+        },
+      );
       return (await invoke(
         persistence,
         "fail_market_research_pipeline",
@@ -647,6 +661,8 @@ export function createMarketEvidenceRepository(
           p_market_research_run_id:
             input.runId === null ? null : parseOrThrow(identifierSchema, input.runId),
           p_safe_failure_code: failureCode,
+          p_adapter_cost_micros_usd: costs.adapterCostMicrosUsd,
+          p_adapter_latency_ms: costs.adapterLatencyMs,
         },
         pipelineFailOutcomeSchema,
         "failPipeline",
