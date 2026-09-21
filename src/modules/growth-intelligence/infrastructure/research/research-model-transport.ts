@@ -113,6 +113,11 @@ export function createResearchModelTransport(input: {
           temperature: 0.1,
           maxOutputTokens,
           abortSignal: signal,
+          // Deterministic extraction/review need direct structured answers:
+          // gemini-2.5-flash thinks by default, and thinking tokens would
+          // consume the bounded output budget (empty/truncated text) while
+          // billing against the fenced quote. Zero disables thinking.
+          providerOptions: { google: { thinkingConfig: { thinkingBudget: 0 } } },
         });
         return {
           text: result.text,

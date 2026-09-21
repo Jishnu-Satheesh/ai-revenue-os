@@ -57,6 +57,7 @@ describe("research model transport wired path", () => {
       model: { id: MODEL_ID },
       temperature: 0.1,
       maxOutputTokens: 4_000,
+      providerOptions: { google: { thinkingConfig: { thinkingBudget: 0 } } },
     });
     expect(call.abortSignal).toBeInstanceOf(AbortSignal);
     expect(typeof call.system).toBe("string");
