@@ -458,4 +458,45 @@ describe("extraction brief relevance", () => {
     // Relevance only: no private bodies travel, only refs.
     expect(prompt).not.toContain("operator note");
   });
+
+  it("documents the closed value sets inline so the model returns admittable enums", async () => {
+    const { transport, prompts } = transportFor([
+      {
+        text: candidateJson({
+          candidateKey: "marina-offer-1",
+          claimCategory: "offer",
+          geographicLayer: "trade_area",
+          geographyRef: "ae:du",
+          publishedAt: "2026-09-01T08:00:00Z",
+          limitations: ["SNIPPET_EVIDENCE_ONLY"],
+        }),
+        microsUsd: 140,
+      },
+    ]);
+
+    const result = await extractResearchClaims({
+      scope,
+      sources: [source()],
+      budget,
+      transport,
+      spender: spender(),
+      modelId: "gemini-fixture-1",
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      candidateKey: "marina-offer-1",
+      claimCategory: "offer",
+      geographicLayer: "trade_area",
+      geographyRef: "ae:du",
+    });
+    const prompt = prompts[0] ?? "";
+    expect(prompt).toContain(
+      "availability|offer|price|event|review_trend|demand_trend|regulation|seasonality|structural_context",
+    );
+    expect(prompt).toContain("trade_area|city|country");
+    expect(prompt).toContain("ae:du");
+    expect(prompt).toContain("[a-z][a-z0-9_.-]{0,79}");
+    expect(prompt).toContain("[A-Z][A-Z0-9_]{2,80}");
+  });
 });

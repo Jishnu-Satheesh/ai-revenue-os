@@ -219,6 +219,13 @@ const EXTRACTION_INSTRUCTIONS =
   "claimCategory, geographicLayer, geographyRef, citations " +
   "(sourceKey plus exact character offsets spanStart/spanEnd into that source excerpt), " +
   "publishedAt/observedAt (ISO or null) and limitations (safe codes or []). " +
+  "Closed value sets, use only these: claimCategory is one of " +
+  "availability|offer|price|event|review_trend|demand_trend|regulation|seasonality|structural_context; " +
+  "geographicLayer is one of trade_area|city|country; geographyRef is a short " +
+  "lowercase code such as ae:du (2-160 chars); candidateKey is a lowercase slug " +
+  "matching [a-z][a-z0-9_.-]{0,79}; publishedAt/observedAt are ISO datetimes " +
+  "with offset or null; limitations are UPPER_SNAKE codes matching " +
+  "[A-Z][A-Z0-9_]{2,80} or []. " +
   "Cite only the listed source keys. Never invent sources, offsets or dates.";
 
 function buildExtractionPrompt(
