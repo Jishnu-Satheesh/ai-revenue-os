@@ -47,6 +47,21 @@ function formatReportDate(value: string, timeZone: string): string {
   });
 }
 
+/**
+ * Readable source title derived deterministically from the stored URL.
+ * Returns null for missing or malformed URLs so callers fall back to the
+ * short label instead of inventing a title.
+ */
+function sourceDomainLabel(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return host.length > 0 ? host : null;
+  } catch {
+    return null;
+  }
+}
+
 function sectionLabel(key: ReportReaderSectionKey): string {
   return REPORT_READER_SECTIONS.find((section) => section.key === key)?.label ?? key;
 }
@@ -582,51 +597,56 @@ export function ReportReaderView({
 
         {section === "sources" ? (
           <div className="flex min-w-0 flex-col">
-            <h3 className="text-xl font-semibold">Sources &amp; evidence</h3>
+            <h3 className="text-[22px] font-bold tracking-tight">Sources &amp; evidence</h3>
             <p className="mt-2 max-w-prose text-sm text-muted-foreground">
               Report date: {reportDate}. Evidence periods and source dates are shown separately
               below.
             </p>
-            <p className="mt-1 text-xs text-muted-foreground break-all">
-              Evidence digest: {identity.evidenceDigest}
-            </p>
-            {view.sources.map((source) => (
-              <article
-                key={source.sourceRef}
-                ref={(element) => {
-                  if (element) sourceRefs.current.set(source.sourceRef, element);
-                  else sourceRefs.current.delete(source.sourceRef);
-                }}
-                data-testid={`reader-source-${source.sourceRef}`}
-                className={
-                  flashSource === source.sourceRef
-                    ? "mt-2 rounded-lg bg-primary/10 p-3"
-                    : "mt-2 border-b py-4 last:border-b-0"
-                }
-              >
-                <h4 className="min-w-0 text-sm font-semibold break-words">[{source.sourceRef}]</h4>
-                {source.available && source.url ? (
-                  <a
-                    href={source.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="min-w-0 text-sm break-all text-primary underline-offset-2 hover:underline"
-                  >
-                    {source.url}
-                  </a>
-                ) : (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Source evidence no longer available. The reference [{source.sourceRef}] is
-                    retained with the report.
-                  </p>
-                )}
-                {source.retrievedAtUtc ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Retrieved {formatReportDate(source.retrievedAtUtc, timeZone)}
-                  </p>
-                ) : null}
-              </article>
-            ))}
+            {view.sources.map((source, sourceIndex) => {
+              const shortLabel = `S${sourceIndex + 1}`;
+              const domain = sourceDomainLabel(source.available ? source.url : null);
+              return (
+                <article
+                  key={source.sourceRef}
+                  ref={(element) => {
+                    if (element) sourceRefs.current.set(source.sourceRef, element);
+                    else sourceRefs.current.delete(source.sourceRef);
+                  }}
+                  data-testid={`reader-source-${source.sourceRef}`}
+                  aria-label={`Source ${shortLabel}: ${source.sourceRef}`}
+                  className={
+                    flashSource === source.sourceRef
+                      ? "mt-3 rounded-lg bg-primary/10 p-3"
+                      : "mt-3 border-b py-5 last:border-b-0"
+                  }
+                >
+                  <h4 className="min-w-0 text-sm font-semibold break-words">
+                    [{shortLabel}]{domain ? ` · ${domain}` : ""}
+                  </h4>
+                  {source.available && source.url ? (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={source.url}
+                      className="mt-1 block min-w-0 text-sm break-all text-primary underline-offset-2 hover:underline"
+                    >
+                      {source.url}
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Source evidence no longer available. The reference [{shortLabel}] is
+                      retained with the report.
+                    </p>
+                  )}
+                  {source.retrievedAtUtc ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Retrieved {formatReportDate(source.retrievedAtUtc, timeZone)}
+                    </p>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         ) : null}
       </article>

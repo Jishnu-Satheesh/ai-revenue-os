@@ -169,6 +169,39 @@ describe("ReportReaderView", () => {
     expect(fullCell?.className).not.toMatch(/text-muted-foreground/);
   });
 
+  it("renders sources as short labels with domain titles and no internal digest", () => {
+    render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
+    fireEvent.click(screen.getByRole("button", { name: "Sources" }));
+
+    const heading = screen.getByRole("heading", { name: "Sources & evidence" });
+    expect(heading.className).toMatch(/text-\[22px\]/);
+    expect(heading.className).toMatch(/font-bold/);
+    expect(screen.queryByText(/Evidence digest/)).toBeNull();
+
+    const record = screen.getByTestId("reader-source-S1");
+    expect(record.textContent).toContain("[S1] · rival.example");
+    const link = within(record).getByRole("link");
+    expect(link.getAttribute("href")).toBe("https://rival.example/menu");
+  });
+
+  it("falls back to the short label when a source URL is malformed or missing", () => {
+    render(
+      <ReportReaderView
+        view={viewFixture({
+          sources: [
+            { sourceRef: "S1", url: "not a url", retrievedAtUtc: "2026-09-11T10:00:00.000Z" },
+          ],
+        })}
+        timeZone="Asia/Dubai"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sources" }));
+
+    const record = screen.getByTestId("reader-source-S1");
+    expect(record.textContent).toContain("[S1]");
+    expect(record.textContent).not.toContain("·");
+  });
+
   it("navigates sections and jumps a citation to its source record", () => {
     render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
 
