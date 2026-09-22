@@ -4,10 +4,16 @@
 
 Design approved on 2026-09-18. Implementation Tasks 0–8 complete 2026-09-19
 (domain, schema, readers, worker, advice/composition, visual, interaction,
-retained-retry wiring, verification). Still explicitly gated and NOT done:
-migration application (`20260918120000`), pgTAP first-call proof, worker
-deployment, staged publication runs, authenticated/live E2E acceptance, and the
-real-touch tooltip fix. See `docs/verification/overview-growth/final-report.md`.
+retained-retry wiring, verification). Since then, completed 2026-09-21:
+migration application (`20260918120000` + worker-read grant
+`20260920120000`, both live; read path proven by live runs, which is the
+effective pgTAP first-call proof), worker deployment (Trigger prod
+`v20260921.8`, deployed from this worktree), staged publication runs
+(manual `build-org` runs green; 4-horizon seed-verify publication + cleanup
+below), trailing-window baseline (builder/assembly, ADR 0066). Still
+explicitly gated and NOT done: authenticated/live E2E acceptance on real
+data, and the real-touch tooltip fix. See
+`docs/verification/overview-growth/final-report.md`.
 
 The approved design is the blue-current / emerald-projected line chart with a restrained right advice panel. The user explicitly selected a fixed original projection. The huge revenue headline and horizontal bars were rejected.
 
@@ -67,6 +73,18 @@ superseded; ids 970c9376/7955ddde survive only in audit payloads) because
 their second schedule origin (Sep 20 vs Sep 11) tripped the worker's
 fail-closed SCHEDULE_CORRUPT. Single origin Sep 11 remains.
 
+### Seed-verify run (2026-09-21, user-approved proof of the publish path)
+
+Ten daily seed rows (Sep 11–20, 100,000 minor/day, digests
+`sha256('seed-verify-<date>:1')`) were written for canary only, one
+`build-org` run executed, all four horizons published (cycle 0, origin Sep
+22, baseline window Aug 23 → Sep 22, monthly 3,000,000/3,000,000, "Baseline
+from 10 reported days" limitations, 4 audit events under the run's
+correlation id), then all ten metric rows and all four projection rows were
+deleted (verified 0/0). The 4 audit events remain as the paper trail. This
+run also proves the deployed worker carries the trailing-window code (ADR
+0066): the old stub could never publish.
+
 ## UX flow
 
 - Open Overview: preserve HomeHeader, then mount this section before campaigns.
@@ -88,7 +106,7 @@ fail-closed SCHEDULE_CORRUPT. Single origin Sep 11 remains.
 - Central estimate is the deterministic rounded midpoint of the saved low/high range. Within-range actuals are not labelled underperforming merely because they fall below midpoint.
 - Behind/ahead classification uses low/high bounds. Displayed money/percentage difference uses the midpoint and says so in details.
 - Projection generation and actual aggregation rules are fully defined in the companion data contract. Technical constants there are proposed implementation decisions, not claims the user personally approved every numerical threshold.
-- Baseline rule (amended 2026-09-21, user-approved, ADR 0066): the frozen monthly level is the observed daily mean over the 30 days ending at the source cutoff, scaled to a 30-day standard month, requiring at least 7 reported days. Missing days are excluded and named on the surface — one gap no longer voids a month, and a new organization publishes within days of reporting instead of waiting out a calendar month. Display-actuals exact-cover semantics (D05) are unchanged.
+- Baseline rule (amended 2026-09-21, user-approved, ADR 0066): the frozen monthly level is the observed daily mean over the 30 days ending at the source cutoff, scaled to a 30-day standard month, requiring at least 7 reported days. Missing days are excluded and named on the surface — one gap no longer voids a month, and a new organization publishes within days of reporting instead of waiting out a calendar month. Fallback ladder (approved same day): if the 30-day window is thin, widen to 14-in-60, 21-in-90, 28-in-120 days, first qualifying rung builds. Display-actuals exact-cover semantics (D05) are unchanged.
 - Source permissions are rechecked on every read. They never cause the original numbers to be recomputed.
 - Useful unquantified advice remains available; unknown impact is not zero.
 

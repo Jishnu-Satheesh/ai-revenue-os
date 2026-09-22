@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BASELINE_ONLY_LIMITATION,
   buildGrowthProjectionCandidate,
+  GROWTH_BASELINE_FALLBACK_RUNGS,
   GROWTH_BASELINE_MAX_AGE_DAYS,
   GROWTH_BASELINE_MIN_REPORTED_DAYS,
   resolveTrailingBaselineWindow,
@@ -73,6 +74,7 @@ function baseInput(overrides: Partial<BuildGrowthProjectionCandidateInput> = {})
     currency: "AED",
     scopePartitions: [...SCOPE],
     baselineWindow: { startDate: "2029-12-01", endDateExclusive: "2030-01-01" },
+    minReportedDays: 7,
     baselineFacts: dailyDecemberFacts(),
     findingBases: [],
     actionCandidates: [],
@@ -125,6 +127,22 @@ describe("resolveTrailingBaselineWindow", () => {
   it("pins the freshness and minimum-day floors as named constants", () => {
     expect(GROWTH_BASELINE_MAX_AGE_DAYS).toBe(45);
     expect(GROWTH_BASELINE_MIN_REPORTED_DAYS).toBe(7);
+  });
+
+  it("names a wider window when the rung reaches further back", () => {
+    expect(resolveTrailingBaselineWindow("2029-12-31", 60)).toEqual({
+      startDate: "2029-11-02",
+      endDateExclusive: "2030-01-01",
+    });
+  });
+
+  it("pins the fallback ladder: older data earns its place with more of it", () => {
+    expect(GROWTH_BASELINE_FALLBACK_RUNGS).toEqual([
+      { minReportedDays: 7, windowDays: 30 },
+      { minReportedDays: 14, windowDays: 60 },
+      { minReportedDays: 21, windowDays: 90 },
+      { minReportedDays: 28, windowDays: 120 },
+    ]);
   });
 });
 
@@ -233,6 +251,19 @@ describe("buildGrowthProjectionCandidate", () => {
     const facts = dailyDecemberFacts().slice(0, 6);
     const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: facts }));
     expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+  });
+
+  it("honours a higher rung floor instead of the default 7", () => {
+    const ten = dailyDecemberFacts().slice(0, 10);
+    const refused = buildGrowthProjectionCandidate(
+      baseInput({ baselineFacts: ten, minReportedDays: 14 }),
+    );
+    expect(refused).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    const ready = buildGrowthProjectionCandidate(
+      baseInput({ baselineFacts: dailyDecemberFacts().slice(0, 14), minReportedDays: 14 }),
+    );
+    if (ready.status !== "ready") throw new Error(`expected ready, got ${ready.status}`);
+    expect(ready.document.limitations.join(" ")).toContain("Baseline from 14 reported days");
   });
 
   it("spreads one weekly span over its own reported days, never inventing money", () => {

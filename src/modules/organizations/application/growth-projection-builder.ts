@@ -46,6 +46,21 @@ export const GROWTH_BASELINE_WINDOW_DAYS = 30;
 /** Minimum reported days in the window; fewer refuses instead of guessing. */
 export const GROWTH_BASELINE_MIN_REPORTED_DAYS = 7;
 
+/**
+ * Fallback ladder: each rung pairs the evidence it demands with how far back
+ * it reaches. The first rung that qualifies wins, evaluated top-down every
+ * run — older data earns its place with more of it. A sparse reporter (a
+ * shop reconciling twice a week, an org with a thin recent month but deep
+ * history) publishes at a lower rung instead of waiting; an empty window
+ * refuses at every rung.
+ */
+export const GROWTH_BASELINE_FALLBACK_RUNGS = [
+  { minReportedDays: 7, windowDays: 30 },
+  { minReportedDays: 14, windowDays: 60 },
+  { minReportedDays: 21, windowDays: 90 },
+  { minReportedDays: 28, windowDays: 120 },
+] as const;
+
 /** Standard month the observed daily mean scales to; a named judgment call. */
 export const GROWTH_BASELINE_STANDARD_MONTH_DAYS = 30;
 
@@ -182,6 +197,10 @@ const buildCandidateInputSchema = z.strictObject({
     .refine((value) => value.startDate < value.endDateExclusive, {
       message: "A baseline window must end after it starts.",
     }),
+  // The fallback rung's evidence floor for this window; the assembly sets it
+  // from GROWTH_BASELINE_FALLBACK_RUNGS so older windows earn their place
+  // with more reported days.
+  minReportedDays: z.number().int().min(1).max(366),
   baselineFacts: z.array(revenueFactSchema),
   findingBases: z.array(growthFindingBasisSchema).max(MAX_FINDING_BASES),
   actionCandidates: z.array(growthActionCandidateSchema).max(MAX_ACTION_CANDIDATES),
@@ -198,8 +217,8 @@ function refused(reason: GrowthCandidateRefusalReason, detail: string) {
 }
 
 /**
- * Names the trailing baseline window: the 30 local days ending at the source
- * cutoff (data contract D03).
+ * Names the trailing baseline window: the windowDays local days ending at
+ * the source cutoff (data contract D03).
  *
  * The window anchors at the cutoff — the freshest day the source vouches
  * for — rather than at an arbitrary calendar month, so a new organization
@@ -207,15 +226,21 @@ function refused(reason: GrowthCandidateRefusalReason, detail: string) {
  * month. Downstream always takes this window as given; a stray old report
  * cannot rename it.
  */
-export function resolveTrailingBaselineWindow(cutoffLocalDate: string): {
+export function resolveTrailingBaselineWindow(
+  cutoffLocalDate: string,
+  windowDays: number = GROWTH_BASELINE_WINDOW_DAYS,
+): {
   startDate: string;
   endDateExclusive: string;
 } {
   const parsed = isoDateSchema.safeParse(cutoffLocalDate);
   if (!parsed.success)
     throw new GrowthProgressError("INVALID_INPUT", "Cutoff dates read YYYY-MM-DD.");
+  if (!Number.isInteger(windowDays) || windowDays < 1) {
+    throw new GrowthProgressError("INVALID_INPUT", "Baseline windows span whole days.");
+  }
   return {
-    startDate: addLocalDays(cutoffLocalDate, -(GROWTH_BASELINE_WINDOW_DAYS - 1)),
+    startDate: addLocalDays(cutoffLocalDate, -(windowDays - 1)),
     endDateExclusive: addLocalDays(cutoffLocalDate, 1),
   };
 }
@@ -248,7 +273,7 @@ function divHalfAway(numerator: bigint, denominator: bigint): bigint {
   return quotient;
 }
 
-type TrailingBaselineAssessment =
+export type TrailingBaselineAssessment =
   | {
       status: "ok";
       reportedDays: string[];
@@ -259,6 +284,8 @@ type TrailingBaselineAssessment =
 
 /**
  * Assesses the trailing reported window day by day (data contract D03).
+ * Exported so the assembly can test fallback rungs without building: same
+ * inputs always give the same assessment.
  *
  * Facts outside the window are ignored, never clipped into it — the reader
  * drops crossing rows in production, and this matches that boundary wherever
@@ -275,7 +302,7 @@ type TrailingBaselineAssessment =
  * daily observation is created, stored or drawn from this; D05 still governs
  * what the blue line may show.
  */
-function assessTrailingBaselineWindow(args: {
+export function assessTrailingBaselineWindow(args: {
   windowStart: string;
   windowEndExclusive: string;
   cutoffDate: string;
@@ -376,8 +403,8 @@ function reportedDaysLimitation(reportedDays: number, latestDate: string): strin
  *
  * The baseline is the trailing reported window over the frozen scope: the
  * observed daily mean scaled to a 30-day standard month, requiring at least
- * GROWTH_BASELINE_MIN_REPORTED_DAYS reported days and a latest reported day
- * no older than GROWTH_BASELINE_MAX_AGE_DAYS. Qualified action ranges adapt
+ * the rung's minimum reported days and a latest reported day no older than
+ * GROWTH_BASELINE_MAX_AGE_DAYS. Qualified action ranges adapt
  * to the existing deterministic scenario engine; an unqualified range keeps
  * its advice downstream but contributes no money here.
  */
@@ -454,10 +481,10 @@ export function buildGrowthProjectionCandidate(
       "Conflicting reports cover the same day, so no total is stated.",
     );
   }
-  if (assessed.reportedDays.length < GROWTH_BASELINE_MIN_REPORTED_DAYS) {
+  if (assessed.reportedDays.length < input.minReportedDays) {
     return refused(
       "BASELINE_INCOMPLETE",
-      "Fewer than 7 reported days precede the cutoff, so no total is stated.",
+      `Fewer than ${input.minReportedDays} reported days precede the cutoff, so no total is stated.`,
     );
   }
   const latestReported = assessed.reportedDays[assessed.reportedDays.length - 1]!;

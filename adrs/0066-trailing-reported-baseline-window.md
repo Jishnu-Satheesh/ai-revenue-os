@@ -41,3 +41,16 @@ roughly where it stands within days of reporting, not months.
   conflict refusal bound how wrong an early baseline can be, and the label
   says exactly what it rests on.
 - No migration: the document schema already admits any valid window range.
+
+## Amendment — fallback ladder (accepted 2026-09-21)
+
+When the 30-day window holds fewer than 7 reported days, the worker widens
+rung by rung — 14 reported days in the trailing 60 days, 21 in 90, 28 in
+120 — and builds at the first rung that qualifies. Older data earns its
+place with more of it; the 45-day freshness bound, uniform currency and
+conflict-free coverage apply to every rung, and a rung that cannot trust
+its days refuses outright instead of widening past the defect. Rejected:
+lowering the floor below 7 (frozen fiction), interpolating gaps (invented
+money), confidence-interval bands (schema and display expansion for a
+problem a limitation line already carries). An empty window still refuses
+at every rung: the ladder helps sparse reporters, never conjures data.

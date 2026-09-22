@@ -169,6 +169,86 @@ describe("assembleLedgerBaselineCandidate", () => {
     expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
   });
 
+  it("widens to the second rung when the recent window is thin but history is deep", async () => {
+    const result = await assembleLedgerBaselineCandidate(
+      material(),
+      context(),
+      dependencies({
+        readBaselineFacts: async (input): Promise<RevenueFactsEnvelope> => ({
+          status: "ready",
+          facts:
+            input.from === "2026-08-23"
+              ? septemberFacts({ from: 16 })
+              : septemberFacts(),
+        }),
+      }),
+    );
+
+    // Six September days cannot carry rung one, but the wider window holds 21
+    // reported days against rung two's floor of 14: older data earned its
+    // place with more of it.
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.document.baselineWindow).toEqual({
+      startDate: "2026-07-24",
+      endDateExclusive: "2026-09-22",
+    });
+    expect(result.document.monthlyLowMinor).toBe(3000000);
+    expect(result.document.limitations.join(" ")).toContain(
+      "Baseline from 21 reported days (ending 2026-09-21)",
+    );
+  });
+
+  it("refuses when deeper history still misses the higher rung floor", async () => {
+    const result = await assembleLedgerBaselineCandidate(
+      material(),
+      context(),
+      dependencies({
+        readBaselineFacts: async (input): Promise<RevenueFactsEnvelope> => ({
+          status: "ready",
+          facts:
+            input.from === "2026-08-23"
+              ? septemberFacts({ from: 16 })
+              : septemberFacts({ from: 12 }),
+        }),
+      }),
+    );
+
+    // Ten reported days clear rung one's floor of 7 only in count, but rung
+    // one never sees them: the recent window holds six, and ten misses rung
+    // two's floor of 14 and every rung above it.
+    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+  });
+
+  it("refuses a conflict at the first rung instead of widening past it", async () => {
+    const clash: RevenueFact[] = [3_100_000, 3_100_001].map(
+      (amountMinor, index): RevenueFact => ({
+        sourceTable: "exact_range_metric_observations",
+        rowId: `span-${index}`,
+        organizationId: ORG_ID,
+        partitionKey: "organization-total",
+        startDate: "2026-09-01",
+        endDateExclusive: "2026-09-22",
+        amountMinor,
+        currency: "AED",
+        createdAt: "2026-09-21T00:00:00.000Z",
+        reconciliationDigest: DIGEST,
+      }),
+    );
+    const readBaselineFacts = vi.fn(async (): Promise<RevenueFactsEnvelope> => ({
+      status: "ready",
+      facts: clash,
+    }));
+    const result = await assembleLedgerBaselineCandidate(
+      material(),
+      context(),
+      dependencies({ readBaselineFacts }),
+    );
+
+    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    expect(readBaselineFacts).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses without a bound revenue definition before reading facts", async () => {
     const readBaselineFacts = vi.fn(async (): Promise<RevenueFactsEnvelope> => ({
       status: "ready",
