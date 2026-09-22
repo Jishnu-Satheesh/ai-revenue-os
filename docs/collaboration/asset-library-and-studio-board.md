@@ -7705,3 +7705,72 @@ dev org's live configuration.
 <!-- 2026-09-21 TinyFish live canary PASS (fail-closed + live path): 4 defects found+fixed via canary (metadata TS/DB, bound fail, spend fence). Pipeline 3faf56fc no_findings honestly on 3 searched slots, $0 provider spend, zero leakage. Positive-path proof needs real competitor data (optional 5th start). Report addendum in docs/verification/tinyfish-restoration/2026-09-19-browser-e2e.md. -->
 
 <!-- 2026-09-21 Independent Creative Studio design resume: continuing claimed prototype/spec/plan/report files after interruption; additionally claiming a narrow new campaigns/studio target entry in .superdesign/resume.json after draft import. Preserve all other targets. Browser verification through Chrome DevTools MCP; no application/staging/provider-generation changes. -->
+### 2026-09-20 · muse-spark · Fix: Trigger.dev MCP connection (Tier 1)
+
+- Root cause: both `opencode.json` and `.mcp.json` pinned `trigger.dev@4.5.10`,
+  whose published package is broken (`ERR_MODULE_NOT_FOUND` for
+  `@trigger.dev/core/v3` on `mcp` startup). Repo SDK/CLI are at 4.5.16.
+- Claimed and fixed: `opencode.json` (bumped to `trigger.dev@4.5.16`, added
+  `--project-ref proj_wjxnpmlspegvfcymhpxj` to scope to staging), `.mcp.json`
+  (same version bump; kept gitignored inline `TRIGGER_ACCESS_TOKEN`, verified
+  valid via `list_projects`). No secret committed: `opencode.json` relies on CLI
+  profile login per official Trigger opencode docs; `.mcp.json` stays gitignored.
+- Verified: MCP `initialize` handshake succeeds on the exact `opencode.json`
+  command; `tools/list` + `list_projects` return both staging and production
+  projects with the stored token.
+
+### 2026-09-22 · muse-spark · Task 3 governed-reports form (commit 0964e52)
+
+- Claimed and changed: `src/components/integrations/report-package-upload.tsx` + its
+  test (rebased on current tree per brief; Tasks 1-2 area `src/workflows/reports/*`
+  untouched), plus props-only threading through the channel page, integrations page,
+  `integration-hub-client.tsx`, and `data-sources-tab.tsx`. No migration, no RLS/RPC.
+- Form is now `lg:grid-cols-6` with a full-width dashed dropzone row, one `Period`
+  label over two date inputs, and currency defaulting from `organization.base_currency`.
+- Two deviations to note: (1) brief's `useEffect` currency sync violated the repo's
+  `react-hooks/set-state-in-effect` lint error, so used render-time previous-prop
+  comparison instead (same behavior, lint-clean); (2) snapshot has no org currency,
+  so the default is threaded as an optional prop from the page rather than read
+  from the snapshot; manual fallback preserved. Full detail in
+  `.superpowers/sdd/2026-09-22-governed-reports-fixes/task-3-report.md` (uncommitted).
+- Verified: typecheck clean, lint 0 errors on touched files, 40/40 vitest pass
+  (upload suite + secondary-tabs). Not verified in a browser.
+
+### 2026-09-22 · muse-spark · Task 1 governed-reports CSV profiler (commit 1f63ed8)
+
+- Claimed and changed: `src/workflows/reports/profile-report-package.ts`
+  (`headerCandidateDigest` rejects any row with a figure via existing
+  `readsAsLabels`) + `src/workflows/reports/profile-report-package.test.ts`
+  (2 new tests). No version bump, no migration.
+- Root cause, verified on staging: June CSV `79f9dea7` profiled 5 header
+  candidates (real 56-col header + 4 numeric data rows, all strings in CSV) so its
+  structure fingerprint `638b32…` never matched the XLSX admission `606b75…` and it
+  sat at `awaiting_contract` by design. Fixed CSV converges to the stored digest
+  `d39a9b17…` and CSV==XLSX fingerprint equality in tests.
+- Stuck package needs no data rewrite: map it once via "Which upload are you
+  mapping?" and its approval mints a CSV-shape admission; future CSVs auto-advance.
+- Verified: 8/8 profiler tests pass, typecheck clean. Task review PASS/Approved.
+
+### 2026-09-22 · muse-spark · Task 2 governed-reports validation warnings (commit 10688c6)
+
+- Claimed and changed: `src/components/integrations/report-package-upload.tsx`
+  (validation display only) + its test. Copy source `validation-copy.ts` untouched.
+- Each warning/error code now renders one compact row naming the affected sheet's
+  `canonical (source)` fields from the already-loaded approved contract (sheet-name
+  fallback when contract absent); warning Alert uses shared
+  `border-warning/40 bg-warning/5` + TriangleAlert treatment. No migration:
+  validation tables store codes-only by design; identity comes from the contract.
+- Verified: 20/20 upload tests pass, typecheck + lint clean. Task review
+  PASS/Approved.
+
+### 2026-09-22 · muse-spark · Governed-reports plan closed (1f63ed8, 10688c6, 0964e52)
+
+- Final whole-branch review: SHIP-WITH-NOTES, no blockers. Final check: typecheck
+  clean, 32/32 tests (profiler + upload suites), eslint 0 errors on touched files.
+- Residual notes (follow-ups, not gates): tighten two overstated comments
+  (profiler "never reach here", currency "never overwritten"), Period group
+  `<Label>` → `<span>`, add a PDF profiler regression test, enumerate Task 2
+  minors in the SDD ledger. Full record in
+  `.superpowers/sdd/2026-09-22-governed-reports-fixes/` (uncommitted, gitignored).
+- `git push` is the user's step; three path-limited commits ready on main.
+- Cherry-picked onto staging as 5c50b36, a27d4df, 798ba9e; this log entry kept verbatim.
