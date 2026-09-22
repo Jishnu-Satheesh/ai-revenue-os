@@ -114,14 +114,29 @@ afterEach(() => {
 });
 
 describe("ReportReaderView", () => {
-  it("leads with the summary and local meaning before findings", () => {
+  it("leads the summary with question and findings, keeping local meaning in its own section", () => {
     render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
 
     expect(screen.getByText("What matters for Downtown")).toBeTruthy();
     expect(screen.getByText(/delivery capacity/)).toBeTruthy();
-    expect(screen.getByText("What it means for Downtown")).toBeTruthy();
-    expect(screen.getByText(/order early for National Day/)).toBeTruthy();
+    // The prototype summary goes straight from the question to the findings.
+    expect(screen.queryByText("What it means for Downtown")).toBeNull();
     expect(screen.getByText("Findings to keep in view")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Local opportunity" }));
+    expect(screen.getByRole("heading", { name: "The local opportunity" })).toBeTruthy();
+    expect(screen.getByText(/order early for National Day/)).toBeTruthy();
+  });
+
+  it("matches the prototype summary treatment: green eyebrow, short cites, gaps icon", () => {
+    render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
+
+    expect(screen.getByText("The short version").className).toMatch(/emerald-700/);
+    // Long source tokens collapse to short per-finding labels; the full
+    // reference stays on the accessible name.
+    expect(screen.getByRole("button", { name: "See source S1" }).textContent).toBe("[S1]");
+    const gapsTitle = screen.getByText("Where the evidence is incomplete");
+    expect(gapsTitle.querySelector("svg")).toBeTruthy();
   });
 
   it("navigates sections and jumps a citation to its source record", () => {
@@ -245,8 +260,10 @@ describe("ReportReaderView", () => {
     );
 
     // An unknown citation degrades to inert text, never a jump to nowhere.
+    // It keeps the short per-finding label; the full reference stays on title.
     expect(screen.queryByRole("button", { name: /See source/ })).toBeNull();
-    expect(screen.getByText("[S9]")).toBeTruthy();
+    const inertCite = screen.getByText("[S1]");
+    expect(inertCite.getAttribute("title")).toBe("S9");
 
     fireEvent.click(screen.getByRole("button", { name: "Competitors" }));
     expect(screen.queryByText("Speculative estimate")).toBeNull();

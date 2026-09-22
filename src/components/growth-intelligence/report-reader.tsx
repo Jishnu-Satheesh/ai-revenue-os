@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ArrowRight,
   BookOpen,
   Download,
   FileText,
+  Info,
   ListChecks,
   Store,
   UserRound,
@@ -72,14 +74,22 @@ export function ReportReaderSkeleton() {
 
 function CitationButton({
   sourceRef,
+  sourceLabel,
   known,
   onOpenSource,
 }: {
   sourceRef: string;
+  /** Short per-finding label ([S1], [S2]) matching the approved mockup. */
+  sourceLabel: string;
   known: boolean;
   onOpenSource: (sourceRef: string) => void;
 }) {
-  if (!known) return <span className="font-semibold">[{sourceRef}]</span>;
+  if (!known)
+    return (
+      <span className="font-semibold" title={sourceRef}>
+        [{sourceLabel}]
+      </span>
+    );
   return (
     <button
       type="button"
@@ -87,7 +97,7 @@ function CitationButton({
       onClick={() => onOpenSource(sourceRef)}
       className="font-semibold text-primary underline-offset-2 hover:underline"
     >
-      [{sourceRef}]
+      [{sourceLabel}]
     </button>
   );
 }
@@ -298,10 +308,10 @@ export function ReportReaderView({
   const selectedAdvice = selectedAdviceFor(selected);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[180px_minmax(0,1fr)]">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[208px_minmax(0,1fr)]">
       <nav
         aria-label="Report sections"
-        className="flex shrink-0 gap-1 overflow-x-auto border-b p-2 lg:flex-col lg:overflow-visible lg:border-r lg:border-b-0 lg:p-3"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b p-2 lg:flex-col lg:overflow-visible lg:border-r lg:border-b-0 lg:p-4"
       >
         <p
           aria-hidden="true"
@@ -319,8 +329,8 @@ export function ReportReaderView({
               onClick={() => setSection(entry.key)}
               className={
                 section === entry.key
-                  ? "flex shrink-0 items-center gap-2 rounded-md bg-muted px-3 py-2 text-left text-xs font-semibold whitespace-nowrap"
-                  : "flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-muted-foreground whitespace-nowrap hover:bg-muted/60"
+                  ? "flex shrink-0 items-center gap-2 rounded-md bg-emerald-50 px-3 py-2.5 text-left text-[13px] font-semibold whitespace-nowrap text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                  : "flex shrink-0 items-center gap-2 rounded-md px-3 py-2.5 text-left text-[13px] text-muted-foreground whitespace-nowrap hover:bg-muted/60"
               }
             >
               <Icon aria-hidden="true" className="size-4 shrink-0" />
@@ -340,40 +350,39 @@ export function ReportReaderView({
       <article
         ref={articleRef}
         aria-label={sectionLabel(section)}
-        className="min-h-0 min-w-0 flex-1 overflow-y-auto p-5 sm:p-7"
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto p-5 sm:p-8"
       >
         {section === "summary" ? (
           <div className="flex min-w-0 flex-col">
-            <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+            <p className="text-[11px] font-semibold tracking-widest text-emerald-700 uppercase dark:text-emerald-300">
               The short version
             </p>
-            <h3 className="mt-2 text-xl font-semibold">What matters for {identity.locationName}</h3>
+            <h3 className="mt-2 text-xl font-bold">What matters for {identity.locationName}</h3>
             <p className="mt-3 max-w-prose text-sm leading-relaxed">{view.summary}</p>
-            <h4 className="mt-5 text-sm font-semibold">What it means for {identity.locationName}</h4>
-            <p className="mt-1 max-w-prose text-sm leading-relaxed">{view.localMeaning}</p>
-            <div className="mt-5 border-l-2 border-primary pl-4">
+            <div className="mt-6 border-l-2 border-primary pl-4">
               <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
                 Your research question
               </p>
               <p className="mt-1 max-w-prose text-sm leading-relaxed">{view.brief.question}</p>
             </div>
-            <h4 className="mt-6 text-sm font-semibold">Findings to keep in view</h4>
+            <h4 className="mt-6 text-[15px] font-bold">Findings to keep in view</h4>
             <ol className="mt-1 flex min-w-0 flex-col">
               {view.findings.map((finding, index) => (
                 <li
                   key={finding.key}
-                  className="flex min-w-0 gap-3 border-b py-4 last:border-b-0"
+                  className="flex min-w-0 gap-3 border-b py-5 last:border-b-0"
                 >
                   <span aria-hidden="true" className="shrink-0 text-xs font-semibold text-primary">
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <div className="min-w-0">
-                    <p className="min-w-0 text-sm break-words">
+                    <p className="min-w-0 text-sm font-semibold break-words">
                       {finding.statement}{" "}
-                      {finding.citations.map((ref) => (
+                      {finding.citations.map((ref, citationIndex) => (
                         <CitationButton
                           key={ref}
                           sourceRef={ref}
+                          sourceLabel={`S${citationIndex + 1}`}
                           known={knownSources.has(ref)}
                           onOpenSource={openSource}
                         />
@@ -397,8 +406,11 @@ export function ReportReaderView({
               nothing here can be selected yet.
             </p>
             {view.gaps.length > 0 ? (
-              <div className="mt-4 rounded-lg bg-muted p-4">
-                <p className="text-sm font-semibold">Where the evidence is incomplete</p>
+              <div className="mt-5 rounded-2xl bg-muted p-5">
+                <p className="flex items-center gap-2 text-sm font-semibold">
+                  <Info aria-hidden="true" className="size-4 shrink-0" />
+                  Where the evidence is incomplete
+                </p>
                 {view.gaps.map((gap) => (
                   <p key={gap.key} className="mt-1 min-w-0 text-sm text-muted-foreground break-words">
                     {gap.description}
@@ -432,10 +444,11 @@ export function ReportReaderView({
                       </td>
                       <td className="min-w-0 px-2 py-3 text-muted-foreground break-words">
                         {entry.summary}{" "}
-                        {entry.citations.map((ref) => (
+                        {entry.citations.map((ref, citationIndex) => (
                           <CitationButton
                             key={ref}
                             sourceRef={ref}
+                            sourceLabel={`S${citationIndex + 1}`}
                             known={knownSources.has(ref)}
                             onOpenSource={openSource}
                           />
@@ -767,14 +780,14 @@ export function ReportReaderDialog({
         onEscapeKeyDown={scheduleRestore}
         className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[860px] lg:max-w-[1024px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
       >
-        <DialogHeader className="static shrink-0 border-b px-5 py-4 pr-12 text-left sm:px-7">
-          <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+        <DialogHeader className="static shrink-0 border-b px-5 py-5 pr-12 text-left sm:px-7">
+          <p className="text-[11px] font-semibold tracking-widest text-emerald-700 uppercase dark:text-emerald-300">
             Research report
           </p>
-          <DialogTitle className="mt-1 min-w-0 text-lg font-semibold break-words">
+          <DialogTitle className="mt-1 min-w-0 text-2xl font-bold tracking-tight break-words">
             {title}
           </DialogTitle>
-          <DialogDescription className="mt-0.5 min-w-0 break-words">{subtitle}</DialogDescription>
+          <DialogDescription className="mt-1 min-w-0 text-[13px] break-words">{subtitle}</DialogDescription>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -811,7 +824,7 @@ export function ReportReaderDialog({
               onAdviceSelectionChange={setSelectedAdvice}
             />
           ) : loadState === "failed" ? (
-            <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-5 sm:p-7">
+              <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-5 sm:p-8">
               <Alert variant="destructive">
                 <AlertTitle>This report could not be loaded</AlertTitle>
                 <AlertDescription>
@@ -827,16 +840,19 @@ export function ReportReaderDialog({
           )}
         </div>
 
-        <DialogFooter className="static mx-0 mb-0 shrink-0 flex-row items-center justify-between gap-2 border-t px-5 py-3 sm:px-7">
-          <span className="hidden min-w-0 text-xs leading-relaxed text-muted-foreground sm:block">
-            {payload === null
-              ? "Pinned report version."
-              : `Brief ${payload.identity.briefRevisionNumber} · ${formatReportDate(payload.identity.reportCreatedAt, timeZone)}`}
-            <span className="block">This report stays in the Ready to review list.</span>
+        <DialogFooter className="static mx-0 mb-0 shrink-0 flex-row items-center justify-between gap-2 border-t px-5 py-4 sm:px-7">
+          <span className="hidden min-w-0 items-center gap-1.5 text-left text-xs leading-relaxed text-muted-foreground sm:flex">
+            <FileText aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="min-w-0">
+              {payload === null
+                ? "Pinned report version."
+                : `Brief ${payload.identity.briefRevisionNumber} · ${formatReportDate(payload.identity.reportCreatedAt, timeZone)}`}
+              <span className="block">This report stays in the Ready to review list.</span>
+            </span>
           </span>
           <div className="flex shrink-0 items-center gap-2">
             {payload === null ? null : (
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="outline" className="h-10" asChild>
                 <a
                   href={reportDownloadPath(organizationId, payload.identity.reportVersionId)}
                   download
@@ -848,20 +864,21 @@ export function ReportReaderDialog({
             )}
             <Button
               variant="outline"
-              size="sm"
+              className="h-10"
               onClick={closeNow}
               title="This report stays in the Ready to review list."
             >
               Save for later
             </Button>
             <Button
-              size="sm"
+              className="h-10 px-5"
               disabled={payload === null || selectedAdvice.length === 0}
               onClick={() => setReviewOpen(true)}
             >
               {selectedAdvice.length > 0
                 ? `Review selection (${selectedAdvice.length})`
                 : "Review selection"}
+              <ArrowRight aria-hidden="true" className="size-4" />
             </Button>
           </div>
         </DialogFooter>
