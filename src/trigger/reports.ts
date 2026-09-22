@@ -660,6 +660,28 @@ export const reportPackageProjectionTask = schemaTask({
     if (result.outcome === "failed") {
       throw new AbortTaskRunError(`report-package refused: ${payload.packageId}`);
     }
+    // A claim that was refused without failing leaves the package parked with
+    // no failure code and nothing watching it retry -- the May 2026 Talabat
+    // upload sat in `awaiting_projection` this way with no analysis and no
+    // recommendations, and the run list said only `completed`. Worth a
+    // warning so the next stall is found in the logs, not by an operator
+    // noticing a missing month.
+    if (
+      result.outcome === "not_ready" ||
+      result.outcome === "not_found" ||
+      result.outcome === "conflict" ||
+      result.outcome === "expired" ||
+      result.outcome === "object_mismatch"
+    ) {
+      logger.warn("report_package.projection_stalled", {
+        organizationId: payload.organizationId,
+        packageId: payload.packageId,
+        projectionVersionId: payload.projectionVersionId,
+        projectionRunId: payload.projectionRunId,
+        correlationId: payload.correlationId,
+        outcome: result.outcome,
+      });
+    }
     // The audit follows the figures. A clean projection starts the channel
     // analysis for the package's own window, channel and branch, so the
     // channel page has an answer without anyone pressing the button. The

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(24);
+select extensions.plan(25);
 
 -- Contract: update-keyed fenced spend ---------------------------------------
 -- (1) has_function reserve_monitoring_update_budget
@@ -104,6 +104,13 @@ update public.growth_intelligence_monitoring_updates update_row
 set reason_code = 'RESEARCH_EXECUTION_UNAVAILABLE', retryable = true
 where update_row.update_id = 'e6000000-0000-4000-8000-000000000502'::uuid;
 
+-- The canary-staging migration may have committed a tinyfish row on shared
+-- staging. Remove it inside this transaction (rolled back afterwards) so the
+-- fixture insert below works with or without the push.
+
+delete from private.growth_intelligence_provider_qualifications
+where provider = 'tinyfish';
+
 insert into private.growth_intelligence_provider_qualifications (
   provider, agreement_version, agreement_date, agreement_expires_at,
   permitted_uses, retention_policy, deletion_rules, pricing_version,
@@ -113,7 +120,9 @@ insert into private.growth_intelligence_provider_qualifications (
   array['snippet_storage', 'commercial_inference', 'organization_display', 'derived_claims', 'synthesis_reuse', 'agreed_retention'],
   'retain permitted excerpts for 400 days, then erase',
   'erase on termination within 30 days, including derived text on request',
-  'tinyfish-search-2026-09', 0, true,
+  'tinyfish-search-2026-09', 1, true,
+  -- Rate 1 micro-dollar is the documented free-tier accounting floor: the
+  -- lane assert requires a positive rate, and actual TinyFish cost stays zero.
   '{"extraction": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "supportReview": {"maxInputTokens": 12000, "maxOutputTokens": 4000}, "synthesis": {"maxInputTokens": 24000, "maxOutputTokens": 6000}}'::jsonb,
   'passed'
 );

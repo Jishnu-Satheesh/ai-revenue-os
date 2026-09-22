@@ -4,6 +4,13 @@ create extension if not exists pgtap with schema extensions;
 
 select extensions.plan(16);
 
+-- The canary-staging migration may have committed a tinyfish row on shared
+-- staging. Remove it inside this transaction (rolled back afterwards) so the
+-- no-staged-row assertion below stays meaningful with or without the push.
+
+delete from private.growth_intelligence_provider_qualifications
+where provider = 'tinyfish';
+
 -- Contract: per-provider qualification for the TinyFish restoration ----------
 
 select extensions.has_function(

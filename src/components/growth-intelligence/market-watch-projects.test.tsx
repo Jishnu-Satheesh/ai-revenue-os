@@ -239,6 +239,65 @@ describe("MarketWatchProjectsView", () => {
     expect(screen.getByRole("button", { name: /paused 1/i })).toBeTruthy();
   });
 
+  it("marks only the active filter pressed", () => {
+    render(<MarketWatchProjectsView {...viewProps()} />);
+
+    expect(
+      screen.getByRole("button", { name: /all projects 3/i }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: /paused 1/i }).getAttribute("aria-pressed"),
+    ).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: /paused 1/i }));
+    expect(
+      screen.getByRole("button", { name: /paused 1/i }).getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("keeps a single New research entry: no section-level duplicate", () => {
+    render(<MarketWatchProjectsView {...viewProps()} />);
+
+    // The header CTA (workspace) stands alone; the section keeps no twin.
+    // The empty-state starter is a different control, covered below.
+    expect(screen.queryByRole("button", { name: "New research" })).toBeNull();
+  });
+
+  it("lists the featured report contents without inventing links", () => {
+    render(<MarketWatchProjectsView {...viewProps()} />);
+
+    const panel = screen.getByRole("complementary", { name: "In this report" });
+    expect(panel).toBeTruthy();
+    for (const entry of [
+      "Competitors & their offers",
+      "What customers are saying",
+      "The local opportunity",
+      "Draft advice for your review",
+    ]) {
+      expect(screen.getByText(entry)).toBeTruthy();
+    }
+    // Static preview list: entries navigate nowhere invented.
+    expect(panel.querySelectorAll("a,button").length).toBe(0);
+  });
+
+  it("keeps Project history disabled by default with its reason", () => {
+    render(<MarketWatchProjectsView {...viewProps()} />);
+
+    const history = screen.getByRole("button", { name: /project history/i });
+    expect(history).toHaveProperty("disabled", true);
+    expect(history.getAttribute("title")).toMatch(/unavailable in this view/i);
+    // No drill-in arrows without the overview entry point.
+    expect(screen.queryByRole("button", { name: /^open /i })).toBeNull();
+  });
+
+  it("routes row drill-in through the overview entry point when provided", () => {
+    const onOpenProject = vi.fn();
+    render(<MarketWatchProjectsView {...viewProps({ onOpenProject })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open competitor monitoring/i }));
+    expect(onOpenProject).toHaveBeenCalledWith("51000000-0000-4000-8000-000000000051");
+  });
+
   it("offers a named next action when no projects exist yet", () => {
     const onNewResearch = vi.fn();
     render(<MarketWatchProjectsView {...viewProps({ items: [], onNewResearch })} />);
@@ -248,10 +307,10 @@ describe("MarketWatchProjectsView", () => {
     expect(onNewResearch).toHaveBeenCalled();
   });
 
-  it("heads the list as Research projects without duplicating tab sections", () => {
+  it("heads the list as Market Watch without duplicating tab sections", () => {
     render(<MarketWatchProjectsView {...viewProps()} />);
 
-    expect(screen.getByRole("heading", { name: "Research projects" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Market Watch" })).toBeTruthy();
     // Insights and data gaps live in their own tab sections with triage
     // controls; this list keeps no second copies.
     expect(screen.queryByText("Business insights")).toBeNull();
@@ -289,6 +348,68 @@ describe("MarketWatchProjectsView", () => {
     expect(
       screen.getByTestId("research-project-state-50000000-0000-4000-8000-000000000005"),
     ).toBeTruthy();
+  });
+
+  it("shows the brief question on the featured Ready-to-review card (P7)", () => {
+    render(<MarketWatchProjectsView {...viewProps()} />);
+
+    expect(screen.getByText("How should we prepare for National Day?")).toBeTruthy();
+  });
+
+  it("groups non-review rows inside one card container with separation lines (P7)", () => {
+    const { container } = render(<MarketWatchProjectsView {...viewProps()} />);
+
+    const list = screen.getByTestId("market-watch-project-list");
+    expect(list).toBeTruthy();
+    // Single-box list: the container owns the divided rows.
+    expect(list.querySelector(".divide-y")).toBeTruthy();
+    // Both non-featured rows live inside the one container.
+    expect(
+      list.querySelector('[data-testid="research-project-51000000-0000-4000-8000-000000000051"]'),
+    ).toBeTruthy();
+    expect(
+      list.querySelector('[data-testid="research-project-52000000-0000-4000-8000-000000000052"]'),
+    ).toBeTruthy();
+    // The featured ready project stays out of the grouped list.
+    expect(
+      list.querySelector('[data-testid="research-project-50000000-0000-4000-8000-000000000005"]'),
+    ).toBeNull();
+    void container;
+  });
+
+  it("animates a loading ring on every Researching row and respects reduced motion (P6)", () => {
+    render(<MarketWatchProjectsView {...viewProps()} />);
+
+    const rings = screen.getAllByTestId("market-watch-loading-ring");
+    expect(rings.length).toBeGreaterThanOrEqual(1);
+    for (const ring of rings) {
+      expect(ring.getAttribute("class") ?? "").toMatch(/animate-spin/);
+      expect(ring.getAttribute("class") ?? "").toMatch(/motion-reduce:animate-none/);
+    }
+  });
+
+  it("styles the header with eyebrow, separation lines, pinned location and pills (P8)", () => {
+    const { container } = render(<MarketWatchProjectsView {...viewProps()} />);
+
+    const eyebrow = screen.getByText("Your market, in context");
+    expect(eyebrow.className).toMatch(/text-primary/);
+    // Location left, search right with separation lines around the toolbar.
+    expect(screen.getByRole("combobox", { name: /research location/i })).toBeTruthy();
+    expect(screen.getByRole("searchbox", { name: /find a research project/i })).toBeTruthy();
+    const section = container.querySelector('section[aria-label="Market Watch projects"]');
+    expect(section?.querySelectorAll(".border-t").length).toBeGreaterThanOrEqual(2);
+    // Filter pills use the smaller prototype radius, not full pills.
+    const readyPill = screen.getByRole("button", { name: /ready to review 1/i });
+    expect(readyPill.className).toMatch(/rounded-md/);
+    expect(readyPill.className).not.toMatch(/rounded-full/);
+  });
+
+  it("closes the list section with a separation line before insights (P9)", () => {
+    const { container } = render(<MarketWatchProjectsView {...viewProps()} />);
+
+    const section = container.querySelector('section[aria-label="Market Watch projects"]');
+    const separators = section?.querySelectorAll('[aria-hidden="true"].border-t');
+    expect((separators?.length ?? 0)).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -372,6 +493,34 @@ describe("MarketWatchProjectsSection", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /retry/i }));
       expect(await screen.findByText("Prepare for National Day")).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("opens the project overview from Project history and closes it again", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(listBody), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(<MarketWatchProjectsSection {...sectionProps()} />);
+      expect(await screen.findByText("Prepare for National Day")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /project history/i }));
+      // P7: the featured Ready-to-review card shows the brief question, so the
+      // overview dialog duplicates it while open. Assert on the dialog scope.
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toBeTruthy();
+      const questions = await screen.findAllByText("How should we prepare for National Day?");
+      expect(questions.length).toBeGreaterThanOrEqual(2);
+      const pause = screen.getByRole("button", { name: /pause monitoring/i });
+      expect(pause).toHaveProperty("disabled", true);
+
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      });
+      // The featured card keeps showing the question after the dialog closes.
+      expect(screen.getByText("How should we prepare for National Day?")).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -631,6 +780,11 @@ describe("MarketWatchProjectsSection report reader wiring", () => {
       expect(await screen.findByText("What matters for Downtown")).toBeTruthy();
 
       fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+      fireEvent.click(
+        screen.getByRole("checkbox", { name: "Draft one clear family bundle" }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /review selection/i }));
+      expect(await screen.findByRole("heading", { name: "Review selected items" })).toBeTruthy();
       expect(screen.getByRole("button", { name: /accept selected/i })).toBeTruthy();
       expect(screen.queryByText(/needs the manage permission/)).toBeNull();
     } finally {

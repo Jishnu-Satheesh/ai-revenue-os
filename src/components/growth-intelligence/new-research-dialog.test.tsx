@@ -61,9 +61,7 @@ async function goToReview() {
 
 function chooseMode(label: RegExp) {
   const radios = screen.getAllByRole("radio");
-  const target = label.source.includes("one")
-    ? radios[0]!
-    : radios[1]!;
+  const target = label.source.includes("one") ? radios[0]! : radios[1]!;
   fireEvent.click(target);
 }
 
@@ -122,7 +120,9 @@ describe("NewResearchDialog scope step", () => {
     render(<NewResearchDialog {...dialogProps()} />);
     await goToScope();
 
-    fireEvent.change(screen.getByLabelText(/competitor name/i), { target: { value: "Rival Kitchen" } });
+    fireEvent.change(screen.getByLabelText(/competitor name/i), {
+      target: { value: "Rival Kitchen" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
     expect(screen.getByText("Rival Kitchen")).toBeTruthy();
 
@@ -140,7 +140,9 @@ describe("NewResearchDialog scope step", () => {
     fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
     expect(await screen.findByRole("alert")).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText(/competitor name/i), { target: { value: "Rival Kitchen" } });
+    fireEvent.change(screen.getByLabelText(/competitor name/i), {
+      target: { value: "Rival Kitchen" },
+    });
     fireEvent.change(screen.getByLabelText(/website/i), { target: { value: "not a url" } });
     fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
     expect(await screen.findByText(/valid public HTTP/i)).toBeTruthy();
@@ -148,11 +150,15 @@ describe("NewResearchDialog scope step", () => {
     fireEvent.change(screen.getByLabelText(/website/i), {
       target: { value: "https://rival.example/menu" },
     });
-    fireEvent.change(screen.getByLabelText(/location hint/i), { target: { value: "Near Marina Mall" } });
+    fireEvent.change(screen.getByLabelText(/location hint/i), {
+      target: { value: "Near Marina Mall" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
     expect(screen.getByText("Rival Kitchen")).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText(/competitor name/i), { target: { value: "rival kitchen" } });
+    fireEvent.change(screen.getByLabelText(/competitor name/i), {
+      target: { value: "rival kitchen" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
     expect(await screen.findByText(/already listed/i)).toBeTruthy();
 
@@ -170,7 +176,9 @@ describe("NewResearchDialog scope step", () => {
     render(<NewResearchDialog {...dialogProps()} />);
     await goToScope();
 
-    fireEvent.change(screen.getByLabelText(/competitor name/i), { target: { value: "Rival Kitchen" } });
+    fireEvent.change(screen.getByLabelText(/competitor name/i), {
+      target: { value: "Rival Kitchen" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
 
     fireEvent.click(screen.getByRole("button", { name: /edit competitor rival kitchen/i }));
@@ -185,7 +193,9 @@ describe("NewResearchDialog scope step", () => {
 
     expect(screen.getByText("Suggestions")).toBeTruthy();
     expect(screen.getByText(/not verified competitors/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /add suggested competitor rival kitchen/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /add suggested competitor rival kitchen/i }),
+    );
     expect(screen.getByText("Suggestion")).toBeTruthy();
   });
 
@@ -404,5 +414,137 @@ describe("NewResearchDialog layout contract", () => {
     expect(dialog.className).toMatch(/sm:max-w-\[820px\]/);
     expect(dialog.className).toMatch(/max-sm:h-dvh/);
     expect(dialog.className).toMatch(/flex-col/);
+  });
+});
+
+describe("NewResearchDialog step indicator", () => {
+  it("marks the current step, disables future steps, and keeps visited steps clickable", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+
+    expect(screen.getByRole("button", { name: "Brief" })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: "Scope" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+
+    await goToScope();
+
+    // The completed Brief step shows a check in its (hidden) circle.
+    const briefDone = screen.getByRole("button", { name: "Brief" });
+    expect(briefDone).not.toHaveAttribute("aria-current");
+    expect(briefDone.querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Scope" })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+
+    fireEvent.click(briefDone);
+    expect(screen.getByLabelText(/what would you like to achieve/i)).toBeTruthy();
+  });
+});
+
+describe("NewResearchDialog event brief shortcut", () => {
+  it("renders the helper band and fills the brief like the prototype", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+
+    expect(screen.getByText("From a question to a useful report")).toBeTruthy();
+    expect(screen.getByText(/connect it with your business context/)).toBeTruthy();
+    expect(screen.getByLabelText(/what would you like to achieve/i)).toHaveAttribute(
+      "placeholder",
+      "For example: Find out what nearby competitors are doing for National Day and how we could attract more family orders.",
+    );
+    expect(screen.getByLabelText(/project name/i)).toHaveAttribute(
+      "placeholder",
+      "A short name you'll recognise",
+    );
+
+    // The shortcut overwrites whatever is already typed (prototype behavior).
+    fireEvent.change(screen.getByLabelText(/project name/i), { target: { value: "Old name" } });
+    fireEvent.click(screen.getByRole("button", { name: /try an event brief/i }));
+
+    expect(screen.getByLabelText(/what would you like to achieve/i)).toHaveProperty(
+      "value",
+      "Find out what nearby competitors are offering for National Day and how we could attract more family orders without putting delivery quality at risk.",
+    );
+    expect(screen.getByLabelText(/project name/i)).toHaveProperty(
+      "value",
+      "National Day opportunity",
+    );
+    expect(screen.getByLabelText(/event or target date/i)).toHaveProperty("value", "2026-12-02");
+  });
+
+  it("marks the draft dirty and clears the question error", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /try an event brief/i }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+
+    // Dirty: closing asks instead of closing.
+    fireEvent.click(screen.getByRole("button", { name: /close research dialog/i }));
+    expect(await screen.findByText(/discard this research brief/i)).toBeTruthy();
+  });
+});
+
+describe("NewResearchDialog competitor row shape", () => {
+  it("renders the tile, sub-line and icon actions", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    fireEvent.change(screen.getByLabelText(/competitor name/i), {
+      target: { value: "Rival Kitchen" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
+    // A bare name still gets the fallback sub-line.
+    expect(screen.getByText("Location to be checked")).toBeTruthy();
+
+    const edit = screen.getByRole("button", { name: /edit competitor rival kitchen/i });
+    const remove = screen.getByRole("button", { name: /remove competitor rival kitchen/i });
+    expect(edit.querySelector("svg")).not.toBeNull();
+    expect(remove.querySelector("svg")).not.toBeNull();
+    // Icon tile plus the two icon actions: three svgs in the row.
+    expect(edit.closest("li")?.querySelectorAll("svg").length).toBe(3);
+
+    fireEvent.click(edit);
+    fireEvent.change(screen.getByLabelText(/location hint/i), {
+      target: { value: "Near Marina Mall" },
+    });
+    fireEvent.change(screen.getByLabelText(/website/i), {
+      target: { value: "https://rival.example/menu" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save competitor/i }));
+    expect(screen.getByText("Near Marina Mall · https://rival.example/menu")).toBeTruthy();
+  });
+
+  it("lists investigation chips in prototype order", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    const chips = [
+      "Digital presence",
+      "Offers & pricing",
+      "Customer feedback",
+      "Local demand",
+      "Performance signals",
+    ].map((label) => screen.getByText(label));
+    for (let i = 1; i < chips.length; i++) {
+      expect(chips[i - 1]!.compareDocumentPosition(chips[i]!)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }
+  });
+});
+
+describe("NewResearchDialog footer restyle", () => {
+  it("always shows the privacy note and arrow icons", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+
+    const note = screen.getByText("Your business context stays private.");
+    expect(note.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(note.querySelector("svg")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /continue/i }).querySelector("svg")).not.toBeNull();
+
+    await goToReview();
+    chooseMode(/one-time/);
+    expect(
+      screen.getByRole("button", { name: /start research/i }).querySelector("svg"),
+    ).not.toBeNull();
   });
 });

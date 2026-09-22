@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mock } from "vitest";
 
 import { mswServer } from "@/test/msw/server";
 
@@ -76,7 +78,6 @@ function workspace(
       organizationId={ORGANIZATION}
       canManage
       isCurrentMonth={isCurrentMonth}
-      marketWatch={<section aria-label="Market Watch" />}
       performanceCard={null}
       fetchedAt="2026-09-07T09:00:00.000Z"
       performanceFilters={filters}
@@ -262,7 +263,7 @@ describe("GrowthIntelligenceWorkspace", () => {
       expect(screen.getByRole("tab", { name: new RegExp(name) })).toBeTruthy();
     }
     fireEvent.click(screen.getByRole("tab", { name: /Insights & market/ }));
-    expect(screen.getByRole("region", { name: "Market Watch" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Market Watch projects" })).toBeTruthy();
   });
 
   it("keeps activity-month navigation inside Your actions", () => {
@@ -292,7 +293,6 @@ describe("GrowthIntelligenceWorkspace", () => {
       organizationId: ORGANIZATION,
       canManage: true,
       isCurrentMonth: true,
-      marketWatch: null,
       performanceCard: card,
       fetchedAt: "2026-09-07T09:00:00.000Z",
       performanceFilters: defaultFilters(),
@@ -314,10 +314,10 @@ describe("GrowthIntelligenceWorkspace header and tabs", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("keeps the title and Market monitoring on one header row", () => {
+  it("keeps the title and New research on one header row", () => {
     const { container } = workspace();
     const heading = screen.getByRole("heading", { name: "Growth Intelligence", level: 1 });
-    const button = screen.getByRole("button", { name: /^market monitoring$/i });
+    const button = screen.getByRole("button", { name: /^new research$/i });
     expect(heading.parentElement?.parentElement).toBe(button.parentElement);
     expect(container.textContent).toContain("follow earlier decisions");
   });
@@ -328,71 +328,88 @@ describe("GrowthIntelligenceWorkspace header and tabs", () => {
   });
 });
 
-describe("GrowthIntelligenceWorkspace market monitoring", () => {
+describe("GrowthIntelligenceWorkspace market research entry", () => {
   afterEach(() => {
     cleanup();
     window.history.replaceState(null, "", "/");
   });
 
-  it("opens the Review dialog from the Market monitoring header entry", async () => {
+  it("opens the New research dialog from the single header entry", async () => {
     workspace();
-    fireEvent.click(screen.getByRole("button", { name: /^market monitoring$/i }));
-    expect(await screen.findByRole("dialog", { name: "Review market monitoring" })).toBeTruthy();
-    expect(screen.getByText(/no active branch/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^new research$/i }));
+    expect(await screen.findByRole("dialog", { name: "New research" })).toBeTruthy();
   });
 
-  it("opens the same dialog from the Market Watch entry point", async () => {
+  it("switches to the Insights tab before opening from the header", async () => {
     workspace();
-    window.dispatchEvent(new CustomEvent("growth-intelligence:open-market-monitoring"));
-    expect(await screen.findByRole("dialog", { name: "Review market monitoring" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^new research$/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /insights/i }).getAttribute("aria-selected")).toBe(
+        "true",
+      ),
+    );
+    expect(await screen.findByRole("dialog", { name: "New research" })).toBeTruthy();
   });
 
-  it("invites a branch choice in Insights & market while branchless", () => {
+  it("shows Market Watch without requiring a branch choice", async () => {
     workspace();
     fireEvent.click(screen.getByRole("tab", { name: /insights/i }));
-    expect(screen.getByText(/follows one branch at a time/i)).toBeTruthy();
+    expect(screen.queryByText(/follows one branch at a time/i)).toBeNull();
+    expect(
+      await screen.findByRole("region", { name: "Market Watch projects" }),
+    ).toBeTruthy();
   });
 
   it("heads Insights & market with the same intro card pattern as Recommendations", () => {
     workspace();
     fireEvent.click(screen.getByRole("tab", { name: /insights/i }));
     expect(screen.getByText(/what your evidence says, what is missing/i)).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Insights" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Business insights" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Data gaps" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Market Watch" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Market Watch projects" })).toBeTruthy();
   });
 
-  it("observes the selected branch pipeline without branchless copy", async () => {
-    const fetchMock = vi.fn(
-      async (_url: string) => new Response(JSON.stringify({ research: null }), { status: 200 }),
+  it("makes no branch-scoped research requests for a selected branch", async () => {
+    const fetchMock: Mock<(url: string) => Promise<Response>> = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ projects: [], reportsByProject: {}, revisionsByProject: {} }),
+          { status: 200 },
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     try {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+      });
       render(
-        <GrowthIntelligenceWorkspace
-          view={view()}
-          organizationId={ORGANIZATION}
-          canManage
-          isCurrentMonth
-          marketWatch={<section aria-label="Market Watch" />}
-          performanceCard={null}
-          fetchedAt={null}
-          performanceFilters={null}
-          branches={[
-            {
-              id: "20000000-0000-4000-8000-00000000000a",
-              name: "Downtown",
-              serviceArea: null,
-              isActive: true,
-            },
-          ]}
-          selectedBranchId="20000000-0000-4000-8000-00000000000a"
-        />,
+        <QueryClientProvider client={queryClient}>
+          <GrowthIntelligenceWorkspace
+            view={view()}
+            organizationId={ORGANIZATION}
+            canManage
+            isCurrentMonth
+            performanceCard={null}
+            fetchedAt={null}
+            performanceFilters={null}
+            branches={[
+              {
+                id: "20000000-0000-4000-8000-00000000000a",
+                name: "Downtown",
+                serviceArea: null,
+                isActive: true,
+              },
+            ]}
+            selectedBranchId="20000000-0000-4000-8000-00000000000a"
+          />
+        </QueryClientProvider>,
       );
-      expect(screen.queryByText(/follows one branch at a time/i)).toBeNull();
+      fireEvent.click(screen.getByRole("tab", { name: /insights/i }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-      const url = String(fetchMock.mock.calls[0]?.[0] ?? "");
-      expect(url).toContain("branchId=20000000-0000-4000-8000-00000000000a");
+      for (const call of fetchMock.mock.calls) {
+        expect(String(call[0] ?? "")).not.toMatch(/[?&]branchId=/);
+      }
+      expect(screen.queryByText(/follows one branch at a time/i)).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }

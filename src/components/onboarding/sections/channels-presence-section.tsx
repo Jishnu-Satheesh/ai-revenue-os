@@ -1,5 +1,6 @@
 "use client";
 
+import { OrganizationCompetitorsBlock } from "@/components/onboarding/organization-competitors-block";
 import { SectionForm, type SectionSaveStatus } from "@/components/onboarding/sections/shared";
 import {
   accountOwnershipOptions,
@@ -10,9 +11,16 @@ import {
 export function ChannelsPresenceSection({
   defaultValues = {},
   onSave,
+  /**
+   * Organisation id for the shared competitors block. Absent in unit tests
+   * and anywhere the organisation store is unavailable — the section then
+   * renders exactly as before, without the block.
+   */
+  organizationId,
 }: {
   defaultValues?: Record<string, unknown>;
   onSave: (payload: Record<string, unknown>, status: SectionSaveStatus) => Promise<void>;
+  organizationId?: string;
 }) {
   return (
     <SectionForm
@@ -55,6 +63,8 @@ export function ChannelsPresenceSection({
             "Only a verified end-to-end setup counts as connected for readiness scoring.",
         },
       ]}
-    />
+    >
+      {organizationId ? <OrganizationCompetitorsBlock organizationId={organizationId} /> : null}
+    </SectionForm>
   );
 }

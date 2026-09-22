@@ -17,9 +17,9 @@ export function InsightsList({
   canManage: boolean;
 }) {
   return (
-    <section aria-label="Insights" className="flex flex-col gap-4">
+    <section aria-label="Business insights" className="flex flex-col gap-4">
       <div>
-        <h2 className="text-xl font-semibold">Insights</h2>
+        <h2 className="text-xl font-semibold">Business insights</h2>
         <p className="text-sm text-muted-foreground">
           Material observations from your business and market evidence.
         </p>

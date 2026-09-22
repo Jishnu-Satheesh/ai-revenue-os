@@ -1,7 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download } from "lucide-react";
+import {
+  BookOpen,
+  Download,
+  FileText,
+  ListChecks,
+  Store,
+  UserRound,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,6 +30,11 @@ import {
   type AssembledReportView,
   type ReportReaderSectionKey,
 } from "@/modules/growth-intelligence/application/report-reader";
+import {
+  ReportReviewDialog,
+  acceptErrorMessage,
+  type ReviewableAdviceItem,
+} from "@/components/growth-intelligence/report-review-dialog";
 
 function formatReportDate(value: string, timeZone: string): string {
   return new Date(value).toLocaleDateString("en-AE", {
@@ -34,6 +48,14 @@ function formatReportDate(value: string, timeZone: string): string {
 function sectionLabel(key: ReportReaderSectionKey): string {
   return REPORT_READER_SECTIONS.find((section) => section.key === key)?.label ?? key;
 }
+
+const SECTION_ICONS: Record<ReportReaderSectionKey, LucideIcon> = {
+  summary: FileText,
+  competitors: Store,
+  opportunity: UserRound,
+  advice: ListChecks,
+  sources: BookOpen,
+};
 
 export function ReportReaderSkeleton() {
   return (
@@ -70,116 +92,23 @@ function CitationButton({
   );
 }
 
-type SelectedDraftAdvice = {
-  itemKey: string;
-  kind: "action" | "finding";
-  title: string;
-  destinationLabel: string;
-};
-
-type AcceptOutcome = {
-  itemKey: string;
-  title: string;
-  destination: string;
-  outcome: "accepted" | "already_accepted";
-};
-
-function acceptErrorMessage(status: number): string {
-  if (status === 403) {
-    return "You do not have permission to accept research for this organization.";
-  }
-  if (status === 404) {
-    return "This report could not be found in your organization.";
-  }
-  return "The selection could not be accepted. Nothing was added — try again.";
-}
-
 /**
- * Review-and-accept for one report's draft advice. Posts the selection
- * exactly once per click (single-flight guard plus a fresh idempotency
- * key); a repeated acceptance answers already-accepted with an
- * explanation and creates nothing.
+ * Local selection summary for one report's draft advice. Accepting moved
+ * to the Review-selected-items dialog (opened from the reader footer), so
+ * this panel never posts: it previews type-derived destinations and
+ * points at the footer entry.
  */
-function AdviceAcceptancePanel({
-  organizationId,
-  reportVersionId,
+function AdviceSelectionSummary({
   briefRevisionNumber,
   selectedAdvice,
   canAccept,
 }: {
-  organizationId: string;
-  reportVersionId: string;
   briefRevisionNumber: number;
-  selectedAdvice: SelectedDraftAdvice[];
+  selectedAdvice: ReviewableAdviceItem[];
   canAccept: boolean;
 }) {
-  const [phase, setPhase] = useState<"idle" | "pending" | "done" | "failed">("idle");
-  const [outcomes, setOutcomes] = useState<AcceptOutcome[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const flightRef = useRef(false);
-
-  if (!canAccept) {
-    return (
-      <p className="mt-4 text-xs text-muted-foreground">
-        Accepting needs the manage permission — you can read this report.
-      </p>
-    );
-  }
-
   const toRecommendations = selectedAdvice.filter((advice) => advice.kind === "action").length;
   const toInsights = selectedAdvice.length - toRecommendations;
-  const allReplayed = phase === "done" && outcomes.length > 0 && outcomes.every((outcome) => outcome.outcome === "already_accepted");
-
-  async function acceptSelected() {
-    if (flightRef.current) return;
-    flightRef.current = true;
-    setPhase("pending");
-    setError(null);
-    try {
-      const response = await fetch(
-        `${reportReaderPath(organizationId, reportVersionId)}/accept`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({
-            items: selectedAdvice.map((advice) => ({ itemKey: advice.itemKey, kind: advice.kind })),
-            idempotencyKey: crypto.randomUUID(),
-          }),
-        },
-      );
-      const body = (await response.json().catch(() => null)) as {
-        items?: { itemKey: string; destination: string; outcome: string }[];
-      } | null;
-      if (!response.ok || !body || !Array.isArray(body.items)) {
-        throw new Error(acceptErrorMessage(response.status));
-      }
-      const byKey = new Map(selectedAdvice.map((advice) => [advice.itemKey, advice] as const));
-      setOutcomes(
-        body.items.flatMap((item) => {
-          const advice = byKey.get(item.itemKey);
-          if (!advice) return [];
-          if (item.outcome !== "accepted" && item.outcome !== "already_accepted") return [];
-          return [
-            {
-              itemKey: item.itemKey,
-              title: advice.title,
-              destination: item.destination,
-              outcome: item.outcome,
-            },
-          ];
-        }),
-      );
-      setPhase("done");
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error ? requestError.message : "The selection could not be accepted.",
-      );
-      setPhase("failed");
-    } finally {
-      flightRef.current = false;
-    }
-  }
 
   return (
     <div className="mt-4 rounded-lg border p-4">
@@ -196,54 +125,15 @@ function AdviceAcceptancePanel({
           link to this report (Brief {briefRevisionNumber}).
         </p>
       )}
-      <div className="mt-3 flex shrink-0 items-center gap-2">
-        <Button
-          size="sm"
-          disabled={selectedAdvice.length === 0 || phase === "pending"}
-          onClick={acceptSelected}
-        >
-          {phase === "pending" ? "Accepting…" : "Accept selected"}
-        </Button>
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Accepting never approves campaign work, spending or publication.
-      </p>
-      {phase === "failed" && error ? (
-        <p role="alert" className="mt-2 text-sm text-destructive">
-          {error}{" "}
-          <button
-            type="button"
-            onClick={acceptSelected}
-            className="font-semibold underline-offset-2 hover:underline"
-          >
-            Retry
-          </button>
+      {canAccept ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Use Review selection in the footer to check the items and accept them.
         </p>
-      ) : null}
-      {phase === "done" ? (
-        <div className="mt-2" role="status">
-          {allReplayed ? (
-            <p className="text-sm text-muted-foreground">
-              Already accepted — nothing new was added. Each item keeps its link to this report.
-            </p>
-          ) : null}
-          <ul className="mt-1 flex flex-col gap-1">
-            {outcomes.map((outcome) => (
-              <li key={outcome.itemKey} className="min-w-0 text-sm break-words">
-                {outcome.outcome === "accepted" ? (
-                  <span>
-                    {outcome.title} — accepted to {outcome.destination}.
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">
-                    {outcome.title} — already accepted; nothing new was added.
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Accepting needs the manage permission — you can read this report.
+        </p>
+      )}
     </div>
   );
 }
@@ -329,26 +219,37 @@ function MarkReviewedPanel({
  *
  * Selection review: each draft item carries its type-derived destination
  * preview (action advice adds to Recommendations, findings add to
- * Insights). Accepting posts the selection once with an idempotency key;
- * a repeated acceptance reports the already-accepted state with an
- * explanation instead of duplicating feed items.
+ * Insights). The advice checkboxes hold local selection only; the reader
+ * footer opens the Review-selected-items dialog, which posts the
+ * selection once with an idempotency key. A repeated acceptance reports
+ * the already-accepted state with an explanation instead of duplicating
+ * feed items. Summary findings stay unselectable until finding
+ * acceptance has backend support.
  */
 export function ReportReaderView({
   view,
   timeZone,
   acceptance,
+  onAdviceSelectionChange,
 }: {
   view: AssembledReportView;
   timeZone: string;
   /**
    * Slice 6 review entry point. Absent by default: advice selection stays
-   * local-only with no writes. Present: the advice section offers
-   * accept-selected (single-flight POST with an idempotency key) and the
-   * empty-advice state offers mark-reviewed when `canAccept` is true.
-   * Omitted or false hides the actions with the reason instead (viewer
-   * path); direct calls are still refused by the route.
+   * local-only with no writes. Present: the advice section previews the
+   * selection and the footer offers review-and-accept (single-flight POST
+   * with an idempotency key), while the empty-advice state offers
+   * mark-reviewed when `canAccept` is true. Omitted or false hides the
+   * actions with the reason instead (viewer path); direct calls are still
+   * refused by the route.
    */
   acceptance?: { organizationId: string; canAccept?: boolean };
+  /**
+   * Reports the selected draft advice (advice checkboxes only) so the
+   * reader footer can offer the Review-selection entry. Called on every
+   * advice toggle; findings are never selectable so they never appear.
+   */
+  onAdviceSelectionChange?: (selectedAdvice: ReviewableAdviceItem[]) => void;
 }) {
   const [section, setSection] = useState<ReportReaderSectionKey>("summary");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -372,16 +273,29 @@ export function ReportReaderView({
     articleRef.current?.scrollTo?.({ top: 0 });
   }, [section]);
 
-  function toggleSelection(key: string, checked: boolean) {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (checked) next.add(key);
-      else next.delete(key);
-      return next;
-    });
+  function selectedAdviceFor(keys: ReadonlySet<string>): ReviewableAdviceItem[] {
+    return view.draftAdvice
+      .filter((advice) => keys.has(`advice:${advice.itemKey}`))
+      .map((advice) => ({
+        itemKey: advice.itemKey,
+        kind: advice.kind,
+        title: advice.title,
+        detail: advice.detail,
+        destinationLabel: advice.destinationLabel,
+      }));
+  }
+
+  function toggleAdviceSelection(itemKey: string, checked: boolean) {
+    const key = `advice:${itemKey}`;
+    const next = new Set(selected);
+    if (checked) next.add(key);
+    else next.delete(key);
+    setSelected(next);
+    onAdviceSelectionChange?.(selectedAdviceFor(next));
   }
 
   const identity = view.identity;
+  const selectedAdvice = selectedAdviceFor(selected);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[180px_minmax(0,1fr)]">
@@ -389,21 +303,31 @@ export function ReportReaderView({
         aria-label="Report sections"
         className="flex shrink-0 gap-1 overflow-x-auto border-b p-2 lg:flex-col lg:overflow-visible lg:border-r lg:border-b-0 lg:p-3"
       >
-        {REPORT_READER_SECTIONS.map((entry) => (
-          <button
-            key={entry.key}
-            type="button"
-            aria-current={section === entry.key ? "page" : undefined}
-            onClick={() => setSection(entry.key)}
-            className={
-              section === entry.key
-                ? "shrink-0 rounded-md bg-muted px-3 py-2 text-left text-xs font-semibold whitespace-nowrap"
-                : "shrink-0 rounded-md px-3 py-2 text-left text-xs text-muted-foreground whitespace-nowrap hover:bg-muted/60"
-            }
-          >
-            {entry.label}
-          </button>
-        ))}
+        <p
+          aria-hidden="true"
+          className="hidden px-3 pb-1 text-[11px] font-semibold tracking-widest text-muted-foreground uppercase lg:block"
+        >
+          In this report
+        </p>
+        {REPORT_READER_SECTIONS.map((entry) => {
+          const Icon = SECTION_ICONS[entry.key];
+          return (
+            <button
+              key={entry.key}
+              type="button"
+              aria-current={section === entry.key ? "page" : undefined}
+              onClick={() => setSection(entry.key)}
+              className={
+                section === entry.key
+                  ? "flex shrink-0 items-center gap-2 rounded-md bg-muted px-3 py-2 text-left text-xs font-semibold whitespace-nowrap"
+                  : "flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-muted-foreground whitespace-nowrap hover:bg-muted/60"
+              }
+            >
+              <Icon aria-hidden="true" className="size-4 shrink-0" />
+              {entry.label}
+            </button>
+          );
+        })}
         <p className="mt-auto hidden px-3 pt-4 text-[11px] leading-relaxed text-muted-foreground lg:block">
           Brief {identity.briefRevisionNumber}
           <br />
@@ -455,14 +379,12 @@ export function ReportReaderView({
                         />
                       ))}
                     </p>
-                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                    <label className="mt-2 flex cursor-not-allowed items-center gap-2 text-xs text-muted-foreground">
                       <input
                         type="checkbox"
+                        disabled
+                        aria-describedby="finding-review-note"
                         className="accent-primary"
-                        checked={selected.has(`finding:${finding.key}`)}
-                        onChange={(event) =>
-                          toggleSelection(`finding:${finding.key}`, event.target.checked)
-                        }
                       />
                       Select finding for Insights
                     </label>
@@ -470,6 +392,10 @@ export function ReportReaderView({
                 </li>
               ))}
             </ol>
+            <p id="finding-review-note" className="mt-3 text-xs text-muted-foreground">
+              Finding checkboxes are off for now: accepting findings needs a backend update, so
+              nothing here can be selected yet.
+            </p>
             {view.gaps.length > 0 ? (
               <div className="mt-4 rounded-lg bg-muted p-4">
                 <p className="text-sm font-semibold">Where the evidence is incomplete</p>
@@ -602,7 +528,7 @@ export function ReportReaderView({
                     className="mt-1 shrink-0 accent-primary"
                     checked={selected.has(`advice:${advice.itemKey}`)}
                     onChange={(event) =>
-                      toggleSelection(`advice:${advice.itemKey}`, event.target.checked)
+                      toggleAdviceSelection(advice.itemKey, event.target.checked)
                     }
                   />
                   <span className="min-w-0 break-words">{advice.title}</span>
@@ -626,18 +552,9 @@ export function ReportReaderView({
               </p>
             </div>
             {acceptance ? (
-              <AdviceAcceptancePanel
-                organizationId={acceptance.organizationId}
-                reportVersionId={view.identity.reportVersionId}
+              <AdviceSelectionSummary
                 briefRevisionNumber={view.identity.briefRevisionNumber}
-                selectedAdvice={view.draftAdvice
-                  .filter((advice) => selected.has(`advice:${advice.itemKey}`))
-                  .map((advice) => ({
-                    itemKey: advice.itemKey,
-                    kind: advice.kind,
-                    title: advice.title,
-                    destinationLabel: advice.destinationLabel,
-                  }))}
+                selectedAdvice={selectedAdvice}
                 canAccept={acceptance.canAccept ?? false}
               />
             ) : null}
@@ -734,16 +651,24 @@ export function ReportReaderDialog({
   const [loadState, setLoadState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [refreshError, setRefreshError] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  // Mirrors the advice checkboxes inside the reader view so the footer can
+  // offer the Review-selection entry with a live count.
+  const [selectedAdvice, setSelectedAdvice] = useState<ReviewableAdviceItem[]>([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const loadedVersion = useRef<string | null>(null);
   const payloadRef = useRef<AssembledReportView | null>(null);
 
   // Closing resets the refresh cycle so the next open starts clean. State
   // settles during render (never in an effect), after the New research
   // dialog's draft-seed pattern. A retained payload for another version is
-  // cleared so reopening never flashes the wrong report.
+  // cleared so reopening never flashes the wrong report. A version change
+  // also clears the mirrored selection because the view remounts per
+  // version and starts unselected.
   const [closeSeed, setCloseSeed] = useState({ open, reportVersionId });
   if (closeSeed.open !== open || closeSeed.reportVersionId !== reportVersionId) {
     setCloseSeed({ open, reportVersionId });
+    setSelectedAdvice([]);
+    setReviewOpen(false);
     if (!open) {
       setReloadToken(0);
       setRefreshError(false);
@@ -842,7 +767,7 @@ export function ReportReaderDialog({
         onEscapeKeyDown={scheduleRestore}
         className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[860px] lg:max-w-[1024px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
       >
-        <DialogHeader className="static shrink-0 border-b px-5 py-4 text-left sm:px-7">
+        <DialogHeader className="static shrink-0 border-b px-5 py-4 pr-12 text-left sm:px-7">
           <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
             Research report
           </p>
@@ -850,6 +775,15 @@ export function ReportReaderDialog({
             {title}
           </DialogTitle>
           <DialogDescription className="mt-0.5 min-w-0 break-words">{subtitle}</DialogDescription>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={closeNow}
+            aria-label="Close"
+            className="absolute top-3 right-3"
+          >
+            <X aria-hidden="true" />
+          </Button>
         </DialogHeader>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -874,6 +808,7 @@ export function ReportReaderDialog({
               view={payload}
               timeZone={timeZone}
               acceptance={{ organizationId, canAccept }}
+              onAdviceSelectionChange={setSelectedAdvice}
             />
           ) : loadState === "failed" ? (
             <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-5 sm:p-7">
@@ -893,10 +828,11 @@ export function ReportReaderDialog({
         </div>
 
         <DialogFooter className="static mx-0 mb-0 shrink-0 flex-row items-center justify-between gap-2 border-t px-5 py-3 sm:px-7">
-          <span className="hidden min-w-0 text-xs text-muted-foreground sm:block">
+          <span className="hidden min-w-0 text-xs leading-relaxed text-muted-foreground sm:block">
             {payload === null
               ? "Pinned report version."
               : `Brief ${payload.identity.briefRevisionNumber} · ${formatReportDate(payload.identity.reportCreatedAt, timeZone)}`}
+            <span className="block">This report stays in the Ready to review list.</span>
           </span>
           <div className="flex shrink-0 items-center gap-2">
             {payload === null ? null : (
@@ -910,11 +846,38 @@ export function ReportReaderDialog({
                 </a>
               </Button>
             )}
-            <Button size="sm" onClick={closeNow}>
-              Close
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={closeNow}
+              title="This report stays in the Ready to review list."
+            >
+              Save for later
+            </Button>
+            <Button
+              size="sm"
+              disabled={payload === null || selectedAdvice.length === 0}
+              onClick={() => setReviewOpen(true)}
+            >
+              {selectedAdvice.length > 0
+                ? `Review selection (${selectedAdvice.length})`
+                : "Review selection"}
             </Button>
           </div>
         </DialogFooter>
+        {payload === null ? null : (
+          <ReportReviewDialog
+            open={reviewOpen}
+            onOpenChange={setReviewOpen}
+            organizationId={organizationId}
+            reportVersionId={payload.identity.reportVersionId}
+            briefRevisionNumber={payload.identity.briefRevisionNumber}
+            reportTitle={payload.identity.projectTitle}
+            reportDateLabel={formatReportDate(payload.identity.reportCreatedAt, timeZone)}
+            items={selectedAdvice}
+            canAccept={canAccept}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

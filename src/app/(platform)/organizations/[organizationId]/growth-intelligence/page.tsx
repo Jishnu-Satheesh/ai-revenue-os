@@ -1,8 +1,6 @@
 import { GrowthIntelligenceWorkspace } from "@/components/growth-intelligence/growth-intelligence-workspace";
-import { MarketWatchLivePreview } from "@/components/growth-intelligence/market-watch-live-preview";
-import type { MonitoringBranchOption } from "@/components/growth-intelligence/market-monitoring-dialog";
-import { MarketWatch } from "@/components/growth-intelligence/market-watch";
 import {
+  type MonitoringBranchOption,
   parseWorkspaceMonth,
   summarizeServiceArea,
 } from "@/components/growth-intelligence/query-options";
@@ -12,9 +10,7 @@ import { ChannelAnalysisError } from "@/domain/analysis/errors";
 import type { AnalysisGrain } from "@/domain/analysis/types";
 import { isWindowCovered } from "@/domain/analysis/window-selection";
 import type { CoverageWindow } from "@/domain/analysis/window-selection";
-import type { MarketGeographicLayer } from "@/domain/growth-intelligence/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
-import { createEventPublisher } from "@/domain/events/publisher";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { cacheGet, cacheSet } from "@/lib/cache/redis";
 import { DomainError, toPublicError } from "@/lib/errors";
@@ -44,12 +40,9 @@ import {
 import { createChannelService } from "@/modules/channels/application/service";
 import { createAuthenticatedChannelRepository } from "@/modules/channels/infrastructure/repository";
 import { assertGrowthIntelligenceAccess } from "@/modules/growth-intelligence/application/feature-access";
-import { buildMarketWatch } from "@/modules/growth-intelligence/application/market-watch";
-import { createMarketProfileService } from "@/modules/growth-intelligence/application/profile-service";
 import { createGrowthIntelligenceReadService } from "@/modules/growth-intelligence/application/read-service";
 import { createAuthenticatedGrowthIntelligenceReadRepository } from "@/modules/growth-intelligence/infrastructure/read-repository";
 import { createAuthenticatedResearchReadRepository } from "@/modules/growth-intelligence/infrastructure/research-read-repository";
-import { createAuthenticatedMarketProfileRepository } from "@/modules/growth-intelligence/infrastructure/profile-repository";
 import { createDecisionRepository } from "@/modules/decisions/infrastructure/repository";
 import type { DecisionPersistence } from "@/modules/decisions/infrastructure/repository";
 import { isGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
@@ -106,16 +99,6 @@ function parseWindow(
   return { windowStart, windowEnd, grain };
 }
 
-function parseLimit(value: string | undefined): number {
-  const parsed = Number(value ?? "");
-  if (!Number.isInteger(parsed)) return 20;
-  return Math.min(Math.max(parsed, 1), 50);
-}
-
-function parseGeography(value: string | undefined): MarketGeographicLayer | null {
-  return value === "trade_area" || value === "city" || value === "country" ? value : null;
-}
-
 export default async function GrowthIntelligencePage({ params, searchParams }: PageProps) {
   const context = await getOrganizationContext(params);
   const role = context.membership.role as OrganizationRole;
@@ -130,49 +113,9 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
   const canManage = hasOrganizationPermission(role, "growth_intelligence.manage");
 
   const search = (await searchParams) ?? {};
-  const limit = parseLimit(search.limit);
   const activityMonth = parseWorkspaceMonth(search.month);
 
-  const service = createMarketProfileService({
-    repository: createAuthenticatedMarketProfileRepository(context.supabase),
-    events: createEventPublisher(),
-  });
-  // Legacy organization scope: this workspace surface predates branch profiles.
-  const profile = await service.read({ organizationId: context.organizationId, branchId: null });
-  const currentVersionId = profile.profile?.currentVersionId ?? null;
-
   const reads = createAuthenticatedGrowthIntelligenceReadRepository(context.supabase);
-  const claims = currentVersionId
-    ? await reads.listClaimPage({
-        organizationId: context.organizationId,
-        profileVersionId: currentVersionId,
-        limit,
-        cursor: search.cursor ?? null,
-      })
-    : { claims: [], nextCursor: null };
-  const claimIds = claims.claims.map((claim) => claim.id);
-  const runIds = [...new Set(claims.claims.map((claim) => claim.runId))];
-  const [sources, links, events, requests] = await Promise.all([
-    reads.listSourcesByRuns({ organizationId: context.organizationId, runIds }),
-    reads.listLinksByClaims({ organizationId: context.organizationId, claimIds }),
-    reads.listEventsByClaims({ organizationId: context.organizationId, claimIds }),
-    reads.listRequests({ organizationId: context.organizationId, limit: 50 }),
-  ]);
-
-  const currentVersion = profile.versions.find((version) => version.id === currentVersionId);
-  const watch = buildMarketWatch({
-    profile,
-    claims: claims.claims,
-    sources,
-    links,
-    events,
-    requests,
-    limit: Math.max(claims.claims.length, 1),
-    cursor: null,
-    geography: parseGeography(search.geography),
-    now: new Date().toISOString(),
-    allowBoundedQuotes: currentVersion?.document.sourcePolicy.allowBoundedQuotes ?? false,
-  });
 
   // Campaign proposals are composed in only where the caller could actually be
   // shown one: the campaigns feature has to be on for this organization, and
@@ -485,33 +428,7 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
     performanceFetchedAt = new Date().toISOString();
   }
 
-  const marketWatch = (
-    <MarketWatch
-      organizationId={context.organizationId}
-      watch={{ ...watch, nextCursor: claims.nextCursor }}
-      canRetry={canManage}
-    />
-  );
-
-  // Ephemeral live-only preview beside stored Market Watch. Mounts only for
-  // managers with a branch selected; stored watch logic below is untouched and
-  // the preview fetches nothing on page load (explicit click only).
-  const marketWatchWithPreview = (
-    <div className="flex flex-col gap-3">
-      {branchId && canManage ? (
-        <div className="flex justify-end">
-          <MarketWatchLivePreview
-            organizationId={context.organizationId}
-            branchId={branchId}
-            canManage={canManage}
-          />
-        </div>
-      ) : null}
-      {marketWatch}
-    </div>
-  );
-
-  // Branches feed the Review market monitoring dialog's Location selector.
+  // Branches feed the New research dialog's Location selector.
   // A failed list degrades to no branches rather than failing the page.
   let branches: MonitoringBranchOption[] = [];
   try {
@@ -541,7 +458,6 @@ export default async function GrowthIntelligencePage({ params, searchParams }: P
         view={view}
         organizationId={context.organizationId}
         canManage={canManage}
-        marketWatch={marketWatchWithPreview}
         isCurrentMonth={activityMonth === null}
         performanceCard={performanceCard}
         fetchedAt={performanceFetchedAt}

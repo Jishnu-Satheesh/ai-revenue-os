@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -141,6 +141,41 @@ describe("ReportReaderView", () => {
     expect(source.textContent).toContain("https://rival.example/menu");
   });
 
+  it("keeps section labels, order and behavior with icons", () => {
+    render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
+
+    const nav = screen.getByRole("navigation", { name: "Report sections" });
+    const buttons = within(nav).getAllByRole("button");
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      "Summary",
+      "Competitors",
+      "Local opportunity",
+      "Draft advice",
+      "Sources",
+    ]);
+    for (const button of buttons) {
+      expect(button.querySelector("svg")).toBeTruthy();
+    }
+  });
+
+  it("holds summary-finding checkboxes disabled with an honest reason", () => {
+    render(
+      <ReportReaderView
+        view={viewFixture()}
+        timeZone="Asia/Dubai"
+        acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: /Select finding for Insights/ });
+    expect(checkbox).toBeDisabled();
+    expect(
+      screen.getByText(/accepting findings needs a backend update/),
+    ).toBeTruthy();
+    fireEvent.click(checkbox);
+    expect(screen.getByRole("status").textContent).toContain("Nothing selected");
+  });
+
   it("keeps the estimate label, assumptions and reasoning on one surface", () => {
     render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
     fireEvent.click(screen.getByRole("button", { name: "Competitors" }));
@@ -264,6 +299,9 @@ describe("ReportReaderDialog", () => {
         `/api/organizations/${ORGANIZATION}/growth-intelligence/monitoring/reports/${REPORT_VERSION}/download`,
       );
       expect(screen.getByRole("button", { name: /^close$/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /save for later/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^review selection$/i })).toBeDisabled();
+      expect(screen.getByText(/stays in the Ready to review list/)).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -392,18 +430,56 @@ describe("ReportReaderView acceptance", () => {
     return new Response(JSON.stringify({ items }), { status: 200 });
   }
 
+  function reviewDialogProps(overrides: Record<string, unknown> = {}) {
+    return {
+      organizationId: ORGANIZATION,
+      reportVersionId: REPORT_VERSION as string | null,
+      open: true,
+      onOpenChange: vi.fn(),
+      timeZone: "Asia/Dubai",
+      canAccept: true,
+      ...overrides,
+    };
+  }
+
+  function stubReviewFetch(
+    acceptImpl: () => Promise<Response>,
+    view: AssembledReportView = adviceView(),
+  ) {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.endsWith("/accept")) return acceptImpl();
+      return new Response(JSON.stringify({ report: view }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function acceptCalls(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls.filter(
+      ([url]) => typeof url === "string" && (url as string).endsWith("/accept"),
+    );
+  }
+
+  async function openReviewWithOneSelected() {
+    fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+    fireEvent.click(screen.getByRole("button", { name: /review selection \(1\)/i }));
+    return screen.findByRole("dialog", { name: /review selected items/i });
+  }
+
   it("stays local-only without the review entry point", () => {
     render(<ReportReaderView view={adviceView()} timeZone="Asia/Dubai" />);
     fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
 
     expect(screen.queryByRole("button", { name: /accept selected/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /review selection/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /mark as reviewed/i })).toBeNull();
   });
 
-  it("previews type-derived destinations and posts the selection once with an idempotency key", async () => {
-    const fetchMock = vi.fn(async () =>
-      acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
-    );
+  it("previews type-derived destinations with a local summary and no writes", () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("must not fetch");
+    });
     vi.stubGlobal("fetch", fetchMock);
     try {
       render(
@@ -422,12 +498,65 @@ describe("ReportReaderView acceptance", () => {
       fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
       expect(screen.getByText(/1 to Recommendations/)).toBeTruthy();
       expect(screen.getByText(/keeps its link to this report \(Brief 1\)/)).toBeTruthy();
+      expect(screen.getByText(/Use Review selection in the footer/)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /accept selected/i })).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
-      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
-      await screen.findByText(/accepted to Recommendations/);
+  it("footer offers save-for-later close and a live review-selection entry", async () => {
+    stubReviewFetch(async () =>
+      acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
+    );
+    try {
+      const onOpenChange = vi.fn();
+      render(<ReportReaderDialog {...reviewDialogProps({ onOpenChange })} />);
+      await screen.findByText("What matters for Downtown");
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(screen.getByRole("button", { name: /^review selection$/i })).toBeDisabled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+      expect(screen.getByRole("button", { name: /review selection \(1\)/i })).toBeEnabled();
+
+      fireEvent.click(screen.getByRole("button", { name: /review selection \(1\)/i }));
+      const review = await screen.findByRole("dialog", { name: /review selected items/i });
+      expect(within(review).getByText("Draft one clear family bundle")).toBeTruthy();
+
+      // Back to report returns to the still-open report.
+      fireEvent.click(within(review).getByRole("button", { name: /back to report/i }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: /review selected items/i })).toBeNull(),
+      );
+      expect(screen.getByRole("dialog", { name: /prepare for national day/i })).toBeTruthy();
+
+      // Save for later is the honest close: the report stays in the Ready list.
+      fireEvent.click(screen.getByRole("button", { name: /save for later/i }));
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("posts the selection once with an idempotency key from the review dialog", async () => {
+    const fetchMock = stubReviewFetch(async () =>
+      acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
+    );
+    try {
+      render(<ReportReaderDialog {...reviewDialogProps()} />);
+      await screen.findByText("What matters for Downtown");
+
+      const review = await openReviewWithOneSelected();
+      expect(within(review).getByText(/Adds to Recommendations/)).toBeTruthy();
+
+      fireEvent.click(within(review).getByRole("button", { name: /accept selected items/i }));
+      await within(review).findByText(/accepted to Recommendations/);
+
+      const posts = acceptCalls(fetchMock);
+      expect(posts).toHaveLength(1);
+      const [url, init] = posts[0] as unknown as [string, RequestInit];
       expect(url).toBe(acceptUrl);
       expect(init.method).toBe("POST");
       const body = JSON.parse(String(init.body)) as {
@@ -444,82 +573,61 @@ describe("ReportReaderView acceptance", () => {
   });
 
   it("single-flights rapid accept clicks into one request", async () => {
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = stubReviewFetch(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
-      return acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]);
+      return acceptResponse([
+        { itemKey: "bundle", destination: "Recommendations", outcome: "accepted" },
+      ]);
     });
-    vi.stubGlobal("fetch", fetchMock);
     try {
-      render(
-        <ReportReaderView
-          view={adviceView()}
-          timeZone="Asia/Dubai"
-          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
-        />,
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
-      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+      render(<ReportReaderDialog {...reviewDialogProps()} />);
+      await screen.findByText("What matters for Downtown");
 
-      const accept = screen.getByRole("button", { name: /accept selected/i });
+      const review = await openReviewWithOneSelected();
+      const accept = within(review).getByRole("button", { name: /accept selected items/i });
       fireEvent.click(accept);
       fireEvent.click(accept);
-      await screen.findByText(/accepted to Recommendations/);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await within(review).findByText(/accepted to Recommendations/);
+      expect(acceptCalls(fetchMock)).toHaveLength(1);
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
   it("explains an already-accepted replay and creates nothing", async () => {
-    const fetchMock = vi
-      .fn(async () =>
-        acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
-      )
-      .mockImplementationOnce(async () =>
-        acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
-      )
-      .mockImplementationOnce(async () =>
-        acceptResponse([
-          { itemKey: "bundle", destination: "Recommendations", outcome: "already_accepted" },
-        ]),
-      );
-    vi.stubGlobal("fetch", fetchMock);
+    let calls = 0;
+    const fetchMock = stubReviewFetch(async () => {
+      calls += 1;
+      return calls === 1
+        ? acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }])
+        : acceptResponse([
+            { itemKey: "bundle", destination: "Recommendations", outcome: "already_accepted" },
+          ]);
+    });
     try {
-      render(
-        <ReportReaderView
-          view={adviceView()}
-          timeZone="Asia/Dubai"
-          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
-        />,
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
-      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
+      render(<ReportReaderDialog {...reviewDialogProps()} />);
+      await screen.findByText("What matters for Downtown");
 
-      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
-      await screen.findByText(/accepted to Recommendations/);
+      const review = await openReviewWithOneSelected();
+      fireEvent.click(within(review).getByRole("button", { name: /accept selected items/i }));
+      await within(review).findByText(/accepted to Recommendations/);
 
-      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
-      await screen.findByText(/Already accepted — nothing new was added/);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      fireEvent.click(within(review).getByRole("button", { name: /accept selected items/i }));
+      await within(review).findByText(/Already accepted — nothing new was added/);
+      expect(acceptCalls(fetchMock)).toHaveLength(2);
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("operates by keyboard: tab to items, Space selects, Enter accepts", async () => {
+  it("operates by keyboard: Space selects, Enter reviews and accepts", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async () =>
+    stubReviewFetch(async () =>
       acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
     );
-    vi.stubGlobal("fetch", fetchMock);
     try {
-      render(
-        <ReportReaderView
-          view={adviceView()}
-          timeZone="Asia/Dubai"
-          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
-        />,
-      );
+      render(<ReportReaderDialog {...reviewDialogProps()} />);
+      await screen.findByText("What matters for Downtown");
       fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
 
       const checkbox = screen.getByRole("checkbox", { name: /Draft one clear family bundle/ });
@@ -529,12 +637,17 @@ describe("ReportReaderView acceptance", () => {
       expect(checkbox).toBeChecked();
       expect(screen.getByText(/1 to Recommendations/)).toBeTruthy();
 
-      const accept = screen.getByRole("button", { name: /accept selected/i });
+      const reviewButton = screen.getByRole("button", { name: /review selection \(1\)/i });
+      reviewButton.focus();
+      expect(document.activeElement).toBe(reviewButton);
+      await user.keyboard("{Enter}");
+      const review = await screen.findByRole("dialog", { name: /review selected items/i });
+
+      const accept = within(review).getByRole("button", { name: /accept selected items/i });
       accept.focus();
       expect(document.activeElement).toBe(accept);
       await user.keyboard("{Enter}");
-      await screen.findByText(/accepted to Recommendations/);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await within(review).findByText(/accepted to Recommendations/);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -604,7 +717,7 @@ describe("ReportReaderView acceptance", () => {
     expect(screen.getAllByText(/needs the manage permission/).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows accept controls to managers when canAccept is true", () => {
+  it("points managers at the footer review entry when canAccept is true", () => {
     render(
       <ReportReaderView
         view={adviceView()}
@@ -614,27 +727,40 @@ describe("ReportReaderView acceptance", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
 
-    expect(screen.getByRole("button", { name: /accept selected/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /accept selected/i })).toBeNull();
+    expect(screen.getByText(/Use Review selection in the footer/)).toBeTruthy();
     expect(screen.queryByText(/needs the manage permission/)).toBeNull();
   });
 
-  it("shows a safe reason when the route refuses the call", async () => {
-    const fetchMock = vi.fn(async () => new Response("nope", { status: 403 }));
-    vi.stubGlobal("fetch", fetchMock);
+  it("review dialog explains the permission reason to viewers", async () => {
+    stubReviewFetch(async () =>
+      acceptResponse([{ itemKey: "bundle", destination: "Recommendations", outcome: "accepted" }]),
+    );
     try {
-      render(
-        <ReportReaderView
-          view={adviceView()}
-          timeZone="Asia/Dubai"
-          acceptance={{ organizationId: ORGANIZATION, canAccept: true }}
-        />,
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Draft advice" }));
-      fireEvent.click(screen.getByRole("checkbox", { name: /Draft one clear family bundle/ }));
-      fireEvent.click(screen.getByRole("button", { name: /accept selected/i }));
+      render(<ReportReaderDialog {...reviewDialogProps({ canAccept: false })} />);
+      await screen.findByText("What matters for Downtown");
 
-      await screen.findByRole("alert");
-      expect(screen.getByRole("alert").textContent).toMatch(/permission/);
+      const review = await openReviewWithOneSelected();
+      expect(within(review).getByText(/needs the manage permission/)).toBeTruthy();
+      expect(
+        within(review).queryByRole("button", { name: /accept selected items/i }),
+      ).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows a safe reason when the route refuses the call", async () => {
+    stubReviewFetch(async () => new Response("nope", { status: 403 }));
+    try {
+      render(<ReportReaderDialog {...reviewDialogProps()} />);
+      await screen.findByText("What matters for Downtown");
+
+      const review = await openReviewWithOneSelected();
+      fireEvent.click(within(review).getByRole("button", { name: /accept selected items/i }));
+
+      const alert = await within(review).findByRole("alert");
+      expect(alert.textContent).toMatch(/permission/);
     } finally {
       vi.unstubAllGlobals();
     }

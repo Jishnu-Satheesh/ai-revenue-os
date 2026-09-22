@@ -69,13 +69,6 @@ export function researchQueryKey(
       ] as const);
 }
 
-/** Window event that opens the Review market monitoring dialog from any entry point. */
-export const MARKET_MONITORING_OPEN_EVENT = "growth-intelligence:open-market-monitoring";
-
-export function requestMarketMonitoringDialog(): void {
-  window.dispatchEvent(new CustomEvent(MARKET_MONITORING_OPEN_EVENT));
-}
-
 /** Window event that opens the New research dialog from any entry point. */
 export const NEW_RESEARCH_OPEN_EVENT = "growth-intelligence:open-new-research";
 
@@ -120,6 +113,15 @@ export function parseMonitoringProjectStatus(value: string | null | undefined): 
     ? (value as MonitoringProjectStatusFilter)
     : "all";
 }
+
+/** One branch row for a research Location selector. */
+export type MonitoringBranchOption = {
+  id: string;
+  name: string;
+  /** Saved service area summary shown beside the branch name. */
+  serviceArea: string | null;
+  isActive: boolean;
+};
 
 /**
  * One-line summary of a branch service_area record for the Location

@@ -1,6 +1,6 @@
 # Market Watch and New research — visual review candidate
 
-This continues the existing Growth Intelligence design. It is a fictional design preview, not application implementation. Product basis: `docs/verification/growth-intelligence/2026-09-13-market-monitoring-workflow-audit.md`. The whole design and implementation plan are not approved.
+This continues the existing Growth Intelligence design. It is a fictional design preview, not application implementation. Product basis: `docs/verification/growth-intelligence/2026-09-13-market-monitoring-workflow-audit.md`. The design and implementation plan were approved 2026-09-14 per `docs/superpowers/specs/2026-09-14-market-monitoring-report-experience.md` (Tier 3 authorization granted; visual direction approved).
 
 ## Settled requirements
 

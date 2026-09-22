@@ -14,7 +14,7 @@ It starts in Growth Intelligence → Insights & market. The data is fictional an
 - Speculative competitor financial ranges are allowed when clearly labelled and explained, including when competitor financial figures are unavailable.
 - After explicit acceptance, the platform routes action items to Recommendations and informational findings to Insights.
 
-The visual layout is a review candidate. No application implementation, staging migration, live research, provider activation or deployment is included.
+The visual layout was approved 2026-09-14 per `docs/superpowers/specs/2026-09-14-market-monitoring-report-experience.md` (Tier 3 authorization granted; visual direction approved). No application implementation, staging migration, live research, provider activation or deployment is included.
 
 ## Walk through it
 
@@ -66,4 +66,4 @@ The other Growth Intelligence tabs retain the earlier fictional design. Their sa
 - `generation.log` records the Superdesign generation refusal: the account had no credits. This draft was authored locally and successfully saved through the documented no-credit import path. `prompt.txt` preserves the earlier generation request; `brief.md` carries the final confirmed choices.
 - `import-result.json` records the actual canvas URLs and version. `artifact-verification.json` records the matching local/remote HTML hashes and saved artifact checks. The Growth Intelligence entry in `../resume.json` points to this draft with refreshed context fingerprints.
 
-The next implementation step is an approved specification and execution plan. The current production worker still needs live retrieval/extraction wiring, project-scoped lifecycle contracts, context assembly, report persistence and acceptance wiring; the source-backed audit enumerates those gaps. Research cost and duration need a measured provider canary before changing allowances or promising a completion time.
+The specification and execution plan were approved 2026-09-14 per `docs/superpowers/specs/2026-09-14-market-monitoring-report-experience.md` (Tier 3 authorization granted; visual direction approved). The current production worker still needs live retrieval/extraction wiring, project-scoped lifecycle contracts, context assembly, report persistence and acceptance wiring; the source-backed audit enumerates those gaps. Research cost and duration need a measured provider canary before changing allowances or promising a completion time.

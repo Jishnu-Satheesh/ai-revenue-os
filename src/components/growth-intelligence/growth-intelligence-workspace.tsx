@@ -2,7 +2,7 @@
 
 import { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, RefreshCw, Settings2 } from "lucide-react";
+import { ArrowRight, Plus, RefreshCw } from "lucide-react";
 
 import { formatWindow } from "@/components/analysis/format";
 import { WindowRangePicker } from "@/components/analysis/window-range-picker";
@@ -11,27 +11,18 @@ import { RequestCampaignResearch } from "@/components/campaigns/request-campaign
 import { BusinessPerformanceCard } from "@/components/growth-intelligence/business-performance-card";
 import { DataGaps } from "@/components/growth-intelligence/data-gaps";
 import { InsightsList } from "@/components/growth-intelligence/insights-list";
-import {
-  MarketMonitoringDialog,
-  type MonitoringBranchOption,
-} from "@/components/growth-intelligence/market-monitoring-dialog";
+import { MarketWatchLivePreview } from "@/components/growth-intelligence/market-watch-live-preview";
 import { MarketWatchProjectsSection } from "@/components/growth-intelligence/market-watch-projects";
 import { MergedRecommendations } from "@/components/growth-intelligence/merged-recommendations";
 import { PriorityActions } from "@/components/growth-intelligence/priority-actions";
 import {
-  MARKET_MONITORING_OPEN_EVENT,
-  requestMarketMonitoringDialog,
+  type MonitoringBranchOption,
+  requestNewResearchDialog,
 } from "@/components/growth-intelligence/query-options";
 import { YourActionsTab } from "@/components/growth-intelligence/your-actions-tab";
-import {
-  ResearchProgress,
-  useResearchPipeline,
-} from "@/components/growth-intelligence/research-progress";
-import { ResearchOutcomes } from "@/components/growth-intelligence/research-outcomes";
-import type { ResearchPipelineView } from "@/modules/growth-intelligence/application/research-read-model";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -342,46 +333,10 @@ function PerformanceSummary({
   );
 }
 
-function BranchResearch({
-  organizationId,
-  active,
-  history,
-  lastSuccess,
-  status,
-  timeZone,
-  canManage,
-}: {
-  organizationId: string;
-  active: ResearchPipelineView | null;
-  history: ResearchPipelineView[];
-  lastSuccess: ResearchPipelineView | null;
-  status: "loading" | "ready" | "unavailable";
-  timeZone: string;
-  canManage: boolean;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <ResearchProgress
-        organizationId={organizationId}
-        pipeline={active}
-        timeZone={timeZone}
-        loadError={status === "unavailable" && !active ? "network" : null}
-      />
-      <ResearchOutcomes
-        organizationId={organizationId}
-        history={history}
-        lastSuccess={lastSuccess}
-        canManage={canManage}
-      />
-    </div>
-  );
-}
-
 export function GrowthIntelligenceWorkspace({
   view,
   organizationId,
   canManage,
-  marketWatch,
   isCurrentMonth,
   performanceCard,
   fetchedAt,
@@ -397,7 +352,6 @@ export function GrowthIntelligenceWorkspace({
   view: GrowthIntelligenceView;
   organizationId: string;
   canManage: boolean;
-  marketWatch: React.ReactNode;
   isCurrentMonth: boolean;
   performanceCard: BusinessPerformanceCardView | null;
   fetchedAt: string | null;
@@ -411,9 +365,7 @@ export function GrowthIntelligenceWorkspace({
   /** `campaign.research_request`: may spend the research allowance. */
   canRequestResearch?: boolean;
 }) {
-  const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");
-  const [monitoringOpen, setMonitoringOpen] = useState(false);
 
   useEffect(() => {
     const sync = () => {
@@ -425,27 +377,6 @@ export function GrowthIntelligenceWorkspace({
     return () => window.removeEventListener("hashchange", sync);
   }, []);
 
-  useEffect(() => {
-    const open = () => setMonitoringOpen(true);
-    window.addEventListener(MARKET_MONITORING_OPEN_EVENT, open);
-    return () => window.removeEventListener(MARKET_MONITORING_OPEN_EVENT, open);
-  }, []);
-
-  function refreshResearch() {
-    startTransition(() => {
-      router.refresh();
-    });
-  }
-
-  // The pipeline observer lives above the tabs so active runs keep polling
-  // while the operator reads other sections; the views below render inside
-  // Insights & market only.
-  const research = useResearchPipeline({
-    organizationId,
-    branchId: selectedBranchId,
-    onTransition: refreshResearch,
-  });
-
   function changeTab(value: string) {
     if (!isTab(value)) return;
     setTab(value);
@@ -454,6 +385,13 @@ export function GrowthIntelligenceWorkspace({
       "",
       `${window.location.pathname}${window.location.search}#${value}`,
     );
+  }
+
+  function openNewResearch() {
+    changeTab("insights");
+    // The New research listener mounts with the Insights tab section, so
+    // the open event waits a tick for the tab switch to land.
+    setTimeout(() => requestNewResearchDialog(), 0);
   }
 
   const acted = view.timeline.filter((event) => event.type !== "generated");
@@ -474,26 +412,12 @@ export function GrowthIntelligenceWorkspace({
             action.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setMonitoringOpen(true)}
-          className="shrink-0 self-start sm:mt-1"
-        >
-          <Settings2 aria-hidden="true" />
-          Market monitoring
+        <Button size="sm" onClick={openNewResearch} className="shrink-0 self-start sm:mt-1">
+          <Plus aria-hidden="true" />
+          New research
         </Button>
       </div>
       <Tabs value={tab} onValueChange={changeTab} className="flex flex-col gap-6">
-        <MarketMonitoringDialog
-          organizationId={organizationId}
-          canManage={canManage}
-          branches={branches}
-          initialBranchId={selectedBranchId}
-          open={monitoringOpen}
-          onOpenChange={setMonitoringOpen}
-          onStarted={refreshResearch}
-        />
         <div className="overflow-x-auto overflow-y-hidden border-b">
           <TabsList variant="line" className="h-auto min-w-max justify-start">
             <TabsTrigger value="overview" onClick={() => changeTab("overview")}>
@@ -616,68 +540,48 @@ export function GrowthIntelligenceWorkspace({
               </CardDescription>
             </CardHeader>
           </Card>
-          <div className="grid items-start gap-8 lg:grid-cols-2">
-            <div className="flex min-w-0 flex-col gap-8">
-              <InsightsList
-                insights={view.insights}
+          {selectedBranchId && canManage ? (
+            <div className="flex justify-end">
+              <MarketWatchLivePreview
                 organizationId={organizationId}
-                timeZone={view.timeZone}
-                canManage={canManage}
-              />
-              <DataGaps
-                dataGaps={view.dataGaps}
-                organizationId={organizationId}
-                timeZone={view.timeZone}
+                branchId={selectedBranchId}
                 canManage={canManage}
               />
             </div>
-            <div className="min-w-0 flex flex-col gap-8">
-              <MarketWatchProjectsSection
-                organizationId={organizationId}
-                branches={branches.map((branch) => ({ id: branch.id, name: branch.name }))}
-                timeZone={view.timeZone}
-                canManage={canManage}
-                evidencePeriods={(performanceFilters?.coverageWindows ?? [])
-                  .slice()
-                  .sort((left, right) => (left.windowEnd < right.windowEnd ? 1 : -1))
-                  .slice(0, 3)
-                  .map((window) => {
-                    const period = formatEvidencePeriod(
-                      window.windowStart,
-                      window.windowEnd,
-                      view.timeZone,
-                    );
-                    return {
-                      label: `Channel reports · ${period ?? `${window.windowStart}–${window.windowEnd}`}`,
-                    };
-                  })}
-              />
-              {selectedBranchId ? (
-                <BranchResearch
-                  organizationId={organizationId}
-                  active={research.active}
-                  history={research.history}
-                  lastSuccess={research.lastSuccess}
-                  status={research.status}
-                  timeZone={view.timeZone}
-                  canManage={canManage}
-                />
-              ) : (
-                <Card>
-                  <CardContent className="flex flex-col gap-3 py-6 text-sm text-muted-foreground">
-                    <p>
-                      Market research follows one branch at a time. Review market monitoring to
-                      choose a location.
-                    </p>
-                    <Button variant="outline" size="sm" onClick={requestMarketMonitoringDialog}>
-                      <Settings2 aria-hidden="true" />
-                      Review market monitoring
-                    </Button>
-                  </CardContent>
-                </Card>
-              )}
-              {marketWatch}
-            </div>
+          ) : null}
+          <MarketWatchProjectsSection
+            organizationId={organizationId}
+            branches={branches.map((branch) => ({ id: branch.id, name: branch.name }))}
+            timeZone={view.timeZone}
+            canManage={canManage}
+            evidencePeriods={(performanceFilters?.coverageWindows ?? [])
+              .slice()
+              .sort((left, right) => (left.windowEnd < right.windowEnd ? 1 : -1))
+              .slice(0, 3)
+              .map((window) => {
+                const period = formatEvidencePeriod(
+                  window.windowStart,
+                  window.windowEnd,
+                  view.timeZone,
+                );
+                return {
+                  label: `Channel reports · ${period ?? `${window.windowStart}–${window.windowEnd}`}`,
+                };
+              })}
+          />
+          <div className="flex min-w-0 flex-col gap-8">
+            <InsightsList
+              insights={view.insights}
+              organizationId={organizationId}
+              timeZone={view.timeZone}
+              canManage={canManage}
+            />
+            <DataGaps
+              dataGaps={view.dataGaps}
+              organizationId={organizationId}
+              timeZone={view.timeZone}
+              canManage={canManage}
+            />
           </div>
         </TabsContent>
       </Tabs>

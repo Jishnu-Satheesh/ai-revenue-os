@@ -30,6 +30,10 @@ import {
 } from "@/domain/growth-intelligence/project";
 import { DomainError } from "@/lib/errors";
 import {
+  buildBusinessContextEvidencePeriod,
+  resolveBusinessContextWindow,
+} from "@/domain/growth-intelligence/business-context-window";
+import {
   monitoringCompetitorSlotKey,
   monitoringAreaSlotKey,
   type MonitoringResearchQuery,

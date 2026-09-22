@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Plus, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  Lock,
+  Pencil,
+  Plus,
+  Sparkles,
+  Store,
+  X,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -15,8 +25,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -36,6 +45,14 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  useOrganizationCompetitors,
+  type OrganizationCompetitor,
+} from "@/components/growth-intelligence/organization-competitors";
+import {
+  ScheduleDateField,
+  ScheduleTimeField,
+} from "@/components/growth-intelligence/schedule-fields";
 
 export type NewResearchBranchOption = {
   id: string;
@@ -77,10 +94,10 @@ export type NewResearchStartResult = {
 };
 
 const INVESTIGATION_AREAS = [
-  { key: "demand", label: "Local demand" },
   { key: "presence", label: "Digital presence" },
   { key: "offers", label: "Offers & pricing" },
   { key: "reviews", label: "Customer feedback" },
+  { key: "demand", label: "Local demand" },
   { key: "observable_performance", label: "Performance signals" },
 ] as const;
 
@@ -202,7 +219,13 @@ export function NewResearchDialog({
 }) {
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Draft>({ ...EMPTY_DRAFT, timeZone });
-  const [errors, setErrors] = useState<{ question?: string; branch?: string; area?: string; mode?: string; schedule?: string }>({});
+  const [errors, setErrors] = useState<{
+    question?: string;
+    branch?: string;
+    area?: string;
+    mode?: string;
+    schedule?: string;
+  }>({});
   const [competitorFormError, setCompetitorFormError] = useState<string | null>(null);
   const [competitorName, setCompetitorName] = useState("");
   const [competitorWebsite, setCompetitorWebsite] = useState("");
@@ -215,12 +238,40 @@ export function NewResearchDialog({
   const [scopeNotice, setScopeNotice] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
+  // Organisation-wide competitors (Track C1 list API). The dialog seeds an
+  // empty brief from the saved list and persists every add / edit / remove
+  // back through the same store — never session-local only. Reads fail
+  // silently to an empty list so the dialog keeps working before the
+  // backend ships; the hook reports mutation failures via `syncError`.
+  const orgCompetitors = useOrganizationCompetitors(organizationId, open);
+  const seededRef = useRef(false);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
   }, []);
+
+  // Seed an untouched brief from the organisation's saved competitors once
+  // per open. Seeding writes the draft without marking it dirty, so opening
+  // and closing the dialog never triggers the discard prompt on its own.
+  useEffect(() => {
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current || !orgCompetitors.isLoaded) return;
+    seededRef.current = true;
+    if (orgCompetitors.competitors.length === 0) return;
+    const seeded: NewResearchCompetitor[] = orgCompetitors.competitors.map((row) => ({
+      name: row.name,
+      ...(row.website ? { website: row.website } : {}),
+      ...(row.locationHint ? { locationHint: row.locationHint } : {}),
+      source: "operator_lead",
+    }));
+    setDraft((current) => (current.competitors.length === 0 ? { ...current, competitors: seeded } : current));
+  }, [open, orgCompetitors.isLoaded, orgCompetitors.competitors]);
 
   // Focus containment rides the Radix dialog trap. Restoration is ours:
   // the opener is captured while the dialog opens and refocused after the
@@ -230,7 +281,7 @@ export function NewResearchDialog({
   const openerRef = useRef<Element | null>(null);
   useEffect(() => {
     if (open) openerRef.current = document.activeElement;
-  }, [open ]);
+  }, [open]);
   const [draftSeed, setDraftSeed] = useState({ open, timeZone });
   if (draftSeed.open !== open || draftSeed.timeZone !== timeZone) {
     setDraftSeed({ open, timeZone });
@@ -249,6 +300,16 @@ export function NewResearchDialog({
   function patch(next: Partial<Draft>) {
     setDraft((current) => ({ ...current, ...next }));
     setDirty(true);
+  }
+
+  function fillEventBrief() {
+    patch({
+      question:
+        "Find out what nearby competitors are offering for National Day and how we could attract more family orders without putting delivery quality at risk.",
+      title: "National Day opportunity",
+      eventDate: "2026-12-02",
+    });
+    setErrors((current) => ({ ...current, question: undefined }));
   }
 
   function requestClose() {
@@ -321,7 +382,15 @@ export function NewResearchDialog({
     else if (step === 2 && scopeValid()) setStep(3);
   }
 
-  function addCompetitor() {
+  function toOrganizationRow(row: NewResearchCompetitor): OrganizationCompetitor {
+    return {
+      name: row.name,
+      website: row.website ?? "",
+      locationHint: row.locationHint ?? "",
+    };
+  }
+
+  async function addCompetitor() {
     const name = normalize(competitorName);
     const website = competitorWebsite.trim();
     const hint = normalize(competitorHint);
@@ -342,8 +411,7 @@ export function NewResearchDialog({
       return;
     }
     const duplicate = draft.competitors.some(
-      (row, index) =>
-        index !== editingIndex && row.name.toLowerCase() === name.toLowerCase(),
+      (row, index) => index !== editingIndex && row.name.toLowerCase() === name.toLowerCase(),
     );
     if (duplicate) {
       setCompetitorFormError("That competitor is already listed.");
@@ -356,14 +424,21 @@ export function NewResearchDialog({
       source: "operator_lead",
     };
     if (editingIndex !== null) {
+      const previousName = draft.competitors[editingIndex]?.name ?? null;
       patch({
         competitors: draft.competitors.map((current, index) =>
           index === editingIndex ? { ...row, source: current.source } : current,
         ),
       });
       setEditingIndex(null);
+      // Persist the edit to the organisation list; the brief-local row
+      // stays regardless so the dialog works before the backend ships.
+      if (previousName) void orgCompetitors.update(previousName, toOrganizationRow(row));
     } else {
       patch({ competitors: [...draft.competitors, row] });
+      // Persist the addition to the organisation list; the brief-local row
+      // stays regardless so the dialog works before the backend ships.
+      void orgCompetitors.add(toOrganizationRow(row));
     }
     setCompetitorName("");
     setCompetitorWebsite("");
@@ -379,13 +454,19 @@ export function NewResearchDialog({
     ) {
       return;
     }
+    // Suggestions stay brief-local until the operator saves them as a
+    // competitor: a suggestion is a starting point, never a saved fact.
     patch({
       competitors: [...draft.competitors, { name: normalized, source: "suggestion" }],
     });
   }
 
   function removeCompetitor(index: number) {
+    const row = draft.competitors[index];
     patch({ competitors: draft.competitors.filter((_, current) => current !== index) });
+    // Persist the removal to the organisation list when the row names a
+    // saved competitor; suggestion rows were never saved, so skip those.
+    if (row && row.source === "operator_lead") void orgCompetitors.remove(row.name);
     if (editingIndex === index) {
       setEditingIndex(null);
       setCompetitorName("");
@@ -471,7 +552,11 @@ export function NewResearchDialog({
   }
 
   const branchName = branches.find((branch) => branch.id === draft.branchId)?.name ?? "";
-  const stepReached = { 1: true, 2: normalize(draft.question).length > 0, 3: draft.branchId !== "" && normalize(draft.researchArea).length > 0 };
+  const stepReached = {
+    1: true,
+    2: normalize(draft.question).length > 0,
+    3: draft.branchId !== "" && normalize(draft.researchArea).length > 0,
+  };
   const visibleSuggestions = suggestions.filter(
     (name) =>
       !draft.competitors.some((row) => row.name.toLowerCase() === normalize(name).toLowerCase()),
@@ -526,7 +611,7 @@ export function NewResearchDialog({
                 <X aria-hidden="true" />
               </Button>
             </div>
-            <nav aria-label="Research setup steps" className="mt-4 flex items-center gap-2">
+            <nav aria-label="Research setup steps" className="mt-4 flex items-center gap-1 sm:gap-2">
               {(
                 [
                   { number: 1, label: "Brief" },
@@ -534,27 +619,42 @@ export function NewResearchDialog({
                   { number: 3, label: "Review" },
                 ] as const
               ).map((item, index) => (
-                <div key={item.number} className="flex items-center gap-2">
-                  {index > 0 ? <span aria-hidden="true" className="h-px w-6 bg-border" /> : null}
-                  <Button
-                    variant={step === item.number ? "default" : "outline"}
-                    size="sm"
+                <Fragment key={item.number}>
+                  {index > 0 ? (
+                    <span aria-hidden="true" className="h-px w-4 shrink-0 bg-border sm:w-6" />
+                  ) : null}
+                  <button
+                    type="button"
                     aria-current={step === item.number ? "step" : undefined}
                     disabled={!stepReached[item.number] || submitState === "working"}
                     onClick={() => setStep(item.number)}
+                    className="flex items-center gap-1 rounded-md disabled:cursor-not-allowed sm:gap-2"
                   >
-                    {step > item.number ? (
-                      <>
-                        <Check aria-hidden="true" />
-                        {item.label}
-                      </>
-                    ) : (
-                      <>
-                        {item.number} {item.label}
-                      </>
-                    )}
-                  </Button>
-                </div>
+                    <span
+                      aria-hidden="true"
+                      className={
+                        step >= item.number
+                          ? "flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
+                          : "flex size-6 items-center justify-center rounded-full border bg-muted text-xs font-semibold text-muted-foreground"
+                      }
+                    >
+                      {step > item.number ? (
+                        <Check className="size-3.5" aria-hidden="true" />
+                      ) : (
+                        item.number
+                      )}
+                    </span>
+                    <span
+                      className={
+                        step === item.number
+                          ? "text-xs font-semibold sm:text-sm"
+                          : "text-xs text-muted-foreground sm:text-sm"
+                      }
+                    >
+                      {item.label}
+                    </span>
+                  </button>
+                </Fragment>
               ))}
             </nav>
           </DialogHeader>
@@ -584,7 +684,7 @@ export function NewResearchDialog({
                       setErrors((current) => ({ ...current, question: undefined }));
                     }}
                     rows={5}
-                    placeholder="Which family offers are competitors promoting for National Day, and what should we prepare?"
+                    placeholder="For example: Find out what nearby competitors are doing for National Day and how we could attract more family orders."
                     aria-invalid={errors.question !== undefined}
                     className="min-h-32"
                   />
@@ -596,13 +696,14 @@ export function NewResearchDialog({
                 <div className="grid gap-5 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="new-research-title">
-                      Project name <span className="font-normal text-muted-foreground">Optional</span>
+                      Project name{" "}
+                      <span className="font-normal text-muted-foreground">Optional</span>
                     </FieldLabel>
                     <Input
                       id="new-research-title"
                       value={draft.title}
                       onChange={(event) => patch({ title: event.target.value })}
-                      placeholder="National Day preparation"
+                      placeholder="A short name you'll recognise"
                       maxLength={TITLE_LIMIT + 1}
                     />
                   </Field>
@@ -619,10 +720,26 @@ export function NewResearchDialog({
                     />
                   </Field>
                 </div>
-                <p className="rounded-lg bg-muted p-3 text-sm">
-                  We&rsquo;ll research your market, connect it with your business context and
-                  prepare draft advice for you to review.
-                </p>
+                <div className="flex gap-3 rounded-lg bg-muted p-4">
+                  <Sparkles aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-semibold">From a question to a useful report</p>
+                    <p className="text-sm text-muted-foreground">
+                      We&rsquo;ll research your market, connect it with your business context and
+                      prepare draft advice for you to review.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto w-fit px-0"
+                      onClick={fillEventBrief}
+                    >
+                      Try an event brief
+                      <ArrowRight aria-hidden="true" />
+                    </Button>
+                  </div>
+                </div>
               </div>
             ) : step === 2 ? (
               <div className="flex flex-col gap-5">
@@ -636,7 +753,10 @@ export function NewResearchDialog({
                         setErrors((current) => ({ ...current, branch: undefined }));
                       }}
                     >
-                      <SelectTrigger id="new-research-location" aria-invalid={errors.branch !== undefined}>
+                      <SelectTrigger
+                        id="new-research-location"
+                        aria-invalid={errors.branch !== undefined}
+                      >
                         <SelectValue placeholder="Choose a location" />
                       </SelectTrigger>
                       <SelectContent>
@@ -679,45 +799,56 @@ export function NewResearchDialog({
                       Optional · Add the ones you know
                     </span>
                   </div>
+                  {orgCompetitors.syncError ? (
+                    <p role="status" className="text-xs text-muted-foreground">
+                      {orgCompetitors.syncError}
+                    </p>
+                  ) : null}
                   {draft.competitors.length > 0 ? (
                     <ul className="flex flex-col gap-2">
                       {draft.competitors.map((row, index) => (
                         <li
                           key={`${row.name}-${index}`}
-                          className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+                          className="flex min-w-0 items-center gap-3 rounded-lg border px-3 py-2 text-sm"
                         >
-                          <span className="min-w-0 flex-1 break-words">
-                            <span className="font-medium">{row.name}</span>{" "}
-                            {row.website ? (
-                              <span className="text-muted-foreground">{row.website}</span>
-                            ) : null}{" "}
-                            {row.locationHint ? (
-                              <span className="text-muted-foreground">· {row.locationHint}</span>
-                            ) : null}{" "}
-                            {row.source === "suggestion" ? (
-                              <Badge variant="outline">Suggestion</Badge>
-                            ) : null}
+                          <span
+                            aria-hidden="true"
+                            className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"
+                          >
+                            <Store className="size-4 text-muted-foreground" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium break-words">{row.name}</span>
+                              {row.source === "suggestion" ? (
+                                <Badge variant="outline">Suggestion</Badge>
+                              ) : null}
+                            </span>
+                            <span className="block truncate text-muted-foreground">
+                              {(row.locationHint || "Location to be checked") +
+                                (row.website ? ` · ${row.website}` : "")}
+                            </span>
                           </span>
                           <span className="flex shrink-0 gap-1">
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon-sm"
                               variant="ghost"
                               aria-label={`Edit competitor ${row.name}`}
                               onClick={() => editCompetitor(index)}
                               disabled={submitState === "working"}
                             >
-                              Edit
+                              <Pencil aria-hidden="true" />
                             </Button>
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon-sm"
                               variant="ghost"
                               aria-label={`Remove competitor ${row.name}`}
                               onClick={() => removeCompetitor(index)}
                               disabled={submitState === "working"}
                             >
-                              Remove
+                              <X aria-hidden="true" />
                             </Button>
                           </span>
                         </li>
@@ -726,7 +857,9 @@ export function NewResearchDialog({
                   ) : null}
                   <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-3">
                     <Field>
-                      <FieldLabel htmlFor="new-research-competitor-name">Competitor name</FieldLabel>
+                      <FieldLabel htmlFor="new-research-competitor-name">
+                        Competitor name
+                      </FieldLabel>
                       <Input
                         id="new-research-competitor-name"
                         value={competitorName}
@@ -845,8 +978,8 @@ export function NewResearchDialog({
                   <CollapsibleContent className="px-3 pb-3 text-sm">
                     {evidencePeriods.length === 0 && businessGoals.length === 0 ? (
                       <p className="text-muted-foreground">
-                        No business context connected yet. The research will rely on public
-                        evidence only.
+                        No business context connected yet. The research will rely on public evidence
+                        only.
                       </p>
                     ) : (
                       <dl className="flex flex-col gap-2">
@@ -882,7 +1015,9 @@ export function NewResearchDialog({
             ) : (
               <div className="flex flex-col gap-5">
                 <fieldset>
-                  <legend className="text-sm font-semibold">How often should we research this?</legend>
+                  <legend className="text-sm font-semibold">
+                    How often should we research this?
+                  </legend>
                   <RadioGroup
                     value={draft.mode ?? ""}
                     onValueChange={(value: "one-time" | "recurring") => {
@@ -938,20 +1073,21 @@ export function NewResearchDialog({
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field>
-                      <FieldLabel htmlFor="new-research-time">Research start time</FieldLabel>
-                      <Input
-                        id="new-research-time"
-                        type="time"
-                        value={draft.localTime}
-                        onChange={(event) => patch({ localTime: event.target.value })}
-                      />
-                      <FieldDescription>Location timezone · {draft.timeZone || timeZone}</FieldDescription>
-                    </Field>
+                    <ScheduleTimeField
+                      id="new-research-time"
+                      value={draft.localTime}
+                      onChange={(value) => patch({ localTime: value })}
+                      caption={`Location timezone · ${draft.timeZone || timeZone}`}
+                      disabled={submitState === "working"}
+                    />
                     <Field>
                       <FieldLabel htmlFor="new-research-timezone">Timezone</FieldLabel>
                       <Select
-                        value={TIMEZONE_OPTIONS.includes(draft.timeZone || timeZone) ? draft.timeZone || timeZone : "Asia/Dubai"}
+                        value={
+                          TIMEZONE_OPTIONS.includes(draft.timeZone || timeZone)
+                            ? draft.timeZone || timeZone
+                            : "Asia/Dubai"
+                        }
                         onValueChange={(value) => patch({ timeZone: value })}
                       >
                         <SelectTrigger id="new-research-timezone">
@@ -966,21 +1102,12 @@ export function NewResearchDialog({
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field>
-                      <FieldLabel htmlFor="new-research-end-date">
-                        Stop monitoring on{" "}
-                        <span className="font-normal text-muted-foreground">Optional</span>
-                      </FieldLabel>
-                      <Input
-                        id="new-research-end-date"
-                        type="date"
-                        value={draft.endDate}
-                        onChange={(event) => patch({ endDate: event.target.value })}
-                      />
-                      <FieldDescription>
-                        Leave empty to continue until you pause monitoring.
-                      </FieldDescription>
-                    </Field>
+                    <ScheduleDateField
+                      id="new-research-end-date"
+                      value={draft.endDate}
+                      onChange={(value) => patch({ endDate: value })}
+                      disabled={submitState === "working"}
+                    />
                   </div>
                 ) : null}
                 {errors.schedule ? <FieldError role="alert">{errors.schedule}</FieldError> : null}
@@ -1001,7 +1128,12 @@ export function NewResearchDialog({
                       <dt className="font-semibold">Location</dt>
                       <dd>
                         {branchName} · {normalize(draft.researchArea)}{" "}
-                        <Button variant="link" size="sm" className="h-auto px-0" onClick={() => setStep(2)}>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="h-auto px-0"
+                          onClick={() => setStep(2)}
+                        >
                           Edit scope
                         </Button>
                       </dd>
@@ -1013,9 +1145,7 @@ export function NewResearchDialog({
                           ? "Find relevant competitors in the research area"
                           : draft.competitors
                               .map((row) =>
-                                row.source === "suggestion"
-                                  ? `${row.name} (suggestion)`
-                                  : row.name,
+                                row.source === "suggestion" ? `${row.name} (suggestion)` : row.name,
                               )
                               .join(", ")}
                       </dd>
@@ -1069,11 +1199,16 @@ export function NewResearchDialog({
 
           {canManage ? (
             <DialogFooter className="static mx-0 mb-0 shrink-0 flex-col gap-2 border-t px-6 py-4 sm:flex-row sm:items-center">
-              <span className="mr-auto hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
+              <span className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Lock aria-hidden="true" className="size-3.5" />
                 Your business context stays private.
               </span>
               {step > 1 ? (
-                <Button variant="outline" onClick={() => setStep(step - 1)} disabled={submitState === "working"}>
+                <Button
+                  variant="outline"
+                  onClick={() => setStep(step - 1)}
+                  disabled={submitState === "working"}
+                >
                   Back
                 </Button>
               ) : (
@@ -1086,10 +1221,12 @@ export function NewResearchDialog({
               ) : step < 3 ? (
                 <Button onClick={goNext} disabled={submitState === "working"}>
                   Continue
+                  <ArrowRight aria-hidden="true" />
                 </Button>
               ) : (
                 <Button onClick={start} disabled={submitState === "working"}>
                   {submitState === "working" ? "Starting…" : "Start research"}
+                  <ArrowRight aria-hidden="true" />
                 </Button>
               )}
             </DialogFooter>
