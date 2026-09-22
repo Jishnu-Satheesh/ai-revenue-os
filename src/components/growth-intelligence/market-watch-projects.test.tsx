@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -167,6 +167,28 @@ describe("MarketWatchProjectsView", () => {
     expect(screen.queryByText(/Compare family offers and check delivery capacity/)).toBeNull();
     expect(screen.getByText(/Based on brief 1/)).toBeTruthy();
     expect(screen.getByText(/Advice awaits your review/)).toBeTruthy();
+  });
+
+  it("places the Agent lane switch beside Project history in the featured footer for managers", () => {
+    render(
+      <MarketWatchProjectsView
+        {...viewProps({ organizationId: ORGANIZATION, canManage: true })}
+      />,
+    );
+
+    const card = screen.getByTestId(
+      "featured-report-60000000-0000-4000-8000-000000000006",
+    );
+    const toggle = within(card).getByTestId(
+      "agent-lane-opt-in-50000000-0000-4000-8000-000000000005",
+    );
+    expect(toggle.getAttribute("role")).toBe("switch");
+    // Same button group as Project history, ahead of the right-aligned note.
+    const footer = toggle.closest("div")?.parentElement?.parentElement;
+    expect(footer).toBeTruthy();
+    expect(
+      within(footer as HTMLElement).getByRole("button", { name: /project history/i }),
+    ).toBeTruthy();
   });
 
   it("keeps the Review report action disabled by default with its reason", () => {
@@ -526,7 +548,7 @@ describe("MarketWatchProjectsSection", () => {
     // Status renders as a pill badge, not plain caps text.
     const badge = screen.getByText("Ready to review", { exact: true });
     expect(badge.tagName).toBe("SPAN");
-    expect(badge.className).toMatch(/rounded-full/);
+    expect(badge.className).toMatch(/rounded-md/);
     } finally {
       vi.unstubAllGlobals();
     }

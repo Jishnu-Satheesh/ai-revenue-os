@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   buildMarketWatchProjectList,
   countMarketWatchProjectsByStatus,
@@ -141,16 +142,16 @@ function AgentLaneOptInToggle({
   }
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-        <input
-          type="checkbox"
+        Agent lane
+        <Switch
           checked={optIn}
           disabled={pending}
-          onChange={(event) => void save(event.target.checked)}
+          onCheckedChange={(next) => void save(next)}
           data-testid={`agent-lane-opt-in-${projectId}`}
+          aria-label="Agent lane"
         />
-        Agent lane
       </label>
       {failed ? (
         <p role="alert" className="text-xs text-destructive">
@@ -371,11 +372,11 @@ export function MarketWatchProjectsView({
           {featured && featured.latestReport ? (
             <>
             <Card data-testid={`featured-report-${featured.latestReport.reportVersionId}`}>
-              <CardContent className="flex min-w-0 flex-col gap-2 py-5">
-                <div className="flex min-w-0 flex-col gap-4 sm:flex-row">
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <CardContent className="min-w-0 p-0">
+                <div className="flex min-w-0 flex-col px-6 pt-6 sm:flex-row">
+                  <div className="flex min-w-0 flex-1 flex-col pb-5">
                     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-800 normal-case dark:bg-emerald-950 dark:text-emerald-200">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
                         <Check aria-hidden="true" className="size-3.5 shrink-0" />
                         Ready to review
                       </span>
@@ -383,23 +384,23 @@ export function MarketWatchProjectsView({
                         Report · {formatReportDate(featured.latestReport.createdAt, timeZone)}
                       </span>
                     </div>
-                    <h3 className="min-w-0 text-2xl font-bold tracking-tight break-words">
+                    <h3 className="mt-3 min-w-0 text-[22px] leading-tight font-bold tracking-tight break-words">
                       {featured.title}
                     </h3>
-                    <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground break-words">
+                    <p className="mt-1.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground break-words">
                       <MapPin aria-hidden="true" className="size-3.5 shrink-0" />
                       {featured.branchName} · {modeLabel(featured.mode)}
                     </p>
-                    <p className="min-w-0 text-sm break-words">{featured.question}</p>
+                    <p className="mt-2.5 min-w-0 text-sm break-words">{featured.question}</p>
                   </div>
                   <aside
                     aria-label="In this report"
-                    className="min-w-0 border-muted bg-emerald-50/40 sm:w-56 sm:shrink-0 sm:border-l sm:pl-4 dark:bg-emerald-950/30"
+                    className="min-w-0 border-t border-muted bg-emerald-50/40 pt-4 pb-5 sm:-mt-6 sm:-mr-6 sm:w-60 sm:shrink-0 sm:border-t-0 sm:border-l sm:py-6 sm:pr-6 sm:pl-5 dark:bg-emerald-950/30"
                   >
                     <h4 className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
                       In this report
                     </h4>
-                    <ul className="mt-2 flex min-w-0 flex-col gap-2 text-sm">
+                    <ul className="mt-2.5 flex min-w-0 flex-col gap-2.5 text-sm">
                       <li className="flex min-w-0 items-center gap-2">
                         <Store aria-hidden="true" className="size-4 shrink-0 text-primary" />
                         <span className="min-w-0 break-words">Competitors &amp; their offers</span>
@@ -428,9 +429,9 @@ export function MarketWatchProjectsView({
                     </ul>
                   </aside>
                 </div>
-                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 border-t border-border pt-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border px-6 pt-4 pb-5">
                   <Button
-                    size="sm"
+                    className="h-10 px-5"
                     disabled={onReviewReport === undefined}
                     title={
                       onReviewReport === undefined
@@ -440,10 +441,10 @@ export function MarketWatchProjectsView({
                     onClick={() => onReviewReport?.(featured.latestReport!.reportVersionId)}
                   >
                     Review report
-                    <ArrowUpRight aria-hidden="true" />
+                    <ArrowUpRight aria-hidden="true" className="size-4" />
                   </Button>
                   <Button
-                    size="sm"
+                    className="h-10"
                     variant="outline"
                     disabled={onOpenProject === undefined}
                     title={
@@ -455,6 +456,16 @@ export function MarketWatchProjectsView({
                   >
                     Project history
                   </Button>
+                  {optInOrganizationId !== undefined ? (
+                    <div className="ml-2 flex min-w-0 items-center">
+                      <AgentLaneOptInToggle
+                        key={`featured-${featured.projectId}-${agentLaneOptInFor(featured) ? "on" : "off"}`}
+                        organizationId={optInOrganizationId}
+                        projectId={featured.projectId}
+                        initialOptIn={agentLaneOptInFor(featured)}
+                      />
+                    </div>
+                  ) : null}
                   <span className="ml-auto min-w-0 text-xs text-muted-foreground">
                     Based on brief {featured.latestRevision?.revisionNumber ?? 1} ·{" "}
                     {featured.latestReport.reviewState === "pending_review"
@@ -464,16 +475,6 @@ export function MarketWatchProjectsView({
                 </div>
               </CardContent>
             </Card>
-            {optInOrganizationId !== undefined ? (
-              <div className="flex min-w-0 justify-end">
-                <AgentLaneOptInToggle
-                  key={`featured-${featured.projectId}-${agentLaneOptInFor(featured) ? "on" : "off"}`}
-                  organizationId={optInOrganizationId}
-                  projectId={featured.projectId}
-                  initialOptIn={agentLaneOptInFor(featured)}
-                />
-              </div>
-            ) : null}
             </>
           ) : null}
           {rows.length > 0 ? (
