@@ -705,6 +705,7 @@ export function ReportPackageUpload({
   role,
   timeZone,
   fixedChannelId,
+  defaultCurrency,
 }: Readonly<{
   organizationId: string;
   role: OrganizationRole;
@@ -715,6 +716,12 @@ export function ReportPackageUpload({
    * on the Integrations view, which behaves exactly as before.
    */
   fixedChannelId?: string;
+  /**
+   * The organization's base currency, used as the form's starting currency.
+   * The select still allows an override per upload. Absent (for example in
+   * tests) leaves currency manual, exactly as before.
+   */
+  defaultCurrency?: string;
 }>) {
   const queryClient = useQueryClient();
   const [channelId, setChannelId] = useState("");
@@ -722,7 +729,17 @@ export function ReportPackageUpload({
   const [reportType, setReportType] = useState("");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
-  const [currency, setCurrency] = useState("");
+  const [currency, setCurrency] = useState(defaultCurrency ?? "");
+  // The default arrives with the page's own props, so a late value still
+  // reaches the form. Adjusted during render rather than in an effect (the
+  // repo forbids synchronous setState in effects): comparing against the
+  // previously seen prop means a currency the operator chose by hand is
+  // never overwritten -- only a changed prop resets it.
+  const [seenDefaultCurrency, setSeenDefaultCurrency] = useState(defaultCurrency);
+  if (seenDefaultCurrency !== defaultCurrency) {
+    setSeenDefaultCurrency(defaultCurrency);
+    if (defaultCurrency) setCurrency(defaultCurrency);
+  }
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [proposalPackageId, setProposalPackageId] = useState("");
@@ -1186,7 +1203,7 @@ export function ReportPackageUpload({
       <CardContent className="space-y-5">
         {canUpload ? (
           <form
-            className="grid gap-4 md:grid-cols-2"
+            className="grid gap-3 lg:grid-cols-6"
             onSubmit={(event) => {
               event.preventDefault();
               upload.mutate();
@@ -1297,45 +1314,74 @@ export function ReportPackageUpload({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="report-period-start">Period start</Label>
-              <Input
-                id="report-period-start"
-                type="date"
-                value={periodStart}
-                onChange={(event) => setPeriodStart(event.target.value)}
-                required
-              />
+            <div className="space-y-2 lg:col-span-2">
+              <Label id="report-period-label">Period</Label>
+              <div
+                className="grid grid-cols-2 gap-2"
+                role="group"
+                aria-labelledby="report-period-label"
+              >
+                <Input
+                  id="report-period-start"
+                  type="date"
+                  aria-label="Period start"
+                  value={periodStart}
+                  onChange={(event) => setPeriodStart(event.target.value)}
+                  required
+                />
+                <Input
+                  id="report-period-end"
+                  type="date"
+                  aria-label="Period end"
+                  value={periodEnd}
+                  onChange={(event) => setPeriodEnd(event.target.value)}
+                  required
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="report-period-end">Period end</Label>
-              <Input
-                id="report-period-end"
-                type="date"
-                value={periodEnd}
-                onChange={(event) => setPeriodEnd(event.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="report-file">CSV, XLSX, or PDF, up to 50 MiB</Label>
+            <div
+              className="lg:col-span-6"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                setFile(event.dataTransfer.files?.[0] ?? null);
+              }}
+            >
+              <Label
+                htmlFor="report-file"
+                className="flex flex-col items-center justify-center rounded-lg border border-dashed p-6 text-center cursor-pointer"
+              >
+                <UploadCloud className="size-5 text-muted-foreground" aria-hidden="true" />
+                <span className="mt-2 text-sm">
+                  Drag files here, or <span className="font-medium underline">Choose file</span>
+                </span>
+                <span className="mt-1 text-xs text-muted-foreground">
+                  CSV, XLSX, or PDF, up to 50 MiB
+                </span>
+                {file ? (
+                  <span className="mt-2 text-xs font-medium">
+                    {file.name} · {(file.size / 1_048_576).toFixed(2)} MiB
+                  </span>
+                ) : null}
+              </Label>
               <Input
                 id="report-file"
                 type="file"
                 accept=".csv,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="sr-only"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 required
               />
             </div>
             {progress !== null ? (
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2 lg:col-span-6">
                 <Progress value={progress} />
                 <p className="text-xs text-muted-foreground">
                   Uploading directly to private storage · {progress}%
                 </p>
               </div>
             ) : null}
-            <div className="md:col-span-2">
+            <div className="lg:col-span-6">
               <Button
                 type="submit"
                 disabled={

@@ -931,3 +931,71 @@ describe("ReportPackageUpload validation warnings", () => {
     expect(screen.queryByText(/note \(note\)/)).not.toBeInTheDocument();
   });
 });
+
+describe("ReportPackageUpload governed form", () => {
+  function renderForm(options: { defaultCurrency?: string } = {}) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ReportPackageUpload
+          organizationId={ORGANIZATION_ID}
+          role="owner"
+          timeZone="Asia/Dubai"
+          defaultCurrency={options.defaultCurrency}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("renders the file dropzone as a full-width dashed row", async () => {
+    renderForm();
+
+    await screen.findByRole("button", { name: /upload report/i });
+    const label = screen.getByText(/drag files here/i).closest("label");
+    expect(label).not.toBeNull();
+    expect(label?.className).toMatch(/border-dashed/);
+    expect(screen.getByText(/choose file/i)).toBeInTheDocument();
+    // Second row of the six-column grid: label plus hidden input share one
+    // full-width cell.
+    expect(label?.parentElement?.className).toMatch(/lg:col-span-6/);
+    expect(document.getElementById("report-file")?.getAttribute("type")).toBe("file");
+  });
+
+  it("groups the period as one label over two date inputs", async () => {
+    renderForm();
+
+    await screen.findByRole("button", { name: /upload report/i });
+    expect(screen.queryByText("Period start")).not.toBeInTheDocument();
+    expect(screen.queryByText("Period end")).not.toBeInTheDocument();
+    expect(screen.getByText("Period")).toBeInTheDocument();
+    const start = document.getElementById("report-period-start");
+    const end = document.getElementById("report-period-end");
+    expect(start?.getAttribute("type")).toBe("date");
+    expect(end?.getAttribute("type")).toBe("date");
+    const group = start?.closest('[role="group"]');
+    expect(group).not.toBeNull();
+    expect(group?.getAttribute("aria-labelledby")).toBe("report-period-label");
+    expect(end?.closest('[role="group"]')).toBe(group);
+  });
+
+  it("defaults the currency select to the passed defaultCurrency", async () => {
+    renderForm({ defaultCurrency: "AED" });
+
+    const trigger = await screen.findByRole("combobox", { name: /declared currency/i });
+    fireEvent.click(trigger);
+    const option = await screen.findByRole("option", { name: /^AED/ });
+    expect(option).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("takes a dropped file and names it with its size", async () => {
+    renderForm();
+
+    await screen.findByRole("button", { name: /upload report/i });
+    const cell = screen.getByText(/drag files here/i).closest("label")?.parentElement;
+    expect(cell).not.toBeNull();
+    fireEvent.drop(cell!, {
+      dataTransfer: { files: [new File(["a,b"], "settlement.csv", { type: "text/csv" })] },
+    });
+    expect(await screen.findByText(/settlement\.csv/)).toBeInTheDocument();
+  });
+});

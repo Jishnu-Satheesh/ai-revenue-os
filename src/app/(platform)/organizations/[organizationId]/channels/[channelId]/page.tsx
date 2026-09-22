@@ -286,6 +286,7 @@ export default async function ChannelDetailPage({
               role={role}
               timeZone={organization.default_timezone}
               fixedChannelId={channel.id}
+              defaultCurrency={organization.base_currency}
             />
           ) : null
         }

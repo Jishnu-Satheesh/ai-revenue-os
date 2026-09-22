@@ -24,6 +24,8 @@ export type IntegrationHubClientProps = {
   organizationId: string;
   organizationName: string;
   organizationTimeZone: string;
+  /** Base currency used as the report upload form's starting currency. */
+  defaultCurrency?: string;
   role: OrganizationRole;
   initialSnapshot: IntegrationHubSnapshot;
   initialCatalog: readonly ProviderDefinition[];
@@ -47,6 +49,7 @@ export function IntegrationHubClient({
   organizationId,
   organizationName,
   organizationTimeZone,
+  defaultCurrency,
   role,
   initialSnapshot,
   initialCatalog,
@@ -139,6 +142,7 @@ export function IntegrationHubClient({
             metricTargets={metricTargets}
             role={role}
             timeZone={organizationTimeZone}
+            defaultCurrency={defaultCurrency}
           />
         </TabsContent>
         <TabsContent value="activity" className="min-h-0">
