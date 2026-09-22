@@ -12,6 +12,7 @@ import {
   Store,
   X,
 } from "lucide-react";
+import { z } from "zod";
 
 import {
   AlertDialog,
@@ -106,6 +107,7 @@ const COMPETITOR_HINT_LIMIT = 240;
 const QUESTION_LIMIT = 2000;
 const TITLE_LIMIT = 200;
 const AREA_LIMIT = 160;
+const RECENT_AREAS_LIST_ID = "new-research-area-recent";
 
 const TIMEZONE_OPTIONS = [
   "Asia/Dubai",
@@ -127,6 +129,32 @@ function validWebsite(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+const recentResearchAreasResponseSchema = z
+  .object({
+    areas: z.array(z.string().trim().min(1).max(160)).max(10),
+    mostRecent: z.string().trim().min(1).max(160).nullable(),
+  })
+  .passthrough();
+
+/**
+ * Tenant-scoped recent research areas (Track C1 Redis API, `{ areas,
+ * mostRecent, correlationId }`). Fail-open by design: any transport or
+ * shape failure rejects so the caller falls back to a plain text field
+ * with no error shown.
+ */
+async function fetchRecentResearchAreas(organizationId: string): Promise<string[]> {
+  const response = await fetch(
+    `/api/organizations/${organizationId}/growth-intelligence/recent-research-areas`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) throw new Error(`RECENT_AREAS_FAILED:${response.status}`);
+  const parsed = recentResearchAreasResponseSchema.safeParse(
+    await response.json().catch(() => null),
+  );
+  if (!parsed.success) throw new Error("RECENT_AREAS_INVALID");
+  return parsed.data.areas;
 }
 
 async function defaultStartResearch(
@@ -245,6 +273,15 @@ export function NewResearchDialog({
   // backend ships; the hook reports mutation failures via `syncError`.
   const orgCompetitors = useOrganizationCompetitors(organizationId, open);
 
+  // Recent research areas (Track C1 Redis API). Fetched once per dialog
+  // open when the Scope step opens, tenant-pinned exactly like the
+  // competitor list (`/api/organizations/:id/...`). Any failure settles to
+  // an empty list so the Research area field stays a plain text input —
+  // never an error state.
+  const [recentAreas, setRecentAreas] = useState<string[]>([]);
+  const [recentAreasFor, setRecentAreasFor] = useState<string | null>(null);
+  const [areaSeedFor, setAreaSeedFor] = useState<string | null>(null);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -291,6 +328,61 @@ export function NewResearchDialog({
     setDraftSeed({ open, timeZone });
     if (open) {
       setDraft((current) => (current.timeZone ? current : { ...current, timeZone }));
+    }
+  }
+
+  // Reset the cached list while the dialog is closed so the next open
+  // refetches. Settles during render (never in an effect), like the
+  // competitor and draft seeds above.
+  if (!open && (recentAreasFor !== null || recentAreas.length > 0)) {
+    setRecentAreas([]);
+    setRecentAreasFor(null);
+  }
+
+  // Fetch once per dialog open when the Scope step opens. State settles
+  // only in the async callbacks below, never synchronously in the effect.
+  useEffect(() => {
+    if (!open || step < 2 || organizationId.length === 0 || recentAreasFor === organizationId) {
+      return;
+    }
+    let cancelled = false;
+    fetchRecentResearchAreas(organizationId).then(
+      (areas) => {
+        if (!cancelled) {
+          setRecentAreas(areas);
+          setRecentAreasFor(organizationId);
+        }
+      },
+      () => {
+        // Fail-open: the Research area field stays a plain text input.
+        if (!cancelled) {
+          setRecentAreas([]);
+          setRecentAreasFor(organizationId);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [open, step, organizationId, recentAreasFor]);
+
+  // Auto-populate an untouched Research area field with the single most
+  // recent value, once per loaded list. Never overwrites typed input and
+  // never marks the draft dirty, so opening the dialog alone never
+  // triggers the discard prompt. Settles during render like the seeds.
+  const areaLoadKey = open && recentAreasFor === organizationId ? organizationId : null;
+  if (areaLoadKey !== areaSeedFor) {
+    setAreaSeedFor(areaLoadKey);
+    if (areaLoadKey !== null) {
+      const latest = recentAreas[0];
+      if (latest && normalize(draft.researchArea).length === 0) {
+        setDraft((current) =>
+          normalize(current.researchArea).length === 0
+            ? { ...current, researchArea: latest }
+            : current,
+        );
+        setErrors((current) => (current.area ? { ...current, area: undefined } : current));
+      }
     }
   }
 
@@ -804,7 +896,15 @@ export function NewResearchDialog({
                       placeholder="Neighbourhood, city or service area"
                       maxLength={AREA_LIMIT + 1}
                       aria-invalid={errors.area !== undefined}
+                      list={recentAreas.length > 0 ? RECENT_AREAS_LIST_ID : undefined}
                     />
+                    {recentAreas.length > 0 ? (
+                      <datalist id={RECENT_AREAS_LIST_ID}>
+                        {recentAreas.map((area) => (
+                          <option key={area} value={area} />
+                        ))}
+                      </datalist>
+                    ) : null}
                     <FieldDescription>
                       Use the area your customers and competitors serve.
                     </FieldDescription>

@@ -763,3 +763,117 @@ describe("NewResearchDialog footer restyle", () => {
     ).not.toBeNull();
   });
 });
+
+describe("NewResearchDialog recent research areas", () => {
+  type RecentCall = { method: string; url: string };
+
+  function stubRecentAreasApi(recent: { ok: boolean; body: unknown }, seen: RecentCall[]) {
+    const fetchMock = vi.fn(async (input: unknown, init?: { method?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      seen.push({ method, url });
+      if (url.includes("/growth-intelligence/recent-research-areas")) {
+        return recent.ok
+          ? { ok: true, status: 200, json: async () => recent.body }
+          : { ok: false, status: 500, json: async () => null };
+      }
+      return { ok: true, status: 200, json: async () => ({ competitors: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function recentOptions(): string[] {
+    return Array.from(document.querySelectorAll("#new-research-area-recent option")).map(
+      (option) => option.getAttribute("value") ?? "",
+    );
+  }
+
+  it("fetches the tenant-scoped list on Scope open and offers it as a dropdown", async () => {
+    const seen: RecentCall[] = [];
+    stubRecentAreasApi(
+      {
+        ok: true,
+        body: { areas: ["Marina", "Deira"], mostRecent: "Marina", correlationId: "c" },
+      },
+      seen,
+    );
+    render(<NewResearchDialog {...dialogProps()} />);
+    // Nothing fetched before the Scope step opens.
+    expect(seen.some((call) => call.url.includes("recent-research-areas"))).toBe(false);
+
+    await goToScope();
+
+    await waitFor(() =>
+      expect(
+        seen.some(
+          (call) =>
+            call.method === "GET" &&
+            call.url ===
+              `/api/organizations/${ORGANIZATION}/growth-intelligence/recent-research-areas`,
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(recentOptions()).toEqual(["Marina", "Deira"]));
+    expect(screen.getByLabelText(/research area/i).getAttribute("list")).toBe(
+      "new-research-area-recent",
+    );
+  });
+
+  it("auto-populates the single most recent value while still accepting a new value", async () => {
+    const seen: RecentCall[] = [];
+    stubRecentAreasApi(
+      {
+        ok: true,
+        body: { areas: ["Marina", "Deira"], mostRecent: "Marina", correlationId: "c" },
+      },
+      seen,
+    );
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    const field = screen.getByLabelText(/research area/i);
+    await waitFor(() => expect(field).toHaveProperty("value", "Marina"));
+
+    // The operator can still type a new area; the existing start path
+    // records it via the POST side effect.
+    fireEvent.change(field, { target: { value: "Jumeirah" } });
+    expect(field).toHaveProperty("value", "Jumeirah");
+  });
+
+  it("fails open to a plain text field with no error when the API errors", async () => {
+    const seen: RecentCall[] = [];
+    const fetchMock = stubRecentAreasApi({ ok: false, body: null }, seen);
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("recent-research-areas"),
+        expect.anything(),
+      ),
+    );
+    const field = screen.getByLabelText(/research area/i);
+    await waitFor(() => expect(field).toHaveProperty("value", ""));
+    expect(field.getAttribute("list")).toBeNull();
+    expect(document.querySelector("#new-research-area-recent")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("stays a plain text field when the list is empty", async () => {
+    const seen: RecentCall[] = [];
+    stubRecentAreasApi(
+      { ok: true, body: { areas: [], mostRecent: null, correlationId: "c" } },
+      seen,
+    );
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    await waitFor(() =>
+      expect(seen.some((call) => call.url.includes("recent-research-areas"))).toBe(true),
+    );
+    const field = await screen.findByLabelText(/research area/i);
+    expect(field).toHaveProperty("value", "");
+    expect(field.getAttribute("list")).toBeNull();
+  });
+});
