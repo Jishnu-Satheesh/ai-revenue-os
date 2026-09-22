@@ -446,3 +446,97 @@ describe("summarizeMonitoringCost", () => {
     expect(summary).toEqual({ knownMicrosUsd: 1200, unknownCount: 1 });
   });
 });
+
+describe("startMonitoringUpdate business-context window", () => {
+  function harnessWithCoverage() {
+    const db = createFixtureDb();
+    let updateSequence = 0;
+    let revisionSequence = 0;
+    const updateIds = [
+      "91000000-0000-4000-8000-000000000001",
+      "91000000-0000-4000-8000-000000000002",
+      "91000000-0000-4000-8000-000000000003",
+    ];
+    const revisionIds = [
+      "71000000-0000-4000-8000-000000000001",
+      "71000000-0000-4000-8000-000000000002",
+      "71000000-0000-4000-8000-000000000003",
+    ];
+    const deps = {
+      projects: createFakeProjects(db),
+      updates: createFakeStore(db),
+      dispatch: createFakeDispatch({}),
+      events: createFakeEvents(),
+      now: () => FIXED_NOW,
+      newUpdateId: () => updateIds[updateSequence++ % updateIds.length]!,
+      newRevisionId: () => revisionIds[revisionSequence++ % revisionIds.length]!,
+    };
+    return { db, deps };
+  }
+
+  it("ends the brief window at initiation day with up to 60 days back", async () => {
+    const { deps } = harnessWithCoverage();
+    const result = await startMonitoringUpdate(
+      startInputFixture({
+        idempotencyKey: "window-60d",
+        channelCoverage: [{ start: "2026-01-01", end: "2026-09-14" }],
+      }),
+      deps,
+    );
+    expect(result.outcome).toBe("started");
+    if (result.outcome !== "started") throw new Error("expected started");
+    expect(deps.projects.saveCalls).toBe(1);
+    const brief = (
+      await deps.updates.get({
+        organizationId: FIXTURE_IDS.organizationId,
+        updateId: result.updateId,
+      })
+    )?.brief;
+    expect(brief?.evidencePeriods).toEqual([
+      {
+        label: "Channel reports · 2026-07-17–2026-09-14",
+        startDate: "2026-07-17",
+        endDate: "2026-09-14",
+      },
+    ]);
+  });
+
+  it("shrinks to the available stretch when evidence is shorter than 60 days", async () => {
+    const { deps } = harnessWithCoverage();
+    const result = await startMonitoringUpdate(
+      startInputFixture({
+        idempotencyKey: "window-short",
+        channelCoverage: [{ start: "2026-08-01", end: "2026-09-14" }],
+      }),
+      deps,
+    );
+    expect(result.outcome).toBe("started");
+    if (result.outcome !== "started") throw new Error("expected started");
+    const brief = (await deps.updates.get({
+      organizationId: FIXTURE_IDS.organizationId,
+      updateId: result.updateId,
+    }))?.brief;
+    expect(brief?.evidencePeriods).toEqual([
+      {
+        label: "Channel reports · 2026-08-01–2026-09-14",
+        startDate: "2026-08-01",
+        endDate: "2026-09-14",
+      },
+    ]);
+  });
+
+  it("keeps an evidence-only brief when no coverage exists", async () => {
+    const { deps } = harnessWithCoverage();
+    const result = await startMonitoringUpdate(
+      startInputFixture({ idempotencyKey: "window-empty" }),
+      deps,
+    );
+    expect(result.outcome).toBe("started");
+    if (result.outcome !== "started") throw new Error("expected started");
+    const brief = (await deps.updates.get({
+      organizationId: FIXTURE_IDS.organizationId,
+      updateId: result.updateId,
+    }))?.brief;
+    expect(brief?.evidencePeriods).toEqual([]);
+  });
+});

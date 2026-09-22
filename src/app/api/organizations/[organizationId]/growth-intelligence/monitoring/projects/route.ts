@@ -32,6 +32,9 @@ import {
   createAuthenticatedResearchProjectRepository,
   type ResearchProjectRepository,
 } from "@/modules/growth-intelligence/infrastructure/research-project-repository";
+import { createAuthenticatedOrganizationCompetitorRepository } from "@/modules/growth-intelligence/infrastructure/organization-competitor-repository";
+import { recordRecentResearchArea } from "@/modules/growth-intelligence/application/recent-research-areas";
+import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { triggerMarketMonitoringUpdate } from "@/trigger/growth-intelligence";
 
 /**
@@ -602,6 +605,28 @@ export async function POST(
       return response;
     }
 
+    // Dynamic business-context window (P1): the last 30–60 days of AVAILABLE
+    // channel evidence counted back from initiation. Best effort — a failed
+    // coverage read keeps the legacy evidence-only brief rather than failing
+    // the start.
+    let channelCoverage: { start: string; end: string }[] = [];
+    try {
+      const analysis = createAuthenticatedChannelAnalysisRepository(context.supabase);
+      const segments = await analysis.loadCoverageSegments({
+        organizationId,
+        channelId: null,
+      });
+      channelCoverage = segments
+        .filter(
+          (segment): segment is { start: string; end: string } =>
+            typeof segment.start === "string" && typeof segment.end === "string",
+        )
+        .map((segment) => ({ start: segment.start, end: segment.end }))
+        .slice(0, 200);
+    } catch {
+      channelCoverage = [];
+    }
+
     const started = await startMonitoringUpdate(
       {
         organizationId,
@@ -618,6 +643,7 @@ export async function POST(
         idempotencyKey: body.idempotencyKey,
         correlationId,
         refresh: false,
+        ...(channelCoverage.length > 0 ? { channelCoverage } : {}),
       },
       {
         projects: {
@@ -633,6 +659,36 @@ export async function POST(
         events: createEventPublisher(),
       },
     );
+    // P2 + P3 side effects, both best-effort so they never fail a start:
+    // competitors fold into permanent organisation storage (deduplicated by
+    // normalized name; a missing table degrades silently until the migration
+    // lands) and the research area joins the Redis recent list.
+    try {
+      await createAuthenticatedOrganizationCompetitorRepository(context.supabase).rememberCompetitors({
+        organizationId,
+        competitors: body.competitors.map((competitor) => ({
+          name: competitor.name,
+          ...(competitor.website ? { website: competitor.website } : {}),
+          ...(competitor.locationHint ? { locationHint: competitor.locationHint } : {}),
+        })),
+        actorId: context.user.id,
+      });
+    } catch (error) {
+      logger.warn("growth_intelligence.monitoring_start_competitors_degraded", {
+        organizationId,
+        correlationId,
+        errorCode: toPublicError(error).code,
+      });
+    }
+    try {
+      await recordRecentResearchArea(organizationId, body.researchArea);
+    } catch (error) {
+      logger.warn("growth_intelligence.monitoring_start_recent_area_degraded", {
+        organizationId,
+        correlationId,
+        errorCode: toPublicError(error).code,
+      });
+    }
     const response = NextResponse.json(
       { start: started, correlationId },
       { status: started.outcome === "started" ? 201 : 200 },

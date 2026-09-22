@@ -108,6 +108,23 @@ export const startMonitoringUpdateInputSchema = z
     idempotencyKey: z.string().trim().min(1).max(200),
     correlationId: z.string().uuid(),
     refresh: z.boolean().optional().default(false),
+    /**
+     * Available channel-evidence stretches the business-context window counts
+     * back over. Omitted (or empty) keeps the legacy evidence-only brief with
+     * no period; the POST route loads coverage segments and passes them here
+     * so every initiation resolves its window dynamically from what exists.
+     */
+    channelCoverage: z
+      .array(
+        z
+          .object({
+            start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          })
+          .strict(),
+      )
+      .max(200)
+      .optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -698,6 +715,15 @@ export async function startMonitoringUpdate(
     };
   }
   const updateId = reserved.record.updateId;
+  // Dynamic business-context window: the last 30–60 days of AVAILABLE channel
+  // evidence counted back from initiation (UTC). No coverage (or coverage
+  // ending after a gap) yields no period rather than an invented one.
+  const initiationDay = now().toISOString().slice(0, 10);
+  const businessWindow = resolveBusinessContextWindow({
+    initiationDay,
+    coverage: parsed.channelCoverage ?? [],
+  });
+  const evidencePeriods = businessWindow ? [buildBusinessContextEvidencePeriod(businessWindow)] : [];
   const brief = briefRevisionSchema.parse({
     revisionId: newRevisionId(),
     projectId,
@@ -709,7 +735,7 @@ export async function startMonitoringUpdate(
     researchArea: parsed.researchArea,
     competitors: parsed.competitors,
     investigationAreas: [...parsed.investigationAreas].sort(),
-    evidencePeriods: [],
+    evidencePeriods,
     businessContextSnapshotId: parsed.businessContextSnapshotId,
     frequency,
     pinnedToUpdateId: updateId,

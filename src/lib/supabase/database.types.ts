@@ -220,6 +220,32 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      growth_intelligence_organization_competitors: {
+        Row: {
+          id: string;
+          organization_id: string;
+          name: string;
+          normalized_name: string;
+          website: string | null;
+          location_hint: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          organization_id: string;
+          name: string;
+          normalized_name: string;
+          website?: string | null;
+          location_hint?: string | null;
+        };
+        Update: {
+          name?: string;
+          normalized_name?: string;
+          website?: string | null;
+          location_hint?: string | null;
+        };
+        Relationships: [];
+      };
       growth_intelligence_project_create_keys: {
         Row: {
           id: string;
