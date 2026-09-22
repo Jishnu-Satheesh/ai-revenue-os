@@ -128,6 +128,22 @@ describe("ReportReaderView", () => {
     expect(screen.getByText(/order early for National Day/)).toBeTruthy();
   });
 
+  it("renders the opportunity tab with checklist and honest box", () => {
+    render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
+    fireEvent.click(screen.getByRole("button", { name: "Local opportunity" }));
+
+    const heading = screen.getByRole("heading", { name: "The local opportunity" });
+    expect(heading.className).toMatch(/text-\[22px\]/);
+    expect(heading.className).toMatch(/font-bold/);
+    expect(screen.getByText("What to check before committing")).toBeTruthy();
+    for (const title of ["Customer occasion", "Operating capacity", "Commercial fit"]) {
+      expect(screen.getByText(title)).toBeTruthy();
+    }
+    const boxTitle = screen.getByText("Potential opportunity, not a promised result");
+    expect(boxTitle.className).toMatch(/font-bold/);
+    expect(boxTitle.querySelector("svg")).toBeTruthy();
+  });
+
   it("matches the prototype summary treatment: green eyebrow, short cites, gaps icon", () => {
     render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
 

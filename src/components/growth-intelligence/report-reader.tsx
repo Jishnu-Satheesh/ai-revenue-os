@@ -74,6 +74,27 @@ const SECTION_ICONS: Record<ReportReaderSectionKey, LucideIcon> = {
   sources: BookOpen,
 };
 
+/**
+ * Fixed pre-commit guidance shown on the opportunity tab, using the approved
+ * mockup's words. Static product copy like the honesty box below it — never
+ * per-report data, never a claim about results.
+ */
+const PRE_COMMIT_CHECKS: { title: string; detail: string }[] = [
+  {
+    title: "Customer occasion",
+    detail: "Make the intended customer and the reason to buy explicit.",
+  },
+  {
+    title: "Operating capacity",
+    detail: "Confirm available items, preparation limits and fulfilment coverage at this location.",
+  },
+  {
+    title: "Commercial fit",
+    detail:
+      "Check the proposed offer against costs and the organization's goals before approving a campaign.",
+  },
+];
+
 export function ReportReaderSkeleton() {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-4 p-5 sm:p-7" aria-label="Loading report">
@@ -514,10 +535,32 @@ export function ReportReaderView({
 
         {section === "opportunity" ? (
           <div className="flex min-w-0 flex-col">
-            <h3 className="text-xl font-semibold">The local opportunity</h3>
+            <h3 className="text-[22px] font-bold tracking-tight">The local opportunity</h3>
             <p className="mt-3 max-w-prose text-sm leading-relaxed">{view.localMeaning}</p>
-            <div className="mt-4 rounded-lg bg-muted p-4">
-              <p className="text-sm font-semibold">Potential opportunity, not a promised result</p>
+            <h4 className="mt-6 text-[15px] font-bold">What to check before committing</h4>
+            <ol className="mt-1 flex min-w-0 flex-col">
+              {PRE_COMMIT_CHECKS.map((check, index) => (
+                <li
+                  key={check.title}
+                  className="flex min-w-0 gap-3 border-b py-5 last:border-b-0"
+                >
+                  <span aria-hidden="true" className="shrink-0 text-xs font-semibold text-primary">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="min-w-0 text-sm font-semibold break-words">{check.title}</p>
+                    <p className="mt-1 min-w-0 text-sm text-muted-foreground break-words">
+                      {check.detail}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-5 rounded-2xl bg-muted p-5">
+              <p className="flex items-center gap-2 text-sm font-bold">
+                <Info aria-hidden="true" className="size-4 shrink-0" />
+                Potential opportunity, not a promised result
+              </p>
               <p className="mt-1 max-w-prose text-sm text-muted-foreground">
                 The report proposes what to investigate. It does not claim that a campaign has
                 earned revenue or profit.
