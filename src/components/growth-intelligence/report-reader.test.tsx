@@ -139,6 +139,36 @@ describe("ReportReaderView", () => {
     expect(gapsTitle.querySelector("svg")).toBeTruthy();
   });
 
+  it("tones competitor rows by evidence: dark findings, muted empty states", () => {
+    const { rerender } = render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
+    fireEvent.click(screen.getByRole("button", { name: "Competitors" }));
+
+    const heading = screen.getByRole("heading", { name: "Competitors & their offers" });
+    expect(heading.className).toMatch(/text-\[22px\]/);
+    expect(heading.className).toMatch(/font-bold/);
+    // Fixture row carries no citations: honest empty state in muted tone.
+    const emptyCell = screen.getByText(/Promotes family bundles/).closest("td");
+    expect(emptyCell?.className).toMatch(/text-muted-foreground/);
+
+    rerender(
+      <ReportReaderView
+        view={viewFixture({
+          competitorComparison: [
+            {
+              competitorName: "Rival Kitchen",
+              summary: "Promotes family bundles.",
+              citationSlots: [{ claimId: CLAIM, sourceRef: "S1" }],
+            },
+          ],
+        })}
+        timeZone="Asia/Dubai"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Competitors" }));
+    const fullCell = screen.getByText(/Promotes family bundles/).closest("td");
+    expect(fullCell?.className).not.toMatch(/text-muted-foreground/);
+  });
+
   it("navigates sections and jumps a citation to its source record", () => {
     render(<ReportReaderView view={viewFixture()} timeZone="Asia/Dubai" />);
 
@@ -319,6 +349,20 @@ describe("ReportReaderDialog", () => {
       expect(screen.getByRole("button", { name: /save for later/i })).toBeTruthy();
       expect(screen.getByRole("button", { name: /^review selection$/i })).toBeDisabled();
       expect(screen.getByText(/stays in the Ready to review list/)).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("holds a fixed frame so short reports do not collapse the dialog", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(readerBody()), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(<ReportReaderDialog {...dialogProps()} />);
+      expect(await screen.findByText("What matters for Downtown")).toBeTruthy();
+      const dialog = screen.getByRole("dialog");
+      expect(dialog.className).toMatch(/sm:h-\[85vh\]/);
+      expect(dialog.className).toMatch(/max-h-\[90vh\]/);
     } finally {
       vi.unstubAllGlobals();
     }

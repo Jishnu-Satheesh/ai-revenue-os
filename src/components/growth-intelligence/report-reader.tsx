@@ -423,7 +423,7 @@ export function ReportReaderView({
 
         {section === "competitors" ? (
           <div className="flex min-w-0 flex-col">
-            <h3 className="text-xl font-semibold">Competitors &amp; their offers</h3>
+            <h3 className="text-[22px] font-bold tracking-tight">Competitors &amp; their offers</h3>
             <p className="mt-2 max-w-prose text-sm text-muted-foreground">
               Compare the offer and customer experience. Public visibility is a signal, not proof
               of business performance.
@@ -432,17 +432,23 @@ export function ReportReaderView({
               <table className="w-full min-w-[420px] border-collapse text-sm">
                 <thead>
                   <tr className="border-b text-left text-[11px] tracking-wide text-muted-foreground uppercase">
-                    <th className="px-2 py-2 font-semibold">Competitor</th>
-                    <th className="px-2 py-2 font-semibold">What we found</th>
+                    <th className="w-[28%] px-4 py-3 font-semibold">Competitor</th>
+                    <th className="px-4 py-3 font-semibold">What we found</th>
                   </tr>
                 </thead>
                 <tbody>
                   {view.competitorComparison.map((entry) => (
                     <tr key={entry.competitorName} className="border-b align-top last:border-b-0">
-                      <td className="min-w-0 px-2 py-3 font-semibold break-words">
+                      <td className="w-[28%] min-w-0 px-4 py-5 font-semibold break-words">
                         {entry.competitorName}
                       </td>
-                      <td className="min-w-0 px-2 py-3 text-muted-foreground break-words">
+                      <td
+                        className={
+                          entry.citations.length === 0
+                            ? "min-w-0 px-4 py-5 text-muted-foreground break-words"
+                            : "min-w-0 px-4 py-5 break-words"
+                        }
+                      >
                         {entry.summary}{" "}
                         {entry.citations.map((ref, citationIndex) => (
                           <CitationButton
@@ -460,7 +466,7 @@ export function ReportReaderView({
               </table>
             </div>
             {view.speculativeEstimate ? (
-              <div className="mt-6 rounded-lg border p-4 sm:p-5">
+              <div className="mt-6 rounded-lg border p-5 sm:p-6">
                 <p className="inline-block rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
                   Speculative estimate
                 </p>
@@ -778,7 +784,7 @@ export function ReportReaderDialog({
           openerRef.current = document.activeElement;
         }}
         onEscapeKeyDown={scheduleRestore}
-        className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[860px] lg:max-w-[1024px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
+        className="flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden p-0 sm:h-[85vh] sm:max-w-[860px] lg:max-w-[1024px] max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
       >
         <DialogHeader className="static shrink-0 border-b px-5 py-5 pr-12 text-left sm:px-7">
           <p className="text-[11px] font-semibold tracking-widest text-emerald-700 uppercase dark:text-emerald-300">
