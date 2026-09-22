@@ -767,3 +767,167 @@ describe("ReportPackageUpload reached by an operator", () => {
     expect(screen.queryByText(/tell us what these columns mean/i)).not.toBeInTheDocument();
   });
 });
+
+describe("ReportPackageUpload validation warnings", () => {
+  const VALIDATION_RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const VALIDATION_CONTRACT_VERSION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  function validationSnapshot(withContract: boolean) {
+    return {
+      packages: [
+        {
+          ...snapshot.packages[0],
+          status: "partially_validated",
+        },
+      ],
+      sheetManifests: [],
+      contracts: [],
+      contractVersions: withContract
+        ? [
+            {
+              id: VALIDATION_CONTRACT_VERSION_ID,
+              organization_id: ORGANIZATION_ID,
+              report_contract_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+              report_package_id: PACKAGE_ID,
+              version: 1,
+              schema_fingerprint: "e".repeat(64),
+              parser_version: 1,
+              fingerprint_version: 2,
+              mapping_document: {
+                currency: "AED",
+                outletGrain: "branch",
+                unmappedFieldDisposition: "reviewed_ignore",
+                sheets: [
+                  {
+                    normalizedSheetName: "performance",
+                    headerRow: 1,
+                    dataStartRow: 2,
+                    allowFormula: false,
+                    allowMergedCells: false,
+                    fields: [
+                      {
+                        canonicalField: "gross_sales",
+                        sourceHeader: "gross_sales",
+                        parser: "money",
+                        financialSign: "positive",
+                        required: true,
+                      },
+                      {
+                        canonicalField: "note",
+                        sourceHeader: "note",
+                        parser: "text",
+                        required: false,
+                      },
+                    ],
+                  },
+                ],
+              },
+              mapping_digest: "f".repeat(64),
+              declared_currency: "AED",
+              financial_sign_semantics: null,
+              controls: null,
+              unmapped_field_disposition: "reviewed_ignore",
+              proposal_source: "human",
+              provider_definition_key: null,
+              created_by: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              correlation_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              created_at: "2026-01-01T00:00:00.000Z",
+            },
+          ]
+        : [],
+      contractDecisions: [],
+      contractBindings: [],
+      validationRuns: [
+        {
+          id: VALIDATION_RUN_ID,
+          organization_id: ORGANIZATION_ID,
+          report_package_id: PACKAGE_ID,
+          report_contract_version_id: VALIDATION_CONTRACT_VERSION_ID,
+          report_contract_binding_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          validator_version: 1,
+          input_digest: "1".repeat(64),
+          result_digest: null,
+          status: "partially_validated",
+          quality_state: "complete",
+          completeness_state: "partial",
+          error_codes: [],
+          warning_codes: ["OPTIONAL_FIELD_MISSING"],
+          correlation_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          started_at: "2026-01-01T00:03:00.000Z",
+          completed_at: "2026-01-01T00:04:00.000Z",
+          created_at: "2026-01-01T00:04:00.000Z",
+        },
+      ],
+      validationSheetResults: [
+        {
+          id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+          organization_id: ORGANIZATION_ID,
+          validation_run_id: VALIDATION_RUN_ID,
+          normalized_sheet_name: "performance",
+          required: true,
+          outcome: "warning",
+          row_count: 10,
+          populated_cell_count: 20,
+          parsed_field_success_count: 18,
+          parsed_field_failure_count: 0,
+          error_codes: [],
+          warning_codes: ["OPTIONAL_FIELD_MISSING"],
+          created_at: "2026-01-01T00:04:00.000Z",
+        },
+      ],
+      validationControlResults: [],
+      projectionVersions: [],
+      projectionDecisions: [],
+      projectionBindings: [],
+      projectionRuns: [],
+      reconciliationGroups: [],
+      channels: [],
+      branches: [],
+    } as unknown as ReportPackageSnapshot;
+  }
+
+  function stubValidationSnapshot(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    );
+  }
+
+  it("names the optional field from the approved contract in one compact warning row", async () => {
+    stubValidationSnapshot(validationSnapshot(true));
+    renderUpload();
+
+    // Optional field identity comes from the already-loaded approved
+    // contract only -- never invented.
+    const fieldNode = await screen.findByText(/note \(note\)/);
+    expect(fieldNode).toBeInTheDocument();
+
+    // Compact single-row layout: title, code, field names and next step
+    // share one <p>, instead of three stacked <p>s per code.
+    const row = fieldNode.closest("p");
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toMatch(/OPTIONAL_FIELD_MISSING/);
+    expect(row?.textContent).toMatch(/Review the warning/);
+    expect(screen.queryByText(/An optional field was not present/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Next step:/)).not.toBeInTheDocument();
+
+    // Warning box keeps shadcn Alert with the shared warning treatment.
+    const title = screen.getByText("Validation warnings");
+    const alert = title.closest('div[role="alert"]');
+    expect(alert?.className).toMatch(/border-warning/);
+    expect(alert?.className).toMatch(/bg-warning/);
+    expect(alert?.querySelector("svg")).not.toBeNull();
+
+    // Sheet summary rows stay.
+    expect(screen.getByText(/Sheet performance · warning/)).toBeInTheDocument();
+  });
+
+  it("falls back to the sheet name when the contract is unavailable", async () => {
+    stubValidationSnapshot(validationSnapshot(false));
+    renderUpload();
+
+    await screen.findByText("Validation warnings");
+    expect(screen.getAllByText(/Sheet performance/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/note \(note\)/)).not.toBeInTheDocument();
+  });
+});

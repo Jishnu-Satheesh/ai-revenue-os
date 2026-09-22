@@ -401,6 +401,107 @@ function safeValidationCodes(value: unknown): string[] {
     : [];
 }
 
+function formatContractFieldLabel(canonicalField: string, sourceHeader: string): string {
+  return `${canonicalField} (${sourceHeader})`;
+}
+
+/**
+ * Optional fields per sheet from the already-loaded approved contract.
+ *
+ * `summarizeReportContract` keeps required fields only, so the optional side
+ * is read from the same mapping document with the same field shape:
+ * `required !== true` with non-empty `canonicalField` + `sourceHeader`.
+ * Nothing here invents a name -- every label is contract text verbatim.
+ */
+function optionalContractFieldLabelsBySheet(mappingDocument: unknown): Map<string, string[]> {
+  const bySheet = new Map<string, string[]>();
+  if (!mappingDocument || typeof mappingDocument !== "object" || Array.isArray(mappingDocument)) {
+    return bySheet;
+  }
+  const sheets = (mappingDocument as { sheets?: unknown }).sheets;
+  if (!Array.isArray(sheets)) return bySheet;
+  for (const sheet of sheets) {
+    if (!sheet || typeof sheet !== "object" || Array.isArray(sheet)) continue;
+    const record = sheet as { normalizedSheetName?: unknown; fields?: unknown };
+    if (typeof record.normalizedSheetName !== "string" || !Array.isArray(record.fields)) continue;
+    const labels: string[] = [];
+    for (const field of record.fields) {
+      if (!field || typeof field !== "object" || Array.isArray(field)) continue;
+      const candidate = field as {
+        canonicalField?: unknown;
+        sourceHeader?: unknown;
+        required?: unknown;
+      };
+      if (candidate.required === true) continue;
+      if (typeof candidate.canonicalField !== "string" || candidate.canonicalField.length === 0)
+        continue;
+      if (typeof candidate.sourceHeader !== "string" || candidate.sourceHeader.length === 0)
+        continue;
+      labels.push(formatContractFieldLabel(candidate.canonicalField, candidate.sourceHeader));
+    }
+    bySheet.set(record.normalizedSheetName, labels);
+  }
+  return bySheet;
+}
+
+/**
+ * The middle of a compact validation row: field names or a sheet name.
+ *
+ * Validation tables store codes only by design (bounded evidence, never
+ * workbook content), so field identity comes from the approved contract the
+ * run already points at. When the contract is unavailable there is nothing
+ * honest to list, so the affected sheet name stands in instead.
+ */
+function validationCodeContextDetail(options: {
+  code: string;
+  contractSummary: ReturnType<typeof summarizeReportContract>;
+  optionalBySheet: Map<string, string[]>;
+  affectedSheetNames: string[];
+}): string | null {
+  const { code, contractSummary, optionalBySheet, affectedSheetNames } = options;
+  const uniqueAffected = [...new Set(affectedSheetNames)];
+  const sheetLabel = uniqueAffected.length > 0 ? `Sheet ${uniqueAffected.join(", ")}` : null;
+
+  if (code === "OPTIONAL_FIELD_MISSING") {
+    const sheetsToUse =
+      uniqueAffected.length > 0
+        ? uniqueAffected
+        : ((contractSummary?.sheets.map((sheet) => sheet.normalizedSheetName) ?? [
+            ...optionalBySheet.keys(),
+          ]) as string[]);
+    const parts: string[] = [];
+    for (const sheetName of sheetsToUse) {
+      const labels = optionalBySheet.get(sheetName) ?? [];
+      if (labels.length > 0) parts.push(`${sheetName}: ${labels.join(", ")}`);
+    }
+    if (parts.length > 0) return parts.join(" · ");
+    if (sheetLabel) return sheetLabel;
+    if (contractSummary && contractSummary.sheets.length > 0) {
+      return `Sheet ${contractSummary.sheets.map((sheet) => sheet.normalizedSheetName).join(", ")}`;
+    }
+    return null;
+  }
+
+  if (code === "REQUIRED_FIELD_MISSING" || code === "REQUIRED_SOURCE_HEADER_MISSING") {
+    if (!contractSummary) return sheetLabel;
+    const matching = contractSummary.sheets.filter((sheet) =>
+      uniqueAffected.includes(sheet.normalizedSheetName),
+    );
+    const effective = matching.length > 0 || uniqueAffected.length > 0 ? matching : contractSummary.sheets;
+    const parts: string[] = [];
+    for (const sheet of effective) {
+      const labels = sheet.requiredFields.map((field) =>
+        formatContractFieldLabel(field.canonicalField, field.sourceHeader),
+      );
+      if (labels.length > 0) parts.push(`${sheet.normalizedSheetName}: ${labels.join(", ")}`);
+    }
+    if (parts.length > 0) return parts.join(" · ");
+    return sheetLabel;
+  }
+
+  return sheetLabel;
+}
+
 type ReportFamilyRecognition = { sheets: unknown[]; recognisedFamilies: RecognisedFamily[] };
 
 /**
@@ -1272,6 +1373,32 @@ export function ReportPackageUpload({
                     (result) => result.validation_run_id === latestValidation.id,
                   )
                 : [];
+              const validationContractVersion = latestValidation
+                ? view.contractVersions.find(
+                    (version) => version.id === latestValidation.report_contract_version_id,
+                  )
+                : undefined;
+              const validationContractSummary = validationContractVersion
+                ? summarizeReportContract(validationContractVersion.mapping_document)
+                : null;
+              const validationOptionalBySheet = validationContractVersion
+                ? optionalContractFieldLabelsBySheet(validationContractVersion.mapping_document)
+                : new Map<string, string[]>();
+              const affectedSheetsForValidationCode = (code: string): string[] =>
+                validationSheetResults
+                  .filter(
+                    (result) =>
+                      safeValidationCodes(result.error_codes).includes(code) ||
+                      safeValidationCodes(result.warning_codes).includes(code),
+                  )
+                  .map((result) => result.normalized_sheet_name);
+              const detailForValidationCode = (code: string): string | null =>
+                validationCodeContextDetail({
+                  code,
+                  contractSummary: validationContractSummary,
+                  optionalBySheet: validationOptionalBySheet,
+                  affectedSheetNames: affectedSheetsForValidationCode(code),
+                });
               const latestProjection = view.projectionRuns.find(
                 (run) => run.report_package_id === reportPackage.id,
               );
@@ -1395,33 +1522,34 @@ export function ReportPackageUpload({
                           <AlertDescription className="space-y-2">
                             {validationErrorCodes.map((code) => {
                               const explanation = explainReportValidationCode(code);
+                              const context = detailForValidationCode(code);
                               return (
-                                <div key={code}>
-                                  <p className="font-medium">
+                                <p key={code} className="text-xs">
+                                  <span className="font-medium">
                                     {explanation.title} <span className="font-mono">({code})</span>
-                                  </p>
-                                  <p>{explanation.detail}</p>
-                                  <p>Next step: {explanation.nextStep}</p>
-                                </div>
+                                  </span>
+                                  {context ? <> — {context}</> : null} — {explanation.nextStep}
+                                </p>
                               );
                             })}
                           </AlertDescription>
                         </Alert>
                       ) : null}
                       {validationWarningCodes.length > 0 ? (
-                        <Alert>
+                        <Alert className="border-warning/40 bg-warning/5">
+                          <TriangleAlert aria-hidden="true" className="text-warning" />
                           <AlertTitle>Validation warnings</AlertTitle>
                           <AlertDescription className="space-y-2">
                             {validationWarningCodes.map((code) => {
                               const explanation = explainReportValidationCode(code);
+                              const context = detailForValidationCode(code);
                               return (
-                                <div key={code}>
-                                  <p className="font-medium">
+                                <p key={code} className="text-xs">
+                                  <span className="font-medium">
                                     {explanation.title} <span className="font-mono">({code})</span>
-                                  </p>
-                                  <p>{explanation.detail}</p>
-                                  <p>Next step: {explanation.nextStep}</p>
-                                </div>
+                                  </span>
+                                  {context ? <> — {context}</> : null} — {explanation.nextStep}
+                                </p>
                               );
                             })}
                           </AlertDescription>
