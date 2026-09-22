@@ -96,3 +96,12 @@ If the other track has it claimed, post intent here and wait for their ack line.
   wrap fix applied at 320); throwaway user removed after. Gates: 228/228,
   typecheck 0, eslint clean. Tree uncommitted per user.
 - 2026-09-22 Track A Task 2 edit on shared `src/components/growth-intelligence/market-watch-projects.tsx`: additive-only Agent lane opt-in toggle (new component + optional props, no restyle, existing rows/cards untouched); proves no Track B conflict, Track B W2 still awaited.
+- 2026-09-22 Track C2 (dialog P2fe+P4+P5) done, WIP-committed, never pushed:
+  `organization-competitors.ts` (id-keyed client over C1's real API —
+  C1's `competitors/` routes, repository and migration read, never edited),
+  `new-research-dialog.tsx` (+ test: org seed/persist, shadcn time/date
+  pickers), `schedule-fields.tsx` (reused as-is), `project-overview-dialog.tsx`
+  (+ test: 05-progress restyle), `organization-competitors-block.tsx` (reused)
+  + `channels-presence-section.tsx` + `onboarding-client.tsx` (org-id
+  threading), 2 new test files. Never touched `market-watch-projects.tsx`.
+  Report: `.superpowers/sdd/market-watch-fixes/track-c2-report.md`.

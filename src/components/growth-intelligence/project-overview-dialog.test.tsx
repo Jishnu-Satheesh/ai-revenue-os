@@ -94,6 +94,40 @@ function attentionProject(): MarketWatchProjectListItem {
   return item;
 }
 
+function researchingProject(): MarketWatchProjectListItem {
+  const [item] = buildMarketWatchProjectList({
+    projects: [
+      {
+        projectId: PROJECT,
+        organizationId: ORGANIZATION,
+        branchId: DOWNTOWN,
+        branchName: "Downtown",
+        title: "National Day opportunity",
+        question:
+          "Find out what nearby competitors are offering for National Day and how we could attract more family orders without putting delivery quality at risk.",
+        mode: "recurring",
+        lifecycle: "active",
+        createdAt: "2026-09-10T10:00:00Z",
+      },
+    ],
+    reportsByProject: new Map(),
+    revisionsByProject: new Map([
+      [
+        PROJECT,
+        [
+          {
+            revisionId: "61000000-0000-4000-8000-000000000061",
+            revisionNumber: 1,
+            pinnedToUpdateId: "64000000-0000-4000-8000-000000000064",
+            createdAt: "2026-09-10T11:00:00Z",
+          },
+        ],
+      ],
+    ]),
+  });
+  return item;
+}
+
 function dialogProps(overrides: Record<string, unknown> = {}) {
   return {
     project: readyProject(),
@@ -132,14 +166,62 @@ describe("ProjectOverviewDialog", () => {
     ).toBeTruthy();
   });
 
-  it("shows the empty-history copy with the state caption when no reports exist", () => {
+  it("shows the queued progress timeline instead of an empty history when no reports exist", () => {
     render(
       <ProjectOverviewDialog {...dialogProps({ project: attentionProject(), reports: [] })} />,
     );
 
-    expect(screen.getByText("No reports yet.")).toBeTruthy();
-    expect(screen.getByText("Start research to receive the first report.")).toBeTruthy();
+    expect(screen.getByText("Research queued")).toBeTruthy();
+    expect(
+      screen.getByText("Your reviewed brief is saved. This project is waiting for research to start."),
+    ).toBeTruthy();
+    expect(screen.getByText("Research the market")).toBeTruthy();
+    expect(screen.getByText("Prepare your report")).toBeTruthy();
+    expect(screen.getByText("Ready for your review")).toBeTruthy();
+    expect(
+      screen.getByText("You can close this dialog and return to the project later."),
+    ).toBeTruthy();
+    // The failing state this replaced showed a history section with no
+    // reports; the progress mockup has neither the header nor the line.
+    expect(screen.queryByText("No reports yet.")).toBeNull();
+    expect(screen.queryByText("Report history")).toBeNull();
     expect(screen.queryByRole("button", { name: "Review report" })).toBeNull();
+  });
+
+  it("names the saved brief and live pill for researching projects", () => {
+    render(
+      <ProjectOverviewDialog {...dialogProps({ project: researchingProject(), reports: [] })} />,
+    );
+
+    expect(screen.getByText("National Day opportunity")).toBeTruthy();
+    expect(screen.getByText("Downtown · Recurring research")).toBeTruthy();
+    expect(screen.getByText("Researching")).toBeTruthy();
+    expect(screen.getByText("Brief saved")).toBeTruthy();
+    expect(
+      screen.getByText("The exact question and scope are saved for this update."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("You can close this dialog and return to the project later."),
+    ).toBeTruthy();
+  });
+
+  it("keeps a History entry point beside Pause, Stop and Close", () => {
+    render(
+      <ProjectOverviewDialog {...dialogProps({ project: researchingProject(), reports: [] })} />,
+    );
+
+    const footer = document.querySelector('[data-slot="dialog-footer"]');
+    if (!footer) throw new Error("missing dialog footer");
+    const names = within(footer as HTMLElement)
+      .getAllByRole("button")
+      .map((button) => button.textContent);
+    expect(names).toEqual(
+      expect.arrayContaining(["Pause monitoring", "Stop this research", "History", "Close"]),
+    );
+
+    // History only moves focus within the dialog; it never navigates.
+    fireEvent.click(within(footer as HTMLElement).getByRole("button", { name: "History" }));
+    expect(screen.getByText("National Day opportunity")).toBeTruthy();
   });
 
   it("keeps pause and stop disabled with honest backend-update reasons", () => {

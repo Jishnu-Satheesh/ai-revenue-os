@@ -5,7 +5,7 @@ import { Pencil, Plus, Store, X } from "lucide-react";
 
 import {
   useOrganizationCompetitors,
-  type OrganizationCompetitor,
+  type OrganizationCompetitorInput,
 } from "@/components/growth-intelligence/organization-competitors";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
@@ -39,7 +39,7 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [hint, setHint] = useState("");
-  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   async function save() {
@@ -64,21 +64,21 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
     }
     const duplicate = store.competitors.some(
       (row) =>
-        row.name.toLowerCase() !== (editingName ?? "").toLowerCase() &&
+        row.id !== editingId &&
         row.name.toLowerCase() === trimmedName.toLowerCase(),
     );
     if (duplicate) {
       setFormError("That competitor is already listed.");
       return;
     }
-    const row: OrganizationCompetitor = {
+    const row: OrganizationCompetitorInput = {
       name: trimmedName,
       website: trimmedWebsite,
       locationHint: trimmedHint,
     };
-    if (editingName !== null) {
-      await store.update(editingName, row);
-      setEditingName(null);
+    if (editingId !== null) {
+      await store.update(editingId, row);
+      setEditingId(null);
     } else {
       await store.add(row);
     }
@@ -88,8 +88,10 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
     setFormError(null);
   }
 
-  function edit(row: OrganizationCompetitor) {
-    setEditingName(row.name);
+  function edit(id: string) {
+    const row = store.competitors.find((candidate) => candidate.id === id);
+    if (!row) return;
+    setEditingId(row.id);
     setName(row.name);
     setWebsite(row.website ?? "");
     setHint(row.locationHint ?? "");
@@ -97,7 +99,7 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
   }
 
   function cancelEdit() {
-    setEditingName(null);
+    setEditingId(null);
     setName("");
     setWebsite("");
     setHint("");
@@ -121,7 +123,7 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
         <ul className="flex flex-col gap-2">
           {store.competitors.map((row) => (
             <li
-              key={row.name}
+              key={row.id}
               className="flex min-w-0 items-center gap-3 rounded-lg border px-3 py-2 text-sm"
             >
               <span
@@ -143,7 +145,7 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`Edit competitor ${row.name}`}
-                  onClick={() => edit(row)}
+                  onClick={() => edit(row.id)}
                 >
                   <Pencil aria-hidden="true" />
                 </Button>
@@ -152,7 +154,7 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`Remove competitor ${row.name}`}
-                  onClick={() => store.remove(row.name)}
+                  onClick={() => store.remove(row.id)}
                 >
                   <X aria-hidden="true" />
                 </Button>
@@ -208,9 +210,9 @@ export function OrganizationCompetitorsBlock({ organizationId }: { organizationI
       <div>
         <Button type="button" variant="outline" size="sm" onClick={() => void save()}>
           <Plus aria-hidden="true" />
-          {editingName !== null ? "Save competitor" : "Add a competitor"}
+          {editingId !== null ? "Save competitor" : "Add a competitor"}
         </Button>
-        {editingName !== null ? (
+        {editingId !== null ? (
           <Button type="button" variant="ghost" size="sm" onClick={cancelEdit}>
             Cancel edit
           </Button>

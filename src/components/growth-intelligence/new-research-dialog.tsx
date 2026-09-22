@@ -47,7 +47,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import {
   useOrganizationCompetitors,
-  type OrganizationCompetitor,
+  type OrganizationCompetitorInput,
 } from "@/components/growth-intelligence/organization-competitors";
 import {
   ScheduleDateField,
@@ -244,7 +244,6 @@ export function NewResearchDialog({
   // silently to an empty list so the dialog keeps working before the
   // backend ships; the hook reports mutation failures via `syncError`.
   const orgCompetitors = useOrganizationCompetitors(organizationId, open);
-  const seededRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -253,25 +252,30 @@ export function NewResearchDialog({
     };
   }, []);
 
-  // Seed an untouched brief from the organisation's saved competitors once
-  // per open. Seeding writes the draft without marking it dirty, so opening
-  // and closing the dialog never triggers the discard prompt on its own.
-  useEffect(() => {
-    if (!open) {
-      seededRef.current = false;
-      return;
+  // Seed an untouched brief from the organisation's saved competitors, once
+  // per open once the list lands. This settles during render (never in an
+  // effect), like the draft seed below, so the scope step reads it
+  // immediately — and it never marks the draft dirty, so opening and closing
+  // the dialog alone never triggers the discard prompt.
+  const [competitorSeedKey, setCompetitorSeedKey] = useState<string | null>(null);
+  const competitorSeedState = open && orgCompetitors.isLoaded ? "loaded" : "";
+  const competitorSeedNext = open ? `${organizationId}:${competitorSeedState}` : null;
+  if (competitorSeedNext !== competitorSeedKey) {
+    setCompetitorSeedKey(competitorSeedNext);
+    if (competitorSeedNext !== null && competitorSeedState === "loaded") {
+      const seeded: NewResearchCompetitor[] = orgCompetitors.competitors.map((row) => ({
+        name: row.name,
+        ...(row.website ? { website: row.website } : {}),
+        ...(row.locationHint ? { locationHint: row.locationHint } : {}),
+        source: "operator_lead",
+      }));
+      if (seeded.length > 0) {
+        setDraft((current) =>
+          current.competitors.length === 0 ? { ...current, competitors: seeded } : current,
+        );
+      }
     }
-    if (seededRef.current || !orgCompetitors.isLoaded) return;
-    seededRef.current = true;
-    if (orgCompetitors.competitors.length === 0) return;
-    const seeded: NewResearchCompetitor[] = orgCompetitors.competitors.map((row) => ({
-      name: row.name,
-      ...(row.website ? { website: row.website } : {}),
-      ...(row.locationHint ? { locationHint: row.locationHint } : {}),
-      source: "operator_lead",
-    }));
-    setDraft((current) => (current.competitors.length === 0 ? { ...current, competitors: seeded } : current));
-  }, [open, orgCompetitors.isLoaded, orgCompetitors.competitors]);
+  }
 
   // Focus containment rides the Radix dialog trap. Restoration is ours:
   // the opener is captured while the dialog opens and refocused after the
@@ -382,12 +386,20 @@ export function NewResearchDialog({
     else if (step === 2 && scopeValid()) setStep(3);
   }
 
-  function toOrganizationRow(row: NewResearchCompetitor): OrganizationCompetitor {
+  function toOrganizationInput(row: NewResearchCompetitor): OrganizationCompetitorInput {
     return {
       name: row.name,
       website: row.website ?? "",
       locationHint: row.locationHint ?? "",
     };
+  }
+
+  function savedCompetitorId(name: string): string | null {
+    return (
+      orgCompetitors.competitors.find(
+        (row) => row.name.toLowerCase() === name.toLowerCase(),
+      )?.id ?? null
+    );
   }
 
   async function addCompetitor() {
@@ -425,20 +437,27 @@ export function NewResearchDialog({
     };
     if (editingIndex !== null) {
       const previousName = draft.competitors[editingIndex]?.name ?? null;
+      const wasSuggestion = draft.competitors[editingIndex]?.source === "suggestion";
       patch({
         competitors: draft.competitors.map((current, index) =>
-          index === editingIndex ? { ...row, source: current.source } : current,
+          index === editingIndex
+            ? { ...row, source: wasSuggestion ? "operator_lead" : current.source }
+            : current,
         ),
       });
       setEditingIndex(null);
       // Persist the edit to the organisation list; the brief-local row
       // stays regardless so the dialog works before the backend ships.
-      if (previousName) void orgCompetitors.update(previousName, toOrganizationRow(row));
+      // Saving a suggestion promotes it: the operator gave it a website and
+      // a location hint, so it is no longer an unverified starting point.
+      const savedId = previousName ? savedCompetitorId(previousName) : null;
+      if (savedId) void orgCompetitors.update(savedId, toOrganizationInput(row));
+      else void orgCompetitors.add(toOrganizationInput(row));
     } else {
       patch({ competitors: [...draft.competitors, row] });
       // Persist the addition to the organisation list; the brief-local row
       // stays regardless so the dialog works before the backend ships.
-      void orgCompetitors.add(toOrganizationRow(row));
+      void orgCompetitors.add(toOrganizationInput(row));
     }
     setCompetitorName("");
     setCompetitorWebsite("");
@@ -466,7 +485,10 @@ export function NewResearchDialog({
     patch({ competitors: draft.competitors.filter((_, current) => current !== index) });
     // Persist the removal to the organisation list when the row names a
     // saved competitor; suggestion rows were never saved, so skip those.
-    if (row && row.source === "operator_lead") void orgCompetitors.remove(row.name);
+    if (row && row.source === "operator_lead") {
+      const savedId = savedCompetitorId(row.name);
+      if (savedId) void orgCompetitors.remove(savedId);
+    }
     if (editingIndex === index) {
       setEditingIndex(null);
       setCompetitorName("");

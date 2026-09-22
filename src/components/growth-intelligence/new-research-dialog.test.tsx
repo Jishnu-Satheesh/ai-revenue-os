@@ -79,6 +79,12 @@ function startedResult(overrides: Partial<NewResearchStartResult> = {}): NewRese
 
 beforeEach(() => {
   vi.stubGlobal("crypto", { randomUUID: () => "00000000-0000-4000-8000-000000000000" });
+  // The dialog reads the organisation competitor list on open; default to an
+  // empty saved list so tests focus on brief behavior unless they stub more.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, status: 200, json: async () => [] })),
+  );
 });
 
 afterEach(() => {
@@ -532,6 +538,215 @@ describe("NewResearchDialog competitor row shape", () => {
   });
 });
 
+describe("NewResearchDialog organisation competitors", () => {
+  type SeenCall = { method: string; url: string; body?: unknown };
+
+  function stubCompetitorApi(list: unknown, seen: SeenCall[]) {
+    const fetchMock = vi.fn(async (input: unknown, init?: { method?: string; body?: string }) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      let body: unknown;
+      try {
+        body = init?.body ? (JSON.parse(init.body) as unknown) : undefined;
+      } catch {
+        body = undefined;
+      }
+      seen.push({ method, url, body });
+      // Echo mutations back in the API's single-row shape so the store can
+      // adopt the returned id, like the real 201/200 responses do.
+      const payload =
+        method === "GET"
+          ? list
+          : {
+              competitor: {
+                id: "80000000-0000-4000-8000-000000000008",
+                ...(typeof body === "object" && body !== null ? body : {}),
+              },
+            };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => payload,
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const SEEDED_ID = "81000000-0000-4000-8000-000000000081";
+
+  function seededRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: SEEDED_ID,
+      organizationId: ORGANIZATION,
+      name: "Rival Kitchen",
+      website: "https://rival.example/menu",
+      locationHint: "Deira",
+      createdAt: "2026-09-22T00:00:00.000Z",
+      updatedAt: "2026-09-22T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("seeds an empty brief from the organisation's saved competitors in served order", async () => {
+    const seen: SeenCall[] = [];
+    stubCompetitorApi(
+      {
+        competitors: [
+          seededRow(),
+          seededRow({
+            id: "82000000-0000-4000-8000-000000000082",
+            name: "Neighbour Table",
+            website: null,
+            locationHint: null,
+          }),
+        ],
+      },
+      seen,
+    );
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    expect(
+      await screen.findByText("Deira · https://rival.example/menu"),
+    ).toBeTruthy();
+    expect(screen.getByText("Location to be checked")).toBeTruthy();
+    expect(
+      seen.some(
+        (call) =>
+          call.method === "GET" && call.url.includes("/growth-intelligence/competitors"),
+      ),
+    ).toBe(true);
+  });
+
+  it("persists added competitors to the organisation list", async () => {
+    const seen: SeenCall[] = [];
+    stubCompetitorApi([], seen);
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    fireEvent.change(screen.getByLabelText(/competitor name/i), {
+      target: { value: "Rival Kitchen" },
+    });
+    fireEvent.change(screen.getByLabelText(/website/i), {
+      target: { value: "https://rival.example/menu" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
+
+    await waitFor(() =>
+      expect(
+        seen.some(
+          (call) =>
+            call.method === "POST" && call.url.includes("/growth-intelligence/competitors"),
+        ),
+      ).toBe(true),
+    );
+    const post = seen.find((call) => call.method === "POST");
+    // Empty optionals are omitted: the API rejects empty strings.
+    expect(post?.body).toEqual({
+      name: "Rival Kitchen",
+      website: "https://rival.example/menu",
+    });
+  });
+
+  it("persists removals to the organisation list by id", async () => {
+    const seen: SeenCall[] = [];
+    stubCompetitorApi({ competitors: [seededRow()] }, seen);
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+    await screen.findByRole("button", { name: /remove competitor rival kitchen/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /remove competitor rival kitchen/i }));
+
+    await waitFor(() =>
+      expect(
+        seen.some(
+          (call) =>
+            call.method === "DELETE" &&
+            call.url.includes(`/growth-intelligence/competitors/${SEEDED_ID}`),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("keeps the brief-local row when the organisation save fails closed", async () => {
+    // A duplicate normalized name fails closed server-side (400); the brief
+    // keeps its row and says so instead of dropping it.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown, init?: { method?: string }) =>
+        (init?.method ?? "GET") === "GET"
+          ? { ok: true, status: 200, json: async () => ({ competitors: [] }) }
+          : { ok: false, status: 400, json: async () => null },
+      ),
+    );
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    fireEvent.change(screen.getByLabelText(/competitor name/i), {
+      target: { value: "Rival Kitchen" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add a competitor/i }));
+
+    expect(await screen.findByText("Rival Kitchen")).toBeTruthy();
+    expect(await screen.findByText(/kept in this brief only/i)).toBeTruthy();
+  });
+
+  it("keeps suggestion adds brief-local without touching the organisation list", async () => {
+    const seen: SeenCall[] = [];
+    stubCompetitorApi([], seen);
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToScope();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /add suggested competitor rival kitchen/i }),
+    );
+    expect(screen.getByText("Suggestion")).toBeTruthy();
+    // Let any stray request land, then confirm only the initial GET ran.
+    await waitFor(() =>
+      expect(
+        seen.filter((call) => call.method === "GET").length,
+      ).toBeGreaterThan(0),
+    );
+    expect(seen.filter((call) => call.method !== "GET")).toHaveLength(0);
+  });
+});
+
+describe("NewResearchDialog schedule pickers", () => {
+  it("chooses the start time from the shadcn select and keeps the timezone caption", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToReview();
+    chooseMode(/monitoring/);
+
+    expect(screen.getByText(/Location timezone · Asia\/Dubai/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/research start time/i));
+    fireEvent.click(await screen.findByRole("option", { name: "14:30" }));
+
+    // The stored HH:MM flows into the reviewed brief untransformed.
+    expect(await screen.findByText(/14:30 Asia\/Dubai/)).toBeTruthy();
+  });
+
+  it("chooses the stop date from the calendar popover and keeps it optional", async () => {
+    render(<NewResearchDialog {...dialogProps()} />);
+    await goToReview();
+    chooseMode(/monitoring/);
+
+    const trigger = screen.getByLabelText(/stop monitoring on/i);
+    expect(trigger).toHaveTextContent("Pick a date");
+    fireEvent.click(trigger);
+
+    await waitFor(() =>
+      expect(document.querySelector("button[data-day]")).not.toBeNull(),
+    );
+    const dayButton = document.querySelector("button[data-day]") as HTMLButtonElement;
+    const iso = dayButton.getAttribute("data-day") ?? "";
+    expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    fireEvent.click(dayButton);
+
+    // The stored YYYY-MM-DD flows into the reviewed brief untransformed.
+    await waitFor(() => expect(screen.getByText(new RegExp(`until ${iso}`))).toBeTruthy());
+  });
+});
 describe("NewResearchDialog footer restyle", () => {
   it("always shows the privacy note and arrow icons", async () => {
     render(<NewResearchDialog {...dialogProps()} />);
