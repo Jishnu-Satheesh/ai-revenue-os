@@ -35,6 +35,8 @@ import {
   ReportIntakeMapping,
   type RecognisedFamily,
 } from "@/components/integrations/report-intake-mapping";
+import { ReportPackageDrawer } from "@/components/integrations/report-package-drawer";
+import { ReportReviewQueue } from "@/components/integrations/report-review-queue";
 import {
   isBareCategoricalValueNotDeclared,
   isDeclarableCategoricalValue,
@@ -53,11 +55,7 @@ import {
 import { currencyOptions } from "@/domain/reference/currencies";
 import { REPORT_PACKAGE_LIMITS, type ReportPackageStatus } from "@/domain/reports/types";
 import { hasReportPermission } from "@/domain/reports/permissions";
-import {
-  explainReportValidationCode,
-  parserLabel,
-  summarizeReportContract,
-} from "@/domain/reports/validation-copy";
+import { parserLabel, summarizeReportContract } from "@/domain/reports/validation-copy";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import type {
   ReportPackageSnapshot,
@@ -145,7 +143,7 @@ function formatReportDate(value: string | null): string | null {
   }).format(new Date(`${value}T00:00:00Z`));
 }
 
-function ReconciliationAction({
+export function ReconciliationAction({
   group,
   canResolve,
   pending,
@@ -270,7 +268,7 @@ function ReconciliationAction({
   );
 }
 
-function stateLabel(status: ReportPackageStatus): string {
+export function stateLabel(status: ReportPackageStatus): string {
   return {
     awaiting_upload: "Awaiting upload",
     uploaded: "Upload verified",
@@ -292,7 +290,7 @@ function stateLabel(status: ReportPackageStatus): string {
   }[status];
 }
 
-function stateVariant(
+export function stateVariant(
   status: ReportPackageStatus,
 ): "default" | "secondary" | "destructive" | "outline" {
   if (status === "failed" || status === "validation_failed" || status === "projection_failed")
@@ -399,7 +397,7 @@ function toSnapshotView(data: ReportPackageSnapshot | undefined): ReportPackageS
   };
 }
 
-function safeValidationCodes(value: unknown): string[] {
+export function safeValidationCodes(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((code): code is string => typeof code === "string").slice(0, 20)
     : [];
@@ -417,7 +415,9 @@ function formatContractFieldLabel(canonicalField: string, sourceHeader: string):
  * `required !== true` with non-empty `canonicalField` + `sourceHeader`.
  * Nothing here invents a name -- every label is contract text verbatim.
  */
-function optionalContractFieldLabelsBySheet(mappingDocument: unknown): Map<string, string[]> {
+export function optionalContractFieldLabelsBySheet(
+  mappingDocument: unknown,
+): Map<string, string[]> {
   const bySheet = new Map<string, string[]>();
   if (!mappingDocument || typeof mappingDocument !== "object" || Array.isArray(mappingDocument)) {
     return bySheet;
@@ -456,7 +456,7 @@ function optionalContractFieldLabelsBySheet(mappingDocument: unknown): Map<strin
  * run already points at. When the contract is unavailable there is nothing
  * honest to list, so the affected sheet name stands in instead.
  */
-function validationCodeContextDetail(options: {
+export function validationCodeContextDetail(options: {
   code: string;
   contractSummary: ReturnType<typeof summarizeReportContract>;
   optionalBySheet: Map<string, string[]>;
@@ -491,7 +491,8 @@ function validationCodeContextDetail(options: {
     const matching = contractSummary.sheets.filter((sheet) =>
       uniqueAffected.includes(sheet.normalizedSheetName),
     );
-    const effective = matching.length > 0 || uniqueAffected.length > 0 ? matching : contractSummary.sheets;
+    const effective =
+      matching.length > 0 || uniqueAffected.length > 0 ? matching : contractSummary.sheets;
     const parts: string[] = [];
     for (const sheet of effective) {
       const labels = sheet.requiredFields.map((field) =>
@@ -588,7 +589,7 @@ function ReportContractStep({
  * it before anything is read. An operator without approval permission sees
  * who must act instead of a button that would only be refused.
  */
-function CategoricalRefusalDeclaration({
+export function CategoricalRefusalDeclaration({
   organizationId,
   projectionVersionId,
   failureDetail,
@@ -749,6 +750,9 @@ export function ReportPackageUpload({
   const [proposalPackageId, setProposalPackageId] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [projectionContractVersionId, setProjectionContractVersionId] = useState("");
+  // Local drawer state only. Slice 3 mirrors this in `?package=` so a row can
+  // be deep-linked; until then the queue is the only way to open a package.
+  const [openPackageId, setOpenPackageId] = useState<string | null>(null);
   const canUpload = hasReportPermission(role, "report.upload");
   const canRetry = hasReportPermission(role, "report.retry");
   const canApproveContract = hasReportPermission(role, "report.contract_approve");
@@ -1447,254 +1451,36 @@ export function ReportPackageUpload({
           </p>
         )}
 
-        <div className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">
-            {fixedChannelId ? "1 · This channel's uploads" : "1 · Recent uploads"}
-          </h3>
-          {visiblePackages.length ? (
-            visiblePackages.map((reportPackage) => {
-              const latestValidation = view.validationRuns.find(
-                (run) => run.report_package_id === reportPackage.id,
-              );
-              const validationErrorCodes = safeValidationCodes(latestValidation?.error_codes);
-              const validationWarningCodes = safeValidationCodes(latestValidation?.warning_codes);
-              const validationSheetResults = latestValidation
-                ? view.validationSheetResults.filter(
-                    (result) => result.validation_run_id === latestValidation.id,
-                  )
-                : [];
-              const validationContractVersion = latestValidation
-                ? view.contractVersions.find(
-                    (version) => version.id === latestValidation.report_contract_version_id,
-                  )
-                : undefined;
-              const validationContractSummary = validationContractVersion
-                ? summarizeReportContract(validationContractVersion.mapping_document)
-                : null;
-              const validationOptionalBySheet = validationContractVersion
-                ? optionalContractFieldLabelsBySheet(validationContractVersion.mapping_document)
-                : new Map<string, string[]>();
-              const affectedSheetsForValidationCode = (code: string): string[] =>
-                validationSheetResults
-                  .filter(
-                    (result) =>
-                      safeValidationCodes(result.error_codes).includes(code) ||
-                      safeValidationCodes(result.warning_codes).includes(code),
-                  )
-                  .map((result) => result.normalized_sheet_name);
-              const detailForValidationCode = (code: string): string | null =>
-                validationCodeContextDetail({
-                  code,
-                  contractSummary: validationContractSummary,
-                  optionalBySheet: validationOptionalBySheet,
-                  affectedSheetNames: affectedSheetsForValidationCode(code),
-                });
-              const latestProjection = view.projectionRuns.find(
-                (run) => run.report_package_id === reportPackage.id,
-              );
-              const projectionFailed =
-                reportPackage.status === "projection_failed" ||
-                latestProjection?.status === "failed";
-              const canRequestProjection =
-                reportPackage.status === "validated" ||
-                reportPackage.status === "partially_validated" ||
-                projectionFailed;
-              const reconciliationGroups = view.reconciliationGroups.filter(
-                (group) => group.report_package_id === reportPackage.id,
-              );
-              const affectedRecordCount = reconciliationGroups.reduce(
-                (total, group) => total + group.affected_record_count,
-                0,
-              );
-              const readyRecordCount = Math.max(
-                0,
-                (latestProjection?.output_count ?? 0) - affectedRecordCount,
-              );
-              const absentRowCount = latestProjection?.absent_row_count ?? 0;
-              return (
-                <div key={reportPackage.id} className="rounded-lg border p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">
-                        {reportPackage.report_type} · {reportPackage.declared_period_start} to{" "}
-                        {reportPackage.declared_period_end}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {reportPackage.file_kind.toUpperCase()} · {reportPackage.declared_currency}{" "}
-                        · retained until{" "}
-                        {new Intl.DateTimeFormat(undefined, {
-                          dateStyle: "medium",
-                          timeZone,
-                        }).format(new Date(reportPackage.retained_until))}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={stateVariant(reportPackage.status)}>
-                        {stateLabel(reportPackage.status)}
-                      </Badge>
-                      {reportPackage.status === "failed" &&
-                      canRetry &&
-                      reportPackage.storage_object_id ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={retry.isPending}
-                          onClick={() => retry.mutate(reportPackage.id)}
-                        >
-                          <RotateCcw data-icon="inline-start" /> Retry
-                        </Button>
-                      ) : null}
-                      {(reportPackage.status === "validation_failed" ||
-                        reportPackage.status === "awaiting_validation") &&
-                      canRetry ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={retryValidation.isPending}
-                          onClick={() => retryValidation.mutate(reportPackage.id)}
-                        >
-                          <RotateCcw data-icon="inline-start" />{" "}
-                          {reportPackage.status === "awaiting_validation"
-                            ? "Start validation"
-                            : "Retry validation"}
-                        </Button>
-                      ) : null}
-                      {canRequestProjection && canRetry ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={requestProjection.isPending}
-                          onClick={() => requestProjection.mutate(reportPackage.id)}
-                        >
-                          {projectionFailed ? (
-                            <RotateCcw data-icon="inline-start" />
-                          ) : (
-                            <ShieldCheck data-icon="inline-start" />
-                          )}
-                          {projectionFailed ? "Retry projection" : "Project safely"}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                  {reconciliationGroups.map((group) => (
-                    <ReconciliationAction
-                      key={`${group.projection_run_id}:${group.projection_output_key}`}
-                      group={group}
-                      canResolve={canApproveContract}
-                      pending={resolveOverlapGroup.isPending}
-                      onResolve={(input) => resolveOverlapGroup.mutate(input)}
-                    />
-                  ))}
-                  {latestValidation ? (
-                    <div className="mt-2 space-y-2">
-                      <p className="text-xs text-muted-foreground">
-                        Validation {latestValidation.status.replaceAll("_", " ")} ·{" "}
-                        {validationErrorCodes.length} error code(s) ·{" "}
-                        {validationWarningCodes.length} warning code(s)
-                        {latestValidation.result_digest
-                          ? ` · evidence ${latestValidation.result_digest.slice(0, 12)}…`
-                          : ""}
-                      </p>
-                      {validationSheetResults.map((result) => (
-                        <div key={result.id} className="rounded-md border bg-muted/30 p-2 text-xs">
-                          <p className="font-medium">
-                            Sheet {result.normalized_sheet_name} · {result.outcome}
-                          </p>
-                          <p className="mt-1 text-muted-foreground">
-                            {result.row_count} sheet rows · {result.parsed_field_success_count}{" "}
-                            mapped values parsed · {result.parsed_field_failure_count} failed
-                          </p>
-                        </div>
-                      ))}
-                      {validationErrorCodes.length > 0 ? (
-                        <Alert variant="destructive">
-                          <AlertTitle>Why validation stopped</AlertTitle>
-                          <AlertDescription className="space-y-2">
-                            {validationErrorCodes.map((code) => {
-                              const explanation = explainReportValidationCode(code);
-                              const context = detailForValidationCode(code);
-                              return (
-                                <p key={code} className="text-xs">
-                                  <span className="font-medium">
-                                    {explanation.title} <span className="font-mono">({code})</span>
-                                  </span>
-                                  {context ? <> — {context}</> : null} — {explanation.nextStep}
-                                </p>
-                              );
-                            })}
-                          </AlertDescription>
-                        </Alert>
-                      ) : null}
-                      {validationWarningCodes.length > 0 ? (
-                        <Alert className="border-warning/40 bg-warning/5">
-                          <TriangleAlert aria-hidden="true" className="text-warning" />
-                          <AlertTitle>Validation warnings</AlertTitle>
-                          <AlertDescription className="space-y-2">
-                            {validationWarningCodes.map((code) => {
-                              const explanation = explainReportValidationCode(code);
-                              const context = detailForValidationCode(code);
-                              return (
-                                <p key={code} className="text-xs">
-                                  <span className="font-medium">
-                                    {explanation.title} <span className="font-mono">({code})</span>
-                                  </span>
-                                  {context ? <> — {context}</> : null} — {explanation.nextStep}
-                                </p>
-                              );
-                            })}
-                          </AlertDescription>
-                        </Alert>
-                      ) : null}
-                    </div>
-                  ) : reportPackage.status === "awaiting_validation" ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      The exact contract is approved. Start validation to run the deterministic
-                      checks.
-                    </p>
-                  ) : null}
-                  {latestProjection && typeof latestProjection.output_count === "number" ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {latestProjection.output_count} records checked
-                      {affectedRecordCount > 0
-                        ? ` · ${readyRecordCount} ready for Analysis · ${affectedRecordCount} need review`
-                        : ""}
-                      {absentRowCount > 0
-                        ? ` · ${absentRowCount} source rows had no reported value and stayed missing`
-                        : ""}
-                    </p>
-                  ) : reportPackage.status === "awaiting_projection" ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      An approved declaration was selected. Deterministic projection starts when
-                      this rollout is enabled.
-                    </p>
-                  ) : null}
-                  {/*
-                    What the failure knew about itself. A code alone names a
-                    category -- "processing failed" -- and leaves an operator
-                    with nothing to act on and nothing to report. The detail is
-                    the error's own words, recorded by the run that failed.
-                  */}
-                  {latestProjection?.status === "failed" && latestProjection.failure_detail ? (
-                    <>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Why it stopped: </span>
-                        {latestProjection.failure_detail}
-                      </p>
-                      <CategoricalRefusalDeclaration
-                        organizationId={organizationId}
-                        projectionVersionId={latestProjection.report_projection_version_id}
-                        failureDetail={latestProjection.failure_detail}
-                        canDeclare={canApproveContract}
-                      />
-                    </>
-                  ) : null}
-                </div>
-              );
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground">No governed report packages yet.</p>
-          )}
-        </div>
+        <ReportReviewQueue
+          packages={visiblePackages}
+          view={view}
+          fixedChannelId={fixedChannelId}
+          canRetry={canRetry}
+          onRetry={(packageId) => retry.mutate(packageId)}
+          retryPending={retry.isPending}
+          onRetryValidation={(packageId) => retryValidation.mutate(packageId)}
+          retryValidationPending={retryValidation.isPending}
+          onRequestProjection={(packageId) => requestProjection.mutate(packageId)}
+          requestProjectionPending={requestProjection.isPending}
+          onOpen={(packageId) => setOpenPackageId(packageId)}
+        />
+        <ReportPackageDrawer
+          packageId={openPackageId}
+          organizationId={organizationId}
+          timeZone={timeZone}
+          view={view}
+          canRetry={canRetry}
+          canApproveContract={canApproveContract}
+          onRetry={(packageId) => retry.mutate(packageId)}
+          retryPending={retry.isPending}
+          onRetryValidation={(packageId) => retryValidation.mutate(packageId)}
+          retryValidationPending={retryValidation.isPending}
+          onRequestProjection={(packageId) => requestProjection.mutate(packageId)}
+          requestProjectionPending={requestProjection.isPending}
+          onResolveOverlap={(input) => resolveOverlapGroup.mutate(input)}
+          resolveOverlapPending={resolveOverlapGroup.isPending}
+          onClose={() => setOpenPackageId(null)}
+        />
 
         <div className="space-y-3 border-t pt-4">
           <div>

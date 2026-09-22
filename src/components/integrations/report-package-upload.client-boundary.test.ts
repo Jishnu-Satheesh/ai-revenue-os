@@ -3,10 +3,15 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const componentSource = readFileSync(
-  resolve(process.cwd(), "src/components/integrations/report-package-upload.tsx"),
-  "utf8",
-);
+// Slice 1 moved the §1 package detail into the drawer file, so the source
+// strings below live across both files. The expectations are unchanged; only
+// the scanned set widened.
+const componentSource = [
+  "src/components/integrations/report-package-upload.tsx",
+  "src/components/integrations/report-package-drawer.tsx",
+]
+  .map((file) => readFileSync(resolve(process.cwd(), file), "utf8"))
+  .join("\n");
 
 describe("ReportPackageUpload client boundary", () => {
   it("does not import the Node-hashed reconciliation module into the browser bundle", () => {

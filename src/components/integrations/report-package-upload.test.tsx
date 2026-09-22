@@ -129,6 +129,13 @@ function renderUpload() {
   );
 }
 
+// Slice 1 moved the per-package detail behind a queue row click. The shared
+// fixture package is always the Performance upload, so one helper opens it.
+async function openDetailsDrawer() {
+  fireEvent.click(await screen.findByRole("button", { name: /Open details for Performance/i }));
+  await screen.findByRole("dialog");
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("crypto", { ...globalThis.crypto, randomUUID: () => "fixed-operation-key" });
@@ -157,6 +164,7 @@ afterEach(() => {
 describe("ReportPackageUpload reconciliation actions", () => {
   it("shows one meaningful action before the compact projection summary and hides audit noise", async () => {
     renderUpload();
+    await openDetailsDrawer();
 
     const action = await screen.findByRole("region", { name: "Gross revenue overlap" });
     expect(within(action).getByText(/20 daily Gross revenue records/i)).toBeInTheDocument();
@@ -179,6 +187,7 @@ describe("ReportPackageUpload reconciliation actions", () => {
 
   it("sends one grouped decision through the atomic resolution route", async () => {
     renderUpload();
+    await openDetailsDrawer();
     const action = await screen.findByRole("region", { name: "Gross revenue overlap" });
     fireEvent.click(within(action).getByRole("button", { name: /use this upload's revenue/i }));
 
@@ -213,6 +222,7 @@ describe("ReportPackageUpload reconciliation actions", () => {
     );
 
     renderUpload();
+    await openDetailsDrawer();
     const action = await screen.findByRole("region", { name: "Gross revenue overlap" });
     fireEvent.click(within(action).getByRole("button", { name: /keep existing revenue/i }));
 
@@ -295,6 +305,7 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot(FAILURE_DETAIL));
     renderUploadAs("owner");
 
+    await openDetailsDrawer();
     const button = await screen.findByRole("button", {
       name: /Declare "CLOSED" as a value we count/i,
     });
@@ -306,6 +317,7 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot(FAILURE_DETAIL));
     renderUploadAs("owner");
 
+    await openDetailsDrawer();
     fireEvent.click(
       await screen.findByRole("button", { name: /Declare "CLOSED" as a value we count/i }),
     );
@@ -332,6 +344,7 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot(FAILURE_DETAIL));
     renderUploadAs("operator");
 
+    await openDetailsDrawer();
     await screen.findByText(/An owner or admin declares it once/i);
     expect(
       screen.queryByRole("button", { name: /Declare "CLOSED" as a value we count/i }),
@@ -342,6 +355,7 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot("ReportProjectionFailure: INVALID_LOCAL_DATE"));
     renderUploadAs("owner");
 
+    await openDetailsDrawer();
     await screen.findByText(/Why it stopped:/i);
     expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
   });
@@ -357,6 +371,7 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot(proseDetail));
     renderUploadAs("owner");
 
+    await openDetailsDrawer();
     await screen.findByText(/written as the provider.s own prose/i);
     expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
   });
@@ -367,6 +382,7 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot(truncatedDetail));
     renderUploadAs("owner");
 
+    await openDetailsDrawer();
     await screen.findByText(/cut off before it reached the platform/i);
     expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
   });
@@ -377,6 +393,7 @@ describe("ReportPackageUpload categorical refusal declaration", () => {
     stubSnapshot(failedSnapshot("ReportProjectionError: CATEGORICAL_VALUE_NOT_DECLARED"));
     renderUploadAs("owner");
 
+    await openDetailsDrawer();
     await screen.findByText(/This refusal predates the detail the platform now records/i);
     expect(screen.queryByRole("button", { name: /Declare "/i })).not.toBeInTheDocument();
   });
@@ -676,9 +693,7 @@ describe("ReportPackageUpload report type derivation", () => {
     );
     // The green link stays where it was, under the report type, and the note
     // carries no link text of its own.
-    expect(
-      screen.getByRole("button", { name: /different report/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /different report/i })).toBeInTheDocument();
     expect(note.textContent).not.toMatch(/different report/i);
   });
 
@@ -966,6 +981,7 @@ describe("ReportPackageUpload validation warnings", () => {
 
     // Optional field identity comes from the already-loaded approved
     // contract only -- never invented.
+    await openDetailsDrawer();
     const fieldNode = await screen.findByText(/note \(note\)/);
     expect(fieldNode).toBeInTheDocument();
 
@@ -993,6 +1009,7 @@ describe("ReportPackageUpload validation warnings", () => {
     stubValidationSnapshot(validationSnapshot(false));
     renderUpload();
 
+    await openDetailsDrawer();
     await screen.findByText("Validation warnings");
     expect(screen.getAllByText(/Sheet performance/).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/note \(note\)/)).not.toBeInTheDocument();
@@ -1064,7 +1081,7 @@ describe("ReportPackageUpload governed form", () => {
 
     await screen.findByRole("button", { name: /upload report/i });
     const enabledDays = () =>
-      Array.from(document.querySelectorAll('button[data-day]:not([disabled])'));
+      Array.from(document.querySelectorAll("button[data-day]:not([disabled])"));
 
     const startButton = screen.getByRole("button", { name: /pick start date/i });
     fireEvent.click(startButton);
@@ -1102,7 +1119,7 @@ describe("ReportPackageUpload governed form", () => {
 
     await screen.findByRole("button", { name: /upload report/i });
     const enabledDays = () =>
-      Array.from(document.querySelectorAll('button[data-day]:not([disabled])'));
+      Array.from(document.querySelectorAll("button[data-day]:not([disabled])"));
 
     const startButton = screen.getByRole("button", { name: /pick start date/i });
     fireEvent.click(startButton);
