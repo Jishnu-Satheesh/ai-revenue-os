@@ -142,3 +142,12 @@ If the other track has it claimed, post intent here and wait for their ack line.
   untouched). OWED: user deploys worker from THIS worktree, then retries
   update c7d1d052 (National Day, terminal research_failed retryable=true);
   expect findings + saved report instead of instant refusal.
+- 2026-09-22 Track D VERIFIED GREEN on prod v20260922.3 (browser loop,
+  localhost:3000 against staging, admin-minted login, no new users): National
+  Day retry run_06gchsnhl (2.7m, $0.0054) -> partial + report c7423ad2 with 2
+  cited findings, featured card + IN THIS REPORT render, gaps honest; trace
+  shows 2x monitoring_agent_slot_ok (lane's first live real-SDK exercise).
+  Summer e63354c6 retry run_06gci94ju (39.7s, $0.0013) -> partial + report
+  c8916d8c; Sep-21 in-executor mode did NOT recur. UI: Ready to review 2.
+  Remaining Needs attention 2 are the Sep-15 ADAPTER_UNAVAILABLE-era rows
+  (pre-qualification, out of scope). No code changes in this loop.
