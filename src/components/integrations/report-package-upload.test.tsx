@@ -433,6 +433,15 @@ describe("ReportPackageUpload fixed channel", () => {
     expect(screen.queryByRole("combobox", { name: /business channel/i })).not.toBeInTheDocument();
   });
 
+  it("renders the read-only channel name at the standard control height", async () => {
+    stubSnapshot(fixedSnapshot());
+    renderFixed();
+
+    const box = await screen.findByText("Talabat");
+    expect(box.className).toMatch(/h-8/);
+    expect(box.className).toMatch(/w-full/);
+  });
+
   it("lists only this channel's uploads", async () => {
     stubSnapshot(fixedSnapshot());
     renderFixed();
@@ -629,6 +638,64 @@ describe("ReportPackageUpload report type derivation", () => {
 
     expect(await screen.findByText("Marketplace performance")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /^report type$/i })).not.toBeInTheDocument();
+  });
+
+  it("renders the known report type at the standard control height", async () => {
+    stubFetch(recognisedSnapshot());
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+
+    await screen.findByText("Marketplace performance");
+    const box = document.getElementById("report-type");
+    expect(box?.className).toMatch(/h-8/);
+    expect(box?.className).toMatch(/w-full/);
+  });
+
+  it("moves the known-report note below the fields in italic and keeps the green link under report type", async () => {
+    stubFetch(recognisedSnapshot());
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+
+    await screen.findByText("Marketplace performance");
+    const note = screen.getByText(/already reads a known report/);
+    expect(note.tagName).toBe("P");
+    expect(note.className).toMatch(/italic/);
+    expect(note.className).toMatch(/lg:col-span-6/);
+    expect(note.textContent?.startsWith("*")).toBe(true);
+    // A direct child of the form grid, i.e. its own full-width row below the
+    // fields rather than a paragraph inside the report-type cell.
+    expect(note.parentElement?.tagName).toBe("FORM");
+    const group = document.getElementById("report-period-start")?.closest('[role="group"]');
+    expect(group).not.toBeNull();
+    expect(note.compareDocumentPosition(group as Node) & Node.DOCUMENT_POSITION_PRECEDING).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING,
+    );
+    // The green link stays where it was, under the report type, and the note
+    // carries no link text of its own.
+    expect(
+      screen.getByRole("button", { name: /different report/i }),
+    ).toBeInTheDocument();
+    expect(note.textContent).not.toMatch(/different report/i);
+  });
+
+  it("hides the asterisk note while overriding and brings it back with the known type", async () => {
+    stubFetch(recognisedSnapshot());
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /business channel/i }));
+    fireEvent.click(await screen.findByRole("option", { name: "Talabat" }));
+    expect(await screen.findByText(/already reads a known report/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /different report/i }));
+    expect(screen.queryByText(/already reads a known report/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /known report/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /known report/i }));
+    expect(await screen.findByText(/already reads a known report/)).toBeInTheDocument();
   });
 });
 
@@ -961,21 +1028,111 @@ describe("ReportPackageUpload governed form", () => {
     expect(document.getElementById("report-file")?.getAttribute("type")).toBe("file");
   });
 
-  it("groups the period as one label over two date inputs", async () => {
+  it("groups start and end date pickers under one renamed label", async () => {
     renderForm();
 
     await screen.findByRole("button", { name: /upload report/i });
-    expect(screen.queryByText("Period start")).not.toBeInTheDocument();
-    expect(screen.queryByText("Period end")).not.toBeInTheDocument();
-    expect(screen.getByText("Period")).toBeInTheDocument();
-    const start = document.getElementById("report-period-start");
-    const end = document.getElementById("report-period-end");
-    expect(start?.getAttribute("type")).toBe("date");
-    expect(end?.getAttribute("type")).toBe("date");
-    const group = start?.closest('[role="group"]');
+    expect(screen.getByText("Start & end date")).toBeInTheDocument();
+    expect(screen.queryByText(/^Period$/)).not.toBeInTheDocument();
+    const start = screen.getByRole("button", { name: /pick start date/i });
+    const end = screen.getByRole("button", { name: /pick end date/i });
+    expect(start.getAttribute("id")).toBe("report-period-start");
+    expect(end.getAttribute("id")).toBe("report-period-end");
+    const group = start.closest('[role="group"]');
     expect(group).not.toBeNull();
     expect(group?.getAttribute("aria-labelledby")).toBe("report-period-label");
-    expect(end?.closest('[role="group"]')).toBe(group);
+    expect(end.closest('[role="group"]')).toBe(group);
+  });
+
+  it("renders every field control at the same height and full column width", async () => {
+    renderForm();
+
+    await screen.findByRole("button", { name: /upload report/i });
+    const branch = screen.getByRole("combobox", { name: /branch \/ outlet/i });
+    expect(branch.className).toMatch(/w-full/);
+    const currency = screen.getByRole("combobox", { name: /declared currency/i });
+    expect(currency.className).toMatch(/w-full/);
+    for (const name of [/pick start date/i, /pick end date/i]) {
+      const picker = screen.getByRole("button", { name });
+      expect(picker.className).toMatch(/h-8/);
+      expect(picker.className).toMatch(/w-full/);
+    }
+  });
+
+  it("picks both dates from the calendar popups and keeps the end on or after the start", async () => {
+    renderForm();
+
+    await screen.findByRole("button", { name: /upload report/i });
+    const enabledDays = () =>
+      Array.from(document.querySelectorAll('button[data-day]:not([disabled])'));
+
+    const startButton = screen.getByRole("button", { name: /pick start date/i });
+    fireEvent.click(startButton);
+    const startChoices = enabledDays();
+    expect(startChoices.length).toBeGreaterThan(1);
+    const startDay = (startChoices[0] as HTMLElement).dataset.day as string;
+    fireEvent.click(startChoices[0]);
+    // The open popup must close before the end popup opens, or day queries
+    // would hit two calendars at once. The trigger node stays the same
+    // element across the text update, so the held reference still works.
+    fireEvent.click(startButton);
+    expect(document.querySelector("button[data-day]")).toBeNull();
+    expect(startButton.textContent).not.toMatch(/pick start date/i);
+    expect(startButton.textContent).toMatch(/\d{4}/);
+
+    const endButton = screen.getByRole("button", { name: /pick end date/i });
+    fireEvent.click(endButton);
+    const sameDay = document.querySelector(`button[data-day="${startDay}"]`);
+    expect(sameDay).not.toBeNull();
+    expect(sameDay?.hasAttribute("disabled")).toBe(false);
+    for (const day of Array.from(document.querySelectorAll("button[data-day]"))) {
+      if (((day as HTMLElement).dataset.day as string) < startDay) {
+        expect(day.hasAttribute("disabled")).toBe(true);
+      }
+    }
+    const endChoices = enabledDays();
+    fireEvent.click(endChoices[endChoices.length - 1]);
+    fireEvent.click(endButton);
+    expect(document.querySelector("button[data-day]")).toBeNull();
+    expect(endButton.textContent).not.toMatch(/pick end date/i);
+  });
+
+  it("clears the end date when the start moves past it, so an inverted range cannot be sent", async () => {
+    renderForm();
+
+    await screen.findByRole("button", { name: /upload report/i });
+    const enabledDays = () =>
+      Array.from(document.querySelectorAll('button[data-day]:not([disabled])'));
+
+    const startButton = screen.getByRole("button", { name: /pick start date/i });
+    fireEvent.click(startButton);
+    const firstRound = enabledDays();
+    const earlyDay = (firstRound[2] as HTMLElement).dataset.day as string;
+    fireEvent.click(firstRound[2]);
+    fireEvent.click(startButton);
+
+    const endButton = screen.getByRole("button", { name: /pick end date/i });
+    fireEvent.click(endButton);
+    const endRound = enabledDays();
+    const laterChoice = endRound.find(
+      (day) => ((day as HTMLElement).dataset.day as string) > earlyDay,
+    );
+    expect(laterChoice).toBeDefined();
+    const laterDay = (laterChoice as HTMLElement).dataset.day as string;
+    fireEvent.click(laterChoice!);
+    fireEvent.click(endButton);
+    expect(endButton.textContent).not.toMatch(/pick end date/i);
+
+    fireEvent.click(startButton);
+    const lastRound = enabledDays();
+    // laterDay sits near the top of the visible month by construction, so a
+    // day past the current end always exists with no month navigation.
+    const beyondEnd = lastRound.find(
+      (day) => ((day as HTMLElement).dataset.day as string) > laterDay,
+    );
+    expect(beyondEnd).toBeDefined();
+    fireEvent.click(beyondEnd!);
+    expect(await screen.findByRole("button", { name: /pick end date/i })).toBeInTheDocument();
   });
 
   it("defaults the currency select to the passed defaultCurrency", async () => {

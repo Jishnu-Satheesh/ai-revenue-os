@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import {
   Banknote,
   Calculator,
+  Calendar as CalendarIcon,
   ChevronDown,
   FileSpreadsheet,
   Lock,
@@ -17,14 +18,17 @@ import {
   UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { format, parseISO } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { ReportAdmissionApproval } from "@/components/integrations/report-admission-approval";
 import {
@@ -1212,13 +1216,13 @@ export function ReportPackageUpload({
             <div className="space-y-2">
               <Label htmlFor="report-channel">Business channel</Label>
               {fixedChannelId ? (
-                <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium">
+                <p className="flex h-8 w-full items-center rounded-md border bg-muted/30 px-3 text-sm font-medium">
                   {view.channels.find((channel) => channel.id === fixedChannelId)?.display_name ??
                     "This channel"}
                 </p>
               ) : (
                 <Select value={channelId} onValueChange={setChannelId}>
-                  <SelectTrigger id="report-channel">
+                  <SelectTrigger id="report-channel" className="w-full">
                     <SelectValue placeholder="Select channel" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1234,7 +1238,7 @@ export function ReportPackageUpload({
             <div className="space-y-2">
               <Label htmlFor="report-branch">Branch / outlet</Label>
               <Select value={branchId} onValueChange={setBranchId}>
-                <SelectTrigger id="report-branch">
+                <SelectTrigger id="report-branch" className="w-full">
                   <SelectValue placeholder="Select branch" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1252,13 +1256,9 @@ export function ReportPackageUpload({
                 <>
                   <p
                     id="report-type"
-                    className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium"
+                    className="flex h-8 w-full items-center rounded-md border bg-muted/30 px-3 text-sm font-medium"
                   >
                     {recognisedReportTypeForChannel}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    This channel already reads a known report. Every upload of it is filed under the
-                    same type automatically.
                   </p>
                   {/*
                     One provider can send a channel several different exports,
@@ -1302,7 +1302,7 @@ export function ReportPackageUpload({
             <div className="space-y-2">
               <Label htmlFor="report-currency">Declared currency</Label>
               <Select value={currency} onValueChange={setCurrency}>
-                <SelectTrigger id="report-currency">
+                <SelectTrigger id="report-currency" className="w-full">
                   <SelectValue placeholder="Select currency" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1315,30 +1315,72 @@ export function ReportPackageUpload({
               </Select>
             </div>
             <div className="space-y-2 lg:col-span-2">
-              <Label id="report-period-label">Period</Label>
+              <Label id="report-period-label">Start &amp; end date</Label>
               <div
                 className="grid grid-cols-2 gap-2"
                 role="group"
                 aria-labelledby="report-period-label"
               >
-                <Input
-                  id="report-period-start"
-                  type="date"
-                  aria-label="Period start"
-                  value={periodStart}
-                  onChange={(event) => setPeriodStart(event.target.value)}
-                  required
-                />
-                <Input
-                  id="report-period-end"
-                  type="date"
-                  aria-label="Period end"
-                  value={periodEnd}
-                  onChange={(event) => setPeriodEnd(event.target.value)}
-                  required
-                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="report-period-start"
+                      variant="outline"
+                      data-empty={!periodStart}
+                      className="h-8 w-full justify-start px-2.5 text-left font-normal data-[empty=true]:text-muted-foreground"
+                    >
+                      <CalendarIcon data-icon="inline-start" />
+                      {periodStart ? (
+                        format(parseISO(periodStart), "PPP")
+                      ) : (
+                        <span>Pick start date</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={periodStart ? parseISO(periodStart) : undefined}
+                      onSelect={(day) => {
+                        if (!day) return;
+                        const next = format(day, "yyyy-MM-dd");
+                        setPeriodStart(next);
+                        if (periodEnd && periodEnd < next) setPeriodEnd("");
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="report-period-end"
+                      variant="outline"
+                      data-empty={!periodEnd}
+                      className="h-8 w-full justify-start px-2.5 text-left font-normal data-[empty=true]:text-muted-foreground"
+                    >
+                      <CalendarIcon data-icon="inline-start" />
+                      {periodEnd ? format(parseISO(periodEnd), "PPP") : <span>Pick end date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={periodEnd ? parseISO(periodEnd) : undefined}
+                      disabled={periodStart ? { before: parseISO(periodStart) } : undefined}
+                      onSelect={(day) => {
+                        if (day) setPeriodEnd(format(day, "yyyy-MM-dd"));
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
+            {recognisedReportTypeForChannel !== null && !overridingReportType ? (
+              <p className="text-xs text-muted-foreground italic lg:col-span-6">
+                * This channel already reads a known report. Every upload of it is filed under the
+                same type automatically.
+              </p>
+            ) : null}
             <div
               className="lg:col-span-6"
               onDragOver={(event) => event.preventDefault()}
@@ -1389,7 +1431,9 @@ export function ReportPackageUpload({
                   snapshot.isLoading ||
                   !effectiveChannelId ||
                   !branchId ||
-                  !currency
+                  !currency ||
+                  !periodStart ||
+                  !periodEnd
                 }
               >
                 <UploadCloud data-icon="inline-start" />{" "}

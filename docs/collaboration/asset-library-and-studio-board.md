@@ -7774,3 +7774,16 @@ dev org's live configuration.
   `.superpowers/sdd/2026-09-22-governed-reports-fixes/` (uncommitted, gitignored).
 - `git push` is the user's step; three path-limited commits ready on main.
 - Cherry-picked onto staging as 5c50b36, a27d4df, 798ba9e; this log entry kept verbatim.
+
+### 2026-09-22 · muse-spark · Governed upload form polish (uniform fields, note move, shadcn date pickers)
+
+- Claimed: `src/components/integrations/report-package-upload.tsx` + its test.
+  Reusing the already-committed `src/components/ui/calendar.tsx`
+  (react-day-picker, other party's analysis work) — no new component, no new
+  dependency. Reverted a stray `cn@0.3.2` package.json/lockfile addition left by
+  an interrupted `shadcn add calendar` run before it could do anything else.
+- Planned: uniform `h-8 w-full` on all five fields (SelectTrigger `w-fit` and
+  padding-sized `<p>` stand-ins caused the uneven screenshot); known-report info
+  sentence moves to a full-width italic `*` row below the fields, green
+  "different report" link stays; "Period" becomes "Start & end date" with two
+  Popover+Calendar single-date pickers keeping the same `YYYY-MM-DD` payload.
