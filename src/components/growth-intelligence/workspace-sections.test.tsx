@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-import { DataGaps } from "@/components/growth-intelligence/data-gaps";
 import { InsightsList } from "@/components/growth-intelligence/insights-list";
 import { PriorityActions } from "@/components/growth-intelligence/priority-actions";
 import type {
@@ -136,20 +135,33 @@ describe("workspace sections", () => {
     render(<PriorityActions opportunities={[]} recommendations={[]} {...shared} />);
     expect(screen.getByText(/No open platform opportunities/)).toBeTruthy();
     expect(screen.getByText(/No operator recommendations/)).toBeTruthy();
-    render(<InsightsList insights={[]} {...shared} />);
+    render(<InsightsList insights={[]} dataGaps={[]} organizationId={ORGANIZATION} timeZone="Asia/Dubai" />);
     expect(screen.getByText(/No insights for this month/)).toBeTruthy();
-    render(<DataGaps dataGaps={[]} {...shared} />);
     expect(screen.getByText(/No missing evidence/)).toBeTruthy();
   });
 
-  it("lists insights and data gaps with their repair paths", () => {
-    render(<InsightsList insights={[insightCard()]} {...shared} />);
+  it("lists insight rows with evidence links and gaps in the improve rail", () => {
+    render(
+      <InsightsList
+        insights={[insightCard()]}
+        dataGaps={[gapCard()]}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+      />,
+    );
     expect(screen.getByText(/Rainy Thursdays/)).toBeTruthy();
-    cleanup();
-    render(<DataGaps dataGaps={[gapCard()]} {...shared} />);
-    expect(screen.getByRole("link", { name: "Repair in channels" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /inspect evidence/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/channels`,
+    );
+    expect(screen.getByText("Improve the next report")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /august delivery costs/i })).toHaveAttribute(
       "href",
       `/organizations/${ORGANIZATION}/channels/${CHANNEL}`,
+    );
+    expect(screen.getByRole("link", { name: /review missing context/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/channels`,
     );
   });
 });

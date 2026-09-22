@@ -365,7 +365,7 @@ describe("GrowthIntelligenceWorkspace market research entry", () => {
     fireEvent.click(screen.getByRole("tab", { name: /insights/i }));
     expect(screen.getByText(/what your evidence says, what is missing/i)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Business insights" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Data gaps" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Improve the next report" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Market Watch projects" })).toBeTruthy();
   });
 

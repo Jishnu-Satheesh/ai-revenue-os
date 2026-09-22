@@ -9,7 +9,6 @@ import { WindowRangePicker } from "@/components/analysis/window-range-picker";
 import { CampaignProposalSection } from "@/components/campaigns/campaign-proposal-card";
 import { RequestCampaignResearch } from "@/components/campaigns/request-campaign-research";
 import { BusinessPerformanceCard } from "@/components/growth-intelligence/business-performance-card";
-import { DataGaps } from "@/components/growth-intelligence/data-gaps";
 import { InsightsList } from "@/components/growth-intelligence/insights-list";
 import { MarketWatchLivePreview } from "@/components/growth-intelligence/market-watch-live-preview";
 import { MarketWatchProjectsSection } from "@/components/growth-intelligence/market-watch-projects";
@@ -569,20 +568,14 @@ export function GrowthIntelligenceWorkspace({
                 };
               })}
           />
-          <div className="flex min-w-0 flex-col gap-8">
-            <InsightsList
-              insights={view.insights}
-              organizationId={organizationId}
-              timeZone={view.timeZone}
-              canManage={canManage}
-            />
-            <DataGaps
-              dataGaps={view.dataGaps}
-              organizationId={organizationId}
-              timeZone={view.timeZone}
-              canManage={canManage}
-            />
-          </div>
+          <InsightsList
+            insights={view.insights}
+            dataGaps={view.dataGaps}
+            organizationId={organizationId}
+            timeZone={view.timeZone}
+            channelNames={channelNames}
+            branchNames={branchNames}
+          />
         </TabsContent>
       </Tabs>
     </div>
