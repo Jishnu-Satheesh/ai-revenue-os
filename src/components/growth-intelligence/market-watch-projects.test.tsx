@@ -156,13 +156,15 @@ afterEach(() => {
 });
 
 describe("MarketWatchProjectsView", () => {
-  it("features the ready report with question, location, date, mode and takeaway", () => {
+  it("features the ready report as a prototype-style card without the takeaway excerpt", () => {
     render(<MarketWatchProjectsView {...viewProps()} />);
 
     expect(screen.getByText("Prepare for National Day")).toBeTruthy();
     expect(screen.getByText(/Downtown · One-time research/)).toBeTruthy();
     expect(screen.getByText(`Report · ${reportDate("2026-09-12T10:00:00Z")}`)).toBeTruthy();
-    expect(screen.getByText(/Compare family offers and check delivery capacity/)).toBeTruthy();
+    expect(screen.getByText("How should we prepare for National Day?")).toBeTruthy();
+    // Prototype card shows the question only; the takeaway lives in the report.
+    expect(screen.queryByText(/Compare family offers and check delivery capacity/)).toBeNull();
     expect(screen.getByText(/Based on brief 1/)).toBeTruthy();
     expect(screen.getByText(/Advice awaits your review/)).toBeTruthy();
   });
@@ -520,7 +522,11 @@ describe("MarketWatchProjectsSection", () => {
         expect(screen.queryByRole("dialog")).toBeNull();
       });
       // The featured card keeps showing the question after the dialog closes.
-      expect(screen.getByText("How should we prepare for National Day?")).toBeTruthy();
+    expect(screen.getByText("How should we prepare for National Day?")).toBeTruthy();
+    // Status renders as a pill badge, not plain caps text.
+    const badge = screen.getByText("Ready to review", { exact: true });
+    expect(badge.tagName).toBe("SPAN");
+    expect(badge.className).toMatch(/rounded-full/);
     } finally {
       vi.unstubAllGlobals();
     }

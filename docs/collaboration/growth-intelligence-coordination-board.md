@@ -151,3 +151,4 @@ If the other track has it claimed, post intent here and wait for their ack line.
   c8916d8c; Sep-21 in-executor mode did NOT recur. UI: Ready to review 2.
   Remaining Needs attention 2 are the Sep-15 ADAPTER_UNAVAILABLE-era rows
   (pre-qualification, out of scope). No code changes in this loop.
+- 2026-09-22 Ready-review card prototype parity (Tier 1/2 UI fix, this session): touching ONLY `src/components/growth-intelligence/market-watch-projects.tsx` (+ its `.test.tsx`). Featured card -> prototype Screenshot 1: pill badge + date-left, pin + branch line, dark question, no takeaway excerpt, arrow button, right-aligned brief note, Agent toggle moved below the card (kept functional for managers; no staff-only surface exists yet). No API/RDBMS/trigger changes.

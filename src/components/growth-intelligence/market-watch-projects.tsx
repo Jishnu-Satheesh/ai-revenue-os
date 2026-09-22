@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUpRight,
+  Check,
   ListChecks,
   MapPin,
   MapPinned,
@@ -367,36 +369,28 @@ export function MarketWatchProjectsView({
       ) : (
         <>
           {featured && featured.latestReport ? (
+            <>
             <Card data-testid={`featured-report-${featured.latestReport.reportVersionId}`}>
               <CardContent className="flex min-w-0 flex-col gap-2 py-5">
                 <div className="flex min-w-0 flex-col gap-4 sm:flex-row">
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
-                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <span className="font-semibold tracking-widest uppercase">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-800 normal-case dark:bg-emerald-950 dark:text-emerald-200">
+                        <Check aria-hidden="true" className="size-3.5 shrink-0" />
                         Ready to review
                       </span>
                       <span>
                         Report · {formatReportDate(featured.latestReport.createdAt, timeZone)}
                       </span>
                     </div>
-                    <h3 className="min-w-0 text-xl font-bold tracking-tight break-words">
+                    <h3 className="min-w-0 text-2xl font-bold tracking-tight break-words">
                       {featured.title}
                     </h3>
-                    <p className="min-w-0 text-xs text-muted-foreground break-words">
+                    <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground break-words">
+                      <MapPin aria-hidden="true" className="size-3.5 shrink-0" />
                       {featured.branchName} · {modeLabel(featured.mode)}
                     </p>
-                    <p className="min-w-0 text-sm text-muted-foreground break-words">
-                      {featured.question}
-                    </p>
-                    {featured.latestReport.takeaway ? (
-                      <p className="min-w-0 text-sm break-words">
-                        {featured.latestReport.takeaway}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        The report summary could not be read. Open the report to read it in full.
-                      </p>
-                    )}
+                    <p className="min-w-0 text-sm break-words">{featured.question}</p>
                   </div>
                   <aside
                     aria-label="In this report"
@@ -446,6 +440,7 @@ export function MarketWatchProjectsView({
                     onClick={() => onReviewReport?.(featured.latestReport!.reportVersionId)}
                   >
                     Review report
+                    <ArrowUpRight aria-hidden="true" />
                   </Button>
                   <Button
                     size="sm"
@@ -460,23 +455,26 @@ export function MarketWatchProjectsView({
                   >
                     Project history
                   </Button>
-                  <span className="min-w-0 text-xs text-muted-foreground">
+                  <span className="ml-auto min-w-0 text-xs text-muted-foreground">
                     Based on brief {featured.latestRevision?.revisionNumber ?? 1} ·{" "}
                     {featured.latestReport.reviewState === "pending_review"
                       ? "Advice awaits your review"
                       : "Reviewed"}
                   </span>
                 </div>
-                {optInOrganizationId !== undefined ? (
-                  <AgentLaneOptInToggle
-                    key={`featured-${featured.projectId}-${agentLaneOptInFor(featured) ? "on" : "off"}`}
-                    organizationId={optInOrganizationId}
-                    projectId={featured.projectId}
-                    initialOptIn={agentLaneOptInFor(featured)}
-                  />
-                ) : null}
               </CardContent>
             </Card>
+            {optInOrganizationId !== undefined ? (
+              <div className="flex min-w-0 justify-end">
+                <AgentLaneOptInToggle
+                  key={`featured-${featured.projectId}-${agentLaneOptInFor(featured) ? "on" : "off"}`}
+                  organizationId={optInOrganizationId}
+                  projectId={featured.projectId}
+                  initialOptIn={agentLaneOptInFor(featured)}
+                />
+              </div>
+            ) : null}
+            </>
           ) : null}
           {rows.length > 0 ? (
             <Card data-testid="market-watch-project-list" className="gap-0 overflow-hidden py-0">
