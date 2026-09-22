@@ -274,12 +274,13 @@ export type Database = {
           mode: "one-time" | "recurring";
           schedule: Record<string, unknown> | null;
           lifecycle: "active" | "paused" | "archived";
+          agent_lane_opt_in: boolean;
           created_by: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: never;
-        Update: never;
+        Update: { agent_lane_opt_in?: boolean };
         Relationships: [];
       };
       growth_intelligence_requests: {

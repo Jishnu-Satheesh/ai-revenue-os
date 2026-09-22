@@ -91,7 +91,21 @@ const failedUpdateRowSchema = z
   })
   .passthrough();
 
+const projectOptInRowSchema = z
+  .object({
+    id: z.string().uuid(),
+    agent_lane_opt_in: z.boolean(),
+  })
+  .passthrough();
+
 const UUID_ZERO = "00000000-0000-0000-0000-000000000000";
+
+const optInBodySchema = z
+  .object({
+    project_id: z.string().uuid(),
+    agent_lane_opt_in: z.boolean(),
+  })
+  .strict();
 
 const startBodySchema = z
   .object({
@@ -319,10 +333,37 @@ export async function GET(
       }
     }
 
+    // Agent-lane opt-in flags per project, best-effort. The column lands
+    // via a migration that is dry-run only in this slice, so a missing
+    // column (or any read failure) degrades to absent flags instead of
+    // failing the list; the toggle then renders unchecked until saved.
+    const agentLaneOptInByProject = new Map<string, boolean>();
+    if (projectIds.length > 0) {
+      try {
+        const flagResult = (await context.supabase
+          .from("growth_intelligence_research_projects")
+          .select("id,agent_lane_opt_in")
+          .eq("organization_id", organizationId)
+          .in("id", projectIds)
+          .limit(projectIds.length)) as { data: unknown; error: unknown };
+        if (!flagResult.error && Array.isArray(flagResult.data)) {
+          for (const row of flagResult.data) {
+            const parsed = projectOptInRowSchema.safeParse(row);
+            if (parsed.success) agentLaneOptInByProject.set(parsed.data.id, parsed.data.agent_lane_opt_in);
+          }
+        }
+      } catch {
+        // Degraded flags stay degraded; the project list still loads.
+      }
+    }
+
     const response = NextResponse.json({
       projects: summaries.map((project) => ({
         ...project,
         branchName: branchNames.get(project.branchId) ?? project.branchId,
+        ...(agentLaneOptInByProject.has(project.projectId)
+          ? { agentLaneOptIn: agentLaneOptInByProject.get(project.projectId) }
+          : {}),
       })),
       reportsByProject,
       revisionsByProject,
@@ -601,6 +642,89 @@ export async function POST(
     return response;
   } catch (error) {
     logger.warn("growth_intelligence.monitoring_start_api_failed", {
+      organizationId,
+      correlationId,
+      errorCode: toPublicError(error).code,
+    });
+    return marketProfileApiErrorResponse(error, correlationId);
+  }
+}
+
+/**
+ * Agent fallback lane opt-in toggle.
+ *
+ * PATCH flips `agent_lane_opt_in` for a single project pinned to the
+ * caller's own organization: the update carries both the session
+ * organization and the project id, so an unknown id or another
+ * organization's project updates zero rows and reads as not-found (404),
+ * never as a permission leak. Managers only; viewers are refused before
+ * touching persistence.
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ organizationId: string }> },
+) {
+  const correlation = marketProfileCorrelationState(request);
+  let correlationId = correlation.responseId;
+  let organizationId: string | undefined;
+  try {
+    const rawParams = await params;
+    const context = await getOrganizationContext(
+      Promise.resolve({ organizationId: rawParams.organizationId }),
+    );
+    organizationId = context.organizationId;
+
+    assertGrowthIntelligenceAccess(organizationId, "market");
+    if (
+      !hasOrganizationPermission(
+        context.membership.role as OrganizationRole,
+        "growth_intelligence.manage",
+      )
+    ) {
+      throw new DomainError(
+        "AUTHORIZATION_ERROR",
+        "You do not have permission to update Market Intelligence research.",
+      );
+    }
+    correlationId = correlation.parseAfterAuthorization();
+
+    const body = optInBodySchema.parse(await request.json().catch(() => ({})));
+
+    const updated = (await context.supabase
+      .from("growth_intelligence_research_projects")
+      .update({ agent_lane_opt_in: body.agent_lane_opt_in })
+      .eq("organization_id", organizationId)
+      .eq("id", body.project_id)
+      .select("id,agent_lane_opt_in")) as { data: unknown; error: unknown };
+    if (updated.error) {
+      throw new DomainError(
+        "UNEXPECTED_ERROR",
+        "The agent lane setting could not be saved. Try again.",
+        updated.error,
+      );
+    }
+    const updatedRows = Array.isArray(updated.data) ? updated.data : [];
+    const parsed = projectOptInRowSchema.safeParse(updatedRows[0]);
+    if (!parsed.success) {
+      throw new DomainError(
+        "TENANT_SCOPE_ERROR",
+        "This research project was not found in your organization.",
+      );
+    }
+
+    logger.info("growth_intelligence.monitoring_project_opt_in_updated", {
+      organizationId,
+      correlationId,
+    });
+    const response = NextResponse.json({
+      project: { projectId: parsed.data.id, agentLaneOptIn: parsed.data.agent_lane_opt_in },
+      correlationId,
+    });
+    response.headers.set("x-correlation-id", correlationId);
+    response.headers.set("Cache-Control", "no-store");
+    return response;
+  } catch (error) {
+    logger.warn("growth_intelligence.monitoring_project_opt_in_api_failed", {
       organizationId,
       correlationId,
       errorCode: toPublicError(error).code,

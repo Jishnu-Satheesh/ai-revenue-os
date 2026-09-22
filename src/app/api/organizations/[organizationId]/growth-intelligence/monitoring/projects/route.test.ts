@@ -36,6 +36,7 @@ vi.mock("@/lib/logger", () => ({
 
 import {
   GET,
+  PATCH,
   POST,
 } from "@/app/api/organizations/[organizationId]/growth-intelligence/monitoring/projects/route";
 import { DomainError } from "@/lib/errors";
@@ -98,7 +99,15 @@ function reportContent(overrides: Record<string, unknown> = {}) {
   };
 }
 
-type Db = { branches: unknown[]; reports: unknown[]; revisions: unknown[]; updates?: unknown[] };
+type Db = {
+  branches: unknown[];
+  reports: unknown[];
+  revisions: unknown[];
+  updates?: unknown[];
+  projects?: unknown[];
+  /** When set, every read/write on the projects table resolves this error. */
+  projectsError?: unknown;
+};
 
 function supabaseFake(db: Db) {
   const tables: Record<string, keyof Db> = {
@@ -106,6 +115,7 @@ function supabaseFake(db: Db) {
     growth_intelligence_reports: "reports",
     growth_intelligence_brief_revisions: "revisions",
     growth_intelligence_monitoring_updates: "updates",
+    growth_intelligence_research_projects: "projects",
   };
   return {
     from(table: string) {
@@ -114,8 +124,13 @@ function supabaseFake(db: Db) {
       const inclusions: { column: string; values: readonly unknown[] }[] = [];
       const orderings: { column: string; ascending: boolean }[] = [];
       let limit: number | null = null;
+      let pendingUpdate: Record<string, unknown> | null = null;
       const builder = {
         select() {
+          return builder;
+        },
+        update(values: Record<string, unknown>) {
+          pendingUpdate = values;
           return builder;
         },
         eq(column: string, value: unknown) {
@@ -134,13 +149,25 @@ function supabaseFake(db: Db) {
           limit = count;
           return builder;
         },
-        then(resolve: (value: { data: unknown[]; error: null }) => void) {
+        then(resolve: (value: { data: unknown; error: unknown }) => void) {
+          if (key === "projects" && db.projectsError !== undefined && db.projectsError !== null) {
+            resolve({ data: null, error: db.projectsError });
+            return;
+          }
           let rows = [...((db[key] ?? []) as Record<string, unknown>[])];
           for (const filter of filters) {
             rows = rows.filter((row) => row[filter.column] === filter.value);
           }
           for (const inclusion of inclusions) {
             rows = rows.filter((row) => inclusion.values.includes(row[inclusion.column]));
+          }
+          if (pendingUpdate !== null && key === "projects") {
+            const applied = pendingUpdate;
+            const matchedIds = new Set(rows.map((row) => row["id"]));
+            db.projects = ((db.projects ?? []) as Record<string, unknown>[]).map((row) =>
+              matchedIds.has(row["id"]) ? { ...row, ...applied } : row,
+            );
+            rows = rows.map((row) => ({ ...row, ...applied }));
           }
           for (const ordering of orderings) {
             rows = [...rows].sort((left, right) => {
@@ -364,6 +391,56 @@ describe("monitoring projects GET", () => {
     expect(body.failedUpdatesByProject[PROJECT]).toEqual([
       { updateId: UPDATE, stage: "research_failed" },
     ]);
+  });
+
+  it("serves the agent lane opt-in flag beside each project", async () => {
+    const db: Db = {
+      branches: [],
+      reports: [],
+      revisions: [],
+      projects: [{ id: PROJECT, organization_id: ORGANIZATION, agent_lane_opt_in: true }],
+    };
+    mocks.createProjects.mockImplementation(() =>
+      repositoryFake({ listActiveProjects: vi.fn(async () => [projectSummary()]) }),
+    );
+    contextWith(db);
+
+    const response = await GET(new Request("https://example.test/monitoring/projects"), {
+      params: Promise.resolve({ organizationId: ORGANIZATION }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      projects: Record<string, unknown>[];
+    };
+    expect(body.projects[0]).toMatchObject({ projectId: PROJECT, agentLaneOptIn: true });
+  });
+
+  it("serves the list without flags when the opt-in column is unavailable", async () => {
+    const db: Db = {
+      branches: [],
+      reports: [],
+      revisions: [],
+      projects: [],
+      projectsError: { message: 'column "agent_lane_opt_in" does not exist' },
+    };
+    mocks.createProjects.mockImplementation(() =>
+      repositoryFake({ listActiveProjects: vi.fn(async () => [projectSummary()]) }),
+    );
+    contextWith(db);
+
+    const response = await GET(new Request("https://example.test/monitoring/projects"), {
+      params: Promise.resolve({ organizationId: ORGANIZATION }),
+    });
+
+    // The migration is dry-run only in this slice, so staging has no column
+    // yet: the list must still load, with the toggle rendering unchecked.
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      projects: Record<string, unknown>[];
+    };
+    expect(body.projects[0]).toMatchObject({ projectId: PROJECT });
+    expect("agentLaneOptIn" in body.projects[0]!).toBe(false);
   });
 });
 
@@ -727,6 +804,121 @@ describe("monitoring projects POST", () => {
       { params: Promise.resolve({ organizationId: ORGANIZATION }) },
     );
     expect(missing.status).toBe(400);
+  });
+});
+
+describe("monitoring projects PATCH (agent lane opt-in)", () => {
+  function projectRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: PROJECT,
+      organization_id: ORGANIZATION,
+      agent_lane_opt_in: false,
+      ...overrides,
+    };
+  }
+
+  function optInBody(overrides: Record<string, unknown> = {}) {
+    return { project_id: PROJECT, agent_lane_opt_in: true, ...overrides };
+  }
+
+  function patchRequest(body: unknown) {
+    return new Request("https://example.test/monitoring/projects", {
+      method: "PATCH",
+      headers: { "x-correlation-id": CORRELATION },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function patchParams(organizationId: string = ORGANIZATION) {
+    return { params: Promise.resolve({ organizationId }) };
+  }
+
+  it("turns the opt-in on and off for the caller's own project", async () => {
+    const db: Db = { branches: [], reports: [], revisions: [], projects: [projectRow()] };
+    contextWith(db);
+
+    const on = await PATCH(patchRequest(optInBody({ agent_lane_opt_in: true })), patchParams());
+    expect(on.status).toBe(200);
+    const onBody = (await on.json()) as {
+      project: { projectId: string; agentLaneOptIn: boolean };
+    };
+    expect(onBody.project).toEqual({ projectId: PROJECT, agentLaneOptIn: true });
+
+    const off = await PATCH(patchRequest(optInBody({ agent_lane_opt_in: false })), patchParams());
+    expect(off.status).toBe(200);
+    const offBody = (await off.json()) as {
+      project: { projectId: string; agentLaneOptIn: boolean };
+    };
+    expect(offBody.project).toEqual({ projectId: PROJECT, agentLaneOptIn: false });
+    // The round-trip travels storage: the fake row converges on the write.
+    expect((db.projects![0] as Record<string, unknown>)["agent_lane_opt_in"]).toBe(false);
+  });
+
+  it("returns 404 for another organization's project without leaking", async () => {
+    const db: Db = {
+      branches: [],
+      reports: [],
+      revisions: [],
+      projects: [projectRow({ organization_id: FOREIGN_ORGANIZATION })],
+    };
+    contextWith(db);
+
+    const response = await PATCH(patchRequest(optInBody()), patchParams());
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("TENANT_SCOPE_ERROR");
+    expect(body.error.message).not.toMatch(/forbidden|permission/i);
+  });
+
+  it("returns 404 for an unknown project id", async () => {
+    contextWith({ branches: [], reports: [], revisions: [], projects: [] });
+
+    const response = await PATCH(patchRequest(optInBody()), patchParams());
+
+    expect(response.status).toBe(404);
+  });
+
+  it("rejects invalid bodies with 400", async () => {
+    contextWith({ branches: [], reports: [], revisions: [], projects: [projectRow()] });
+
+    const empty = await PATCH(patchRequest({}), patchParams());
+    expect(empty.status).toBe(400);
+
+    const malformed = await PATCH(
+      patchRequest({ project_id: "not-a-uuid", agent_lane_opt_in: "yes" }),
+      patchParams(),
+    );
+    expect(malformed.status).toBe(400);
+  });
+
+  it("refuses viewers before touching persistence", async () => {
+    const db: Db = { branches: [], reports: [], revisions: [], projects: [projectRow()] };
+    mocks.hasPermission.mockImplementation((_: unknown, permission: string) =>
+      permission === "growth_intelligence.read",
+    );
+    contextWith(db, "viewer");
+
+    const response = await PATCH(patchRequest(optInBody()), patchParams());
+
+    expect(response.status).toBe(403);
+    expect((db.projects![0] as Record<string, unknown>)["agent_lane_opt_in"]).toBe(false);
+  });
+
+  it("fails closed without leaking when storage refuses the write", async () => {
+    contextWith({
+      branches: [],
+      reports: [],
+      revisions: [],
+      projects: [projectRow()],
+      projectsError: { message: "permission denied for table" },
+    });
+
+    const response = await PATCH(patchRequest(optInBody()), patchParams());
+
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("UNEXPECTED_ERROR");
   });
 });
 

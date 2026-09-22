@@ -46,7 +46,12 @@ export type MarketWatchEvidencePeriod = {
 };
 
 type ProjectsResponse = {
-  projects: MarketWatchProjectRecord[];
+  /**
+   * Server records may carry the Agent fallback lane opt-in flag (absent
+   * while the opt-in migration is unpushed). buildMarketWatchProjectList
+   * spreads it through to the list items untouched.
+   */
+  projects: (MarketWatchProjectRecord & { agentLaneOptIn?: boolean })[];
   reportsByProject: Record<string, MarketWatchProjectReportSummary[]>;
   revisionsByProject: Record<string, MarketWatchProjectRevisionSummary[]>;
   failedUpdatesByProject?: Record<string, MarketWatchProjectFailedUpdate[]>;
@@ -72,6 +77,77 @@ const STATUS_BUTTONS: { value: MonitoringProjectStatusFilter; label: string }[] 
   { value: "needs_attention", label: "Needs attention" },
   { value: "paused", label: "Paused" },
 ];
+
+type MarketWatchProjectWithOptIn = MarketWatchProjectListItem & { agentLaneOptIn?: boolean };
+
+function agentLaneOptInFor(item: MarketWatchProjectListItem): boolean {
+  return (item as MarketWatchProjectWithOptIn).agentLaneOptIn === true;
+}
+
+/**
+ * Agent fallback lane opt-in toggle (Track A, additive): managers flip one
+ * project between the search lane and the agent lane. The flip persists
+ * through the projects PATCH endpoint with an optimistic update that rolls
+ * back to the last saved value when the save fails. Says nothing about
+ * spend; the platform credit limit arrives in a later slice.
+ */
+function AgentLaneOptInToggle({
+  organizationId,
+  projectId,
+  initialOptIn,
+}: {
+  organizationId: string;
+  projectId: string;
+  initialOptIn: boolean;
+}) {
+  const [optIn, setOptIn] = useState(initialOptIn);
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function save(next: boolean) {
+    const previous = optIn;
+    setOptIn(next);
+    setFailed(false);
+    setPending(true);
+    try {
+      const response = await fetch(
+        `/api/organizations/${organizationId}/growth-intelligence/monitoring/projects`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ project_id: projectId, agent_lane_opt_in: next }),
+        },
+      );
+      if (!response.ok) throw new Error("OPT_IN_SAVE_FAILED");
+    } catch {
+      setOptIn(previous);
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+      <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={optIn}
+          disabled={pending}
+          onChange={(event) => void save(event.target.checked)}
+          data-testid={`agent-lane-opt-in-${projectId}`}
+        />
+        Agent lane
+      </label>
+      {failed ? (
+        <p role="alert" className="text-xs text-destructive">
+          Could not save. Retry.
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function MarketWatchProjectsSkeleton() {
   return (
@@ -108,6 +184,8 @@ export function MarketWatchProjectsView({
   timeZone,
   onNewResearch,
   onReviewReport,
+  organizationId,
+  canManage,
 }: {
   items: readonly MarketWatchProjectListItem[];
   branches: readonly MarketWatchLocationOption[];
@@ -118,6 +196,13 @@ export function MarketWatchProjectsView({
    * control renders disabled with its reason instead of opening anything.
    */
   onReviewReport?: (reportVersionId: string) => void;
+  /**
+   * Agent lane opt-in wiring. Both present for managers only: each project
+   * row (and the featured card) gains its toggle. Viewers keep the
+   * read-only list with no toggle rendered.
+   */
+  organizationId?: string;
+  canManage?: boolean;
 }) {
   const [branchId, setBranchId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -133,6 +218,8 @@ export function MarketWatchProjectsView({
     () => (featured ? filtered.filter((item) => item.projectId !== featured.projectId) : filtered),
     [filtered, featured],
   );
+  // Agent-lane toggles render for managers only; viewers keep the read-only list.
+  const optInOrganizationId = canManage === true ? organizationId : undefined;
 
   function clearFilters() {
     setBranchId(null);
@@ -281,16 +368,33 @@ export function MarketWatchProjectsView({
                       : "Reviewed"}
                   </span>
                 </div>
+                {optInOrganizationId !== undefined ? (
+                  <AgentLaneOptInToggle
+                    key={`featured-${featured.projectId}-${agentLaneOptInFor(featured) ? "on" : "off"}`}
+                    organizationId={optInOrganizationId}
+                    projectId={featured.projectId}
+                    initialOptIn={agentLaneOptInFor(featured)}
+                  />
+                ) : null}
               </CardContent>
             </Card>
           ) : null}
           {rows.map((item) => (
-            <ResearchProjectRow
-              key={item.projectId}
-              item={item}
-              timeZone={timeZone}
-              onReviewReport={onReviewReport}
-            />
+            <div key={item.projectId} className="flex min-w-0 flex-col gap-1">
+              <ResearchProjectRow
+                item={item}
+                timeZone={timeZone}
+                onReviewReport={onReviewReport}
+              />
+              {optInOrganizationId !== undefined ? (
+                <AgentLaneOptInToggle
+                  key={`row-${item.projectId}-${agentLaneOptInFor(item) ? "on" : "off"}`}
+                  organizationId={optInOrganizationId}
+                  projectId={item.projectId}
+                  initialOptIn={agentLaneOptInFor(item)}
+                />
+              ) : null}
+            </div>
           ))}
           <p className="text-xs text-muted-foreground" role="status">
             {filtered.length} {filtered.length === 1 ? "project" : "projects"} shown. Past reports
@@ -418,6 +522,8 @@ export function MarketWatchProjectsSection({
         branches={branches}
         timeZone={timeZone}
         onNewResearch={() => setDialogOpen(true)}
+        organizationId={organizationId}
+        canManage={canManage}
         onReviewReport={(reportVersionId) => {
           if (onReviewReport) {
             onReviewReport(reportVersionId);
