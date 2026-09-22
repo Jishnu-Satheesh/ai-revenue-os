@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import {
@@ -30,12 +32,19 @@ import {
   type MonitoringResearcher,
   type MonitoringResearchOutcome,
 } from "@/modules/growth-intelligence/application/market-monitoring-update";
+import { monitoringCompetitorSlotKey } from "@/modules/growth-intelligence/application/market-monitoring-context";
 import {
   approvedResearchScopeSchema,
   researchRequestSchema,
+  researchRetrievedSourceSchema,
   type ApprovedResearchScope,
   type ResearchRetrievedSource,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
+import {
+  AGENT_SLOT_TIMEOUT_MS,
+  createTinyfishAgentAdapter,
+  type AgentSlotOutcome,
+} from "@/modules/growth-intelligence/infrastructure/research/tinyfish-agent-adapter";
 import {
   digestClaimCandidate,
   extractResearchClaims,
@@ -70,6 +79,7 @@ import {
 } from "@/trigger/growth-intelligence-research-models";
 import type { ResearchBudgetRepository } from "@/modules/growth-intelligence/infrastructure/research/budget-repository";
 import {
+  createTinyfishAgentClientSeam,
   isTinyfishResearchGateOpen,
   readTinyfishSearchApiKey,
   TINYFISH_RESEARCH_PRICE_VERSION,
@@ -373,6 +383,28 @@ const executorInputSchema = z
   })
   .passthrough();
 
+/**
+ * Agent fallback lane (Task 3 of 2026-09-21-agent-fallback-lane, R4).
+ * At most the first 2 competitor slots per update run through the Agent lane;
+ * every other slot (topics, excess competitors) stays on Search+Fetch.
+ */
+export const AGENT_LANE_MAX_COMPETITOR_SLOTS = 2;
+
+export type MonitoringAgentSlotRunner = {
+  runCompetitorSlot(input: {
+    url: string;
+    competitorName: string;
+    fields: string[];
+    timeoutMs?: number;
+    abortSignal?: AbortSignal;
+  }): Promise<AgentSlotOutcome>;
+};
+
+export type MonitoringAgentLane = {
+  enabled: boolean;
+  runner: MonitoringAgentSlotRunner;
+};
+
 export type MonitoringResearchExecutorDependencies = {
   availability: { available: boolean; provider: string };
   brief: BriefRevision;
@@ -392,8 +424,101 @@ export type MonitoringResearchExecutorDependencies = {
     budget: ResearchModelBudget;
     modelId: string;
   };
+  agentLane?: MonitoringAgentLane;
   now?: () => Date;
 };
+
+/**
+ * Tenant-pinned opt-in read. Pins organization_id + id; any anomaly (no
+ * `from` seam, query error, missing row, missing/invalid column) returns false
+ * so the update keeps today's search-only behavior bit-for-bit. Never throws.
+ */
+async function readAgentLaneOptIn(
+  persistence: TinyfishResearchPersistence,
+  organizationId: string,
+  projectId: string,
+): Promise<boolean> {
+  try {
+    const client = persistence as unknown as {
+      from?: (table: string) => unknown;
+    };
+    if (typeof client.from !== "function") return false;
+    const query = (client as unknown as {
+      from(table: string): {
+        select(columns: string): {
+          eq(column: string, value: string): {
+            eq(column: string, value: string): {
+              maybeSingle(): Promise<{ data: unknown; error: unknown }>;
+            };
+          };
+        };
+      };
+    })
+      .from("growth_intelligence_research_projects")
+      .select("agent_lane_opt_in")
+      .eq("organization_id", organizationId)
+      .eq("id", projectId);
+    const { data, error } = await query.maybeSingle();
+    if (error || !data || typeof data !== "object") return false;
+    return (data as { agent_lane_opt_in?: unknown }).agent_lane_opt_in === true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveAgentSlotTarget(
+  scope: ApprovedResearchScope,
+  slotKey: string,
+): { url: string; competitorName: string; fields: string[] } | null {
+  const competitor = scope.competitors.find(
+    (entry) => monitoringCompetitorSlotKey(entry.name) === slotKey,
+  );
+  if (!competitor || !competitor.publicUrl) return null;
+  let url: URL;
+  try {
+    url = new URL(competitor.publicUrl);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+    return null;
+  }
+  if (scope.topics.length === 0) return null;
+  return { url: competitor.publicUrl, competitorName: competitor.name, fields: [...scope.topics] };
+}
+
+/**
+ * Wraps agent JSON as a single retained source so the existing
+ * extraction → review → admission path validates it unchanged. Returns null
+ * when the payload cannot become a valid source (fail-closed to the
+ * no-evidence path, never a throw).
+ */
+function agentDataToSource(input: {
+  url: string;
+  data: unknown;
+  retrievedAt: string;
+}): ResearchRetrievedSource | null {
+  try {
+    const text = JSON.stringify(input.data);
+    if (!text || text === "null" || text.trim().length === 0) return null;
+    const excerptText = text.slice(0, RESEARCH_BUDGET_LIMITS.maxExcerptCharacters);
+    if (excerptText.trim().length === 0) return null;
+    const parsed = new URL(input.url);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) {
+      return null;
+    }
+    const digest = createHash("sha256").update(excerptText, "utf8").digest("hex");
+    return researchRetrievedSourceSchema.parse({
+      sourceUrl: input.url,
+      domain: parsed.hostname.toLowerCase(),
+      excerptText,
+      excerptDigest: digest,
+      retrievedAt: input.retrievedAt,
+    });
+  } catch {
+    return null;
+  }
+}
 
 function failedOutcome(
   code: string,
@@ -529,6 +654,20 @@ export function createMonitoringResearchExecutor(
       let attemptUsages: ResearchAttemptUsage[] = [];
       let chainBroken = false;
 
+      // Agent fallback lane (R4): when enabled, the first 2 competitor slots
+      // in plan order run through the Agent adapter; every other slot stays on
+      // Search+Fetch. Missing/false opt-in keeps today's behavior bit-for-bit
+      // because `agentLane` is absent/disabled and this set stays empty.
+      const agentLane = dependencies.agentLane?.enabled ? dependencies.agentLane : null;
+      const agentSlotKeys = new Set<string>();
+      if (agentLane) {
+        for (const candidate of queries) {
+          if (candidate.kind !== "competitor") continue;
+          if (agentSlotKeys.size >= AGENT_LANE_MAX_COMPETITOR_SLOTS) break;
+          agentSlotKeys.add(candidate.slotKey);
+        }
+      }
+
       for (const query of queries) {
         if (signal?.aborted) return { status: "cancelled" };
         if (chainBroken) {
@@ -542,6 +681,103 @@ export function createMonitoringResearchExecutor(
             }),
           );
           continue;
+        }
+        if (agentLane && agentSlotKeys.has(query.slotKey)) {
+          const target = resolveAgentSlotTarget(scope, query.slotKey);
+          if (target) {
+            let outcome: AgentSlotOutcome;
+            try {
+              outcome = await agentLane.runner.runCompetitorSlot({
+                url: target.url,
+                competitorName: target.competitorName,
+                fields: target.fields,
+                timeoutMs: AGENT_SLOT_TIMEOUT_MS,
+                ...(signal ? { abortSignal: signal } : {}),
+              });
+            } catch {
+              // The adapter never throws on provider-shaped outcomes; an
+              // unexpected throw still settles to the no-evidence path without
+              // breaking the search chain or spending.
+              coverages.push(
+                researchCoverageEntrySchema.parse({
+                  slotKey: query.slotKey,
+                  kind: "competitor",
+                  outcome: "searched_no_usable_evidence" as const,
+                  attemptIds: [],
+                  acceptedClaimIds: [],
+                }),
+              );
+              // LogContext is a closed allowlist with no projectId/updateId/code:
+              // runIds travel as `runId`, slot codes as `errorCode`
+              // (Task 2 applied the same narrowing; logger.ts is out of scope).
+              logger.warn("growth_intelligence.monitoring_agent_slot_no_evidence", {
+                organizationId: parsed.data.organizationId,
+                runId: "",
+                errorCode: "AGENT_RUN_FAILED",
+              });
+              continue;
+            }
+            if (outcome.status === "ok") {
+              const source = agentDataToSource({
+                url: target.url,
+                data: outcome.data,
+                retrievedAt: now().toISOString(),
+              });
+              if (source) {
+                retrieved = [...retrieved, source];
+                if (!sourceSlotByUrl.has(source.sourceUrl)) {
+                  sourceSlotByUrl.set(source.sourceUrl, query.slotKey);
+                }
+                coverages.push(
+                  researchCoverageEntrySchema.parse({
+                    slotKey: query.slotKey,
+                    kind: "competitor",
+                    outcome: "supported" as const,
+                    attemptIds: [],
+                    acceptedClaimIds: [],
+                  }),
+                );
+                logger.info("growth_intelligence.monitoring_agent_slot_ok", {
+                  organizationId: parsed.data.organizationId,
+                  runId: outcome.runId,
+                });
+              } else {
+                coverages.push(
+                  researchCoverageEntrySchema.parse({
+                    slotKey: query.slotKey,
+                    kind: "competitor",
+                    outcome: "searched_no_usable_evidence" as const,
+                    attemptIds: [],
+                    acceptedClaimIds: [],
+                  }),
+                );
+                logger.warn("growth_intelligence.monitoring_agent_slot_no_evidence", {
+                  organizationId: parsed.data.organizationId,
+                  runId: outcome.runId,
+                  errorCode: "AGENT_UNUSABLE_RESULT",
+                });
+              }
+            } else {
+              coverages.push(
+                researchCoverageEntrySchema.parse({
+                  slotKey: query.slotKey,
+                  kind: "competitor",
+                  outcome: "searched_no_usable_evidence" as const,
+                  attemptIds: [],
+                  acceptedClaimIds: [],
+                }),
+              );
+              logger.warn("growth_intelligence.monitoring_agent_slot_no_evidence", {
+                organizationId: parsed.data.organizationId,
+                runId: outcome.runId,
+                errorCode: outcome.code ?? "AGENT_BLOCKED",
+              });
+            }
+            // Agent slots never touch the search resume chain, attempt usages,
+            // or spend: no reservation, no settle, runIds logged for audit.
+            continue;
+          }
+          // No public URL or fields: fall through to Search+Fetch fail-closed.
         }
         const previousSourceCount = retrieved.length;
         try {
@@ -752,6 +988,8 @@ export async function createQualifiedMonitoringResearcher(input: {
   brief: BriefRevision;
   organizationCountryCode: string | null;
   fetchImpl?: typeof globalThis.fetch;
+  agentLaneOptIn?: boolean;
+  agentLane?: MonitoringAgentLane | null;
 }): Promise<MonitoringResearcher> {
   const refused = (code: string): MonitoringResearcher => async () => ({
     status: "failed",
@@ -813,7 +1051,34 @@ export async function createQualifiedMonitoringResearcher(input: {
     modelId: reviewModelId,
   });
 
+  // Agent fallback lane (Task 3): read `agent_lane_opt_in` with the project
+  // row fetch. Missing/false keeps today's search-only behavior bit-for-bit.
+  // True routes the first 2 competitor slots through `createTinyfishAgentAdapter`;
+  // a closed gate or blank key falls back to search-only with no exception.
+  // No spend accounting in this slice; runIds are logged for audit.
+  let agentLane: MonitoringAgentLane | undefined;
+  try {
+    const optIn =
+      typeof input.agentLaneOptIn === "boolean"
+        ? input.agentLaneOptIn
+        : await readAgentLaneOptIn(input.persistence, input.organizationId, brief.projectId);
+    if (optIn && apiKey.length > 0 && isTinyfishResearchGateOpen()) {
+      if (input.agentLane) {
+        if (input.agentLane.enabled) agentLane = input.agentLane;
+      } else {
+        const seam = createTinyfishAgentClientSeam({
+          apiKey,
+          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+        });
+        agentLane = { enabled: true, runner: createTinyfishAgentAdapter(seam) };
+      }
+    }
+  } catch {
+    agentLane = undefined;
+  }
+
   return createMonitoringResearchExecutor({
+    ...(agentLane ? { agentLane } : {}),
     availability: { available: true, provider: QUALIFIED_TINYFISH_RESEARCH_PROVIDER },
     brief,
     scope,

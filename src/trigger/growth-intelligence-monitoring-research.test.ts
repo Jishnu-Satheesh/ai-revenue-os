@@ -29,6 +29,7 @@ import {
 import { startMonitoringUpdate } from "@/modules/growth-intelligence/application/market-monitoring-update";
 
 import {
+  AGENT_LANE_MAX_COMPETITOR_SLOTS,
   buildMonitoringModelScope,
   createFencedMonitoringUpdateModelSpender,
   createFencedMonitoringUpdateSearchSpender,
@@ -38,9 +39,11 @@ import {
   deriveMonitoringClaimId,
   MONITORING_UPDATE_MAXIMUM_MICROS_USD_PER_ATTEMPT,
   MONITORING_UPDATE_QUOTE_MICROS_USD,
+  type MonitoringAgentLane,
   type MonitoringResearchExecutorDependencies,
   type MonitoringUpdateBudget,
 } from "@/trigger/growth-intelligence-monitoring-research";
+import type { AgentSlotOutcome } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-agent-adapter";
 import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 
 const FIXED_NOW = new Date("2026-09-14T06:00:00.000Z");
@@ -936,6 +939,202 @@ describe("createMonitoringResearchExecutor", () => {
     });
     expect(outcome).toEqual({ status: "cancelled" });
     expect(searchCalls).toEqual([]);
+  });
+});
+
+describe("agent fallback lane (Task 3)", () => {
+  function briefWithWebsites(names: string[]) {
+    return briefFixture({
+      competitors: names.map((name) => ({
+        name,
+        website: `https://${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.example.com`,
+        source: "suggestion" as const,
+      })),
+    });
+  }
+
+  function fakeAgentLane(
+    calls: Array<{ url: string; competitorName: string; fields: string[] }>,
+    handler: (input: { url: string; competitorName: string; fields: string[] }) => AgentSlotOutcome,
+    enabled = true,
+  ): MonitoringAgentLane {
+    return {
+      enabled,
+      runner: {
+        async runCompetitorSlot(input) {
+          calls.push({ url: input.url, competitorName: input.competitorName, fields: input.fields });
+          return handler(input);
+        },
+      },
+    };
+  }
+
+  it("stays search-only when the lane is disabled (opt-out bit-for-bit)", async () => {
+    const searchCalls: string[] = [];
+    const agentCalls: Array<{ url: string; competitorName: string; fields: string[] }> = [];
+    const brief = briefWithWebsites(["Stitch House"]);
+    const research = createMonitoringResearchExecutor({
+      ...wiredDependencies(
+        brief,
+        scriptedSearchTransport(() => ({ status: 200, results: twoResults("a") }), searchCalls),
+      ),
+      agentLane: fakeAgentLane(agentCalls, () => ({
+        status: "ok",
+        data: { demand: "late" },
+        runId: "run-should-not-happen",
+      }), false),
+    });
+    const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+    expect(outcome.status).toBe("succeeded");
+    expect(agentCalls).toEqual([]);
+    // 2 areas + 1 competitor, all on search.
+    expect(searchCalls).toHaveLength(3);
+  });
+
+  it("routes opted-in competitor slots through the seam and keeps topics on search", async () => {
+    const searchCalls: string[] = [];
+    const agentCalls: Array<{ url: string; competitorName: string; fields: string[] }> = [];
+    const brief = briefWithWebsites(["Stitch House"]);
+    const research = createMonitoringResearchExecutor({
+      ...wiredDependencies(
+        brief,
+        scriptedSearchTransport((url) => {
+          const tag = createHash("sha256").update(url, "utf8").digest("hex").slice(0, 8);
+          return { status: 200, results: twoResults(tag) };
+        }, searchCalls),
+      ),
+      agentLane: fakeAgentLane(agentCalls, (input) => ({
+        status: "ok",
+        data: { demand: `agent evidence for ${input.competitorName}`, reviews: "4.8 stars" },
+        runId: "run-agent-1",
+      })),
+    });
+    const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+    expect(AGENT_LANE_MAX_COMPETITOR_SLOTS).toBe(2);
+    expect(agentCalls).toHaveLength(1);
+    expect(agentCalls[0]?.competitorName).toBe("Stitch House");
+    expect(agentCalls[0]?.url).toBe("https://stitch-house.example.com/");
+    expect(agentCalls[0]?.fields).toEqual(["demand", "reviews"]);
+    // Topics stay on search; the competitor slot skips search.
+    expect(searchCalls).toHaveLength(2);
+    expect(outcome.status).toBe("succeeded");
+    if (outcome.status !== "succeeded") return;
+    const competitorCoverage = outcome.retrievalCoverage.find((entry) => entry.slotKey.startsWith("competitor:"));
+    expect(competitorCoverage?.outcome).toBe("supported");
+  });
+
+  it("falls back to search-only when the gate is closed even when opted in", async () => {
+    const agentCalls: Array<{ url: string; competitorName: string; fields: string[] }> = [];
+    setEnv({
+      TINYFISH_SEARCH_API_KEY: "test-key",
+      TINYFISH_MARKET_RESEARCH_ENABLED: "false",
+    });
+    try {
+      const brief = briefWithWebsites(["Stitch House"]);
+      const research = await createQualifiedMonitoringResearcher({
+        persistence: qualifiedPersistence([]),
+        budget: createFakeMonitoringBudget(),
+        organizationId: brief.organizationId,
+        brief,
+        organizationCountryCode: "AE",
+        agentLaneOptIn: true,
+        agentLane: fakeAgentLane(agentCalls, () => ({
+          status: "ok",
+          data: { demand: "late" },
+          runId: "run-agent-1",
+        })),
+      });
+      const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+      expect(outcome).toMatchObject({ status: "failed", code: "ADAPTER_UNAVAILABLE" });
+      expect(agentCalls).toEqual([]);
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it("settles blocked agent outcomes to the no-evidence path with the runId kept", async () => {
+    const searchCalls: string[] = [];
+    const agentCalls: Array<{ url: string; competitorName: string; fields: string[] }> = [];
+    const brief = briefWithWebsites(["Stitch House"]);
+    const research = createMonitoringResearchExecutor({
+      ...wiredDependencies(
+        brief,
+        scriptedSearchTransport((url) => {
+          const tag = createHash("sha256").update(url, "utf8").digest("hex").slice(0, 8);
+          return { status: 200, results: twoResults(tag) };
+        }, searchCalls),
+      ),
+      agentLane: fakeAgentLane(agentCalls, () => ({
+        status: "blocked",
+        data: { blocked: true },
+        runId: "run-blocked-1",
+      })),
+    });
+    const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+    expect(agentCalls).toHaveLength(1);
+    expect(searchCalls).toHaveLength(2);
+    expect(outcome.status).toBe("succeeded");
+    if (outcome.status !== "succeeded") return;
+    const competitorCoverage = outcome.retrievalCoverage.find((entry) => entry.slotKey.startsWith("competitor:"));
+    expect(competitorCoverage?.outcome).toBe("searched_no_usable_evidence");
+    // Blocked agent evidence never invents a finding: every finding traces to a
+    // searched topic slot, never to the blocked competitor slot.
+    for (const finding of outcome.findings) {
+      expect(finding.slotKey.startsWith("area:")).toBe(true);
+    }
+  });
+
+  it("keeps the third competitor slot on search (R4 cap at 2)", async () => {
+    const searchCalls: string[] = [];
+    const agentCalls: Array<{ url: string; competitorName: string; fields: string[] }> = [];
+    const brief = briefWithWebsites(["Alpha Tailors", "Beta Stitch", "Gamma Sew"]);
+    const research = createMonitoringResearchExecutor({
+      ...wiredDependencies(
+        brief,
+        scriptedSearchTransport((url) => {
+          const tag = createHash("sha256").update(url, "utf8").digest("hex").slice(0, 8);
+          return { status: 200, results: twoResults(tag) };
+        }, searchCalls),
+      ),
+      agentLane: fakeAgentLane(agentCalls, (input) => ({
+        status: "ok",
+        data: { demand: `agent evidence for ${input.competitorName}` },
+        runId: `run-${input.competitorName}`,
+      })),
+    });
+    const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+    // First 2 competitor slots go to the agent; the 3rd stays on search.
+    expect(agentCalls.map((call) => call.competitorName)).toEqual(["Alpha Tailors", "Beta Stitch"]);
+    // 2 areas + 3rd competitor on search.
+    expect(searchCalls).toHaveLength(3);
+    expect(outcome.status).toBe("succeeded");
+    if (outcome.status !== "succeeded") return;
+    expect(outcome.retrievalCoverage).toHaveLength(5);
+    expect(
+      outcome.retrievalCoverage.filter((entry) => entry.outcome === "supported"),
+    ).toHaveLength(5);
+  });
+
+  it("falls back to search when the competitor has no public URL", async () => {
+    const searchCalls: string[] = [];
+    const agentCalls: Array<{ url: string; competitorName: string; fields: string[] }> = [];
+    // Default fixture competitor carries no website, so the lane cannot run it.
+    const brief = briefFixture();
+    const research = createMonitoringResearchExecutor({
+      ...wiredDependencies(
+        brief,
+        scriptedSearchTransport(() => ({ status: 200, results: twoResults("a") }), searchCalls),
+      ),
+      agentLane: fakeAgentLane(agentCalls, () => ({
+        status: "ok",
+        data: { demand: "late" },
+        runId: "run-agent-1",
+      })),
+    });
+    const outcome = await research(executorInput(brief, buildMonitoringQueryPlan(brief)));
+    expect(agentCalls).toEqual([]);
+    expect(searchCalls).toHaveLength(3);
+    expect(outcome.status).toBe("succeeded");
   });
 });
 

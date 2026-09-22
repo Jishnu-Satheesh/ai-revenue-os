@@ -22,6 +22,8 @@ import {
   type TinyfishSearchSpender,
 } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-search-adapter";
 import { createTinyfishSearchTransport } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-search-transport";
+import { TinyFish } from "@tiny-fish/sdk";
+import type { AgentClientSeam } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-agent-adapter";
 
 /**
  * Production TinyFish research assembly for the market-research worker's
@@ -203,4 +205,71 @@ export async function createQualifiedTinyfishResearchAdapter(input: {
     candidate,
     QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
   );
+}
+
+/**
+ * Agent fallback lane client seam (Task 3 of 2026-09-21-agent-fallback-lane).
+ *
+ * SDK verification (binding, installed @tiny-fish/sdk 0.7.0): `queue()` accepts
+ * an `agent_config` passthrough (`AgentRunParams.agent_config` with
+ * `max_duration_seconds`), so start carries `{ max_duration_seconds: 120 }`
+ * through the SDK. The SDK exposes no cancel-run method (`RunsResource` has
+ * only `get`/`list`), so `cancelRun` is a raw
+ * `POST https://agent.tinyfish.ai/v1/runs/{runId}/cancel` with the `X-API-Key`
+ * header. The key comes from `readTinyfishSearchApiKey()` and is never logged.
+ * The cancel fetch uses `redirect: "error"` on the allowlisted host only, so a
+ * redirect can never carry the key elsewhere.
+ */
+export const TINYFISH_AGENT_API_BASE_URL = "https://agent.tinyfish.ai";
+
+/** Server-side bound for every agent run (AGENT_SLOT_TIMEOUT_MS / 1000). */
+export const TINYFISH_AGENT_MAX_DURATION_SECONDS = 120;
+
+export function createTinyfishAgentClientSeam(input?: {
+  apiKey?: string;
+  client?: TinyFish;
+  fetchImpl?: typeof globalThis.fetch;
+}): AgentClientSeam {
+  const apiKey = input?.apiKey ?? readTinyfishSearchApiKey();
+  if (apiKey.length === 0) {
+    throw new Error("TinyFish Agent lane requires an API key.");
+  }
+  // `new TinyFish({ apiKey })` is explicit so the lane works with the existing
+  // `TINYFISH_SEARCH_API_KEY` env (the SDK default reads `TINYFISH_API_KEY`).
+  const resolvedClient: TinyFish = input?.client ?? new TinyFish({ apiKey });
+  const fetchImpl = input?.fetchImpl ?? globalThis.fetch;
+  return {
+    async startRun(runInput) {
+      const response = await resolvedClient.agent.queue({
+        url: runInput.url,
+        goal: runInput.goal,
+        browser_profile: runInput.browserProfile,
+        agent_config: { max_duration_seconds: runInput.maxDurationSeconds },
+      });
+      if (response.run_id === null) {
+        throw new Error("TinyFish agent queue refused the run.");
+      }
+      return { runId: response.run_id };
+    },
+    async getRun(runId) {
+      const run = await resolvedClient.runs.get(runId);
+      return { status: run.status, result: run.result ?? null };
+    },
+    async cancelRun(runId) {
+      if (runId.length === 0) return;
+      const encoded = encodeURIComponent(runId);
+      const url = `${TINYFISH_AGENT_API_BASE_URL}/v1/runs/${encoded}/cancel`;
+      if (!url.startsWith(`${TINYFISH_AGENT_API_BASE_URL}/`)) {
+        throw new Error("TinyFish Agent cancel refused an unexpected host.");
+      }
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+        redirect: "error",
+      });
+      if (!response.ok) {
+        throw new Error(`TinyFish Agent cancel failed with status ${response.status}.`);
+      }
+    },
+  };
 }

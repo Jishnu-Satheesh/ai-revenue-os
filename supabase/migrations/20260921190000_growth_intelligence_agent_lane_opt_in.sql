@@ -11,6 +11,7 @@
 -- the table currently grants authenticated SELECT only with no UPDATE
 -- policy, so the PATCH fails closed (500/404, nothing written) until a
 -- pinned UPDATE policy plus grant lands.
+-- Superseded in part by 20260921191000 policy migration.
 
 alter table public.growth_intelligence_research_projects
   add column if not exists agent_lane_opt_in boolean not null default false;
