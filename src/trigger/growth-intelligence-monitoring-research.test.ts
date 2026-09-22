@@ -691,6 +691,23 @@ describe("createMonitoringResearchExecutor", () => {
     expect(searchCalls).toEqual([]);
   });
 
+  it("still refuses an over-length query text without spending", async () => {
+    const searchCalls: string[] = [];
+    const brief = briefFixture();
+    const research = createMonitoringResearchExecutor(
+      wiredDependencies(
+        brief,
+        scriptedSearchTransport(() => ({ status: 200, results: twoResults("a") }), searchCalls),
+      ),
+    );
+    const queries = buildMonitoringQueryPlan(brief).map((query, index) =>
+      index === 0 ? { ...query, text: `${"q".repeat(160)}!` } : query,
+    );
+    const outcome = await research(executorInput(brief, queries));
+    expect(outcome).toMatchObject({ status: "failed", code: "RESEARCH_EXECUTION_UNAVAILABLE" });
+    expect(searchCalls).toEqual([]);
+  });
+
   it("returns succeeded findings with per-slot provenance on a qualified run", async () => {
     const brief = briefFixture();
     const queries = buildMonitoringQueryPlan(brief);

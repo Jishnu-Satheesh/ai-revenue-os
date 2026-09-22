@@ -314,6 +314,21 @@ function quote(value: string): string {
 }
 
 /**
+ * Longest query text the monitoring researcher accepts. The executor schema
+ * reuses this same symbol, so the plan below can never emit a text the
+ * researcher refuses: bounding each component is not enough, because the
+ * joined competitor text (name + area + hint) can still exceed the cap.
+ */
+export const MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH = 160;
+
+function boundedQueryText(parts: readonly string[]): string {
+  return parts
+    .filter((part) => part.length > 0)
+    .join(" ")
+    .slice(0, MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH);
+}
+
+/**
  * Project-scope query plan from the pinned brief revision.
  *
  * Queries are a deterministic function of approved public brief fields only
@@ -335,7 +350,7 @@ export function buildMonitoringQueryPlan(brief: BriefRevision): MonitoringResear
   const queries: MonitoringResearchQuery[] = areas.map((area) => ({
     slotKey: monitoringAreaSlotKey(area),
     kind: "investigation_area",
-    text: `${quote(brief.researchArea)} ${quote(areaLabels[area])}`,
+    text: boundedQueryText([quote(brief.researchArea), quote(areaLabels[area])]),
     maxResults: RESEARCH_BUDGET_LIMITS.maxResultsPerQuery,
   }));
   for (const competitor of brief.competitors) {
@@ -343,7 +358,7 @@ export function buildMonitoringQueryPlan(brief: BriefRevision): MonitoringResear
     queries.push({
       slotKey: monitoringCompetitorSlotKey(competitor.name),
       kind: "competitor",
-      text: [quote(competitor.name), quote(brief.researchArea), hint].filter(Boolean).join(" "),
+      text: boundedQueryText([quote(competitor.name), quote(brief.researchArea), hint]),
       maxResults: RESEARCH_BUDGET_LIMITS.maxResultsPerQuery,
     });
   }

@@ -9,6 +9,7 @@ import {
   buildMonitoringSynthesisPack,
   createMonitoringResearchBriefBuilder,
   createMonitoringSynthesisContextBuilder,
+  MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH,
   monitoringCompetitorSlotKey,
 } from "@/modules/growth-intelligence/application/market-monitoring-context";
 import type { MonitoringSnapshot } from "@/modules/growth-intelligence/application/market-monitoring-context";
@@ -531,5 +532,40 @@ describe("buildMonitoringQueryPlan", () => {
     expect(monitoringCompetitorSlotKey("مطعم الديوان")).not.toBe(
       monitoringCompetitorSlotKey("مطعم البراحة"),
     );
+  });
+
+  it("bounds every query text to the executor contract, however long the hint", () => {
+    const brief = briefFixture({
+      researchArea: "Jumeirah, Dubai",
+      investigationAreas: ["demand", "observable_performance", "offers", "presence", "reviews"],
+      competitors: [
+        {
+          name: "Bombay Borough",
+          website: "https://www.bombayborough.com/dubai.html",
+          locationHint:
+            "Bombay Borough, Gate Village, Building 3 - towards DIFC Parking - opposite Gate District 2 Valet Parking Desk at Gate - Zaa'beel Second - District 2 - Dubai - United Arab Emirates",
+          source: "operator_lead",
+        },
+      ],
+    });
+    const queries = buildMonitoringQueryPlan(brief);
+    expect(queries).toHaveLength(6);
+    for (const query of queries) {
+      expect(query.text.length).toBeLessThanOrEqual(MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH);
+      expect(query.text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("bounds area texts when the research area itself runs to its cap", () => {
+    const brief = briefFixture({
+      researchArea: "Jumeirah, Dubai ".repeat(10).slice(0, 160),
+      competitors: [],
+    });
+    const queries = buildMonitoringQueryPlan(brief);
+    expect(queries.length).toBeGreaterThan(0);
+    for (const query of queries) {
+      expect(query.text.length).toBeLessThanOrEqual(MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH);
+      expect(query.text.length).toBeGreaterThan(0);
+    }
   });
 });

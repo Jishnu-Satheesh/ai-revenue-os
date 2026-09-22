@@ -110,3 +110,35 @@ If the other track has it claimed, post intent here and wait for their ack line.
   + `channels-presence-section.tsx` + `onboarding-client.tsx` (org-id
   threading), 2 new test files. Never touched `market-watch-projects.tsx`.
   Report: `.superpowers/sdd/market-watch-fixes/track-c2-report.md`.
+- 2026-09-22 Track D ROOT CAUSE (owned run run_06gcgk2m1qgootm6u3000mbe01,
+  National Day update c7d1d052, prod v20260922.1): RESEARCH_EXECUTION_UNAVAILABLE
+  with zero reservations, zero ledger rows, backfilled all-unavailable coverage,
+  921ms, $0, and NO monitoring_research_finished span = pre-executor refusal.
+  Verified with the real builder: `buildMonitoringQueryPlan` emits a 194-char
+  competitor text (Bombay Borough 179-char hint) that `executorQuerySchema`
+  (text max 160) rejects via safeParse. Brief caps allow worse (name 160 +
+  area 160 + hint 240 = ~486 joined; long researchArea can break area texts
+  too). Suspect (a) wrong-tree deploy DISPROVEN (deploy times track this
+  worktree's commits; main lacks the task entirely); suspect (c) budget
+  refusal DISPROVEN (no reservation row = refused before first reserve).
+  Fix (Tier 1): bound joined texts to a shared 160 const in
+  `market-monitoring-context.ts`, reuse the const in the executor schema
+  (gate value unchanged). NOTE: Sep-21 run_06gc7slb (v20260921.11, 5.3s,
+  finish span present, zero spend, brief identical to the passing run) is a
+  DIFFERENT in-executor mode, unreproduced, not owned here.
+- 2026-09-22 Track D EDIT INTENT (Track A-shared file): will touch
+  `src/trigger/growth-intelligence-monitoring-research.ts` (executor schema
+  max 160 -> shared const import, value unchanged; plus a gate-survival test
+  in its `.test.ts`) and `src/modules/growth-intelligence/application/market-monitoring-context.ts`
+  (+ its `.test.ts`, not Track A-claimed). No lane/adapter/gate logic touched.
+  No live peers; proceeding per board precedent.
+- 2026-09-22 Track D FIX LANDED (WIP-committed, never pushed): shared
+  `MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH = 160` in
+  `market-monitoring-context.ts`, plan texts bounded via `boundedQueryText`,
+  executor schema reuses the const (gate value unchanged). Tests: 2 new
+  plan-bounds tests (failed pre-fix at 194/161 chars), 1 gate-survival test
+  (over-length still refused, zero spend). Gates: 128/128 vitest across 5
+  affected files, typecheck 0, eslint 0 errors (1 pre-existing warning
+  untouched). OWED: user deploys worker from THIS worktree, then retries
+  update c7d1d052 (National Day, terminal research_failed retryable=true);
+  expect findings + saved report instead of instant refusal.

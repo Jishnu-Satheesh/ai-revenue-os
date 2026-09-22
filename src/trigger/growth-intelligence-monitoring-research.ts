@@ -32,7 +32,10 @@ import {
   type MonitoringResearcher,
   type MonitoringResearchOutcome,
 } from "@/modules/growth-intelligence/application/market-monitoring-update";
-import { monitoringCompetitorSlotKey } from "@/modules/growth-intelligence/application/market-monitoring-context";
+import {
+  MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH,
+  monitoringCompetitorSlotKey,
+} from "@/modules/growth-intelligence/application/market-monitoring-context";
 import {
   approvedResearchScopeSchema,
   researchRequestSchema,
@@ -360,7 +363,7 @@ const executorQuerySchema = z
   .object({
     slotKey: z.string().trim().min(1).max(160),
     kind: z.enum(["investigation_area", "competitor"]),
-    text: z.string().trim().min(1).max(160),
+    text: z.string().trim().min(1).max(MONITORING_RESEARCH_QUERY_TEXT_MAX_LENGTH),
     maxResults: z.number().int().min(1).max(RESEARCH_BUDGET_LIMITS.maxResultsPerQuery),
   })
   .strict();
