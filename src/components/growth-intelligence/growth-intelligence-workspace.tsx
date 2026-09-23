@@ -411,8 +411,8 @@ export function GrowthIntelligenceWorkspace({
             action.
           </p>
         </div>
-        <Button size="sm" onClick={openNewResearch} className="shrink-0 self-start sm:mt-1">
-          <Plus aria-hidden="true" />
+        <Button onClick={openNewResearch} className="h-10 shrink-0 self-start px-5 sm:mt-1">
+          <Plus aria-hidden="true" className="size-4" />
           New research
         </Button>
       </div>
@@ -422,14 +422,14 @@ export function GrowthIntelligenceWorkspace({
             <TabsTrigger value="overview" onClick={() => changeTab("overview")}>
               Overview
             </TabsTrigger>
+            <TabsTrigger value="insights" onClick={() => changeTab("insights")}>
+              Insights &amp; market <Badge variant="secondary">{view.counts.insights}</Badge>
+            </TabsTrigger>
             <TabsTrigger value="recommendations" onClick={() => changeTab("recommendations")}>
               Recommendations <Badge variant="secondary">{view.counts.recommendations}</Badge>
             </TabsTrigger>
             <TabsTrigger value="actions" onClick={() => changeTab("actions")}>
               Your actions <Badge variant="secondary">{acted.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="insights" onClick={() => changeTab("insights")}>
-              Insights &amp; market <Badge variant="secondary">{view.counts.insights}</Badge>
             </TabsTrigger>
           </TabsList>
         </div>
@@ -530,15 +530,6 @@ export function GrowthIntelligenceWorkspace({
         </TabsContent>
 
         <TabsContent value="insights" className="flex flex-col gap-8">
-          <Card>
-            <CardHeader>
-              <CardTitle>Insights &amp; market</CardTitle>
-              <CardDescription>
-                What your evidence says, what is missing, and what market research found — each
-                item names its source and next step.
-              </CardDescription>
-            </CardHeader>
-          </Card>
           {selectedBranchId && canManage ? (
             <div className="flex justify-end">
               <MarketWatchLivePreview

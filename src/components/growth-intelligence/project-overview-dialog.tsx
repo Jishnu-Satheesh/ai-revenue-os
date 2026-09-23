@@ -1,6 +1,5 @@
 "use client";
 
-import { useRef } from "react";
 import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -23,8 +22,8 @@ import type {
 
 /**
  * Read-only history for one research project: its update and report rows,
- * newest first. Project controls (pause, stop) are shown disabled with their
- * reason until the backend update ships them; this dialog never starts,
+ * newest first. The footer keeps Close only; project controls (pause, stop)
+ * return with the backend slice that ships them. This dialog never starts,
  * pauses or stops anything. There is no brief viewer yet, so the update row
  * names the live brief with its state while its button stays disabled with
  * its reason; finished reports open in the report reader.
@@ -66,21 +65,10 @@ export function ProjectOverviewDialog({
   // Researching means the brief is pinned to running work; needs attention
   // means it is saved and waiting for research to start.
   const started = project.displayState === "researching";
-  const historyRef = useRef<HTMLDivElement>(null);
 
   function briefSubline(revisionId: string, state: string): string {
     const number = briefNumbers?.get(revisionId);
     return number === undefined ? `Brief · ${state}` : `Brief ${number} · ${state}`;
-  }
-
-  function showHistory() {
-    const node = historyRef.current;
-    if (!node) return;
-    // jsdom (unit tests) has no scrollIntoView; the focus still lands.
-    if (typeof node.scrollIntoView === "function") {
-      node.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-    node.focus({ preventScroll: true });
   }
 
   return (
@@ -190,7 +178,7 @@ export function ProjectOverviewDialog({
               </li>
             </ol>
           ) : null}
-          <div ref={historyRef} tabIndex={-1} className="min-w-0 outline-none">
+          <div className="min-w-0 outline-none">
             {isProgress ? (
               <p className="mt-[18px] text-xs leading-relaxed text-muted-foreground">
                 You can close this dialog and return to the project later.
@@ -247,33 +235,10 @@ export function ProjectOverviewDialog({
           </div>
         </div>
 
-        <DialogFooter className="mx-0 mb-0 justify-between gap-x-6 gap-y-3 rounded-b-2xl bg-background px-7 py-4 max-sm:flex-col max-sm:items-stretch">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" className="h-10" onClick={() => onOpenChange(false)}>
-              Close
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 max-sm:justify-end">
-            <Button
-              variant="outline"
-              className="h-10"
-              disabled
-              title="Pausing is not available yet — project controls arrive with the backend update."
-            >
-              Pause monitoring
-            </Button>
-            <Button
-              variant="outline"
-              className="h-10"
-              disabled
-              title="Stopping is not available yet — project controls arrive with the backend update."
-            >
-              Stop this research
-            </Button>
-            <Button variant="outline" className="h-10" onClick={showHistory}>
-              History
-            </Button>
-          </div>
+        <DialogFooter className="mx-0 mb-0 justify-start gap-3 rounded-b-2xl bg-background px-7 py-4 max-sm:flex-col max-sm:items-stretch">
+          <Button variant="outline" className="h-10" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

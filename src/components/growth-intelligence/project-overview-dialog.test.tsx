@@ -233,45 +233,17 @@ describe("ProjectOverviewDialog", () => {
     ).toBeTruthy();
   });
 
-  it("keeps a History entry point beside Pause, Stop and Close", () => {
+  it("keeps a Close-only footer", () => {
     render(
       <ProjectOverviewDialog {...dialogProps({ project: researchingProject(), reports: [] })} />,
     );
 
     const footer = document.querySelector('[data-slot="dialog-footer"]');
     if (!footer) throw new Error("missing dialog footer");
-    const groups = Array.from(footer.children).map((group) =>
-      within(group as HTMLElement)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    );
-    // Lone Close left; preserved controls grouped right with daylight between.
-    expect(groups[0]).toEqual(["Close"]);
-    expect(groups[1]).toEqual(
-      expect.arrayContaining(["Pause monitoring", "Stop this research", "History"]),
-    );
     const names = within(footer as HTMLElement)
       .getAllByRole("button")
       .map((button) => button.textContent);
-    expect(names).toEqual(
-      expect.arrayContaining(["Pause monitoring", "Stop this research", "History", "Close"]),
-    );
-
-    // History only moves focus within the dialog; it never navigates.
-    fireEvent.click(within(footer as HTMLElement).getByRole("button", { name: "History" }));
-    expect(screen.getByText(/National Day opportunity/)).toBeTruthy();
-  });
-
-  it("keeps pause and stop disabled with honest backend-update reasons", () => {
-    render(<ProjectOverviewDialog {...dialogProps()} />);
-
-    const pause = screen.getByRole("button", { name: "Pause monitoring" });
-    expect(pause).toHaveProperty("disabled", true);
-    expect(pause.getAttribute("title")).toMatch(/project controls arrive with the backend update/i);
-
-    const stop = screen.getByRole("button", { name: "Stop this research" });
-    expect(stop).toHaveProperty("disabled", true);
-    expect(stop.getAttribute("title")).toMatch(/project controls arrive with the backend update/i);
+    expect(names).toEqual(["Close"]);
   });
 
   it("keeps review controls disabled with their reason without onReviewReport", () => {

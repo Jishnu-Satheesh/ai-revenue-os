@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
@@ -360,10 +360,15 @@ describe("GrowthIntelligenceWorkspace market research entry", () => {
     ).toBeTruthy();
   });
 
-  it("heads Insights & market with the same intro card pattern as Recommendations", () => {
+  it("heads Insights & market without the intro card, tabs ordered Overview first", () => {
     workspace();
+    const tablist = screen.getByRole("tablist");
+    const tabs = within(tablist)
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent?.replace(/[0-9]+$/, "").trim());
+    expect(tabs).toEqual(["Overview", "Insights & market", "Recommendations", "Your actions"]);
     fireEvent.click(screen.getByRole("tab", { name: /insights/i }));
-    expect(screen.getByText(/what your evidence says, what is missing/i)).toBeTruthy();
+    expect(screen.queryByText(/what your evidence says, what is missing/i)).toBeNull();
     expect(screen.getByRole("heading", { name: "Business insights" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Improve the next report" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Market Watch projects" })).toBeTruthy();

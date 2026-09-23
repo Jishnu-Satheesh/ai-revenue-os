@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -159,9 +159,32 @@ describe("workspace sections", () => {
       "href",
       `/organizations/${ORGANIZATION}/channels/${CHANNEL}`,
     );
-    expect(screen.getByRole("link", { name: /review missing context/i })).toHaveAttribute(
-      "href",
-      `/organizations/${ORGANIZATION}/channels`,
+    // A single gap needs no overflow drawer.
+    expect(screen.queryByRole("button", { name: /review missing context/i })).toBeNull();
+  });
+
+  it("caps the improve rail at three items with the rest behind Review missing context", () => {
+    const gaps = [0, 1, 2, 3].map((index) => ({
+      ...gapCard(),
+      id: `71000000-0000-4000-8000-00000000007${index}`,
+      title: `Gap ${index}`,
+    }));
+    render(
+      <InsightsList
+        insights={[]}
+        dataGaps={gaps}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+      />,
     );
+    expect(screen.getByText("Gap 0")).toBeTruthy();
+    expect(screen.getByText("Gap 2")).toBeTruthy();
+    expect(screen.queryByText("Gap 3")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /review missing context/i }));
+    const drawer = screen.getByRole("dialog", { name: "Improve the next report" });
+    expect(within(drawer).getByText("Gap 3")).toBeTruthy();
+    expect(within(drawer).getByText("Business context")).toBeTruthy();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
   });
 });

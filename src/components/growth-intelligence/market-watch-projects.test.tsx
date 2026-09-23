@@ -542,8 +542,14 @@ describe("MarketWatchProjectsSection", () => {
       ).toBeTruthy();
       const questions = await screen.findAllByText("How should we prepare for National Day?");
       expect(questions.length).toBe(1);
-      const pause = screen.getByRole("button", { name: /pause monitoring/i });
-      expect(pause).toHaveProperty("disabled", true);
+      // The history footer keeps Close only.
+      const footer = document.querySelector('[data-slot="dialog-footer"]');
+      if (!footer) throw new Error("missing dialog footer");
+      expect(
+        within(footer as HTMLElement)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual(["Close"]);
 
       fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
       await waitFor(() => {

@@ -1,6 +1,17 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, CircleDashed, ClipboardList, NotebookPen } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import type {
   DataGapCard,
   InsightCard,
@@ -146,7 +157,7 @@ export function InsightsList({
           ) : (
             <>
               <ul className="mt-4 flex min-w-0 flex-col gap-3">
-                {dataGaps.map((gap) => (
+                {dataGaps.slice(0, 3).map((gap) => (
                   <li key={gap.id} className="flex min-w-0 gap-2.5">
                     <CircleDashed
                       aria-hidden="true"
@@ -166,13 +177,62 @@ export function InsightsList({
                   </li>
                 ))}
               </ul>
-              <Link
-                href={`/organizations/${organizationId}/channels`}
-                className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold text-primary underline-offset-2 hover:underline"
-              >
-                Review missing context
-                <ArrowRight aria-hidden="true" className="size-3.5" />
-              </Link>
+              {dataGaps.length > 3 ? (
+                <Drawer>
+                  <DrawerTrigger asChild>
+                    <button
+                      type="button"
+                      className="mt-4 inline-flex cursor-pointer items-center gap-1 text-[13px] font-semibold text-primary underline-offset-2 hover:underline"
+                    >
+                      Review missing context
+                      <ArrowRight aria-hidden="true" className="size-3.5" />
+                    </button>
+                  </DrawerTrigger>
+                  <DrawerContent aria-label="Improve the next report">
+                    <DrawerHeader>
+                      <p className="text-[11px] font-bold tracking-[0.08em] text-emerald-700 uppercase dark:text-emerald-300">
+                        Market Watch
+                      </p>
+                      <DrawerTitle>Improve the next report</DrawerTitle>
+                      <DrawerDescription>Business context</DrawerDescription>
+                    </DrawerHeader>
+                    <div className="min-w-0 overflow-y-auto px-7 py-6">
+                      <ul className="flex min-w-0 flex-col">
+                        {dataGaps.map((gap) => (
+                          <li key={gap.id} className="min-w-0 border-b py-5 first:pt-0 last:border-b-0 last:pb-0">
+                            <p className="min-w-0 text-[15px] font-bold break-words">
+                              {gap.title}
+                            </p>
+                            <p className="mt-1 min-w-0 text-sm text-muted-foreground break-words">
+                              {gap.detail}
+                            </p>
+                            <p className="mt-1.5 min-w-0 text-xs text-muted-foreground break-words">
+                              {gapSubline(gap, channelNames)} ·{" "}
+                              <Link
+                                href={channelHref(organizationId, gap.channelId)}
+                                className="font-semibold text-primary underline-offset-2 hover:underline"
+                              >
+                                Repair in channels
+                              </Link>
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-6 border-t pt-4 text-[13px] text-muted-foreground">
+                        The existing Business Memory and Channels workspaces remain the places
+                        to update these records.
+                      </p>
+                    </div>
+                    <DrawerFooter>
+                      <DrawerClose asChild>
+                        <Button variant="outline" className="h-10 self-start">
+                          Close
+                        </Button>
+                      </DrawerClose>
+                    </DrawerFooter>
+                  </DrawerContent>
+                </Drawer>
+              ) : null}
             </>
           )}
         </aside>
