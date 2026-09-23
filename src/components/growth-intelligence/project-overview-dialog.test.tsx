@@ -167,6 +167,32 @@ describe("ProjectOverviewDialog", () => {
     expect(screen.getByText("Brief · Saved report")).toBeTruthy();
     // Takeaways live in the reader, never in the history rows.
     expect(screen.queryByText(/Compare family offers and check delivery capacity/)).toBeNull();
+    // The prototype has no section heading: intro flows straight into rows.
+    expect(screen.queryByText("Report history", { exact: true })).toBeNull();
+  });
+
+  it("keeps the update row with a bare state when no revision exists", () => {
+    const [item] = buildMarketWatchProjectList({
+      projects: [
+        {
+          projectId: PROJECT,
+          organizationId: ORGANIZATION,
+          branchId: DOWNTOWN,
+          branchName: "Downtown",
+          title: "Prepare for National Day",
+          question: "How should we prepare for National Day?",
+          mode: "one-time",
+          lifecycle: "active",
+          createdAt: "2026-09-10T10:00:00Z",
+        },
+      ],
+      reportsByProject: new Map([[PROJECT, [NEWEST_REPORT]]]),
+      revisionsByProject: new Map(),
+    });
+    render(<ProjectOverviewDialog {...dialogProps({ project: item, reports: [NEWEST_REPORT] })} />);
+
+    expect(screen.getByText("Current update")).toBeTruthy();
+    expect(screen.getByText("Ready to review", { exact: true })).toBeTruthy();
   });
 
   it("shows the queued progress timeline instead of an empty history when no reports exist", () => {
@@ -214,6 +240,16 @@ describe("ProjectOverviewDialog", () => {
 
     const footer = document.querySelector('[data-slot="dialog-footer"]');
     if (!footer) throw new Error("missing dialog footer");
+    const groups = Array.from(footer.children).map((group) =>
+      within(group as HTMLElement)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    );
+    // Lone Close left; preserved controls grouped right with daylight between.
+    expect(groups[0]).toEqual(["Close"]);
+    expect(groups[1]).toEqual(
+      expect.arrayContaining(["Pause monitoring", "Stop this research", "History"]),
+    );
     const names = within(footer as HTMLElement)
       .getAllByRole("button")
       .map((button) => button.textContent);

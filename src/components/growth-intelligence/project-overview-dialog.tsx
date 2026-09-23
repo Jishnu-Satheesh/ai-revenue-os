@@ -102,12 +102,14 @@ export function ProjectOverviewDialog({
           <p className="min-w-0 text-sm text-muted-foreground break-words">
             Each report keeps the question and evidence used for that update.
           </p>
-          {!isProgress && project.latestRevision ? (
+          {!isProgress ? (
             <div className="mt-2 flex min-w-0 items-center justify-between gap-3 border-b py-5">
               <div className="min-w-0">
                 <p className="min-w-0 text-sm font-bold break-words">Current update</p>
                 <p className="mt-0.5 min-w-0 text-[13px] text-muted-foreground break-words">
-                  {briefSubline(project.latestRevision.revisionId, project.stateLabel)}
+                  {project.latestRevision
+                    ? briefSubline(project.latestRevision.revisionId, project.stateLabel)
+                    : project.stateLabel}
                 </p>
               </div>
               <Button
@@ -208,9 +210,6 @@ export function ProjectOverviewDialog({
               )
             ) : (
               <div className="mt-6 flex min-w-0 flex-col gap-2">
-                <h4 className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                  Report history
-                </h4>
                 <ul className="flex min-w-0 flex-col">
                   {reports.map((report) => {
                     const dateLabel = formatReportDate(report.createdAt, timeZone);
@@ -248,7 +247,7 @@ export function ProjectOverviewDialog({
           </div>
         </div>
 
-        <DialogFooter className="mx-0 mb-0 justify-between gap-3 rounded-b-2xl bg-background px-7 py-4 max-sm:flex-col max-sm:items-stretch">
+        <DialogFooter className="mx-0 mb-0 justify-between gap-x-6 gap-y-3 rounded-b-2xl bg-background px-7 py-4 max-sm:flex-col max-sm:items-stretch">
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" className="h-10" onClick={() => onOpenChange(false)}>
               Close
