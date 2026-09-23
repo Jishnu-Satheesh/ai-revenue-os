@@ -185,6 +185,7 @@ describe("workspace sections", () => {
     const drawer = screen.getByRole("dialog", { name: "Improve the next report" });
     expect(within(drawer).getByText("Gap 3")).toBeTruthy();
     expect(within(drawer).getByText("Business context")).toBeTruthy();
-    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+    // Footer Close is first; the sheet's corner X comes after the content.
+    fireEvent.click(within(drawer).getAllByRole("button", { name: "Close" })[0]);
   });
 });

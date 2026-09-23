@@ -3,15 +3,15 @@ import { ArrowRight, ArrowUpRight, CircleDashed, ClipboardList, NotebookPen } fr
 
 import { Button } from "@/components/ui/button";
 import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerTrigger,
-} from "@/components/ui/drawer";
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import type {
   DataGapCard,
   InsightCard,
@@ -178,8 +178,8 @@ export function InsightsList({
                 ))}
               </ul>
               {dataGaps.length > 3 ? (
-                <Drawer>
-                  <DrawerTrigger asChild>
+                <Sheet>
+                  <SheetTrigger asChild>
                     <button
                       type="button"
                       className="mt-4 inline-flex cursor-pointer items-center gap-1 text-[13px] font-semibold text-primary underline-offset-2 hover:underline"
@@ -187,16 +187,24 @@ export function InsightsList({
                       Review missing context
                       <ArrowRight aria-hidden="true" className="size-3.5" />
                     </button>
-                  </DrawerTrigger>
-                  <DrawerContent aria-label="Improve the next report">
-                    <DrawerHeader>
+                  </SheetTrigger>
+                  <SheetContent
+                    side="right"
+                    aria-label="Improve the next report"
+                    className="px-7 py-6 data-[side=right]:sm:max-w-2xl"
+                  >
+                    <SheetHeader className="p-0 text-left">
                       <p className="text-[11px] font-bold tracking-[0.08em] text-emerald-700 uppercase dark:text-emerald-300">
                         Market Watch
                       </p>
-                      <DrawerTitle>Improve the next report</DrawerTitle>
-                      <DrawerDescription>Business context</DrawerDescription>
-                    </DrawerHeader>
-                    <div className="min-w-0 overflow-y-auto px-7 py-6">
+                      <SheetTitle className="mt-2 text-[22px] font-bold tracking-tight">
+                        Improve the next report
+                      </SheetTitle>
+                      <SheetDescription className="mt-2 text-[13px]">
+                        Business context
+                      </SheetDescription>
+                    </SheetHeader>
+                    <div className="min-w-0 overflow-y-auto py-6">
                       <ul className="flex min-w-0 flex-col">
                         {dataGaps.map((gap) => (
                           <li key={gap.id} className="min-w-0 border-b py-5 first:pt-0 last:border-b-0 last:pb-0">
@@ -223,15 +231,15 @@ export function InsightsList({
                         to update these records.
                       </p>
                     </div>
-                    <DrawerFooter>
-                      <DrawerClose asChild>
+                    <SheetFooter className="border-t p-0 pt-4">
+                      <SheetClose asChild>
                         <Button variant="outline" className="h-10 self-start">
                           Close
                         </Button>
-                      </DrawerClose>
-                    </DrawerFooter>
-                  </DrawerContent>
-                </Drawer>
+                      </SheetClose>
+                    </SheetFooter>
+                  </SheetContent>
+                </Sheet>
               ) : null}
             </>
           )}
